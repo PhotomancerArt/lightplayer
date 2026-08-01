@@ -16,6 +16,8 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 | `wgpu.f32` | IEEE f32 (GPU) | per-directive fragment probe on a wgpu device | no — explicit `--target wgpu.f32`; needs a GPU adapter |
 | `xtn.q32` | Q32 fixed-point | `lpvm-native` → **Xtensa** emulator + linked builtins (ESP32-S3 board profile) | no — explicit `--target xtn.q32`; needs the Xtensa builtins image |
 | `xtlpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → Xtensa emulator | no — as above |
+| `xtn.f32` | IEEE f32 | `lpvm-native` → Xtensa **hardware FPU** (`add.s`/`mul.s` on the LX7 float file) in the emulator | no — as above |
+| `xtlpn.f32` | IEEE f32 | `lps-glsl` frontend → the same hardware-FPU path | no — as above |
 | `wasm.f32` | IEEE f32 | `lpvm-wasm`'s f32 emit path → wasmtime | no — explicit `--target wasm.f32`; see below |
 | `rv32n.f32` | IEEE f32 (soft) | `lpvm-native` f32 lowering → RV32 emulator, float ops as soft-float calls | no — explicit `--target rv32n.f32`; see below |
 | `rv32lpn.f32` | IEEE f32 (soft) | `lps-glsl` frontend → the same soft-float path | no — as above |
@@ -108,6 +110,32 @@ by one:
   one predicate, because `backend=rv32n` names `Backend::Rv32fa`.
 
 ### The Xtensa pair
+
+### The Xtensa f32 pair (M8)
+
+`xtn.f32` / `xtlpn.f32` are the same backend in `FloatMode::F32`, emitting real
+FP instructions on the LX7's float register file — the codegen M7 took to
+silicon. They needed no new match arm anywhere: the compile path is already
+parameterised by `(isa, float_mode)` and the f32 execution path is the typed
+`LpvmInstance::call` that `wasm.f32` and the rv32 f32 targets already use.
+
+Like their Q32 siblings they are **not** default, and for the same reason: the
+Xtensa builtins image is a cross-target artifact needing the esp toolchain, so
+it is absent on a fresh clone. Defaulting the f32 pair while `xtn.q32` stays
+on-demand would be an inconsistency rather than a decision. Measured wall-clock
+if that changes: `xtn.f32` ≈ 15 s, `xtlpn.f32` ≈ 5 s, matching their Q32
+siblings almost exactly.
+
+Dispositions on registration: `xtn.f32` **850/850 files, no `@broken`**.
+`xtlpn.f32` 850/850 with **8 assertions `@broken`** across 6 files — a real
+config-masked codegen bug that needs the Lp frontend *and* Xtensa *and* f32
+together, recorded in
+`docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`. It is
+`@broken` and not `@unsupported` deliberately: the corpus should not read green
+while the compiler is wrong.
+
+A bare `xtn` / `xtlpn` shorthand now selects **both** float modes, as `wasm`
+already did. Spell the mode out to get one.
 
 `xtn.q32` / `xtlpn.q32` are the Xtensa mirrors of `rv32n.q32` / `rv32lpn.q32` —
 same corpus, same engine (`rt_emu` takes the ISA as a runtime parameter), running
