@@ -6546,12 +6546,7 @@ mod tests {
     #[test]
     fn playlist_children_visual_products_stay_tracked_for_entry_thumbs() {
         let mut view = ProjectView::new();
-        let mut playlist = node_entry(
-            1,
-            "/demo.module/list.playlist",
-            None,
-            NodeRuntimeStatus::Ok,
-        );
+        let mut playlist = node_entry(1, "/demo.module/list.playlist", None, NodeRuntimeStatus::Ok);
         playlist.children = vec![NodeId::new(2)];
         view.tree.insert(playlist);
         view.tree.insert(node_entry(
@@ -8256,10 +8251,8 @@ mod tests {
             authoring_inventory_read_response(4),
             mutation_response(5, vec![accepted(1), accepted(2)], 7),
         ]);
-        block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
-        )
-        .unwrap();
+        block_on_ready(project.remove_node(&mut client, &node_address("/demo.module/clock.clock")))
+            .unwrap();
         // Restore the controller tree (the scripted refresh carried no tree
         // events) so the site address resolves its def artifact.
         project

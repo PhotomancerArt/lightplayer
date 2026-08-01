@@ -176,10 +176,7 @@ mod tests {
             row(&slots, "format").map(display_value).as_deref(),
             Some("1")
         );
-        assert!(
-            row(&slots, "notes").is_none(),
-            "no such field on ModuleDef"
-        );
+        assert!(row(&slots, "notes").is_none(), "no such field on ModuleDef");
     }
 
     #[test]

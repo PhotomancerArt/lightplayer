@@ -7,14 +7,13 @@ use alloc::vec::Vec;
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
     ArtifactChangeSummary, ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, CommitResult,
-    MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
-    MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
-    NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
-    ModuleFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
+    ModuleFormatProbe, MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult,
+    MutationCmdResult, MutationEffect, MutationOp, MutationRejection, MutationRejectionReason,
+    MutationResult, NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState,
+    PROJECT_FORMAT_VERSION, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
     SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotPolicyResolution,
     SlotShapeLookup, SlotShapeView, StaticSlotShape, StoredSlotEdit, WithRevision,
-    lookup_slot_data, lp_value_matches_type, read_module_format_json,
-    resolve_slot_policy_and_leaf,
+    lookup_slot_data, lp_value_matches_type, read_module_format_json, resolve_slot_policy_and_leaf,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
