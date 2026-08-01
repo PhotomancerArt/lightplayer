@@ -208,14 +208,19 @@ impl EngineServices {
         );
     }
 
+    /// Re-read an output's authored configuration, reopening the channel only
+    /// if it actually changed.
+    ///
+    /// Called for every output on every tick, so the unchanged path — which is
+    /// nearly every call — must not allocate. The comparison borrows the
+    /// authored endpoint; only a genuine change pays for a copy of it.
     pub fn update_output_sink_config(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
-        let endpoint = endpoint_from_output_config(config);
         let display_options = display_options_from_output_config(config);
         let Some(existing) = self.output_sinks.get(&buffer_id) else {
             self.register_output_sink(buffer_id, config);
             return;
         };
-        if existing.endpoint == endpoint
+        if existing.endpoint == *config.endpoint()
             && output_options_eq(&existing.display_options, &display_options)
         {
             return;
@@ -226,7 +231,7 @@ impl EngineServices {
             .remove(&buffer_id)
             .expect("output sink existed above");
         self.close_output_sink(&mut existing);
-        existing.endpoint = endpoint;
+        existing.endpoint = endpoint_from_output_config(config);
         existing.display_options = display_options;
         existing.last_byte_count = None;
         // A re-authored endpoint is a fresh question for the hardware, so the
@@ -565,6 +570,47 @@ mod tests {
             .expect("second handle");
         assert_ne!(first_handle, second_handle);
         assert_eq!(provider.open_channel_count(), 1);
+    }
+
+    /// Every tick re-reads every output's authored config, so the unchanged
+    /// case — which is nearly every one of them — must leave the channel
+    /// exactly as it found it. Reopening here would drop a live channel and
+    /// re-claim the pin sixty times a second.
+    #[test]
+    fn re_applying_an_unchanged_config_leaves_the_channel_alone() {
+        let provider = Rc::new(CountingOutputProvider::new(MemoryOutputProvider::new()));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        let config = OutputDef::new(endpoint("ws281x:rmt:D10"));
+        services.register_output_sink(buffer_id, &config);
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("initial flush opens the channel");
+        let handle = provider
+            .inner()
+            .get_handle_for_endpoint(&endpoint("ws281x:rmt:D10"))
+            .expect("channel handle");
+        let generation = provider.hardware_generation();
+
+        for _ in 0..32 {
+            services.update_output_sink_config(buffer_id, &config);
+        }
+
+        assert_eq!(provider.open_calls(), 1, "no reopen for an unchanged config");
+        assert_eq!(
+            provider
+                .inner()
+                .get_handle_for_endpoint(&endpoint("ws281x:rmt:D10")),
+            Some(handle)
+        );
+        assert_eq!(
+            provider.hardware_generation(),
+            generation,
+            "an unchanged config must not churn the hardware claim"
+        );
     }
 
     #[test]
