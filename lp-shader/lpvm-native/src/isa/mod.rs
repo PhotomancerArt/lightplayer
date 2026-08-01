@@ -864,19 +864,24 @@ mod tests {
     }
 
     /// The float pool is the *feature's* observable footprint in the register
-    /// model: 16 FRs when `float-f32` is on, nothing at all when it is off.
-    /// The off case is the gate's whole claim (M7 D9) — a leak here would mean
-    /// a Fixed-only image carries the float allocator.
+    /// model: 15 of the 16 FRs when `float-f32` is on (`f15` is the emitter's
+    /// scratch — see `isa::xt::fpr`), nothing at all when it is off. The off
+    /// case is the gate's whole claim (M7 D9) — a leak here would mean a
+    /// Fixed-only image carries the float allocator.
     #[cfg(feature = "isa-xt")]
     #[test]
     fn xtensa_float_pool_follows_the_feature() {
         let isa = IsaTarget::Xtensa;
         let pool = isa.allocatable_pool_order(RegClass::Float);
         if cfg!(feature = "float-f32") {
-            assert_eq!(pool.len(), 16, "all 16 FRs are allocatable (M7 D8)");
+            assert_eq!(pool.len(), 15, "15 FRs allocatable, f15 is the scratch");
             // Every FR is call-clobbered — the measured esp-toolchain ABI.
             assert_eq!(isa.caller_saved_pool_hw(RegClass::Float), pool);
-            assert!(isa.is_in_allocatable_pool(PReg::float(15)));
+            assert!(isa.is_in_allocatable_pool(PReg::float(14)));
+            assert!(
+                !isa.is_in_allocatable_pool(PReg::float(15)),
+                "the emitter scratch must never be handed to the allocator"
+            );
             assert_eq!(isa.reg_name(PReg::float(3)), "f3");
         } else {
             assert!(pool.is_empty());
