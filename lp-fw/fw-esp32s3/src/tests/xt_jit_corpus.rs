@@ -32,7 +32,7 @@ use alloc::sync::Arc;
 
 use esp_println::println;
 use lpir::FloatMode;
-use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
+use lpvm::{LpvmCompileParams, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_native::native_options::NativeCompileOptions;
 use lpvm_native::rt_jit::{BuiltinTable, NativeJitEngine};
 use lpvm_native::xt_corpus::CASES;
@@ -82,6 +82,8 @@ pub fn run_all() -> ! {
     run_q32_cases(&mut tally);
     #[cfg(feature = "float-f32")]
     run_f32_cases(&mut tally);
+    #[cfg(feature = "float-f32")]
+    run_per_compile_float_mode(&mut tally);
 
     println!("{TAG} ==================================================");
     println!(
@@ -227,6 +229,114 @@ fn run_f32_cases(tally: &mut Tally) {
                     // which is a firmware finding rather than a compiler one.
                     println!(
                         "{TAG} FAIL {}#{i} args={:08X?} trapped: {e}",
+                        case.name, inv.args
+                    );
+                    tally.failed += 1;
+                }
+            }
+        }
+    }
+}
+
+/// The app's engine, asked for Float **per compile**.
+///
+/// The two corpora above each build an engine already set to the mode they
+/// want. The app does not: `TargetLpvmGraphics::new` constructs exactly one
+/// engine at boot, with `NativeCompileOptions::default()` — Q32 — and every
+/// project that runs on that boot compiles through it. So the mode a shader
+/// gets has to arrive with the *compile*, from its authored `float_mode` slot
+/// (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`).
+///
+/// This is the only place that path executes on silicon, and its failure mode
+/// is the reason it is worth a section: if `LpvmCompileParams::float_mode`
+/// stopped reaching `NativeCompileOptions`, nothing would error. The engine
+/// would compile Q32, the module would run, and every number would be wrong in
+/// a way that looks like a shader bug. So this asserts the *disclosed*
+/// implementation, not just the value — `HardwareF32` is the module saying it
+/// emitted FP instructions, and a Q32 compile cannot say that.
+#[cfg(feature = "float-f32")]
+fn run_per_compile_float_mode(tally: &mut Tally) {
+    use lpvm::FloatImpl;
+    use lpvm_native::xt_corpus::F32_CASES;
+
+    println!("{TAG} --- per-compile float mode (Q32-constructed engine) ---");
+
+    // Constructed exactly as the app constructs it: default options, Q32.
+    let engine = engine_for(FloatMode::Q32);
+
+    if !engine.supports_float_mode(FloatMode::F32) {
+        println!(
+            "{TAG} FAIL per-compile — this image linked float-f32 but the engine \
+             says it cannot compile F32"
+        );
+        tally.failed += 1;
+        return;
+    }
+
+    let params = LpvmCompileParams {
+        config: Default::default(),
+        float_mode: FloatMode::F32,
+    };
+
+    for case in F32_CASES {
+        let (ir, sig) = (case.build)();
+        let module = match engine.compile_with_params(&ir, &sig, &params) {
+            Ok(m) => m,
+            Err(e) => {
+                println!("{TAG} FAIL per-compile {} — compile failed: {e}", case.name);
+                tally.failed += 1;
+                continue;
+            }
+        };
+
+        // The disclosure check. A Q32 module reports `Fixed` on every target,
+        // so this distinguishes "compiled in the mode I asked for" from
+        // "compiled, ran, and quietly used the engine's own mode".
+        let impl_reported = module.float_impl();
+        if impl_reported != FloatImpl::HardwareF32 {
+            println!(
+                "{TAG} FAIL per-compile {} — module reports {impl_reported:?}, \
+                 expected HardwareF32",
+                case.name
+            );
+            tally.failed += 1;
+            continue;
+        }
+
+        for (i, inv) in case.invocations.iter().enumerate() {
+            let mut inst = match module.instantiate() {
+                Ok(inst) => inst,
+                Err(e) => {
+                    println!(
+                        "{TAG} FAIL per-compile {}#{i} — instantiate failed: {e}",
+                        case.name
+                    );
+                    tally.failed += 1;
+                    continue;
+                }
+            };
+            match inst.call_f32_words(case.entry, inv.args) {
+                Ok(got) if got.as_slice() == inv.golden => {
+                    println!(
+                        "{TAG} PASS per-compile {}#{i} args={:08X?} -> {:08X?}",
+                        case.name, inv.args, got
+                    );
+                    tally.passed += 1;
+                }
+                Ok(got) => {
+                    // Same goldens as the f32 corpus above, on purpose: a
+                    // disagreement between the two sections would mean the
+                    // per-compile route emits different code from the
+                    // per-engine one, which is exactly what must not happen.
+                    println!(
+                        "{TAG} FAIL per-compile {}#{i} args={:08X?} expected={:08X?} got={:08X?}",
+                        case.name, inv.args, inv.golden, got
+                    );
+                    tally.failed += 1;
+                }
+                Err(e) => {
+                    println!(
+                        "{TAG} FAIL per-compile {}#{i} args={:08X?} trapped: {e}",
                         case.name, inv.args
                     );
                     tally.failed += 1;
