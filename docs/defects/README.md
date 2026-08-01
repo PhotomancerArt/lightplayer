@@ -105,6 +105,13 @@ genuinely fits none of these, and define it here in one line.
 - **`unsynchronized-shared-artifact`** — two steps share a filesystem
   artifact, but the lock that would order them is scoped narrower than
   the artifact, so a reader observes a writer's intermediate state.
+- **`opt-in-degradation`** — an absent or unusable input is modelled as a
+  legal degraded *value* rather than an error, so the intended graceful
+  behaviour (skip, fall back, no-op) holds only for consumers that
+  explicitly interrogate it. Consumers that do not get the raw failure,
+  worded as the subject's fault and surfacing at first use rather than at
+  the point of substitution. The population of callers grows; the guard
+  does not.
 - **`model-conflation`** — a model represents two things the real system
   keeps separate as one resource, so they contend for something that on
   hardware they never share. Presents as a *capacity* failure in the units
@@ -125,6 +132,9 @@ genuinely fits none of these, and define it here in one line.
   a member that tool actually does assign — so the gap survives
   exactly as long as nothing exercises that one member. Real toolchain
   output (a sequence transcription, not memory) is the only falsifier.
+- **`retired-surface-still-reachable`** — a surface believed replaced is
+  still rendered, because its replacement can be absent and the old
+  surface is the fallback branch.
 
 ## Index
 
@@ -180,8 +190,22 @@ under-scoped. When a fix establishes an invariant, enumerate every place
 it applies before closing the entry; here that enumeration was one
 sentence (arguments in, returns out; registers and stack).
 
+**The 2026-08-01 entry moves the masking axis off the ISA.**
+`xtlpn-f32-loses-writes-to-value-parameters` is the same shape — shared code
+whose fast path was safe only for the configurations anyone ran — but what
+masked it was the **frontend**, not the register layout: Naga copies parameters
+into fresh locals, `lps-glsl` reuses the parameter's own vreg, and only the
+second shape can make a lowering shortcut read a stale copy. So the mitigation
+generalizes past "a second ISA": the falsifying configuration is the *product*
+of the axes a compile is parameterized by (frontend × ISA × float mode), and a
+target that exists in the matrix but not in the suite is a configuration nothing
+can falsify. It needed all three axes at once, and it was found within hours of
+the combination first being registered as a target.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| opt-in-degradation | 2026-08-01 | [xt-builtins-image-strands-just-test](2026-08-01-xt-builtins-image-strands-just-test.md) | fixed | justfile (`ci-prereqs`/`test`) + build-builtins-xt.sh + lpvm-native tests |
+| config-masked-defect | 2026-08-01 | [xtlpn-f32-loses-writes-to-value-parameters](2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md) | fixed | lpvm-native lowering (lower_f32.rs) |
 | precision-loss-at-a-seam | 2026-08-01 | [gamma-8bit-choke](2026-08-01-gamma-8bit-choke.md) | fixed | lpc-engine fixture node |
 | misattributed-symptom | 2026-08-01 | [classic-rmt-open-fault](2026-08-01-classic-rmt-open-fault.md) | fixed | lpc-shared DisplayPipeline + fw-esp32-common provider |
 | capacity-regression | 2026-08-01 | [classic-heap-regression-after-f32-merge](2026-08-01-classic-heap-regression-after-f32-merge.md) | **open** | unattributed (3 f32 PRs are the candidates) |
@@ -222,7 +246,7 @@ sentence (arguments in, returns out; registers and stack).
 | stand-in-divergence | 2026-07-23 | [popover-open-resizes-card](2026-07-23-popover-open-resizes-card.md) | fixed | lpa-studio-web/base/popover |
 | stand-in-divergence | 2026-07-27 | [story-check-tolerance-ignores-amplitude](2026-07-27-story-check-tolerance-ignores-amplitude.md) | **open** | lpa-studio-web/scripts + CI |
 | nondeterministic-capture | 2026-07-28 | [overview-composite-capture-races](2026-07-28-overview-composite-capture-races.md) | fixed | lpa-studio-web story capture (overview composites) |
-| retired-surface-still-reachable | 2026-07-28 | [retired-device-pane-still-reachable](2026-07-28-retired-device-pane-still-reachable.md) | **open** | lpa-studio-core/home + studio_shell |
+| retired-surface-still-reachable | 2026-07-28 | [retired-device-pane-still-reachable](2026-07-28-retired-device-pane-still-reachable.md) | fixed | lpa-studio-core/home + studio_shell |
 | stale-measurement | 2026-07-30 | [deploy-compiles-previous-upload](2026-07-30-deploy-compiles-previous-upload.md) | **fixed** (CLI-side; hardware confirmation pending P7) | lp-cli (upload observability) |
 | stale-measurement | 2026-07-26 | [popover-outline-stale-on-content-resize](2026-07-26-popover-outline-stale-on-content-resize.md) | fixed | lpa-studio-web/base/popover |
 | stale-measurement | 2026-07-27 | [code-editor-gutter-misaligned](2026-07-27-code-editor-gutter-misaligned.md) | fixed | lpa-studio-web/base/code_editor |
