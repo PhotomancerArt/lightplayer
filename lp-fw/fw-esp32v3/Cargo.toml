@@ -1,0 +1,90 @@
+# Own workspace root, deliberately — NOT a member of the repo-root Cargo.toml.
+#
+# fw-esp32s3's own README ("Workspace notes") says it IS a repo-root workspace
+# member excluded from `default-members`; this crate takes a different shape
+# on purpose. P1 has zero lp2025-internal path dependencies (no
+# `fw-esp32-common`, no `lp-recovery` — see `src/main.rs`), so there is
+# nothing here that needs the root workspace's `workspace.dependencies` or
+# `[patch.crates-io]` forks (naga, esp-storage, pp-rs, ser-write-json). Folding
+# this into the root `members` list would also require adding it to
+# `clippy-host`'s `--exclude` list in the justfile to keep `just check` green
+# (fw-esp32c6 and fw-esp32s3 both need that entry) — exactly the justfile edit
+# P1 was told to leave for P4. Standing alone avoids that coupling entirely and
+# needs no root Cargo.toml edit at all.
+#
+# `[workspace]` here is load-bearing for worktrees, not just style: without it,
+# a git worktree checked out under `<repo>/.claude/worktrees/<name>/` makes
+# Cargo walk upward past this directory into the worktree's own root
+# Cargo.toml, which neither includes nor excludes this path —
+# "current package believes it's in a workspace when it's not". Same fix, same
+# reasoning, as the experiment repo's `fw/xt-runner-esp32/Cargo.toml`.
+#
+# If a later phase gives this crate real lp2025-internal dependencies (a
+# `fw-esp32-common` consumer, mirroring the S3), revisit whether folding it
+# into the root workspace (S3's shape) is worth the justfile coupling at that
+# point — not before.
+[workspace]
+
+[package]
+name = "fw-esp32v3"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+rust-version = "1.90.0"
+build = "build.rs"
+description = "LightPlayer firmware for the classic ESP32 (Xtensa LX6, WROOM-32E v3)."
+
+[[bin]]
+name = "fw-esp32v3"
+path = "src/main.rs"
+
+[dependencies]
+# Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
+# (proven on classic ESP32 silicon 2026-07-28, FINDINGS.md C1 PASS) — the
+# working classic-ESP32 dependency cohort under the `esp` toolchain, not a
+# guess. `esp-hal` 1.1.1 (not fw-esp32s3's 1.1.0): fw-esp32s3 pins `"1.1.0"`
+# with a caret range, and 1.1.1 is what actually resolves and is cached
+# locally, so pin the version that is known to work with the `esp32` feature.
+esp-hal = { version = "1.1.1", features = ["esp32", "log-04", "unstable"] }
+esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
+esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+
+# UART variant, not `jtag-serial`: classic ESP32 has no USB-Serial-JTAG
+# peripheral. `esp-println`'s `uart` feature only writes UART0's FIFO — it
+# never programs the baud divisor itself (esp-rs/esp-hal; confirmed on this
+# exact chip, experiment repo FINDINGS.md "C1"). After `esp_hal::init()`
+# reclocks to `CpuClock::max()`, the ROM's divisor no longer matches, and
+# output goes to garbage at every standard baud. The fix `main.rs` applies is
+# the one FINDINGS.md verified: construct an `esp_hal::uart::Uart` on UART0
+# once at boot (115200 8N1) and keep it alive — esp-println's raw FIFO writes
+# then ride out at the divisor that construction programmed. The S3 never hits
+# this because USB-Serial-JTAG has no baud rate to program.
+esp-println = { version = "0.17.0", default-features = false, features = ["esp32", "uart", "log-04"] }
+
+# Fault/exception handling. fw-esp32s3 depends on this with the same
+# `["println"]` feature set and lets the chip feature arrive indirectly (see
+# its `[features] esp32s3 = ["esp-backtrace/esp32s3", ...]`); mirrored here
+# via the `esp32` default feature below rather than inline, for the same
+# reason: naming the chip feature in both places would be easy to let drift.
+# Not directly called from `src/main.rs` — it hooks the exception vector for
+# hardware faults (illegal instruction, access violation) that never reach
+# Rust's `#[panic_handler]`, which only catches explicit `panic!`.
+esp-backtrace = { version = "0.19.0", features = ["println"] }
+
+[features]
+default = ["esp32"]
+esp32 = ["esp-backtrace/esp32"]
+
+[profile.release-esp32v3]
+inherits = "release"
+# Mirrors fw-esp32s3's `release-esp32s3` profile verbatim, INCLUDING its
+# choice of `opt-level = "s"` over the workspace default `"z"` — per the task:
+# "copy the S3's since it's the timing-safe choice". fw-esp32s3's own comment
+# for this line explains why: at `"z"` the ws281x RX drain path missed a
+# 30 µs deadline on cold-first-frame codegen (measured on silicon). This
+# crate has no timing-critical driver yet (P1 is boot-to-hello only), but
+# there is no evidence yet that classic ESP32 (LX6, slower than the S3's LX7)
+# is safe at `"z"` either, so inherit the already-validated choice rather than
+# assume the tighter one is fine. Revisit with real timing data once M4-class
+# WS281x output lands on this chip.
+opt-level = "s"
