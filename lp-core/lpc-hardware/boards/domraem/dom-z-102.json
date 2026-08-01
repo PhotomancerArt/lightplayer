@@ -3,28 +3,31 @@
   "target": "esp32",
   "vendor": "domraem",
   "product": "DOM-Z-102",
-  "description": "Domraem DOM-Z-102 classic-ESP32 (LX6, rev v3.x, 4 MB flash) 4-output WS281x controller — the classic bring-up roadmap's desk board and WLED-class deployment exemplar. Data channels verified against the board silkscreen (display sidecar authored from a photo of this exact unit); GPIO capabilities are listed only for pins the board actually exposes. Host link is UART0 through an onboard CH340K bridge (0x1A86:0x7522) — macOS needs the WCH VCP driver before a serial port appears at all; see the fw-esp32v3 README.",
+  "description": "Domraem DOM-Z-102 classic-ESP32 (LX6, rev v3.x, 4 MB flash) 4-output WS281x controller \u2014 the classic bring-up roadmap's desk board and WLED-class deployment exemplar. Data terminals are silkscreened IO18/IO16/IO14/IO2 (top to bottom of the DATA group), verified against a photo of the desk unit; GPIO0=OPT and GPIO1/3=UART are standard-wiring inference, though the UART link itself is hardware-verified through the onboard CH340K bridge (0x1A86:0x7522). An IO13 screw terminal exists at the top of the right rail with unstated function \u2014 deliberately omitted here until verified (the display sidecar draws it non-claimable). GPIO capabilities are listed only for pins the board actually exposes. macOS needs the WCH VCP driver before the CH340K serial port appears at all; see the fw-esp32v3 README.",
   "board_label": [
     {
-      "label": "LED1",
+      "label": "IO18",
       "gpio": "/gpio/18",
-      "status": "assigned"
+      "status": "assigned",
+      "note": "data channel 1 (top of the DATA group)"
     },
     {
-      "label": "LED2",
+      "label": "IO16",
       "gpio": "/gpio/16",
-      "status": "assigned"
+      "status": "assigned",
+      "note": "data channel 2"
     },
     {
-      "label": "LED3",
+      "label": "IO14",
       "gpio": "/gpio/14",
-      "status": "assigned"
+      "status": "assigned",
+      "note": "data channel 3"
     },
     {
-      "label": "LED4",
+      "label": "IO2",
       "gpio": "/gpio/2",
       "status": "assigned",
-      "note": "classic-ESP32 strapping pin (boot mode); must be low/floating at reset, which a WS281x data line satisfies — fine as an output once booted"
+      "note": "data channel 4 (bottom); classic-ESP32 strapping pin (boot mode); must be low/floating at reset, which a WS281x data line satisfies \u2014 fine as an output once booted"
     }
   ],
   "gpio": [
@@ -51,11 +54,11 @@
         "IO1",
         "U0TXD"
       ],
-      "reserved_reason": "UART0 TX into the CH340K bridge — the host serial link; driving it drops the link"
+      "reserved_reason": "UART0 TX into the CH340K bridge \u2014 the host serial link; driving it drops the link"
     },
     {
       "address": "/gpio/2",
-      "display_label": "LED4",
+      "display_label": "IO2",
       "capabilities": [
         "gpio-output",
         "gpio-input"
@@ -76,11 +79,11 @@
         "IO3",
         "U0RXD"
       ],
-      "reserved_reason": "UART0 RX from the CH340K bridge — the host serial link; driving it drops the link"
+      "reserved_reason": "UART0 RX from the CH340K bridge \u2014 the host serial link; driving it drops the link"
     },
     {
       "address": "/gpio/14",
-      "display_label": "LED3",
+      "display_label": "IO14",
       "capabilities": [
         "gpio-output",
         "gpio-input"
@@ -92,7 +95,7 @@
     },
     {
       "address": "/gpio/16",
-      "display_label": "LED2",
+      "display_label": "IO16",
       "capabilities": [
         "gpio-output",
         "gpio-input"
@@ -104,7 +107,7 @@
     },
     {
       "address": "/gpio/18",
-      "display_label": "LED1",
+      "display_label": "IO18",
       "capabilities": [
         "gpio-output",
         "gpio-input"
