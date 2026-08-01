@@ -245,7 +245,28 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
         // always used it.
         compress: true,
       });
-      assertNoFlashCommunicationWarning(logs, "Boot-control write");
+      // Verify by READBACK, not by esptool's flash-ID warning. On the bench
+      // (2026-07-31, ESP32-C6 rev 2 over USB-Serial-JTAG) the ID probe reads
+      // 0 and esptool prints "Failed to communicate with the flash chip" —
+      // while actual stub reads AND writes work fine (the 2.9 MB firmware
+      // write and the filesystem backup both succeeded on the same plug
+      // session). The ID probe drives per-chip SPI registers; the stub's
+      // FLASH_DEFL_*/READ_FLASH commands are a different path. Gating on the
+      // warning blocked every boot-control write on that board; comparing
+      // the record byte-for-byte in flash is the guarantee we actually want.
+      const readBack = await loader.readFlash(address, record.byteLength ?? record.length);
+      const written = new Uint8Array(record);
+      const matches =
+        readBack &&
+        readBack.length === written.length &&
+        written.every((byte, i) => readBack[i] === byte);
+      if (!matches) {
+        throw new Error(
+          `Boot-control record readback mismatch at 0x${address.toString(16)}: ` +
+            `wrote [${Array.from(written, (b) => b.toString(16).padStart(2, "0")).join(" ")}], ` +
+            `read ${readBack ? `[${Array.from(readBack, (b) => b.toString(16).padStart(2, "0")).join(" ")}]` : "nothing"}`,
+        );
+      }
       pushProgress(progress, onEvent, {
         label: "Boot-control record written",
         completedSteps: 2,
