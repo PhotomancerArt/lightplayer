@@ -243,10 +243,15 @@ Without it, `lps_builtins_xt_image::is_available()` is false and Xtensa
 consumers skip with a loud note rather than failing — the workspace must build
 and test on a machine with no esp toolchain.
 
-Xtensa shader code shares the image's 112 KiB text region with ~84 KiB of
-builtins, leaving **~28 KiB**. Overflowing it is an explicit error naming the
-budget, never a silent write past the region; the fix would be
-`lp-xt/lps-builtins-xt-app/link.ld`'s split, not the host region size.
+The Xtensa builtins image is **flash-resident firmware**, exactly as on the
+device: `rt_emu/xt_image` places its `.text` in the emulator's modeled IROM
+window and its `.rodata` in DROM, and compiled shader code gets the **whole**
+SRAM code region — 128 KiB on the S3 — with nothing resident in front of it.
+Overflowing that is an explicit error naming the budget, never a silent write
+past the region, and the budget is now the shader's own size rather than
+whatever the builtins left over. (It was the latter until 2026-08-01; see
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`
+for why that was a modeling bug and not a capacity one.)
 
 `isa/xt/` and the `lp-xt-*` crates it builds on contain material derived from
 LLVM under Apache-2.0-WITH-LLVM-exception and carry per-file provenance

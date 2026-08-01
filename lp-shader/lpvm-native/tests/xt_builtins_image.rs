@@ -92,21 +92,36 @@ fn image_exports_every_builtin_and_they_execute() {
     }
 }
 
+/// The builtins are **flash-resident firmware**, so every one of them must
+/// live in the modeled IROM window — and, just as load-bearing, none of them
+/// may live in the SRAM code region, which belongs to JIT'd shader code.
+///
+/// This assertion used to read the other way round, back when the image shared
+/// the code region with the shader. Both halves matter: a symbol outside every
+/// modeled region would fetch-fault at run time rather than fail here, and a
+/// symbol back inside the code region would silently re-couple the largest
+/// compilable shader to the size of the builtins
+/// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
 #[test]
-fn builtins_land_inside_the_modeled_code_region() {
+fn builtins_land_in_flash_and_never_in_the_shader_code_region() {
     let Some((_emu, bytes)) = load_image() else {
         return;
     };
     let elf = XtensaElf::parse(&bytes).unwrap();
-    // The emulator maps 128 KiB of code at I-bus 0x40378000; a symbol outside
-    // it would fetch-fault at run time rather than fail here, so pin it.
-    let lo = 0x4037_8000u32;
-    let hi = lo + 0x0002_0000;
+    let p = lp_xt_emu::board::BoardProfile::esp32s3();
     for name in ["__lps_sin_q32", "__lps_cos_q32", "__lps_pow_q32"] {
         let a = elf.symbol(name).unwrap_or_else(|| panic!("exports {name}"));
         assert!(
-            (lo..hi).contains(&a),
-            "{name} at {a:#x} is outside the modeled code region {lo:#x}..{hi:#x}"
+            p.irom_offset(a).is_some(),
+            "{name} at {a:#x} is outside the modeled IROM window {:#x}..{:#x} \
+             — see lp-xt/lps-builtins-xt-app/link.ld",
+            p.irom_base,
+            p.irom_base + p.irom_len as u32,
+        );
+        assert!(
+            p.code_region_offset(a).is_none(),
+            "{name} at {a:#x} is inside the SRAM code region, which belongs to \
+             JIT'd shader code"
         );
     }
 }

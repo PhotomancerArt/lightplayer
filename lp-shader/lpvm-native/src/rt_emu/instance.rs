@@ -572,6 +572,12 @@ impl NativeEmuInstance {
         emu.step_budget = EMU_CALL_INSTRUCTION_LIMIT;
         emu.mem
             .add_shared(lp_xt_emu::SHARED_DBUS_BASE, self.module.arena.storage_arc());
+        // The flash-resident builtins image first (IROM/DROM, plus its SRAM
+        // .data/.bss when it has any), then the shader's own SRAM code region.
+        // Both are per-call: the emulator is built fresh for every entry.
+        for r in &self.module.load.regions {
+            emu.mem.load_region(r.base, &r.bytes);
+        }
         emu.mem
             .load_region(self.module.load.code_base, &self.module.load.code);
 
