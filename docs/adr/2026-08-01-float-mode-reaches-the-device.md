@@ -150,9 +150,33 @@ the negative control that proves the feature gate holds.
 - **Compute shaders carry the mode too**, straight on `CompileComputeDesc`;
   they have no `ShaderSemantics` tier because they only ever run on a CPU
   backend.
-- **The C6 image is unchanged and the S3 image is unchanged**: this is
-  plumbing, not new codegen. Measured, both directions — see the sizes recorded
-  with this change.
+- **Both images grew, and the ESP32-C6's zero-delta control does not apply
+  here.** That control is about the `float-f32` *feature gate* not leaking; this
+  change is not behind that gate, so it is always-linked code on every board.
+  Measured against the branch point (`1367ccceb`), same recipe:
+
+  | Image | Before | After | Δ |
+  |---|---|---|---|
+  | ESP32-C6 | 2,874,528 B | 2,874,944 B | **+416 B** |
+  | ESP32-S3 | 1,826,352 B | 1,826,608 B | **+256 B** |
+
+  The C6's 416 B splits cleanly, measured by building it once with the
+  capability pre-checks and their message text removed and the mode threading
+  kept: **160 B is the threading**, **256 B is the legible refusal** — the
+  strings and the branches that turn "this fails somewhere in lowering" into a
+  message naming the backend and the slot. That is the price of §4, stated
+  rather than absorbed. The first attempt cost 960 B; two thirds of that was
+  `{:?}`, which is why `ShaderSemantics::name()` and `FloatMode::as_str()`
+  exist.
+
+  Both numbers are against 271 KB (C6) and 4.4 MB (S3) of headroom. If the C6
+  ever needs the 256 B back, dropping its pre-check is the lever — it would
+  still refuse, just with the lowering's Cargo-feature message.
+
+- **Proved on silicon**, esp32s3 rev v0.2: `passed=41 failed=0`, up from 27.
+  The 14 new cases are a Q32-constructed engine — the one the app boots — asked
+  for Float per compile, asserting the module's disclosed `FloatImpl` and the
+  same goldens the per-engine route uses.
 
 ## Alternatives Considered
 
