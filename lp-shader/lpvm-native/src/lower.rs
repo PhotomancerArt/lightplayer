@@ -1497,7 +1497,15 @@ pub fn lower_lpir_op(
         | LpirOp::Unorm8toF { .. } => {
             #[cfg(feature = "float-f32")]
             {
-                crate::lower_f32::lower_f32_op(out, op, abi.isa(), src_op, symbols, vreg_pool, temps)
+                crate::lower_f32::lower_f32_op(
+                    out,
+                    op,
+                    abi.isa(),
+                    src_op,
+                    symbols,
+                    vreg_pool,
+                    temps,
+                )
             }
             // Without the feature the f32 lowering is not linked at all, which
             // is the point of the gate (roadmap D2: `FloatMode` is matched on a

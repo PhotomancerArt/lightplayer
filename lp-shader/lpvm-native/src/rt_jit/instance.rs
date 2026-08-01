@@ -8,10 +8,9 @@ use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
     CallError, DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpvmBuffer, LpvmInstance,
-    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read,
-    decode_return_to_f32, encode_global_write, encode_uniform_write, encode_uniform_write_q32,
-    flat_words_from_f32_args, float_lane_abi, global_data_span, glsl_component_count,
-    validate_compute_tick_sig,
+    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, decode_return_to_f32,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32, flat_words_from_f32_args,
+    float_lane_abi, global_data_span, glsl_component_count, validate_compute_tick_sig,
 };
 
 use crate::error::NativeError;

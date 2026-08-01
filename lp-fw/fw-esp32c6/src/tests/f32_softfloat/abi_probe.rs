@@ -94,14 +94,39 @@ pub fn run(report: &mut Report) {
 }
 
 fn arithmetic(report: &mut Report) {
-    check(report, "__addsf3(1,2)", bits(unsafe { __addsf3(of(F_1_0), of(F_2_0)) }), F_3_0);
-    check(report, "__subsf3(3,1)", bits(unsafe { __subsf3(of(F_3_0), of(F_1_0)) }), F_2_0);
-    check(report, "__mulsf3(3,2)", bits(unsafe { __mulsf3(of(F_3_0), of(F_2_0)) }), 0x40C0_0000);
+    check(
+        report,
+        "__addsf3(1,2)",
+        bits(unsafe { __addsf3(of(F_1_0), of(F_2_0)) }),
+        F_3_0,
+    );
+    check(
+        report,
+        "__subsf3(3,1)",
+        bits(unsafe { __subsf3(of(F_3_0), of(F_1_0)) }),
+        F_2_0,
+    );
+    check(
+        report,
+        "__mulsf3(3,2)",
+        bits(unsafe { __mulsf3(of(F_3_0), of(F_2_0)) }),
+        0x40C0_0000,
+    );
     // The classic: 0.1 + 0.2 must round to 0.30000001192092896, not 0.3.
     // Anything else means the routine is not round-to-nearest-even.
-    check(report, "__addsf3(0.1,0.2)", bits(unsafe { __addsf3(of(F_0_1), of(F_0_2)) }), F_0_3_SUM);
+    check(
+        report,
+        "__addsf3(0.1,0.2)",
+        bits(unsafe { __addsf3(of(F_0_1), of(F_0_2)) }),
+        F_0_3_SUM,
+    );
     // 1/3 is the one-bit-wrong detector for a reciprocal-multiply shortcut.
-    check(report, "__divsf3(1,3)", bits(unsafe { __divsf3(of(F_1_0), of(F_3_0)) }), F_1_3RD);
+    check(
+        report,
+        "__divsf3(1,3)",
+        bits(unsafe { __divsf3(of(F_1_0), of(F_3_0)) }),
+        F_1_3RD,
+    );
 }
 
 fn edge_values(report: &mut Report) {
