@@ -12,7 +12,7 @@
 //! Changing an `extern "C"` builtin in `lps-builtins` without re-running codegen will desync
 //! this file and fail `cargo check` until you regenerate.
 
-use cranelift_codegen::ir::{AbiParam, Signature, types};
+use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_codegen::isa::CallConv;
 use lps_builtin_ids::BuiltinId;
 

@@ -32,6 +32,14 @@
 //! two-instruction preamble that does what P5's board init will do.
 //! `unarmed_float_code_faults_with_a_coprocessor_trap` is the negative
 //! control: the same code without the preamble must take EXCCAUSE 32.
+//!
+//! # Two link paths
+//!
+//! Most tests here link only the module's own functions ([`link_blob`]) —
+//! everything M7 P3 emits inline needs nothing else. The one case that calls a
+//! routed builtin ([`run_f32_with_builtins`]) links against the Xtensa builtins
+//! base image instead, and skips loudly when that cross-target artifact has not
+//! been built.
 
 use lp_collection::VecMap;
 use lpir::builder::FunctionBuilder;
@@ -197,6 +205,10 @@ fn run_f32_with_builtins(
     args: &[u32],
     image: &[u8],
 ) -> RunOutcome {
+    assert!(
+        args.len() <= 5,
+        "the arming preamble clobbers the sixth argument register"
+    );
     let mut emu = Emulator::new();
     let elf = XtensaElf::parse(image).expect("builtins image parses as Xtensa ELF32");
     elf.load_into(&mut emu)
