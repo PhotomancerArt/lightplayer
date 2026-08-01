@@ -137,18 +137,42 @@ fn lower_soft_float_op(
     let po = pack_src_op(src_op);
     match op {
         // ── compiler-rt arithmetic ───────────────────────────────────────────
-        LpirOp::Fadd { dst, lhs, rhs } => {
-            soft_call(out, symbols, vreg_pool, "__addsf3", &[*lhs, *rhs], &[*dst], po)
-        }
-        LpirOp::Fsub { dst, lhs, rhs } => {
-            soft_call(out, symbols, vreg_pool, "__subsf3", &[*lhs, *rhs], &[*dst], po)
-        }
-        LpirOp::Fmul { dst, lhs, rhs } => {
-            soft_call(out, symbols, vreg_pool, "__mulsf3", &[*lhs, *rhs], &[*dst], po)
-        }
-        LpirOp::Fdiv { dst, lhs, rhs } => {
-            soft_call(out, symbols, vreg_pool, "__divsf3", &[*lhs, *rhs], &[*dst], po)
-        }
+        LpirOp::Fadd { dst, lhs, rhs } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__addsf3",
+            &[*lhs, *rhs],
+            &[*dst],
+            po,
+        ),
+        LpirOp::Fsub { dst, lhs, rhs } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__subsf3",
+            &[*lhs, *rhs],
+            &[*dst],
+            po,
+        ),
+        LpirOp::Fmul { dst, lhs, rhs } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__mulsf3",
+            &[*lhs, *rhs],
+            &[*dst],
+            po,
+        ),
+        LpirOp::Fdiv { dst, lhs, rhs } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__divsf3",
+            &[*lhs, *rhs],
+            &[*dst],
+            po,
+        ),
         // A real divide, not the Q32 path's multiply-by-reciprocal. The Q32
         // rewrite is legitimate there because Q16.16 division is already
         // approximate; in f32 it would silently lose the last bits of an
@@ -172,32 +196,92 @@ fn lower_soft_float_op(
         }
 
         // ── compiler-rt comparisons ──────────────────────────────────────────
-        LpirOp::Feq { dst, lhs, rhs } => {
-            soft_compare(out, symbols, vreg_pool, temps, "__eqsf2", IcmpCond::Eq, *dst, *lhs, *rhs, po)
-        }
-        LpirOp::Fne { dst, lhs, rhs } => {
-            soft_compare(out, symbols, vreg_pool, temps, "__nesf2", IcmpCond::Ne, *dst, *lhs, *rhs, po)
-        }
-        LpirOp::Flt { dst, lhs, rhs } => {
-            soft_compare(out, symbols, vreg_pool, temps, "__ltsf2", IcmpCond::LtS, *dst, *lhs, *rhs, po)
-        }
-        LpirOp::Fle { dst, lhs, rhs } => {
-            soft_compare(out, symbols, vreg_pool, temps, "__lesf2", IcmpCond::LeS, *dst, *lhs, *rhs, po)
-        }
-        LpirOp::Fgt { dst, lhs, rhs } => {
-            soft_compare(out, symbols, vreg_pool, temps, "__gtsf2", IcmpCond::GtS, *dst, *lhs, *rhs, po)
-        }
-        LpirOp::Fge { dst, lhs, rhs } => {
-            soft_compare(out, symbols, vreg_pool, temps, "__gesf2", IcmpCond::GeS, *dst, *lhs, *rhs, po)
-        }
+        LpirOp::Feq { dst, lhs, rhs } => soft_compare(
+            out,
+            symbols,
+            vreg_pool,
+            temps,
+            "__eqsf2",
+            IcmpCond::Eq,
+            *dst,
+            *lhs,
+            *rhs,
+            po,
+        ),
+        LpirOp::Fne { dst, lhs, rhs } => soft_compare(
+            out,
+            symbols,
+            vreg_pool,
+            temps,
+            "__nesf2",
+            IcmpCond::Ne,
+            *dst,
+            *lhs,
+            *rhs,
+            po,
+        ),
+        LpirOp::Flt { dst, lhs, rhs } => soft_compare(
+            out,
+            symbols,
+            vreg_pool,
+            temps,
+            "__ltsf2",
+            IcmpCond::LtS,
+            *dst,
+            *lhs,
+            *rhs,
+            po,
+        ),
+        LpirOp::Fle { dst, lhs, rhs } => soft_compare(
+            out,
+            symbols,
+            vreg_pool,
+            temps,
+            "__lesf2",
+            IcmpCond::LeS,
+            *dst,
+            *lhs,
+            *rhs,
+            po,
+        ),
+        LpirOp::Fgt { dst, lhs, rhs } => soft_compare(
+            out,
+            symbols,
+            vreg_pool,
+            temps,
+            "__gtsf2",
+            IcmpCond::GtS,
+            *dst,
+            *lhs,
+            *rhs,
+            po,
+        ),
+        LpirOp::Fge { dst, lhs, rhs } => soft_compare(
+            out,
+            symbols,
+            vreg_pool,
+            temps,
+            "__gesf2",
+            IcmpCond::GeS,
+            *dst,
+            *lhs,
+            *rhs,
+            po,
+        ),
 
         // ── compiler-rt int → float ──────────────────────────────────────────
         LpirOp::ItofS { dst, src } => {
             soft_call(out, symbols, vreg_pool, "__floatsisf", &[*src], &[*dst], po)
         }
-        LpirOp::ItofU { dst, src } => {
-            soft_call(out, symbols, vreg_pool, "__floatunsisf", &[*src], &[*dst], po)
-        }
+        LpirOp::ItofU { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__floatunsisf",
+            &[*src],
+            &[*dst],
+            po,
+        ),
 
         // ── bit manipulation, no call ────────────────────────────────────────
         LpirOp::FconstF32 { dst, value } => {
@@ -211,12 +295,28 @@ fn lower_soft_float_op(
         // Flip the sign bit. Not `0.0 - x`: that turns `-0.0` into `+0.0` and
         // quiets a signaling NaN, both of which `float.md` §3 forbids for `-x`.
         LpirOp::Fneg { dst, src } => {
-            mask_op(out, temps, AluOp::Xor, SIGN_BIT, fa_vreg(*dst), fa_vreg(*src), po);
+            mask_op(
+                out,
+                temps,
+                AluOp::Xor,
+                SIGN_BIT,
+                fa_vreg(*dst),
+                fa_vreg(*src),
+                po,
+            );
             Ok(())
         }
         // Clear the sign bit; exact on NaN and ±0 for the same reason.
         LpirOp::Fabs { dst, src } => {
-            mask_op(out, temps, AluOp::And, SIGN_MASK_OFF, fa_vreg(*dst), fa_vreg(*src), po);
+            mask_op(
+                out,
+                temps,
+                AluOp::And,
+                SIGN_MASK_OFF,
+                fa_vreg(*dst),
+                fa_vreg(*src),
+                po,
+            );
             Ok(())
         }
         // Reinterpret: the value is already the bit pattern, in an integer
@@ -233,21 +333,51 @@ fn lower_soft_float_op(
         }
 
         // ── native-f32 builtin family (no compiler-rt equivalent) ────────────
-        LpirOp::Fsqrt { dst, src } => {
-            soft_call(out, symbols, vreg_pool, "__lp_lpir_fsqrt_f32", &[*src], &[*dst], po)
-        }
-        LpirOp::Ffloor { dst, src } => {
-            soft_call(out, symbols, vreg_pool, "__lp_lpir_ffloor_f32", &[*src], &[*dst], po)
-        }
-        LpirOp::Fceil { dst, src } => {
-            soft_call(out, symbols, vreg_pool, "__lp_lpir_fceil_f32", &[*src], &[*dst], po)
-        }
-        LpirOp::Ftrunc { dst, src } => {
-            soft_call(out, symbols, vreg_pool, "__lp_lpir_ftrunc_f32", &[*src], &[*dst], po)
-        }
-        LpirOp::Fnearest { dst, src } => {
-            soft_call(out, symbols, vreg_pool, "__lp_lpir_fnearest_f32", &[*src], &[*dst], po)
-        }
+        LpirOp::Fsqrt { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__lp_lpir_fsqrt_f32",
+            &[*src],
+            &[*dst],
+            po,
+        ),
+        LpirOp::Ffloor { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__lp_lpir_ffloor_f32",
+            &[*src],
+            &[*dst],
+            po,
+        ),
+        LpirOp::Fceil { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__lp_lpir_fceil_f32",
+            &[*src],
+            &[*dst],
+            po,
+        ),
+        LpirOp::Ftrunc { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__lp_lpir_ftrunc_f32",
+            &[*src],
+            &[*dst],
+            po,
+        ),
+        LpirOp::Fnearest { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            "__lp_lpir_fnearest_f32",
+            &[*src],
+            &[*dst],
+            po,
+        ),
         LpirOp::Fmin { dst, lhs, rhs } => soft_call(
             out,
             symbols,
@@ -266,12 +396,24 @@ fn lower_soft_float_op(
             &[*dst],
             po,
         ),
-        LpirOp::FtoiSatS { dst, src } => {
-            soft_call(out, symbols, vreg_pool, f32_ftoi_sat_s_symbol(), &[*src], &[*dst], po)
-        }
-        LpirOp::FtoiSatU { dst, src } => {
-            soft_call(out, symbols, vreg_pool, f32_ftoi_sat_u_symbol(), &[*src], &[*dst], po)
-        }
+        LpirOp::FtoiSatS { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            f32_ftoi_sat_s_symbol(),
+            &[*src],
+            &[*dst],
+            po,
+        ),
+        LpirOp::FtoiSatU { dst, src } => soft_call(
+            out,
+            symbols,
+            vreg_pool,
+            f32_ftoi_sat_u_symbol(),
+            &[*src],
+            &[*dst],
+            po,
+        ),
         LpirOp::FtoUnorm16 { dst, src } => soft_call(
             out,
             symbols,
@@ -656,10 +798,7 @@ mod tests {
             neg.as_slice(),
             [
                 VInst::IConst32 { val: SIGN_BIT, .. },
-                VInst::AluRRR {
-                    op: AluOp::Xor,
-                    ..
-                }
+                VInst::AluRRR { op: AluOp::Xor, .. }
             ]
         ));
 
@@ -678,10 +817,7 @@ mod tests {
                     val: SIGN_MASK_OFF,
                     ..
                 },
-                VInst::AluRRR {
-                    op: AluOp::And,
-                    ..
-                }
+                VInst::AluRRR { op: AluOp::And, .. }
             ]
         ));
     }

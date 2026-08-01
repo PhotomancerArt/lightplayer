@@ -70,9 +70,9 @@ pub use lps_shared::path_resolve::{LpsTypePathExt, PathError};
 pub use lps_shared::value_path::{LpsValuePathError, LpsValuePathExt};
 pub use lps_shared::{LayoutRules, LpsFnSig, LpsType, StructMember};
 pub use lpvm_abi::{
-    CallError, CallResult, GlslReturn, decode_q32_return, decode_return_to_f32, float_lane_abi,
-    flat_q32_words_from_f32_args, flat_words_from_f32_args,
-    flatten_q32_arg, flatten_q32_return, glsl_component_count, unflatten_q32_args,
+    CallError, CallResult, GlslReturn, decode_q32_return, decode_return_to_f32,
+    flat_q32_words_from_f32_args, flat_words_from_f32_args, flatten_q32_arg, flatten_q32_return,
+    float_lane_abi, glsl_component_count, unflatten_q32_args,
 };
 pub use lpvm_data_q32::LpvmDataQ32;
 pub use memory::{AllocError, BumpLpvmMemory, LpvmMemory};

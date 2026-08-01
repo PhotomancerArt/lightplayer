@@ -309,40 +309,19 @@ pub fn lanes_to_lps_value_f32(
         (LpsType::BVec3, LpsValueQ32::BVec3(a)) => LpsValueF32::BVec3(a),
         (LpsType::BVec4, LpsValueQ32::BVec4(a)) => LpsValueF32::BVec4(a),
 
-        (LpsType::Mat2, LpsValueQ32::Mat2x2(m)) => LpsValueF32::Mat2x2([
-            [dec(m[0][0]), dec(m[0][1])],
-            [dec(m[1][0]), dec(m[1][1])],
-        ]),
+        (LpsType::Mat2, LpsValueQ32::Mat2x2(m)) => {
+            LpsValueF32::Mat2x2([[dec(m[0][0]), dec(m[0][1])], [dec(m[1][0]), dec(m[1][1])]])
+        }
         (LpsType::Mat3, LpsValueQ32::Mat3x3(m)) => LpsValueF32::Mat3x3([
             [dec(m[0][0]), dec(m[0][1]), dec(m[0][2])],
             [dec(m[1][0]), dec(m[1][1]), dec(m[1][2])],
             [dec(m[2][0]), dec(m[2][1]), dec(m[2][2])],
         ]),
         (LpsType::Mat4, LpsValueQ32::Mat4x4(m)) => LpsValueF32::Mat4x4([
-            [
-                dec(m[0][0]),
-                dec(m[0][1]),
-                dec(m[0][2]),
-                dec(m[0][3]),
-            ],
-            [
-                dec(m[1][0]),
-                dec(m[1][1]),
-                dec(m[1][2]),
-                dec(m[1][3]),
-            ],
-            [
-                dec(m[2][0]),
-                dec(m[2][1]),
-                dec(m[2][2]),
-                dec(m[2][3]),
-            ],
-            [
-                dec(m[3][0]),
-                dec(m[3][1]),
-                dec(m[3][2]),
-                dec(m[3][3]),
-            ],
+            [dec(m[0][0]), dec(m[0][1]), dec(m[0][2]), dec(m[0][3])],
+            [dec(m[1][0]), dec(m[1][1]), dec(m[1][2]), dec(m[1][3])],
+            [dec(m[2][0]), dec(m[2][1]), dec(m[2][2]), dec(m[2][3])],
+            [dec(m[3][0]), dec(m[3][1]), dec(m[3][2]), dec(m[3][3])],
         ]),
 
         (LpsType::Array { element, len }, LpsValueQ32::Array(items)) => {
@@ -373,7 +352,10 @@ pub fn lanes_to_lps_value_f32(
                 if fname != &key {
                     return Err(bad());
                 }
-                fields.push((fname.clone(), lanes_to_lps_value_f32(&m.ty, fv.clone(), abi)?));
+                fields.push((
+                    fname.clone(),
+                    lanes_to_lps_value_f32(&m.ty, fv.clone(), abi)?,
+                ));
             }
             LpsValueF32::Struct {
                 name: vname.or(name.clone()),
@@ -419,5 +401,59 @@ mod tests {
         assert_eq!(q, LpsValueQ32::Texture2D(tv));
         let back = q32_to_lps_value_f32(&ty, q).unwrap();
         assert!(back.eq(&v));
+    }
+
+    /// The property that makes the IEEE lane ABI worth having: values Q16.16
+    /// cannot represent survive it **exactly**, bit for bit, and the two modes
+    /// share one traversal so a struct or matrix cannot round-trip in one mode
+    /// and not the other.
+    #[test]
+    fn ieee_lanes_round_trip_values_q32_cannot_hold() {
+        for (ty, v) in [
+            (LpsType::Float, LpsValueF32::F32(1.234_567_8e10)),
+            (LpsType::Float, LpsValueF32::F32(1e-30)),
+            (LpsType::Float, LpsValueF32::F32(-0.0)),
+            (
+                LpsType::Vec3,
+                LpsValueF32::Vec3([f32::INFINITY, -1e20, 1.0e-38]),
+            ),
+        ] {
+            let lanes = lps_value_f32_to_lanes(&ty, &v, FloatLaneAbi::Ieee754Bits).unwrap();
+            let back = lanes_to_lps_value_f32(&ty, lanes, FloatLaneAbi::Ieee754Bits).unwrap();
+            assert!(
+                back.eq(&v),
+                "{ty:?}: {v:?} did not survive the IEEE lane ABI"
+            );
+        }
+    }
+
+    /// NaN survives as a *bit pattern*. `eq` would be false for it, so this
+    /// checks the lane word directly — and it is the case a "clever" conversion
+    /// through `f64` or through `Q32` arithmetic would quietly destroy.
+    #[test]
+    fn ieee_lanes_carry_nan_bits_untouched() {
+        let signalling = f32::from_bits(0x7f80_0001);
+        let lanes = lps_value_f32_to_lanes(
+            &LpsType::Float,
+            &LpsValueF32::F32(signalling),
+            FloatLaneAbi::Ieee754Bits,
+        )
+        .unwrap();
+        let LpsValueQ32::F32(word) = lanes else {
+            panic!("expected a float lane");
+        };
+        assert_eq!(word.to_fixed() as u32, 0x7f80_0001);
+    }
+
+    /// The Ieee754Bits lane is a raw word, not a number: reading it back under
+    /// the Q16.16 codec must not accidentally agree. If these two ever match,
+    /// the codec split has collapsed and the modes are silently sharing an
+    /// encoding.
+    #[test]
+    fn the_two_lane_abis_are_not_interchangeable() {
+        let v = LpsValueF32::F32(1.0);
+        let ieee = lps_value_f32_to_lanes(&LpsType::Float, &v, FloatLaneAbi::Ieee754Bits).unwrap();
+        let fixed = lps_value_f32_to_lanes(&LpsType::Float, &v, FloatLaneAbi::Q16_16).unwrap();
+        assert_ne!(ieee, fixed);
     }
 }

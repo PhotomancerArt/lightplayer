@@ -179,10 +179,18 @@ pub fn run(report: &mut Report) {
             case.args.iter().map(|a| LpsValueF32::F32(*a)).collect();
         match inst.call(case.func, &args) {
             Ok(LpsValueF32::F32(got)) => {
-                report.record(case.name, got.to_bits() == case.want_bits, got.to_bits(), case.want_bits);
+                report.record(
+                    case.name,
+                    got.to_bits() == case.want_bits,
+                    got.to_bits(),
+                    case.want_bits,
+                );
             }
             Ok(other) => {
-                println!("[f32-soft] FAIL {}: unexpected return shape {other:?}", case.name);
+                println!(
+                    "[f32-soft] FAIL {}: unexpected return shape {other:?}",
+                    case.name
+                );
                 report.record(case.name, false, 0, case.want_bits);
             }
             Err(e) => {
@@ -214,7 +222,12 @@ pub fn run(report: &mut Report) {
         ),
         other => {
             println!("[f32-soft] FAIL to_int: {other:?}");
-            report.record("to_int(1000000.5) truncates to 1000000", false, 0, 1_000_000);
+            report.record(
+                "to_int(1000000.5) truncates to 1000000",
+                false,
+                0,
+                1_000_000,
+            );
         }
     }
 }
