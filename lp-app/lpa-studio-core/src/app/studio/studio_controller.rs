@@ -23,13 +23,13 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
-    PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
-    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
-    ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
-    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
-    UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
-    UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodePasteOp,
+    NodeRemoveOp, NodeRevertOp, PlaylistActivateOp, ProjectConnectResult, ProjectController,
+    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
+    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
+    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiNotice, UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent,
+    UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -1999,6 +1999,10 @@ impl StudioController {
                 let op = action.into_op::<NodeRevertOp>()?;
                 return self.execute_node_revert_op(op).await;
             }
+            if action.op_as::<NodeClearDebugOp>().is_some() {
+                let op = action.into_op::<NodeClearDebugOp>()?;
+                return self.execute_node_clear_debug_op(op).await;
+            }
             if action.op_as::<PlaylistActivateOp>().is_some() {
                 let op = action.into_op::<PlaylistActivateOp>()?;
                 return self.execute_playlist_activate_op(op).await;
@@ -2867,6 +2871,13 @@ impl StudioController {
                 };
                 self.record_project_edit_run(run)
             }
+            ProjectOp::ClearDebugEdits => {
+                let run = {
+                    let server = self.pool.lens_session_mut()?.client_mut()?;
+                    self.project.clear_debug_edits(server).await
+                };
+                self.record_project_edit_run(run)
+            }
         }
     }
 
@@ -3118,6 +3129,16 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.revert_node_edits(server, &op.node).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// The per-node scope of the Clear verb (D7): only this subtree's Debug
+    /// overrides go, persisted edits stay.
+    async fn execute_node_clear_debug_op(&mut self, op: NodeClearDebugOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.clear_node_debug_edits(server, &op.node).await
         };
         self.record_project_edit_run(run)
     }

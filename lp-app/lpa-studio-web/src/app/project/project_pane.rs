@@ -155,7 +155,6 @@ fn ProjectDetailPopover(
     let label = trigger_label(affordance);
     let status_class = node_status_label_class(status.kind);
     let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
-    let live_entries = entries_in(&pending_edits, PendingEditBucket::Live);
     let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
 
     rsx! {
@@ -206,15 +205,6 @@ fn ProjectDetailPopover(
                 tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
                 PendingEditList { entries: unsaved_entries, on_action }
             }
-            DetailSection {
-                title: "Live (transient)",
-                meta: dirty.transient.to_string(),
-                tint: bucket_section_tint(PendingEditBucket::Live, dirty.transient),
-                PendingEditList { entries: live_entries, on_action }
-                p { class: "tw:m-0 tw:pt-1 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
-                    "Live controls apply to the running project and are never written by Save."
-                }
-            }
             if dirty.failed > 0 || !failed_entries.is_empty() {
                 DetailSection {
                     title: "Failed edits",
@@ -250,7 +240,7 @@ fn trigger_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "Project details — no unsaved changes",
         UiAffordance::Busy => "Project activity in progress",
-        UiAffordance::Live => "Project has live-only edits",
+        UiAffordance::Live => "Project has debug overrides",
         UiAffordance::Unsaved => "Project has unsaved changes",
         UiAffordance::Error => "Project needs attention",
     }
@@ -261,7 +251,7 @@ fn state_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "unchanged",
         UiAffordance::Busy => "in progress",
-        UiAffordance::Live => "live edits only",
+        UiAffordance::Live => "debug overrides only",
         UiAffordance::Unsaved => "uncommitted",
         UiAffordance::Error => "needs attention",
     }
@@ -274,12 +264,8 @@ mod tests {
 
     use super::*;
 
-    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
-        DirtySummary {
-            persisted,
-            transient,
-            failed,
-        }
+    fn dirty(persisted: usize, failed: usize) -> DirtySummary {
+        DirtySummary { persisted, failed }
     }
 
     fn editor_view(dirty: DirtySummary, edits_in_flight: usize) -> ProjectEditorView {
@@ -305,18 +291,19 @@ mod tests {
 
         // Persisted edits: the edited pencil, even while an ack is pending
         // (Unsaved outranks Busy in the shared priority).
-        let uncommitted = editor_view(dirty(1, 0, 0), 1).affordance(UiStatusKind::Good);
+        let uncommitted = editor_view(dirty(1, 0), 1).affordance(UiStatusKind::Good);
         assert_eq!(uncommitted, UiAffordance::Unsaved);
         assert_eq!(state_label(uncommitted), "uncommitted");
 
         // In-flight only: genuine activity.
-        let busy = editor_view(dirty(0, 0, 0), 1).affordance(UiStatusKind::Good);
+        let busy = editor_view(dirty(0, 0), 1).affordance(UiStatusKind::Good);
         assert_eq!(busy, UiAffordance::Busy);
         assert_eq!(state_label(busy), "in progress");
 
-        // Live-only edits stay distinct from unsaved.
-        let live = editor_view(dirty(0, 2, 0), 0).affordance(UiStatusKind::Good);
-        assert_eq!(live, UiAffordance::Live);
+        // D7: a project whose only pending edits are debug overrides reads
+        // clean — they never enter the summary, so the trigger stays quiet.
+        let debug_only = editor_view(DirtySummary::clean(), 0).affordance(UiStatusKind::Good);
+        assert_eq!(debug_only, UiAffordance::Info);
     }
 
     #[test]
@@ -330,20 +317,11 @@ mod tests {
             tone(DirtySummary::clean(), 0, UiStatusKind::Good),
             PaneTone::Good
         );
-        assert_eq!(tone(dirty(1, 0, 1), 2, UiStatusKind::Good), PaneTone::Error);
-        assert_eq!(
-            tone(dirty(2, 1, 0), 0, UiStatusKind::Good),
-            PaneTone::Warning
-        );
-        assert_eq!(tone(dirty(0, 1, 0), 0, UiStatusKind::Good), PaneTone::Live);
-        assert_eq!(
-            tone(dirty(0, 0, 0), 1, UiStatusKind::Good),
-            PaneTone::Working
-        );
+        assert_eq!(tone(dirty(1, 1), 2, UiStatusKind::Good), PaneTone::Error);
+        assert_eq!(tone(dirty(2, 0), 0, UiStatusKind::Good), PaneTone::Warning);
+        assert_eq!(tone(dirty(0, 1), 0, UiStatusKind::Good), PaneTone::Error);
+        assert_eq!(tone(dirty(0, 0), 1, UiStatusKind::Good), PaneTone::Working);
         // An error pane status is never masked by a dirty wash.
-        assert_eq!(
-            tone(dirty(0, 1, 0), 0, UiStatusKind::Error),
-            PaneTone::Error
-        );
+        assert_eq!(tone(dirty(1, 0), 0, UiStatusKind::Error), PaneTone::Error);
     }
 }

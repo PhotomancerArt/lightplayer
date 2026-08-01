@@ -35,28 +35,10 @@ pub(crate) fn uncommitted() -> Element {
         StoryPane {
             dirty: DirtySummary {
                 persisted: 2,
-                transient: 1,
                 failed: 0,
             },
             edits_in_flight: 0,
             actions: true,
-        }
-    }
-}
-
-#[story(
-    description = "Only live (transient) edits: blue header wash; no persisted edits, so no Save/Revert icons and a quiet 'i' trigger."
-)]
-pub(crate) fn live_only() -> Element {
-    rsx! {
-        StoryPane {
-            dirty: DirtySummary {
-                persisted: 0,
-                transient: 2,
-                failed: 0,
-            },
-            edits_in_flight: 0,
-            actions: false,
         }
     }
 }
@@ -69,7 +51,6 @@ pub(crate) fn in_progress() -> Element {
         StoryPane {
             dirty: DirtySummary {
                 persisted: 1,
-                transient: 0,
                 failed: 0,
             },
             edits_in_flight: 1,
@@ -79,7 +60,7 @@ pub(crate) fn in_progress() -> Element {
 }
 
 #[story(
-    description = "The detail popup as the save panel: identity with the status pill, state, overlay revision, and the per-bucket sections as headed change lists (counts in the headers, node label + path + op/value + revert per row), plus the project stats section."
+    description = "The detail popup as the save panel: identity with the status pill, state, overlay revision, and the per-bucket sections as headed change lists (counts in the headers, node label + path + op/value + revert per row), plus the project stats section. Debug overrides never appear here (D7)."
 )]
 pub(crate) fn detail_popup() -> Element {
     rsx! {
@@ -87,7 +68,6 @@ pub(crate) fn detail_popup() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 2,
-                    transient: 1,
                     failed: 0,
                 },
                 edits_in_flight: 0,
@@ -104,7 +84,6 @@ pub(crate) fn detail_popup() -> Element {
                         UiPendingEditKind::Added,
                         UiPendingEditPhase::Persisted,
                     ),
-                    assign_edit("Orbit shader", "controls.rate", "2.0", UiPendingEditPhase::Live),
                 ],
             }
         }
@@ -112,7 +91,7 @@ pub(crate) fn detail_popup() -> Element {
 }
 
 #[story(
-    description = "A mixed change list in the save panel: value assigns (old → new where the saved value is known), a structural add and remove (the remove with its replaced value), a live control, and a failed entry with its reason in the error-tinted section — every row with its own revert."
+    description = "A mixed change list in the save panel: value assigns (old → new where the saved value is known), a structural add and remove (the remove with its replaced value), and a failed entry with its reason in the error-tinted section — every row with its own revert. Debug overrides are deliberately absent: they are not dirty (D7)."
 )]
 pub(crate) fn change_list() -> Element {
     rsx! {
@@ -120,7 +99,6 @@ pub(crate) fn change_list() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 3,
-                    transient: 1,
                     failed: 1,
                 },
                 edits_in_flight: 0,
@@ -146,7 +124,6 @@ pub(crate) fn change_list() -> Element {
                         ),
                         "{\"shader\":\"stripe.glsl\",\"duration\":2.0}",
                     ),
-                    assign_edit("Orbit shader", "controls.rate", "2.0", UiPendingEditPhase::Live),
                     pending_edit(
                         "Sunrise palette",
                         "entries[ghost]",
@@ -196,7 +173,6 @@ pub(crate) fn change_list_overflow() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 14,
-                    transient: 0,
                     failed: 0,
                 },
                 edits_in_flight: 0,
@@ -254,7 +230,6 @@ pub(crate) fn staged_node_removal() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 3,
-                    transient: 0,
                     failed: 0,
                 },
                 edits_in_flight: 0,

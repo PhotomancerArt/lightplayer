@@ -55,6 +55,14 @@ pub enum SlotEditOp {
     /// Discard the pending edit for the slot at `address`, locally and on
     /// the server overlay.
     Revert { address: ProjectSlotAddress },
+    /// **Clear** the Debug override at `address` — the per-value scope of the
+    /// Clear verb (D7). Mechanically identical to [`Self::Revert`] (one
+    /// `RemoveSlotEdit` at the address): a Debug slot has no durable authored
+    /// value underneath, so removing the overlay entry returns the slot to its
+    /// shape default. It exists as its own variant because the *verb* differs
+    /// — Debug values are cleared, never "reverted" or "reset" — and the
+    /// action's label/summary follow the op.
+    Clear { address: ProjectSlotAddress },
 }
 
 impl SlotEditOp {
@@ -65,7 +73,8 @@ impl SlotEditOp {
             | Self::EnsurePresent { address }
             | Self::RemoveValue { address }
             | Self::MoveEntry { address, .. }
-            | Self::Revert { address } => address,
+            | Self::Revert { address }
+            | Self::Clear { address } => address,
         }
     }
 }
@@ -96,6 +105,11 @@ impl ControllerOp for SlotEditOp {
             Self::Revert { .. } => ActionMeta::new(
                 "Revert",
                 "Discard the pending edit for this slot.",
+                ActionPriority::Secondary,
+            ),
+            Self::Clear { .. } => ActionMeta::new(
+                "Clear",
+                "Clear this debug override; the slot returns to its default.",
                 ActionPriority::Secondary,
             ),
         }
@@ -163,6 +177,9 @@ mod tests {
             SlotEditOp::Revert {
                 address: test_address(),
             },
+            SlotEditOp::Clear {
+                address: test_address(),
+            },
         ];
 
         for op in ops {
@@ -175,5 +192,18 @@ mod tests {
             );
             assert_eq!(op.address(), &test_address());
         }
+    }
+
+    #[test]
+    fn debug_slots_are_cleared_never_reverted_or_reset() {
+        // D7 vocabulary: the per-value Clear scope says "Clear", and no
+        // Debug-facing wording leaks "Revert"/"Reset".
+        let meta = SlotEditOp::Clear {
+            address: test_address(),
+        }
+        .default_action_meta();
+        assert_eq!(meta.label, "Clear");
+        assert!(!meta.summary.contains("Revert"));
+        assert!(!meta.summary.contains("Reset"));
     }
 }

@@ -6,7 +6,7 @@ use lpa_studio_core::{
     UiSlotComposite, UiSlotFieldState, UiSlotMapKeyKind, UiSlotSourceState,
 };
 
-use crate::app::node::slot_edit_actions::slot_revert_action;
+use crate::app::node::slot_edit_actions::{slot_clear_action, slot_revert_action};
 use crate::app::node::slot_option_presence::{
     OptionPresenceWidth, option_presence_child_slot, option_presence_chip,
 };
@@ -269,14 +269,24 @@ pub fn ConfigSlotRow(
     }
 }
 
-/// The one revert verb vocabulary (M3 UX gate): "Revert" for unsaved
-/// (persisted) edits, "Reset" for live (transient) controls — shared by the
-/// inline row icon and the detail-popup footer so the two access points can
-/// never diverge.
+/// The one verb vocabulary (M3 UX gate, D7): "Revert" for unsaved
+/// (persisted) edits, **"Clear"** for live/debug overrides — never
+/// "Reset" — shared by the inline row icon and the detail-popup footer so
+/// the two access points can never diverge.
 fn chrome_revert_labels(chrome: SlotEditChrome) -> (&'static str, &'static str) {
     match chrome {
         SlotEditChrome::Unsaved => ("Revert", "Discard this pending edit"),
-        SlotEditChrome::Live => ("Reset", "Reset this live control to its authored value"),
+        SlotEditChrome::Live => ("Clear", "Clear this debug override"),
+    }
+}
+
+/// The op the row's verb dispatches: a persisted edit is reverted, a
+/// live/debug override is **cleared** (same `RemoveSlotEdit` mechanism, the
+/// vocabulary debug values use).
+fn chrome_revert_action(chrome: SlotEditChrome, address: ProjectSlotAddress) -> UiAction {
+    match chrome {
+        SlotEditChrome::Unsaved => slot_revert_action(address),
+        SlotEditChrome::Live => slot_clear_action(address),
     }
 }
 
@@ -327,7 +337,7 @@ fn SlotRowRevertButton(revert: RowRevert) -> Element {
             title: "{label}: {title}",
             onclick: move |event| {
                 event.stop_propagation();
-                on_action.call(slot_revert_action(address.clone()));
+                on_action.call(chrome_revert_action(chrome, address.clone()));
             },
             StudioIcon {
                 name: StudioIconName::Revert,
@@ -347,11 +357,12 @@ fn slot_detail_revert(
     address: Option<ProjectSlotAddress>,
     on_action: Option<EventHandler<UiAction>>,
 ) -> Option<SlotDetailRevert> {
-    let (label, title) = chrome_revert_labels(chrome?);
+    let chrome = chrome?;
+    let (label, title) = chrome_revert_labels(chrome);
     Some(SlotDetailRevert {
         label,
         title,
-        address: address?,
+        action: chrome_revert_action(chrome, address?),
         on_action: on_action?,
     })
 }

@@ -137,7 +137,13 @@ pub(in crate::app::project) struct SlotEditEntry<'a> {
     pub pending: Option<&'a PendingEdit>,
     /// The entry's op for display, from the source that classifies it.
     pub op: SlotEditEntrySource<'a>,
-    /// The entry's [`DirtySummary`] classification (exactly one bucket).
+    /// The persistence governing the entry's path.
+    /// [`SlotPersistence::Transient`] marks a **Debug** (live-only) override:
+    /// not dirty (D7), listed nowhere, and cleared by the Clear verb rather
+    /// than reverted.
+    pub persistence: SlotPersistence,
+    /// The entry's [`DirtySummary`] classification (at most one bucket —
+    /// a non-failed Debug entry counts in none).
     pub summary: DirtySummary,
 }
 
@@ -303,14 +309,16 @@ impl<'a> SlotEditJoin<'a> {
                             .expect("entry addresses come from the buffer or the overlay"),
                     ),
                 };
+                let persistence = self.entry_persistence(address);
                 SlotEditEntry {
                     address,
                     pending,
                     op,
+                    persistence,
                     summary: DirtySummary::for_slot(
                         pending,
                         self.overlay_dirty(address),
-                        self.entry_persistence(address),
+                        persistence,
                     ),
                 }
             })
@@ -323,8 +331,9 @@ impl<'a> SlotEditJoin<'a> {
     ///
     /// Counts are per edit entry ([`Self::entries`]), classified by
     /// [`DirtySummary::for_slot`] exactly like the per-field affordances: a
-    /// failed buffer entry → `failed`, anything else → its resolved
-    /// persistence bucket. Each entry counts **once** regardless of whether
+    /// failed buffer entry → `failed`, a persisted one → `persisted`, and a
+    /// Debug (transient) override → nothing at all (D7). Each entry counts
+    /// **at most once** regardless of whether
     /// a slot row survives at its path (a removed map entry still counts) —
     /// prefix-dirty on ancestor composites is display state, never an
     /// additional count.
@@ -492,7 +501,8 @@ mod tests {
     fn dirty_summary_counts_entries_once_including_rowless_removals() {
         // One overlay removal at a path with no surviving row, one buffered
         // failed edit, one address present in both buffer and overlay: three
-        // entries, three counts — the buffer classification wins on overlap.
+        // entries — the buffer classification wins on overlap, and the Debug
+        // (transient) one counts in no bucket (D7).
         let buffer = BTreeMap::from([
             (
                 at("entries[b]"),
@@ -514,10 +524,19 @@ mod tests {
             join.dirty_summary_for_node(&node()),
             DirtySummary {
                 persisted: 1,
-                transient: 1,
                 failed: 1,
             }
         );
+        // The Debug entry is still an ENTRY (Clear enumerates it) — it just
+        // carries no dirty weight.
+        let entries = join.entries();
+        assert_eq!(entries.len(), 3);
+        let debug_entry = entries
+            .iter()
+            .find(|entry| *entry.address == at("brightness"))
+            .expect("the transient address is an entry");
+        assert_eq!(debug_entry.persistence, SlotPersistence::Transient);
+        assert!(debug_entry.summary.is_clean());
         assert!(
             join.dirty_summary_for_node(
                 &ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap()
@@ -566,7 +585,6 @@ mod tests {
 
         let one_persisted = DirtySummary {
             persisted: 1,
-            transient: 0,
             failed: 0,
         };
         assert_eq!(join.dirty_summary_for_node(&node()), one_persisted);
@@ -609,7 +627,6 @@ mod tests {
             join.dirty_summary_for_node(&node()),
             DirtySummary {
                 persisted: 0,
-                transient: 0,
                 failed: 1,
             }
         );
