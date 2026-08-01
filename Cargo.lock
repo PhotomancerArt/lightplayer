@@ -3961,6 +3961,7 @@ dependencies = [
  "lp-xt-fp-vectors",
  "lpa-server",
  "lpc-hardware",
+ "lpc-model",
  "lpc-shared",
  "lpc-wire",
  "lpfs",
