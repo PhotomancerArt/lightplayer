@@ -19,10 +19,17 @@ extern crate alloc;
 pub mod decode;
 pub mod disasm;
 pub mod encode;
+pub mod fp;
+pub mod sr;
 
 pub use decode::{DecodeError, decode};
 pub use disasm::format_instruction;
 pub use encode::encode;
+pub use fp::{
+    BReg, FReg, FpCmpOp, FpLsiOp, FpLsxOp, FpMovArOp, FpMovBrOp, FpRrOp, FpRrrOp, FpToIntOp,
+    IntToFpOp,
+};
+pub use sr::{SpecialReg, SrOp, UrOp, UserReg};
 
 /// An Xtensa address register `a0`..`a15`.
 ///
@@ -301,6 +308,44 @@ pub enum Inst {
     Nullary(NullaryOp),
     /// zero-operand narrow return/nop (16-bit)
     NullaryN(NullaryNarrowOp),
+
+    // --- floating point (see the [`fp`] module doc for the normative subset) ---
+    /// `op fr, fs, ft`
+    FpRrr(FpRrrOp, FReg, FReg, FReg),
+    /// `op fr, fs`
+    FpRr(FpRrOp, FReg, FReg),
+    /// `const.s fr, imm` (imm 0..=15 selects a constant, not a value)
+    ConstS(FReg, u8),
+    /// `rfr ar, fs` — FR → AR bit-for-bit
+    Rfr(Reg, FReg),
+    /// `wfr fr, as` — AR → FR bit-for-bit
+    Wfr(FReg, Reg),
+    /// `op fr, fs, at` — FP conditional move on an address register
+    FpMovAr(FpMovArOp, FReg, FReg, Reg),
+    /// `op fr, fs, bt` — FP conditional move on a boolean register
+    FpMovBr(FpMovBrOp, FReg, FReg, BReg),
+    /// `op br, fs, ft` — FP compare, result to a boolean register
+    FpCmp(FpCmpOp, BReg, FReg, FReg),
+    /// `op ar, fs, imm` (imm 0..=15 is a binary pre-scale)
+    FpToInt(FpToIntOp, Reg, FReg, u8),
+    /// `op fr, as, imm` (imm 0..=15 is a binary post-scale)
+    IntToFp(IntToFpOp, FReg, Reg, u8),
+    /// `op fr, as, at` — indexed FP load/store
+    FpLsx(FpLsxOp, FReg, Reg, Reg),
+    /// `op ft, as, offset` (offset 0..=1020, multiple of 4)
+    FpLsi(FpLsiOp, FReg, Reg, u32),
+
+    // --- boolean register file (the Boolean core option) ---
+    /// `movt`/`movf ar, as, bt` — conditional AR move on a boolean register
+    MovBool(bool /* set? movt:movf */, Reg, Reg, BReg),
+    /// `bt`/`bf bs, target`. Stores the signed 8-bit PC-relative offset.
+    BranchBool(bool /* set? bt:bf */, BReg, i32),
+
+    // --- special / user registers (see the [`sr`] module doc) ---
+    /// `rsr.<sr>`/`wsr.<sr>`/`xsr.<sr> at`
+    Sr(SrOp, SpecialReg, Reg),
+    /// `rur.<ur>`/`wur.<ur> at`
+    Ur(UrOp, UserReg, Reg),
 }
 
 /// The `b4const` lookup table (signed branch immediates), indexed by the 4-bit field.

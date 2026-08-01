@@ -118,13 +118,15 @@ holds the full context.
 | Share-envelope format migration (`format` mismatches are refused outright during alpha, never migrated) | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.md` | The authored formats settle enough that migration is written once, not weekly |
 | Wire-read (`FsRequest`) export for device-hosted projects absent from the local library (editor-popup export is library-backed only) | `2026-07-28-share-envelopes` | Someone needs to export a project that only exists on a device |
 | Size guard on node share envelopes (a large binary asset base64s into something no clipboard should carry) | `2026-07-28-share-envelopes` | A real shader-with-texture share hits a clipboard limit |
-| CLA / DCO-with-explicit-grant mechanism (recorded as intent only) | `2026-07-29-license-provenance-discipline` | The first outside contribution to relicensing-sensitive code is proposed |
 | Per-board partition table selection (4/8/16 MB chosen at build time, so no board assumption is baked into `partitions.csv`) | `2026-07-30-esp32s3-partition-floor` | A second ESP32-S3 board with a different flash size actually exists |
 | Classic-ESP32 (LX6) address windows for the Xtensa backtrace walk (the ABI is shared, the memory map is not) | `2026-07-30-xtensa-backtrace-window-spill` | A classic-ESP32 firmware target needs frames in its crash reports |
 | Xtensa exception-frame walking (crashes arriving through the exception vector rather than `panic!`; `walk_frames_from` already takes an explicit `(ra, sp)` for it) | `2026-07-30-xtensa-backtrace-window-spill` | The S3 needs backtraces for hardware faults, not just panics |
 | Emitter peephole for the Xtensa integer-div-by-zero guard (`Movi`+`BranchRr` → a single `BranchZ(Beqz)`; `MOVEQZ`/`MOVNEZ` fusion, both already encoded/decoded/emulated in `lp-xt-inst`/`lp-xt-emu`) | `2026-07-30-integer-division-never-traps` | Xtensa code-size or instruction-count pressure makes trimming the guard worth it |
 | C6 migration to `lp-ws281x` (`docs/debt/c6-on-legacy-ws281x-driver.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A second C6 channel is wanted, a `lp-ws281x` fix needs to reach the C6, or maintaining two drivers becomes its own tax |
 | `MAX_LEDS` silent truncation and duplication (`docs/debt/output-channel-led-cap-silent-truncation.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A long strip is authored and the cap bites with no diagnostic |
+| Float→int through the soft-float ABI (`__fixsfsi`/`__fixunssfsi` are skipped because the ABI leaves out-of-range and NaN undefined) | `2026-07-31-soft-float-via-compiler-builtins` | The C6 harness's probe data shows the ROM matching `compiler_builtins` at those edges |
+| Xtensa `F32Lowering` arm (`Unsupported` today — the S3 has an FPU, so soft float would be the wrong default) | `2026-07-31-soft-float-via-compiler-builtins` | The Xtensa FPU emulator and emitter land (roadmap M6/M7) |
+| Soft-float performance measurement on the C6 (nothing here says how slow Float mode is) | `2026-07-31-soft-float-via-compiler-builtins` | A perf surface exists to show it (roadmap D3) |
 
 ## Relationship To Shared Planning
 
