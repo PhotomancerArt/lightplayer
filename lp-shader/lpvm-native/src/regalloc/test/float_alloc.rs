@@ -85,7 +85,10 @@ fn floats_and_ints_allocate_from_their_own_pools_in_one_function() {
         "no integer register was allocated: {found:?}"
     );
     for (preg, want) in &found {
-        assert_eq!(preg.class, *want, "{preg:?} allocated for a {want:?} operand");
+        assert_eq!(
+            preg.class, *want,
+            "{preg:?} allocated for a {want:?} operand"
+        );
     }
     assert!(
         found
@@ -175,6 +178,35 @@ fn an_integer_register_on_a_float_operand_is_rejected() {
         None,
     );
     crate::regalloc::verify::verify_alloc(&vinsts, &pool, &output, &func_abi);
+}
+
+/// The entry-transfer shape, allocated end to end: a value arrives in a
+/// **precolored address register**, crosses into the float file, is computed on
+/// there, and crosses back before the return.
+///
+/// This is the calling convention (M7 D1/D2) as the allocator sees it, and the
+/// only case here where an ABI-precolored register meets a float operand — the
+/// interaction that decided the parameter shadow in `lower_f32::float_vreg`.
+/// The verifier accepting it is the claim; checking that a float register was
+/// actually handed out is what keeps the claim from being vacuous.
+#[test]
+fn a_parameter_crosses_into_the_float_file_and_back() {
+    let src = "i10 = Wfr i1
+               i11 = FMul i10, i10
+               i12 = Rfr i11
+               Ret i12";
+    let r = xt().abi_params(2).run_vinst(src);
+    r.expect_spill_slots(0);
+
+    let (vinsts, _symbols, pool) = crate::debug::vinst::parse(src).unwrap();
+    let found = allocated_classes(&vinsts, &pool, &r.output);
+    assert!(
+        found.iter().any(|(p, _)| p.class == RegClass::Float),
+        "the body never reached the float file: {found:?}"
+    );
+    for (preg, want) in &found {
+        assert_eq!(preg.class, *want, "{preg:?} for a {want:?} operand");
+    }
 }
 
 /// A call evicts every live float, because no FR survives a `call8` (M6-P4).
