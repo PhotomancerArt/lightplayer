@@ -258,18 +258,42 @@ mod tests {
         assert_eq!(seen.len(), ALL_TARGETS.len());
     }
 
+    /// A bare `xtn` / `xtlpn` selects **both** float modes, in `ALL_TARGETS`
+    /// order — the same rule `wasm` follows, and the reason M8 registering
+    /// `xtn.f32` changed what an existing shorthand means. A caller that wants
+    /// only the Q32 target must spell it out; `just` recipes and CI do.
     #[test]
     fn test_parse_target_filters_xt_shorthands() {
         let v = parse_target_filters("xtn").expect("parse");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "xtn.q32");
+        assert_eq!(
+            v.iter().map(|t| t.name()).collect::<Vec<_>>(),
+            ["xtn.q32", "xtn.f32"]
+        );
 
         let v = parse_target_filters("xtlpn").expect("parse");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "xtlpn.q32");
+        assert_eq!(
+            v.iter().map(|t| t.name()).collect::<Vec<_>>(),
+            ["xtlpn.q32", "xtlpn.f32"]
+        );
 
         let v = parse_target_filters("xtn.q32,xtlpn.q32").expect("parse");
         assert_eq!(v.len(), 2);
+    }
+
+    /// The f32 pair round-trips by name, and does not collide with the Q32
+    /// pair — `xtlpn` is the device pipeline (lps-glsl frontend), `xtn` is
+    /// Naga, and the float mode is a separate axis from both.
+    #[test]
+    fn test_target_name_xt_f32_pair() {
+        let t = Target::from_name("xtn.f32").expect("xtn.f32 registered");
+        assert_eq!(t.name(), "xtn.f32");
+        assert_eq!(t.float_mode, FloatMode::F32);
+        assert_eq!(t.isa, Isa::Xtensa);
+
+        let t = Target::from_name("xtlpn.f32").expect("xtlpn.f32 registered");
+        assert_eq!(t.name(), "xtlpn.f32");
+        assert_eq!(t.frontend, Frontend::Lp);
+        assert_ne!(t.name(), Target::from_name("xtn.f32").unwrap().name());
     }
 
     #[test]

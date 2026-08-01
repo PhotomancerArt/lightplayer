@@ -22,6 +22,7 @@ float test_declare_in_float() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_float() ~= 1.0
 
 int test_declare_in_int() {
@@ -33,6 +34,7 @@ int test_declare_in_int() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_int() == 0
 
 uint test_declare_in_uint() {
@@ -44,6 +46,7 @@ uint test_declare_in_uint() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_uint() == 1u
 
 bool test_declare_in_bool() {
@@ -55,6 +58,7 @@ bool test_declare_in_bool() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_bool() == false
 
 vec2 test_declare_in_vec2() {
@@ -66,6 +70,7 @@ vec2 test_declare_in_vec2() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_vec2() ~= vec2(0.5, 0.5)
 
 vec3 test_declare_in_vec3() {
@@ -77,6 +82,7 @@ vec3 test_declare_in_vec3() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 vec4 test_declare_in_vec4() {
@@ -88,6 +94,7 @@ vec4 test_declare_in_vec4() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_declare_in_calculate() {
@@ -102,4 +109,5 @@ float test_declare_in_calculate() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_in_calculate() ~= 0.2

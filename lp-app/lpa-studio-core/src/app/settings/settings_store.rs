@@ -5,14 +5,16 @@ use lpa_agent::{AnthropicConfig, ListModelsError, ModelInfo, OpenAiCompatConfig}
 
 use crate::app::agent::agent_pricing::AgentCostRates;
 use crate::app::agent::agent_provider_config::AgentProviderConfig;
-use crate::app::settings::agent_models::{AgentModelsFetch, AgentModelsState, models_error_copy};
+use crate::app::settings::agent_models::{
+    AgentModelsFetch, AgentModelsState, model_options, models_error_copy,
+};
 use crate::app::settings::agent_provider::{AgentProvider, provider_guidance};
 use crate::app::settings::settings_layer::SettingsLayer;
 use crate::app::settings::studio_settings::{
     DEFAULT_AGENT_MODEL, DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, StudioSettings,
 };
 use crate::app::settings::ui_settings_view::{
-    UiAgentSettingsView, UiModelOption, UiSettingsView, masked_key_preview,
+    UiAgentSettingsView, UiSettingsView, masked_key_preview,
 };
 
 /// Two overlays over the baked defaults, merged per-field with
@@ -85,6 +87,38 @@ impl SettingsStore {
     /// Set or clear the user's model override (trimmed; empty ⇒ clear).
     pub fn set_agent_model(&mut self, model: Option<String>) {
         self.user.agent.model = normalized(model);
+        self.adopt_discovered_rates();
+    }
+
+    /// Carry the chosen model's published rates onto the cost-estimate
+    /// overrides, from the provider's own listing.
+    ///
+    /// Nobody fills those fields in by hand, and the alternative is worse
+    /// than leaving them empty: rates from the PREVIOUSLY chosen model
+    /// would quietly mis-price the new one. So a model the listing prices
+    /// sets them, and a model it does not price clears them — falling back
+    /// to the built-in table for known ids. Providers that publish no rates
+    /// at all (Anthropic, OpenAI, local servers) leave any hand-entered
+    /// values alone, since there is no listing to disagree with.
+    fn adopt_discovered_rates(&mut self) {
+        let provider = self.agent_provider();
+        let Some(model) = self.agent_model().map(str::to_string) else {
+            return;
+        };
+        let Some(AgentModelsFetch::Loaded { models, .. }) =
+            self.agent_models(provider).map(|state| &state.fetch)
+        else {
+            return;
+        };
+        if !models.iter().any(|listed| listed.price.is_some()) {
+            return;
+        }
+        let price = models
+            .iter()
+            .find(|listed| listed.id == model)
+            .and_then(|listed| listed.price);
+        self.user.agent.price_input_per_mtok = price.map(|price| price.input_per_mtok);
+        self.user.agent.price_output_per_mtok = price.map(|price| price.output_per_mtok);
     }
 
     /// Set or clear the input-rate override from its text-field value
@@ -397,25 +431,19 @@ impl SettingsStore {
         };
         // The discovered-model slice (P8): options only from a Loaded
         // fetch; Loading and Failed render as flags on the free-text path.
-        let (model_options, models_loading, models_error) =
-            match self.agent_models(provider).map(|state| &state.fetch) {
-                Some(AgentModelsFetch::Loading) => (Vec::new(), true, None),
-                Some(AgentModelsFetch::Loaded { models, .. }) => (
-                    models
-                        .iter()
-                        .map(|model| UiModelOption {
-                            id: model.id.clone(),
-                            label: model.display_name.clone(),
-                        })
-                        .collect(),
-                    false,
-                    None,
-                ),
-                Some(AgentModelsFetch::Failed { error }) => {
-                    (Vec::new(), false, Some(models_error_copy(provider, error)))
-                }
-                None => (Vec::new(), false, None),
-            };
+        let (model_options, models_loading, models_error) = match self
+            .agent_models(provider)
+            .map(|state| &state.fetch)
+        {
+            Some(AgentModelsFetch::Loading) => (Vec::new(), true, None),
+            // Ranked and filtered here, not rendered raw: OpenRouter
+            // alone lists ~340 models (see `model_options`).
+            Some(AgentModelsFetch::Loaded { models, .. }) => (model_options(models), false, None),
+            Some(AgentModelsFetch::Failed { error }) => {
+                (Vec::new(), false, Some(models_error_copy(provider, error)))
+            }
+            None => (Vec::new(), false, None),
+        };
         UiSettingsView {
             agent: UiAgentSettingsView {
                 provider,
@@ -499,6 +527,7 @@ fn normalized_settings(mut settings: StudioSettings) -> StudioSettings {
 mod tests {
     use super::*;
     use crate::app::settings::studio_settings::AgentSettings;
+    use crate::app::settings::ui_settings_view::UiModelOption;
 
     #[test]
     fn defaults_apply_with_no_layers() {
@@ -742,9 +771,68 @@ mod tests {
 
     fn model(id: &str, display_name: Option<&str>) -> ModelInfo {
         ModelInfo {
-            id: id.to_string(),
             display_name: display_name.map(str::to_string),
+            ..ModelInfo::new(id)
         }
+    }
+
+    #[test]
+    fn picking_a_priced_model_carries_its_rates_and_a_later_pick_replaces_them() {
+        let mut store = SettingsStore::default();
+        store.set_agent_provider(Some(AgentProvider::OpenRouter));
+        store.set_agent_openrouter_api_key(Some("sk-or-x".to_string()));
+        let priced = |id: &str, input: f64, output: f64| ModelInfo {
+            price: Some(lpa_agent::ModelPrice {
+                input_per_mtok: input,
+                output_per_mtok: output,
+            }),
+            ..ModelInfo::new(id)
+        };
+        store.request_agent_models(AgentProvider::OpenRouter, "fp".into(), false);
+        store.agent_models_loaded(
+            AgentProvider::OpenRouter,
+            "fp",
+            Ok(vec![
+                priced("anthropic/claude-opus-5", 5.0, 25.0),
+                priced("qwen/qwen3-coder", 0.07, 0.27),
+                ModelInfo::new("free/unpriced"),
+            ]),
+            1.0,
+        );
+
+        store.set_agent_model(Some("anthropic/claude-opus-5".to_string()));
+        let rates = store.agent_cost_rates().expect("rates");
+        assert_eq!((rates.input_per_mtok, rates.output_per_mtok), (5.0, 25.0));
+
+        store.set_agent_model(Some("qwen/qwen3-coder".to_string()));
+        let rates = store.agent_cost_rates().expect("rates");
+        assert_eq!((rates.input_per_mtok, rates.output_per_mtok), (0.07, 0.27));
+
+        // A model the listing does not price clears them rather than
+        // pricing it at the last model's rates.
+        store.set_agent_model(Some("free/unpriced".to_string()));
+        assert_eq!(store.user_layer().agent.price_input_per_mtok, None);
+        assert_eq!(store.user_layer().agent.price_output_per_mtok, None);
+    }
+
+    #[test]
+    fn a_listing_without_rates_leaves_hand_entered_ones_alone() {
+        // Anthropic publishes no pricing, so its listing has nothing to say
+        // about the rate fields — a user's own values must survive.
+        let mut store = SettingsStore::default();
+        store.set_agent_anthropic_api_key(Some("sk-ant-x".to_string()));
+        store.set_agent_price_input_per_mtok(Some("2".to_string()));
+        store.set_agent_price_output_per_mtok(Some("8".to_string()));
+        store.request_agent_models(AgentProvider::Anthropic, "fp".into(), false);
+        store.agent_models_loaded(
+            AgentProvider::Anthropic,
+            "fp",
+            Ok(vec![ModelInfo::new("claude-opus-5")]),
+            1.0,
+        );
+        store.set_agent_model(Some("claude-opus-5".to_string()));
+        let rates = store.agent_cost_rates().expect("rates");
+        assert_eq!((rates.input_per_mtok, rates.output_per_mtok), (2.0, 8.0));
     }
 
     #[test]
@@ -796,10 +884,12 @@ mod tests {
                 UiModelOption {
                     id: "claude-sonnet-5".into(),
                     label: Some("Claude Sonnet 5".into()),
+                    detail: None,
                 },
                 UiModelOption {
                     id: "claude-haiku-4-5".into(),
                     label: None,
+                    detail: None,
                 },
             ]
         );

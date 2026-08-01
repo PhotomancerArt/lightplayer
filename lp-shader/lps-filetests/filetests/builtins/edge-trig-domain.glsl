@@ -26,6 +26,9 @@ float test_asin_domain_over() {
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_asin_domain_over() ~= 0.0
 
 float test_asin_domain_under() {
@@ -43,6 +46,9 @@ float test_asin_domain_under() {
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_asin_domain_under() ~= 0.0
 
 float test_acos_domain_over() {
@@ -75,6 +81,9 @@ float test_atan2_zero_zero() {
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_atan2_zero_zero() ~= 0.0
 
 float test_acosh_domain_under() {
@@ -92,6 +101,9 @@ float test_acosh_domain_under() {
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_acosh_domain_under() ~= 0.0
 
 float test_atanh_domain_over() {
@@ -109,6 +121,9 @@ float test_atanh_domain_over() {
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_atanh_domain_over() ~= 0.0
 
 float test_atanh_domain_under() {
@@ -126,6 +141,9 @@ float test_atanh_domain_under() {
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_atanh_domain_under() ~= 0.0
 
 float test_atanh_domain_one() {
@@ -143,6 +161,9 @@ float test_atanh_domain_one() {
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_atanh_domain_one() ~= 0.0
 
 float test_atanh_domain_neg_one() {
@@ -161,6 +182,9 @@ float test_atanh_domain_neg_one() {
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_atanh_domain_neg_one() ~= 0.0
 
 

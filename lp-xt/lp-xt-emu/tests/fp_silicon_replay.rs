@@ -247,3 +247,138 @@ fn probe2_grids_are_ready_for_the_next_board_window() {
     assert_eq!(probe2::fingerprint(), 0x67C2_9B75);
     assert_eq!(probe2::total(), 7073);
 }
+
+/// Which kernel id [`run_probe`] uses for a second-round grid.
+fn probe2_kernel_id(op: probe2::Op2) -> u8 {
+    match op.kernel() {
+        // The grid's own encoding: 0 = divn.s, 1 = madd.s, 2 = maddn.s.
+        1 => 7,
+        2 => 5,
+        _ => 6,
+    }
+}
+
+/// **The out-of-sample test of the `divn.s` fit**, and the reason probe2 was
+/// designed at all.
+///
+/// The model was fitted against the *first* round's grid, where it reproduces
+/// 1 387 of 1 536 rows ([`DIVN_PROBE_MATCHES`]). A fit judged on its own
+/// training data says nothing, so this replays 7 073 probes the model has
+/// never seen — a dense map of the exponent-reassembly plane, a fine sweep
+/// through the class region `mkdadj.s`/`mksadj.s` encode at `A − 384 ∈ 0..5`,
+/// sign combinations, a non-zero `s` so the sum path and flags are live in the
+/// wrap regions, and mixed-sign distinct-payload NaN grids.
+///
+/// Every count here is **pinned rather than bounded**. An "improvement"
+/// without a re-fit is as suspicious as a regression: both mean the model
+/// moved without anyone deciding it should.
+///
+/// The accumulate grids (`madd.s`, `maddn.s`, and `divn.s` with a NaN in each
+/// position) are asserted **exactly**. Those were the acc-NaN gap: the
+/// first-round grid staged only the canonical NaN, so "the accumulator's NaN
+/// wins" was inferred from sequence behaviour rather than measured. With four
+/// distinct payloads in every position it is measured.
+#[test]
+fn probe2_grids_replay_against_the_fitted_model() {
+    let cap = capture("helpers2.txt");
+    assert_eq!(
+        cap.helpers2_fingerprint,
+        Some(probe2::fingerprint()),
+        "capture was produced by a different probe2 grid than this build          defines — the two must be the same generator (M6 D3)"
+    );
+
+    let mut emu = Emulator::new();
+    let mut per_grid: Vec<(&str, u32, u32)> = Vec::new();
+
+    for op in probe2::Op2::ALL {
+        let rows = &cap.rows[op.name()];
+        assert_eq!(rows.len() as u32, probe2::count(op), "{}", op.name());
+
+        let mut matched = 0u32;
+        let mut total = 0u32;
+        for (&i, res) in rows {
+            let DeviceResult::Value { bits, fsr } = *res else {
+                panic!("probe2 rows are never skipped")
+            };
+            let (r, s, t) = probe2::probe(op, i);
+            let (got, got_fsr) = run_probe(&mut emu, probe2_kernel_id(op), r, s, t);
+            total += 1;
+            if (got, got_fsr) == (bits, fsr) {
+                matched += 1;
+            } else if matches!(
+                op,
+                probe2::Op2::MaddNan | probe2::Op2::MaddnNan | probe2::Op2::DivnNan
+            ) {
+                // The NaN-position grids are the gap this round exists to
+                // close. A mismatch here is a real finding about operand
+                // priority, not an off-envelope shape, so it fails loudly
+                // with the operands rather than being folded into a count.
+                panic!(
+                    "{} probe {i}: r={r:#010x} s={s:#010x} t={t:#010x}\n\
+                     expected (silicon) {bits:#010x} fsr={fsr:#010x}\n\
+                     got      (model)   {got:#010x} fsr={got_fsr:#010x}",
+                    op.name()
+                );
+            }
+        }
+        per_grid.push((op.name(), matched, total));
+    }
+
+    for (name, matched, total) in &per_grid {
+        println!("probe2 {name}: {matched}/{total}");
+    }
+
+    assert_eq!(
+        per_grid
+            .iter()
+            .map(|(n, m, t)| (*n, *m, *t))
+            .collect::<Vec<_>>(),
+        PROBE2_AGREEMENT,
+        "probe2 agreement moved. This is the divn.s model's out-of-sample \
+         behaviour — re-fit against the capture and update the campaign \
+         record before repinning."
+    );
+}
+
+/// Per-grid `(name, matched, total)` for the second probe round, measured on
+/// silicon 2026-08-01 (same board as the first round, MAC `d8:3b:da:47:29:70`).
+///
+/// **What this round settled, in two opposite directions.**
+///
+/// The **NaN-position grids close their gap outright**: 176/176 exact,
+/// results and flags, with four distinct payloads staged in every operand
+/// position. Accumulator-operand priority for `madd.s`/`maddn.s`/`divn.s` was
+/// previously *inferred* from sequence behaviour because the first round
+/// staged only the canonical NaN; it is now measured, and the emulator's
+/// existing model was already right.
+///
+/// The **`divn.s` fit does not generalise**, and now there is a number for it:
+/// 4 985 of 6 897 off-envelope probes, 72.3%, against 90.3% on the round-1
+/// grid it was fitted to. The class region `mkdadj.s`/`mksadj.s` encode at
+/// `A − 384 ∈ 0..5` is the weakest at 41.7% — the region this grid was
+/// designed to interrogate. That is a real limit of the model, not noise.
+///
+/// **It is still not a correctness problem**, for the reason G2 accepted:
+/// these are operand shapes no divide or sqrt sequence can produce, and the
+/// model is exact on all 272 end-to-end sequence rows plus every family
+/// vector. What changed is that the limit is quantified instead of assumed —
+/// which matters for the ADR's inline-divide/sqrt follow-up, since building
+/// on `divn.s` directly would need a re-fit **first**, not afterwards.
+///
+/// See `probe2_grids_replay_against_the_fitted_model` for why these are pinned
+/// equalities rather than lower bounds.
+const PROBE2_AGREEMENT: [(&str, u32, u32); 7] = [
+    // divn.s, off the sequence envelope: 4 985 / 6 897 overall (72.3%). The
+    // fine sweep through the class region is the weakest at 41.7%, which is
+    // the honest headline — that region is exactly what this grid was built
+    // to interrogate, and the fit does not hold there.
+    ("h2_divnmap", 3536, 4096),
+    ("h2_divnfine", 895, 2145),
+    ("h2_divnsign", 328, 400),
+    ("h2_divnsmalls", 226, 256),
+    // The NaN-position grids: exact. 176/176 rows, four distinct payloads in
+    // every operand position. This is the acc-NaN gap closed.
+    ("h2_maddnan", 64, 64),
+    ("h2_maddnnan", 64, 64),
+    ("h2_divnnan", 48, 48),
+];
