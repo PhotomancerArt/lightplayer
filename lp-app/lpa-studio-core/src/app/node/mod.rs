@@ -38,7 +38,7 @@ mod ui_slot_unit;
 mod ui_slot_value;
 
 pub use face::{
-    UiFixtureFace, UiModuleChild, UiModuleFace, UiNodeFace, UiPanelControl, UiPanelControlState,
+    UiFixtureFace, UiModuleFace, UiNodeFace, UiPanelControl, UiPanelControlState,
     UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiShaderFace,
 };
 pub use ui_asset_editor::UiAssetEditor;

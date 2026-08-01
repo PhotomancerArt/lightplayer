@@ -24,7 +24,7 @@ mod ui_playlist_face;
 mod ui_shader_face;
 
 pub use ui_fixture_face::UiFixtureFace;
-pub use ui_module_face::{UiModuleChild, UiModuleFace};
+pub use ui_module_face::UiModuleFace;
 pub use ui_node_face::UiNodeFace;
 pub use ui_panel_control::UiPanelControl;
 pub use ui_panel_control_view::{UiPanelControlState, UiPanelControlView};

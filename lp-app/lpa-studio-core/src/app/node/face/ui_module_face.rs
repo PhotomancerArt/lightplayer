@@ -6,16 +6,21 @@
 //! same face as a child card inside its host; play mode renders the root
 //! module's panel alone, without any face at all.
 //!
-//! Top-down: output-mirror hero (R7) → panel (R8) → children nested inside
-//! the card → the bus-as-wiring drawer → provenance. The split between the
-//! panel and the wiring drawer is the sidebar bus pane's replacement:
-//! bus-as-controls sits on the face, bus-as-writers/readers goes in a
-//! drawer.
+//! Top-down: output-mirror hero (R7) → panel (R8) → the bus-as-wiring
+//! drawer → provenance. The split between the panel and the wiring drawer
+//! is the sidebar bus pane's replacement: bus-as-controls sits on the face,
+//! bus-as-writers/readers goes in a drawer.
+//!
+//! **Children are not on the face.** They render below the card as full
+//! sibling cards, through the same [`crate::UiNodeChild`] path the playlist
+//! and the old project node use — the module contributes no new nesting
+//! grammar. All of a module's children render, not just an active one:
+//! module children are collaborators, not branches.
 //!
 //! M2 UX spike: this DTO is fed by mock fixtures. Deriving it from real
 //! scope data is M4's work.
 
-use crate::{UiBusView, UiPanelControlView, UiPanelGroup, UiProducedProduct};
+use crate::{UiBusView, UiPanelGroup, UiProducedProduct};
 
 /// A module node card's permanent face.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,8 +38,6 @@ pub struct UiModuleFace {
     pub wiring: Option<UiBusView>,
     /// Whether the wiring drawer renders expanded.
     pub wiring_open: bool,
-    /// Children, nested INSIDE the card: the effect author's zoom level.
-    pub children: Vec<UiModuleChild>,
     /// Compact provenance line ("Yona · v1 · CC0-1.0"); `None` when the
     /// module carries no provenance fields (§8).
     pub provenance: Option<String>,
@@ -51,85 +54,8 @@ impl UiModuleFace {
             panel,
             wiring: None,
             wiring_open: false,
-            children: Vec::new(),
             provenance: None,
             auto_save: true,
         }
-    }
-}
-
-/// One child inside a module card.
-///
-/// A child that is itself a module carries a whole [`UiModuleFace`] and
-/// wears the same face one level in — that recursion *is* the "one face at
-/// every depth" claim. A leaf child shows its preview and its own panel
-/// (its bound slots, R8).
-#[derive(Clone, Debug, PartialEq)]
-pub struct UiModuleChild {
-    /// Child node name.
-    pub name: String,
-    /// Human-readable node kind ("Shader", "Clock", "Module").
-    pub kind: String,
-    /// One-line role summary under the name.
-    pub summary: Option<String>,
-    /// The child's produced visual, when it has one.
-    pub preview: Option<UiProducedProduct>,
-    /// A leaf child's panel: exactly its bound slots (R3/R8).
-    pub controls: Vec<UiPanelControlView>,
-    /// Present when the child is a module — it wears the same face.
-    pub module: Option<Box<UiModuleFace>>,
-    /// Whether the child renders collapsed to its header row.
-    pub collapsed: bool,
-}
-
-impl UiModuleChild {
-    /// A leaf child (shader, clock, fixture…).
-    pub fn leaf(name: impl Into<String>, kind: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            kind: kind.into(),
-            summary: None,
-            preview: None,
-            controls: Vec::new(),
-            module: None,
-            collapsed: false,
-        }
-    }
-
-    /// A child module, wearing the same face one level in.
-    pub fn module(name: impl Into<String>, face: UiModuleFace) -> Self {
-        Self {
-            name: name.into(),
-            kind: "Module".to_string(),
-            summary: None,
-            preview: face.preview.clone(),
-            controls: Vec::new(),
-            module: Some(Box::new(face)),
-            collapsed: false,
-        }
-    }
-
-    /// Attach the one-line role summary.
-    pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
-        self.summary = Some(summary.into());
-        self
-    }
-
-    /// Attach the child's produced visual.
-    pub fn with_preview(mut self, preview: UiProducedProduct) -> Self {
-        self.preview = Some(preview);
-        self
-    }
-
-    /// Attach a leaf child's own panel controls.
-    pub fn with_controls(mut self, controls: Vec<UiPanelControlView>) -> Self {
-        self.controls = controls;
-        self
-    }
-
-    /// Render the child collapsed to its header row.
-    pub fn collapsed(mut self) -> Self {
-        self.collapsed = true;
-        self
     }
 }

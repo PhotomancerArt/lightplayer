@@ -1,6 +1,6 @@
 //! The kind-specific face variants a node card can render.
 
-use crate::{UiFixtureFace, UiModuleFace, UiPlaylistFace, UiShaderFace};
+use crate::{UiFixtureFace, UiModuleFace, UiPanelGroup, UiPlaylistFace, UiShaderFace};
 
 /// Kind-specific permanent face for a node card.
 ///
@@ -17,8 +17,17 @@ pub enum UiNodeFace {
     /// below via the existing [`crate::UiNodeChild`].
     Playlist(UiPlaylistFace),
     /// Module card (`docs/design/modules.md` §5): output-mirror hero, the
-    /// scope's panel, children nested inside, and the bus-wiring drawer.
-    /// Worn at every depth — root workspace card and embedded child card
-    /// alike. **M2 UX spike:** fed by mock fixtures, not yet derived.
+    /// scope's panel, and the bus-wiring drawer. Worn at every depth — root
+    /// workspace card and embedded child card alike. Its children render
+    /// below it as sibling cards via [`crate::UiNodeChild`], like every
+    /// other kind. **M2 UX spike:** fed by mock fixtures, not yet derived.
     Module(UiModuleFace),
+    /// A non-module node whose whole face is its bound slots, presented as
+    /// panel controls (`docs/design/modules.md` R3): the clock, the control
+    /// node, the fixture sitting under a module. The group carries the
+    /// ENCLOSING scope, because a leaf introduces no scope of its own — so
+    /// these controls share their `(scope, channel)` identity, and their
+    /// panel state, with the module panel above (`panel.md` P1).
+    /// **M2 UX spike:** mock-fed.
+    Controls(UiPanelGroup),
 }
