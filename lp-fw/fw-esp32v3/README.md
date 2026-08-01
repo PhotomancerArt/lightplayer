@@ -12,9 +12,13 @@ bring-up roadmap
 WS281x output landed in M4-P1: up to four concurrent RMT channels, sourced
 from the board manifest — see "WS281x output" below.
 
-Still absent: the `lp-recovery` crash ledger (M7) and radio (measure-only,
-behind `radio_ram_probe`). See "JIT status" below for where on-device shader
-execution stands.
+The `lp-recovery` RTC crash ledger landed in M4-P2, pulled forward from M7
+because the WS281x fault could not report itself over serial — see
+`src/recovery/`. Safe mode, boot reports and the blame ledger all work; the
+**RWDT is still M7**.
+
+Still absent: radio (measure-only, behind `radio_ram_probe`). See "JIT status"
+below for where on-device shader execution stands.
 
 ## Workspace shape
 
@@ -64,10 +68,17 @@ Other build shapes (all covered by `just clippy-fw-esp32v3`):
 | `--no-default-features --features esp32,radio_ram_probe` | M2-P3 radio RAM ledger |
 | `--features ws281x_telemetry` | app + periodic WS281x counter log (see below) |
 
-Measured 2026-08-01 with the app layer and WS281x output in: **1,691,728 B**
-image against the 3 MB `factory` partition (54%, 1,454,000 B headroom), and
-the DRAM split below. The WS281x driver cost **+16,608 B** of image over the
-M3-P1 app-only build (1,675,120 B).
+Measured 2026-08-01 at M6, with the app layer, WS281x output and the recovery
+ledger in: **1,707,792 B** image against the 3 MB `factory` partition —
+**1,437,936 B of headroom, 46 % free**.
+
+⚠️ **Flash is not this chip's constraint; RAM is.** At four channels the heap
+has ~7 KB free where flash has 1.4 MB. LED-count claims must be quoted from
+the RAM ledger, never from the RMT channel count — the measured ceiling is
+**~240 LEDs comfortable / ~300 at the edge / 400 impossible**, at ≈89.5 B per
+LED. Full flash and RAM ledgers, the cross-chip comparison and the
+serde-surface go/no-go are in
+[`docs/adr/2026-08-01-esp32v3-flash-budget.md`](../../docs/adr/2026-08-01-esp32v3-flash-budget.md).
 
 ### Release profile
 
@@ -246,8 +257,14 @@ into a loud espflash refusal instead of a confusing boot-loop.
 ## Partitions
 
 `partitions.csv` copies `fw-esp32c6`'s **4 MB** shape verbatim (Q7 in the
-bring-up roadmap): this chip's flash budget is constrained like the C6's,
-not the S3's 8 MB floor.
+bring-up roadmap). **Ratified at M6** —
+[`docs/adr/2026-08-01-esp32v3-flash-budget.md`](../../docs/adr/2026-08-01-esp32v3-flash-budget.md) —
+though the reasoning that produced it turned out to be wrong in a harmless
+direction: the guess was that this chip is flash-constrained like the C6, and
+it is not. The measured image is within 8,720 B of the **S3's**, not the C6's
+(both are Xtensa and abort tier; the C6 is 1.15 MB larger). 3 MB is kept
+because it is ample, not because it is tight, and unlike the S3 this chip
+narrows supported hardware not at all — any 4 MB N4-class module runs it.
 
 | Partition | Offset | Size |
 |---|---|---|
