@@ -136,10 +136,70 @@ const HEAP_SIZE: usize = 72 * 1024;
 /// Abort-tier panic handler. Print what panicked, then reset so the next boot
 /// starts clean — there is no ledger yet to stage a breadcrumb into (contrast
 /// fw-esp32s3's `recovery::panic_path::stage_and_reset`).
+///
+/// ⚠️ The spin before the reset is load-bearing, not politeness. `esp-println`'s
+/// `uart` feature writes UART0's TX FIFO and returns; `software_reset()`
+/// discards whatever has not been clocked out yet. Without the drain, a panic
+/// on this board printed exactly `panicked at /` and rebooted — the message
+/// that says WHICH file and WHY was still sitting in the FIFO (observed
+/// 2026-08-01, M4 bring-up: a full boot-panic diagnosis was invisible). A
+/// panic message you cannot read is worth nothing, and this is the only
+/// channel this chip has.
+///
+/// The spin is deliberately a dumb cycle count rather than a `Delay` or a
+/// FIFO-empty poll: the panic path must not touch peripherals or clocks whose
+/// state is exactly what may have just gone wrong. 240 MHz × ~40 ms is far
+/// more than the ~1.4 ms a full 128-byte FIFO needs at 921600 baud, and the
+/// cost is paid only on a boot that is already dead.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    /// Give the TX FIFO time to clock out before the next print or the reset.
+    fn drain() {
+        for _ in 0..2_000_000u32 {
+            core::hint::spin_loop();
+        }
+    }
+    // FIRST, before printing anything: mask interrupts.
+    //
+    // The RMT refill ISR runs continuously while strips are transmitting. If
+    // the panic came from inside it — or from anything it can re-enter — the
+    // next interrupt lands in the middle of this handler and panics again,
+    // and a double panic aborts mid-sentence. That is not hypothetical: it
+    // is why this board printed `at /U` and rebooted while a driver fault was
+    // being diagnosed, hiding the file and line for three flash cycles. A
+    // panic report is only trustworthy if nothing else can run during it.
+    unsafe { esp_hal::xtensa_lx::interrupt::disable() };
+
+    // ⚠️ This channel is NOT trustworthy for a fault inside the RMT path.
+    //
+    // Measured 2026-08-01 (M4-P2): a fault raised while WS281x channels are
+    // opening resets the chip in well under a millisecond, no matter what
+    // this handler does — masking interrupts, draining the FIFO first,
+    // printing in 4-byte chunks, and trading 46 KB of heap for stack all
+    // yielded the same ~5 characters. That is the signature of a second
+    // exception taken inside exception context (window overflow or a
+    // flash-mapped read with `PS.EXCM` set), which vectors straight to reset
+    // and cannot be out-run from Rust.
+    //
+    // The fix is not a better print: it is the `lp-recovery` RTC-RAM ledger
+    // fw-esp32s3 carries, which stages a breadcrumb that survives the reset
+    // and is reported on the NEXT boot. That is M7 work, and this experience
+    // is the argument for not deferring it further —
+    // `docs/defects/2026-08-01-classic-rmt-open-fault.md`.
+    //
+    // Interrupt masking and the drain stay because they are correct for the
+    // panics this handler CAN report (anything outside exception context).
+    drain();
     esp_println::println!("\n\n====================== PANIC ======================");
-    esp_println::println!("{info}");
+    drain();
+    if let Some(loc) = info.location() {
+        esp_println::println!("at {}:{}", loc.file(), loc.line());
+    } else {
+        esp_println::println!("at <unknown location>");
+    }
+    drain();
+    esp_println::println!("msg: {}", info.message());
+    drain();
     esp_hal::system::software_reset()
 }
 
