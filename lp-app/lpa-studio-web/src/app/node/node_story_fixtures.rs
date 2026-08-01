@@ -365,6 +365,68 @@ pub(crate) fn visual_error_product(name: &str) -> UiProducedProduct {
         })
 }
 
+/// A control preview whose lamp layout comes from a shared `lpc-mapping`
+/// corpus document — layout, wiring spans, and lamp count all derive from
+/// the same resolver the engine uses. `render` is the fixture texture size
+/// the doc is aspect-fit into (the runtime's width/height hints).
+pub(crate) fn map2d_control_preview_product(
+    name: &str,
+    doc: &lpc_mapping::Map2dDoc,
+    render: (u32, u32),
+) -> UiProducedProduct {
+    let resolved = lpc_mapping::resolve(doc).expect("story corpus doc resolves");
+    let fitted = lpc_mapping::fit_points(
+        &resolved.positions(),
+        doc.canvas_bounds(),
+        render.0,
+        render.1,
+    )
+    .expect("story corpus doc fits");
+    let radius = (doc.sample_diameter / 2.0) / render.0.max(render.1) as f32;
+    let lamps = fitted
+        .iter()
+        .enumerate()
+        .map(|(index, center)| ControlLamp2d {
+            lamp_index: index as u32,
+            sample_start: index as u32 * 3,
+            center: *center,
+            radius,
+        })
+        .collect();
+    let paths = resolved
+        .spans
+        .iter()
+        .map(|span| lpa_studio_core::ControlPathSpan2d {
+            first_lamp: span.start,
+            lamp_count: span.count,
+        })
+        .collect();
+    let count = fitted.len() as u32;
+    let layout =
+        ControlLayout2d::new(Revision::new(104), render.0, render.1, lamps).with_paths(paths);
+    UiProducedProduct::control(name)
+        .with_detail(format!("{count} RGB lamps"))
+        .with_tracking(UiProductTrackingState::Tracking)
+        .with_preview(UiProductPreview::ControlNative(UiControlProductPreview {
+            revision: 104,
+            extent: ControlExtent::new(1, count * 3),
+            sample_format: UiControlSampleFormat::U16,
+            sample_layout: ControlSampleLayout {
+                spans: vec![ControlSampleSpan {
+                    row: 0,
+                    start: 0,
+                    len: count * 3,
+                    encoding: ControlSampleEncoding::RgbPixels {
+                        count,
+                        color_order: ColorOrder::Rgb,
+                    },
+                }],
+            },
+            display_layout: Some(ControlDisplayLayout::Layout2d(layout)),
+            bytes: control_preview_bytes(count).into(),
+        }))
+}
+
 pub(crate) fn control_preview_product(name: &str) -> UiProducedProduct {
     UiProducedProduct::control(name)
         .with_detail("16 RGB lamps")

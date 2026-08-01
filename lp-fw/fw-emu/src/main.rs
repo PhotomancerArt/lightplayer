@@ -120,7 +120,10 @@ pub extern "C" fn _lp_main() -> ! {
     // Create filesystem (in-memory)
     let base_fs = alloc::boxed::Box::new(LpFsMemory::new());
 
-    let hardware_registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
+    // Four timing channels, as the desk S3 has: a four-strip project should
+    // light four strips here too, rather than one plus three endpoints that
+    // never open.
+    let hardware_registry = Rc::new(HwRegistry::new(HwManifest::virtual_quad_rmt_gpio_board()));
     let hardware_system = Rc::new(HardwareSystem::with_virtual_drivers(hardware_registry));
 
     // Create output provider
@@ -132,7 +135,7 @@ pub extern "C" fn _lp_main() -> ! {
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
     // GLSL frontend: the emulator matches the device product constant
     // (LpsGlsl); the crate's own `naga` feature is an explicit builder
-    // opt-in mirroring fw-esp32's.
+    // opt-in mirroring fw-esp32c6's.
     let shader_frontend = if cfg!(feature = "naga") {
         lpa_server::ShaderFrontend::Naga
     } else {

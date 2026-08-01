@@ -1144,7 +1144,9 @@ label:has(> input:not(:disabled)) {
 
 .ux-produced-product-control-lamp {
     position: absolute;
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     pointer-events: none;
     transform: translate(-50%, -50%);
     border-radius: 50%;
@@ -1156,6 +1158,693 @@ label:has(> input:not(:disabled)) {
     );
     filter: saturate(1.08);
     mix-blend-mode: screen;
+}
+
+/* ---- the standalone mapping editor (#/mapping, lpa-mapping-editor) ----- */
+
+.lpme-page {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--studio-color-app);
+    color: var(--studio-color-text);
+}
+
+.lpme-editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+.lpme-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--studio-color-border-strong);
+    background: var(--studio-color-surface);
+    flex-wrap: wrap;
+}
+
+.lpme-title {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-muted);
+    font-weight: 600;
+}
+
+.lpme-status {
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-dirty {
+    color: #e4c065;
+}
+
+.lpme-spacer {
+    flex: 1;
+}
+
+.lpme-sep {
+    width: 1px;
+    align-self: stretch;
+    background: var(--studio-color-border);
+    margin: 2px 4px;
+}
+
+.lpme-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid var(--studio-color-border-strong);
+    background: none;
+    cursor: pointer;
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+    text-decoration: none;
+}
+
+.lpme-btn:hover {
+    color: var(--studio-color-text-strong);
+}
+
+.lpme-btn-on {
+    color: var(--studio-color-good, #3fd68e);
+    background: rgba(63, 214, 142, 0.1);
+    border-color: rgba(63, 214, 142, 0.4);
+}
+
+.lpme-select {
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border-strong);
+    color: var(--studio-color-text);
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+.lpme-canvas-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: var(--studio-color-terminal, #0b0c0e);
+    /* Drags must never turn into text selection. */
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.lpme-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+}
+
+.lpme-hitline {
+    fill: none;
+    stroke: transparent;
+    cursor: move;
+}
+
+/* Invisible enlarged pointer target over sparse (small-radius) lamps. */
+.lpme-lamp-hit {
+    fill: transparent;
+    stroke: none;
+}
+
+.lpme-canvas-rect {
+    fill: rgba(255, 255, 255, 0.02);
+    stroke: rgba(154, 151, 143, 0.55);
+    stroke-dasharray: 6 5;
+}
+
+.lpme-fit-rect {
+    fill: rgba(90, 169, 230, 0.05);
+    stroke: rgba(90, 169, 230, 0.75);
+}
+
+.lpme-fit-label {
+    fill: rgba(90, 169, 230, 0.9);
+    font-family: var(--studio-font-mono);
+}
+
+.lpme-arrow-wire {
+    stroke: rgba(198, 203, 212, 0.6);
+    color: rgba(198, 203, 212, 0.6);
+}
+
+.lpme-arrow-chain {
+    stroke: rgba(228, 192, 101, 0.9);
+    color: rgba(228, 192, 101, 0.9);
+    stroke-dasharray: 8 6;
+}
+
+.lpme-lamp-num {
+    fill: #fff;
+    stroke: #000;
+    /* stroke-width is per-element: it must scale with the font under the
+       camera transform or the outline swallows the glyphs when zoomed. */
+    paint-order: stroke;
+    stroke-linejoin: round;
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.lpme-error {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: rgba(239, 83, 80, 0.12);
+    border-bottom: 1px solid rgba(239, 83, 80, 0.5);
+    color: var(--studio-color-text);
+    font-size: 12px;
+}
+
+.lpme-hidden-input {
+    display: none;
+}
+
+.lpme-canvas-tool {
+    cursor: crosshair;
+}
+
+.lpme-sel-outline {
+    fill: none;
+    stroke: #4c9ffe;
+    stroke-dasharray: 5 4;
+    opacity: 0.9;
+}
+
+.lpme-handle {
+    fill: var(--studio-color-surface);
+    stroke: #4c9ffe;
+    cursor: nwse-resize;
+}
+
+.lpme-vertex {
+    fill: var(--studio-color-surface);
+    stroke: #4c9ffe;
+    cursor: move;
+}
+
+.lpme-vertex-hot {
+    fill: #4c9ffe;
+}
+
+.lpme-draft {
+    fill: none;
+    stroke: #4c9ffe;
+    stroke-dasharray: 5 4;
+}
+
+.lpme-marquee {
+    fill: rgba(76, 159, 254, 0.08);
+    stroke: #4c9ffe;
+    stroke-dasharray: 4 3;
+}
+
+.lpme-popover {
+    position: absolute;
+    z-index: 6;
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    padding: 10px 12px 12px;
+}
+
+.lpme-pop-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: -10px -12px 10px;
+    padding: 9px 12px 8px;
+    border-bottom: 1px solid var(--studio-color-border);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 10px 10px 0 0;
+}
+
+.lpme-pop-name {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    border-bottom: 1px solid transparent;
+    color: var(--studio-color-text-strong);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.lpme-pop-name:focus {
+    outline: none;
+    border-bottom-color: #4c9ffe;
+}
+
+.lpme-pop-name-static {
+    flex: 1;
+    color: var(--studio-color-text-strong);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.lpme-pop-kind {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-field {
+    display: grid;
+    grid-template-columns: 86px 1fr;
+    gap: 7px 10px;
+    align-items: center;
+    margin-bottom: 7px;
+}
+
+.lpme-field label {
+    color: var(--studio-color-text-muted);
+    font-size: 11px;
+}
+
+.lpme-field input {
+    width: 100%;
+    background: var(--studio-color-app);
+    border: 1px solid var(--studio-color-border-strong);
+    color: var(--studio-color-text-strong);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-family: var(--studio-font-mono);
+    font-size: 12px;
+}
+
+.lpme-field input:focus {
+    outline: none;
+    border-color: #4c9ffe;
+}
+
+.lpme-seg {
+    display: flex;
+    background: var(--studio-color-app);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.lpme-seg button {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--studio-color-text-muted);
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    padding: 4px 0;
+    cursor: pointer;
+}
+
+.lpme-seg button + button {
+    border-left: 1px solid var(--studio-color-border);
+}
+
+.lpme-seg .lpme-seg-on {
+    background: rgba(76, 159, 254, 0.14);
+    color: #4c9ffe;
+}
+
+.lpme-pop-meta {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+    margin-top: 8px;
+}
+
+.lpme-pop-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.lpme-btn-danger:hover {
+    color: #ef5350;
+    border-color: #ef5350;
+}
+
+/* Canvas + optional docked rail, side by side. */
+.lpme-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+/* The rail toggle floats top-right of the canvas (like the zoom float). */
+.lpme-rail-float {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    z-index: 6;
+    display: flex;
+    padding: 3px;
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+}
+
+/* Docked wiring-order pane: shrinks the canvas instead of covering it. */
+.lpme-rail-pane {
+    flex: none;
+    width: 212px;
+    overflow-y: auto;
+    border-left: 1px solid var(--studio-color-border-strong);
+    background: var(--studio-color-surface);
+    padding: 5px;
+}
+
+.lpme-rail-head {
+    padding: 6px 8px 4px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    border-bottom: 1px solid var(--studio-color-border);
+    margin-bottom: 4px;
+}
+
+.lpme-rail-empty {
+    padding: 10px 8px;
+    font-size: 11px;
+    color: var(--studio-color-text-muted);
+}
+
+/* Floating "?" (left of the rail toggle) and its shortcut reference. */
+.lpme-help-float {
+    position: absolute;
+    top: 10px;
+    right: 56px;
+    z-index: 6;
+    display: flex;
+    padding: 3px;
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+}
+
+.lpme-help-panel {
+    position: absolute;
+    top: 52px;
+    right: 12px;
+    z-index: 7;
+    min-width: 250px;
+    padding: 8px 10px;
+    background: rgba(16, 18, 22, 0.95);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 9px;
+}
+
+.lpme-help-title {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    margin-bottom: 6px;
+}
+
+.lpme-help-row {
+    display: flex;
+    gap: 10px;
+    padding: 2px 0;
+    font-size: 11px;
+}
+
+.lpme-help-keys {
+    font-family: var(--studio-font-mono);
+    color: var(--studio-color-text-strong);
+    min-width: 110px;
+    flex: none;
+}
+
+.lpme-help-what {
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-rail-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.lpme-rail-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.lpme-rail-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.lpme-rail-row-sel {
+    background: rgba(76, 159, 254, 0.12);
+}
+
+.lpme-rail-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex: none;
+}
+
+.lpme-rail-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--studio-color-text);
+}
+
+.lpme-rail-range {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+    flex: none;
+}
+
+.lpme-rail-move {
+    display: none;
+    flex: none;
+}
+
+.lpme-rail-row:hover .lpme-rail-move {
+    display: flex;
+}
+
+.lpme-rail-move button {
+    background: none;
+    border: none;
+    color: var(--studio-color-text-muted);
+    cursor: pointer;
+    padding: 0 3px;
+    font-size: 10px;
+}
+
+.lpme-rail-move button:hover {
+    color: var(--studio-color-text-strong);
+}
+
+.lpme-rail-move button:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+/* Floating zoom control: canvas furniture, not toolbar chrome (M5 gate). */
+.lpme-zoom-float {
+    position: absolute;
+    bottom: 10px;
+    right: 12px;
+    z-index: 6;
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+}
+
+.lpme-zoom-pct {
+    font-family: var(--studio-font-mono);
+    min-width: 48px;
+}
+
+.lpme-hint {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    /* Keep clear of the zoom float in narrow embeds. */
+    max-width: calc(100% - 150px);
+    pointer-events: none;
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    color: var(--studio-color-text-muted);
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+    padding: 4px 10px;
+}
+
+/* The output section's one home: transparent wrapper around the toggle bar
+   + display/editor so edit mode can go full-page in place (same DOM spot,
+   fixed positioning only). */
+.ux-map-home {
+    display: contents;
+}
+
+.ux-map-home-full {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 16px;
+    z-index: 90;
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+
+.ux-map-home-full .lpme-face-editor {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* The face-embedded mapping editor (one-home edit mode). */
+.lpme-face-editor {
+    display: flex;
+    flex-direction: column;
+    height: 460px;
+}
+
+.lpme-face-editor .lpme-editor {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.lpme-face-editor-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-top: 1px solid var(--studio-color-border);
+}
+
+.lpme-face-editor-failure {
+    font-size: 11px;
+    color: #ef5350;
+}
+
+.lpme-face-editor-loading {
+    padding: 18px;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+}
+
+/* ---- mapping view layers (wiring numbers / arrows / toggles) ---------- */
+
+/* Pulls the lamp field off the frame edges so edge-mapped lamps stay whole. */
+.ux-map-inset {
+    position: absolute;
+    inset: 5.5%;
+}
+
+.ux-map-lamp-num {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    font-family: var(--studio-font-mono, ui-monospace, monospace);
+    font-size: 8px;
+    font-weight: 600;
+    line-height: 1;
+    /* White fill + 8-direction black outline: readable over any lamp color,
+       lit or unlit (the lp2014 outline treatment). */
+    color: #fff;
+    text-shadow:
+        1px 0 0 #000,
+        -1px 0 0 #000,
+        0 1px 0 #000,
+        0 -1px 0 #000,
+        1px 1px 0 #000,
+        -1px 1px 0 #000,
+        1px -1px 0 #000,
+        -1px -1px 0 #000;
+}
+
+.ux-map-arrows {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.ux-map-arrow-wire {
+    stroke: rgba(198, 203, 212, 0.65);
+    stroke-width: 2.5;
+    color: rgba(198, 203, 212, 0.65);
+}
+
+.ux-map-arrow-chain {
+    stroke: rgba(228, 192, 101, 0.9);
+    stroke-width: 3;
+    stroke-dasharray: 10 8;
+    color: rgba(228, 192, 101, 0.9);
+}
+
+/* Pinned above the lamp display inside the output section (not floating). */
+.ux-map-toggle-bar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 2px;
+    padding: 3px 8px;
+    border-bottom: 1px solid var(--studio-color-border);
+}
+
+.ux-map-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 3px 7px;
+    border-radius: 5px;
+    color: var(--studio-color-text-muted);
+}
+
+.ux-map-toggle:hover {
+    color: var(--studio-color-text-strong);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.ux-map-toggle-on {
+    color: var(--studio-color-good, #3fd68e);
+    background: rgba(63, 214, 142, 0.1);
 }
 
 .ux-produced-product-skeleton {
@@ -2277,4 +2966,666 @@ label:has(> input:not(:disabled)) {
         padding: 0 var(--studio-space-2);
     }
 
+}
+
+/* ---- board diagrams (lpa-boards BoardDiagram) --------------------------
+   The row-engine renderer's palette, mapped onto the studio system. Where a
+   studio semantic family exists it is used directly — conn = bound (violet,
+   never green), adc = good, touch = attention, dac = live, pwr = error —
+   and hues the palette lacks (spi, i2c, uart, amber strap/usb, silk slate)
+   carry literal values tuned against the dark surfaces in the approved
+   spike (spikes/hardware-boards, rev 5). Geometry never lives here: every
+   size the design language derives from `u` is computed in
+   lpa-boards/src/geometry.rs and arrives inline. */
+
+.lpb-diagram {
+    display: block;
+}
+
+.lpb-pcb {
+    fill: #101418;
+    stroke: #2c3440;
+    stroke-width: 1.5;
+}
+
+.lpb-hole {
+    fill: var(--studio-color-bg);
+    stroke: #2c3440;
+}
+
+.lpb-antenna {
+    fill: none;
+    stroke: #2c3440;
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+
+.lpb-antenna-zigzag {
+    fill: none;
+    stroke: #8b93a0;
+    stroke-width: 1;
+    opacity: 0.7;
+}
+
+.lpb-module {
+    fill: #1a2027;
+    stroke: #39414d;
+    stroke-width: 1.2;
+}
+
+.lpb-module-label {
+    font-family: var(--studio-font-mono);
+    font-weight: 700;
+    fill: #8d96a4;
+}
+
+.lpb-usb {
+    fill: #2b313a;
+    stroke: #454d59;
+    stroke-width: 1;
+}
+
+.lpb-button {
+    fill: #232830;
+    stroke: #454d59;
+}
+
+.lpb-button-cap {
+    fill: #3a414c;
+}
+
+.lpb-rgb {
+    fill: #20262e;
+    stroke: #454d59;
+}
+
+.lpb-rgb-die {
+    fill: #5a5470;
+}
+
+.lpb-terminal {
+    fill: #1d232b;
+    stroke: #454d59;
+}
+
+.lpb-screw {
+    fill: none;
+    stroke: #5a6270;
+    stroke-width: 1.6;
+}
+
+.lpb-silk {
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+    font-size: 6.5px;
+    fill: #8b93a0;
+}
+
+.lpb-pinlabel {
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+}
+
+.lpb-leader {
+    fill: none;
+    stroke: var(--studio-color-border-strong);
+    stroke-width: 1;
+}
+
+.lpb-cell-rect {
+    stroke-width: 0.8;
+}
+
+.lpb-cell-text {
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+}
+
+/* Pad fills by pin role: physical-marker colors, not UI semantics. */
+.lpb-pad--pwr5 { fill: #b3564f; }
+.lpb-pad--pwr3 { fill: #a3703f; }
+.lpb-pad--gnd  { fill: #3a3f48; }
+.lpb-pad--io   { fill: #4a5260; }
+.lpb-pad--ioin { fill: #3d4854; }
+.lpb-pad--strap { fill: #8a6d3a; }
+.lpb-pad--usb  { fill: #8a6d3a; }
+.lpb-pad--ctl  { fill: #556070; }
+.lpb-pad--nc   { fill: #2a2e35; }
+
+/* Cell families: rect fill/stroke + text fill (labels reuse via lpb-fg--*). */
+.lpb-cell--name .lpb-cell-rect { fill: rgba(138, 143, 152, 0.1); stroke: #4a5260; }
+.lpb-cell--name .lpb-cell-text, .lpb-fg--name { fill: #c7cdd6; }
+
+.lpb-cell--pwr .lpb-cell-rect { fill: var(--studio-status-error-bg); stroke: var(--studio-status-error-border); }
+.lpb-cell--pwr .lpb-cell-text, .lpb-fg--pwr { fill: #e99a97; }
+
+.lpb-cell--gnd .lpb-cell-rect { fill: rgba(255, 255, 255, 0.03); stroke: #33383f; }
+.lpb-cell--gnd .lpb-cell-text, .lpb-fg--gnd { fill: #767c85; }
+
+.lpb-cell--ctl .lpb-cell-rect { fill: rgba(138, 143, 152, 0.08); stroke: #454b54; }
+.lpb-cell--ctl .lpb-cell-text, .lpb-fg--ctl { fill: #9aa1ab; }
+
+.lpb-cell--adc .lpb-cell-rect { fill: var(--studio-status-good-bg); stroke: var(--studio-status-good-border); }
+.lpb-cell--adc .lpb-cell-text, .lpb-fg--adc { fill: var(--studio-status-good-text); }
+
+.lpb-cell--dac .lpb-cell-rect { fill: var(--studio-status-live-bg); stroke: var(--studio-status-live-border); }
+.lpb-cell--dac .lpb-cell-text, .lpb-fg--dac { fill: var(--studio-status-live-text); }
+
+.lpb-cell--touch .lpb-cell-rect { fill: var(--studio-status-attention-bg); stroke: var(--studio-status-attention-border); }
+.lpb-cell--touch .lpb-cell-text, .lpb-fg--touch { fill: var(--studio-status-attention-text); }
+
+.lpb-cell--spi .lpb-cell-rect { fill: rgba(167, 139, 250, 0.1); stroke: #54487c; }
+.lpb-cell--spi .lpb-cell-text, .lpb-fg--spi { fill: #b9a2f6; }
+
+.lpb-cell--i2c .lpb-cell-rect { fill: rgba(47, 212, 201, 0.09); stroke: #265c58; }
+.lpb-cell--i2c .lpb-cell-text, .lpb-fg--i2c { fill: #59d8cf; }
+
+.lpb-cell--uart .lpb-cell-rect { fill: rgba(201, 141, 92, 0.1); stroke: #5f4530; }
+.lpb-cell--uart .lpb-cell-text, .lpb-fg--uart { fill: #d3a077; }
+
+.lpb-cell--usb .lpb-cell-rect { fill: rgba(228, 192, 101, 0.1); stroke: #6a5a30; }
+.lpb-cell--usb .lpb-cell-text, .lpb-fg--usb { fill: #e0c377; }
+
+.lpb-cell--strap .lpb-cell-rect { fill: rgba(228, 192, 101, 0.08); stroke: #5c512e; }
+.lpb-cell--strap .lpb-cell-text, .lpb-fg--strap { fill: #cbb168; }
+
+.lpb-cell--warn .lpb-cell-rect { fill: rgba(240, 145, 59, 0.07); stroke: #5c4224; }
+.lpb-cell--warn .lpb-cell-text, .lpb-fg--warn { fill: #c98d5c; }
+
+.lpb-cell--note .lpb-cell-rect { fill: rgba(255, 255, 255, 0.03); stroke: #3a3f48; }
+.lpb-cell--note .lpb-cell-text, .lpb-fg--note { fill: #8b93a0; }
+
+/* Bound connection: the studio bound family. Violet, never green. */
+.lpb-cell--conn .lpb-cell-rect { fill: var(--studio-status-bound-bg); stroke: var(--studio-status-bound-border); stroke-width: 1; }
+.lpb-cell--conn .lpb-cell-text, .lpb-fg--conn { fill: var(--studio-status-bound-text); }
+
+/* Discovery swatch cells: neutral frame; the confirmed pin goes bound. */
+.lpb-cell--swatch .lpb-cell-rect { fill: rgba(138, 143, 152, 0.1); stroke: #3a3f48; }
+.lpb-cell--swatch-selected .lpb-cell-rect { fill: var(--studio-status-bound-bg); stroke: var(--studio-status-bound-border); stroke-width: 1.4; }
+.lpb-swatch-px { stroke: rgba(255, 255, 255, 0.12); stroke-width: 0.5; }
+
+/* Anatomy annotations (the design-language figure). */
+.lpb-anat-line {
+    stroke: #e4c065;
+    stroke-width: 0.9;
+    stroke-dasharray: 2 2.5;
+    opacity: 0.65;
+    fill: none;
+}
+
+.lpb-anat-dot {
+    fill: #e4c065;
+}
+
+.lpb-anat-label {
+    font-family: var(--studio-font-sans);
+    font-weight: 700;
+    font-size: 8px;
+    fill: #e4c065;
+}
+
+.lpb-anat-shape {
+    stroke: #e4c065;
+    fill: none;
+    stroke-width: 1;
+    stroke-dasharray: 3 2.5;
+    opacity: 0.8;
+}
+
+.lpb-anat-solid {
+    stroke-dasharray: none;
+}
+
+/* ---- boards catalog page (#/boards, lpa-boards BoardsCatalogPage) ------ */
+
+.lpb-cat-page {
+    max-width: 1340px;
+    margin: 0 auto;
+    padding: 28px 32px 120px;
+}
+
+.lpb-cat-header h1 {
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    color: var(--studio-color-text-muted);
+    text-transform: uppercase;
+    margin: 0 0 6px;
+}
+
+.lpb-cat-sub {
+    color: var(--studio-color-text-dim);
+    font-size: 12px;
+    margin: 0 0 22px;
+    max-width: 720px;
+}
+
+.lpb-cat-tier-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 11.5px;
+    color: var(--studio-color-text-dim);
+    margin: 0 0 16px;
+}
+
+.lpb-cat-def {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+}
+
+.lpb-cat-tier {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: var(--studio-radius-pill);
+    padding: 2px 9px 2px 7px;
+    border: 1px solid transparent;
+}
+
+.lpb-cat-tier::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 6px currentColor;
+}
+
+.lpb-cat-tier--gold { color: #e4c065; background: rgba(228, 192, 101, 0.1); border-color: rgba(228, 192, 101, 0.35); }
+.lpb-cat-tier--silver { color: #b9c0cc; background: rgba(185, 192, 204, 0.09); border-color: rgba(185, 192, 204, 0.3); }
+.lpb-cat-tier--bronze { color: #c98d5c; background: rgba(201, 141, 92, 0.1); border-color: rgba(201, 141, 92, 0.35); }
+
+.lpb-cat-controls {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 10px 14px;
+    border: 1px dashed var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-md);
+    color: var(--studio-color-text-muted);
+    font-size: 12px;
+    margin-bottom: 16px;
+}
+
+.lpb-cat-group {
+    display: inline-flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.lpb-cat-group b {
+    color: var(--studio-color-text);
+    font-weight: 600;
+}
+
+.lpb-cat-select {
+    background: var(--studio-color-terminal);
+    color: var(--studio-color-text);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    font-size: 12px;
+    padding: 3px 6px;
+}
+
+.lpb-cat-chiprow {
+    display: inline-flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.lpb-cat-fchip {
+    appearance: none;
+    border: 1px solid var(--studio-color-border-strong);
+    background: transparent;
+    color: var(--studio-color-text-muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    border-radius: var(--studio-radius-pill);
+    padding: 3px 10px;
+}
+
+.lpb-cat-fchip:hover {
+    color: var(--studio-color-text);
+}
+
+.lpb-cat-fchip[aria-pressed="true"] {
+    color: var(--studio-status-bound-text);
+    border-color: var(--studio-status-bound-border);
+    background: var(--studio-status-bound-bg);
+}
+
+.lpb-cat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    align-items: stretch;
+}
+
+.lpb-cat-card {
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.2s;
+}
+
+.lpb-cat-card:hover {
+    border-color: var(--studio-color-border-strong);
+}
+
+.lpb-cat-figure {
+    background:
+        radial-gradient(120% 90% at 50% 0%, rgba(167, 139, 250, 0.05), transparent 60%),
+        var(--studio-color-terminal);
+    border-bottom: 1px solid var(--studio-color-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 170px;
+    padding: 12px;
+    position: relative;
+}
+
+.lpb-cat-figure .lpb-diagram {
+    max-height: 100%;
+    max-width: 100%;
+}
+
+.lpb-cat-figure .lpb-cat-tier {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+}
+
+.lpb-cat-price {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-family: var(--studio-font-mono);
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--studio-color-border);
+    border-radius: var(--studio-radius-sm);
+    padding: 2px 7px;
+}
+
+.lpb-cat-info {
+    padding: 10px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+}
+
+.lpb-cat-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.lpb-cat-name {
+    font-weight: 700;
+    color: var(--studio-color-text-strong);
+    font-size: 14px;
+}
+
+.lpb-cat-mfr {
+    color: var(--studio-color-text-dim);
+    font-size: 11.5px;
+}
+
+.lpb-cat-specs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.lpb-cat-spec {
+    font-family: var(--studio-font-mono);
+    font-size: 10.5px;
+    color: var(--studio-color-text-muted);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 5px;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.lpb-cat-spec--soc {
+    color: #e4c065;
+    border-color: rgba(228, 192, 101, 0.3);
+}
+
+/* Driver warning (plan D5): a compact attention chip on cards; the full
+   setup steps live on the board detail view. */
+.lpb-cat-driver-chip {
+    font-family: var(--studio-font-mono);
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    color: var(--studio-status-attention-text);
+    background: var(--studio-status-attention-bg);
+    border: 1px solid var(--studio-status-attention-border);
+    border-radius: var(--studio-radius-pill);
+    padding: 2px 8px;
+}
+
+/* Cards open their detail view: the clickable region keeps link affordance
+   without nesting interactive elements around the buy links. */
+.lpb-cat-open {
+    appearance: none;
+    border: 0;
+    background: none;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+    color: inherit;
+    display: block;
+    width: 100%;
+}
+
+.lpb-cat-open .lpb-cat-title {
+    padding: 10px 12px 0;
+}
+
+/* ---- board detail view (#/boards/<vendor>/<product>) ------------------ */
+
+/* Expand-in-place: the selected card becomes a full-width grid row. */
+.lpb-cat-card--expanded {
+    grid-column: 1 / -1;
+}
+
+.lpb-cat-expanded-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--studio-color-border);
+    background: var(--studio-color-surface);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    border-radius: 10px 10px 0 0;
+}
+
+.lpb-cat-expanded-id {
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-cat-expanded-body {
+    padding: 14px;
+}
+
+.lpb-cat-expanded-body .lpb-det {
+    max-width: none;
+}
+
+.lpb-det-back {
+    appearance: none;
+    border: 1px solid var(--studio-color-border-strong);
+    background: transparent;
+    color: var(--studio-color-text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: var(--studio-radius-sm);
+    padding: 4px 12px;
+}
+
+.lpb-det-back:hover {
+    color: var(--studio-color-text-strong);
+}
+
+.lpb-det {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    max-width: 980px;
+}
+
+.lpb-det-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.lpb-det-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.lpb-det-title h1 {
+    font-size: 20px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--studio-color-text-strong);
+    font-family: inherit;
+    margin: 0;
+}
+
+.lpb-det-title .lpb-cat-price {
+    position: static;
+}
+
+.lpb-det-figure {
+    background: var(--studio-color-terminal);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 12px;
+    padding: 18px;
+    overflow-x: auto;
+}
+
+.lpb-det-section {
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+.lpb-det-section h2 {
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-dim);
+    font-family: var(--studio-font-mono);
+    border: 0;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.lpb-det-driver--warning {
+    border-color: var(--studio-status-attention-border);
+    background: var(--studio-status-attention-bg);
+}
+
+.lpb-det-driver-summary {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpb-det-steps {
+    margin: 10px 0 2px;
+    padding-left: 20px;
+    color: var(--studio-color-text-muted);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.lpb-det-notes {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--studio-color-text-muted);
+    font-size: 12.5px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lpb-det-note-tag {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--studio-status-live-text);
+    background: var(--studio-status-live-bg);
+    border: 1px solid var(--studio-status-live-border);
+    border-radius: var(--studio-radius-pill);
+    padding: 1px 7px;
+    margin-right: 7px;
+}
+
+.lpb-cat-blurb {
+    color: var(--studio-color-text-muted);
+    font-size: 12px;
+    flex: 1;
+    margin: 0;
+}
+
+.lpb-cat-support-note {
+    color: var(--studio-color-text-dim);
+    font-size: 11px;
+    margin: 0;
+}
+
+.lpb-cat-links {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.lpb-cat-buy {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    padding: 3px 9px;
+    text-decoration: none;
+}
+
+.lpb-cat-buy:hover {
+    color: var(--studio-color-text-strong);
+    border-color: var(--studio-status-bound-border);
 }

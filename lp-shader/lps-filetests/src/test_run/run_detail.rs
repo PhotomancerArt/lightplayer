@@ -13,7 +13,7 @@ use crate::test_run::record_result;
 use crate::test_run::set_uniform;
 use crate::test_run::texture_fixture;
 use anyhow::Result;
-use lp_riscv_emu::LogLevel;
+use lp_emu_core::LogLevel;
 use std::path::{Path, PathBuf};
 
 use crate::colors;
@@ -148,7 +148,9 @@ pub fn run(
                 let disposition = directive_disposition(&directive.annotations, target);
                 match &disposition {
                     Disposition::Skip => unsupported_count += 1,
-                    Disposition::ExpectFailure(AnnotationKind::Unsupported) => {
+                    Disposition::ExpectFailure(
+                        AnnotationKind::Unsupported | AnnotationKind::Ignore,
+                    ) => {
                         unsupported_count += 1;
                     }
                     Disposition::ExpectFailure(AnnotationKind::Unimplemented)

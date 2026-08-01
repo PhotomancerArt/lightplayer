@@ -53,11 +53,10 @@ worktree's build* and return an incorrect gate answer
   exception**: the user asks for it in chat, and the handoff message says
   the port is pinned and why.
 
-## Delegated and spawned sessions run to the end
+## Sessions run to the end
 
-If a session was started from a task chip, a handoff prompt, or another
-agent's delegation, its definition of done is **not** "implementation
-compiles". Unless the prompt explicitly scopes it smaller:
+A session's definition of done is **not** "implementation compiles". Unless
+the request explicitly scopes it smaller:
 
 1. Implement and validate (CI-parity checks locally).
 2. Push, create/update the PR, watch CI to green.
@@ -65,9 +64,26 @@ compiles". Unless the prompt explicitly scopes it smaller:
    handoff checklist above — server started, link posted, PNGs posted, gate
    questions stated.
 
-The human clicked the chip because they wanted the whole pipeline, not a
-branch they still have to shepherd. Symmetrically: agents *filing* task
-chips or delegation prompts include this definition of done in the prompt.
+This holds for every session, including ones started from a task chip, a
+handoff prompt, or another agent's delegation — the human clicked the chip
+because they wanted the whole pipeline, not a branch they still have to
+shepherd. Symmetrically: agents *filing* task chips or delegation prompts
+include this definition of done in the prompt.
+
+**Stop only at a gate.** The stopping points are the gates this document
+defines, plus the genuine blockers in the implementing skill's Stop And Ask
+list — ambiguity that must be resolved now, validation failing twice with no
+new signal, a fix that would expand scope past the plan, an action needing
+human authority. That list is closed. A phase boundary with no gate is not a
+stopping point. Neither is finishing a commit, nor finishing implementation
+and asking whether to push, nor a CI run you could be watching.
+
+**Open the PR early.** The PR is part of the pipeline, not a follow-up step.
+Open it as a draft at the first commit, before validation passes, so the
+path-gated CI starts giving signal while there is still time to react. It
+stays draft while work remains, a gate is pending, or CI is red, and goes
+ready when all three clear. Work that ends at a gate hands over a draft PR —
+marking it ready is the human's call, never a way to satisfy the gate.
 
 ## Where the pieces live
 

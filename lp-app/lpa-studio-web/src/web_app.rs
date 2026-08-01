@@ -25,13 +25,14 @@ use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
+use crate::unsaved_gate;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
     DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp, STUDIO_LOG_SINK,
     SettingsCommand, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
-    UiLogLevel, UiStudioView,
+    UiLogLevel, UiStudioView, has_unsaved_work,
 };
 
 const STYLE: &str = include_str!("style.css");
@@ -63,6 +64,28 @@ pub fn App() -> Element {
             style { "{STYLE}" }
             document::Stylesheet { href: asset!("/assets/tailwind.css") }
             crate::exploration::preview_lab::PreviewLabPage {}
+        };
+    }
+
+    // The standalone mapping editor is a separate page, like the story
+    // book: an early return before any hooks (route changes into/out of it
+    // hard-reload — see the route listener below).
+    if matches!(router::current_route(), StudioRoute::MappingEditor) {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            lpa_mapping_editor::MapEditorPage {}
+        };
+    }
+
+    // The boards catalog: same standalone-page pattern. The detected OS
+    // drives per-bridge driver warnings (plan D5) — detected here at the
+    // platform edge; lpa-boards stays platform-blind.
+    if let StudioRoute::Boards { board } = router::current_route() {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
         };
     }
 
@@ -103,6 +126,13 @@ pub fn App() -> Element {
     // not trip the "open ended" fallback — the race: a queued RefreshTick's
     // home view can land between the navigation and the action starting.
     let pending_route_open = use_hook(|| Rc::new(Cell::new(false)));
+    // Armed whenever the open project holds unsaved persisted edits; read
+    // by the `beforeunload` listener installed below.
+    let unsaved = use_hook(|| Rc::new(Cell::new(false)));
+    let _unsaved_gate = use_hook({
+        let flag = Rc::clone(&unsaved);
+        move || unsaved_gate::install_unsaved_gate(flag)
+    });
 
     // Install the global `log::` sink and the JS-console mirror hook, then
     // spawn the actor once and drive the view signal from its change-gated
@@ -112,6 +142,7 @@ pub fn App() -> Element {
     let loop_bound_route = Rc::clone(&bound_route_now);
     let loop_saw_opening = Rc::clone(&saw_opening);
     let loop_pending_route_open = Rc::clone(&pending_route_open);
+    let loop_unsaved = Rc::clone(&unsaved);
     let bridge = use_hook(move || {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
@@ -132,6 +163,9 @@ pub fn App() -> Element {
             controller.load_user_settings_json(&json);
         }
         controller.set_on_user_settings(crate::settings_io::store_user_settings_json);
+        // Node copy produces envelope text in core and writes it here
+        // (core never touches `navigator.clipboard`).
+        controller.set_on_copy_text(crate::clipboard::write_text);
         // Shader agent (P5/P8): run futures ride the browser's
         // single-threaded executor; the provider streams SSE over the
         // browser fetch transport — Anthropic or OpenAI-compatible per the
@@ -153,6 +187,31 @@ pub fn App() -> Element {
                         config.clone(),
                         lpa_agent::provider::WebFetchTransport,
                     ))
+                }
+            });
+            // Model discovery (P8): the settings dropdown's `/models`
+            // listing over the same fetch transport, spawned through the
+            // agent seam and reporting back as `ModelsLoaded`.
+            controller.set_agent_models_fetcher(|config| match config {
+                AgentProviderConfig::Anthropic(config) => {
+                    let config = config.clone();
+                    Box::pin(async move {
+                        lpa_agent::list_anthropic_models(
+                            &config,
+                            &lpa_agent::provider::WebFetchTransport,
+                        )
+                        .await
+                    })
+                }
+                AgentProviderConfig::OpenAiCompat(config) => {
+                    let config = config.clone();
+                    Box::pin(async move {
+                        lpa_agent::list_openai_compat_models(
+                            &config,
+                            &lpa_agent::provider::WebFetchTransport,
+                        )
+                        .await
+                    })
                 }
             });
         }
@@ -222,6 +281,11 @@ pub fn App() -> Element {
                         route.set(StudioRoute::Home);
                     }
                 }
+
+                // Arm/disarm the unload gate from the snapshot that is
+                // about to render, so the browser prompt always matches
+                // what the save panel is showing.
+                loop_unsaved.set(has_unsaved_work(&next.dirty));
 
                 view.set(next);
             }
@@ -340,10 +404,13 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Stories { .. } => {
-                    // the story book mounts on fresh page loads only (its
-                    // early return in App runs before any hooks); reload to
-                    // keep the hook order sound
+                StudioRoute::Stories { .. }
+                | StudioRoute::MappingEditor
+                | StudioRoute::Boards { .. } => {
+                    // the story book, mapping editor, and boards catalog
+                    // mount on fresh page loads only (their early returns
+                    // in App run before any hooks); reload to keep the
+                    // hook order sound
                     router::hard_reload();
                 }
             }
@@ -404,7 +471,10 @@ pub fn App() -> Element {
                             },
                         )));
                 }
-                StudioRoute::Home | StudioRoute::Stories { .. } => {}
+                StudioRoute::Home
+                | StudioRoute::Stories { .. }
+                | StudioRoute::MappingEditor
+                | StudioRoute::Boards { .. } => {}
             }
             // D32 auto-connect (M6): the load-time attach sweep — queued
             // AFTER the route dispatch, so a `#/device/<uid>` reload's own
@@ -438,7 +508,20 @@ pub fn App() -> Element {
     });
 
     let action_bridge = bridge.clone();
+    let action_unsaved = Rc::clone(&unsaved);
     let on_action = move |action: UiAction| {
+        // The other way to lose unsaved work: opening a DIFFERENT project
+        // replaces the one loaded on the sim. (Merely detaching the lens to
+        // the gallery does not — the session keeps running, edits included —
+        // so that path is deliberately not gated.)
+        if action_unsaved.get() && unsaved_gate::action_replaces_loaded_project(&action) {
+            let proceed = unsaved_gate::confirm_discarding_unsaved(
+                "This project has unsaved changes. Opening another project will discard them.\n\nOpen anyway?",
+            );
+            if !proceed {
+                return;
+            }
+        }
         action_bridge.tx.send(StudioCommand::Action(action));
     };
 
@@ -448,6 +531,18 @@ pub fn App() -> Element {
     let on_settings = move |command: SettingsCommand| {
         settings_bridge.tx.send(StudioCommand::Settings(command));
     };
+    // The chat footer's model chip dispatches the same settings mutations
+    // (SetAgentModel / RequestModels) from deep inside the node tree;
+    // context spares threading a handler through every layer. Stories
+    // provide no context, so the chip renders inert there.
+    let chip_settings_bridge = bridge.clone();
+    use_context_provider(|| {
+        Callback::new(move |command: SettingsCommand| {
+            chip_settings_bridge
+                .tx
+                .send(StudioCommand::Settings(command));
+        })
+    });
 
     // The URL's intent picks the frame: a SIM route whose project the
     // view hasn't reached yet renders the opening frame, not the gallery.
@@ -477,6 +572,31 @@ pub fn App() -> Element {
 /// The pull loop's per-request progress-deadline timer on wasm: a `setTimeout`
 /// via `gloo_timers`. The actor calls this to build each pull's quiet-gap
 /// deadline; native callers would pass a `sleep`-backed factory instead.
+/// The OS the page runs on, for per-bridge driver guidance (plan D5).
+/// User-agent sniffing is exactly the right tool here: the answer only
+/// picks which driver instructions to show.
+fn detect_host_os() -> lpa_boards::HostOs {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let user_agent = web_sys::window()
+            .and_then(|window| window.navigator().user_agent().ok())
+            .unwrap_or_default();
+        if user_agent.contains("Mac") {
+            lpa_boards::HostOs::MacOs
+        } else if user_agent.contains("Win") {
+            lpa_boards::HostOs::Windows
+        } else if user_agent.contains("Linux") || user_agent.contains("X11") {
+            lpa_boards::HostOs::Linux
+        } else {
+            lpa_boards::HostOs::Other
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        lpa_boards::HostOs::Other
+    }
+}
+
 fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
 }

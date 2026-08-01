@@ -365,3 +365,34 @@ cannot coexist with a tolerance-based check. What remains:
 Exit when both hold across a few captures. If a new over-tolerance
 churner appears and resists diagnosis, that is the architecture signal —
 escalate rather than widening the threshold.
+
+- 2026-07-28 — **the `overview` composites are out of the pipeline, and
+  the churn they caused was never a settling race.** Both PR #163
+  flip-floppers were generated composites, which is what made "composites
+  race their transitions" the working theory. Diffing the two committed
+  variants of `studio__roster__roster-card__overview__lg` says otherwise:
+  279448 px / max Δ243, confined to the five stories in the page that
+  mount a `backdrop-filter` overlay (`.ux-card-sheet`, `.ux-card-op`), all
+  of them 7×–16× below the 760 px viewport, with everything above y=5658
+  byte-identical. In the bad variant those overlays keep their blur and
+  lose their own background and children — a partly rasterized surface
+  under `captureBeyondViewport` against a **14991 px** clip, not an
+  unfinished animation. Transitions were already frozen at capture time
+  (`* { transition: none !important }`, since 250ea7ff7), so the fix this
+  entry's predecessor proposed was already in the tree and irrelevant.
+  Both terminals are per-page-load, so the stable pair passes on either
+  and commits a coin flip.
+  Composites are now excluded from discovery and their 153 baselines
+  deleted (**27 MB of the set's 55 MB**; every state in them is captured
+  on its own page anyway, and no non-composite baseline exceeds 3400 px).
+  See [the defect](../defects/2026-07-28-overview-composite-capture-races.md)
+  and [the ADR](../adr/2026-07-28-overview-composites-are-not-baselines.md).
+  For (5b): the other #163 flipper, `base__code-editor__overview__sm`, is
+  the open gutter bug — a *different* mechanism that happened to surface
+  through a composite. Grouping the two by their shared page shape was the
+  wrong inference, and it cost a round of theorizing.
+  Two things for the workarounds lore above: the capture pass is now
+  materially lighter (the composites were its heaviest pages, the family
+  that has wedged runs since 2026-07-08), and **diff the bytes before
+  designing a fix** — this pipeline has now produced several "obviously a
+  settling race" diagnoses that the pixels overturned.

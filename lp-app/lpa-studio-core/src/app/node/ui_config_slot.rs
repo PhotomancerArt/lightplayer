@@ -363,8 +363,17 @@ fn published_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
 }
 
 fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
+    // The friendly "Name" (the authored/humanized label) titles the popover;
+    // the raw slot path moves to its own "Path" row (P6 item 2). A row with
+    // no label keeps the key so the title never goes blank.
+    let name = if slot.label.is_empty() {
+        slot.key.clone()
+    } else {
+        slot.label.clone()
+    };
     let mut aspect = UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
-        .with_row(UiSlotAspectRow::new("Name", slot.key.clone()));
+        .with_row(UiSlotAspectRow::new("Name", name))
+        .with_row(UiSlotAspectRow::new("Path", slot.key.clone()));
 
     aspect = aspect.with_row(UiSlotAspectRow::shape(body_shape(&slot.body)));
 
@@ -449,6 +458,30 @@ mod tests {
         };
         assert_eq!(asset.source, "./shader.glsl");
         assert_eq!(asset.editor_label(), "GLSL asset");
+    }
+
+    #[test]
+    fn type_info_carries_friendly_name_and_separate_path() {
+        let slot = UiConfigSlot::value("consumed[speed].default", "Speed", UiSlotValue::f32(1.6));
+
+        let aspects = slot.visible_aspects();
+        let info = aspects
+            .iter()
+            .find(|aspect| aspect.kind == crate::UiSlotAspectKind::TypeInfo)
+            .expect("type info aspect");
+        assert_eq!(
+            (info.rows[0].label.as_str(), info.rows[0].value.as_str()),
+            ("Name", "Speed")
+        );
+        assert_eq!(
+            (info.rows[1].label.as_str(), info.rows[1].value.as_str()),
+            ("Path", "consumed[speed].default")
+        );
+
+        // A label-less row keeps the key as its Name so titles never blank.
+        let unlabeled = UiConfigSlot::value("fade", "", UiSlotValue::f32(0.5));
+        let aspects = unlabeled.visible_aspects();
+        assert_eq!(aspects[0].rows[0].value, "fade");
     }
 
     #[test]

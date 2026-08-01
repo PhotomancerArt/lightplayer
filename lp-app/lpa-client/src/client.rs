@@ -456,6 +456,28 @@ where
         }
     }
 
+    /// Dispatch a runtime node command (playlist activate-entry, future sim
+    /// pokes) and return the server's accepted/rejected outcome.
+    pub async fn project_node_command(
+        &mut self,
+        handle: WireProjectHandle,
+        node: lpc_model::NodeId,
+        command: lpc_wire::WireNodeCommand,
+    ) -> ClientResult<ClientOutcome<lpc_wire::WireNodeCommandResponse>> {
+        let response = self
+            .project_command(handle, WireProjectCommand::NodeCommand { node, command })
+            .await?;
+        match response.value {
+            WireProjectCommandResponse::NodeCommand { response: value } => {
+                Ok(ClientOutcome::new(value, response.events))
+            }
+            other => Err(ClientError::unexpected_response(
+                "project.node_command",
+                other,
+            )),
+        }
+    }
+
     pub async fn project_list_available(
         &mut self,
     ) -> ClientResult<ClientOutcome<Vec<AvailableProject>>> {

@@ -18,7 +18,10 @@ pub struct ChatCompletionsRequest<'a> {
     /// ignore it; the provider tolerates absent usage).
     pub stream_options: StreamOptions,
     /// The current parameter name (OpenAI deprecated `max_tokens`).
-    pub max_completion_tokens: u32,
+    /// `None` omits the field, which lets each server apply its own model
+    /// max — see the ceiling note on [`super::openai_compat_provider`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
     pub messages: Vec<WireMessage>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<WireTool<'a>>,
@@ -131,8 +134,12 @@ fn assistant_message(message: &ChatMessage) -> WireMessage {
                     arguments: input.to_string(),
                 },
             }),
-            // Tool results never appear in assistant messages.
-            ContentBlock::ToolResult { .. } => {}
+            // Tool results never appear in assistant messages, and thinking
+            // blocks are never echoed back on this dialect (DeepSeek et al.
+            // explicitly reject replayed reasoning_content).
+            ContentBlock::ToolResult { .. }
+            | ContentBlock::Thinking { .. }
+            | ContentBlock::RedactedThinking { .. } => {}
         }
     }
     WireMessage {
@@ -158,8 +165,10 @@ fn user_messages(message: &ChatMessage, out: &mut Vec<WireMessage>) {
                 tool_calls: Vec::new(),
                 tool_call_id: Some(tool_use_id.clone()),
             }),
-            // Tool calls never appear in user messages.
-            ContentBlock::ToolUse { .. } => {}
+            // Tool calls and thinking never appear in user messages.
+            ContentBlock::ToolUse { .. }
+            | ContentBlock::Thinking { .. }
+            | ContentBlock::RedactedThinking { .. } => {}
         }
     }
     if !text_parts.is_empty() {
@@ -189,8 +198,25 @@ pub struct WireChoice {
 pub struct WireDelta {
     #[serde(default)]
     pub content: Option<String>,
+    /// Streamed reasoning text, the DeepSeek/vLLM/Ollama convention.
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
+    /// Alternate reasoning field name some servers use (e.g. OpenRouter).
+    #[serde(default)]
+    pub reasoning: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<WireToolCallDelta>,
+}
+
+impl WireDelta {
+    /// The reasoning fragment, whichever field the server used
+    /// (`reasoning_content` wins when both are present).
+    pub fn reasoning_fragment(&self) -> Option<&str> {
+        self.reasoning_content
+            .as_deref()
+            .or(self.reasoning.as_deref())
+            .filter(|text| !text.is_empty())
+    }
 }
 
 /// One tool-call fragment: `id` and `function.name` arrive on the first
@@ -214,13 +240,35 @@ pub struct WireFunctionDelta {
 }
 
 /// The final chunk's usage block (absent on servers that ignore
-/// `stream_options.include_usage`).
+/// `stream_options.include_usage`). Note `prompt_tokens` INCLUDES any
+/// cached tokens on this dialect — the provider subtracts
+/// [`PromptTokensDetails::cached_tokens`] to keep the neutral usage
+/// buckets disjoint.
 #[derive(Debug, Deserialize)]
 pub struct WireUsage {
     #[serde(default)]
     pub prompt_tokens: u32,
     #[serde(default)]
     pub completion_tokens: u32,
+    /// OpenAI's cached-prompt breakdown (absent on most local servers).
+    #[serde(default)]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+impl WireUsage {
+    /// Cached prompt tokens, when the server reports them.
+    pub fn cached_tokens(&self) -> u32 {
+        self.prompt_tokens_details
+            .as_ref()
+            .map_or(0, |details| details.cached_tokens)
+    }
+}
+
+/// `usage.prompt_tokens_details`: the cached share of `prompt_tokens`.
+#[derive(Debug, Deserialize)]
+pub struct PromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: u32,
 }
 
 /// Non-2xx response body: `{ "error": { "message", "type", ... } }`.
@@ -290,7 +338,7 @@ mod tests {
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            max_completion_tokens: 4096,
+            max_completion_tokens: Some(4096),
             messages: wire_messages("sys", &messages),
             tools: tools.iter().map(WireTool::from_def).collect(),
         };
@@ -324,13 +372,16 @@ mod tests {
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            max_completion_tokens: 1,
+            max_completion_tokens: None,
             messages: wire_messages("", &[ChatMessage::user_text("hi")]),
             tools: Vec::new(),
         };
         let got = serde_json::to_value(&req).expect("serialize");
         let obj = got.as_object().expect("obj");
         assert!(obj.get("tools").is_none());
+        // `None` omits the ceiling entirely rather than sending a null or a
+        // zero, either of which servers would treat as a real limit.
+        assert!(obj.get("max_completion_tokens").is_none());
         // No system message when the system prompt is empty.
         assert_eq!(got["messages"], json!([{"role": "user", "content": "hi"}]));
     }
@@ -378,6 +429,77 @@ mod tests {
         .expect("parse");
         let usage = chunk.usage.expect("usage");
         assert_eq!((usage.prompt_tokens, usage.completion_tokens), (25, 12));
+        // No details block → zero cached tokens.
+        assert_eq!(usage.cached_tokens(), 0);
+    }
+
+    #[test]
+    fn reasoning_deltas_deserialize_under_either_field_name() {
+        // DeepSeek/vLLM/Ollama convention.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning_content":"Hmm, "},"finish_reason":null}]}"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            chunk.choices[0].delta.reasoning_fragment(),
+            Some("Hmm, "),
+            "reasoning_content"
+        );
+
+        // OpenRouter-style `reasoning`.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning":"weighing options"},"finish_reason":null}]}"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            chunk.choices[0].delta.reasoning_fragment(),
+            Some("weighing options")
+        );
+
+        // Empty fragments and plain content chunks produce nothing.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning_content":"","content":"Hi"},"finish_reason":null}]}"#,
+        )
+        .expect("parse");
+        assert_eq!(chunk.choices[0].delta.reasoning_fragment(), None);
+    }
+
+    #[test]
+    fn thinking_blocks_never_reach_the_compat_wire() {
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "reasoning".into(),
+                    signature: String::new(),
+                },
+                ContentBlock::RedactedThinking { data: "x".into() },
+                ContentBlock::Text {
+                    text: "Answer.".into(),
+                },
+            ],
+        }];
+        let wire = wire_messages("", &messages);
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0].content.as_deref(), Some("Answer."));
+    }
+
+    #[test]
+    fn cached_prompt_tokens_deserialize() {
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":12,
+                "prompt_tokens_details":{"cached_tokens":768}}}"#,
+        )
+        .expect("parse");
+        assert_eq!(chunk.usage.expect("usage").cached_tokens(), 768);
+
+        // An empty details object defaults its fields.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":1,
+                "prompt_tokens_details":{}}}"#,
+        )
+        .expect("parse");
+        assert_eq!(chunk.usage.expect("usage").cached_tokens(), 0);
     }
 
     #[test]

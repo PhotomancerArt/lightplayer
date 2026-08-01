@@ -26,6 +26,25 @@ If you are about to:
 
 **STOP. You are about to break the product.**
 
+## License discipline — HARD RULE
+
+LightPlayer is AGPL-3.0 **by choice**; relicensing stays possible only while
+provenance is provable. See
+`docs/adr/2026-07-29-license-provenance-discipline.md`.
+
+- **NEVER copy, transliterate, or line-by-line adapt GPL source** into this
+  repo. QEMU, binutils/GDB, and GCC are **behavioral references only** — run
+  them, read them to understand semantics, then implement independently from
+  primary specs. Their *output* (e.g. objdump golden vectors) is fact and is
+  fine; their code is not.
+- **Apache/MIT/BSD material** (e.g. `espressif/llvm-project`'s Xtensa `.td`
+  files) MAY be used to derive encoding *data*, IF the derived file carries a
+  provenance header naming upstream repo, path, and commit SHA, and the
+  upstream license text is vendored under `licenses/`.
+- Prefer primary specs (Xtensa ISA Reference Manual, ESP32-S3 TRM, RISC-V
+  specs) over any implementation.
+- If unsure whether a source is safe to copy from: **ask; do not copy.**
+
 ## How to Handle `no_std` Issues
 
 When a dependency in the GLSL → LPIR → machine code path does not support
@@ -41,13 +60,34 @@ and the correct solution was always to fix the dependency.
 
 ## How to Handle Binary Size Issues
 
-If the firmware binary exceeds available flash:
+The ESP32-C6 app image must fit a 3 MB partition, and the budget is tight —
+read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
+records what has already been spent (a ~200 KB diagnostics-for-flash flag
+stack, the deliberately-kept 500 KB WiFi blob), what is reserved (the lpfs
+partition, held for the future radio/WiFi decision), and what has been measured
+and *rejected* so you don't re-run dead ends.
+
+Check where you stand at any time:
+
+```bash
+just fw-esp32c6-size-check
+```
+
+This prints the image size and headroom, and pre-merge CI fails any PR that
+drops headroom below 64 KB.
+
+If the binary exceeds available flash:
 
 1. Disable optional compiler features (e.g. `cranelift-optimizer`, `cranelift-verifier`)
 2. Use LTO (`lto = true` in release profile)
 3. Use `opt-level = "z"` (size optimization)
 4. Strip debug info
 5. Audit for unnecessary dependencies
+6. Look for duplicate monomorphizations before looking for code to delete —
+   the same generic instantiated over two sinks/backends has twice been the
+   single biggest win (serde tagging, 2026-06; serializer sink erasure,
+   2026-07). `rust-nm --demangle --print-size --size-sort` on the ELF shows
+   them.
 
 Do NOT disable the compiler. The compiler is the product.
 
@@ -61,13 +101,26 @@ Do NOT disable the compiler. The compiler is the product.
 - **Default server/engine builds include the full compiler pipeline.** Optional
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
   test builds), not for *adding* the compiler.
+- **`float-f32`** (`lpvm-native`, `lps-builtins`) enables IEEE-754 f32 shader
+  math alongside Q16.16. Off by default: `FloatMode` is matched on a *runtime*
+  value, so LTO cannot drop the f32 arms, and the shipping ESP32-C6 runs
+  Fixed-mode shaders only. The one device configuration that turns it on is
+  `fw-esp32c6`'s `test_f32_softfloat` harness — a test build, never product
+  firmware. See `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+
+> **Gating the crate that *uses* a table does not gate the crate that *holds*
+> it.** `lps-builtin-ids` is linked by every firmware image and is not behind
+> `float-f32`; reaching its f32 name→id tables on a runtime value cost
+> **+3,904 B** on the C6 before the resolver was pinned to Q32 in feature-off
+> builds. Measure with `just fw-esp32c6-size-check` on both sides of a feature
+> gate, not just the side you added.
 
 ## Sans-IO core
 
 The core is IO-free state machines; async belongs to platform edges. See
 `docs/adr/2026-07-06-sans-io-core.md` for the full decision. The checklist:
 
-- **Core crates** (`lp-base/*`, `lp-core/*`, `lp-shader/*`, `lp-riscv/*`)
+- **Core crates** (`lp-base/*`, `lp-core/*`, `lp-shader/*`, `lp-riscv/*`, `lp-emu/*`)
   take effects by injection. They never read clocks, generate randomness,
   perform ambient IO, or depend on an executor/reactor. Edges are
   `lpa-*`, `fw-*`, `lp-cli`.
@@ -137,20 +190,56 @@ runtime.
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lp-server`      | Project management, client connections | yes              |
-| `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
-## Native RV32 backend (`lpvm-native`)
+## Native backends (`lpvm-native`)
 
-**`lpvm-native`** lowers LPIR to custom RV32 machine code outside Cranelift
+**`lpvm-native`** lowers LPIR to custom machine code outside Cranelift
 (pool-based register allocation, `rt_jit` / `rt_emu`). It is the default
-on-device codegen path and is exercised by **`native-jit`** on `fw-esp32`/`fw-emu`
-and the **`rv32n.q32`** filetest target.
+on-device codegen path and is exercised by **`native-jit`** on `fw-esp32c6`/`fw-emu`
+and the **`rv32n.q32`** / **`rv32lpn.q32`** filetest targets.
+
+**Two ISAs**: RV32 (ESP32-C6) and Xtensa (ESP32-S3 / classic ESP32), each behind
+an `isa-*` Cargo feature so firmware pays only for the one it runs. `rt_emu` is
+**one engine parameterized by `IsaTarget`**, not one per ISA — see
+`docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`. The Xtensa host path
+is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
+targets; it needs a cross-compiled builtins image
+(`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
+
+**Xtensa floating point is proven equal to real ESP32-S3 silicon (M6, G2
+passed 2026-08-01).** `lp-xt-inst` encodes the FP subset and `lp-xt-emu`
+executes it behind an explicit policy layer where every corner IEEE-754 does
+not fix is either measured (cited to the ISA Reference Manual, silicon-
+confirmed, or silicon alone) or `Unknown` — and **reading an `Unknown`
+panics** rather than guessing. All 17 policy fields are now measured; the
+behavior contract, corner by corner with its proving vector family, is
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`.
+`cargo test -p lp-xt-emu --test fp_conformance` replays the whole 5 630-vector
+corpus with no board attached and asserts **zero** `UNKNOWN` rows;
+`cargo test -p lp-xt-emu --test fp_silicon_replay` replays the campaign's own
+silicon captures (ROM sweeps, helper probes, the full family diff) with no
+board attached either — that pair is what makes "the emulator is trusted"
+something CI enforces on every commit. `just fwtest-xt-fp-esp32s3 <port>` runs
+the same vectors on a desk S3 and `just fp-diff <capture>` classifies the
+answers, for the rare case the contract itself needs re-checking. The
+predictions were committed before any hardware ran, so **a device
+disagreement is a finding to triage, never a reason to edit a golden**. Do
+not resolve a policy field without a citation naming a manual page or a dated
+desk session.
+
+> **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
+> correct.** Two defects landed there in 2026-07 that were correct on rv32 only
+> because its argument registers and allocatable pool happen to be disjoint sets;
+> Xtensa's overlap, and both became wrong-value bugs. See the
+> `config-masked-defect` class in `docs/defects/README.md`. When you change
+> allocation or ABI code, run **both** target families.
 
 ## Building the workspace (cross-target)
 
 This workspace mixes host crates and bare-metal RV32 firmware crates
-(`fw-esp32`, `fw-emu`, `lps-builtins-emu-app`, `lp-riscv-emu-guest*`).
+(`fw-esp32c6`, `fw-emu`, `lps-builtins-emu-app`, `lp-riscv-emu-guest*`).
 The RV32 crates depend on `esp-rom-sys`, `esp-sync`, `esp32c6`, etc., which
 **do not compile for the host target** (they use RISC-V intrinsics, RV32
 interrupt vectors, and section attributes that LLVM rejects on Mach-O /
@@ -179,26 +268,26 @@ just build              # parallel: host + rv32
 
 ### ESP32 linked-build pitfall
 
-For `fw-esp32`, **linked firmware builds, size measurements, and bloat
-analysis must run from `lp-fw/fw-esp32/`** (or through a just recipe that
-`cd`s there first, such as `just build-fw-esp32`). The crate-local
+For `fw-esp32c6`, **linked firmware builds, size measurements, and bloat
+analysis must run from `lp-fw/fw-esp32c6/`** (or through a just recipe that
+`cd`s there first, such as `just build-fw-esp32c6`). The crate-local
 `.cargo/config.toml` and linker setup are part of the build.
 
 This is fine from the workspace root because it does not final-link:
 
 ```bash
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 ```
 
 For a real linked ELF or size numbers, do this instead:
 
 ```bash
-cd lp-fw/fw-esp32
+cd lp-fw/fw-esp32c6
 cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
-rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32
+rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
 ```
 
-Running `cargo build -p fw-esp32 ...` from the workspace root can fail at final
+Running `cargo build -p fw-esp32c6 ...` from the workspace root can fail at final
 link with `memory region not defined: ROTEXT`, because it bypasses the
 crate-local firmware build context.
 
@@ -214,7 +303,7 @@ the same exclusion list the justfile uses for clippy:
 
 ```bash
 cargo build --workspace \
-  --exclude fw-esp32 --exclude fw-emu \
+  --exclude fw-esp32c6 --exclude fw-emu \
   --exclude lps-builtins-emu-app \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```
@@ -267,31 +356,72 @@ test module at the bottom anyway.
 New agent planning work uses the Photomancer personal planning workspace, not
 new repo-local plan or roadmap directories.
 
-This repo uses the `pm-*` (pm = Photomancer) skills, **not** the `yona-*`
-skills. The `yona-*` planning/review skills write to repo-local
-`docs/plans/` and `docs/reviews/`, which are legacy locations here; if both
-families are installed, always pick `pm-*`.
+This repo uses the `yona-*` skills. They read `agent-context.toml` at the repo
+root to decide where planning artifacts go, so the same skills that write
+repo-local `docs/plans/` elsewhere write the shared Photomancer workspace here.
+The `pm-*` family is retired — it was a fork of the same skills that drifted
+from its source and lost its PR rules. If you find a `pm-*` command still
+installed anywhere, it is stale; use `yona-*`.
 
-- Use `pm-plan` for new planning, roadmap, and investigation artifacts.
-- Use `pm-implement` to execute an existing shared `plan.md`.
-- Use `pm-review` for durable review artifacts.
-- Push/PR/CI-watch: there is no `pm-push` yet. Follow the same flow
-  (push, create PR, watch checks, focused CI repair) directly, or via
-  `yona-push` — it is location-neutral, so it is the one tolerated
-  `yona-*` skill until a `pm-push` exists.
-- Resolve context from `agent-context.toml`; the repo slug is `lp2025`.
-- Resolve the workspace from `PHOTOMANCER_PLANNING_ROOT`, or from the default
-  `~/.photomancer/planning` link.
+- Use `yona-plan` for new planning, roadmap, and investigation artifacts.
+- Use `yona-implement` to execute an existing `plan.md`. It runs to the first
+  declared review gate, or to a pull request when the plan declares none, and
+  it opens and drives that PR itself.
+- Use `yona-review` for durable review artifacts.
+- Use `yona-push` only for a branch that already has the work on it but no PR.
+  `yona-implement` does not hand off to it.
+- Resolve context from `agent-context.toml`; the repo slug is `lp2025` and
+  `planning_root` is `~/.photomancer/planning`. `PHOTOMANCER_PLANNING_ROOT`
+  overrides it when set.
 - Store new active artifacts under
-  `<planning-root>/lp2025/<YYYY-MM-DD>-<name>/`.
+  `<planning-root>/lp2025/<YYYY-MM-DD-HHMM>-<name>/`.
 - Store completed artifacts under `<planning-root>/lp2025/_archive/`.
 - Store review artifacts under `<planning-root>/lp2025/_reviews/`.
+
+Many existing planning directories are date-only (`2026-07-28-fw-esp32-prep`)
+and some phase files use the legacy `01-*.md` naming instead of `p1-*.md`.
+Read both; only new artifacts follow the current convention. Never rename an
+existing planning directory or phase file to match it.
+
+The skills live in `github.com/Yona-Appletree/2026-ai-teaching`, symlinked into
+`~/.claude/skills` by that repo's `install.sh`. There is one editable copy of
+each skill: the one in that repo. Never edit the installed path — you would be
+editing the checkout, and a process fix that lands only in an installed copy is
+how the `pm-*` fork happened.
 
 Durable decisions belong in repo ADRs under `docs/adr/`. Intermediate plans,
 phase prompts, review notes, scratch reports, and implementation logs belong in
 the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
 `docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
 be migrated unless a separate migration plan asks for it.
+
+### Implementation runs to a gate or to a PR
+
+Implementation does not stop at phase boundaries. It runs from the start of a
+plan to the first declared review gate, and from the last gate to a pull
+request with CI watched to green. A phase boundary whose `Review gate:` is
+`none` is not a stopping point, and neither is a commit, nor "the code is
+written, shall I push?".
+
+The pull request is part of the pipeline, not a follow-up. Open it as a draft
+at the first commit — before validation passes — so the path-gated CI in
+`.github/workflows/pre-merge.yml` starts giving signal while there is still
+time to react. It goes ready for review when the work is complete, CI is green,
+and no gate is pending; a plan that ends at a review gate keeps its PR in
+draft. Title it `<type>: <plan title>` from the plan's H1 and open the body
+with `Plan: lp2025/<planning-dir>` so PRs correlate to the planning workspace.
+
+This applies to every session, not just delegated ones. See
+`docs/process/review-gates.md`.
+
+### Defect and debt registers during implementation
+
+When implementation fixes a user-reported or walk-found defect, write or close
+its `docs/defects/` entry in the same change (see `docs/defects/README.md`).
+When it hits a recurring operational burden, check `docs/debt/` for the entry,
+follow its Workarounds, and append the incident; file a new entry only for a
+structural, recurring burden. Do the same during push and CI repair — a CI
+failure that matches a known burden belongs in that entry's incident log.
 
 ## Dev server ports
 
@@ -328,10 +458,10 @@ approval, or final pre-merge review — follow
   AND post screenshots to chat with your leans. Never hand back "run the
   server to see it".
 - Always state the exact gate questions.
-- Sessions started from a task chip or delegation prompt run the full
-  pipeline by default: implement → validate → PR → CI green → review
-  handoff when the change is user-visible. Prompts that file task chips
-  must say so too.
+- Every session runs the full pipeline by default: implement → validate →
+  PR → CI green → review handoff when the change is user-visible. That
+  includes sessions started from a task chip or a delegation prompt, and
+  prompts that file task chips must say so too.
 
 Claude sessions: the repo skill `lp-review-handoff` executes this checklist.
 
@@ -415,7 +545,7 @@ These commands must pass for any change touching the shader pipeline:
 cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
 
 # ESP32 builds with compiler included
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 
 # Emulator build
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
@@ -427,18 +557,24 @@ cargo test -p lpa-server --no-run
 
 ## CI gate (run this before pushing)
 
-CI on `feature/*` branches runs `just check build-ci test` (see
-`.github/workflows/pre-merge.yml`). To avoid the round-trip of
-"push → wait 3 min → CI fails on lint → fix → repeat", run the same
-locally before every push:
+CI (see `.github/workflows/pre-merge.yml`) is path-gated per job: one
+`detect-changes` job computes the gates, then `Lint (x64)` runs
+`just check-lint` in parallel with `Validate (x64)`, which runs
+`just ci-prereqs`, the gated test recipes (`test-rust-core`, plus
+`test-studio-host` when studio paths changed, plus `test-filetests` when
+shader paths changed), then `schema-check`. Docs-only PRs skip every job.
+Pushes to main force all gates true, so filter misses surface on the next
+merge. To avoid the round-trip of "push → wait → CI fails on lint → fix →
+repeat", run the local equivalent before every push:
 
 ```bash
-just check                   # fmt-check + clippy-host + clippy-rv32  (the usual blocker)
-just build-ci                # host + rv32 builtins + emu-guest
+just check                   # check-lint + schema-check  (the usual blocker)
 just test                    # cargo test (+ studio-web view tests) + glsl filetests
 ```
 
-Or, in one go: `just ci` (which is the parallel composition above).
+Or, in one go: `just ci`. CI builds with sccache, `CARGO_INCREMENTAL=0`,
+and `debug=0`; local builds don't — a green local run is still the same
+lint/test signal.
 
 ### Why the nightly date is pinned
 
@@ -460,12 +596,12 @@ To bump the toolchain, do it deliberately as its own change:
 
 1. Update `channel` in `rust-toolchain.toml`.
 2. Update the matching `unwinding` version in the crates that depend on
-   it (`fw-esp32`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
+   it (`fw-esp32c6`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
    nightly date and the `unwinding` version move together.
 3. Update the hardcoded `toolchain:` value in every job in
    `.github/workflows/pre-merge.yml` (the workflow carries a
    "keep this in sync" comment at each site).
-4. Run the full gate (`just check build-ci test`) before pushing, and
+4. Run the full gate (`just check test`) before pushing, and
    expect new-lint fallout in the same change.
 
 ### Architecture coverage

@@ -1,0 +1,16 @@
+{
+  "kind": "Project",
+  "format": 2,
+  "name": "Shader oracle",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    }
+  }
+}

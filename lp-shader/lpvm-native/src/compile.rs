@@ -28,7 +28,7 @@ pub struct NativeReloc {
     pub offset: usize,
     /// Symbol name to resolve (builtin or function).
     pub symbol: String,
-    /// ELF / JIT relocation type (e.g. [`crate::isa::rv32::link::R_RISCV_CALL_PLT`]).
+    /// ELF / JIT relocation type (see [`crate::isa::IsaTarget::call_reloc_type`]).
     pub r_type: u32,
 }
 
@@ -94,7 +94,10 @@ pub(crate) fn compile_function_func_abi(
     fn_sig: &LpsFnSig,
 ) -> FuncAbi {
     match session.isa {
+        #[cfg(feature = "isa-rv32")]
         IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(fn_sig, Some(func)),
+        #[cfg(feature = "isa-xt")]
+        IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(fn_sig, Some(func)),
     }
 }
 
@@ -120,7 +123,6 @@ pub(crate) fn compile_function_lower_stage(
 ) -> Result<(), NativeError> {
     let lower_opts = LowerOpts {
         float_mode: session.float_mode,
-        q32: &session.options.config.q32,
         fuel: session.options.fuel,
     };
     let lowered =
@@ -137,13 +139,14 @@ pub(crate) fn compile_function_lower_stage(
 pub(crate) fn compile_function_peephole(
     state: &mut function_job::FunctionCompileState,
 ) -> Result<(), NativeError> {
+    let isa = state.func_abi.isa();
     let Some(lowered) = state.lowered.as_mut() else {
         return Err(NativeError::Internal(format!(
             "peephole stage missing lowered function for {}",
             state.name
         )));
     };
-    crate::opt::fold_immediates(lowered);
+    crate::opt::fold_immediates(lowered, isa);
     Ok(())
 }
 
@@ -401,92 +404,57 @@ mod tests {
         assert_eq!(module.functions.len(), 1, "expected 1 compiled function");
     }
 
-    /// Phase 0 regression: [`crate::native_options::NativeCompileOptions::config`] (e.g. Q32 mul
-    /// mode) must reach [`compile_module`]. `rt_jit::compile_module_jit` forwards the same
-    /// struct into here; if it rebuilt options from defaults, only float_mode would apply.
+    /// Phase 0 regression: the caller's [`crate::native_options::NativeCompileOptions`] must
+    /// reach [`compile_module`] *whole*, not just its `float_mode`.
+    /// `rt_jit::compile_module_jit` forwards the same struct into here; if it rebuilt options
+    /// from defaults, every other field would silently revert to its default value.
+    ///
+    /// Keyed on `fuel` because it is the only field outside `float_mode` whose value is visible
+    /// in emitted code. `options.config` ([`lpir::CompilerConfig`]) is not a candidate: its
+    /// `texture.texel_fetch_bounds` is consumed by the GLSL frontend while lowering to LPIR, so
+    /// `compile_module` only ever sees the already-clamped (or already-unclamped) ops, and its
+    /// `inline.*` keys have no consumer anywhere — the inliner never merged. Extend this test to
+    /// cover `config` the moment one of its keys grows a backend consumer.
     #[test]
-    fn compile_module_respects_q32_mul_mode_in_emitted_code() {
-        use lps_q32::q32_options::{MulMode, Q32Options};
-        use lps_shared::{FnParam, ParamQualifier};
+    fn compile_module_respects_non_float_mode_options_in_emitted_code() {
+        let (ir, sig) = simple_iconst_module();
 
-        let func = IrFunction {
-            name: String::from("q32_fmul"),
-            is_entry: true,
-            vmctx_vreg: VReg(0),
-            param_count: 2,
-            return_types: vec![IrType::F32],
-            sret_arg: None,
-            vreg_types: vec![IrType::Pointer, IrType::F32, IrType::F32, IrType::F32],
-            slots: vec![],
-            body: vec![
-                LpirOp::Fmul {
-                    dst: VReg(3),
-                    lhs: VReg(1),
-                    rhs: VReg(2),
-                },
-                LpirOp::Return {
-                    values: VRegRange { start: 0, count: 1 },
-                },
-            ]
-            .into(),
-            vreg_pool: vec![VReg(3)],
+        let opts_fuel = crate::native_options::NativeCompileOptions {
+            fuel: true,
+            ..Default::default()
         };
-        let ir = LpirModule {
-            imports: vec![],
-            functions: VecMap::from([(FuncId(0), func)]),
-        };
-        let sig = LpsModuleSig {
-            functions: vec![LpsFnSig {
-                name: String::from("q32_fmul"),
-                return_type: LpsType::Float,
-                parameters: vec![
-                    FnParam {
-                        name: String::from("a"),
-                        ty: LpsType::Float,
-                        qualifier: ParamQualifier::In,
-                    },
-                    FnParam {
-                        name: String::from("b"),
-                        ty: LpsType::Float,
-                        qualifier: ParamQualifier::In,
-                    },
-                ],
-                kind: LpsFnKind::UserDefined,
-            }],
+        let opts_no_fuel = crate::native_options::NativeCompileOptions {
+            fuel: false,
             ..Default::default()
         };
 
-        let mut opts_sat = crate::native_options::NativeCompileOptions::default();
-        opts_sat.float_mode = lpir::FloatMode::Q32;
-        opts_sat.config.q32.mul = MulMode::Saturating;
-
-        let mut opts_wrap = crate::native_options::NativeCompileOptions::default();
-        opts_wrap.float_mode = lpir::FloatMode::Q32;
-        opts_wrap.config.q32 = Q32Options {
-            mul: MulMode::Wrapping,
-            ..Default::default()
-        };
-
-        let sat = compile_module(
+        let fueled = compile_module(
             &ir,
             &sig,
             lpir::FloatMode::Q32,
-            opts_sat,
+            opts_fuel,
             IsaTarget::Rv32imac,
         )
-        .expect("saturating mul compile");
-        let wrap = compile_module(
+        .expect("fuel: true compile");
+        let unfueled = compile_module(
             &ir,
             &sig,
             lpir::FloatMode::Q32,
-            opts_wrap,
+            opts_no_fuel,
             IsaTarget::Rv32imac,
         )
-        .expect("wrapping mul compile");
+        .expect("fuel: false compile");
 
         assert_ne!(
-            sat.functions[0].code, wrap.functions[0].code,
-            "saturating fmul lowers to a builtin call; wrapping uses inline mul/mulh — code must differ"
+            fueled.functions[0].code, unfueled.functions[0].code,
+            "fuel: true adds a function-entry fuel check — code must differ",
+        );
+        assert!(
+            fueled.functions[0].code.len() > unfueled.functions[0].code.len(),
+            "the fuel check is extra instructions, so the fueled function must be longer \
+             (fuel: true {} bytes, fuel: false {} bytes)",
+            fueled.functions[0].code.len(),
+            unfueled.functions[0].code.len(),
         );
     }
 

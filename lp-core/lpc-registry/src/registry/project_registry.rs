@@ -1623,9 +1623,12 @@ mod tests {
             vec![
                 MutationOp::PutSlotEdit {
                     artifact: project.clone(),
+                    // Deliberately not PROJECT_FORMAT_VERSION: the write must
+                    // be rejected, so it has to be distinguishable from the
+                    // value the fixture already carries.
                     edit: SlotEdit::assign_value(
                         SlotPath::parse("format.some").unwrap(),
-                        LpValue::U32(2),
+                        LpValue::U32(999),
                     ),
                 },
                 MutationOp::PutSlotEdit {
@@ -1663,7 +1666,11 @@ mod tests {
             .as_project()
             .expect("project def");
         assert_eq!(def.name(), Some("Renamed"));
-        assert_eq!(def.format(), Some(1), "format edit never applied");
+        assert_eq!(
+            def.format(),
+            Some(PROJECT_FORMAT_VERSION),
+            "format edit never applied"
+        );
         assert!(def.nodes.entries.contains_key("clock"));
         assert!(!def.nodes.entries.contains_key("strip"));
     }
@@ -2704,17 +2711,17 @@ mod tests {
 
     #[test]
     fn switching_back_to_the_base_variant_clears_the_pending_switch_subtree() {
-        // The dropdown repro: base authors PathPoints. Switch to SvgPath
-        // (stores at mapping.SvgPath, plus an edit under it), then switch
+        // The dropdown repro: base authors PathPoints. Switch to Map2d
+        // (stores at mapping.Map2d, plus an edit under it), then switch
         // BACK to PathPoints. The EnsurePresent at mapping.PathPoints
         // normalizes away (base is already PathPoints) — but it must also
         // clear the sibling variant subtree, or the stored mapping.SvgPath
-        // entry survives and the effective def stays stuck on SvgPath.
+        // entry survives and the effective def stays stuck on Map2d.
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = path_points_fixture_project(&shapes);
         let fixture = fixture_artifact();
-        let svg_path = SlotPath::parse("mapping.SvgPath").unwrap();
-        let svg_leaf = SlotPath::parse("mapping.SvgPath.sample_diameter").unwrap();
+        let map2d_path = SlotPath::parse("mapping.Map2d").unwrap();
+        let map2d_leaf = SlotPath::parse("mapping.Map2d.source").unwrap();
 
         let results = mutate_batch(
             &fs,
@@ -2723,11 +2730,14 @@ mod tests {
             vec![
                 MutationOp::PutSlotEdit {
                     artifact: fixture.clone(),
-                    edit: SlotEdit::ensure_present(svg_path.clone()),
+                    edit: SlotEdit::ensure_present(map2d_path.clone()),
                 },
                 MutationOp::PutSlotEdit {
                     artifact: fixture.clone(),
-                    edit: SlotEdit::assign_value(svg_leaf.clone(), LpValue::F32(2.5)),
+                    edit: SlotEdit::assign_value(
+                        map2d_leaf.clone(),
+                        LpValue::String("sign.map2d.json".into()),
+                    ),
                 },
             ],
         );
@@ -2735,7 +2745,7 @@ mod tests {
         assert_accepted(&results[1], true);
         assert!(matches!(
             effective_fixture_def(&registry).mapping.value(),
-            lpc_model::MappingConfig::SvgPath { .. }
+            lpc_model::MappingConfig::Map2d { .. }
         ));
 
         // Switch back: normalized away AND the sibling subtree clears; the
@@ -2757,8 +2767,8 @@ mod tests {
                 StoredSlotEdit::Removed {
                     path: SlotPath::parse("mapping.PathPoints").unwrap(),
                 },
-                StoredSlotEdit::Removed { path: svg_path },
-                StoredSlotEdit::Removed { path: svg_leaf },
+                StoredSlotEdit::Removed { path: map2d_path },
+                StoredSlotEdit::Removed { path: map2d_leaf },
             ],
             "the ack lists the normalized target and the cleared sibling subtree"
         );
@@ -2779,7 +2789,7 @@ mod tests {
     #[test]
     fn switching_through_a_third_variant_leaves_exactly_one_pending_switch() {
         // A → B → C on the mapping enum (base PathPoints): selecting a new
-        // variant replaces the previous pending switch, so after SvgPath
+        // variant replaces the previous pending switch, so after Map2d
         // then Unset exactly one entry remains — at mapping.Unset.
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = path_points_fixture_project(&shapes);
@@ -2792,7 +2802,7 @@ mod tests {
             &shapes,
             vec![MutationOp::PutSlotEdit {
                 artifact: fixture.clone(),
-                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.SvgPath").unwrap()),
+                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.Map2d").unwrap()),
             }],
         );
         assert_accepted(&results[0], true);
@@ -2879,7 +2889,7 @@ mod tests {
                 &fs,
                 MutationOp::PutSlotEdit {
                     artifact: fixture.clone(),
-                    edit: SlotEdit::ensure_present(SlotPath::parse("mapping.SvgPath").unwrap()),
+                    edit: SlotEdit::ensure_present(SlotPath::parse("mapping.Map2d").unwrap()),
                 },
                 Revision::new(10),
                 &ctx,
@@ -2993,7 +3003,7 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = path_points_fixture_project(&shapes);
         let fixture = fixture_artifact();
-        let counts = "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts";
+        let counts = "mapping.PathPoints.paths[0].PointList.points";
 
         let results = mutate_batch(
             &fs,
@@ -3008,44 +3018,52 @@ mod tests {
 
         // The move materializes into the ordinary edit vocabulary: create
         // the target entry, assign the one leaf where the moved value
-        // diverges from a fresh entry's default (12 vs 0), remove the source.
+        // diverges from a fresh entry's default, remove the source.
         // Base-value annotations ride per stored edit: the base-absent target
         // paths carry none; the removed source key exists in base, so its
         // stored remove carries the base leaf's display string.
+        use lpc_model::ToLpValue as _;
+        let moved = lpc_model::Xy([0.6, 0.4]);
         let edits = assert_materialized(&results[0], true);
+        assert_eq!(edits.len(), 3, "{edits:?}");
         assert_eq!(
-            edits,
+            &edits[..2],
             &[
                 StoredSlotEdit::put(SlotEdit::ensure_present(
                     SlotPath::parse(&format!("{counts}[2]")).unwrap()
                 )),
                 StoredSlotEdit::put(SlotEdit::assign_value(
                     SlotPath::parse(&format!("{counts}[2]")).unwrap(),
-                    LpValue::U32(12),
+                    moved.to_lp_value(),
                 )),
-                StoredSlotEdit::put_with_base_display(
-                    SlotEdit::remove(SlotPath::parse(&format!("{counts}[1]")).unwrap()),
-                    Some("12".to_string()),
-                ),
             ]
         );
+        match &edits[2] {
+            StoredSlotEdit::Put {
+                edit,
+                base_display: Some(display),
+            } => {
+                assert_eq!(
+                    edit,
+                    &SlotEdit::remove(SlotPath::parse(&format!("{counts}[1]")).unwrap())
+                );
+                assert!(display.contains("0.6"), "{display}");
+            }
+            other => panic!("expected annotated remove of the source entry, got {other:?}"),
+        }
 
         let def = effective_fixture_def(&registry);
         let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
             panic!("expected PathPoints mapping");
         };
-        let lpc_model::PathSpec::RingArray {
-            ring_lamp_counts, ..
-        } = paths.entries.get(&0).expect("path 0").value()
-        else {
-            panic!("expected RingArray at path 0");
-        };
-        let counts_by_key: Vec<(u32, u32)> = ring_lamp_counts
+        let lpc_model::PathSpec::PointList { points, .. } =
+            paths.entries.get(&0).expect("path 0").value();
+        let points_by_key: Vec<(u32, [f32; 2])> = points
             .entries
             .iter()
-            .map(|(key, value)| (*key, *value.value()))
+            .map(|(key, value)| (*key, value.value().0))
             .collect();
-        assert_eq!(counts_by_key, vec![(0, 8), (2, 12)]);
+        assert_eq!(points_by_key, vec![(0, [0.1, 0.9]), (2, [0.6, 0.4])]);
 
         // A move is an overlay change like any other: revision advances.
         assert_eq!(registry.overlay().changed_at(), Revision::new(10));
@@ -3075,9 +3093,11 @@ mod tests {
             }],
         );
 
-        // The moved entry is a non-default enum variant (PointList; RingArray
-        // is the factory default), so the materialization must carry the
-        // variant selection, the diverged leaves, and the nested map add.
+        // The materialization must carry the diverged leaves and the nested
+        // map add. (PointList is the sole PathSpec variant since the
+        // parametric-shape retirement, so an explicit variant-selection
+        // edit may normalize away — multi-variant move preservation is
+        // covered by the mapping-enum switch tests above.)
         let edits = assert_materialized(&results[0], true);
         let put = StoredSlotEdit::put;
         assert_eq!(
@@ -3085,12 +3105,6 @@ mod tests {
             Some(&put(SlotEdit::ensure_present(
                 SlotPath::parse(&format!("{paths}[1]")).unwrap()
             )))
-        );
-        assert!(
-            edits.contains(&put(SlotEdit::ensure_present(
-                SlotPath::parse(&format!("{paths}[1].PointList")).unwrap()
-            ))),
-            "variant selection must survive the move: {edits:?}"
         );
         assert!(
             edits.contains(&put(SlotEdit::assign_value(
@@ -3146,7 +3160,7 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = path_points_fixture_project(&shapes);
         let fixture = fixture_artifact();
-        let counts = "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts";
+        let counts = "mapping.PathPoints.paths[0].PointList.points";
         let move_op = |from: &str, to: &str| MutationOp::MoveSlotEntry {
             artifact: fixture.clone(),
             from: SlotPath::parse(from).unwrap(),
@@ -3276,7 +3290,7 @@ mod tests {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = path_points_fixture_project(&shapes);
         let fixture = fixture_artifact();
-        let counts = "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts";
+        let counts = "mapping.PathPoints.paths[0].PointList.points";
         let ctx = ParseCtx { shapes: &shapes };
 
         let result = registry
@@ -3390,7 +3404,7 @@ mod tests {
         assert_accepted(&results[0], true);
         let display = accepted_base_display(&results[0]).expect("composite base display");
         assert!(display.starts_with('{'), "{display}");
-        assert!(display.contains("RingArray"), "{display}");
+        assert!(display.contains("PointList"), "{display}");
     }
 
     #[test]
@@ -3436,7 +3450,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -3477,7 +3491,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -3514,7 +3528,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
   }
@@ -3546,9 +3560,9 @@ mod tests {
     }
 
     /// Fixture project whose `mapping` authors a `PathPoints` variant with a
-    /// leaf-valued nested map (`paths[0].RingArray.ring_lamp_counts`) and a
-    /// composite non-default-variant entry (`paths[3]`: `PointList` with a
-    /// diverged leaf and a nested map entry) — the move-op fixtures.
+    /// leaf-valued nested map (`paths[0].PointList.points`) and a composite
+    /// entry (`paths[3]`: `PointList` with a diverged leaf and a nested map
+    /// entry) — the move-op fixtures.
     fn path_points_fixture_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
         crate::test::fixtures::write_file(
@@ -3556,7 +3570,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
   }
@@ -3573,8 +3587,8 @@ mod tests {
     "sample_diameter": 1.5,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "ring_lamp_counts": { "0": 8, "1": 12 }
+        "kind": "PointList",
+        "points": { "0": [0.1, 0.9], "1": [0.6, 0.4] }
       },
       "3": {
         "kind": "PointList",

@@ -17,10 +17,13 @@ pub struct UiPlaylistEntry {
     /// Thumbnail preview for the entry's child output, `None` before any
     /// probe lands.
     pub thumb: Option<UiProductPreview>,
-    /// Clicking the chip selects/focuses the entry's child node — the
-    /// existing node-select action, reused. Activation-by-click has no wire
-    /// op today (the engine switches entries via trigger messages and timed
-    /// advance only), so selection is the whole gesture. `None` when the
-    /// entry's child is not mounted.
+    /// Clicking a non-active chip activates the entry NOW — a
+    /// `PlaylistActivateOp` runtime poke through the wire command channel
+    /// (`docs/adr/2026-07-27-runtime-node-command-channel.md`): nothing is
+    /// staged in the overlay, and the ACTIVE placard follows via ordinary
+    /// reads. Present for every non-active entry, mounted child or not.
+    /// The ACTIVE entry's chip instead carries the child select/Focus
+    /// action (activating what already plays is a no-op), `None` when its
+    /// child is not mounted.
     pub action: Option<UiAction>,
 }

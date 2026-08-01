@@ -1,0 +1,39 @@
+# Xtensa counterpart of `lp-shader/lps-builtins-emu-app`: a guest image whose
+# only job is to carry every `__lps_*` builtin at known addresses so the host
+# emulator can link shader code against them.
+#
+# DEVICE-target crate (esp toolchain) — a member of the `lp-xt/fixtures`
+# workspace, NOT the host workspace. See lp-xt/README.md.
+[package]
+name = "lps-builtins-xt-app"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Xtensa builtins image for lp-xt-emu host execution (lps-builtins at known addresses)."
+workspace = "../fixtures"
+
+[[bin]]
+name = "lps-builtins-xt-app"
+path = "src/main.rs"
+test = false
+
+[features]
+# The native-f32 builtin family, forwarded exactly as the rv32 sibling
+# (`lp-shader/lps-builtins-emu-app`) forwards it.
+#
+# `src/builtin_refs.rs` is *shared* with that crate, and its f32 entries carry
+# `#[cfg(feature = "float-f32")]` — cfgs are evaluated against the crate being
+# compiled, so without this feature declared here those entries vanish, the
+# linker garbage-collects the f32 family, and every f32 builtin call M7's
+# lowering emits fails to resolve against this image. That failure surfaces
+# far from its cause, which is why `scripts/build-builtins-xt.sh` asserts the
+# symbol count by name rather than trusting the build.
+#
+# Unlike the rv32 image this one is built *with* the feature on
+# (`build-builtins-xt.sh` passes it): the Xtensa host path is where M7's
+# hardware-f32 code runs, so the family is the point rather than dead weight.
+float-f32 = ["lps-builtins/float-f32"]
+
+[dependencies]
+lps-builtins = { path = "../../lp-shader/lps-builtins" }
+lp-xt-emu-guest = { path = "../lp-xt-emu-guest" }

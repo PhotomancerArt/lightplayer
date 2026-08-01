@@ -7,7 +7,9 @@ use crate::error::NativeError;
 use alloc::string::String;
 
 /// Standard RISC-V `R_RISCV_CALL_PLT` relocation type (ELF / JIT).
-pub const R_RISCV_CALL_PLT: u32 = 17;
+///
+/// Reached from outside `isa::` only via [`crate::isa::IsaTarget::call_reloc_type`].
+pub(crate) const R_RISCV_CALL_PLT: u32 = 17;
 
 /// `e_flags` value for the soft-float ABI used by ESP32-C6.
 pub const EF_RISCV_FLOAT_ABI_SOFT: u32 = elf::EF_RISCV_FLOAT_ABI_SOFT;

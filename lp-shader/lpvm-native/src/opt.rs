@@ -1,13 +1,14 @@
 //! Post-lowering VInst optimizations.
 //!
-//! Folds `IConst32` + `AluRRR` patterns into `AluRRI` when the constant fits
-//! an RV32I 12-bit signed immediate. Does not change instruction count, so
-//! region tree indices remain valid. Dead `IConst32` defs are eliminated by
-//! the register allocator.
+//! Folds `IConst32` + `AluRRR` patterns into `AluRRI` when the constant is a
+//! legal immediate for the resulting op on the target ISA
+//! ([`crate::isa::IsaTarget::alu_imm_fits`]). Does not change instruction
+//! count, so region tree indices remain valid. Dead `IConst32` defs are
+//! eliminated by the register allocator.
 
 use alloc::vec::Vec;
 
-use crate::imm::fits_imm12;
+use crate::isa::IsaTarget;
 use crate::lower::LoweredFunction;
 use crate::vinst::{AluImmOp, AluOp, VInst, VReg};
 
@@ -28,10 +29,12 @@ fn is_commutative(op: AluOp) -> bool {
     matches!(op, AluOp::Add | AluOp::And | AluOp::Or | AluOp::Xor)
 }
 
-/// Fold `IConst32` + `AluRRR` → `AluRRI` where the constant fits imm12.
+/// Fold `IConst32` + `AluRRR` → `AluRRI` where the constant is a legal
+/// immediate for the resulting op on `isa`.
 ///
 /// Also handles `Sub` with a constant rhs by converting to `Addi` with
-/// the negated immediate (when the negated value fits imm12).
+/// the negated immediate (when the negated value is a legal `Addi`
+/// immediate).
 ///
 /// The pass is *loop-aware*: it walks `vinsts` linearly, but a recorded
 /// `IConst32` value cannot be used to fold a use that lives inside a loop
@@ -40,7 +43,7 @@ fn is_commutative(op: AluOp) -> bool {
 /// subsequent iteration broken (e.g. `px_off` initialised to 0 outside a
 /// per-pixel loop and `+= 8` inside it would still resolve to `+ 0` at the
 /// in-loop use, causing every pixel to overwrite pixel 0).
-pub fn fold_immediates(lowered: &mut LoweredFunction) {
+pub fn fold_immediates(lowered: &mut LoweredFunction, isa: IsaTarget) {
     let max_vreg = max_vreg_index(&lowered.vinsts, &lowered.vreg_pool);
     if max_vreg == 0 {
         return;
@@ -91,7 +94,7 @@ pub fn fold_immediates(lowered: &mut LoweredFunction) {
                 if op == AluOp::Sub {
                     if let Some(val) = c2 {
                         let neg = val.wrapping_neg();
-                        if fits_imm12(neg) {
+                        if isa.alu_imm_fits(AluImmOp::Addi, neg) {
                             lowered.vinsts[i] = VInst::AluRRI {
                                 op: AluImmOp::Addi,
                                 dst,
@@ -103,7 +106,7 @@ pub fn fold_immediates(lowered: &mut LoweredFunction) {
                     }
                 } else if let Some(imm_op) = alu_to_imm_op(op) {
                     if let Some(val) = c2 {
-                        if fits_imm12(val) {
+                        if isa.alu_imm_fits(imm_op, val) {
                             lowered.vinsts[i] = VInst::AluRRI {
                                 op: imm_op,
                                 dst,
@@ -114,7 +117,7 @@ pub fn fold_immediates(lowered: &mut LoweredFunction) {
                         }
                     } else if is_commutative(op) {
                         if let Some(val) = c1 {
-                            if fits_imm12(val) {
+                            if isa.alu_imm_fits(imm_op, val) {
                                 lowered.vinsts[i] = VInst::AluRRI {
                                     op: imm_op,
                                     dst,
@@ -232,7 +235,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(matches!(lowered.vinsts[0], VInst::IConst32 { .. }));
         assert!(matches!(
             lowered.vinsts[1],
@@ -260,7 +263,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(matches!(
             lowered.vinsts[1],
             VInst::AluRRR { op: AluOp::Add, .. }
@@ -283,7 +286,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         match &lowered.vinsts[1] {
             VInst::AluRRI {
                 op: AluImmOp::Addi,
@@ -313,7 +316,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(matches!(
             lowered.vinsts[1],
             VInst::AluRRI {
@@ -340,7 +343,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(matches!(
             lowered.vinsts[1],
             VInst::AluRRI {
@@ -367,7 +370,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(matches!(
             lowered.vinsts[1],
             VInst::AluRRR { op: AluOp::Sll, .. }
@@ -390,7 +393,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(matches!(
             lowered.vinsts[1],
             VInst::AluRRR { op: AluOp::Mul, .. }
@@ -443,7 +446,7 @@ mod tests {
             header_idx: 1,
             backedge_idx: 4,
         });
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(
             matches!(lowered.vinsts[2], VInst::AluRRR { op: AluOp::Add, .. }),
             "in-loop use of mutated vreg must not fold to addi+0; got {:?}",
@@ -472,7 +475,7 @@ mod tests {
                 src_op: SRC_OP_NONE,
             },
         ]);
-        fold_immediates(&mut lowered);
+        fold_immediates(&mut lowered, IsaTarget::Rv32imac);
         assert!(matches!(
             lowered.vinsts[2],
             VInst::AluRRR { op: AluOp::Add, .. }

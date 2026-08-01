@@ -56,6 +56,12 @@ pub struct UiStudioView {
     /// The layered-settings slice (effective values, provenance, override
     /// state) for the shell's settings popover.
     pub settings: crate::app::settings::UiSettingsView,
+    /// The open project's edit state, hoisted to the shell so the web edge
+    /// can arm the unload gate without reaching into the pane tree. Clean
+    /// when no project is open. See
+    /// [`has_unsaved_work`](crate::app::studio::has_unsaved_work) for which
+    /// buckets actually mean "you would lose work".
+    pub dirty: crate::DirtySummary,
 }
 
 impl UiStudioView {
@@ -70,6 +76,7 @@ impl UiStudioView {
             device_sync: None,
             lens_card: None,
             settings: crate::app::settings::UiSettingsView::default(),
+            dirty: crate::DirtySummary::clean(),
         }
     }
 
@@ -104,6 +111,11 @@ impl UiStudioView {
 
     pub fn with_settings(mut self, settings: crate::app::settings::UiSettingsView) -> Self {
         self.settings = settings;
+        self
+    }
+
+    pub fn with_dirty(mut self, dirty: crate::DirtySummary) -> Self {
+        self.dirty = dirty;
         self
     }
 

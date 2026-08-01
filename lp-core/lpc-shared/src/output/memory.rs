@@ -246,6 +246,13 @@ impl OutputProvider for MemoryOutputProvider {
 
         Ok(())
     }
+
+    fn hardware_generation(&self) -> u64 {
+        // Permissive mode opens nothing against the registry, so its answer is
+        // simply constant — which is the right answer there: a permissive
+        // failure is about the caller's own config, not about ownership.
+        self.hardware_system.registry().generation()
+    }
 }
 
 impl MemoryOutputProvider {
@@ -378,6 +385,35 @@ mod tests {
 
         assert!(provider.is_endpoint_open(&demo_endpoint));
         assert_eq!(provider.get_data(handle), Some(vec![1, 2, 3]));
+    }
+
+    /// The generation is what tells a parked caller to try again, so it must
+    /// move when a channel claims or frees hardware — and must not move when
+    /// the channel is merely being written to, which happens every frame.
+    #[test]
+    fn hardware_generation_tracks_claims_not_writes() {
+        let provider = MemoryOutputProvider::new();
+        let before_open = provider.hardware_generation();
+
+        let handle = provider
+            .open(&endpoint("ws281x:rmt:D10"), 3, OutputFormat::Ws2811, None)
+            .expect("output opens");
+        let after_open = provider.hardware_generation();
+        assert_ne!(after_open, before_open, "claiming hardware is a change");
+
+        provider.write(handle, &[1, 2, 3]).expect("write succeeds");
+        assert_eq!(
+            provider.hardware_generation(),
+            after_open,
+            "writing frames must not look like a hardware change"
+        );
+
+        provider.close(handle).expect("output closes");
+        assert_ne!(
+            provider.hardware_generation(),
+            after_open,
+            "releasing hardware is a change"
+        );
     }
 
     #[test]

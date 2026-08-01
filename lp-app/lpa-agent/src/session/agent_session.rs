@@ -21,11 +21,12 @@ use crate::session::agent_event::AgentEvent;
 use crate::session::agent_transcript::AgentTranscript;
 use crate::tool::iterate_host::AgentHost;
 use crate::tool::iterate_tool::{ITERATE_TOOL_NAME, IterateOutcome, iterate_tool_def, run_iterate};
+use crate::tool::upsert_param_tool::{
+    UPSERT_PARAM_TOOL_NAME, run_upsert_param, upsert_param_tool_def,
+};
 
 /// Model turns (API calls) allowed per user message.
 pub const MAX_TURNS_PER_RUN: u32 = 16;
-/// Default per-turn output token budget.
-pub const DEFAULT_MAX_TOKENS: u32 = 8192;
 
 /// A session run failed (the transcript keeps everything up to the failure).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,8 +40,6 @@ pub struct AgentSession<P: ModelProvider, H: AgentHost> {
     provider: P,
     host: H,
     transcript: AgentTranscript,
-    /// Per-turn output token budget.
-    pub max_tokens: u32,
     /// Model turns allowed per `run` call.
     pub max_turns: u32,
     abort: Arc<AtomicBool>,
@@ -54,7 +53,6 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
             provider,
             host,
             transcript: AgentTranscript::default(),
-            max_tokens: DEFAULT_MAX_TOKENS,
             max_turns: MAX_TURNS_PER_RUN,
             abort: Arc::new(AtomicBool::new(false)),
             prev_compiled: None,
@@ -134,12 +132,14 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
         let req = TurnRequest {
             system,
             messages: self.transcript.messages.clone(),
-            tools: vec![iterate_tool_def()],
-            max_tokens: self.max_tokens,
+            tools: vec![iterate_tool_def(), upsert_param_tool_def()],
         };
 
         let mut blocks: Vec<Acc> = Vec::new();
         let mut outcome: Option<StopReason> = None;
+        // True while a thinking segment is streaming; the transition to any
+        // visible content (or the turn's end) emits the collapse boundary.
+        let mut thinking_open = false;
         {
             let mut stream = self.provider.run_turn(req);
             while let Some(ev) = stream.next().await {
@@ -147,7 +147,45 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                     return Ok(TurnStep::Aborted); // dropping `stream` cancels
                 }
                 match ev {
+                    TurnEvent::ThinkingDelta(text) => {
+                        // A delta after the previous block's signature
+                        // closed it starts a NEW thinking block
+                        // (interleaved thinking).
+                        match blocks.last_mut() {
+                            Some(Acc::Thinking {
+                                text: existing,
+                                signature,
+                            }) if signature.is_empty() => existing.push_str(&text),
+                            _ => blocks.push(Acc::Thinking {
+                                text: text.clone(),
+                                signature: String::new(),
+                            }),
+                        }
+                        thinking_open = true;
+                        on_event(AgentEvent::ThinkingDelta(text));
+                    }
+                    TurnEvent::ThinkingSignature(fragment) => {
+                        // Signatures accumulate onto the open block; one
+                        // arriving with no block (display-omitted servers)
+                        // still records a replayable empty-text block.
+                        match blocks.last_mut() {
+                            Some(Acc::Thinking { signature, .. }) => {
+                                signature.push_str(&fragment);
+                            }
+                            _ => blocks.push(Acc::Thinking {
+                                text: String::new(),
+                                signature: fragment,
+                            }),
+                        }
+                    }
+                    TurnEvent::RedactedThinking(data) => {
+                        // Opaque: transcript-only, never shown.
+                        blocks.push(Acc::Redacted { data });
+                    }
                     TurnEvent::TextDelta(text) => {
+                        if std::mem::take(&mut thinking_open) {
+                            on_event(AgentEvent::ThinkingDone);
+                        }
                         match blocks.last_mut() {
                             Some(Acc::Text(t)) => t.push_str(&text),
                             _ => blocks.push(Acc::Text(text.clone())),
@@ -155,6 +193,9 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                         on_event(AgentEvent::TextDelta(text));
                     }
                     TurnEvent::ToolUseStart { id, name } => {
+                        if std::mem::take(&mut thinking_open) {
+                            on_event(AgentEvent::ThinkingDone);
+                        }
                         blocks.push(Acc::Tool {
                             id: id.clone(),
                             name: name.clone(),
@@ -171,6 +212,9 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                         on_event(AgentEvent::ToolInputDelta { id, json_fragment });
                     }
                     TurnEvent::TurnDone { stop_reason, usage } => {
+                        if std::mem::take(&mut thinking_open) {
+                            on_event(AgentEvent::ThinkingDone);
+                        }
                         self.transcript.usage_total.add(usage);
                         on_event(AgentEvent::TurnDone {
                             stop_reason: stop_reason.clone(),
@@ -200,7 +244,43 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
 
         // Record the assistant message (parse accumulated tool input JSON
         // now, at end of turn).
-        let content: Vec<ContentBlock> = blocks.iter().map(Acc::to_content_block).collect();
+        let mut content: Vec<ContentBlock> = blocks.iter().map(Acc::to_content_block).collect();
+
+        // Tool input JSON that does not parse is direct evidence the turn
+        // was cut mid-call, and it outranks the server's self-report: some
+        // compat servers label an output-cap cut `tool_calls` rather than
+        // `length`, which would otherwise walk a torn call straight into
+        // the execution path below and fail deep in the tool layer with a
+        // deserialization error that names neither the cause nor the fix.
+        // Note this reclassifies AFTER `TurnDone`, so the UI's usage row
+        // still reflects what the provider actually reported.
+        let stop_reason = if blocks.iter().any(Acc::has_malformed_tool_input) {
+            StopReason::MaxTokens
+        } else {
+            stop_reason
+        };
+
+        if stop_reason != StopReason::ToolUse {
+            // Any accumulated tool call will never execute — most often a
+            // `MaxTokens` cut mid-input-JSON. Drop such blocks from the
+            // recorded message instead of replaying them: the Anthropic
+            // protocol requires every `tool_use` to be answered by a
+            // `tool_result`, and a truncated input is garbage anyway. The
+            // `Truncated` event tells the UI the run ended incomplete.
+            let dropped_tool_call = content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. }));
+            content.retain(|b| !matches!(b, ContentBlock::ToolUse { .. }));
+            self.transcript.push_assistant(content);
+            if matches!(stop_reason, StopReason::MaxTokens | StopReason::Other(_)) {
+                on_event(AgentEvent::Truncated {
+                    stop_reason,
+                    dropped_tool_call,
+                });
+            }
+            return Ok(TurnStep::Done);
+        }
+
         let tool_calls: Vec<(String, String, serde_json::Value)> = content
             .iter()
             .filter_map(|b| match b {
@@ -211,19 +291,53 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
             })
             .collect();
         self.transcript.push_assistant(content);
-
-        if stop_reason != StopReason::ToolUse || tool_calls.is_empty() {
+        if tool_calls.is_empty() {
             return Ok(TurnStep::Done);
         }
 
         let mut results = Vec::new();
-        for (id, name, input) in tool_calls {
+        let mut calls = tool_calls.into_iter();
+        while let Some((id, name, input)) = calls.next() {
             if self.abort.load(Ordering::Relaxed) {
+                // The recorded assistant message already carries every
+                // tool_use block; the protocol still requires each to be
+                // answered before the next model turn, so the unexecuted
+                // remainder gets synthesized cancellation results.
+                results.push(cancelled_tool_result(id));
+                results.extend(calls.map(|(id, _, _)| cancelled_tool_result(id)));
                 self.transcript.push_tool_results(results);
                 return Ok(TurnStep::Aborted);
             }
+            // The input JSON is fully accumulated here (parsed at end of
+            // turn): surface the model's one-line note so the running row
+            // reads "{note} — running" instead of a generic label.
+            on_event(AgentEvent::ToolInputReady {
+                id: id.clone(),
+                note: input["note"].as_str().map(str::to_string),
+            });
             let outcome = if name == ITERATE_TOOL_NAME {
-                run_iterate(&input, &mut self.host, &mut self.prev_compiled)
+                let progress_id = id.clone();
+                run_iterate(
+                    &input,
+                    &mut self.host,
+                    &mut self.prev_compiled,
+                    &mut |phase| {
+                        on_event(AgentEvent::ToolProgress {
+                            id: progress_id.clone(),
+                            phase,
+                        });
+                    },
+                )
+                .await
+            } else if name == UPSERT_PARAM_TOOL_NAME {
+                let progress_id = id.clone();
+                run_upsert_param(&input, &mut self.host, &mut |phase| {
+                    on_event(AgentEvent::ToolProgress {
+                        id: progress_id.clone(),
+                        phase,
+                    });
+                })
+                .await
             } else {
                 IterateOutcome {
                     content: json!({ "error": format!("unknown tool {name:?}") }).to_string(),
@@ -254,9 +368,32 @@ enum TurnStep {
     Aborted,
 }
 
+/// The synthesized result for a recorded tool call the run never executed
+/// (Stop mid-turn): keeps the transcript protocol-valid — every `tool_use`
+/// answered — and tells the model plainly what happened.
+fn cancelled_tool_result(id: String) -> ContentBlock {
+    ContentBlock::ToolResult {
+        tool_use_id: id,
+        content: json!({ "cancelled": "the user stopped the run before this call executed" })
+            .to_string(),
+        is_error: Some(true),
+    }
+}
+
 /// Accumulator for one streamed content block.
 enum Acc {
     Text(String),
+    /// A thinking block; the signature closes it (Anthropic) or stays
+    /// empty (compat reasoning — recorded for the UI mirror, never
+    /// replayed to a provider).
+    Thinking {
+        text: String,
+        signature: String,
+    },
+    /// An opaque redacted thinking block, passed through verbatim.
+    Redacted {
+        data: String,
+    },
     Tool {
         id: String,
         name: String,
@@ -268,28 +405,49 @@ impl Acc {
     fn tool_id(&self) -> Option<&String> {
         match self {
             Acc::Tool { id, .. } => Some(id),
-            Acc::Text(_) => None,
+            Acc::Text(_) | Acc::Thinking { .. } | Acc::Redacted { .. } => None,
+        }
+    }
+
+    /// Whether this is a tool call whose accumulated input JSON does not
+    /// parse — a call that can never execute. The overwhelmingly common
+    /// cause is the per-turn output cap landing mid-JSON; a genuinely
+    /// malformed emission is indistinguishable here and is treated the
+    /// same way, since neither can be run.
+    fn has_malformed_tool_input(&self) -> bool {
+        match self {
+            Acc::Tool { input_json, .. } => {
+                let raw = input_json.trim();
+                !raw.is_empty() && serde_json::from_str::<serde_json::Value>(raw).is_err()
+            }
+            Acc::Text(_) | Acc::Thinking { .. } | Acc::Redacted { .. } => false,
         }
     }
 
     fn to_content_block(&self) -> ContentBlock {
         match self {
             Acc::Text(text) => ContentBlock::Text { text: text.clone() },
+            Acc::Thinking { text, signature } => ContentBlock::Thinking {
+                thinking: text.clone(),
+                signature: signature.clone(),
+            },
+            Acc::Redacted { data } => ContentBlock::RedactedThinking { data: data.clone() },
             Acc::Tool {
                 id,
                 name,
                 input_json,
             } => {
                 let raw = input_json.trim();
-                // A tool call with no streamed input means `{}`.
+                // A tool call with no streamed input means `{}`. Input that
+                // does not parse means the call was cut mid-JSON: `run_turn`
+                // detects that via `has_malformed_tool_input` and drops the
+                // block before execution, so this placeholder is never read.
+                // (It must not be the raw string — handing that to a tool's
+                // deserializer reports a type mismatch instead of the cut.)
                 let input = if raw.is_empty() {
                     json!({})
                 } else {
-                    serde_json::from_str(raw).unwrap_or_else(|_| {
-                        // Malformed input JSON: preserve it verbatim so the
-                        // tool layer reports it in-band.
-                        serde_json::Value::String(input_json.clone())
-                    })
+                    serde_json::from_str(raw).unwrap_or(serde_json::Value::Null)
                 };
                 ContentBlock::ToolUse {
                     id: id.clone(),
@@ -311,7 +469,8 @@ mod tests {
 
     use super::*;
     use crate::provider::model_provider::{BoxStream, ChatRole, TokenUsage};
-    use crate::tool::iterate_host::{HostError, ShaderContext};
+    use crate::tool::iterate_host::{HostError, HostFuture, ShaderContext};
+    use crate::tool::tool_phase::ToolPhase;
 
     const RED: &str = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
     const GREEN: &str = "vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
@@ -344,8 +503,9 @@ mod tests {
         let reqs = provider.requests.borrow();
         assert_eq!(reqs.len(), 1);
         assert!(reqs[0].system.contains(RED));
-        assert_eq!(reqs[0].tools.len(), 1);
+        assert_eq!(reqs[0].tools.len(), 2);
         assert_eq!(reqs[0].tools[0].name, "iterate");
+        assert_eq!(reqs[0].tools[1].name, "upsert_param");
     }
 
     #[test]
@@ -380,6 +540,32 @@ mod tests {
 
         // The host saw the staged edit.
         assert_eq!(session.host.staged.borrow().as_slice(), [GREEN.to_string()]);
+        // The accumulated input surfaced its note (pre-execution), then the
+        // live phases, then the executed summary — in that order.
+        let ready_at = events
+            .iter()
+            .position(|e| {
+                matches!(e, AgentEvent::ToolInputReady { id, note }
+                    if id == "tu_1" && note.as_deref() == Some("go green"))
+            })
+            .expect("ToolInputReady");
+        let first_progress = events
+            .iter()
+            .position(|e| {
+                matches!(
+                    e,
+                    AgentEvent::ToolProgress {
+                        phase: ToolPhase::Staging,
+                        ..
+                    }
+                )
+            })
+            .expect("ToolProgress(Staging)");
+        let executed_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ToolExecuted { .. }))
+            .expect("ToolExecuted");
+        assert!(ready_at < first_progress && first_progress < executed_at);
         // ToolExecuted carried the compact summary.
         let executed = events
             .iter()
@@ -420,11 +606,113 @@ mod tests {
             session.transcript().usage_total,
             TokenUsage {
                 input_tokens: 60,
-                output_tokens: 40
+                output_tokens: 40,
+                ..TokenUsage::default()
             }
         );
         // The second turn's system prompt reflects the staged source.
         assert!(provider.requests.borrow()[1].system.contains(GREEN));
+    }
+
+    #[test]
+    fn thinking_blocks_round_trip_into_the_next_request() {
+        // Turn 1 thinks (with a split signature), calls the tool, and the
+        // session must replay the thinking block VERBATIM in turn 2's
+        // request — the Anthropic tool-use protocol requirement.
+        let provider = FakeProvider::new(vec![
+            vec![
+                TurnEvent::ThinkingDelta("Green means ".into()),
+                TurnEvent::ThinkingDelta("more G.".into()),
+                TurnEvent::ThinkingSignature("EqQB".into()),
+                TurnEvent::ThinkingSignature("sig".into()),
+                TurnEvent::RedactedThinking("opaque-data".into()),
+                TurnEvent::TextDelta("Trying green.".into()),
+                TurnEvent::ToolUseStart {
+                    id: "tu_1".into(),
+                    name: "iterate".into(),
+                },
+                turn_done(StopReason::ToolUse, 20, 30),
+            ],
+            vec![
+                TurnEvent::TextDelta("Done.".into()),
+                turn_done(StopReason::EndTurn, 40, 10),
+            ],
+        ]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("make it green".into(), |e| events.push(e))).expect("run");
+
+        // Streamed thinking surfaced, and the boundary landed before the
+        // first visible text.
+        let deltas: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ThinkingDelta(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas, ["Green means ", "more G."]);
+        let done_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ThinkingDone))
+            .expect("ThinkingDone");
+        let text_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::TextDelta(_)))
+            .expect("TextDelta");
+        assert!(done_at < text_at);
+
+        // The assistant message carries thinking + redacted + text + tool.
+        let assistant = &session.transcript().messages[1];
+        assert_eq!(
+            assistant.content[0],
+            ContentBlock::Thinking {
+                thinking: "Green means more G.".into(),
+                signature: "EqQBsig".into(),
+            }
+        );
+        assert_eq!(
+            assistant.content[1],
+            ContentBlock::RedactedThinking {
+                data: "opaque-data".into(),
+            }
+        );
+
+        // And turn 2's REQUEST replays both blocks exactly as received.
+        let reqs = provider.requests.borrow();
+        let replayed = &reqs[1].messages[1];
+        assert_eq!(replayed.content[0], assistant.content[0]);
+        assert_eq!(replayed.content[1], assistant.content[1]);
+    }
+
+    #[test]
+    fn reasoning_only_turns_close_thinking_at_turn_done() {
+        // Compat servers can stream reasoning with no signature; the
+        // boundary must still arrive when the turn ends.
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::ThinkingDelta("pondering".into()),
+            turn_done(StopReason::EndTurn, 1, 1),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("go".into(), |e| events.push(e))).expect("run");
+        let done_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ThinkingDone))
+            .expect("ThinkingDone");
+        let turn_done_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::TurnDone { .. }))
+            .expect("TurnDone");
+        assert!(done_at < turn_done_at);
+        // The unsigned block is recorded (UI mirror parity)...
+        assert_eq!(
+            session.transcript().messages[1].content[0],
+            ContentBlock::Thinking {
+                thinking: "pondering".into(),
+                signature: String::new(),
+            }
+        );
     }
 
     #[test]
@@ -538,6 +826,221 @@ mod tests {
         }
     }
 
+    #[test]
+    fn max_tokens_cut_drops_the_dangling_tool_call_and_reports_truncation() {
+        // The output budget ran out mid-tool-input-JSON — the live failure:
+        // stream ends with `max_tokens`, the tool call's input is torn.
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::TextDelta("Rewriting the shader.".into()),
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: "{\"source\": \"vec4 render(".into(),
+            },
+            turn_done(StopReason::MaxTokens, 10, 8192),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("bounce a ball".into(), |e| events.push(e))).expect("run");
+
+        // The run ends CLEANLY but loudly: Truncated then SessionDone.
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Truncated {
+                stop_reason: StopReason::MaxTokens,
+                dropped_tool_call: true,
+            }
+        )));
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::SessionDone { .. })
+        ));
+        // The dangling tool_use never reaches the transcript (a replayed
+        // tool_use without a tool_result is a protocol violation), while
+        // the text that did stream is kept.
+        let assistant = &session.transcript().messages[1];
+        assert_eq!(
+            assistant.content,
+            vec![ContentBlock::Text {
+                text: "Rewriting the shader.".into()
+            }]
+        );
+        // A follow-up run replays a valid transcript and completes.
+        provider.turns.borrow_mut().push_back(vec![
+            TurnEvent::TextDelta("Shorter this time.".into()),
+            turn_done(StopReason::EndTurn, 1, 1),
+        ]);
+        block_on(session.run("try smaller".into(), |e| events.push(e))).expect("second run");
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::SessionDone { .. })
+        ));
+    }
+
+    #[test]
+    fn torn_tool_input_labelled_tool_calls_is_still_treated_as_a_cut() {
+        // The prod failure: the output cap landed mid-input-JSON but the
+        // server reported `tool_calls` (not `length`), so `stop_reason`
+        // alone says "run this call". The torn JSON is the real evidence.
+        // Before the fix this reached the tool layer and came back as
+        // `invalid type: string ... expected struct IterateInput`.
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: "{\"note\": \"hearts\", \"source\": \"vec2 pm = p - 0".into(),
+            },
+            turn_done(StopReason::ToolUse, 10, 8192),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("multiple hearts".into(), |e| events.push(e))).expect("run");
+
+        // Reclassified as a cut: reported as truncation, not executed.
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Truncated {
+                stop_reason: StopReason::MaxTokens,
+                dropped_tool_call: true,
+            }
+        )));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecuted { .. })),
+            "a torn call must never execute"
+        );
+        // The dangling tool_use stays out of the transcript so the next
+        // turn replays a protocol-valid message. Here the torn call was the
+        // turn's only block, so no assistant message is recorded at all.
+        assert!(
+            !session
+                .transcript()
+                .messages
+                .iter()
+                .flat_map(|m| &m.content)
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. })),
+            "no tool_use may survive without a matching tool_result"
+        );
+    }
+
+    #[test]
+    fn well_formed_tool_input_is_unaffected_by_the_cut_check() {
+        // Guard the negative: a complete call on a `tool_calls` turn must
+        // still execute normally.
+        let input = format!("{{\"source\": {}, \"note\": \"go green\"}}", json!(GREEN));
+        let provider = FakeProvider::new(vec![
+            vec![
+                TurnEvent::ToolUseStart {
+                    id: "tu_1".into(),
+                    name: "iterate".into(),
+                },
+                TurnEvent::ToolInputDelta {
+                    id: "tu_1".into(),
+                    json_fragment: input,
+                },
+                turn_done(StopReason::ToolUse, 1, 1),
+            ],
+            vec![turn_done(StopReason::EndTurn, 1, 1)],
+        ]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("go green".into(), |e| events.push(e))).expect("run");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecuted { .. }))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::Truncated { .. }))
+        );
+    }
+
+    #[test]
+    fn other_stop_reason_reports_truncation_without_a_tool_drop() {
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::TextDelta("Half a thought".into()),
+            turn_done(StopReason::Other("pause_turn".into()), 1, 1),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("go".into(), |e| events.push(e))).expect("run");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Truncated {
+                stop_reason: StopReason::Other(reason),
+                dropped_tool_call: false,
+            } if reason == "pause_turn"
+        )));
+    }
+
+    #[test]
+    fn abort_mid_tool_loop_synthesizes_cancelled_results() {
+        // One turn, two tool calls; the Stop flag flips while the first
+        // executes, so the second must never run — but its recorded
+        // tool_use still needs an answer for the transcript to replay.
+        let input = format!("{{\"source\": {}, \"note\": \"go green\"}}", json!(GREEN));
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: input.clone(),
+            },
+            TurnEvent::ToolUseStart {
+                id: "tu_2".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_2".into(),
+                json_fragment: input,
+            },
+            turn_done(StopReason::ToolUse, 1, 1),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let abort = session.abort_handle();
+        let mut events = Vec::new();
+        block_on(session.run("go".into(), |e| {
+            if matches!(&e, AgentEvent::ToolExecuted { id, .. } if id == "tu_1") {
+                abort.store(true, Ordering::Relaxed);
+            }
+            events.push(e);
+        }))
+        .expect("run");
+
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Aborted)));
+        // The results message answers BOTH calls: the executed first one
+        // and a cancelled second one.
+        let results = &session.transcript().messages[2];
+        assert_eq!(results.content.len(), 2, "{:?}", results.content);
+        assert!(matches!(
+            &results.content[0],
+            ContentBlock::ToolResult { tool_use_id, is_error: None, .. } if tool_use_id == "tu_1"
+        ));
+        match &results.content[1] {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "tu_2");
+                assert!(content.contains("cancelled"), "{content}");
+                assert_eq!(*is_error, Some(true));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
     // -- helpers ----------------------------------------------------------
 
     fn turn_done(stop_reason: StopReason, input: u32, output: u32) -> TurnEvent {
@@ -546,6 +1049,7 @@ mod tests {
             usage: TokenUsage {
                 input_tokens: input,
                 output_tokens: output,
+                ..TokenUsage::default()
             },
         }
     }
@@ -595,10 +1099,15 @@ mod tests {
             Ok(self.source.borrow().clone())
         }
 
-        fn stage_source(&mut self, source: &str) -> Result<(), HostError> {
-            self.staged.borrow_mut().push(source.to_string());
-            *self.source.borrow_mut() = source.to_string();
-            Ok(())
+        fn stage_source<'a>(
+            &'a mut self,
+            source: &'a str,
+        ) -> HostFuture<'a, Result<(), HostError>> {
+            Box::pin(async move {
+                self.staged.borrow_mut().push(source.to_string());
+                *self.source.borrow_mut() = source.to_string();
+                Ok(())
+            })
         }
 
         fn led_points(&self) -> Vec<LedPoint> {

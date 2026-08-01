@@ -37,14 +37,21 @@ pub struct AllocTestBuilder {
     abi_params: usize,
     /// Same spelling as filetests: `void`, `i32`, `f32`, `vec4`, `mat4`, …
     abi_return: String,
+    isa: IsaTarget,
 }
 
 /// Start building an allocation test.
+///
+/// Defaults to rv32 because that is the reference target for allocation
+/// behaviour and what the great majority of these tests assert about. Use
+/// [`AllocTestBuilder::isa`] for anything the two targets do differently — the
+/// float register class, in particular, exists only on Xtensa.
 pub fn alloc_test() -> AllocTestBuilder {
     AllocTestBuilder {
         pool_size: None,
         abi_params: 0,
         abi_return: String::from("void"),
+        isa: IsaTarget::Rv32imac,
     }
 }
 
@@ -80,35 +87,34 @@ impl AllocTestBuilder {
         self
     }
 
+    /// Target ISA for the ABI and the register pool.
+    ///
+    /// Needed for the float class: `RegClass::Float` has an empty pool on rv32
+    /// (its f32 path is soft float, which never leaves the integer file), so a
+    /// float allocation test that ran on the default target would fail with
+    /// `OutOfRegisters` rather than exercising anything.
+    pub fn isa(mut self, isa: IsaTarget) -> Self {
+        self.isa = isa;
+        self
+    }
+
     fn build_func_abi(&self) -> FuncAbi {
-        let return_type = lps_return_type(&self.abi_return);
-        if self.abi_params > 0 {
-            let params: Vec<FnParam> = (0..self.abi_params)
+        let sig = LpsFnSig {
+            name: String::from("test"),
+            return_type: lps_return_type(&self.abi_return),
+            parameters: (0..self.abi_params)
                 .map(|i| FnParam {
                     name: alloc::format!("arg{i}"),
                     ty: LpsType::Int,
                     qualifier: ParamQualifier::In,
                 })
-                .collect();
-            abi::func_abi_rv32(
-                &LpsFnSig {
-                    name: String::from("test"),
-                    return_type,
-                    parameters: params,
-                    kind: LpsFnKind::UserDefined,
-                },
-                None,
-            )
-        } else {
-            abi::func_abi_rv32(
-                &LpsFnSig {
-                    name: String::from("test"),
-                    return_type,
-                    parameters: Vec::new(),
-                    kind: LpsFnKind::UserDefined,
-                },
-                None,
-            )
+                .collect(),
+            kind: LpsFnKind::UserDefined,
+        };
+        match self.isa {
+            IsaTarget::Rv32imac => abi::func_abi_rv32(&sig, None),
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(&sig, None),
         }
     }
 
@@ -120,10 +126,13 @@ impl AllocTestBuilder {
     ) -> AllocTestResult {
         let func_abi = self.build_func_abi();
 
-        let isa = IsaTarget::Rv32imac;
+        let isa = self.isa;
         let pool = match self.pool_size {
             Some(n) => RegPool::with_capacity(isa, n),
-            None => RegPool::new(isa),
+            // `for_abi` rather than `new`: it honours the registers this
+            // function's ABI withholds, and it is what seeds the float pool
+            // from the ABI's float lanes.
+            None => RegPool::for_abi(&func_abi),
         };
 
         let output = walk_linear_with_pool(&vinsts, &vreg_pool, &func_abi, pool)
@@ -387,7 +396,7 @@ mod tests {
             .run_vinst_inner(vinsts, vreg_pool, symbols);
         let call_idx: u16 = 12;
         let ret_regs = (0..4)
-            .filter_map(|operand| r.output.operand_alloc(call_idx, operand).reg())
+            .filter_map(|operand| r.output.operand_alloc(call_idx, operand).preg())
             .collect::<Vec<_>>();
 
         assert!(
@@ -406,8 +415,9 @@ mod tests {
             } = edit
             {
                 assert!(
-                    !ret_regs.contains(reg),
-                    "post-call restore overwrites sret return register x{reg}\n{}",
+                    !ret_regs.contains(&reg.get()),
+                    "post-call restore overwrites sret return register x{}\n{}",
+                    reg.hw(),
                     r.rendered
                 );
             }

@@ -10,7 +10,6 @@ rust-version.workspace = true
 default = []
 std = ["log/std"]
 emu = ["ser-write-json", "lpc-wire/ser-write-json"]
-esp32 = []
 
 [dependencies]
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }

@@ -21,11 +21,15 @@ use lpc_model::{AsLpPath, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
-use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive, project_action};
+use crate::app::studio::studio_edit_e2e_tests::{
+    InProcessServerIo, drive, editor_dirty, project_action,
+};
 use crate::{
-    ControllerId, ProjectController, ProjectOp, ProjectSlotAddress, SlotEditOp, StudioActor,
-    StudioCommand, StudioController, StudioServerClient, UiAction, UiNodeDirtyState, UiNodeFace,
-    UiNodeView, UiPanelControl, UiPanelWidget, UiSlotValueKind, UiStudioView, UiViewContent,
+    ControllerId, NodeCardUiState, NodeUiOp, PlaylistActivateOp, ProjectController,
+    ProjectEditorOp, ProjectEditorTarget, ProjectOp, ProjectSlotAddress, SlotEditOp, StudioActor,
+    StudioCommand, StudioController, StudioServerClient, UiAction, UiLogLevel, UiNodeDirtyState,
+    UiNodeFace, UiNodeView, UiPanelControl, UiPanelWidget, UiPlaylistFace, UiSlotValueKind,
+    UiStudioView, UiViewContent,
 };
 
 #[test]
@@ -52,8 +56,8 @@ fn node_faces_derive_and_edit_end_to_end() {
     let Some(UiNodeFace::Shader(face)) = &shader.face else {
         panic!("shader node derives a shader face, got {:?}", shader.face);
     };
-    assert_eq!(face.controls.len(), 1, "one panel-flagged uniform");
-    let knob = &face.controls[0];
+    assert_eq!(face.controls.len(), 2, "both panel-flagged uniforms");
+    let knob = control_labeled(face, "Speed");
     assert_eq!(knob.label, "Speed");
     assert_eq!(
         knob.widget,
@@ -69,6 +73,19 @@ fn node_faces_derive_and_edit_end_to_end() {
         knob_address.path.to_string(),
         "consumed[speed].default.some"
     );
+    // The u32-shaped `count` uniform is a whole-number knob with no
+    // authoring beyond its value shape.
+    let count = control_labeled(face, "Count");
+    assert_eq!(
+        count.widget,
+        UiPanelWidget::Knob {
+            min: 1.0,
+            max: 4.0,
+            step: Some(1.0)
+        },
+        "an i32/u32 uniform snaps to whole numbers"
+    );
+    assert_eq!(count.value.kind, UiSlotValueKind::F32(2.0));
     assert!(
         face.code_drawer.is_some(),
         "code drawer reuses the inline GLSL editor"
@@ -97,6 +114,11 @@ fn node_faces_derive_and_edit_end_to_end() {
         .clone()
         .expect("fader edits are addressed");
     assert_eq!(fader_address.path.to_string(), "brightness.some");
+    let mapping_editor = face
+        .mapping_editor
+        .as_ref()
+        .expect("map2d fixture derives the in-face mapping editor");
+    assert_eq!(mapping_editor.source, "sign.map2d.json");
 
     // -- fallback: the clock keeps the generic sections ---------------------
     assert_eq!(node_by_kind(&snapshot, "Clock").face, None);
@@ -141,6 +163,68 @@ fn node_faces_derive_and_edit_end_to_end() {
     assert_eq!(
         fixture_fader(&snapshot).state.dirty,
         UiNodeDirtyState::Clean
+    );
+}
+
+#[test]
+fn agent_collapse_preserves_the_composer_draft_end_to_end() {
+    // The draft-survival contract, driven through the REAL seam: the node
+    // key is the snapshot's own `header.path` (exactly what `NodePane`
+    // hands the face), and the ops are the SAME sequence the web's
+    // collapse control dispatches (`NodeUiOp::toggle_agent_section`). This
+    // covers what the controller unit tests cannot — a key mismatch
+    // between the derived DTO and the card-UI overlay would silently drop
+    // the mirrored draft in the wired app while those tests stayed green.
+    let server = Rc::new(RefCell::new(face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let shader = node_by_kind(&snapshot, "Shader");
+    assert_eq!(
+        shader.card_ui,
+        NodeCardUiState::default(),
+        "a fresh card starts expanded with no mirrored draft"
+    );
+    let node = shader.header.path.clone();
+
+    // Collapse with a half-typed draft on hand: mirror rides first, then
+    // the flip — the choreography the ShaderFace toggle dispatches.
+    for op in NodeUiOp::toggle_agent_section(&node, false, "make it pulse, but slo") {
+        handle.tx.send(node_ui_command(op));
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("collapse emits a snapshot");
+    let card_ui = &node_by_kind(&snapshot, "Shader").card_ui;
+    assert!(card_ui.agent_collapsed, "the section reads collapsed");
+    assert_eq!(
+        card_ui.composer_draft, "make it pulse, but slo",
+        "the mirrored draft rides the DTO — the seed a remounting composer restores from"
+    );
+
+    // Expand: the flip alone (the composer was unmounted, so there is no
+    // live draft to mirror) — the mirror must come back out untouched.
+    for op in NodeUiOp::toggle_agent_section(&node, true, "") {
+        handle.tx.send(node_ui_command(op));
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("expand emits a snapshot");
+    let card_ui = &node_by_kind(&snapshot, "Shader").card_ui;
+    assert!(!card_ui.agent_collapsed);
+    assert_eq!(
+        card_ui.composer_draft, "make it pulse, but slo",
+        "collapse → expand round-trips the half-typed draft"
     );
 }
 
@@ -197,15 +281,25 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
     );
     assert!(!child.focused);
 
-    // -- strip click: the entry dispatches the child's node-select action ---
+    // -- strip clicks: ACTIVE chip focuses the child, others activate -------
     let select_idle = idle
         .action
         .clone()
-        .expect("strip entries carry the child select action");
-    let select_active = cued
+        .expect("the ACTIVE entry's chip carries the child select action");
+    assert!(
+        select_idle.op_as::<PlaylistActivateOp>().is_none(),
+        "activating what already plays is a no-op — the ACTIVE chip keeps \
+         the focus gesture"
+    );
+    let activate_cued = cued
         .action
         .clone()
-        .expect("non-active entries carry it too");
+        .expect("non-active entries carry the activate action");
+    let activate_op = activate_cued
+        .op_as::<PlaylistActivateOp>()
+        .expect("non-active chip clicks are runtime activate pokes");
+    assert_eq!(activate_op.entry, 2);
+
     handle.tx.send(StudioCommand::Action(select_idle));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("focus emits a snapshot");
@@ -214,15 +308,150 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
         playlist.children[0].focused,
         "clicking the active entry focuses its (rendered) child"
     );
+    // The non-active click is a runtime poke, not a selection — covered
+    // end-to-end in `playlist_entry_click_activates_on_the_real_server`.
+}
 
-    // Clicking a non-active entry selects its (strip-represented) child;
-    // the strip stays the single surface for it — child list unchanged.
-    handle.tx.send(StudioCommand::Action(select_active));
+#[test]
+fn playlist_entry_click_activates_on_the_real_server() {
+    let server = Rc::new(RefCell::new(playlist_e2e_server(1)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("focus emits a snapshot");
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let face = playlist_face(&snapshot);
+    assert_eq!(face.active, Some(1));
+    let activate = face.entries[1]
+        .action
+        .clone()
+        .expect("non-active entry carries the activate action");
+
+    // Click: the activate op rides the runtime command channel to the real
+    // server (nothing staged — no overlay row, no dirty state); the
+    // playlist validates and queues the switch, applying it on the next
+    // engine frame (every in-process message ticks one).
+    handle.tx.send(StudioCommand::Action(activate));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("dispatch emits a snapshot");
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (0, 0),
+        "an activate poke stages nothing in the overlay"
+    );
+
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
     let playlist = node_by_kind(&snapshot, "Playlist");
+    let face = playlist_face(&snapshot);
+    assert_eq!(
+        face.active,
+        Some(2),
+        "the ACTIVE placard advances to the clicked entry"
+    );
+    assert_eq!(
+        playlist.children.len(),
+        1,
+        "one live surface: exactly the new active entry's child"
+    );
+    assert_eq!(playlist.children[0].label, "Active");
+    // The chips swap roles with the placard: the newly active entry keeps
+    // its child's select action, the idle entry becomes the activate poke.
+    let idle_op = face.entries[0]
+        .action
+        .as_ref()
+        .and_then(|action| action.op_as::<PlaylistActivateOp>())
+        .expect("the now-inactive idle entry carries the activate action");
+    assert_eq!(idle_op.entry, 1);
+    assert!(
+        face.entries[1]
+            .action
+            .as_ref()
+            .is_some_and(|action| action.op_as::<PlaylistActivateOp>().is_none()),
+        "the now-active entry's chip carries the child select action"
+    );
+}
+
+#[test]
+fn playlist_activate_rejects_an_unknown_entry_gracefully() {
+    let server = Rc::new(RefCell::new(playlist_e2e_server(1)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let face = playlist_face(&snapshot);
+    let node = face.entries[1]
+        .action
+        .as_ref()
+        .and_then(|action| action.op_as::<PlaylistActivateOp>())
+        .expect("activate action carries the playlist address")
+        .node
+        .clone();
+    let status_before = node_by_kind(&snapshot, "Playlist").header.status.clone();
+
+    // A stale click (the entry vanished between render and dispatch): the
+    // server answers a NORMAL Rejected response — a warning in the console,
+    // never a transport error or a poisoned runtime status.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        PlaylistActivateOp {
+            node: node.clone(),
+            entry: 9,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("rejection emits a snapshot");
+    assert!(
+        snapshot.console.entries.iter().any(|entry| {
+            entry.level == UiLogLevel::Warn
+                && entry.message.contains("Couldn't activate entry 9")
+                && entry.message.contains("no loaded entry 9")
+        }),
+        "the rejection reason surfaces as a console warning: {:?}",
+        snapshot.console.entries
+    );
+
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    assert_eq!(playlist.header.status, status_before, "no status poisoning");
+    let face = playlist_face(&snapshot);
+    assert_eq!(face.active, Some(1), "the active entry is untouched");
     assert_eq!(playlist.children.len(), 1);
-    assert_eq!(playlist.children[0].label, "Idle");
+
+    // The channel still works after a rejection: a valid activate lands.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        PlaylistActivateOp { node, entry: 2 },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    assert_eq!(playlist_face(&snapshot).active, Some(2));
 }
 
 #[test]
@@ -282,7 +511,7 @@ fn face_e2e_server() -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -310,6 +539,16 @@ fn face_e2e_server() -> LpServer {
       "label": "Speed",
       "description": "Gradient speed multiplier",
       "panel": true
+    },
+    "count": {
+      "kind": "value",
+      "value": "u32",
+      "default": 2,
+      "min": 1,
+      "max": 4,
+      "label": "Count",
+      "description": "How many bands",
+      "panel": true
     }
   }
 }"#;
@@ -317,10 +556,17 @@ fn face_e2e_server() -> LpServer {
   "kind": "Fixture",
   "render_size": { "width": 4, "height": 4 },
   "brightness": 200,
+  "mapping": { "kind": "Map2d", "source": "sign.map2d.json" },
   "bindings": {
     "input": { "source": "bus:visual.out" },
     "output": { "target": "bus:control.out" }
   }
+}"#;
+    let map2d_json = r#"{
+  "format": 1,
+  "objects": [
+    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  ]
 }"#;
     let output_json = r#"{
   "kind": "Output",
@@ -334,6 +580,7 @@ fn face_e2e_server() -> LpServer {
         ("clock.json", clock_json),
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),
+        ("sign.map2d.json", map2d_json),
         ("output.json", output_json),
         ("shader.glsl", FACE_SHADER),
     ];
@@ -370,7 +617,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "playlist": { "ref": "./playlist.json" },
@@ -453,6 +700,16 @@ fn set_value_action(address: ProjectSlotAddress, value: LpValue) -> StudioComman
     ))
 }
 
+/// Wrap a node-card UI mutation exactly as the web's `node_ui_action`
+/// does (targeted at the node-tree editor surface; the op carries its own
+/// node key).
+fn node_ui_command(op: NodeUiOp) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ProjectEditorTarget::node_tree().node_id(),
+        ProjectEditorOp::NodeUi(op),
+    ))
+}
+
 fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
     let bytes = server
         .borrow()
@@ -482,11 +739,27 @@ fn node_by_kind<'a>(view: &'a UiStudioView, kind: &str) -> &'a UiNodeView {
         .unwrap_or_else(|| panic!("project carries a {kind} node"))
 }
 
+fn playlist_face(view: &UiStudioView) -> &UiPlaylistFace {
+    let Some(UiNodeFace::Playlist(face)) = &node_by_kind(view, "Playlist").face else {
+        panic!("playlist face present");
+    };
+    face
+}
+
+/// The one panel control carrying `label` (the uniform map is key-ordered,
+/// so index-addressing the controls is brittle).
+fn control_labeled<'a>(face: &'a crate::UiShaderFace, label: &str) -> &'a UiPanelControl {
+    face.controls
+        .iter()
+        .find(|control| control.label == label)
+        .unwrap_or_else(|| panic!("shader face carries a {label} control"))
+}
+
 fn shader_knob(view: &UiStudioView) -> &UiPanelControl {
     let Some(UiNodeFace::Shader(face)) = &node_by_kind(view, "Shader").face else {
         panic!("shader face present");
     };
-    &face.controls[0]
+    control_labeled(face, "Speed")
 }
 
 fn fixture_fader(view: &UiStudioView) -> &UiPanelControl {

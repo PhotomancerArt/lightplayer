@@ -61,6 +61,11 @@ pub enum HomeOp {
         file_name: String,
         bytes: ZipBytes,
     },
+    /// Install a package from a pasted `lp.package` share envelope
+    /// (Cmd-V anywhere on the gallery, or the explicit paste affordance).
+    ImportJson {
+        text: String,
+    },
     /// Rename a device (D34, inline on the card): registry always; a live
     /// session also writes the identity back to the device.
     RenameDevice {
@@ -128,6 +133,12 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Secondary,
             )
             .with_icon("upload"),
+            Self::ImportJson { .. } => ActionMeta::new(
+                "Paste project",
+                "Install a project from a pasted JSON envelope.",
+                ActionPriority::Secondary,
+            )
+            .with_icon("upload"),
             Self::RenameDevice { .. } => ActionMeta::new(
                 "Rename device",
                 "Rename this device; a connected device is updated too.",
@@ -172,6 +183,7 @@ impl ControllerOp for HomeOp {
             | Self::DuplicatePackage { .. }
             | Self::DeletePackage { .. }
             | Self::ImportZip { .. }
+            | Self::ImportJson { .. }
             | Self::RenameDevice { .. }
             | Self::ForgetDevice { .. }
             | Self::NameDevice { .. } => ActionClass::Foreground {

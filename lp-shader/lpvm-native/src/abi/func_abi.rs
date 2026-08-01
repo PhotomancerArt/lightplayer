@@ -56,7 +56,10 @@ impl FuncAbi {
     /// Argument-passing registers, in order.
     pub fn arg_regs(&self) -> &[PReg] {
         match self.isa {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => &crate::isa::rv32::abi::ARG_REGS,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => &crate::isa::xt::abi::ARG_REGS,
         }
     }
 
@@ -144,18 +147,22 @@ pub struct ModuleAbi {
 impl ModuleAbi {
     /// Build from surface signatures and LPIR imports (import return shapes affect caller sret).
     pub fn from_ir_and_sig(isa: IsaTarget, ir: &LpirModule, sig: &LpsModuleSig) -> Self {
-        use crate::isa::rv32::abi::func_abi_rv32;
-
         let mut func_abis = VecMap::new();
         let mut max_sret_bytes = 0u32;
 
         for fn_sig in &sig.functions {
             let ir_func = ir.functions.values().find(|f| f.name == fn_sig.name);
             let fa = match isa {
-                IsaTarget::Rv32imac => match ir_func {
-                    Some(f) => func_abi_rv32(fn_sig, Some(f)),
-                    None => func_abi_rv32(fn_sig, None),
-                },
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => {
+                    use crate::isa::rv32::abi::func_abi_rv32;
+                    match ir_func {
+                        Some(f) => func_abi_rv32(fn_sig, Some(f)),
+                        None => func_abi_rv32(fn_sig, None),
+                    }
+                }
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(fn_sig, ir_func),
             };
             if let Some(w) = fa.sret_word_count() {
                 max_sret_bytes = max_sret_bytes.max(w * 4);

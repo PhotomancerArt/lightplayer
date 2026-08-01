@@ -73,13 +73,23 @@ pub fn format_vector_constructor(
 }
 
 /// Format a bvec expected value for run directive.
+///
+/// `bvec` is not a supported *generator target* (see `expand::BVEC_UNSUPPORTED`),
+/// but it is very much a supported expectation type: `equal()`, `lessThan()` and
+/// friends all return `bvecN`. This is where [`VecType::BVec`] earns its keep.
 pub fn format_bvec_expected(values: Vec<bool>) -> String {
-    let formatted: Vec<String> = values.iter().map(|&v| v.to_string()).collect();
+    let formatted: Vec<String> = values
+        .iter()
+        .map(|&v| format_literal(i32::from(v), VecType::BVec))
+        .collect();
     format!("bvec{}({})", values.len(), formatted.join(", "))
 }
 
 /// Format a bvec value for comment.
 pub fn format_bvec_comment(values: Vec<bool>) -> String {
-    let formatted: Vec<String> = values.iter().map(|&v| v.to_string()).collect();
+    let formatted: Vec<String> = values
+        .iter()
+        .map(|&v| format_literal(i32::from(v), VecType::BVec))
+        .collect();
     format!("({})", formatted.join(","))
 }

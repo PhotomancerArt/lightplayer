@@ -7,6 +7,10 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectEditorOp {
     Focus,
+    /// Mutate a node card's core-owned UI view-state (drawers, agent
+    /// collapse, mirrored composer draft) — the node arm of the CardUiState
+    /// re-home. Applied synchronously in the controller, like `Focus`.
+    NodeUi(crate::app::project::node_card_ui_state::NodeUiOp),
 }
 
 impl ControllerOp for ProjectEditorOp {
@@ -17,6 +21,11 @@ impl ControllerOp for ProjectEditorOp {
                 "Focus this project editor surface.",
                 ActionPriority::Secondary,
             ),
+            Self::NodeUi(_) => ActionMeta::new(
+                "Card view",
+                "Change what this node card is showing.",
+                ActionPriority::Tertiary,
+            ),
         }
     }
 
@@ -25,8 +34,10 @@ impl ControllerOp for ProjectEditorOp {
         // policy's `PROJECT_EDITOR_ACTION_TIMEOUT_MS` (6 s). `Focus` becomes a
         // local mutation in P3 (no network refresh), but the class it declares
         // here is the deadline the actor would apply were it to drive a pull.
+        // `NodeUi` is likewise a purely local mutation: the handler never
+        // awaits, so the deadline never engages.
         match self {
-            Self::Focus => ActionClass::Foreground {
+            Self::Focus | Self::NodeUi(_) => ActionClass::Foreground {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             },
         }
@@ -57,6 +68,20 @@ mod tests {
     fn focus_uses_the_project_editor_deadline() {
         assert_eq!(
             ProjectEditorOp::Focus.action_class(),
+            ActionClass::Foreground {
+                deadline: PROJECT_EDITOR_ACTION_DEADLINE,
+            }
+        );
+    }
+
+    #[test]
+    fn node_ui_is_foreground_class_local_mutation() {
+        let op = ProjectEditorOp::NodeUi(crate::NodeUiOp::SetAgentCollapsed {
+            node: "/demo.project/orbit.shader".into(),
+            collapsed: true,
+        });
+        assert_eq!(
+            op.action_class(),
             ActionClass::Foreground {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             }

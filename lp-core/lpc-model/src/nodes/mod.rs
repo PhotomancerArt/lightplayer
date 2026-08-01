@@ -16,7 +16,7 @@ pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
 pub use clock::{ClockControls, ClockDef, ClockDefView, ClockState};
 pub use fixture::{
     Brightness, ColorOrder, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
-    FixtureSamplingConfig, FixtureState, FixtureStateView, MappingConfig, PathSpec, RingOrder,
+    FixtureSamplingConfig, FixtureState, FixtureStateView, MappingConfig, PathSpec,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{
@@ -33,15 +33,15 @@ pub use playlist::{
 pub use project::{PROJECT_FORMAT_VERSION, ProjectDef, ProjectDefView};
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{
-    AddSubMode, ComputeShaderDef, ComputeShaderDefView, DivMode, GlslOpts, GlslOptsView, MulMode,
-    ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
-    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef,
-    generate_compute_shader_header, glsl_type_for_lp_type,
+    ComputeShaderDef, ComputeShaderDefView, FloatMode, ScalarHint, ScalarHintView, ShaderDef,
+    ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView,
+    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState,
+    ShaderStateView, ShaderValueShapeRef, generate_compute_shader_header, glsl_type_for_lp_type,
+    shader_panel_step,
 };
 pub use starter::{
-    NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, starter_def_for_kind,
-    starter_for_kind,
+    NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, node_def_asset_ref,
+    set_node_def_asset_ref, starter_def_for_kind, starter_for_kind,
 };
 pub use starter_project::starter_project_files;
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

@@ -450,7 +450,7 @@ mod tests {
             hello: ServerHello {
                 proto: WIRE_PROTO_VERSION,
                 fw: FwProvenance {
-                    package: "fw-esp32".to_string(),
+                    package: "fw-esp32c6".to_string(),
                     commit: "abc123456789".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),

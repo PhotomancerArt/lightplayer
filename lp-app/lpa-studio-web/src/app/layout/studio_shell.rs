@@ -36,6 +36,9 @@ pub fn StudioShell(
         device_sync: _,
         lens_card,
         settings,
+        // consumed by the web shell's unload gate; the project pane
+        // computes its own dirty affordances from the editor view
+        dirty: _,
     } = view;
 
     if opening_frame && panes.is_empty() {

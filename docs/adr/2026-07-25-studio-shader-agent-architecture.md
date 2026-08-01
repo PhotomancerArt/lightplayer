@@ -184,3 +184,152 @@ Recorded, deliberately not built in this slice:
   implement when a credible in-browser model is worth serving.
 - **M6 capture** — unreserve the `capture` tool field when the preview
   snapshot seam lands.
+
+## 2026-07-27 Addendum: Params write surface, cost, visibility, session history
+
+One round of prod testing later (Yona: "it actually works very well" —
+cost and opacity were the complaints, not quality), the
+agent-params-and-polish round (PR #158) grew the architecture along the
+recorded "outward from GLSL" direction. The original decisions stand;
+this addendum records what changed and what the round measured.
+
+### Write surface: two tools, still one door
+
+`upsert_param` joins `iterate` as the second tool — a narrow f32 param
+upsert (name, label, default, min/max, unit, panel) that materializes as
+ONE `MutationCmdBatch` of `PutSlotEdit`s on the def artifact, through
+the SAME Save-gated overlay as source edits. The "overlay is the
+permission system" rule is unchanged; the write surface widened, the
+door count did not. The pre-check accepts a param name from the
+declared-uniform set (fresh compile) or the existing def set; when the
+staged source does not compile, a comment-stripped textual declaration
+scan substitutes for the declared set — declare → upsert → fix-code is
+a normal repair order and must not be refused exactly when the agent is
+mid-repair (live-session finding).
+
+### `iterate` is feedback-dense: engine verdict + params diff
+
+The result (and transcript summary) now carries two new sections:
+
+- **`engine`** — the REAL engine-side verdict (`ok | error | unknown`,
+  message, line/col), fetched by the host bridge awaiting the verdict
+  chase bounded (`ENGINE_VERDICT_BUDGET_MS = 1500`) after a stage.
+  Probe oracle (naga) and engine runtime are different compile worlds;
+  before this the agent literally could not see "shader render: missing
+  uniform field" errors, and a live session burned 14 turns on "compile
+  ok" rows the engine rejected every one of.
+- **`params`** — declared uniforms (a `LpsModuleSig` leaf walker in
+  `lps-probe`, `outputSize` flagged reserved) diffed against def-side
+  `ShaderSlotDef` records, orphans flagged both ways. This is the
+  static catch for the missing-uniform-field class, and the read half
+  of the `upsert_param` loop.
+
+### Async host, live progress, honest run ends
+
+`AgentHost` write/verdict methods return boxed `!Send` `HostFuture`s
+(read accessors stay sync — host-owned snapshots). `run_iterate` emits
+`ToolPhase` progress (`staging / compiling / probe i/of / waiting for
+engine / finishing`) with UI yield points, so the tab paints while
+experiments run. Runs can no longer end silently: `stop_reason` other
+than end-turn surfaces as `AgentEvent::Truncated`, a truncated dangling
+`tool_use` is dropped from the recorded assistant message (replay stays
+protocol-valid), and aborts synthesize cancelled tool_results.
+
+### Extended thinking (adaptive), replayed and displayed
+
+Anthropic requests send `thinking: {type: "adaptive", display:
+"summarized"}` — on the current model family (Sonnet 5) adaptive
+thinking is on regardless and `display` defaults to omitted, which
+streams EMPTY thinking blocks; the explicit shape is what makes
+thinking visible. The old `enabled + budget_tokens` shape is rejected
+by this family (pre-4.6 models would need it back — follow-up). Signed
+thinking blocks are accumulated from the stream and replayed verbatim
+through the tool-use loop (unsigned ones dropped at serialization;
+`cache_control` never lands on thinking-family blocks). The
+OpenAI-compat provider passes through `reasoning_content` / `reasoning`
+deltas where servers emit them but never opts in on the request
+(OpenRouter's `reasoning: {}` opt-in is a follow-up).
+
+### Prompt caching: implemented, and measured leaky
+
+Two `cache_control` breakpoints (system block — which by prefix order
+also covers tools — plus a rolling marker on the last content block),
+four disjoint usage buckets (`input` / `output` / `cache_write` /
+`cache_read`) through both providers, and cache-aware cost estimates
+(write 1.25×, read 0.1× of the input rate) in the chat footnote, the
+debug export, and the eval report.
+
+**Measured P0 caveat (P9 eval run, live)**: the system prompt embeds
+the *current shader source* and is rebuilt every turn, and system sits
+ahead of the conversation in the cache hash prefix — so **every staged
+edit invalidates both cache entries for the next request**. Cache reads
+only materialize on consecutive stage-free turns (eval evidence:
+2-turn staging tasks read 0 cached tokens; a 3-turn task read only its
+stage-free pair). An editing agent stages most turns, which is why live
+session costs still look uncached. Fix direction (deliberately not done
+blind in the closeout): keep the cached prefix static per session and
+inject volatile source state append-only via the message stream — a
+prompt-shape redesign with its own eval pass.
+
+### Session edit history, thumbnails, revert
+
+`AgentEditRecord`s (turn, note, staged source, engine verdict, 32×32
+preview thumb captured post-verdict from the existing probe preview
+bytes — no GPU capture seam needed) accumulate per session (cap 50).
+UI: a filmstrip above the composer plus inline thumbs on the staged
+tool rows; revert restages the old source through the normal
+overlay/Save flow (`AgentOp::RevertToTurn`, idle-only). Reverts are as
+recoverable as any other edit — same door.
+
+### Chat log + debug export
+
+Idle-only `AgentOp::ExportDebug` builds a versioned JSON dump — the
+exact model-facing transcript (thinking blocks included), per-turn
+stop reasons and usage buckets, the staged-edit history with full GLSL,
+provider and model names, **never the key** (tested) — plus a readable
+markdown chat log with per-row probe-compile AND engine verdicts and a
+cache-bucket usage footline ("NO CACHE HITS" on a long session is a
+regression signal, not a detail). The export paid for itself the day it
+landed: it produced the upsert-on-broken-compile finding, the dialect
+doctrine, and the caching caveat above.
+
+### Model discovery
+
+Every provider serves a models list (Anthropic `GET /v1/models`,
+OpenAI-compat `GET {base_url}/models`), so a plain-GET sibling
+transport (`HttpGetTransport`) + `provider/model_discovery.rs` feed a
+fingerprint-keyed store (credentials+endpoint fingerprint; stale
+responses can never land on new credentials). The settings model field
+and a chat-footer model chip render dropdowns with a free-text escape
+hatch; fetches are popover-open/chip-open triggered and debounced, boot
+stays quiet.
+
+### Dialect-landmine doctrine
+
+The system prompt now carries a short list of known landmines where
+GLSL compiles but a backend rejects it (currently: no swizzle-stores
+through indexed array elements — a naga *frontend* limitation). Doctrine
+learned the hard way: landmine entries require root-cause verification
+before they enter the prompt — a "no nested break/continue" entry was
+retracted after the real cause landed as the Q32 `fabs` wasm stack leak
+(`docs/defects/2026-07-27-wasm-q32-fabs-stack-leak.md`); the control
+flow was never broken. The prompt also gained bisection doctrine
+(diagnostic detours capped at 2–3 calls, restage the best working
+source before a run ends) from the same live sessions.
+
+### Runtime command channel (related ADR)
+
+The activate-entry work landed as its own decision —
+`2026-07-27-runtime-node-command-channel.md`, the first non-overlay
+client→engine write. It deliberately does NOT touch the agent's write
+surface; the agent still owns exactly the overlay door.
+
+### Addendum follow-ups
+
+- **Cache-friendly prompt shape** (the P0 caveat above) — static cached
+  prefix, volatile source injected append-only; re-measure with evals.
+- Pre-4.6 Anthropic models need the `enabled + budget_tokens` thinking
+  shape (they 400 on `adaptive`).
+- OpenRouter reasoning requires a request opt-in (`reasoning: {}`) —
+  provider-gated request field when wanted.
+- Transcript/session persistence across reloads remains v1-out-of-scope.

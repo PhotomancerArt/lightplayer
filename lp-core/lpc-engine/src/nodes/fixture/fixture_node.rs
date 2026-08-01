@@ -6,28 +6,29 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{
-    ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec, RingOrder,
+    ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec,
 };
 use lpc_model::{
-    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct, Dim2u,
-    FixtureDefView, FixtureState, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
-    SlotShapeRegistryError,
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
+    ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
-    initialize_channel_accumulators,
+    initialize_channel_accumulators, mapping_from_map2d_doc,
 };
 use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureData, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
 
-use crate::dataflow::resolver::QueryKey;
 use crate::node::{
-    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
-    PressureLevel, ProduceResult, RuntimeStateShape, TickContext, err_ctx,
+    AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
+    MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, RuntimeStateShape,
+    TickContext, err_ctx,
 };
+use crate::nodes::fixture::power_limit::{self, PowerPass};
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
     ControlSpan,
@@ -37,6 +38,21 @@ use crate::products::visual::{
     VisualProduct, VisualSample, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
     texel_center_to_uv_q16,
 };
+use lpc_model::NodeRuntimeStatus;
+use lpc_model::nodes::fixture::{FixturePower, preset_for};
+
+/// The map2d document a fixture's mapping was resolved from, kept so the
+/// node can re-resolve when the asset body changes (the in-place mapping
+/// editor's apply path — the whole-body `SetArtifactBody` flow).
+#[derive(Clone, Debug)]
+pub struct FixtureMap2dSource {
+    pub location: lpc_model::AssetLocation,
+    /// Asset revision the current mapping was resolved from.
+    pub revision: Revision,
+    /// Render-texture extent the doc was resolved against (from the def).
+    pub render_width: u32,
+    pub render_height: u32,
+}
 
 /// Fixture node: resolves a shader visual product and exposes a control product for outputs.
 pub struct FixtureNode {
@@ -44,6 +60,14 @@ pub struct FixtureNode {
     mapping: MappingConfig,
     sampling: FixtureSamplingConfig,
     mapping_version: Revision,
+    /// Present when the mapping came from a `.map2d.json` document.
+    map2d_source: Option<FixtureMap2dSource>,
+    /// Keep-last-good: a failed map2d refresh keeps the old mapping
+    /// rendering and surfaces the failure as the node's runtime status.
+    mapping_error: Option<alloc::string::String>,
+    /// The input didn't resolve (fresh fixture, nothing bound yet): lamps
+    /// render unlit and the cause surfaces as runtime status.
+    input_error: Option<alloc::string::String>,
     def_view: Option<FixtureDefView>,
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
@@ -54,6 +78,15 @@ pub struct FixtureNode {
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     direct_points: Option<(Revision, alloc::vec::Vec<DirectSamplePoint>)>,
     display_layout_revision: Option<(FixtureDisplayLayoutKey, Revision)>,
+    /// Current-limit scale for the NEXT frame, in Q16. Demand for a frame is
+    /// only known once that frame is rendered, so the scale always trails it
+    /// by one.
+    power_scale_q16: u32,
+    /// Last frame's estimated draw, in milliamps.
+    power_estimate_ma: u32,
+    /// Render time of the last frame, for the release rate limit. Supplied by
+    /// the render context — the core never reads a clock.
+    power_last_time_seconds: Option<f32>,
 }
 
 impl FixtureNode {
@@ -69,6 +102,9 @@ impl FixtureNode {
             mapping,
             sampling,
             mapping_version,
+            map2d_source: None,
+            mapping_error: None,
+            input_error: None,
             def_view: None,
             last_visual_product: None,
             last_settings: None,
@@ -78,7 +114,42 @@ impl FixtureNode {
             precomputed: None,
             direct_points: None,
             display_layout_revision: None,
+            power_scale_q16: power_limit::UNITY_SCALE_Q16,
+            power_estimate_ma: 0,
+            power_last_time_seconds: None,
         }
+    }
+
+    /// Attach the map2d document source this mapping was resolved from,
+    /// enabling live re-resolution on asset refresh.
+    #[must_use]
+    pub fn with_map2d_source(mut self, source: FixtureMap2dSource) -> Self {
+        self.map2d_source = Some(source);
+        self
+    }
+
+    /// Seed render settings from the def at load, so control probes work
+    /// before the first tick — a freshly created fixture that nothing
+    /// consumes yet still shows its (unlit) lamp layout instead of
+    /// "missing cached settings". The first real tick refreshes these
+    /// from live slot values.
+    #[must_use]
+    pub fn with_render_defaults(
+        mut self,
+        width: u32,
+        height: u32,
+        color_order: ColorOrder,
+    ) -> Self {
+        self.last_settings = Some(FixtureRenderSettings {
+            width,
+            height,
+            diagnostic_mode: FixtureDiagnosticMode::Off,
+            color_order,
+            brightness: lpc_model::Brightness::DEFAULT.as_u8(),
+            gamma_correction: true,
+            power: FixturePower::default(),
+        });
+        self
     }
 
     fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&FixtureDefView, NodeError> {
@@ -182,8 +253,12 @@ struct FixtureDisplayLayoutKey {
     height: u32,
 }
 
+/// The fixture's authored input slot. Resolution takes it as a constant so
+/// the path is parsed once rather than per frame.
+pub(crate) const FIXTURE_INPUT_PATH: &str = "input";
+
 pub fn fixture_input_path() -> SlotPath {
-    SlotPath::parse("input").expect("fixture input path")
+    SlotPath::parse(FIXTURE_INPUT_PATH).expect("fixture input path")
 }
 
 pub fn fixture_output_path() -> SlotPath {
@@ -207,6 +282,15 @@ impl NodeRuntime for FixtureNode {
                 def.gamma_correction().get_or(ctx, true)?,
             )
         };
+        // Read through the option's `some` branch rather than the def view's
+        // option reader: `power` is absent from every project authored before
+        // it existed, and that reads as an unresolved slot rather than as the
+        // "option slot is none" the view's reader recognises.
+        //
+        // Absent falls back to the default guard rather than to unlimited — the
+        // fixture most in need of a current limit is the one whose author has
+        // never heard of the setting. Opting out is `budget_ma: 0`.
+        let power: FixturePower = try_read_def_value(ctx, "power.some")?.unwrap_or_default();
         let diagnostic_mode =
             try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
         self.sync_mapping_from_def(ctx)?;
@@ -216,30 +300,49 @@ impl NodeRuntime for FixtureNode {
         let ver = ctx.revision();
         let mapping_ver = self.mapping_version;
         if diagnostic_mode == FixtureDiagnosticMode::Off {
-            let prod = ctx
-                .resolve(QueryKey::ConsumedSlot {
-                    node: ctx.node_id(),
-                    slot: fixture_input_path(),
-                })
-                .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
+            // A fixture whose input does not RESOLVE (fresh node, nothing
+            // bound yet) still produces: lamps render unlit and the mapping
+            // stays viewable/editable, with the cause surfaced as runtime
+            // status. A resolved input carrying the wrong shape keeps
+            // failing loudly — that is authored misconfiguration.
+            match ctx.resolve_static_consumed(FIXTURE_INPUT_PATH) {
+                Ok(prod) => {
+                    let visual_product = match prod
+                        .value_leaf()
+                        .ok_or_else(|| {
+                            NodeError::msg(
+                                "fixture input resolved to aggregate data, expected visual product",
+                            )
+                        })?
+                        .get()
+                    {
+                        lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => {
+                            *product
+                        }
+                        _ => {
+                            return Err(NodeError::msg(
+                                "fixture expected visual product from input",
+                            ));
+                        }
+                    };
+                    self.last_visual_product = Some(visual_product);
+                    self.input_error = None;
+                }
+                Err(e) => {
+                    self.last_visual_product = None;
+                    self.input_error = Some(format!("fixture input not resolved: {}", e.message));
+                }
+            }
 
-            let visual_product = match prod
-                .value_leaf()
-                .ok_or_else(|| {
-                    NodeError::msg(
-                        "fixture input resolved to aggregate data, expected visual product",
-                    )
-                })?
-                .get()
+            // The unlit fallback renders through the texture-area
+            // accumulator path, so ensure those entries whenever there is
+            // no visual product — even in Direct sampling mode.
+            if self.sampling == FixtureSamplingConfig::TextureArea
+                || self.last_visual_product.is_none()
             {
-                lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
-                _ => return Err(NodeError::msg("fixture expected visual product from input")),
-            };
-            self.last_visual_product = Some(visual_product);
-
-            if self.sampling == FixtureSamplingConfig::TextureArea {
                 self.ensure_texture_area_mapping(width, height, mapping_ver, ver);
-            } else {
+            }
+            if self.sampling == FixtureSamplingConfig::Direct {
                 self.ensure_direct_points(mapping_ver);
             }
         } else {
@@ -252,11 +355,24 @@ impl NodeRuntime for FixtureNode {
             color_order,
             brightness,
             gamma_correction,
+            power,
         });
         self.state.output.set_with_version(
             ver,
             ControlProduct::new(ctx.node_id(), 0, fixture_control_extent(&self.mapping)),
         );
+        // Published from the last completed render, so these trail the frame
+        // they describe by one — the same trail the scale itself carries.
+        self.state
+            .estimated_draw_ma
+            .set_with_version(ver, self.power_estimate_ma);
+        self.state.power_scale.set_with_version(
+            ver,
+            self.power_scale_q16 as f32 / power_limit::UNITY_SCALE_Q16 as f32,
+        );
+        self.state
+            .power_budget_ma
+            .set_with_version(ver, power.budget_ma);
         Ok(ProduceResult::Produced)
     }
 
@@ -277,6 +393,62 @@ impl NodeRuntime for FixtureNode {
         self.precomputed = None;
         self.direct_points = None;
         Ok(())
+    }
+
+    /// Re-resolve the mapping when the backing map2d document changes —
+    /// the in-place editor's apply path. Mirrors `sync_mapping_from_def`'s
+    /// invalidation so the control product, sample points, and display
+    /// layout all re-derive from the new mapping.
+    fn refresh_asset(
+        &mut self,
+        location: &lpc_model::AssetLocation,
+        ctx: &mut AssetRefreshContext<'_>,
+    ) -> Result<AssetRefreshResult, NodeError> {
+        let Some(source) = &self.map2d_source else {
+            return Ok(AssetRefreshResult::Unused);
+        };
+        if location != &source.location {
+            return Ok(AssetRefreshResult::Unused);
+        }
+
+        let text = match ctx.read_asset_text_if_changed(location, source.revision) {
+            Ok(Some(text)) => text,
+            Ok(None) => return Ok(AssetRefreshResult::Unchanged),
+            Err(err) => {
+                // Keep-last-good: no new document to resolve.
+                self.mapping_error = Some(format!("read fixture map2d document: {err:?}"));
+                return Ok(AssetRefreshResult::Refreshed);
+            }
+        };
+        let asset_revision = text.revision;
+        let resolved = lpc_mapping::Map2dDoc::from_json(&text.text)
+            .map_err(|e| format!("parse fixture map2d document: {e}"))
+            .and_then(|doc| {
+                mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
+                    .map_err(|e| format!("resolve fixture map2d document: {e}"))
+            });
+        match resolved {
+            Ok(mapping) => {
+                self.mapping = mapping;
+                self.mapping_version = ctx.revision();
+                if let Some(source) = &mut self.map2d_source {
+                    source.revision = asset_revision;
+                }
+                self.precomputed = None;
+                self.direct_points = None;
+                self.display_layout_revision = None;
+                self.mapping_error = None;
+            }
+            Err(message) => self.mapping_error = Some(message),
+        }
+        Ok(AssetRefreshResult::Refreshed)
+    }
+
+    fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
+        self.mapping_error
+            .as_ref()
+            .or(self.input_error.as_ref())
+            .map(|error| NodeRuntimeStatus::Error(error.clone()))
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
@@ -300,18 +472,13 @@ impl NodeRuntime for FixtureNode {
 /// snake_case — see `SlotEnumAccess::variant` and the shape variant names.
 const MAPPING_SAMPLE_DIAMETER_DEF_PATH: &str = "mapping.PathPoints.sample_diameter";
 
-/// Def path prefix for one authored `RingArray` path spec.
-fn ring_array_def_prefix(path_key: u32) -> alloc::string::String {
-    alloc::format!("mapping.PathPoints.paths[{path_key}].RingArray")
-}
-
 fn sync_mapping_config_from_def(
     mapping: &mut MappingConfig,
     ctx: &mut TickContext<'_>,
 ) -> Result<(), NodeError> {
     match mapping {
         MappingConfig::Unset => {}
-        MappingConfig::SvgPath { .. } => {}
+        MappingConfig::Map2d { .. } => {}
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -323,105 +490,29 @@ fn sync_mapping_config_from_def(
                 return Ok(());
             };
             sample_diameter.set(next_sample_diameter);
-            let path_keys: Vec<u32> = paths.entries.keys().copied().collect();
-            for path_key in path_keys {
-                let Some(path) = paths.entries.get_mut(&path_key) else {
-                    continue;
-                };
-                sync_path_spec_from_def(path_key, path.value_mut(), ctx)?;
-            }
+            // PointList paths carry no def-synced parameters (positions are
+            // resolved data); only the sample diameter tracks the def.
+            let _ = paths;
         }
     }
     Ok(())
-}
-
-fn sync_path_spec_from_def(
-    path_key: u32,
-    path: &mut PathSpec,
-    ctx: &mut TickContext<'_>,
-) -> Result<(), NodeError> {
-    match path {
-        PathSpec::RingArray {
-            center,
-            diameter,
-            start_ring_inclusive,
-            end_ring_exclusive,
-            ring_lamp_counts,
-            offset_angle,
-            order,
-            ..
-        } => {
-            let prefix = ring_array_def_prefix(path_key);
-            let Some(next_center) = try_read_def_value(ctx, &alloc::format!("{prefix}.center"))?
-            else {
-                return Ok(());
-            };
-            center.set(next_center);
-            let Some(next_diameter) =
-                try_read_def_value(ctx, &alloc::format!("{prefix}.diameter"))?
-            else {
-                return Ok(());
-            };
-            diameter.set(next_diameter);
-            start_ring_inclusive.set(read_def_value(
-                ctx,
-                &alloc::format!("{prefix}.start_ring_inclusive"),
-            )?);
-            end_ring_exclusive.set(read_def_value(
-                ctx,
-                &alloc::format!("{prefix}.end_ring_exclusive"),
-            )?);
-            let count_keys: Vec<u32> = ring_lamp_counts.entries.keys().copied().collect();
-            for count_key in count_keys {
-                let Some(count) = ring_lamp_counts.entries.get_mut(&count_key) else {
-                    continue;
-                };
-                count.set(read_def_value(
-                    ctx,
-                    &alloc::format!("{prefix}.ring_lamp_counts[{count_key}]"),
-                )?);
-            }
-            offset_angle.set(read_def_value(
-                ctx,
-                &alloc::format!("{prefix}.offset_angle"),
-            )?);
-            order.set(read_def_value(ctx, &alloc::format!("{prefix}.order"))?);
-        }
-        PathSpec::PointList { .. } => {}
-    }
-    Ok(())
-}
-
-fn read_def_value<T: lpc_model::FromLpValue>(
-    ctx: &mut TickContext<'_>,
-    path: &str,
-) -> Result<T, NodeError> {
-    let Some(value) = try_read_def_value(ctx, path)? else {
-        return Err(NodeError::msg(alloc::format!(
-            "authored fixture path {path:?} is unavailable"
-        )));
-    };
-    Ok(value)
 }
 
 fn try_read_def_value<T: lpc_model::FromLpValue>(
     ctx: &mut TickContext<'_>,
-    path: &str,
+    path: &'static str,
 ) -> Result<Option<T>, NodeError> {
-    let slot = SlotPath::parse(path).map_err(|e| {
-        NodeError::msg(alloc::format!(
-            "invalid authored fixture path {path:?}: {e}"
-        ))
-    })?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: slot.clone(),
-    }) {
+    let production = match ctx.resolve_static_consumed(path) {
         Ok(production) => production,
         Err(e) => {
             // "Absent" (no def loaded, inactive enum variant, option none) is
             // expected and reads as None; a path that cannot exist in the
             // FixtureDef shape is a code bug and must not be swallowed.
+            let slot = SlotPath::parse(path).map_err(|e| {
+                NodeError::msg(alloc::format!(
+                    "invalid authored fixture path {path:?}: {e}"
+                ))
+            })?;
             ensure_path_exists_in_fixture_def_shape(ctx.slot_shapes(), &slot)?;
             log::debug!("[fixture] def path {path} unavailable: {}", e.message);
             return Ok(None);
@@ -462,6 +553,9 @@ struct FixtureRenderSettings {
     color_order: ColorOrder,
     brightness: u8,
     gamma_correction: bool,
+    /// Lamp type and the budget in force, after an unstated one has fallen
+    /// back to the default. A zero budget means limiting was opted out of.
+    power: FixturePower,
 }
 
 impl ControlNode for FixtureNode {
@@ -485,9 +579,89 @@ impl ControlNode for FixtureNode {
             );
         }
 
-        let visual_product = self
-            .last_visual_product
-            .ok_or_else(|| NodeError::msg("fixture control render requested before tick"))?;
+        let mut power = if settings.power.is_limited() {
+            PowerPass::limited(self.power_scale_q16)
+        } else {
+            PowerPass::unlimited()
+        };
+        let now_seconds = ctx.time_seconds();
+        let layout = self.render_control_inner(request, target, settings, ctx, &mut power)?;
+        self.update_power_limit(settings.power, &power, now_seconds);
+        Ok(layout)
+    }
+
+    fn control_display_layout(
+        &mut self,
+        _product: ControlProduct,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<Option<ControlDisplayLayout>, NodeError> {
+        self.control_display_layout_impl(ctx)
+    }
+}
+
+impl FixtureNode {
+    /// Roll the current-limit scale forward from the demand this frame asked
+    /// for. Runs after the frame is written, because that is when demand is
+    /// known — hence the one-frame trail.
+    fn update_power_limit(&mut self, power: FixturePower, pass: &PowerPass, now_seconds: f32) {
+        let previous_seconds = self.power_last_time_seconds.replace(now_seconds);
+        if !power.is_limited() || !pass.is_enabled() {
+            // Opted out: reset, so restoring a budget starts unlimited rather
+            // than inheriting a stale scale.
+            self.power_scale_q16 = power_limit::UNITY_SCALE_Q16;
+            self.power_estimate_ma = 0;
+            return;
+        }
+
+        let dt_ms = previous_seconds
+            .map(|previous| ((now_seconds - previous).max(0.0) * 1000.0) as u32)
+            .unwrap_or(0);
+        let lamp_count = fixture_lamp_channel_count(&self.mapping);
+        let estimate = power_limit::estimate_ma(
+            preset_for(power.lamp_type).model,
+            lamp_count,
+            pass.demand8(),
+        );
+
+        self.power_estimate_ma = estimate.total_ma();
+        self.power_scale_q16 =
+            power_limit::next_scale_q16(estimate, power.budget_ma, self.power_scale_q16, dt_ms);
+    }
+
+    fn render_control_inner(
+        &mut self,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+        settings: FixtureRenderSettings,
+        ctx: &mut ControlRenderContext<'_>,
+        power: &mut PowerPass,
+    ) -> Result<ControlLayout, NodeError> {
+        let Some(visual_product) = self.last_visual_product else {
+            // Unlit render: no resolvable visual input (fresh fixture,
+            // nothing bound, possibly never ticked). Zeroed accumulators
+            // through the normal target path — black lamps, real layout.
+            self.ensure_texture_area_mapping(
+                settings.width,
+                settings.height,
+                self.mapping_version,
+                self.mapping_version,
+            );
+            let entries = &self
+                .precomputed
+                .as_ref()
+                .ok_or_else(|| NodeError::msg("fixture control render missing cached mapping"))?
+                .3;
+            let accumulators = initialize_channel_accumulators(entries);
+            return render_fixture_control_target(
+                request,
+                target,
+                &accumulators,
+                settings.color_order,
+                settings.brightness,
+                settings.gamma_correction,
+                power,
+            );
+        };
         if self.sampling == FixtureSamplingConfig::Direct {
             return render_direct_fixture_control(
                 &mut self.sample_points,
@@ -501,6 +675,7 @@ impl ControlNode for FixtureNode {
                 target,
                 settings,
                 ctx,
+                power,
             );
         }
         let mapping_entries = &self
@@ -536,12 +711,12 @@ impl ControlNode for FixtureNode {
             settings.color_order,
             settings.brightness,
             settings.gamma_correction,
+            power,
         )
     }
 
-    fn control_display_layout(
+    fn control_display_layout_impl(
         &mut self,
-        _product: ControlProduct,
         ctx: &mut ControlRenderContext<'_>,
     ) -> Result<Option<ControlDisplayLayout>, NodeError> {
         let settings = self
@@ -563,12 +738,17 @@ impl ControlNode for FixtureNode {
             })
             .collect();
 
-        Ok(Some(ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-            revision,
-            settings.width,
-            settings.height,
-            lamps,
-        ))))
+        let paths = fixture_path_spans(&self.mapping)
+            .into_iter()
+            .map(|span| ControlPathSpan2d {
+                first_lamp: span.first_lamp,
+                lamp_count: span.lamp_count,
+            })
+            .collect();
+        Ok(Some(ControlDisplayLayout::Layout2d(
+            ControlLayout2d::new(revision, settings.width, settings.height, lamps)
+                .with_paths(paths),
+        )))
     }
 }
 
@@ -673,6 +853,7 @@ fn render_direct_fixture_control(
     target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
     ctx: &mut ControlRenderContext<'_>,
+    power: &mut PowerPass,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
         || target.sample_format != ControlSampleFormat::Unorm16
@@ -730,6 +911,10 @@ fn render_direct_fixture_control(
             g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
             b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
         }
+        // After gamma, never before. See `power_limit`.
+        let r = power.channel(r);
+        let g = power.channel(g);
+        let b = power.channel(b);
         let ordered = ordered_rgb_u16(settings.color_order, r, g, b);
         target.samples[base..base + 3].copy_from_slice(&ordered);
         written_samples = written_samples.max(base + 3);
@@ -1084,6 +1269,7 @@ fn render_fixture_control_target(
     color_order: ColorOrder,
     brightness_u8: u8,
     gamma_correction: bool,
+    power: &mut PowerPass,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
         || target.sample_format != ControlSampleFormat::Unorm16
@@ -1130,6 +1316,12 @@ fn render_fixture_control_target(
             g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
             b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
         }
+
+        // After gamma, never before: scaling gamma's input sheds roughly the
+        // square of what was intended. See `power_limit`.
+        let r = power.channel(r);
+        let g = power.channel(g);
+        let b = power.channel(b);
 
         let ordered = ordered_rgb_u16(color_order, r, g, b);
         target.samples[base..base + 3].copy_from_slice(&ordered);
@@ -1192,44 +1384,17 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
 fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
     match config {
         MappingConfig::Unset => Vec::new(),
-        MappingConfig::SvgPath { .. } => Vec::new(),
+        MappingConfig::Map2d { .. } => Vec::new(),
         MappingConfig::PathPoints { paths, .. } => {
             let mut spans = Vec::new();
-            let mut next_lamp = 0u32;
             for path in paths.entries.values() {
-                let (first_lamp, lamp_count) = match path.value() {
-                    PathSpec::RingArray {
-                        start_ring_inclusive,
-                        end_ring_exclusive,
-                        ring_lamp_counts,
-                        order,
-                        ..
-                    } => {
-                        let start_ring = *start_ring_inclusive.value();
-                        let end_ring = *end_ring_exclusive.value();
-                        let ring_indices: Vec<u32> = match order.value() {
-                            RingOrder::InnerFirst => (start_ring..end_ring).collect(),
-                            RingOrder::OuterFirst => (start_ring..end_ring).rev().collect(),
-                        };
-
-                        let mut lamp_count = 0u32;
-                        for ring_index in ring_indices {
-                            lamp_count = lamp_count.saturating_add(
-                                ring_lamp_counts
-                                    .entries
-                                    .get(&ring_index)
-                                    .map(|count| *count.value())
-                                    .unwrap_or(0),
-                            );
-                        }
-                        (next_lamp, lamp_count)
-                    }
-                    PathSpec::PointList {
-                        first_channel,
-                        points,
-                        ..
-                    } => (*first_channel.value(), points.entries.len() as u32),
-                };
+                let PathSpec::PointList {
+                    first_channel,
+                    points,
+                    ..
+                } = path.value();
+                let (first_lamp, lamp_count) =
+                    (*first_channel.value(), points.entries.len() as u32);
                 if lamp_count > 0 {
                     spans.push(FixturePathSpan {
                         palette_index: spans.len() as u32,
@@ -1237,7 +1402,6 @@ fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
                         lamp_count,
                     });
                 }
-                next_lamp = first_lamp.saturating_add(lamp_count);
             }
             spans
         }
@@ -1248,36 +1412,58 @@ fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
 mod tests {
     use super::*;
     use alloc::boxed::Box;
+    #[cfg(feature = "node-shader")]
     use alloc::sync::Arc;
     use alloc::vec;
+    #[cfg(feature = "node-shader")]
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use lpc_model::nodes::fixture::{PathSpec, RingOrder};
+    use lpc_model::nodes::fixture::PathSpec;
     use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
     use lpc_registry::ProjectRegistry;
+    use lpc_wire::{WireChildKind, WireSlotIndex};
+    // Read-probe types exercised only by
+    // `fixture_project_read_control_probe_returns_native_samples_and_cached_layout`.
+    #[cfg(feature = "node-shader")]
     use lpc_wire::{
         ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
         ControlProductProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest,
-        WireChannelSampleFormat, WireChildKind, WireSlotIndex,
+        WireChannelSampleFormat,
     };
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::engine::Engine;
+    #[cfg(feature = "node-shader")]
+    use crate::engine::default_demand_input_path;
+    #[cfg(feature = "node-shader")]
     use crate::engine::test_support::read_probe_results;
-    use crate::engine::{Engine, default_demand_input_path};
-    use crate::node::{RenderContext, RenderNode, RuntimeStateShape, test_placeholder_spine};
+    #[cfg(feature = "node-shader")]
+    use crate::node::RuntimeStateShape;
+    use crate::node::test_placeholder_spine;
+    // Only the shader-fed producers below (`FixtureTickCountSolidProducer`,
+    // `FixtureExpectedSampleProducer`) need render-node plumbing.
+    #[cfg(feature = "node-shader")]
+    use crate::node::{RenderContext, RenderNode};
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     use crate::nodes::TextureNode;
+    #[cfg(feature = "node-shader")]
     use crate::nodes::shader_output_path;
+    #[cfg(feature = "node-shader")]
     use crate::products::visual::{
         TextureRenderProduct, VisualProduct, VisualSampleBufferRequest, VisualSampleTarget,
     };
-    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
+    use lpc_model::SlotShapeRegistry;
+    #[cfg(feature = "node-shader")]
+    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistryError};
 
+    #[cfg(feature = "node-shader")]
     struct FixtureTickCountSolidProducer {
         state: ShaderState,
         ticks: Arc<AtomicU32>,
         color: [u16; 4],
     }
 
+    #[cfg(feature = "node-shader")]
     impl NodeRuntime for FixtureTickCountSolidProducer {
         fn produce(
             &mut self,
@@ -1319,6 +1505,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     impl RenderNode for FixtureTickCountSolidProducer {
         fn render_texture(
             &mut self,
@@ -1351,6 +1538,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     struct FixtureExpectedSampleProducer {
         state: ShaderState,
         expected_points: Vec<i32>,
@@ -1359,6 +1547,7 @@ mod tests {
         expected_height: u32,
     }
 
+    #[cfg(feature = "node-shader")]
     impl NodeRuntime for FixtureExpectedSampleProducer {
         fn produce(
             &mut self,
@@ -1399,6 +1588,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     impl RenderNode for FixtureExpectedSampleProducer {
         fn render_texture(
             &mut self,
@@ -1407,8 +1597,7 @@ mod tests {
             _ctx: &mut RenderContext<'_>,
         ) -> Result<TextureRenderProduct, NodeError> {
             Err(NodeError::msg(format!(
-                "unexpected texture render for {:?}",
-                request
+                "unexpected texture render for {request:?}"
             )))
         }
 
@@ -1440,6 +1629,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     fn solid_texture(
         width: u32,
         height: u32,
@@ -1532,15 +1722,7 @@ mod tests {
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
         let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[12],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
+            vec![PathSpec::point_list(0, vec![[0.5, 0.5]; 12])],
             2.0,
         );
 
@@ -1704,15 +1886,7 @@ mod tests {
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
         let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[30],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
+            vec![PathSpec::point_list(0, vec![[0.5, 0.5]; 30])],
             2.0,
         );
 
@@ -1781,6 +1955,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     fn fixture_demand_resolve_and_tick_share_one_shader_producer_tick_via_resolver_cache() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -1834,18 +2009,8 @@ mod tests {
             )
             .unwrap();
 
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
+        let mapping =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
         let fix_id = engine
             .tree_mut()
@@ -1915,6 +2080,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     fn fixture_direct_sampling_writes_expected_u16_rgb_for_solid_red_product() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -1971,18 +2137,8 @@ mod tests {
             )
             .unwrap();
 
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
+        let mapping =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
         let fix_id = engine
             .tree_mut()
@@ -2068,6 +2224,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-shader")]
     fn fixture_project_read_control_probe_returns_native_samples_and_cached_layout() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -2106,18 +2263,8 @@ mod tests {
             )
             .unwrap();
 
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
+        let mapping =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
         let fix_id = engine
             .tree_mut()
@@ -2254,6 +2401,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-shader")]
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
@@ -2293,16 +2441,10 @@ mod tests {
             )
             .unwrap();
 
+        // Two lamps: center + right edge (the retired 2-ring construction's
+        // exact resolved positions).
         let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                2,
-                &[1, 1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
+            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
             2.0,
         );
 
@@ -2413,17 +2555,9 @@ mod tests {
     /// so a path added to the sync code without coverage here still fails the
     /// shape check at runtime.
     fn fixture_sync_def_paths() -> Vec<alloc::string::String> {
-        let prefix = ring_array_def_prefix(0);
         vec![
             alloc::string::String::from("diagnostic_mode"),
             alloc::string::String::from(MAPPING_SAMPLE_DIAMETER_DEF_PATH),
-            format!("{prefix}.center"),
-            format!("{prefix}.diameter"),
-            format!("{prefix}.start_ring_inclusive"),
-            format!("{prefix}.end_ring_exclusive"),
-            format!("{prefix}.ring_lamp_counts[0]"),
-            format!("{prefix}.offset_angle"),
-            format!("{prefix}.order"),
         ]
     }
 
@@ -2439,15 +2573,7 @@ mod tests {
 
         let def = FixtureDef {
             mapping: EnumSlot::new(MappingConfig::path_points_vec(
-                vec![PathSpec::ring_array_counts(
-                    [0.5, 0.5],
-                    1.0,
-                    0,
-                    1,
-                    &[12],
-                    0.0,
-                    RingOrder::InnerFirst,
-                )],
+                vec![PathSpec::point_list(0, vec![[0.5, 0.5]; 12])],
                 2.0,
             )),
             ..FixtureDef::default()
@@ -2466,149 +2592,5 @@ mod tests {
         // the shape check instead of silently reading as "absent".
         let wrong = SlotPath::parse("mapping.path_points.sample_diameter").unwrap();
         assert!(ensure_path_exists_in_fixture_def_shape(&shapes, &wrong).is_err());
-    }
-
-    /// Authored mapping values must actually reach the runtime mapping: the
-    /// constructor mapping has 2 lamps, the def slots say 12, so a synced
-    /// fixture renders all 12 diagnostic lamps. Before the variant-segment
-    /// paths were fixed the def reads silently returned `None` and this
-    /// rendered only 2 lamps.
-    #[test]
-    fn fixture_sync_reads_path_points_mapping_from_def_slots() {
-        use lpc_model::{PositiveF32, Xy};
-
-        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
-        let registry = ProjectRegistry::new();
-        let frame = Revision::new(1);
-        let root = engine.tree().root();
-        let spine = test_placeholder_spine();
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[2],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
-
-        let fix_id = engine
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("fx").unwrap(),
-                lpc_model::NodeName::parse("fixture").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine,
-                frame,
-            )
-            .unwrap();
-
-        engine
-            .attach_runtime_node(
-                fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    mapping,
-                    FixtureSamplingConfig::TextureArea,
-                    frame,
-                )),
-                frame,
-            )
-            .unwrap();
-        bind_fixture_def_defaults(&mut engine, fix_id, frame);
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            "diagnostic_mode",
-            FixtureDiagnosticMode::LedIndex.to_lp_value(),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            MAPPING_SAMPLE_DIAMETER_DEF_PATH,
-            PositiveF32(2.0).to_lp_value(),
-        );
-        let prefix = ring_array_def_prefix(0);
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.center"),
-            Xy([0.5, 0.5]).to_lp_value(),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.diameter"),
-            PositiveF32(1.0).to_lp_value(),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.start_ring_inclusive"),
-            LpValue::U32(0),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.end_ring_exclusive"),
-            LpValue::U32(1),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.ring_lamp_counts[0]"),
-            LpValue::U32(12),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.offset_angle"),
-            LpValue::F32(0.0),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.order"),
-            RingOrder::InnerFirst.to_lp_value(),
-        );
-
-        engine.add_demand_root(fix_id);
-        engine.tick(&registry, 10).unwrap();
-
-        let extent = ControlExtent::new(1, 36);
-        let request = ControlRenderRequest::unorm16(extent);
-        let mut samples = vec![0u16; extent.sample_count() as usize];
-        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
-        let layout = engine
-            .render_control_for_test(
-                &registry,
-                ControlProduct::new(fix_id, 0, extent),
-                &request,
-                target,
-            )
-            .expect("control render");
-
-        // All 12 def-authored lamps render, not just the 2 constructor lamps.
-        assert_eq!(layout.spans.len(), 1);
-        assert_eq!(layout.spans[0].len, 36);
-        assert!(
-            samples[6..36].iter().any(|sample| *sample != 0),
-            "lamps beyond the constructor mapping should be lit: {samples:?}"
-        );
     }
 }

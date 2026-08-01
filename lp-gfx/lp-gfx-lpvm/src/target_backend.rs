@@ -4,13 +4,20 @@
 //! the *guaranteed* backend of the lp-gfx doctrine. Optional accelerated
 //! backends live in their own crates (`lp-gfx-wgpu`) and are selected at
 //! runtime creation, never silently.
+//!
+//! The native-JIT arm is spelled `any(target_arch = "riscv32", target_arch = "xtensa")` — the
+//! JIT-capable target set documented in `lpvm_native`'s crate docs — including
+//! inside the host arm's exclusion list, so adding the ESP32-S3 is a
+//! mechanical `, target_arch = "xtensa"` at each occurrence of that one
+//! pattern and nothing else. The single-element `any(...)` is redundant today
+//! and exists only to make the set grep-able.
 
 use lp_shader::ShaderFrontend;
 
 use crate::lpvm_graphics::LpvmGraphics;
 
 /// The LPVM engine compiled for this target.
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub type TargetLpvmEngine = lpvm_native::NativeJitEngine;
 
 /// The LPVM engine compiled for this target.
@@ -18,7 +25,10 @@ pub type TargetLpvmEngine = lpvm_native::NativeJitEngine;
 pub type TargetLpvmEngine = lpvm_wasm::rt_browser::BrowserLpvmEngine;
 
 /// The LPVM engine compiled for this target.
-#[cfg(not(any(target_arch = "riscv32", target_arch = "wasm32")))]
+#[cfg(not(any(
+    any(target_arch = "riscv32", target_arch = "xtensa"),
+    target_arch = "wasm32"
+)))]
 pub type TargetLpvmEngine = lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
 /// CPU graphics backend for this target.
@@ -26,8 +36,8 @@ pub type TargetLpvmGraphics = LpvmGraphics<TargetLpvmEngine>;
 
 /// RV32 native JIT (`lpvm-native` `rt_jit`): in-process machine-code JIT, no
 /// Cranelift, no ELF link. The only backend on firmware targets
-/// (`fw-esp32`, `fw-emu`).
-#[cfg(target_arch = "riscv32")]
+/// (`fw-esp32c6`, `fw-emu`).
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 impl TargetLpvmGraphics {
     /// `frontend` is the host's GLSL-frontend product decision (see
     /// [`lp_gfx::LpGraphics::glsl_frontend`]).
@@ -63,7 +73,10 @@ impl TargetLpvmGraphics {
 /// happens in-process. Pre-grows linear memory once per engine (see
 /// [`lpvm_wasm::WasmOptions::host_memory_pages`]) so cached buffer host
 /// pointers stay valid.
-#[cfg(not(any(target_arch = "riscv32", target_arch = "wasm32")))]
+#[cfg(not(any(
+    any(target_arch = "riscv32", target_arch = "xtensa"),
+    target_arch = "wasm32"
+)))]
 impl TargetLpvmGraphics {
     /// `frontend` is the host's GLSL-frontend product decision (see
     /// [`lp_gfx::LpGraphics::glsl_frontend`]).

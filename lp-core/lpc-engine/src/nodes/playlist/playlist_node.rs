@@ -46,6 +46,11 @@ pub struct PlaylistNode {
     transition_start_time: f32,
     transition_duration: f32,
     last_seen_triggers: VecMap<u32, u32>,
+    /// Entry key queued by [`WireNodeCommand::PlaylistActivateEntry`],
+    /// applied (and cleared) on the next `produce` in the consumed `time`
+    /// slot's domain — command switches reset the entry clock exactly like
+    /// trigger switches, even when the playlist clock is scrubbed or rated.
+    pending_activate: Option<u32>,
 }
 
 impl PlaylistNode {
@@ -73,6 +78,7 @@ impl PlaylistNode {
             transition_start_time: 0.0,
             transition_duration: 0.0,
             last_seen_triggers: VecMap::new(),
+            pending_activate: None,
         }
     }
 
@@ -131,9 +137,14 @@ impl NodeRuntime for PlaylistNode {
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
         let time = ctx.resolve_consumed_slot_value::<f32>(&SlotPath::parse("time").unwrap())?;
+        // Trigger detection always runs (it also advances the per-message
+        // dedup state), but an explicit activate command wins a same-frame
+        // race against a trigger message.
         let triggered_entry =
             detect_triggered_entry(ctx, &self.entries, &mut self.last_seen_triggers)?;
-        if let Some(entry) = triggered_entry {
+        if let Some(entry) = self.pending_activate.take() {
+            self.switch_to(entry, time);
+        } else if let Some(entry) = triggered_entry {
             self.switch_to(entry, time);
         } else if self.current_entry != self.idle_entry {
             let Some(duration) = self.duration(self.current_entry) else {
@@ -189,6 +200,31 @@ impl NodeRuntime for PlaylistNode {
             }
         }
         Ok(ProduceResult::Produced)
+    }
+
+    /// Activate-entry command (the wire runtime command channel): validate
+    /// the entry key against the loaded runtime entries and queue it; the
+    /// switch itself happens on the next `produce`, in the consumed `time`
+    /// slot's domain, so the entry clock resets exactly as a trigger switch
+    /// does. Unknown keys (including authored entries whose child never
+    /// mounted) reject with a reason — a normal response, not a status
+    /// poisoning.
+    fn handle_command(
+        &mut self,
+        command: &lpc_wire::WireNodeCommand,
+        _time_s: f32,
+    ) -> Result<(), NodeError> {
+        match command {
+            lpc_wire::WireNodeCommand::PlaylistActivateEntry { entry } => {
+                if self.runtime_entry(*entry).is_none() {
+                    return Err(NodeError::msg(format!(
+                        "playlist has no loaded entry {entry}"
+                    )));
+                }
+                self.pending_activate = Some(*entry);
+                Ok(())
+            }
+        }
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
@@ -392,17 +428,13 @@ impl RenderNode for PlaylistNode {
     }
 }
 
-pub fn playlist_output_path() -> SlotPath {
-    SlotPath::parse("output").expect("playlist output path")
-}
-
 fn detect_triggered_entry(
     ctx: &mut TickContext<'_>,
     entries: &[PlaylistRuntimeEntry],
     last_seen: &mut VecMap<u32, u32>,
 ) -> Result<Option<u32>, NodeError> {
     let production = ctx
-        .resolve(QueryKey::ConsumedSlot {
+        .resolve(&QueryKey::ConsumedSlot {
             node: ctx.node_id(),
             slot: SlotPath::parse("trigger").expect("playlist trigger slot"),
         })
@@ -451,7 +483,7 @@ fn resolve_entry_product(
     entry: &PlaylistRuntimeEntry,
 ) -> Result<lpc_model::VisualProduct, NodeError> {
     let production = ctx
-        .resolve(QueryKey::ProducedSlot {
+        .resolve(&QueryKey::ProducedSlot {
             node: entry.child,
             slot: entry.output_slot.clone(),
         })
@@ -513,5 +545,75 @@ trait OptionEntryExt<'a> {
 impl<'a> OptionEntryExt<'a> for Option<&'a PlaylistRuntimeEntry> {
     fn ok_or_missing(self) -> Result<&'a PlaylistRuntimeEntry, NodeError> {
         self.ok_or_else(|| NodeError::msg("playlist entry has no loaded child node"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::ToString;
+    use lpc_wire::WireNodeCommand;
+
+    fn playlist_with_entries(keys: &[u32]) -> PlaylistNode {
+        let entries = keys
+            .iter()
+            .map(|&index| PlaylistRuntimeEntry {
+                index,
+                child: NodeId::new(100 + index),
+                output_slot: SlotPath::parse("output").unwrap(),
+                duration: Some(4.0),
+                fade_after: None,
+                trigger_ids: None,
+            })
+            .collect();
+        PlaylistNode::new(NodeId::new(1), keys[0], 0.35, entries)
+    }
+
+    #[test]
+    fn activate_command_queues_a_known_entry() {
+        let mut node = playlist_with_entries(&[1, 2]);
+
+        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 2 }, 0.5)
+            .expect("known entry accepted");
+
+        assert_eq!(node.pending_activate, Some(2));
+        // The switch is deferred to produce (consumed time domain): the
+        // command itself must not move the active entry or its clock.
+        assert_eq!(node.current_entry, 1);
+        assert_eq!(node.switch_time, 0.0);
+    }
+
+    #[test]
+    fn activate_command_rejects_an_unknown_entry() {
+        let mut node = playlist_with_entries(&[1, 2]);
+
+        let err = node
+            .handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 9 }, 0.5)
+            .expect_err("unknown entry rejected");
+
+        assert!(err.to_string().contains("no loaded entry 9"), "{err}");
+        assert_eq!(node.pending_activate, None);
+    }
+
+    #[test]
+    fn latest_activate_command_wins_within_a_frame() {
+        let mut node = playlist_with_entries(&[1, 2, 3]);
+
+        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 2 }, 0.5)
+            .expect("first accepted");
+        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 3 }, 0.6)
+            .expect("second accepted");
+
+        assert_eq!(node.pending_activate, Some(3));
+    }
+
+    #[test]
+    fn switch_to_resets_the_entry_clock() {
+        let mut node = playlist_with_entries(&[1, 2]);
+
+        node.switch_to(2, 7.25);
+
+        assert_eq!(node.current_entry, 2);
+        assert_eq!(node.switch_time, 7.25);
     }
 }

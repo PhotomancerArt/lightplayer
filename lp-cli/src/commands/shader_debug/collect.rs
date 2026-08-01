@@ -12,7 +12,6 @@ pub fn collect_fa_data(
     sig: &LpsModuleSig,
     float_mode: FloatMode,
     func_filter: Option<&str>,
-    compiler_config: &CompilerConfig,
 ) -> Result<BackendDebugData> {
     use lpvm_native::IsaTarget;
     use lpvm_native::LowerOpts;
@@ -53,7 +52,6 @@ pub fn collect_fa_data(
         // Lower and compile
         let lower_opts = LowerOpts {
             float_mode,
-            q32: &compiler_config.q32,
             // Match device codegen defaults (fuel checks on).
             fuel: true,
         };

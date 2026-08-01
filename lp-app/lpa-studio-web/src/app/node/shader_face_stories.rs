@@ -67,12 +67,15 @@ fn chat_streaming() -> Element {
     description = "Code drawer open: the inline GLSL editor expands under the face — opening code never hides the preview or knobs."
 )]
 fn code_drawer_open() -> Element {
+    // Disclosure is core-owned now: stories seed the DTO's card UI state
+    // (`NodeCardUiState`), not component props.
+    let mut view = shader_node_view(true, UiAgentStatus::Idle);
+    view.card_ui.code_open = true;
     rsx! {
         ShaderCardCanvas {
             NodePane {
-                view: shader_node_view(true, UiAgentStatus::Idle),
+                view,
                 on_action: move |_| {},
-                face_code_drawer_open: true,
                 face_platform: Platform::Mac,
             }
         }
@@ -83,12 +86,29 @@ fn code_drawer_open() -> Element {
     description = "Advanced drawer open: today's slot rows (bound speed row included) behind the last lid."
 )]
 fn advanced_open() -> Element {
+    let mut view = shader_node_view(true, UiAgentStatus::Idle);
+    view.card_ui.advanced_open = true;
     rsx! {
         ShaderCardCanvas {
             NodePane {
-                view: shader_node_view(true, UiAgentStatus::Idle),
+                view,
                 on_action: move |_| {},
-                face_advanced_drawer_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Agent section collapsed to its summary row: sparkles icon + status-aware summary (turn count and cost estimate); expanding restores the chat with any half-typed draft intact."
+)]
+fn agent_collapsed() -> Element {
+    let mut view = shader_node_view(true, UiAgentStatus::Idle);
+    view.card_ui.agent_collapsed = true;
+    rsx! {
+        ShaderCardCanvas {
+            NodePane {
+                view,
+                on_action: move |_| {},
             }
         }
     }

@@ -447,7 +447,9 @@ mod tests {
 
     #[test]
     fn test_load_object_file_with_actual_builtins() {
-        use lp_riscv_emu::{LogLevel, Riscv32Emulator, StepResult};
+        use lp_emu_core::LogLevel;
+        use lp_emu_core::StepResult;
+    use lp_riscv_emu::Riscv32Emulator;
         use lp_riscv_inst::Gpr;
 
         // Skip test if builtins executable is not available

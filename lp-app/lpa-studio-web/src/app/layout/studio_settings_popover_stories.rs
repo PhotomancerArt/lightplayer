@@ -7,7 +7,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AgentProvider, SettingsLayer, UiAgentSettingsView, UiSettingsView, provider_guidance,
+    AgentProvider, SettingsLayer, UiAgentSettingsView, UiModelOption, UiSettingsView,
+    provider_guidance,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -103,6 +104,88 @@ pub(crate) fn openrouter_needs_connect() -> Element {
 )]
 pub(crate) fn openrouter_connected() -> Element {
     panel(openrouter_agent())
+}
+
+#[story(
+    description = "Model discovery populated (P8): the model field is a dropdown over the fetched /models ids with display names, the override selecting one of them; Custom… is the free-text escape."
+)]
+pub(crate) fn model_dropdown_populated() -> Element {
+    let mut agent = UiSettingsView::default().agent;
+    agent.api_key_masked = Some("•••••h3Fk".to_string());
+    agent.api_key_layer = SettingsLayer::User;
+    agent.api_key_overridden = true;
+    agent.model_options = vec![
+        UiModelOption {
+            id: "claude-sonnet-5".to_string(),
+            label: Some("Claude Sonnet 5".to_string()),
+        },
+        UiModelOption {
+            id: "claude-opus-5".to_string(),
+            label: Some("Claude Opus 5".to_string()),
+        },
+        UiModelOption {
+            id: "claude-haiku-4-5".to_string(),
+            label: Some("Claude Haiku 4.5".to_string()),
+        },
+    ];
+    agent.model_override = Some("claude-opus-5".to_string());
+    agent.model_layer = SettingsLayer::User;
+    panel(agent)
+}
+
+#[story(
+    description = "Model discovery failed (P8): a local server fetch error keeps the free-text field, with the mapped error line pointing back at the guidance's CORS note."
+)]
+pub(crate) fn model_fetch_error() -> Element {
+    let mut agent = UiSettingsView::default().agent;
+    agent.provider = AgentProvider::Custom;
+    agent.provider_overridden = true;
+    agent.provider_layer = SettingsLayer::User;
+    agent.guidance = provider_guidance(AgentProvider::Custom);
+    agent.api_key_optional = true;
+    agent.base_url_effective = Some("http://localhost:11434/v1".to_string());
+    agent.base_url_override = Some("http://localhost:11434/v1".to_string());
+    agent.base_url_layer = SettingsLayer::User;
+    agent.model_default = None;
+    agent.model_effective = Some("llama3.2".to_string());
+    agent.model_override = Some("llama3.2".to_string());
+    agent.model_placeholder = "llama3.2".to_string();
+    agent.model_layer = SettingsLayer::User;
+    agent.models_error = Some(
+        "model list unavailable — server unreachable (check the base URL and the CORS note above)"
+            .to_string(),
+    );
+    panel(agent)
+}
+
+#[story(
+    description = "Model discovery with a custom entry (P8): the fetched list is present but the override is a hand-typed id outside it, so the dropdown sits on Custom… with the text input open underneath."
+)]
+pub(crate) fn model_custom_entry() -> Element {
+    let mut agent = UiSettingsView::default().agent;
+    agent.provider = AgentProvider::OpenAi;
+    agent.provider_overridden = true;
+    agent.provider_layer = SettingsLayer::User;
+    agent.guidance = provider_guidance(AgentProvider::OpenAi);
+    agent.api_key_masked = Some("•••••q8Zw".to_string());
+    agent.api_key_layer = SettingsLayer::User;
+    agent.api_key_overridden = true;
+    agent.model_options = vec![
+        UiModelOption {
+            id: "gpt-5.2".to_string(),
+            label: None,
+        },
+        UiModelOption {
+            id: "gpt-5.2-mini".to_string(),
+            label: None,
+        },
+    ];
+    agent.model_default = None;
+    agent.model_effective = Some("ft:gpt-5.2:acme:leds:9k3".to_string());
+    agent.model_override = Some("ft:gpt-5.2:acme:leds:9k3".to_string());
+    agent.model_placeholder = "ft:gpt-5.2:acme:leds:9k3".to_string();
+    agent.model_layer = SettingsLayer::User;
+    panel(agent)
 }
 
 /// The OpenRouter fixture base: connected unless a story clears the key.

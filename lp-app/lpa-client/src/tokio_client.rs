@@ -444,6 +444,23 @@ impl TokioLpClient {
         }
     }
 
+    /// Dispatch a runtime node command (playlist activate-entry, future sim
+    /// pokes) and return the server's accepted/rejected outcome.
+    pub async fn project_node_command(
+        &self,
+        handle: WireProjectHandle,
+        node: lpc_model::NodeId,
+        command: lpc_wire::WireNodeCommand,
+    ) -> Result<lpc_wire::WireNodeCommandResponse> {
+        match self
+            .project_command(handle, WireProjectCommand::NodeCommand { node, command })
+            .await?
+        {
+            WireProjectCommandResponse::NodeCommand { response } => Ok(response),
+            other => Err(unexpected_response("project_node_command", other)),
+        }
+    }
+
     pub async fn project_list_available(&self) -> Result<Vec<AvailableProject>> {
         let response = self
             .send_request(ClientRequest::ListAvailableProjects)

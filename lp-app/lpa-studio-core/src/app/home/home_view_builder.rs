@@ -473,6 +473,7 @@ fn provenance_line(store: &LibraryStore, meta: &PackageMeta) -> Option<String> {
             Some(format!("Remixed from {name}"))
         }
         PackageProvenance::ImportedZip { .. } => Some("Imported from zip".to_string()),
+        PackageProvenance::ImportedJson { .. } => Some("Pasted from JSON".to_string()),
         PackageProvenance::PulledFromDevice { device_name, .. } => {
             Some(format!("Pulled from {device_name}"))
         }
@@ -568,7 +569,7 @@ mod tests {
             hello: ServerHello {
                 proto: WIRE_PROTO_VERSION,
                 fw: FwProvenance {
-                    package: "fw-esp32".to_string(),
+                    package: "fw-esp32c6".to_string(),
                     commit: "abc123456789".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),

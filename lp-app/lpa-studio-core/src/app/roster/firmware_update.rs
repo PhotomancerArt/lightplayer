@@ -115,7 +115,7 @@ mod tests {
 
     fn device(commit: &str, dirty: bool) -> FwProvenance {
         FwProvenance {
-            package: "fw-esp32".to_string(),
+            package: "fw-esp32c6".to_string(),
             commit: commit.to_string(),
             dirty,
             profile: "release-esp32".to_string(),
