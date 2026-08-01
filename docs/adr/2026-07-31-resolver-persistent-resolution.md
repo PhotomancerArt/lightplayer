@@ -82,6 +82,25 @@ stale-value bug the moment it did not. `clear_bindings` ran on the tree, so
 emptying the binding graph left the resolver's knowledge of it intact and
 depended on whatever ran next to invalidate; it now goes through the engine.
 
+**The rule checks itself.** A contract that lives only in this document will
+not survive the next mutation site, so `Engine::tick_nodes` compares a cheap
+fingerprint of the tree's shape (node count, binding count, newest binding
+revision) against the previous frame's, and asserts that a change was
+accompanied by an epoch bump. Debug builds only — release firmware pays
+nothing, and the guard's whole job is to fire during development and tests,
+long before a device is involved. Verified by reintroducing the bug: removing
+the `invalidate_structure()` from `add_binding` produces
+
+```
+the node tree changed shape ((2, 2, Revision(1)) -> (2, 3, Revision(2)))
+without Resolver::invalidate_structure(); resolution cached against the old
+graph is now being served.
+```
+
+That case is worth noting: the differential test **passed** under that
+sabotage, because the scenario reached `add_binding` through `clear_bindings`,
+which does invalidate. Two independent checks, catching different things.
+
 A playlist entry switch is deliberately **not** structural. It changes which
 child a node demands, not what any query resolves through, and the resolver
 handles it by simply being asked a different question.
@@ -103,9 +122,26 @@ cycle model:
 `bindings_for_consumed_slot`, `slot_lookup` and `Vec<SlotPathSegment>::clone`
 no longer appear in the top twenty.
 
-The 4-fixture workload moved only −1.9%, because
-`HwRegistry::endpoint_status_for` is 46.7% of it and is a separate per-frame
-recomputation with its own owner. See
+The 4-fixture workload moved only −1.9% in the emulator, because
+`HwRegistry::endpoint_status_for` is 46.7% of that profile.
+
+On the **desk ESP32-S3** (2026-08-01, same board and projects as the original
+measurement):
+
+| Config | Before | After | |
+|---|---|---|---|
+| 4 fixtures (`quad-strips`) | 20 fps / 48 ms | **25 fps / 37.5 ms** | +25% fps |
+| 1 fixture (`quad-strips-1fix`) | 50 fps / 19 ms | **67 fps / 13.5 ms** | +34% fps |
+
+Hardware improved *more* than the emulator predicted for the 4-fixture case
+(+25% vs +2%), because the emulator profiles the **virtual** WS281x driver,
+whose endpoint enumeration is more expensive than the real RMT driver's — so
+`endpoint_status_for`'s 46.7% share is inflated there. Treat the emulator as
+an attribution tool, not an fps predictor.
+
+The per-additional-chain cost fell from ~9.7 ms to ~8.0 ms (−17%): most of the
+win is in fixed per-frame overhead, not in the per-chain scaling that made
+this a filed debt. That scaling is still owned by endpoint status. See
 `docs/debt/s3-frame-cost-scales-per-fixture.md`.
 
 ### Revision stamps age

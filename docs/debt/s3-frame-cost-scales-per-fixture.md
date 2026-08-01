@@ -13,7 +13,8 @@ related:
 
 **Shape** — Measured on the desk ESP32-S3 (2026-07-31, all eight node gates,
 quad-strips variants, 30-LED strips), then attributed with `lp-cli profile`
-(emulator, esp32-c6 cycle model):
+(emulator, esp32-c6 cycle model). The table below is the ORIGINAL measurement;
+see the 2026-08-01 incident-log entry for the post-resolver numbers:
 
 | Config | fps | tick |
 |---|---|---|
@@ -96,9 +97,23 @@ nothing else helps, by measurement.
   single allocation source in the 1-fixture profile), and a resolver cache hit
   still clones a `ProductionSource` carrying a `SlotPath`.
 
-  ⚠️ Desk-S3 re-measurement is **still pending** — the board did not enumerate
-  for `espflash board-info` during the session (needs a physical replug). The
-  fps matrix in the table above has not been refreshed on silicon.
+  **Desk-S3 re-measured 2026-08-01** (same board `d8:3b:da:47:29:70`, same
+  projects):
+
+  | Config | Before | After | |
+  |---|---|---|---|
+  | 4 fixtures | 20 fps / 48 ms | **25 fps / 37.5 ms** | +25% fps |
+  | 1 fixture | 50 fps / 19 ms | **67 fps / 13.5 ms** | +34% fps |
+
+  Hardware beat the emulator's prediction for 4 fixtures (+25% vs +2%): the
+  profile uses the **virtual** WS281x driver, whose endpoint enumeration is
+  dearer than the real RMT driver's, so `endpoint_status_for`'s 46.7% share is
+  inflated there. The emulator attributes cost well; it does not predict fps.
+
+  **The filed shape is only partly fixed.** Per-additional-chain cost went
+  ~9.7 ms → ~8.0 ms (−17%) — most of the win is fixed per-frame overhead, not
+  the per-chain scaling this entry is named for. A 10-fixture project would
+  still be in the low teens. Endpoint status owns that scaling.
 
 **Exit criteria** — A profiled optimization pass that makes resolved bindings
 and endpoint status persist across frames (invalidate on tree/binding/
@@ -112,6 +127,5 @@ the desk S3 as the oracle.
       hardware endpoints with per-endpoint status recomputation and string
       spec formatting. 46.7% of the 4-fixture profile; the remaining cap on
       multi-fixture fps.
-- [ ] **Desk-S3 re-measurement** of the quad-strips matrix. Not done for the
-      resolver work (board unreachable); worth doing once both halves land,
-      rather than twice.
+- [x] **Desk-S3 re-measurement** — done 2026-08-01 for the resolver half
+      (20 → 25 fps at 4 fixtures). Re-measure again after endpoint status.
