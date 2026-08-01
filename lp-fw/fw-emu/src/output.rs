@@ -107,6 +107,10 @@ impl OutputProvider for SyscallOutputProvider {
         println!("[output] close: handle={:?}", handle);
         Ok(())
     }
+
+    fn hardware_generation(&self) -> u64 {
+        self.hardware_system.registry().generation()
+    }
 }
 
 impl SyscallOutputProvider {

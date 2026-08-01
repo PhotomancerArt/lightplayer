@@ -21,6 +21,11 @@ lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 embassy-time = "0.5.0"
 embassy-sync = "0.8.0"
+# `serial::chunked_write`: the select-with-timeout and the async byte sink. Both
+# are `no_std` and chip-free, and both are already on every bin crate's line —
+# this is the seam moving down, not a new dependency for the images.
+embassy-futures = "0.1"
+embedded-io-async = "0.6"
 smart-leds = "0.3"
 log = { workspace = true, default-features = false }
 hashbrown = { workspace = true }
@@ -39,7 +44,12 @@ lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optio
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
+# `serial::server_msg`'s `StackJsonWriter` implements this crate's `SerWrite`
+# trait, so it must be a direct dependency and not just `lpc-wire`'s. Same
+# version/features as the bin crates so all three resolve to one instance —
+# two would make the impl invisible to `lpc_wire::ser_write_json_to`.
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 [features]
 default = []
-server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs"]
+server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]

@@ -3866,8 +3866,10 @@ dependencies = [
 name = "fw-esp32-common"
 version = "40.0.0"
 dependencies = [
+ "embassy-futures",
  "embassy-sync 0.8.0",
  "embassy-time",
+ "embedded-io-async 0.6.1",
  "fw-core",
  "hashbrown 0.15.5",
  "littlefs-rust",
@@ -3880,6 +3882,7 @@ dependencies = [
  "lpc-shared",
  "lpc-wire",
  "lpfs",
+ "ser-write-json",
  "smart-leds",
 ]
 
@@ -3926,7 +3929,6 @@ dependencies = [
  "lps-shared",
  "lpvm",
  "lpvm-native",
- "ser-write-json",
  "serde",
  "smart-leds",
  "unwinding",
@@ -3967,7 +3969,6 @@ dependencies = [
  "lps-shared",
  "lpvm",
  "lpvm-native",
- "ser-write-json",
 ]
 
 [[package]]

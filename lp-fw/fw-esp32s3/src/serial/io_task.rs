@@ -6,31 +6,25 @@
 //! - Read from serial and push to incoming queue (filter M! prefix)
 //! - Monitor USB host connection; skip writes when disconnected to prevent blocking
 //! - All serial writes use timeouts to prevent blocking if host disconnects mid-write
+//!
+//! The JSON-serialization half — the stack JSON writer, the framed
+//! server-message write, and the chunked-with-timeout byte writer under both —
+//! is chip-agnostic and lives in `fw_esp32_common::serial`, shared with
+//! fw-esp32c6. What stays here is the transport: the USB-Serial-JTAG
+//! peripheral, the connection monitor, the not-draining probe, and the
+//! channels.
 
 extern crate alloc;
 
-// Sole divergence from fw-esp32c6's copy beyond the `board::esp32s3` import:
-// `format!` is used only by the server-gated write paths. `server` is in the
-// default features now (M3 P5), same as the C6, so the `not(server)` arm is not
-// reachable from any build recipe — the attribute stays only so the two copies
-// of this file remain diffable.
-#[cfg_attr(
-    not(feature = "server"),
-    allow(
-        unused_imports,
-        reason = "`format!` is used only by the server-gated write paths"
-    )
-)]
-use alloc::{format, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use embedded_io_async::{Read, Write};
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use fw_core::message_router::MessageRouter;
+use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 use log;
-#[cfg(feature = "server")]
-use ser_write_json::SerWrite;
 
 use crate::board::esp32s3::usb_connection::UsbConnectionMonitor;
 
@@ -63,13 +57,6 @@ static SERVER_WRITE_RESULT: Channel<
     1,
 > = Channel::new();
 
-/// Write timeout per chunk: if a chunk doesn't complete in this time, the host
-/// is not draining. A healthy USB full-speed host drains a chunk in well under
-/// a millisecond, so this is still very generous — but short enough that the
-/// frame loop's inline sends stall briefly, not for seconds, in the window
-/// before the not-draining latch kicks in.
-const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
-
 /// Probe timeout while latched not-draining: a single byte either leaves
 /// immediately (host is back) or it doesn't — no reason to wait long.
 const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
@@ -77,79 +64,26 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 /// Minimum spacing between probe writes while latched not-draining.
 const PROBE_INTERVAL: Duration = Duration::from_millis(2000);
 
-/// Chunk size for large writes. Small enough to avoid timeout on slow USB,
-/// large enough to avoid excessive syscalls. Resource snapshots can be 10KB+.
-const WRITE_CHUNK_SIZE: usize = 256;
-
-/// Write all data in chunks with per-chunk timeout. Prevents large messages
-/// (e.g. resource snapshots) from timing out mid-write and corrupting the stream
-/// by concatenating with the next message. Uses write_all per chunk to
-/// handle partial writes.
-async fn timed_write_all<W: Write>(tx: &mut W, data: &[u8]) -> bool {
-    timed_write_all_with(tx, data, WRITE_TIMEOUT).await
-}
-
-async fn timed_write_all_with<W: Write>(tx: &mut W, data: &[u8], timeout: Duration) -> bool {
-    use embassy_futures::select::{Either, select};
-    let mut offset = 0;
-    while offset < data.len() {
-        // A bounded in-flight write is healthy, not silence: tick liveness
-        // per chunk so a slow host cannot starve the watchdog feeder into
-        // resetting the device.
-        crate::recovery::watchdog::note_io_alive();
-        let chunk_end = (offset + WRITE_CHUNK_SIZE).min(data.len());
-        let chunk = &data[offset..chunk_end];
-        match select(Timer::after(timeout), tx.write_all(chunk)).await {
-            Either::First(_) => return false,
-            Either::Second(Err(_)) => return false,
-            Either::Second(Ok(())) => {}
-        }
-        offset = chunk_end;
-    }
-    true
-}
-
-#[cfg(feature = "server")]
-struct StackJsonWriter<'a> {
-    buf: &'a mut [u8],
-    len: usize,
-}
-
-#[cfg(feature = "server")]
-#[derive(Debug)]
-struct StackJsonError;
-
-#[cfg(feature = "server")]
-impl core::fmt::Display for StackJsonError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("stack JSON buffer full")
-    }
-}
-
-#[cfg(feature = "server")]
-impl<'a> StackJsonWriter<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, len: 0 }
-    }
-
-    fn bytes(&self) -> &[u8] {
-        &self.buf[..self.len]
-    }
-}
-
-#[cfg(feature = "server")]
-impl ser_write_json::SerWrite for StackJsonWriter<'_> {
-    type Error = StackJsonError;
-
-    fn write(&mut self, buf: &[u8]) -> Result<(), StackJsonError> {
-        let end = self.len.checked_add(buf.len()).ok_or(StackJsonError)?;
-        if end > self.buf.len() {
-            return Err(StackJsonError);
-        }
-        self.buf[self.len..end].copy_from_slice(buf);
-        self.len = end;
-        Ok(())
-    }
+/// Wrap this board's TX half in the shared chunked writer.
+///
+/// The per-chunk hook is the one crate-specific seam in that writer. A bounded
+/// in-flight write is healthy, not silence, so liveness is ticked once per
+/// chunk and a slow host cannot starve the watchdog feeder into resetting the
+/// device. The RWDT is an `esp-hal` peripheral and therefore a chip fact, which
+/// fw-esp32-common is forbidden to hold — so it takes the tick as a hook rather
+/// than calling `note_io_alive` itself. Timeout and chunk size come from
+/// [`WritePolicy::USB_SERIAL_JTAG`].
+///
+/// The hook is returned as an opaque `impl FnMut()` — the zero-sized fn *item*
+/// — rather than a `fn()` pointer. Naming it `fn()` compiles and reads a little
+/// plainer, and costs 256 B of un-inlinable indirect calls in this image
+/// (measured with `just fw-esp32c6-size-check`).
+fn link_writer<W: Write>(tx: &mut W) -> ChunkedWriter<'_, W, impl FnMut()> {
+    ChunkedWriter::new(
+        tx,
+        WritePolicy::USB_SERIAL_JTAG,
+        crate::recovery::watchdog::note_io_alive,
+    )
 }
 
 /// I/O task for handling serial communication
@@ -189,7 +123,10 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         // sending anything.
         if conn.needs_probe() && last_probe.elapsed() >= PROBE_INTERVAL {
             last_probe = embassy_time::Instant::now();
-            if timed_write_all_with(&mut tx, b"\n", PROBE_TIMEOUT).await {
+            if link_writer(&mut tx)
+                .write_all_with(b"\n", PROBE_TIMEOUT)
+                .await
+            {
                 conn.note_host_active();
             }
         }
@@ -215,14 +152,15 @@ async fn drain_outgoing_messages<W: Write>(
     conn: &mut UsbConnectionMonitor,
 ) {
     let receiver = router.outgoing().receiver();
+    let mut writer = link_writer(tx);
     loop {
         match receiver.try_receive() {
             Ok(msg) if conn.is_connected() => {
-                if !timed_write_all(tx, b"\n").await {
+                if !writer.write_all(b"\n").await {
                     conn.note_write_timeout();
                     break;
                 }
-                if !timed_write_all(tx, msg.as_bytes()).await {
+                if !writer.write_all(msg.as_bytes()).await {
                     conn.note_write_timeout();
                     break;
                 }
@@ -266,7 +204,9 @@ async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnecti
         return;
     };
 
-    let result = timed_write_server_msg(tx, msg, conn.is_connected()).await;
+    let result = link_writer(tx)
+        .write_server_msg(msg, conn.is_connected())
+        .await;
     match &result {
         Ok(()) => conn.note_host_active(),
         // Only a USB write timeout/failure is draining evidence; fail-fast
@@ -280,170 +220,6 @@ async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnecti
         .sender()
         .send((generation, result))
         .await;
-}
-
-#[cfg(feature = "server")]
-async fn timed_write_server_msg<W: Write>(
-    tx: &mut W,
-    msg: lpc_wire::WireServerMessage,
-    connected: bool,
-) -> Result<(), lpc_wire::TransportError> {
-    if !connected {
-        return Err(lpc_wire::TransportError::ConnectionLost);
-    }
-
-    let result = timed_write_full_server_msg(tx, msg).await;
-    if result.is_err() {
-        // If a timeout interrupts a JSON frame before the trailing newline, separate the
-        // next frame so host parsers can recover instead of concatenating two `M!` messages.
-        let _ = timed_write_all(tx, b"\n").await;
-    }
-    result
-}
-
-#[cfg(feature = "server")]
-async fn timed_write_full_server_msg<W: Write>(
-    tx: &mut W,
-    msg: lpc_wire::WireServerMessage,
-) -> Result<(), lpc_wire::TransportError> {
-    // TODO(M3 stretch): this ~16.7 KiB stack buffer lives as async-fn state and
-    // is paid even for tiny acks. The preferred fix — a `SerWrite` that streams
-    // straight to the chunked+timeout USB writer — is blocked because
-    // `SerWrite::write` is synchronous while `timed_write_all` is `async`, so the
-    // streaming impl cannot `.await` the USB write without an internal buffer.
-    // The StaticCell fallback needs an aliasing/RAM measurement first (io_task is
-    // the sole writer, but drain paths interleave), so it is deferred rather than
-    // forced here. Revisit once an async-capable streaming writer exists.
-    //
-    // Derived from the shared budget: the serial buffer already reserves the
-    // frame budget plus `PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES`; this only adds
-    // room for the `\nM!` framing prefix and trailing `\n` written around the
-    // message (4 bytes, padded to 16 for alignment slack).
-    const SERVER_MSG_FRAMING_BYTES: usize = 16;
-    const SERVER_MSG_JSON_BUFFER_SIZE: usize =
-        lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
-    let mut buf = [0u8; SERVER_MSG_JSON_BUFFER_SIZE];
-    let mut writer = StackJsonWriter::new(&mut buf);
-    if writer.write(b"\nM!").is_err() {
-        log::warn!("[io_task] server message prefix exceeded JSON buffer");
-        return Err(lpc_wire::TransportError::Serialization(
-            "server message prefix exceeded JSON buffer".into(),
-        ));
-    }
-    // Erased writer: shares one serializer instantiation per wire type with the
-    // frame-budget measurement path (lpc_wire::ser_write_json_len), instead of
-    // emitting a second copy of every type's serializer for this sink.
-    if lpc_wire::ser_write_json_to(&mut writer, &msg).is_err() {
-        let detail = server_message_detail(&msg);
-        log::warn!(
-            "[io_task] server message id={} {} exceeded JSON buffer size={} frame_budget={}; write failed",
-            msg.id,
-            detail,
-            SERVER_MSG_JSON_BUFFER_SIZE,
-            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} exceeded JSON buffer",
-            msg.id, detail
-        )));
-    }
-    if writer.write(b"\n").is_err() {
-        let detail = server_message_detail(&msg);
-        log::warn!(
-            "[io_task] server message id={} {} suffix exceeded JSON buffer size={}; write failed",
-            msg.id,
-            detail,
-            SERVER_MSG_JSON_BUFFER_SIZE
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} suffix exceeded JSON buffer",
-            msg.id, detail
-        )));
-    }
-    if timed_write_all(tx, writer.bytes()).await {
-        Ok(())
-    } else {
-        Err(lpc_wire::TransportError::Other(format!(
-            "server message id={} USB write timed out or failed",
-            msg.id
-        )))
-    }
-}
-
-#[cfg(feature = "server")]
-fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
-    match &msg.msg {
-        lpc_wire::server::ServerMsgBody::Hello(hello) => {
-            format!("Hello proto={}", hello.proto)
-        }
-        lpc_wire::server::ServerMsgBody::Filesystem(_) => "Filesystem".into(),
-        lpc_wire::server::ServerMsgBody::LoadProject { .. } => "LoadProject".into(),
-        lpc_wire::server::ServerMsgBody::UnloadProject => "UnloadProject".into(),
-        lpc_wire::server::ServerMsgBody::ProjectRead { events } => format!(
-            "ProjectRead seq={} fin={} events={} [{}]",
-            msg.seq,
-            msg.fin,
-            events.len(),
-            project_read_event_summary(events)
-        ),
-        lpc_wire::server::ServerMsgBody::ProjectCommand { .. } => "ProjectCommand".into(),
-        lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects } => {
-            format!("ListAvailableProjects projects={}", projects.len())
-        }
-        lpc_wire::server::ServerMsgBody::ListLoadedProjects { projects } => {
-            format!("ListLoadedProjects projects={}", projects.len())
-        }
-        lpc_wire::server::ServerMsgBody::StopAllProjects => "StopAllProjects".into(),
-        lpc_wire::server::ServerMsgBody::SetLogLevel => "SetLogLevel".into(),
-        lpc_wire::server::ServerMsgBody::Log { level, .. } => {
-            format!("Log level={level:?}")
-        }
-        lpc_wire::server::ServerMsgBody::Heartbeat {
-            frame_count,
-            loaded_projects,
-            ..
-        } => format!(
-            "Heartbeat frame_count={frame_count} loaded_projects={}",
-            loaded_projects.len()
-        ),
-        lpc_wire::server::ServerMsgBody::Error { .. } => "Error".into(),
-    }
-}
-
-#[cfg(feature = "server")]
-fn project_read_event_summary(events: &[lpc_wire::ProjectReadEvent]) -> String {
-    let mut summary = String::new();
-    for (index, event) in events.iter().take(8).enumerate() {
-        if index > 0 {
-            summary.push_str(", ");
-        }
-        summary.push_str(project_read_event_kind(event));
-    }
-    if events.len() > 8 {
-        summary.push_str(", ...");
-    }
-    summary
-}
-
-#[cfg(feature = "server")]
-fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static str {
-    match event {
-        lpc_wire::ProjectReadEvent::Begin { .. } => "begin",
-        lpc_wire::ProjectReadEvent::Query { event, .. } => match event {
-            lpc_wire::ProjectReadQueryEvent::Shapes(_) => "query.shapes",
-            lpc_wire::ProjectReadQueryEvent::Nodes(_) => "query.nodes",
-            lpc_wire::ProjectReadQueryEvent::Resources(_) => "query.resources",
-            lpc_wire::ProjectReadQueryEvent::Runtime(_) => "query.runtime",
-        },
-        lpc_wire::ProjectReadEvent::Probe { event, .. } => match event {
-            lpc_wire::ProjectReadProbeEvent::Result(_) => "probe.result",
-            lpc_wire::ProjectReadProbeEvent::ResultBegin { .. } => "probe.result_begin",
-            lpc_wire::ProjectReadProbeEvent::ResultBytes { .. } => "probe.result_bytes",
-            lpc_wire::ProjectReadProbeEvent::ResultEnd => "probe.result_end",
-        },
-        lpc_wire::ProjectReadEvent::End { .. } => "end",
-        lpc_wire::ProjectReadEvent::Error { .. } => "error",
-    }
 }
 
 /// Process read buffer and extract complete lines

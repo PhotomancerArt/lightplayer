@@ -336,15 +336,6 @@ impl Engine {
         }
     }
 
-    pub(crate) fn loaded_node_def_for_entry<'a, N>(
-        &self,
-        registry: &'a ProjectRegistry,
-        entry: &RuntimeNodeEntry<N>,
-    ) -> Option<&'a NodeDef> {
-        let location = entry.def_location.as_ref()?;
-        loaded_registry_def(registry, location).ok()
-    }
-
     // Consumed by texture and shader node test modules (and the
     // texture-def-root test in `project_read_stream`).
     #[cfg(all(test, any(feature = "node-texture", feature = "node-shader")))]
@@ -419,20 +410,31 @@ impl Engine {
         result
     }
 
+    /// Re-read every output's authored configuration for this tick.
+    ///
+    /// The tree and the services are borrowed as separate fields so the defs
+    /// can be read while the sinks are updated. Collecting the work first
+    /// instead cost a full clone of every output's definition — endpoint spec
+    /// and all — on every frame, to almost always discover that nothing had
+    /// changed.
     fn refresh_output_sink_configs(&mut self, registry: &ProjectRegistry) {
-        let mut updates = Vec::new();
-        for entry in self.tree.entries() {
-            let Some(buffer_id) = self.runtime_output_sink_buffer_id(entry.id) else {
+        let tree = &self.tree;
+        let services = &mut self.services;
+        for entry in tree.entries() {
+            let buffer_id = match entry.state.value() {
+                NodeEntryState::Alive(node) => node.runtime_output_sink_buffer_id(),
+                _ => None,
+            };
+            let Some(buffer_id) = buffer_id else {
                 continue;
             };
-            let Some(NodeDef::Output(def)) = self.loaded_node_def_for_entry(registry, entry) else {
+            let Some(location) = entry.def_location.as_ref() else {
                 continue;
             };
-            updates.push((buffer_id, def.clone()));
-        }
-
-        for (buffer_id, def) in updates {
-            self.services.update_output_sink_config(buffer_id, &def);
+            let Ok(NodeDef::Output(def)) = loaded_registry_def(registry, location) else {
+                continue;
+            };
+            services.update_output_sink_config(buffer_id, def);
         }
     }
 
