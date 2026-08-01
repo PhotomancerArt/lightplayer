@@ -110,8 +110,9 @@ impl<E: LpvmEngine> LpsEngine<E> {
         validate_compute_abi(&meta, &abi)?;
         if !self.engine.supports_float_mode(float_mode) {
             return Err(LpsError::Validation(format!(
-                "compute shader requested float_mode={float_mode:?}, \
-                 which this LPVM engine does not compile"
+                "compute shader requested float_mode={}, \
+                 which this LPVM engine does not compile",
+                float_mode.as_str()
             )));
         }
         let module = self

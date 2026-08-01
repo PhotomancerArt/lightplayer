@@ -90,9 +90,10 @@ where
         // (`docs/adr/2026-07-09-preview-fidelity-tiers.md` §4).
         if !self.shared.engine.inner().supports_float_mode(float_mode) {
             return Err(GfxError::Backend(format!(
-                "this build's {} backend does not compile {:?} shaders; \
+                "this build's {} backend does not compile {} shaders; \
                  the shader's float_mode must be Fixed on this device",
-                self.backend_name, options.semantics
+                self.backend_name,
+                options.semantics.name()
             )));
         }
         let cfg = options.to_compiler_config();
