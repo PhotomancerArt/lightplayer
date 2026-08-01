@@ -101,6 +101,15 @@ pub struct Target {
 /// deliberately **not** in [`DEFAULT_TARGETS`] — see the corpus findings from the
 /// run that first exercised it (`@lpfn`/`@glsl` builtin imports still resolve to
 /// the Q32 builtin ids, so any file calling one produces an invalid module).
+///
+/// `rv32n.f32` / `rv32lpn.f32` are the **soft-float** rv32 targets (roadmap M9):
+/// the same `lpvm-native` backend, compiled in `FloatMode::F32`, where every
+/// float op is a call to `__addsf3` and friends inside `lp-riscv-emu`. Also
+/// deliberately **not** in [`DEFAULT_TARGETS`] (roadmap Q6: rv32 f32 variants run
+/// on demand). They are slow — each arithmetic op is a function call through the
+/// emulator — and they are not the shipping numeric mode for any rv32 board, so
+/// their cost belongs to a deliberate run, not to every `cargo test`. Select them
+/// explicitly: `-t rv32lpn.f32`.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         frontend: Frontend::Naga,
@@ -163,6 +172,20 @@ pub const ALL_TARGETS: &[Target] = &[
         backend: Backend::Wasm,
         float_mode: FloatMode::F32,
         isa: Isa::Wasm32,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Rv32fa,
+        float_mode: FloatMode::F32,
+        isa: Isa::Riscv32,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Lp,
+        backend: Backend::Rv32fa,
+        float_mode: FloatMode::F32,
+        isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
 ];
