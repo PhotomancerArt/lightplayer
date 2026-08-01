@@ -44,6 +44,13 @@ plausible further instances; only the first to be selected is reported.
 `--features float-f32` since M5 and builds the same source cleanly. This is
 specific to the Xtensa target's backend.
 
+**It is also load-bearing for the Q32 path.** `scripts/filetests.sh` builds
+this image before running the `xtn.*` / `xtlpn.*` targets, so a script that
+passes `--features float-f32` unconditionally takes the entire Xtensa filetest
+suite down with it. The feature is therefore **opt-in** — the crate wiring is
+in place and `LP_XT_BUILTINS_F32=1` requests it — rather than a default that
+would trade a blocked f32 path for a broken fixed-point one.
+
 ## Consequence
 
 The Xtensa builtins image **cannot currently carry M5's f32 symbols**. M7's

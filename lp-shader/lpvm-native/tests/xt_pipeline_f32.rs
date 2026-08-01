@@ -1028,8 +1028,9 @@ fn unarmed_float_code_faults_with_a_coprocessor_trap() {
 /// the esp Rust backend, which cannot select a float constant pool, at any
 /// optimization level. The image therefore carries none of the f32 family yet.
 ///
-/// The flip itself is done (`Cargo.toml` and `scripts/build-builtins-xt.sh`);
-/// only the build is blocked. Un-ignore this when the defect is resolved.
+/// The wiring is done (`Cargo.toml`, and `scripts/build-builtins-xt.sh` behind
+/// `LP_XT_BUILTINS_F32=1`); only the build is blocked. Un-ignore this, and
+/// make the feature that script's default, when the defect is resolved.
 /// `ffloor` is deliberately chosen over `fdiv`/`fsqrt`: it reaches no
 /// `div0.s`/`const.s` estimate helper, so it does not additionally depend on
 /// M6-P6's unresolved policy fields.
