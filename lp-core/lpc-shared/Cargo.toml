@@ -10,6 +10,17 @@ rust-version.workspace = true
 default = ["std"]
 std = ["lpc-hardware/std", "lpfs/std"]
 
+# Calibrate the Xtensa stack walker for the **classic** ESP32 (LX6) instead of
+# the ESP32-S3 (LX7). See the `xt_map` modules in `src/backtrace.rs`: the walk
+# itself is identical on both cores, but the IRAM / flash-cache / DRAM windows a
+# candidate frame is bounds-checked against are not.
+#
+# ⚠️ Getting this wrong is silent. The walker does not fail — it rejects every
+# frame and reports zero, which the firmware's crash report renders as "the
+# stack was unreadable". Only `fw-esp32v3` should enable it, and only ever
+# alongside the `esp32` chip feature.
+xt-map-esp32-classic = []
+
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 libm = "0.2"

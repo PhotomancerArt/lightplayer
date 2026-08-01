@@ -23,14 +23,16 @@
 //! channel count comes from the board manifest's `/rmt/ws281xK` resources
 //! (M4-P1; ADR `2026-07-31-lp-ws281x-multi-channel-driver-adoption`).
 //!
+//! Crash recovery is present as of M4-P2: `src/recovery/` installs the
+//! `lp-recovery` RTC-RAM ledger, so a fault stages a breadcrumb that survives
+//! the reset and is reported on the next boot. It was pulled forward from M7
+//! because the WS281x open path faults faster than this chip can print
+//! (`docs/defects/2026-08-01-classic-rmt-open-fault.md`) — the ledger is the
+//! only channel that can name it. There is still **no RWDT**; see
+//! `recovery::mod`'s docs for why arming one belongs to M7.
+//!
 //! Absent on purpose:
 //!
-//! - **Crash recovery.** No `lp-recovery` RTC ledger, no RWDT, so the panic
-//!   handler below prints and resets rather than leaving a breadcrumb for the
-//!   next boot. The server loop's `lp_recovery::snapshot()` /
-//!   `mark_boot_complete()` calls degrade to no-ops with no backend installed.
-//!   M7 ports the backend (it needs classic-specific RTC-fast-RAM and
-//!   `SocResetReason` constants, which are not P1's scope).
 //! - **Radio.** Linked only behind `radio_ram_probe`, which replaces the
 //!   entrypoint entirely (M2-P3's RAM ledger).
 //!
@@ -59,6 +61,8 @@ mod board;
 mod flash_storage;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 mod output;
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+mod recovery;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 mod serial;
 
@@ -133,9 +137,24 @@ const HEAP_SIZE: usize = 100 * 1024;
 #[cfg(feature = "radio_ram_probe")]
 const HEAP_SIZE: usize = 72 * 1024;
 
-/// Abort-tier panic handler. Print what panicked, then reset so the next boot
-/// starts clean — there is no ledger yet to stage a breadcrumb into (contrast
-/// fw-esp32s3's `recovery::panic_path::stage_and_reset`).
+/// Abort-tier panic handler for the **app** image: stage a breadcrumb into the
+/// RTC ledger, commit it, then print and reset.
+///
+/// The ordering — ledger before serial — is the whole point on this chip; see
+/// `recovery::panic_path`'s module docs. There is no FIFO drain here: the drain
+/// in the bare-image handler below exists to get bytes out before a reset this
+/// handler controls, and once the record is already committed to RTC RAM,
+/// spending 40 ms per line to protect the *serial copy* of information the next
+/// boot will print anyway buys nothing.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    recovery::panic_path::stage_and_reset(info)
+}
+
+/// Abort-tier panic handler for the bare-hello and radio-probe images, which
+/// link no ledger: print what panicked, then reset so the next boot starts
+/// clean.
 ///
 /// ⚠️ The spin before the reset is load-bearing, not politeness. `esp-println`'s
 /// `uart` feature writes UART0's TX FIFO and returns; `software_reset()`
@@ -151,6 +170,7 @@ const HEAP_SIZE: usize = 72 * 1024;
 /// state is exactly what may have just gone wrong. 240 MHz × ~40 ms is far
 /// more than the ~1.4 ms a full 128-byte FIFO needs at 921600 baud, and the
 /// cost is paid only on a boot that is already dead.
+#[cfg(not(all(feature = "server", not(feature = "radio_ram_probe"))))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     /// Give the TX FIFO time to clock out before the next print or the reset.
@@ -181,14 +201,11 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     // flash-mapped read with `PS.EXCM` set), which vectors straight to reset
     // and cannot be out-run from Rust.
     //
-    // The fix is not a better print: it is the `lp-recovery` RTC-RAM ledger
-    // fw-esp32s3 carries, which stages a breadcrumb that survives the reset
-    // and is reported on the NEXT boot. That is M7 work, and this experience
-    // is the argument for not deferring it further —
+    // The app image's answer is the RTC ledger above, which does not depend on
+    // this channel at all. These images have no ledger and no RMT driver, so
+    // the limitation is recorded rather than fixed: print-and-reset is the
+    // whole diagnostic budget of a hello image, and it is adequate for one.
     // `docs/defects/2026-08-01-classic-rmt-open-fault.md`.
-    //
-    // Interrupt masking and the drain stay because they are correct for the
-    // panics this handler CAN report (anything outside exception context).
     drain();
     esp_println::println!("\n\n====================== PANIC ======================");
     drain();
@@ -231,6 +248,16 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     esp_println::println!("[INIT] fw-esp32v3 boot");
     esp_println::println!("[INIT] chip=esp32 arch=xtensa heap={HEAP_SIZE}");
+
+    // Crash recovery first, before anything crash-prone runs: this both reports
+    // the previous run and gives everything after it somewhere to leave a
+    // breadcrumb. It cannot run before `heap_allocator!` — `init_and_report`
+    // leaks its instance into a `&'static mut`.
+    //
+    // No RWDT is armed alongside it (contrast fw-esp32s3, which starts a
+    // `WatchdogFeeder` on the next line); see `recovery`'s module docs.
+    let boot_assessment = recovery::boot_report::init_and_report();
+    let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
 
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
@@ -368,12 +395,32 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         device_uid,
     });
 
-    // Auto-load a project at boot. fw-esp32s3 gates this on its recovery
-    // subsystem's safe-mode verdict; with no ledger here there is no verdict
-    // to consult, so the load is unconditional. That is the concrete cost of
-    // deferring recovery to M7: a project that crashes the boot will keep
-    // crashing it.
-    boot::auto_load_project(&mut server);
+    // Auto-load a project at boot — unless repeated incomplete boots put us in
+    // safe mode, in which case the server comes up reachable but nothing
+    // crash-prone is loaded.
+    //
+    // On this chip that branch is not a formality. `quad-strips-v3` currently
+    // reset-loops the board from inside the WS281x open path
+    // (`docs/defects/2026-08-01-classic-rmt-open-fault.md`), and before the
+    // ledger landed the loop was unbreakable from the host: the board never
+    // stayed up long enough to accept a delete, and clearing it meant erasing
+    // the lpfs partition with espflash. Safe mode is what turns that into a
+    // board you can talk to.
+    if boot_assessment.safe_mode {
+        let incomplete_boots = lp_recovery::snapshot()
+            .map(|s| s.consecutive_incomplete_boots)
+            .unwrap_or(0);
+        log::error!(
+            "[RECOVERY] SAFE MODE: {incomplete_boots} consecutive incomplete boots — skipping project auto-load"
+        );
+    } else {
+        boot::auto_load_project(&mut server);
+    }
+
+    // Boot frame ends here. The boot-complete milestone is NOT marked here: the
+    // server loop marks it after the first successfully served frame, which is
+    // a far stronger claim than "reached the end of boot".
+    drop(boot_guard);
 
     FirmwareApp {
         server,

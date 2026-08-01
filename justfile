@@ -1713,6 +1713,40 @@ decode-backtrace-esp32s3 *addrs:
         addr2line -e {{ fw_esp32s3_elf }} -f -a $ADDRS
     fi
 
+# Symbolize a classic-ESP32 (fw-esp32v3) backtrace.
+#
+# Separate from `decode-backtrace-esp32s3` because the ELF differs — and on this
+# chip the addresses look nothing alike either: classic flash text lives at
+# 0x400Dxxxx where the S3's and C6's live at 0x42xxxxxx, so feeding one to the
+# other's recipe produces confident nonsense rather than an obvious failure.
+# `recovery::panic_path` and the boot report both print the right recipe name
+# next to the addresses for exactly that reason.
+#
+# Usage: just decode-backtrace-esp32v3 0x400d1234 ...
+#        pbpaste | just decode-backtrace-esp32v3
+decode-backtrace-esp32v3 *addrs:
+    #!/usr/bin/env bash
+    set -e
+    test -f {{ fw_esp32v3_elf }}
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace-esp32v3 0x400d... or: pbpaste | just decode-backtrace-esp32v3"
+        exit 1
+    fi
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    if command -v xtensa-esp32-elf-addr2line >/dev/null 2>&1; then
+        xtensa-esp32-elf-addr2line -pfiaC -e {{ fw_esp32v3_elf }} $ADDRS
+    else
+        addr2line -e {{ fw_esp32v3_elf }} -f -a $ADDRS
+    fi
+
 # ============================================================================
 # Profiling (lp-cli profile)
 # ============================================================================

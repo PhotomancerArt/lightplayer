@@ -66,6 +66,7 @@ server = [
     "dep:lp-gfx-lpvm",
     "dep:lpvm-native",
     "dep:lpa-server",
+    "dep:lp-recovery",
     "dep:lpc-hardware",
     "dep:lpc-shared",
     "dep:lpc-wire",
@@ -143,14 +144,19 @@ esp-backtrace = { version = "0.19.0", features = ["println"] }
 
 log = { workspace = true, default-features = false }
 
-# ⚠️ NOT a dependency yet, deliberately: `lp-recovery` + an RTC-backed
-# `RecoveryBackend`. fw-esp32s3 pairs its abort-tier posture with the ledger;
-# this crate keeps the print-and-reset panic handler for now. The server loop
-# calls `lp_recovery::snapshot()` / `mark_boot_complete()` unconditionally, but
-# both degrade to no-ops with no global installed (see
-# `lp-base/lp-recovery/src/recovery.rs::with_global`), so the boot path
-# compiles and runs without one. Porting the backend needs classic-specific
-# RTC-fast-RAM and `SocResetReason` constants — M7 work, not P1's.
+# The RTC-RAM crash ledger, pulled forward from M7 into M4 because it stopped
+# being a nicety: `docs/defects/2026-08-01-classic-rmt-open-fault.md` records a
+# fault in the WS281x open path that resets this chip after ~5 characters of
+# panic output, so the serial channel cannot name it and the ledger is the only
+# instrument that can. `src/recovery/` holds the classic-specific half (RTC fast
+# RAM at 0x3FF8_0000, the classic `SocResetReason` variant set).
+#
+# Optional and gated behind `server` — unlike fw-esp32s3, which takes it
+# unconditionally. The bare-hello and radio-probe entrypoints keep the plain
+# print-and-reset panic handler: the probe image is M2-P3's *measured* code and
+# linking a ledger it never installs would move the RAM numbers the M6 budget
+# ADR is going to quote.
+lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, optional = true }
 
 # Chip-generic firmware layer: logger, time provider, output provider, and —
 # behind `server` — the server loop, transport, littlefs `LpFs`, project
@@ -229,7 +235,16 @@ lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, 
 # Hardware registry/manifest, the filesystem traits the server is handed, and
 # the `OutputProvider` trait object `main.rs` builds.
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
-lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }
+# ⚠️ `xt-map-esp32-classic` is not cosmetic. `lpc_shared::backtrace`'s Xtensa
+# walker is LX6/LX7-generic in mechanism but bounds-checks every candidate frame
+# against one chip's IRAM / flash-cache / DRAM windows, and it defaults to the
+# ESP32-S3's. Left at the default this walker does not fail — it silently
+# rejects every frame on classic silicon and reports zero, which the panic path
+# renders as "the stack was unreadable". `recovery::panic_path`'s
+# `FRAME_WALKER_PRESENT` is the other half of this fact; the two move together.
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = [
+    "xt-map-esp32-classic",
+], optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 
 # The RAM probe's radio cohort (M2-P3 of the classic bring-up roadmap):
