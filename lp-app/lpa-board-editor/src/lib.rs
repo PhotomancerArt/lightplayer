@@ -18,4 +18,5 @@ pub mod view;
 
 pub use editor_core::editor_doc::{EditorDoc, RailTarget, canonical_json};
 pub use editor_core::lint::{LintFinding, LintLevel, lint_board};
+pub use view::board_editor::BoardEditor;
 pub use view::board_editor_page::BoardEditorPage;

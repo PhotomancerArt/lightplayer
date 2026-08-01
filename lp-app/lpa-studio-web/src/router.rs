@@ -431,7 +431,10 @@ mod tests {
 
     #[test]
     fn boards_edit_is_the_editor_not_a_board_id() {
-        assert_eq!(StudioRoute::parse("#/boards/edit"), StudioRoute::BoardEditor);
+        assert_eq!(
+            StudioRoute::parse("#/boards/edit"),
+            StudioRoute::BoardEditor
+        );
         // A two-segment id still reads as a board detail deep link.
         assert_eq!(
             StudioRoute::parse("#/boards/vendor/edit"),

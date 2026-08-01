@@ -119,18 +119,14 @@ pub fn lint_board(board: &BoardDisplayFile) -> Vec<LintFinding> {
     let rail_pins = board
         .pins()
         .map(|pin| (pin.label.clone(), pin.role, pin.gpio, pin.caps.clone()));
-    let terminals = board
-        .hw
-        .terminals
-        .iter()
-        .map(|terminal| {
-            (
-                terminal.label.clone(),
-                terminal.role,
-                terminal.gpio,
-                terminal.caps.clone(),
-            )
-        });
+    let terminals = board.hw.terminals.iter().map(|terminal| {
+        (
+            terminal.label.clone(),
+            terminal.role,
+            terminal.gpio,
+            terminal.caps.clone(),
+        )
+    });
     for (label, role, gpio, caps) in rail_pins.chain(terminals) {
         if label.trim().is_empty() {
             findings.push(error("pin label must not be empty".into()));
@@ -346,10 +342,9 @@ mod tests {
         let doc = EditorDoc::new_template();
         let findings = lint_board(&doc.board);
         assert!(
-            findings
-                .iter()
-                .any(|f| f.level == LintLevel::Info
-                    && f.message.starts_with("1 discovery-eligible")),
+            findings.iter().any(
+                |f| f.level == LintLevel::Info && f.message.starts_with("1 discovery-eligible")
+            ),
             "{findings:?}"
         );
     }

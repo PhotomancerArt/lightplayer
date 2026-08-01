@@ -313,10 +313,9 @@ mod tests {
     fn canonical_json_round_trips_every_board_by_value() {
         for board in lpa_boards::all_boards() {
             let json = canonical_json(board);
-            let back: BoardDisplayFile =
-                serde_json::from_str(&json).unwrap_or_else(|error| {
-                    panic!("{}: canonical json re-parse: {error}", board.board_id)
-                });
+            let back: BoardDisplayFile = serde_json::from_str(&json).unwrap_or_else(|error| {
+                panic!("{}: canonical json re-parse: {error}", board.board_id)
+            });
             assert_eq!(&back, board, "{}", board.board_id);
         }
     }
@@ -346,7 +345,11 @@ mod tests {
                 *fields.gpio = Some(33);
             });
             let row = &doc.rail_rows(target)[last];
-            assert_eq!((row.label.as_str(), row.gpio), ("X1", Some(33)), "{target:?}");
+            assert_eq!(
+                (row.label.as_str(), row.gpio),
+                ("X1", Some(33)),
+                "{target:?}"
+            );
             doc.remove_pin(target, last);
             assert_eq!(doc.rail_rows(target).len(), before, "{target:?}");
         }
