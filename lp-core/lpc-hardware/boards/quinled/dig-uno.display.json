@@ -9,7 +9,6 @@
   "tier": "bronze",
   "capabilities": ["level shifter", "fuse", "screw terminals", "2 LED ports", "5-24 V input"],
   "blurb": "Purpose-built LED controller: fused, level-shifted, screw terminals. The clean permanent-install choice.",
-  "support_note": "Runs when classic ESP32 (v3) firmware lands — in progress.",
   "purchase_urls": [
     { "label": "quinled.info", "href": "https://quinled.info/pre-assembled-quinled-dig-uno/" }
   ],

@@ -10,8 +10,8 @@
 use dioxus::prelude::*;
 use lpa_boards::geometry::{BoardLayout, DiagramOptions};
 use lpa_boards::{
-    BoardDiagram, BoardDisplayFile, DiagramMargin, DiagramMode, PinSwatch, WiredConnection,
-    all_boards, board_by_id,
+    BoardDiagram, BoardDisplayFile, BoardsCatalogPage, DiagramMargin, DiagramMode, HostOs,
+    PinSwatch, WiredConnection, all_boards, board_by_id,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -347,6 +347,31 @@ pub(crate) fn swatch_confirmed() -> Element {
                 u: 12.0,
                 scale: 1.15,
                 swatches: confirmed,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The #/boards catalog page: tier legend, sort + SoC filter controls, cards with renderer thumbnails — and the D5 driver warning on the CH340K board (rendered as on macOS)."
+)]
+pub(crate) fn catalog_page_macos() -> Element {
+    rsx! {
+        div { style: "max-width: 1080px;",
+            BoardsCatalogPage { os: HostOs::MacOs }
+        }
+    }
+}
+
+#[story(
+    description = "The board detail view (#/boards/domraem/dom-z-102 deep link): full caps pinout, driver section with the verified macOS CH340K steps, and the os-tagged note system."
+)]
+pub(crate) fn detail_page_dom_z_102() -> Element {
+    rsx! {
+        div { style: "max-width: 1080px;",
+            BoardsCatalogPage {
+                os: HostOs::MacOs,
+                initial_board: Some("domraem/dom-z-102".to_string()),
             }
         }
     }
