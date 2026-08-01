@@ -28,6 +28,16 @@ struct OutputSinkBinding {
     display_options: Option<OutputDriverOptions>,
     channel_handle: Option<OutputChannelHandle>,
     last_byte_count: Option<u32>,
+    /// Hardware generation observed when this sink's last open attempt failed,
+    /// or `None` while the sink has an open channel or a retry is due.
+    ///
+    /// A sink whose endpoint does not exist on the board — a project authored
+    /// for four strips loaded onto a one-strip board, say — can never open, and
+    /// re-attempting costs a full enumeration of every endpoint the drivers
+    /// offer. Parking on the generation means such a sink is asked once per
+    /// *hardware change* rather than once per frame, while a pin freed by
+    /// another node still lights it on the very next flush.
+    parked_at_generation: Option<u64>,
 }
 
 /// Failure while flushing one registered output sink.
@@ -141,6 +151,12 @@ impl EngineServices {
     /// Replace the optional [`OutputProvider`] used when flushing sinks after each tick.
     pub fn set_output_provider(&mut self, provider: Option<Box<dyn OutputProvider>>) {
         self.close_output_sinks();
+        // A different provider is a different world: what the old one refused
+        // says nothing about what this one will do, so no sink stays parked
+        // across the swap.
+        for sink in self.output_sinks.values_mut() {
+            sink.parked_at_generation = None;
+        }
         self.output_provider = provider;
     }
 
@@ -187,6 +203,7 @@ impl EngineServices {
                 display_options,
                 channel_handle: None,
                 last_byte_count: None,
+                parked_at_generation: None,
             },
         );
     }
@@ -212,6 +229,9 @@ impl EngineServices {
         existing.endpoint = endpoint;
         existing.display_options = display_options;
         existing.last_byte_count = None;
+        // A re-authored endpoint is a fresh question for the hardware, so the
+        // sink stops waiting on a generation change it no longer cares about.
+        existing.parked_at_generation = None;
         self.output_sinks.insert(buffer_id, existing);
     }
 
@@ -321,6 +341,15 @@ fn flush_registered_sinks(
     let mut first_error: Option<OutputFlushError> = None;
     let mut failed = 0usize;
 
+    // Read once per flush, not once per sink: the answer is the same for every
+    // sink in the frame, and asking is a virtual call through the provider.
+    //
+    // Read it *before* any open in this flush, too. A successful open bumps the
+    // generation, so a value sampled afterwards would park a sink against a
+    // number that already reflects this frame's own claims — and a release that
+    // raced the open would be missed rather than retried.
+    let generation = provider.hardware_generation();
+
     for (buffer_id, sink) in sinks.iter_mut() {
         let Some(versioned) = buffers.get(*buffer_id) else {
             continue;
@@ -334,7 +363,11 @@ fn flush_registered_sinks(
             continue;
         }
 
-        if let Err(error) = flush_one_sink(provider, sink, *buffer_id, bytes) {
+        if sink.parked_at_generation == Some(generation) {
+            continue;
+        }
+
+        if let Err(error) = flush_one_sink(provider, sink, *buffer_id, bytes, generation) {
             failed += 1;
             log::warn!("EngineServices: {error}");
             first_error.get_or_insert(error);
@@ -360,6 +393,7 @@ fn flush_one_sink(
     sink: &mut OutputSinkBinding,
     buffer_id: RuntimeBufferId,
     bytes: &[u8],
+    generation: u64,
 ) -> Result<(), OutputFlushError> {
     if bytes.len() % 6 != 0 {
         return Err(OutputFlushError::MisalignedPayload {
@@ -372,7 +406,7 @@ fn flush_one_sink(
     let led_triplets = u16_payload.len() / 3;
     let byte_count = (led_triplets as u32).saturating_mul(3).max(3);
 
-    ensure_channel_open(provider, sink, byte_count).map_err(|error| {
+    ensure_channel_open(provider, sink, byte_count, generation).map_err(|error| {
         OutputFlushError::Provider {
             endpoint: sink.endpoint.clone(),
             error,
@@ -406,22 +440,40 @@ fn decode_bytes_as_u16_le(bytes: &[u8]) -> Vec<u16> {
     out
 }
 
+/// Open the sink's channel if it has none, parking it on failure.
+///
+/// `generation` is the provider's hardware generation sampled before any open
+/// this flush; a sink that fails records it and is skipped until it changes.
 fn ensure_channel_open(
     provider: &dyn OutputProvider,
     sink: &mut OutputSinkBinding,
     byte_count: u32,
+    generation: u64,
 ) -> Result<(), OutputError> {
     if sink.channel_handle.is_some() {
         return Ok(());
     }
 
     let bc = sink.last_byte_count.unwrap_or(3).max(byte_count).max(3);
-    let handle = provider.open(
+    let handle = match provider.open(
         &sink.endpoint,
         bc,
         OutputFormat::Ws2811,
         sink.display_options.clone(),
-    )?;
+    ) {
+        Ok(handle) => handle,
+        Err(error) => {
+            sink.parked_at_generation = Some(generation);
+            return Err(error);
+        }
+    };
+
+    if sink.parked_at_generation.take().is_some() {
+        log::info!(
+            "EngineServices: output {} recovered and is writing again",
+            sink.endpoint
+        );
+    }
     sink.channel_handle = Some(handle);
     sink.last_byte_count = Some(bc);
     Ok(())
@@ -646,6 +698,150 @@ mod tests {
         assert_eq!(provider.open_channel_count(), good.len());
     }
 
+    /// An endpoint the board does not have can never open, so the flush seam
+    /// must ask about it once and then wait — not once per frame.
+    ///
+    /// Every attempt costs a full enumeration of every endpoint the drivers
+    /// offer, with a status lookup and a formatted spec per endpoint. On a
+    /// four-strip project loaded onto a one-strip board that was 45.8% of all
+    /// cycles, spent entirely on learning the same "no" 60 times a second.
+    #[test]
+    fn a_sink_that_cannot_open_is_asked_once_not_once_per_frame() {
+        let provider = Rc::new(CountingOutputProvider::new(
+            MemoryOutputProvider::with_hardware_manifest(
+                lpc_hardware::default_esp32s3_hardware_manifest(),
+            ),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        services.register_output_sink(buffer_id, &OutputDef::new(endpoint("ws281x:rmt:NOT-A-PIN")));
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect_err("the first frame reports the failure");
+        assert_eq!(provider.open_calls(), 1);
+
+        for _ in 0..16 {
+            services
+                .flush_dirty_output_sinks(Revision::new(1), &buffers)
+                .expect("a parked sink does not keep failing the frame");
+        }
+
+        assert_eq!(
+            provider.open_calls(),
+            1,
+            "a parked sink must not re-attempt while the hardware is unchanged"
+        );
+    }
+
+    /// Parking must not cost recovery: when the pin a sink was waiting for is
+    /// freed, the very next flush picks it up, with no config change and
+    /// nothing to poke.
+    #[test]
+    fn freeing_the_contended_hardware_lights_the_waiting_sink() {
+        let provider = Rc::new(CountingOutputProvider::new(MemoryOutputProvider::new()));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let holder = output_buffer(&mut buffers, Revision::new(1));
+        let waiter = output_buffer(&mut buffers, Revision::new(1));
+        let held = endpoint("ws281x:rmt:D10");
+        let waiting = endpoint("ws281x:rmt:GPIO19");
+        services.register_output_sink(holder, &OutputDef::new(held.clone()));
+        services.register_output_sink(waiter, &OutputDef::new(waiting.clone()));
+
+        // The board has one RMT resource, so exactly one of these opens; drive
+        // the flush until both have had their attempt.
+        let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
+        let (open_sink, parked_sink, parked_endpoint) = if provider.inner().is_endpoint_open(&held) {
+            (holder, waiter, waiting.clone())
+        } else {
+            (waiter, holder, held.clone())
+        };
+        let _ = open_sink;
+        assert!(!provider.inner().is_endpoint_open(&parked_endpoint));
+
+        // Releasing the winner's claim is a hardware change, so the parked sink
+        // gets its retry.
+        services.unregister_output_sink(open_sink);
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("the freed resource lets the waiting sink open");
+
+        assert!(
+            provider.inner().is_endpoint_open(&parked_endpoint),
+            "a sink parked on contention must open once the contention clears"
+        );
+        assert!(services.output_sinks.contains_key(&parked_sink));
+    }
+
+    /// Re-authoring the endpoint is a new question, so it must be asked at once
+    /// rather than waiting on a hardware change that may never come.
+    #[test]
+    fn re_authoring_a_parked_sink_retries_without_a_hardware_change() {
+        let provider = Rc::new(CountingOutputProvider::new(
+            MemoryOutputProvider::with_hardware_manifest(
+                lpc_hardware::default_esp32s3_hardware_manifest(),
+            ),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        services.register_output_sink(buffer_id, &OutputDef::new(endpoint("ws281x:rmt:NOT-A-PIN")));
+        let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
+        let generation_before = provider.hardware_generation();
+
+        let good = endpoint("ws281x:rmt:D10");
+        services.update_output_sink_config(buffer_id, &OutputDef::new(good.clone()));
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("the re-authored endpoint opens");
+
+        assert_eq!(
+            provider.hardware_generation(),
+            generation_before + 1,
+            "only the successful claim should have moved the generation"
+        );
+        assert!(provider.inner().is_endpoint_open(&good));
+    }
+
+    /// A new provider is a new world; nothing the old one refused should keep
+    /// a sink parked against it.
+    #[test]
+    fn swapping_the_provider_unparks_sinks() {
+        let strict = Rc::new(CountingOutputProvider::new(MemoryOutputProvider::new()));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&strict)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        // The strict single-RMT board has no such pin; the permissive provider
+        // that replaces it accepts any endpoint.
+        let demo = endpoint("ws281x:rmt:D4");
+        services.register_output_sink(buffer_id, &OutputDef::new(demo.clone()));
+        let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
+        assert_eq!(strict.open_calls(), 1);
+
+        let permissive = Rc::new(CountingOutputProvider::new(
+            MemoryOutputProvider::new_permissive(),
+        ));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(
+            &permissive,
+        )))));
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("the replacement provider accepts the endpoint");
+
+        assert_eq!(permissive.open_calls(), 1, "the swap must unpark the sink");
+        assert!(permissive.inner().is_endpoint_open(&demo));
+    }
+
     fn endpoint(spec: &'static str) -> HwEndpointSpec {
         HwEndpointSpec::from_static(spec)
     }
@@ -655,6 +851,61 @@ mod tests {
             revision,
             RuntimeBuffer::output_channels_u16(3, vec![0, 1, 0, 2, 0, 3]),
         ))
+    }
+
+    /// Counts `open` calls, which is how the parking tests tell "asked once"
+    /// from "asked every frame".
+    struct CountingOutputProvider {
+        inner: MemoryOutputProvider,
+        open_calls: core::cell::Cell<usize>,
+    }
+
+    impl CountingOutputProvider {
+        fn new(inner: MemoryOutputProvider) -> Self {
+            Self {
+                inner,
+                open_calls: core::cell::Cell::new(0),
+            }
+        }
+
+        fn inner(&self) -> &MemoryOutputProvider {
+            &self.inner
+        }
+
+        fn open_calls(&self) -> usize {
+            self.open_calls.get()
+        }
+
+        fn hardware_generation(&self) -> u64 {
+            self.inner.hardware_generation()
+        }
+    }
+
+    struct SharedCountingProvider(Rc<CountingOutputProvider>);
+
+    impl OutputProvider for SharedCountingProvider {
+        fn open(
+            &self,
+            endpoint: &HwEndpointSpec,
+            byte_count: u32,
+            format: OutputFormat,
+            options: Option<OutputDriverOptions>,
+        ) -> Result<OutputChannelHandle, OutputError> {
+            self.0.open_calls.set(self.0.open_calls.get() + 1);
+            self.0.inner.open(endpoint, byte_count, format, options)
+        }
+
+        fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+            self.0.inner.write(handle, data)
+        }
+
+        fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
+            self.0.inner.close(handle)
+        }
+
+        fn hardware_generation(&self) -> u64 {
+            self.0.inner.hardware_generation()
+        }
     }
 
     struct SharedMemoryOutputProvider(Rc<MemoryOutputProvider>);
@@ -676,6 +927,10 @@ mod tests {
 
         fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
             self.0.close(handle)
+        }
+
+        fn hardware_generation(&self) -> u64 {
+            self.0.hardware_generation()
         }
     }
 }

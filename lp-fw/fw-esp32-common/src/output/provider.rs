@@ -150,6 +150,10 @@ impl OutputProvider for Esp32OutputProvider {
             .ok_or_else(|| OutputError::InvalidHandle { handle: handle_id })?;
         Ok(())
     }
+
+    fn hardware_generation(&self) -> u64 {
+        self.hardware_system.registry().generation()
+    }
 }
 
 fn capped_byte_count_for_len(data_len: usize) -> u32 {
