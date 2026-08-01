@@ -168,7 +168,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     // is why this board printed `at /U` and rebooted while a driver fault was
     // being diagnosed, hiding the file and line for three flash cycles. A
     // panic report is only trustworthy if nothing else can run during it.
-    unsafe { esp_hal::xtensa_lx::interrupt::disable() };
+    esp_hal::xtensa_lx::interrupt::disable();
 
     // ⚠️ This channel is NOT trustworthy for a fault inside the RMT path.
     //

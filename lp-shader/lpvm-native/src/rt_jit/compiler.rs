@@ -11,6 +11,7 @@ use crate::compile::{CompiledModule, compile_module};
 use crate::error::NativeError;
 use crate::isa::IsaTarget;
 use crate::jit_symbol_sizes::{derive_sizes, sort_by_offset};
+#[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
 use crate::link::link_jit;
 use crate::native_options::NativeCompileOptions;
 use lp_perf::{EVENT_SHADER_LINK, JitSymbolEntry, emit_jit_map_load};
