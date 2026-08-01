@@ -8,6 +8,9 @@
 
 pub mod abi;
 pub mod emit;
+// The float half of the emitter, gated with the register model below.
+#[cfg(feature = "float-f32")]
+pub mod emit_fp;
 // The float register model. Gated at module granularity (M7 D9) so a
 // Fixed-only image links no float tables; the `VInst` float variants
 // themselves are unconditional, because `cfg` on enum variants matched

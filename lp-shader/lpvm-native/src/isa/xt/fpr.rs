@@ -34,17 +34,38 @@
 //!   at the *bottom* of the frame, structurally distant from the
 //!   window-overflow reservation at the top.
 //!
-//! # No FR is reserved as scratch
+//! # One FR is reserved as scratch
 //!
-//! Unlike `gpr.rs`, which holds back `a8`/`a9`, all 16 FRs are allocatable
-//! (M7 D8). Nothing in the emitted subset needs a float scratch: spill and
-//! reload are a direct `ssi`/`lsi` pair, and the two sequences that do need a
-//! scratch — the out-of-range spill offset and the compare's 0/1
-//! materialization — need an *address* register, which is what `a8`/`a9`
-//! already are. A reservation costs a register for the life of the backend, so
-//! it is not made speculatively; a future inline divide sequence that needs
-//! scratch FRs carves them out of [`ALLOC_POOL`], which is the single place to
-//! do it.
+//! `gpr.rs` holds back `a8`/`a9`; this file holds back exactly one FR,
+//! [`SCRATCH`] (`f15`), leaving 15 allocatable.
+//!
+//! **This narrows M7 D8, and the reason is a demonstrated need, not caution.**
+//! D8 was written against the spill/reload path, where it is right: an `ssi`
+//! or `lsi` names the allocated FR directly and needs no third register, and
+//! the two sequences that *do* need a scratch — the out-of-range spill offset
+//! and the compare's 0/1 materialization — need an *address* register, which
+//! `a8`/`a9` already are. What D8 did not account for is the **spilled def**.
+//!
+//! The register allocator can allocate an instruction's *destination* to
+//! `Alloc::Stack` (`regalloc::walk::process_generic`: a def whose home register
+//! was already freed by a later eviction in the backward walk, but which has a
+//! spill slot). The emitter's contract for that case is to compute into a
+//! scratch and then store it to the slot — that is what `def_vreg`/
+//! `store_def_vreg` do, and for integers the scratch is `a8`. An FP
+//! instruction has to write *somewhere*, and there is no FR-free way to
+//! produce a float result, so the float half needs the same affordance.
+//!
+//! **One is provably enough.** Only defs are ever stack-allocated: every *use*
+//! goes through `regalloc::walk::alloc_use`, which returns `Alloc::Reg` on all
+//! three of its paths (reloading through an inserted edit when the value lives
+//! in a slot), and the one code path that forces uses to the stack is the sret
+//! `Ret` constraint, which no float `VInst` reaches — float returns travel in
+//! address registers (D1), so a float value reaches `Ret` only after an `Rfr`.
+//! And no float `VInst` has two float defs. So at most one FR-sized
+//! materialization is live at a time within a single emitted sequence.
+//!
+//! A future inline divide or sqrt sequence needing more scratch FRs carves
+//! them out of [`ALLOC_POOL`] here, which remains the single place to do it.
 
 /// Physical FR index (`f0`–`f15`).
 pub type FReg = u8;
@@ -52,15 +73,28 @@ pub type FReg = u8;
 /// Number of floating-point registers the coprocessor provides.
 pub const FR_COUNT: u8 = 16;
 
-/// Registers available to the allocator — **all 16** (M7 D8).
+/// The emitter's float scratch (`f15`) — **not allocatable**.
+///
+/// The FR counterpart of [`gpr::SCRATCH`](super::gpr::SCRATCH) (`a8`), and it
+/// exists for one reason: a float `VInst` whose destination the allocator put
+/// on the stack must still compute into a register before it can be stored.
+/// See this module's "One FR is reserved as scratch" section for why exactly
+/// one suffices.
+///
+/// `f15` rather than `f0` so the low-numbered registers — the ones a
+/// disassembly listing shows first — stay allocatable, matching `gpr.rs`'s
+/// habit of reserving out of the way of the program bank.
+pub const SCRATCH: FReg = 15;
+
+/// Registers available to the allocator — 15 of the 16, all but [`SCRATCH`].
 ///
 /// Order is the LRU initialization order, high to low. There is no
 /// caller-saved / callee-saved split to order around (every FR is clobbered by
 /// a call), and no FR carries an ABI role, so the order carries no meaning
-/// beyond determinism: `f15` first keeps the low-numbered registers free
+/// beyond determinism: high-first keeps the low-numbered registers free
 /// longest, matching `gpr::ALLOC_POOL`'s habit and making the two files' dumps
 /// read alike.
-pub const ALLOC_POOL: &[FReg] = &[15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+pub const ALLOC_POOL: &[FReg] = &[14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
 
 /// Pool members clobbered by a call — **all of them**.
 ///
@@ -149,13 +183,20 @@ mod tests {
         }
     }
 
-    /// All 16, no duplicates, nothing held back (D8). A reservation creeping in
-    /// later would show up here rather than as a mysteriously smaller pool.
+    /// Every FR except [`SCRATCH`], no duplicates. A *second* reservation
+    /// creeping in later would show up here rather than as a mysteriously
+    /// smaller pool — and the scratch's exclusion is the whole point: if `f15`
+    /// were both allocatable and the emitter's materialization target, a
+    /// spilled def would silently clobber a live value.
     #[test]
-    fn every_fr_is_allocatable() {
-        assert_eq!(ALLOC_POOL.len(), FR_COUNT as usize);
+    fn every_fr_but_the_scratch_is_allocatable() {
+        assert_eq!(ALLOC_POOL.len(), FR_COUNT as usize - 1);
         for r in 0..FR_COUNT {
-            assert!(pool_contains(r), "f{r} missing from the pool");
+            assert_eq!(
+                pool_contains(r),
+                r != SCRATCH,
+                "f{r} is on the wrong side of the scratch reservation"
+            );
         }
         for (i, &f) in ALLOC_POOL.iter().enumerate() {
             assert!(!ALLOC_POOL[i + 1..].contains(&f), "duplicate f{f}");

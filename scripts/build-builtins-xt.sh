@@ -42,7 +42,7 @@ export CARGO_TARGET_DIR="$PWD/target"
 # and staleness is not harmless here — on esp Rust 1.88 `lpc-model` genuinely
 # fails to compile (70x E0716 from the Slotted derive's const-promotion of a
 # temporary), which is what blocked the firmware crates. Fail loudly instead.
-if ! cargo build --release -p lps-builtins-xt-app; then
+if ! cargo build --release -p lps-builtins-xt-app --features float-f32; then
   echo >&2
   echo "error: build failed. If that was an MSRV error, the esp toolchain is stale:" >&2
   echo "       installed: $(rustc +esp --version 2>/dev/null || echo unknown)" >&2
@@ -61,5 +61,15 @@ if [[ "$COUNT" -eq 0 ]]; then
   echo "error: $OUT contains no __lps_ symbols (dead-code elimination?)" >&2
   exit 1
 fi
+# The f32 family is the reason M7 exists on this image: hardware-float lowering
+# routes divide, sqrt, the rounding family, min/max and every transcendental to
+# these symbols (M7 D4). An image built without `float-f32` links none of them
+# and every such call fails to resolve — checked by name, mirroring the rv32
+# script, because the downstream failure is opaque.
+F32_COUNT="$("$NM" "$OUT" | grep -c '_f32$' || true)"
+if [[ "$F32_COUNT" -eq 0 ]]; then
+  echo "error: $OUT contains no native-f32 builtins (is --features float-f32 set?)" >&2
+  exit 1
+fi
 SIZE="$(wc -c < "$OUT" | xargs)"
-echo "lps-builtins-xt-app: $COUNT builtins, ${SIZE} B -> ${OUT#"$ROOT"/}"
+echo "lps-builtins-xt-app: $COUNT builtins ($F32_COUNT native-f32), ${SIZE} B -> ${OUT#"$ROOT"/}"
