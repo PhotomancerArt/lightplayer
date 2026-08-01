@@ -39,7 +39,7 @@ impl ButtonEventOp {
     /// rejection notice ("Couldn't … the button: …").
     fn verb(&self) -> &'static str {
         match self.event {
-            WireButtonEvent::Click => "Simulate press",
+            WireButtonEvent::Click => "Press",
             WireButtonEvent::Press { .. } => "Hold button",
             WireButtonEvent::Release { .. } => "Release button",
         }
@@ -101,7 +101,7 @@ mod tests {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             }
         );
-        assert_eq!(click.default_action_meta().label, "Simulate press");
+        assert_eq!(click.default_action_meta().label, "Press");
         assert_eq!(
             click.default_action_meta().priority,
             ActionPriority::Primary

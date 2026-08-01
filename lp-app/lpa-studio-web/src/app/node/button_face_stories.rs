@@ -21,7 +21,7 @@ fn ButtonCardCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "Button card at rest: the simulate-press control beside the endpoint and message id, over the collapsed settings drawer. A tap sends a click; holding past ~300 ms becomes a real hold that renews until release."
+    description = "Button card at rest: the press control — a skeuomorphic momentary button in the knob family — beside the endpoint and message id, over the collapsed settings drawer. A tap sends a click; holding past ~300 ms becomes a real hold that renews until release."
 )]
 fn default() -> Element {
     rsx! {
@@ -35,7 +35,7 @@ fn default() -> Element {
 }
 
 #[story(
-    description = "Held: the pointer stayed down past the window, so the control is sustaining a real press on the runtime (renewed every second, auto-released by the device if this tab stops asking). Live-blue, the same family as the playlist's ACTIVE placard — something is happening in the runtime right now."
+    description = "Held: the pointer stayed down past the window, so the button is sustaining a real press on the runtime (renewed every second, auto-released by the device if this tab stops asking). The cap sits depressed with a live-blue ring — the same family as the playlist's ACTIVE placard, something happening in the runtime right now."
 )]
 fn held() -> Element {
     rsx! {
