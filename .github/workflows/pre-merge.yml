@@ -1148,9 +1148,22 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch --depth=1 origin "$HEAD_REF"
           BEFORE_SHA="$(git rev-parse "origin/$HEAD_REF")"
+          # The build steps above can leave tracked files modified (observed
+          # 2026-08-01: the dx story build regenerated assets/tailwind.css
+          # with drifted content, and the checkout below aborted with "local
+          # changes would be overwritten"). Everything this step commits comes
+          # from the gitignored story-images/.new/ staging area, so tracked
+          # dirt is never payload — discard it, but log the paths so a
+          # checked-in generated file that SHOULD be refreshed shows up here
+          # instead of vanishing silently.
+          if ! git diff --quiet HEAD --; then
+            echo "Discarding incidental build-produced changes to tracked files:"
+            git diff --name-only HEAD --
+            git reset --hard HEAD
+          fi
           # The pull_request checkout is a detached merge commit; the fresh
           # captures live in the gitignored story-images/.new/ and survive the
-          # branch switch in place.
+          # branch switch in place (reset --hard above leaves them alone too).
           git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
           # Manifest-driven, NOT a wholesale swap: the check tolerates
           # sub-threshold anti-aliasing jitter, and copying the whole fresh set
