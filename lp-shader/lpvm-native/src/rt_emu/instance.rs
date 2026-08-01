@@ -1104,6 +1104,92 @@ impl NativeEmuInstance {
         }
         Ok(words)
     }
+
+    /// Invoke a function compiled in [`FloatMode::F32`], passing and returning
+    /// **raw IEEE-754 bit patterns**, one word per scalar component.
+    ///
+    /// The f32 counterpart of [`Self::call_q32_with_cycle_model`], and
+    /// deliberately the same shape: a flat word vector in, a flat word vector
+    /// out, no conversion in either direction. In F32 mode a word *is* the
+    /// value's bit pattern — that is exactly M7 D1's boundary convention,
+    /// where floats travel in address registers as bit patterns — so there is
+    /// nothing to convert and no fixed-point scale to get wrong. Callers turn
+    /// them into `f32` with `f32::from_bits`.
+    ///
+    /// Why a separate entry point rather than relaxing
+    /// [`Self::call_q32_with_cycle_model`]'s guard: the two modes disagree
+    /// about what a word *means*, and a Q32 caller handed F32 words gets
+    /// plausible garbage (`1.0f32` reads as `1065353216` in Q16.16, roughly
+    /// 16257.0). The mode check stays a hard error on both sides so a
+    /// mismatch is a message and not a wrong pixel.
+    ///
+    /// `call_render_texture` / `call_render_samples` stay Q32-only: the buffer
+    /// element format per float mode is a product-tier decision M7 does not
+    /// make.
+    pub fn call_f32_words(&mut self, name: &str, args: &[u32]) -> Result<Vec<u32>, NativeError> {
+        self.reset_globals();
+
+        self.last_debug = None;
+        self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
+        if self.module.options.float_mode != FloatMode::F32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeEmuInstance::call_f32_words requires FloatMode::F32",
+            ))));
+        }
+
+        let gfn = self
+            .module
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .cloned()
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+
+        for p in &gfn.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(NativeError::Call(CallError::Unsupported(String::from(
+                    "out/inout parameters are not supported for direct calling.",
+                ))));
+            }
+        }
+
+        let ir_func = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        let param_count = ir_func.param_count as usize;
+
+        let expected_words: usize = gfn
+            .parameters
+            .iter()
+            .map(|p| glsl_component_count(&p.ty))
+            .sum();
+        if args.len() != expected_words {
+            return Err(NativeError::Call(CallError::Arity {
+                expected: expected_words,
+                got: args.len(),
+            }));
+        }
+        if args.len() != param_count {
+            return Err(NativeError::Call(CallError::Unsupported(format!(
+                "flattened argument count {} does not match IR param_count {}",
+                args.len(),
+                param_count
+            ))));
+        }
+
+        let flat: Vec<i32> = args.iter().map(|&w| w as i32).collect();
+        let words = self.invoke_flat(name, &flat, CycleModel::default())?;
+        if gfn.return_type == LpsType::Void {
+            return Ok(Vec::new());
+        }
+        Ok(words.into_iter().map(|w| w as u32).collect())
+    }
 }
 
 #[cfg(test)]
@@ -1166,6 +1252,35 @@ mod tests {
             .call_q32("ok", &[])
             .expect("instance reusable after trap");
         assert_eq!(words, vec![42]);
+    }
+
+    /// The two word entry points are not interchangeable, and the guard says
+    /// so rather than returning plausible garbage.
+    ///
+    /// A word means different things in the two modes — `1.0f32`'s bit pattern
+    /// read as Q16.16 is about 16257.0 — so a mode mismatch that "worked"
+    /// would surface as wrong pixels somewhere far away. Both directions are
+    /// checked because only checking one is how the other half rots.
+    #[test]
+    fn the_word_entry_points_refuse_the_wrong_float_mode() {
+        let (ir, meta) = spin_and_ok_module();
+        let engine = NativeEmuEngine::new(NativeCompileOptions::default());
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+
+        // This module is Q32 (the default), so the f32 entry must refuse it.
+        let err = inst
+            .call_f32_words("ok", &[])
+            .expect_err("a Q32 module must not accept f32 words");
+        let msg = alloc::format!("{err}");
+        assert!(
+            msg.contains("FloatMode::F32"),
+            "the error must name the mode it wanted: {msg}"
+        );
+
+        // And the Q32 entry still works on it, so the guard is a guard and not
+        // a general breakage.
+        assert_eq!(inst.call_q32("ok", &[]).expect("q32 call"), vec![42]);
     }
 
     /// With the raised `EMU_CALL_INSTRUCTION_LIMIT`, a flat call armed with

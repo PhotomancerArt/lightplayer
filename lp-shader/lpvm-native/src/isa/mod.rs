@@ -10,6 +10,8 @@ use alloc::string::String;
 use lpir::IrFunction;
 use object::Architecture;
 
+use lpvm::FloatImpl;
+
 use crate::abi::{FrameLayout, PReg, RegClass};
 use crate::regalloc::{AllocError, AllocOutput};
 use crate::vinst::{AluImmOp, ModuleSymbols, VInst, VReg};
@@ -333,6 +335,32 @@ impl IsaTarget {
             IsaTarget::Xtensa => F32Lowering::HardwareFpu,
             #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
             IsaTarget::Xtensa => F32Lowering::Unsupported,
+        }
+    }
+
+    /// What a module compiled in `mode` for this target actually got, for
+    /// compile-stats disclosure (`LpvmModule::float_impl`, roadmap D3).
+    ///
+    /// The inverse direction of [`Self::f32_lowering`]: that one asks "how do
+    /// I lower this", this one asks "what do I tell the author I did". Kept
+    /// beside it so the two can never disagree — a target that starts emitting
+    /// hardware float changes one match arm and both answers follow.
+    ///
+    /// `Q32` is [`FloatImpl::Fixed`] on every target, and that is not a
+    /// placeholder: a Q16.16 `float` *is* an integer and lowers to integer
+    /// instructions, so "fixed" is the literal truth rather than a fallback.
+    pub fn float_impl_for(self, mode: lpir::FloatMode) -> FloatImpl {
+        match mode {
+            lpir::FloatMode::Q32 => FloatImpl::Fixed,
+            lpir::FloatMode::F32 => match self.f32_lowering() {
+                F32Lowering::HardwareFpu => FloatImpl::HardwareF32,
+                F32Lowering::SoftFloatCalls => FloatImpl::SoftF32,
+                // Unreachable by construction: an F32 module for a target that
+                // cannot lower float fails to compile, so no such module exists
+                // to report on. `Fixed` under-claims rather than over-claims,
+                // which is the right direction to be wrong in if it ever does.
+                F32Lowering::Unsupported => FloatImpl::Fixed,
+            },
         }
     }
 
