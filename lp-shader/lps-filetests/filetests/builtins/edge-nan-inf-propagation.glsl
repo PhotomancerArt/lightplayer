@@ -25,6 +25,9 @@ bool test_isnan_inf() {
 // as the @unsupported entries above, not an f32-specific failure.
 // @unsupported(wasm.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_isnan_inf() == false
 
 bool test_isnan_neg_inf() {
@@ -41,6 +44,9 @@ bool test_isnan_neg_inf() {
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // @unsupported(rv32n.f32)
+// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
+// @unsupported(xtn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_isnan_neg_inf() == false
 
 bool test_isinf_inf() {
