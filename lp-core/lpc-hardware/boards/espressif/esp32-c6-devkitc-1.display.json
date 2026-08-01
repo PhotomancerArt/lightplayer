@@ -6,7 +6,7 @@
   "family": "esp32c6",
   "flash": "8 MB",
   "price_usd": 9.0,
-  "tier": "gold",
+  "tier": "silver",
   "capabilities": ["Wi-Fi 6", "BLE 5", "802.15.4", "onboard RGB pixel"],
   "blurb": "The reference C6 devkit and our best-tested board. RISC-V, Wi-Fi 6, cheap — the easiest way to start.",
   "purchase_urls": [

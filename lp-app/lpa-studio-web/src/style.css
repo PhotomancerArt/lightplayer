@@ -3405,56 +3405,160 @@ label:has(> input:not(:disabled)) {
     border-color: rgba(228, 192, 101, 0.3);
 }
 
-/* Driver warning (plan D5): warning-level prominence, expandable steps. */
-.lpb-cat-driver-warn {
-    border: 1px solid var(--studio-status-attention-border);
-    background: var(--studio-status-attention-bg);
-    border-radius: var(--studio-radius-md);
-    padding: 6px 9px;
-    font-size: 11.5px;
-    color: var(--studio-color-text);
-}
-
-.lpb-cat-driver-warn summary {
-    cursor: pointer;
-    display: flex;
-    gap: 7px;
-    align-items: baseline;
-    color: var(--studio-status-attention-text);
-    list-style: none;
-}
-
-.lpb-cat-driver-warn summary::-webkit-details-marker {
-    display: none;
-}
-
-.lpb-cat-driver-badge {
-    flex: none;
+/* Driver warning (plan D5): a compact attention chip on cards; the full
+   setup steps live on the board detail view. */
+.lpb-cat-driver-chip {
+    font-family: var(--studio-font-mono);
     font-size: 9.5px;
     font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--studio-status-attention-text);
+    background: var(--studio-status-attention-bg);
     border: 1px solid var(--studio-status-attention-border);
     border-radius: var(--studio-radius-pill);
-    padding: 1px 7px;
+    padding: 2px 8px;
 }
 
-.lpb-cat-driver-warn ol {
-    margin: 8px 0 2px;
-    padding-left: 18px;
+/* Cards open their detail view: the clickable region keeps link affordance
+   without nesting interactive elements around the buy links. */
+.lpb-cat-open {
+    appearance: none;
+    border: 0;
+    background: none;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+    color: inherit;
+    display: block;
+    width: 100%;
+}
+
+.lpb-cat-open .lpb-cat-title {
+    padding: 10px 12px 0;
+}
+
+/* ---- board detail view (#/boards/<vendor>/<product>) ------------------ */
+
+.lpb-det-back {
+    appearance: none;
+    border: 1px solid var(--studio-color-border-strong);
+    background: transparent;
     color: var(--studio-color-text-muted);
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: var(--studio-radius-sm);
+    padding: 4px 12px;
+    margin-bottom: 16px;
+}
+
+.lpb-det-back:hover {
+    color: var(--studio-color-text-strong);
+}
+
+.lpb-det {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 18px;
+    max-width: 980px;
 }
 
-.lpb-cat-driver-chip-note {
-    display: block;
-    margin-top: 4px;
+.lpb-det-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.lpb-det-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.lpb-det-title h1 {
+    font-size: 20px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--studio-color-text-strong);
+    font-family: inherit;
+    margin: 0;
+}
+
+.lpb-det-title .lpb-cat-price {
+    position: static;
+}
+
+.lpb-det-figure {
+    background: var(--studio-color-terminal);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 12px;
+    padding: 18px;
+    overflow-x: auto;
+}
+
+.lpb-det-section {
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+.lpb-det-section h2 {
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-dim);
+    font-family: var(--studio-font-mono);
+    border: 0;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.lpb-det-driver--warning {
+    border-color: var(--studio-status-attention-border);
+    background: var(--studio-status-attention-bg);
+}
+
+.lpb-det-driver-summary {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpb-det-steps {
+    margin: 10px 0 2px;
+    padding-left: 20px;
+    color: var(--studio-color-text-muted);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.lpb-det-notes {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--studio-color-text-muted);
+    font-size: 12.5px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lpb-det-note-tag {
     font-family: var(--studio-font-mono);
     font-size: 10px;
-    color: var(--studio-color-text-dim);
+    font-weight: 700;
+    color: var(--studio-status-live-text);
+    background: var(--studio-status-live-bg);
+    border: 1px solid var(--studio-status-live-border);
+    border-radius: var(--studio-radius-pill);
+    padding: 1px 7px;
+    margin-right: 7px;
 }
 
 .lpb-cat-blurb {

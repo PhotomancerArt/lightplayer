@@ -87,8 +87,9 @@ pub(crate) enum StudioRoute {
     /// `.map2d.json` documents with localStorage autosave).
     MappingEditor,
     /// The public boards catalog (project-free, renders the checked-in
-    /// board display metadata).
-    Boards,
+    /// board display metadata). `board` deep-links one board's detail view
+    /// (`vendor/product`).
+    Boards { board: Option<String> },
 }
 
 #[cfg_attr(
@@ -122,7 +123,12 @@ impl StudioRoute {
                 _ => StudioRoute::Home,
             },
             Some("mapping") if segments.next().is_none() => StudioRoute::MappingEditor,
-            Some("boards") if segments.next().is_none() => StudioRoute::Boards,
+            Some("boards") => {
+                let rest: Vec<&str> = segments.collect();
+                StudioRoute::Boards {
+                    board: (rest.len() == 2).then(|| rest.join("/")),
+                }
+            }
             Some("stories") => {
                 let rest: Vec<&str> = segments.collect();
                 StudioRoute::Stories {
@@ -143,7 +149,8 @@ impl StudioRoute {
             StudioRoute::Stories { story_id: None } => "#/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("#/stories/{id}"),
             StudioRoute::MappingEditor => "#/mapping".to_string(),
-            StudioRoute::Boards => "#/boards".to_string(),
+            StudioRoute::Boards { board: None } => "#/boards".to_string(),
+            StudioRoute::Boards { board: Some(board) } => format!("#/boards/{board}"),
         }
     }
 
@@ -375,7 +382,10 @@ mod tests {
                 story_id: Some("base/detail-popover/open-sections".to_string()),
             },
             StudioRoute::MappingEditor,
-            StudioRoute::Boards,
+            StudioRoute::Boards { board: None },
+            StudioRoute::Boards {
+                board: Some("domraem/dom-z-102".to_string()),
+            },
         ];
         for route in routes {
             assert_eq!(StudioRoute::parse(&route.hash()), route, "{route:?}");
