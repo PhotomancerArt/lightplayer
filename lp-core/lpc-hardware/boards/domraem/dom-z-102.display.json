@@ -9,7 +9,6 @@
   "tier": "bronze",
   "capabilities": ["Ethernet", "Wi-Fi", "4 fused outputs", "30 A max", "5-24 V input", "DIN rail"],
   "blurb": "Ethernet + Wi-Fi controller in a DIN-rail case: four fused 7.5 A channels, screw terminals throughout, 5-24 V input. WROOM-32E inside.",
-  "support_note": "Runs when classic ESP32 (v3) firmware lands — in progress.",
   "purchase_urls": [
     { "label": "Amazon", "href": "https://www.amazon.com/dp/B0GH7LPNQV" }
   ],
