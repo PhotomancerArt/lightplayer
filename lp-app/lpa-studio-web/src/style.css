@@ -3702,10 +3702,26 @@ label:has(> input:not(:disabled)) {
     border-color: var(--studio-status-bound-border);
 }
 
-.lpb-ed-btn--add {
-    align-self: flex-start;
-    padding: 2px 8px;
+/* The list-add CTA: a full-width, row-height slot where the next row will
+   appear — dashed to read as "empty row", violet to read as an action. */
+.lpb-ed-add-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 30px;
     font-size: 11px;
+    font-weight: 600;
+    color: var(--studio-status-bound-text);
+    background: none;
+    border: 1px dashed var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    cursor: pointer;
+}
+
+.lpb-ed-add-row:hover {
+    background: var(--studio-status-bound-bg);
+    border-color: var(--studio-status-bound-border);
 }
 
 .lpb-ed-error {
@@ -3965,21 +3981,72 @@ label:has(> input:not(:disabled)) {
     min-width: 180px;
 }
 
+/* The pin list is a table: one shared grid template per section so columns
+   align, row separators instead of per-row card borders, inputs quiet until
+   hovered/focused. */
 .lpb-ed-pins {
     display: flex;
     flex-direction: column;
-    gap: 5px;
 }
 
 .lpb-ed-pin {
-    display: flex;
+    display: grid;
+    grid-template-columns: 26px 76px 88px 74px 48px minmax(180px, 1fr) 24px;
+    gap: 6px;
     align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
-    padding: 4px 6px;
-    border: 1px solid var(--studio-color-border);
-    border-radius: var(--studio-radius-sm);
+    min-height: 32px;
+    padding: 1px 2px;
+    border-bottom: 1px solid var(--studio-color-border);
+}
+
+.lpb-ed-pins--terminals .lpb-ed-pin {
+    grid-template-columns: 26px 76px 88px 48px minmax(180px, 1fr) 24px;
+}
+
+.lpb-ed-pin--head {
+    min-height: 22px;
+    border-bottom: 1px solid var(--studio-color-border-strong);
+}
+
+.lpb-ed-pin--head span {
+    font-family: var(--studio-font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-ed-pin:not(.lpb-ed-pin--head):hover {
     background: var(--studio-color-terminal);
+}
+
+.lpb-ed-pin .lpb-ed-input,
+.lpb-ed-pin .lpb-ed-select {
+    width: 100%;
+    background: transparent;
+    border-color: transparent;
+}
+
+.lpb-ed-pin:hover .lpb-ed-input,
+.lpb-ed-pin:hover .lpb-ed-select {
+    border-color: var(--studio-color-border);
+}
+
+.lpb-ed-pin .lpb-ed-input:focus {
+    border-color: var(--studio-status-bound-border);
+    background: var(--studio-color-terminal);
+}
+
+.lpb-ed-pin .lpb-ed-field--num {
+    width: auto;
+}
+
+.lpb-ed-pin .lpb-ed-caps {
+    min-width: 0;
+}
+
+.lpb-ed-pins .lpb-ed-add-row {
+    margin-top: 6px;
 }
 
 .lpb-ed-pin-order {
