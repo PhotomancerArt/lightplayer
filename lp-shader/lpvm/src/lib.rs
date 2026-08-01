@@ -76,7 +76,7 @@ pub use lpvm_abi::{
 };
 pub use lpvm_data_q32::LpvmDataQ32;
 pub use memory::{AllocError, BumpLpvmMemory, LpvmMemory};
-pub use module::LpvmModule;
+pub use module::{FloatImpl, LpvmModule};
 pub use set_uniform::{encode_uniform_write, encode_uniform_write_q32};
 pub use vmcontext::{
     DEFAULT_INVOCATION_FUEL, DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, TRAP_CODE_NONE,
