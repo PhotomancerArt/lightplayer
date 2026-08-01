@@ -20,6 +20,7 @@ float test_in_readonly_float() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_float() ~= 1.0
 
 int test_in_readonly_int() {
@@ -30,6 +31,7 @@ int test_in_readonly_int() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_int() == 100
 
 uint test_in_readonly_uint() {
@@ -40,6 +42,7 @@ uint test_in_readonly_uint() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_uint() == 50u
 
 bool test_in_readonly_bool() {
@@ -50,6 +53,7 @@ bool test_in_readonly_bool() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_bool() == false
 
 vec2 test_in_readonly_vec2() {
@@ -60,6 +64,7 @@ vec2 test_in_readonly_vec2() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_in_readonly_vec3() {
@@ -70,6 +75,7 @@ vec3 test_in_readonly_vec3() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_in_readonly_vec4() {
@@ -80,6 +86,7 @@ vec4 test_in_readonly_vec4() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_in_readonly_calculations() {
@@ -95,6 +102,7 @@ float test_in_readonly_calculations() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_calculations() ~= 0.3
 
 vec4 test_in_readonly_vertex_processing() {
@@ -113,6 +121,7 @@ vec4 test_in_readonly_vertex_processing() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_in_readonly_texture_mapping() {
@@ -132,4 +141,5 @@ float test_in_readonly_texture_mapping() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_in_readonly_texture_mapping() ~= -2.0

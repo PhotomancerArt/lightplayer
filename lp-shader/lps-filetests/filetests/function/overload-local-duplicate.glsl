@@ -35,6 +35,8 @@ float test_overload_scalar_vs_vector() {
 
 // genuine overloads work only on the wasm backend (see the header for each backend)
 // @broken(float_mode=q32, backend!=wasm)
+// the same backend limits as the q32 row above, in the other float mode
+// @broken(float_mode=f32, backend=rv32n)
 // run: test_overload_scalar_vs_vector() ~= 22.0
 
 float combine(float a) {
@@ -53,4 +55,6 @@ float test_overload_arity_and_nested_call() {
 
 // genuine overloads work only on the wasm backend (see the header for each backend)
 // @broken(float_mode=q32, backend!=wasm)
+// the same backend limits as the q32 row above, in the other float mode
+// @broken(float_mode=f32, backend=rv32n)
 // run: test_overload_arity_and_nested_call() ~= 8.0

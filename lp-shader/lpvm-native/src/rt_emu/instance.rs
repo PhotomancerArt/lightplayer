@@ -1,7 +1,7 @@
 //! [`LpvmInstance`] implementation for emulated native RV32 execution.
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use cranelift_codegen::data_value::DataValue;
@@ -13,16 +13,16 @@ use lpir::FloatMode;
 use lpir::lpir_module::IrFunction;
 use lps_shared::{LayoutRules, LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmBuffer, LpvmInstance, decode_global_read, decode_q32_return,
-    encode_global_write, encode_uniform_write, encode_uniform_write_q32,
-    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
-    validate_compute_tick_sig, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
+    CallError, LpvmBuffer, LpvmInstance, decode_global_read, decode_return_to_f32,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32, flat_words_from_f32_args,
+    float_lane_abi, global_data_span, glsl_component_count, validate_compute_tick_sig,
+    validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 // Only the Xtensa arm allocates from the arena (for its sret buffer).
 #[cfg(feature = "emu-xt")]
 use lpvm::LpvmMemory;
 use lpvm::{INVOCATION_INDEX_ARMED, TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP};
-use lpvm_cranelift::{CompileOptions, signature_for_ir_func, signature_uses_struct_return};
+use lpvm_cranelift::{signature_for_ir_func, signature_uses_struct_return};
 use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa};
 
 use crate::error::NativeError;
@@ -193,14 +193,6 @@ impl NativeEmuInstance {
     /// comparison; production uses the default).
     pub fn set_armed_fuel(&mut self, fuel: u32) {
         self.armed_fuel = fuel;
-    }
-
-    fn cranelift_options(&self) -> CompileOptions {
-        CompileOptions {
-            float_mode: self.module.options.float_mode,
-            config: self.module.options.config.clone(),
-            ..Default::default()
-        }
     }
 
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<u32, NativeError> {
@@ -441,11 +433,23 @@ impl NativeEmuInstance {
             Ok(isa) => isa,
             Err(e) => return Err(FailedRun::without_state(format!("{e}"))),
         };
-        let opts = self.cranelift_options();
+        // `FloatMode::Q32`, deliberately, even when the module is compiled in
+        // f32 mode. This signature describes how the **host enters the guest**,
+        // and `lpvm-native` targets the *soft-float* ABI
+        // (`EF_RISCV_FLOAT_ABI_SOFT`, and Xtensa likewise today): an f32
+        // argument or return lives in an integer register, exactly like a Q32
+        // word. Passing `FloatMode::F32` here asks the emulator to marshal a
+        // `types::F32` in a float register file that this ABI does not use — it
+        // fails with "Unsupported return type: types::F32", and if it ever
+        // stopped failing it would be reading the wrong register.
+        //
+        // When a hardware-FPU backend lands ([`crate::isa::F32Lowering::
+        // HardwareFpu`]), the entry ABI changes with it and this becomes a
+        // query on the target rather than a constant.
         let sig = signature_for_ir_func(
             ir_func,
             CallConv::SystemV,
-            opts.float_mode,
+            FloatMode::Q32,
             isa.pointer_type(),
             &*isa,
         );
@@ -799,11 +803,7 @@ impl LpvmInstance for NativeEmuInstance {
         self.last_debug = None;
         self.last_guest_instruction_count = None;
         self.last_guest_cycle_count = None;
-        if self.module.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeEmuInstance::call requires FloatMode::Q32",
-            ))));
-        }
+        let lane_abi = float_lane_abi(self.module.options.float_mode);
 
         let gfn = self
             .module
@@ -822,12 +822,6 @@ impl LpvmInstance for NativeEmuInstance {
             }
         }
 
-        if gfn.return_type == LpsType::Void {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "void return is not represented as LpsValue; use a typed return",
-            ))));
-        }
-
         if gfn.parameters.len() != args.len() {
             return Err(NativeError::Call(CallError::Arity {
                 expected: gfn.parameters.len(),
@@ -835,7 +829,7 @@ impl LpvmInstance for NativeEmuInstance {
             }));
         }
 
-        let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
+        let flat = flat_words_from_f32_args(&gfn.parameters, args, lane_abi)?;
         let ir_func = self
             .module
             .ir
@@ -853,9 +847,7 @@ impl LpvmInstance for NativeEmuInstance {
         }
 
         let words = self.invoke_flat(name, &flat, CycleModel::default())?;
-        let gq = decode_q32_return(&gfn.return_type, &words)?;
-        q32_to_lps_value_f32(&gfn.return_type, gq)
-            .map_err(|e| NativeError::Call(CallError::TypeMismatch(e.to_string())))
+        Ok(decode_return_to_f32(&gfn.return_type, &words, lane_abi)?)
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
