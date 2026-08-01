@@ -42,22 +42,36 @@ export CARGO_TARGET_DIR="$PWD/target"
 # and staleness is not harmless here — on esp Rust 1.88 `lpc-model` genuinely
 # fails to compile (70x E0716 from the Slotted derive's const-promotion of a
 # temporary), which is what blocked the firmware crates. Fail loudly instead.
-# The native-f32 builtin family is built in unconditionally, matching
-# scripts/build-builtins.sh (rv32). It was briefly opt-in behind
-# LP_XT_BUILTINS_F32 because `lps-builtins/float-f32` did not compile for
-# Xtensa at all:
-#   rustc-LLVM ERROR: Cannot select: XtensaISD::PCREL_WRAPPER
-#                     TargetConstantPool <[2 x float] [0.0, -1.0]>
-# The backend limitation is real and still open, but our source no longer
-# forms a float constant pool — see the workaround (and its bit-equivalence
-# test) in lps-builtins' rgb2hsv_f32.rs, and:
+# The native-f32 builtin family stays **opt-in**, for a different reason than
+# when this gate was introduced.
+#
+# It was originally opt-in because `lps-builtins/float-f32` did not compile for
+# Xtensa at all — the backend cannot select a float constant pool. That is
+# fixed on our side (see the workaround and its bit-equivalence test in
+# lps-builtins' rgb2hsv_f32.rs); the image now links with the family in.
 #   docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
 #
+# What it runs into instead is **capacity**. link.ld gives .text 112 KiB of the
+# emulator's 128 KiB code region; with float-f32 .text is 113,757 B, so the
+# image links with ~931 bytes to spare — and `rt_emu::xt_image` places compiled
+# shader code in exactly that gap. Every filetest whose shader exceeds it fails
+# to link: the xtn.q32 suite drops from 849/849 files to 522/849. Measured, not
+# predicted; the two images are 66,300 B and 113,757 B of .text.
+#   docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md
+#
 # This is load-bearing beyond the f32 path: scripts/filetests.sh builds this
-# image before running the xtn/xtlpn targets, so a compile failure here takes
-# the whole Xtensa filetest suite down with it. If a new `[f32; N]` table ever
-# re-trips the backend, that defect file is the place to start.
-if ! cargo build --release -p lps-builtins-xt-app --features float-f32; then
+# image before running the xtn/xtlpn targets, so anything wrong here takes the
+# whole Xtensa filetest suite down with it. Hence opt-in until the region/split
+# question is decided — `LP_XT_BUILTINS_F32=1` requests the family for the
+# host-execution work that needs it (see lpvm-native's xt_pipeline_f32.rs).
+F32_REQUESTED="${LP_XT_BUILTINS_F32:-0}"
+if [[ "$F32_REQUESTED" == "1" ]]; then
+  BUILD_CMD=(cargo build --release -p lps-builtins-xt-app --features float-f32)
+else
+  BUILD_CMD=(cargo build --release -p lps-builtins-xt-app)
+fi
+
+if ! "${BUILD_CMD[@]}"; then
   echo >&2
   echo "error: build failed. If that was an MSRV error, the esp toolchain is stale:" >&2
   echo "       installed: $(rustc +esp --version 2>/dev/null || echo unknown)" >&2
@@ -79,10 +93,11 @@ fi
 # The f32 family is what M7's hardware-float lowering calls for everything it
 # does not inline — divide, sqrt, the rounding family, min/max, the saturating
 # conversions and every transcendental (M7 D4). An image without those symbols
-# cannot resolve any of it, so assert the family is present (mirroring the rv32
-# script, where a missing family fails 800+ filetests with one opaque message).
+# cannot resolve any of it, so the count is reported either way and asserted
+# when the family was actually requested (mirroring the rv32 script, where a
+# missing family fails 800+ filetests with one opaque message).
 F32_COUNT="$("$NM" "$OUT" | grep -c '_f32$' || true)"
-if [[ "$F32_COUNT" -eq 0 ]]; then
+if [[ "$F32_REQUESTED" == "1" && "$F32_COUNT" -eq 0 ]]; then
   echo "error: $OUT contains no native-f32 builtins despite --features float-f32" >&2
   exit 1
 fi

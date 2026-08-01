@@ -11,9 +11,5 @@ pub extern "C" fn __lp_lpir_ftoi_sat_s_q32(v: i32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_ftoi_sat_u_q32(v: i32) -> i32 {
     let t = __lp_lpir_ftoi_sat_s_q32(v);
-    if t < 0 {
-        0
-    } else {
-        t
-    }
+    if t < 0 { 0 } else { t }
 }
