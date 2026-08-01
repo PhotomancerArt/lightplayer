@@ -5,8 +5,10 @@
 //!
 //! Corpus layout (see P1 of the schema/shape-gen hygiene plan):
 //!
-//! - [`ARTIFACT_ROOTS`] hold authored projects: `project.json` roots validate
-//!   against `schemas/project.schema.json`, `*.map2d.json` files are fixture
+//! - [`ARTIFACT_ROOTS`] hold authored projects: `project.json` container
+//!   manifests validate against `schemas/project.schema.json`, `module.json`
+//!   root modules validate against `schemas/module.schema.json`,
+//!   `*.map2d.json` files are fixture
 //!   mapping documents and validate by parsing with the real `lpc-mapping`
 //!   parser (which owns that format), and every other `*.json` is a node
 //!   artifact and validates against `schemas/node.schema.json`. Non-JSON
@@ -42,6 +44,7 @@ const SKIP_JSON: &[&str] = &[];
 fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
     let workspace = workspace_dir();
     let project_validator = load_validator(&workspace, "schemas/project.schema.json")?;
+    let module_validator = load_validator(&workspace, "schemas/module.schema.json")?;
     let node_validator = load_validator(&workspace, "schemas/node.schema.json")?;
     assert_skip_list_matches(&workspace)?;
 
@@ -55,6 +58,7 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             "no artifact JSON found under {root}/ — walk is vacuous"
         );
         let mut projects = 0usize;
+        let mut modules = 0usize;
         let mut nodes = 0usize;
         let mut mappings = 0usize;
         for file in &files {
@@ -70,6 +74,9 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             let validator = if file.file_name().is_some_and(|name| name == "project.json") {
                 projects += 1;
                 &project_validator
+            } else if file.file_name().is_some_and(|name| name == "module.json") {
+                modules += 1;
+                &module_validator
             } else {
                 nodes += 1;
                 &node_validator
@@ -77,7 +84,7 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             validate_file(validator, file, &rel, &mut failures)?;
         }
         println!(
-            "{root}: validated {projects} project roots + {nodes} node artifacts + {mappings} mapping documents"
+            "{root}: validated {projects} container manifests + {modules} module roots + {nodes} node artifacts + {mappings} mapping documents"
         );
     }
 

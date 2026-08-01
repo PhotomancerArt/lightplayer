@@ -242,20 +242,22 @@ impl LibraryStore {
                 view.write_file(path.as_str().as_path(), bytes)?;
             }
             if !view.file_exists(package_manifest::MANIFEST_PATH.as_path())? {
-                // `format` is required by the loader's root format gate
-                // (`ProjectRegistry::check_root_format`); without it a
+                // `format` is required by the loader's container format gate
+                // (a missing manifest is a hard refuse); without it a
                 // Created package would be unloadable.
-                let minimal = serde_json::json!({
-                    "kind": "Module",
-                    "format": lpc_model::PROJECT_FORMAT_VERSION,
-                    "name": label,
-                });
+                let manifest = lpc_model::ProjectManifest::new_current(label);
                 view.write_file(
                     package_manifest::MANIFEST_PATH.as_path(),
-                    serde_json::to_vec_pretty(&minimal)
-                        .map_err(|e| LibraryError::Manifest(e.to_string()))?
-                        .as_slice(),
+                    manifest.write_json().as_bytes(),
                 )?;
+            }
+            if files.is_empty() && !view.file_exists("/module.json".as_path())? {
+                // The root module node is the other half of the mitosis
+                // split; a blank Created package needs one to be loadable.
+                // Only for blank creates: installs (device pulls, imports)
+                // must stay byte-faithful to their source or parity hashes
+                // would diverge on adoption.
+                view.write_file("/module.json".as_path(), b"{\n  \"kind\": \"Module\"\n}\n")?;
             }
             let fields = package_manifest::read_manifest(&*view)?;
             if fields.name.is_none() {
@@ -461,7 +463,7 @@ impl LibraryStore {
     fn read_summary(&self, slug: &str) -> Result<PackageSummary, LibraryError> {
         let package_fs = self.chroot_package(slug)?;
         let view = package_fs.borrow();
-        let ManifestFields { uid, name, kind } = package_manifest::read_manifest(&*view)?;
+        let ManifestFields { uid, name } = package_manifest::read_manifest(&*view)?;
         let uid = uid
             .ok_or_else(|| LibraryError::Manifest(format!("package {slug} has no uid")))?
             .parse()
@@ -469,7 +471,7 @@ impl LibraryStore {
         Ok(PackageSummary {
             uid,
             name: name.unwrap_or_else(|| slug.to_string()),
-            kind,
+            kind: String::from("Module"),
             slug: slug.to_string(),
         })
     }
@@ -550,8 +552,11 @@ mod tests {
         vec![
             (
                 "project.json".to_string(),
-                br#"{"kind":"Module","name":"demo","nodes":{"clock":{"ref":"./clock.json"}}}"#
-                    .to_vec(),
+                br#"{"format":3,"name":"demo"}"#.to_vec(),
+            ),
+            (
+                "module.json".to_string(),
+                br#"{"kind":"Module","nodes":{"clock":{"ref":"./clock.json"}}}"#.to_vec(),
             ),
             ("clock.json".to_string(), br#"{"kind":"Clock"}"#.to_vec()),
             ("shader.glsl".to_string(), b"void main() {}".to_vec()),
@@ -615,7 +620,7 @@ mod tests {
         assert_eq!(copy_handle.history.version_number(copy_head), Some(2));
         // source untouched
         let source_files = store.open(original.uid).unwrap().read_all_files().unwrap();
-        assert_eq!(source_files.len(), 4); // 3 demo files + sidecar
+        assert_eq!(source_files.len(), 5); // 4 demo files + sidecar
     }
 
     #[test]

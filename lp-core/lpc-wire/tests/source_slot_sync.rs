@@ -10,7 +10,7 @@ use lpc_wire::build_slot_full_sync;
 
 #[test]
 fn real_source_defs_sync_as_slot_roots() {
-    let project = read_basic_project("project.json");
+    let project = read_basic_project("module.json");
     let shader = read_basic_shader("shader.json");
     let output = read_basic_output("output.json");
     let fixture = read_basic_fixture("fixture.json");

@@ -94,12 +94,12 @@ mod tests {
 
         assert!(project_dir.join("project.json").exists());
         let project_json = std::fs::read_to_string(project_dir.join("project.json")).unwrap();
-        let def = NodeDef::from_json_str(&project_json).unwrap();
-        let NodeDef::Module(project) = def else {
-            panic!("expected project def");
-        };
-        assert_eq!(project.name(), Some("my-project"));
-        assert!(!project_json.contains("\"uid\""));
+        let manifest = lpc_model::ProjectManifest::read_json(&project_json).unwrap();
+        assert_eq!(manifest.name.as_deref(), Some("my-project"));
+        assert!(manifest.uid.is_none());
+        let module_json = std::fs::read_to_string(project_dir.join("module.json")).unwrap();
+        let def = NodeDef::from_json_str(&module_json).unwrap();
+        assert!(matches!(def, NodeDef::Module(_)));
         assert!(project_dir.join("shader.glsl").exists());
     }
 
@@ -111,12 +111,9 @@ mod tests {
         create_project_structure(&project_dir, Some("Custom Name")).unwrap();
 
         let project_json = std::fs::read_to_string(project_dir.join("project.json")).unwrap();
-        let def = NodeDef::from_json_str(&project_json).unwrap();
-        let NodeDef::Module(project) = def else {
-            panic!("expected project def");
-        };
-        assert_eq!(project.name(), Some("Custom Name"));
-        assert!(!project_json.contains("\"uid\""));
+        let manifest = lpc_model::ProjectManifest::read_json(&project_json).unwrap();
+        assert_eq!(manifest.name.as_deref(), Some("Custom Name"));
+        assert!(manifest.uid.is_none());
     }
 
     #[test]

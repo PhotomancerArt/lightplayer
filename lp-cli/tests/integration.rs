@@ -70,17 +70,19 @@ fn process_messages(
 
 /// Create a test project on a filesystem
 ///
-/// Creates a minimal project with project.json.
+/// Creates a minimal project: the `project.json` container manifest plus the
+/// `module.json` root module (project/module mitosis).
 #[allow(
     dead_code,
     reason = "async client integration tests are being rewritten"
 )]
 fn create_test_project(fs: &mut LpFsMemory, name: &str) -> Result<(), ClientError> {
-    let project_json = format!(
-        r#"{{ "kind": "Module", "format": 2, "name": "{name}" }}
-"#
-    );
+    let project_json = format!("{{\n  \"format\": 3,\n  \"name\": \"{name}\"\n}}\n");
     fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
+        .map_err(|_| todo!())?;
+
+    let module_json = "{\n  \"kind\": \"Module\",\n  \"nodes\": {}\n}\n";
+    fs.write_file_mut("/module.json".as_path(), module_json.as_bytes())
         .map_err(|_| todo!())?;
 
     Ok(())
@@ -130,13 +132,15 @@ fn test_create_command_structure() {
 
     let project_json = format!(
         r#"{{
-  "kind": "Module",
-  "format": 2,
+  "format": 3,
   "name": "{project_name}"
 }}
 "#
     );
     fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
+        .unwrap();
+    let module_json = "{\n  \"kind\": \"Module\",\n  \"nodes\": {}\n}\n";
+    fs.write_file_mut("/module.json".as_path(), module_json.as_bytes())
         .unwrap();
 
     // Verify project.json exists and is valid
