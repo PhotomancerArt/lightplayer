@@ -34,6 +34,7 @@ server = [
     "dep:lpc-hardware",
     "dep:lpfs",
     "dep:lpc-wire",
+    "dep:lpc-model",
 ]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
@@ -167,6 +168,7 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 # `fw_esp32_common::serial::server_msg`. The `ser-write-json` sink itself moved
 # down with that module, so this crate no longer names the serializer.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 
 # Chip-generic firmware layer: logger, time provider, output provider, the
 # chunked serial writer, and — behind `server` — the server loop, transport,

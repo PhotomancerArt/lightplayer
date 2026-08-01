@@ -90,6 +90,39 @@ channels at once (`on_interrupt` is a single pass over the whole snapshot for
 exactly this reason). The classic ESP32's 64-word blocks give 32-bit halves —
 40 µs — at eight outputs.
 
+#### The classic ESP32 is different, and it is the interesting case
+
+The classic ESP32 has **eight** channels of **64-word** blocks, so the same
+table reads:
+
+| blocks/ch | outputs | window | half | refill deadline | demand per busy output |
+|-----------|---------|--------|------|-----------------|------------------------|
+| 1 | 8 | 64 w | 32 bits | 40 µs | 25 000 refills/s |
+| **2** | **4** | **128 w** | **64 bits** | **80 µs** | **12 500 refills/s** |
+| 4 | 2 | 256 w | 128 bits | 160 µs | 6 250 refills/s |
+
+On the S3 the choice is about deadline margin. On the classic it is about
+**how many outputs work at all**, because that chip has a hard ceiling the
+others do not: its *delivered* interrupt rate flatlines at roughly
+**46–55 k/s regardless of demand** (measured in the experiment repo's
+`sweep_channels` harness; root-caused as ISR throughput saturation, not
+latency — staggering frame starts does not move it). Multiply the demand
+column by the output count and the ceiling picks the winner:
+
+* 1 block → 25 k/s each → saturates at **two** outputs. Measured: truncation
+  begins at the third channel, at every strip length tried, with `lag_max`
+  still comfortable — the giveaway that refills were *missing*, not late.
+  Read `refills` against `refills_wanted`, never `lag_max`, when diagnosing
+  this.
+* 2 blocks → 12.5 k/s each → ~4 outputs, and the margin is thin (50 k demand
+  against a ~48 k ceiling). This is what `fw-esp32v3` ships; whether four
+  channels are genuinely clean is a silicon question, not an arithmetic one.
+
+Note that only slots `0, 2, 4, 6` exist at two blocks each — a backend must
+skip the absorbed slots when it creates channels, not merely when it
+transmits. `fw-esp32v3`'s `output/rmt/v3_rmt.rs::slot_for_index` is the
+worked example.
+
 Measured on an ESP32-S3 at 240 MHz with all four outputs running unequal strips
 (8/16/100/256 LEDs, the `led-lab-esp32s3` firmware in the
 `2026-esp32s3-experiment` repo): mean read-pointer advance across a
