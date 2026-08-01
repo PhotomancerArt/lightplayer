@@ -15,6 +15,11 @@ use crate::app::node::slot_fields::field_wiring;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ToggleField(
     value: bool,
+    /// Live bus reading (display-only; P6 item 1): the pill renders this
+    /// state — with its violet bound ring — while `value` (the authored
+    /// default) stays what a click flips.
+    #[props(default = None)]
+    live_value: Option<bool>,
     state: UiSlotFieldState,
     /// Violet bound treatment on the pill ring.
     #[props(default = false)]
@@ -24,8 +29,9 @@ pub fn ToggleField(
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
-    let pill_class = toggle_pill_class(value, bound, disabled);
-    let thumb_class = toggle_thumb_class(value);
+    let shown = live_value.unwrap_or(value);
+    let pill_class = toggle_pill_class(shown, bound, disabled);
+    let thumb_class = toggle_thumb_class(shown);
     let invalid_title = state.invalid.clone().unwrap_or_default();
 
     rsx! {
@@ -33,7 +39,7 @@ pub fn ToggleField(
             class: "{pill_class}",
             r#type: "button",
             role: "switch",
-            aria_checked: "{value}",
+            aria_checked: "{shown}",
             disabled,
             title: "{invalid_title}",
             onclick: move |event| {

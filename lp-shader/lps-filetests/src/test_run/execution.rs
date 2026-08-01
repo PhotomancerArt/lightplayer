@@ -7,7 +7,7 @@ use lpvm::{LpsValueF32, decode_q32_return, flat_q32_words_from_f32_args, q32_to_
 
 use crate::targets::{FloatMode as TargetFloatMode, Target};
 use crate::test_run::filetest_lpvm::FiletestInstance;
-use lp_riscv_emu::CycleModel;
+use lp_emu_core::CycleModel;
 
 /// Execute a function by name with arguments and return the result as a [`LpsValueF32`].
 pub fn execute_function(

@@ -176,7 +176,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -287,6 +287,63 @@ fn project_apply_asset_body_change_refreshes_existing_shader_node() {
 }
 
 #[test]
+fn project_apply_map2d_body_change_refreshes_existing_fixture_node() {
+    let mut fs = fixture_map2d_project_fs();
+    let services = EngineServices::new(TreePath::parse("/fixture_asset_change.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let fixture_use = NodeUseLocation::root().child(SlotPath::parse("nodes[fixture]").unwrap());
+    let fixture_before = engine
+        .project_runtime_index()
+        .node_id(&fixture_use)
+        .expect("fixture runtime node");
+    let map2d_asset = AssetLocation::artifact(ArtifactLocation::file("/sign.map2d.json"));
+
+    // The in-place editor's apply path: the whole map2d document body
+    // changes (here: a wider grid) and the running fixture must re-resolve.
+    fs.write_file_mut(
+        LpPath::new("/sign.map2d.json"),
+        br#"{
+  "format": 1,
+  "objects": [
+    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 5, "rows": 4, "pitch": 10 } } }
+  ]
+}"#,
+    )
+    .expect("write map2d doc");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/sign.map2d.json"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+
+    assert_eq!(
+        changes.assets.changed,
+        vec![AssetChange::new(map2d_asset.clone(), AssetChangeKind::Body)]
+    );
+    assert!(changes.defs.is_empty());
+    assert!(changes.uses.is_empty());
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    assert_eq!(apply.refreshed_assets, vec![map2d_asset]);
+    assert_eq!(apply.refreshed_nodes, vec![fixture_use.clone()]);
+    assert!(apply.added_nodes.is_empty());
+    assert!(apply.removed_nodes.is_empty());
+    assert!(apply.reattached_nodes.is_empty());
+    assert_eq!(
+        engine.project_runtime_index().node_id(&fixture_use),
+        Some(fixture_before)
+    );
+}
+
+#[test]
 fn project_apply_create_node_op_adds_runtime_node() {
     // The overlay-free add-via-op path: `ProjectRegistry::create_node`
     // commits the new def to the filesystem and reports the same change
@@ -379,6 +436,48 @@ fn project_apply_remove_node_op_tears_down_runtime_node() {
 
 // --- Helpers ---
 
+fn fixture_map2d_project_fs() -> LpFsMemory {
+    let mut fs = LpFsMemory::new();
+    fs.write_file_mut(
+        LpPath::new("/project.json"),
+        br#"
+{
+  "kind": "Project",
+  "format": 2,
+  "nodes": {
+    "fixture": {
+      "ref": "./fixture.json"
+    }
+  }
+}
+"#,
+    )
+    .expect("write project");
+    fs.write_file_mut(
+        LpPath::new("/fixture.json"),
+        br#"
+{
+  "kind": "Fixture",
+  "render_size": { "width": 4, "height": 4 },
+  "brightness": 200,
+  "mapping": { "kind": "Map2d", "source": "sign.map2d.json" }
+}
+"#,
+    )
+    .expect("write fixture def");
+    fs.write_file_mut(
+        LpPath::new("/sign.map2d.json"),
+        br#"{
+  "format": 1,
+  "objects": [
+    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  ]
+}"#,
+    )
+    .expect("write map2d doc");
+    fs
+}
+
 fn clock_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
     fs.write_file_mut(
@@ -386,7 +485,7 @@ fn clock_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -418,7 +517,7 @@ fn shader_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -458,7 +557,7 @@ impl NodeRuntime for ProduceProbeNode {
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
         let pv = ctx
-            .resolve(self.query.clone())
+            .resolve(&self.query)
             .map_err(|e| NodeError::msg(format!("resolve: {}", e.message)))?;
         if let LpsValueF32::F32(v) = pv.as_value().expect("value") {
             self.last = Some(v);

@@ -1,0 +1,15 @@
+[package]
+name = "lp-emu-abi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared ABI between emulator host and guest (syscall constants, serial, recovery handshake)"
+
+[lib]
+
+[dependencies]
+log = { workspace = true, default-features = false }
+
+[features]
+std = []
+

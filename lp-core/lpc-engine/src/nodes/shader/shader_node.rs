@@ -17,10 +17,9 @@ use alloc::vec::Vec;
 
 use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
-    AddSubMode, AssetLocation, DivMode, GlslOpts, MapSlot, MulMode, NodeId, NodeRuntimeStatus,
-    Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState,
-    ShaderValueShapeRef, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
-    StaticSlotShape, ValueSlot,
+    AssetLocation, FloatMode, MapSlot, NodeId, NodeRuntimeStatus, Revision, ShaderMapKeyDef,
+    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
+    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
@@ -48,7 +47,10 @@ pub struct ShaderNode {
     source_revision: Revision,
     glsl_source: String,
     consumed_slots: MapSlot<String, ShaderSlotDef>,
-    glsl_opts: GlslOpts,
+    /// Authored numeric mode. Stored so a change flips `needs_compile`; the
+    /// compiler does not consume it yet — native f32 codegen lands in the
+    /// f32 roadmap's M7/M9.
+    float_mode: ValueSlot<FloatMode>,
     visual_uniforms: Vec<VisualUniform>,
     config_accessors: Option<ShaderConfigAccessors>,
     /// The last successfully compiled program. Kept through source/config
@@ -75,7 +77,7 @@ impl ShaderNode {
             source_revision: source.revision,
             glsl_source: source.text,
             consumed_slots: def.consumed_slots,
-            glsl_opts: def.glsl_opts,
+            float_mode: def.float_mode,
             visual_uniforms,
             config_accessors: None,
             shader: None,
@@ -147,10 +149,8 @@ impl ShaderNode {
         let compile_opts = ShaderCompileOptions {
             // Visual shaders run on the tier and GLSL frontend the host
             // selected when it constructed the backend (fidelity-tiers ADR)
-            // — Q32 on CPU backends, F32Gpu on the GPU tier. `q32_options`
-            // only applies to the Q32 tier; GPU backends never see it.
+            // — Q32 on CPU backends, F32Gpu on the GPU tier.
             semantics: graphics.native_semantics(),
-            q32_options: map_model_q32_options(&self.glsl_opts),
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
             ..ShaderCompileOptions::new(graphics.native_semantics(), graphics.glsl_frontend())
         };
@@ -204,29 +204,54 @@ impl ShaderNode {
         let accessors =
             ShaderConfigAccessors::get_or_compile(&mut self.config_accessors, ctx.slot_shapes())
                 .map_err(err_ctx("compile shader config view"))?;
-        let next_add_sub = accessors.add_sub.get(ctx)?;
-        let next_mul = accessors.mul.get(ctx)?;
-        let next_div = accessors.div.get(ctx)?;
-        if *self.glsl_opts.add_sub.value() != next_add_sub
-            || *self.glsl_opts.mul.value() != next_mul
-            || *self.glsl_opts.div.value() != next_div
-        {
-            self.glsl_opts = GlslOpts {
-                add_sub: lpc_model::ValueSlot::with_version(ctx.revision(), next_add_sub),
-                mul: lpc_model::ValueSlot::with_version(ctx.revision(), next_mul),
-                div: lpc_model::ValueSlot::with_version(ctx.revision(), next_div),
-            };
+        let next_float_mode = accessors.float_mode.get(ctx)?;
+        if *self.float_mode.value() != next_float_mode {
+            self.float_mode = ValueSlot::with_version(ctx.revision(), next_float_mode);
             self.needs_compile = true;
             self.compilation_error = None;
         }
         Ok(())
     }
 
+    /// Reconcile the runtime `consumed` KEY SET with the authored view: an
+    /// overlay `EnsurePresent` can add a record (a map-entry gesture, the
+    /// agent's `upsert_param`) and a `Remove` can drop one — both change
+    /// the generated uniform header, so either flips `needs_compile`. New
+    /// entries start as the default f32 record; the per-key field sync in
+    /// [`Self::update_consumed_slots_from_view`] brings the authored
+    /// values in on the same tick.
+    fn reconcile_consumed_keys(&mut self, ctx: &mut TickContext<'_>) -> bool {
+        let Some(authored) = try_read_authored_consumed_keys(ctx) else {
+            return false;
+        };
+        let mut changed = false;
+        for key in &authored {
+            if self.consumed_slots.entries.get(key).is_none() {
+                self.consumed_slots
+                    .entries
+                    .insert(key.clone(), ShaderSlotDef::default());
+                changed = true;
+            }
+        }
+        let stale: Vec<String> = self
+            .consumed_slots
+            .entries
+            .keys()
+            .filter(|key| !authored.contains(key))
+            .cloned()
+            .collect();
+        for key in stale {
+            self.consumed_slots.entries.remove(&key);
+            changed = true;
+        }
+        changed
+    }
+
     fn update_consumed_slots_from_view(
         &mut self,
         ctx: &mut TickContext<'_>,
     ) -> Result<(), NodeError> {
-        let mut compile_changed = false;
+        let mut compile_changed = self.reconcile_consumed_keys(ctx);
         let keys: Vec<String> = self.consumed_slots.entries.keys().cloned().collect();
         for key in keys {
             let Some(slot) = self.consumed_slots.entries.get_mut(&key) else {
@@ -346,8 +371,11 @@ pub(super) fn format_compile_stats(
         .unwrap_or_else(|| String::from("unknown"));
 
     format!(
-        "elapsed={elapsed}, lpir_inst_count={}, lpir_func_count={}, lpir_import_count={}, final_inst_count={final_inst_count}, final_code_size={final_code_size}",
-        stats.lpir_inst_count, stats.lpir_function_count, stats.lpir_import_count,
+        "elapsed={elapsed}, lpir_inst_count={}, lpir_func_count={}, lpir_import_count={}, final_inst_count={final_inst_count}, final_code_size={final_code_size}, float={}",
+        stats.lpir_inst_count,
+        stats.lpir_function_count,
+        stats.lpir_import_count,
+        stats.float_impl.as_str(),
     )
 }
 
@@ -442,6 +470,31 @@ pub(super) fn read_authored_value<T: lpc_model::FromLpValue>(
     })?)
 }
 
+/// The authored `consumed` map's string key set, read through the same
+/// overlay-aware view as the per-field sync. `None` when the query does
+/// not resolve or the path is not a map (unit fakes without authored
+/// defs) — the runtime key set is then left as loaded.
+fn try_read_authored_consumed_keys(ctx: &mut TickContext<'_>) -> Option<Vec<String>> {
+    let production = ctx
+        .resolve(&QueryKey::ConsumedSlot {
+            node: ctx.node_id(),
+            slot: SlotPath::parse("consumed").expect("static path"),
+        })
+        .ok()?;
+    let lpc_model::SlotData::Map(map) = production.data() else {
+        return None;
+    };
+    Some(
+        map.entries
+            .keys()
+            .filter_map(|key| match key {
+                lpc_model::SlotMapKey::String(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
 fn try_read_authored_value<T: lpc_model::FromLpValue>(
     ctx: &mut TickContext<'_>,
     path: &str,
@@ -449,7 +502,7 @@ fn try_read_authored_value<T: lpc_model::FromLpValue>(
     let slot = SlotPath::parse(path).map_err(|e| {
         NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
     })?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot,
     }) {
@@ -477,18 +530,14 @@ where
 
 struct ShaderConfigAccessors {
     registry_revision: lpc_model::Revision,
-    add_sub: SlotAccessor,
-    mul: SlotAccessor,
-    div: SlotAccessor,
+    float_mode: SlotAccessor,
 }
 
 impl ShaderConfigAccessors {
     fn compile(registry: &SlotShapeRegistry) -> Result<Self, lpc_model::SlotAccessorError> {
         Ok(Self {
             registry_revision: registry.revision(),
-            add_sub: compile_shader_config_value_accessor("glsl_opts.add_sub", registry)?,
-            mul: compile_shader_config_value_accessor("glsl_opts.mul", registry)?,
-            div: compile_shader_config_value_accessor("glsl_opts.div", registry)?,
+            float_mode: compile_shader_config_value_accessor("float_mode", registry)?,
         })
     }
 
@@ -668,7 +717,7 @@ impl RenderNode for ShaderNode {
 
 /// Route an out-of-fuel trap to the node error path.
 ///
-/// Under `panic-recovery` (fw-esp32 / fw-emu) this is a **panic** —
+/// Under `panic-recovery` (fw-esp32c6 / fw-emu) this is a **panic** —
 /// deliberate, limited panic-as-control-flow per the lpvm-native fuel ADR
 /// (`docs/adr/2026-07-20-lpvm-native-fuel.md`): the render/sample calls
 /// above run inside `catch_node_panic_framed` (`FrameKind::NodeRender`),
@@ -720,7 +769,7 @@ fn resolve_or_default_input(
 ) -> Result<LpsValueF32, NodeError> {
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid visual consumed slot {name:?}: {e}")))?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {
@@ -755,23 +804,6 @@ fn validate_shader_visual_product(
     Ok(())
 }
 
-pub(super) fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
-    lps_q32::q32_options::Q32Options {
-        add_sub: match opts.add_sub.value() {
-            AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
-            AddSubMode::Wrapping => lps_q32::q32_options::AddSubMode::Wrapping,
-        },
-        mul: match opts.mul.value() {
-            MulMode::Saturating => lps_q32::q32_options::MulMode::Saturating,
-            MulMode::Wrapping => lps_q32::q32_options::MulMode::Wrapping,
-        },
-        div: match opts.div.value() {
-            DivMode::Saturating => lps_q32::q32_options::DivMode::Saturating,
-            DivMode::Reciprocal => lps_q32::q32_options::DivMode::Reciprocal,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
@@ -785,6 +817,7 @@ mod tests {
     use crate::dataflow::resolver::ResolveLogLevel;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
+    #[cfg(feature = "node-texture")]
     use crate::nodes::TextureNode;
     use crate::products::visual::{
         TextureSampleBatch, TextureUvSamplePoint, VisualProduct, VisualSampleBufferRequest,
@@ -792,9 +825,11 @@ mod tests {
     };
     use lp_gfx::{GfxError, LpGraphics, SampleOutHandle, SamplePointsHandle, TextureData};
     use lp_gfx_lpvm::TargetLpvmGraphics;
+    #[cfg(feature = "node-texture")]
+    use lpc_model::TextureDef;
     use lpc_model::{
         ArtifactLocation, ArtifactSpec, AssetContentType, MapSlot, NodeDef, NodeInvocation,
-        NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, TextureDef, TreePath,
+        NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, TreePath,
     };
     use lpc_registry::{AssetText, ProjectRegistry};
     use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -826,6 +861,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-texture")]
     fn build_texture_and_shader_engine() -> (Engine, ProjectRegistry, NodeId, NodeId, VisualProduct)
     {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
@@ -916,6 +952,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_core_produces_visual_product_value() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(&registry, 1000).expect("tick");
@@ -935,6 +972,75 @@ mod tests {
     }
 
     #[test]
+    fn authored_consumed_entries_added_after_load_reach_the_uniform_supply() {
+        // The runtime node starts WITHOUT the `speed` record while the
+        // registry's effective def HAS it — the state an overlay
+        // `EnsurePresent consumed["speed"]` (the agent's `upsert_param`, a
+        // map-entry gesture) produces after load. The key-set reconcile
+        // must pick the record up from the authored view; without it the
+        // render fails with "missing uniform field `speed`".
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").expect("name"),
+                lpc_model::NodeName::parse("shader").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                NodeInvocation::new(ArtifactSpec::path("shader.toml")),
+                frame,
+            )
+            .expect("shader");
+
+        let mut full = shader_def_with_time();
+        full.consumed_slots.entries.insert(
+            String::from("speed"),
+            ShaderSlotDef::value_f32("Speed", "", 2.0, None),
+        );
+        engine
+            .load_test_node_defs(&mut registry, &[(sh_id, NodeDef::Shader(full))], frame)
+            .expect("load test defs");
+        // The runtime node's copy predates the `speed` record.
+        let sh = ShaderNode::new(
+            sh_id,
+            shader_def_with_time(),
+            shader_asset_text(source, frame),
+        );
+        engine
+            .attach_runtime_node(sh_id, Box::new(sh), frame)
+            .expect("attach shader");
+
+        engine.tick(&registry, 500).expect("tick");
+        let q = QueryKey::ProducedSlot {
+            node: sh_id,
+            slot: shader_output_path(),
+        };
+        resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off).expect("resolve");
+        engine
+            .render_texture_for_test(
+                &registry,
+                VisualProduct::new(sh_id, 0),
+                &crate::products::visual::RenderTextureRequest {
+                    width: 4,
+                    height: 4,
+                    format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.5,
+                },
+            )
+            .expect("render succeeds once the reconciled record supplies `speed`");
+    }
+
+    #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_core_visual_product_is_sampleable_red_channel() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(&registry, 500).expect("tick");
@@ -1091,6 +1197,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_compile_cache_survives_unchanged_config_across_frames() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         let graphics = Arc::new(CountingGraphics::new());
@@ -1126,6 +1233,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_compile_failure_sets_runtime_status_error_and_renders_fallback() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         let graphics = Arc::new(CountingGraphics::failing());

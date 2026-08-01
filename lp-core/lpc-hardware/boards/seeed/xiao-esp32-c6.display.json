@@ -1,0 +1,40 @@
+{
+  "board_id": "seeed/xiao-esp32-c6",
+  "display_name": "XIAO ESP32-C6",
+  "manufacturer": "Seeed Studio",
+  "soc": "ESP32-C6",
+  "family": "esp32c6",
+  "flash": "4 MB",
+  "price_usd": 5.2,
+  "tier": "silver",
+  "capabilities": ["Wi-Fi 6", "BLE 5", "802.15.4", "thumb-sized"],
+  "blurb": "Tiny C6 for wearables and props where the controller must disappear. Calibrated profile in the repo.",
+  "purchase_urls": [
+    { "label": "Seeed", "href": "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html" }
+  ],
+  "usb_bridge": "native-usb-jtag",
+  "hw": {
+    "width": 76,
+    "module": { "x": 14, "y": 6, "w": 48, "h": 30, "label": "C6", "antenna": false },
+    "usb": [ { "x": 24, "label": "USB" } ],
+    "buttons": [ { "x": 64, "y": -14, "label": "B" } ],
+    "left": [
+      { "label": "D0", "role": "io", "gpio": 0, "caps": [ { "text": "ADC1_0", "kind": "adc" } ] },
+      { "label": "D1", "role": "io", "gpio": 1, "caps": [ { "text": "ADC1_1", "kind": "adc" } ] },
+      { "label": "D2", "role": "io", "gpio": 2, "caps": [ { "text": "ADC1_2", "kind": "adc" } ] },
+      { "label": "D3", "role": "io", "gpio": 21 },
+      { "label": "D4", "role": "io", "caps": [ { "text": "not found", "kind": "warn" } ] },
+      { "label": "D5", "role": "io", "caps": [ { "text": "not found", "kind": "warn" } ] },
+      { "label": "D6", "role": "io", "gpio": 16, "caps": [ { "text": "U0_TXD", "kind": "uart" } ] }
+    ],
+    "right": [
+      { "label": "5V", "role": "pwr5" },
+      { "label": "GND", "role": "gnd" },
+      { "label": "3V3", "role": "pwr3" },
+      { "label": "D10", "role": "io", "gpio": 18, "caps": [ { "text": "WS281x hdr", "kind": "note" } ] },
+      { "label": "D9", "role": "io", "gpio": 20 },
+      { "label": "D8", "role": "io", "gpio": 19 },
+      { "label": "D7", "role": "io", "gpio": 17, "caps": [ { "text": "U0_RXD", "kind": "uart" } ] }
+    ]
+  }
+}

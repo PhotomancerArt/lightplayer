@@ -36,7 +36,7 @@ const manifest = {
     chip: "esp32c6",
   },
   build: {
-    package: "fw-esp32",
+    package: "fw-esp32c6",
     target: env.MANIFEST_TARGET,
     profile: env.MANIFEST_PROFILE,
     features: ["esp32c6", "server"],

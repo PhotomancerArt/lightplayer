@@ -4,7 +4,7 @@ use crate::PerfEventKind;
 #[cfg(target_arch = "riscv32")]
 #[inline(always)]
 pub fn emit(name: &'static str, kind: PerfEventKind) {
-    use lp_riscv_emu_shared::SYSCALL_PERF_EVENT;
+    use lp_emu_abi::SYSCALL_PERF_EVENT;
     let ptr = name.as_ptr() as i32;
     let len = name.len() as i32;
     let kind_u = kind as i32;
@@ -30,7 +30,7 @@ pub fn emit(_name: &'static str, _kind: PerfEventKind) {}
 #[cfg(target_arch = "riscv32")]
 #[inline(always)]
 pub fn emit_jit_map_load(base: u32, len: u32, entries: &[JitSymbolEntry]) {
-    use lp_riscv_emu_shared::SYSCALL_JIT_MAP_LOAD;
+    use lp_emu_abi::SYSCALL_JIT_MAP_LOAD;
     let count = entries.len() as i32;
     let entries_ptr = entries.as_ptr() as i32;
     unsafe {

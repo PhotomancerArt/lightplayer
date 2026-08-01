@@ -177,9 +177,6 @@
   .tw\:-mx-1 {
     margin-inline: calc(var(--tw-spacing) * -1);
   }
-  .tw\:-mx-3 {
-    margin-inline: calc(var(--tw-spacing) * -3);
-  }
   .tw\:-mx-4 {
     margin-inline: calc(var(--tw-spacing) * -4);
   }
@@ -264,6 +261,9 @@
   .tw\:inline-grid {
     display: inline-grid;
   }
+  .tw\:field-sizing-content {
+    field-sizing: content;
+  }
   .tw\:aspect-\[9\/5\] {
     aspect-ratio: 9/5;
   }
@@ -308,6 +308,9 @@
   }
   .tw\:h-72 {
     height: calc(var(--tw-spacing) * 72);
+  }
+  .tw\:h-80 {
+    height: calc(var(--tw-spacing) * 80);
   }
   .tw\:h-\[7px\] {
     height: 7px;
@@ -368,6 +371,9 @@
   }
   .tw\:min-h-9 {
     min-height: calc(var(--tw-spacing) * 9);
+  }
+  .tw\:min-h-20 {
+    min-height: calc(var(--tw-spacing) * 20);
   }
   .tw\:min-h-24 {
     min-height: calc(var(--tw-spacing) * 24);
@@ -443,6 +449,9 @@
   }
   .tw\:min-h-screen {
     min-height: 100vh;
+  }
+  .tw\:w-1 {
+    width: calc(var(--tw-spacing) * 1);
   }
   .tw\:w-1\.5 {
     width: calc(var(--tw-spacing) * 1.5);
@@ -548,6 +557,9 @@
   }
   .tw\:max-w-40 {
     max-width: calc(var(--tw-spacing) * 40);
+  }
+  .tw\:max-w-56 {
+    max-width: calc(var(--tw-spacing) * 56);
   }
   .tw\:max-w-72 {
     max-width: calc(var(--tw-spacing) * 72);
@@ -1133,6 +1145,9 @@
   .tw\:bg-card-subtle {
     background-color: var(--tw-color-card-subtle);
   }
+  .tw\:bg-dim-foreground {
+    background-color: var(--tw-color-dim-foreground);
+  }
   .tw\:bg-panel-primary {
     background-color: var(--tw-color-panel-primary);
   }
@@ -1295,6 +1310,9 @@
   .tw\:p-0\.5 {
     padding: calc(var(--tw-spacing) * 0.5);
   }
+  .tw\:p-1 {
+    padding: calc(var(--tw-spacing) * 1);
+  }
   .tw\:p-1\.5 {
     padding: calc(var(--tw-spacing) * 1.5);
   }
@@ -1315,6 +1333,9 @@
   }
   .tw\:p-\[22px\] {
     padding: 22px;
+  }
+  .tw\:px-0 {
+    padding-inline: calc(var(--tw-spacing) * 0);
   }
   .tw\:px-1 {
     padding-inline: calc(var(--tw-spacing) * 1);
@@ -1985,6 +2006,13 @@
     &:hover {
       @media (hover: hover) {
         border-color: var(--tw-color-border-strong);
+      }
+    }
+  }
+  .tw\:hover\:border-border-subtle {
+    &:hover {
+      @media (hover: hover) {
+        border-color: var(--tw-color-border-subtle);
       }
     }
   }

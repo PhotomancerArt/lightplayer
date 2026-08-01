@@ -59,7 +59,7 @@ impl NodeRuntime for OutputNode {
 
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let prod = ctx
-            .resolve(QueryKey::ConsumedSlot {
+            .resolve(&QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
                 slot: output_input_path(),
             })

@@ -15,18 +15,24 @@ members = [
     "lp-app/lpa-server",
     "lp-app/lpa-client",
     "lp-app/lpa-link",
+    "lp-app/lpa-mapping-editor",
+    "lp-app/lpa-boards",
     "lp-app/lpa-studio-core",
     "lp-app/lpa-studio-web",
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-fw/fw-browser",
+    "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
     "lp-fw/fw-checks",
+    "lp-fw/lp-ws281x",
     "lp-cli",
-    "lp-fw/fw-esp32",
+    "lp-fw/fw-esp32c6",
+    "lp-fw/fw-esp32s3",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
+    "lp-core/lpc-mapping",
     "lp-core/lpc-model",
     "lp-core/lpc-slot-codegen",
     "lp-core/lpc-slot-macros",
@@ -60,12 +66,18 @@ members = [
     "lp-shader/lpvm-emu",
     "lp-shader/lpir",
     "lp-shader/lps-filetests",
-    "lp-riscv/lp-riscv-emu-shared",
+    "lp-emu/lp-emu-core",
+    "lp-emu/lp-emu-abi",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
     "lp-riscv/lp-riscv-emu-guest",
     "lp-riscv/lp-riscv-emu-guest-test-app",
+    "lp-xt/lp-xt-inst",
+    "lp-xt/lp-xt-emu",
+    "lp-xt/lp-xt-fp-vectors",
+    "lp-xt/lp-xt-elf",
+    "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-builtins-emu-app",
     "lp-shader/lps-filetests-app",
@@ -73,11 +85,14 @@ members = [
     "spikes/naga-wasm-poc",
     "lp-shader/lps-q32",
 ]
+# Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
+# workspace; lp-xt-emu-guest is its out-of-tree member (see lp-xt/README.md).
+exclude = ["lp-xt/fixtures", "lp-xt/lp-xt-emu-guest"]
 resolver = "2"
 
-# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32 from default workspace builds (cross-target only)
+# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
 # They're still in workspace members so they can use workspace dependencies
-# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
+# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32c6
 default-members = [
     # lp-base workspace members
     "lp-base/lp-recovery",
@@ -92,12 +107,17 @@ default-members = [
     "lp-app/lpa-server",
     "lp-app/lpa-client",
     "lp-app/lpa-link",
+    "lp-app/lpa-mapping-editor",
+    "lp-app/lpa-boards",
     "lp-app/lpa-studio-core",
+    "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
     "lp-fw/fw-checks",
     "lp-fw/fw-tests",
+    "lp-fw/lp-ws281x",
     "lp-cli",
+    "lp-core/lpc-mapping",
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
@@ -119,16 +139,22 @@ default-members = [
     "lp-shader/lps-probe",
     "lp-shader/lpir",
     "lp-shader/lps-filetests",
-    "lp-riscv/lp-riscv-emu-shared",
+    "lp-emu/lp-emu-core",
+    "lp-emu/lp-emu-abi",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
+    "lp-xt/lp-xt-inst",
+    "lp-xt/lp-xt-emu",
+    "lp-xt/lp-xt-fp-vectors",
+    "lp-xt/lp-xt-elf",
+    "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-filetests-app",
 ]
 [workspace.package]
 version = "40.0.0"
-authors = ["The Wasmtime Project Developers"]
+authors = ["Photomancer"]
 edition = "2024"
 license = "AGPL-3.0-or-later"
 rust-version = "1.90.0"
@@ -211,11 +237,19 @@ base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 [profile.dev.package."*"]
 opt-level = 2
 
+[profile.dev.package.lp-emu-core]
+opt-level = 3
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
-[profile.dev.package.lp-riscv-emu-shared]
+[profile.dev.package.lp-emu-abi]
 opt-level = 3
 [profile.dev.package.lp-riscv-inst]
+opt-level = 3
+[profile.dev.package.lp-xt-inst]
+opt-level = 3
+[profile.dev.package.lp-xt-emu]
+opt-level = 3
+[profile.dev.package.lp-xt-elf]
 opt-level = 3
 [profile.dev.package.lpvm]
 opt-level = 3
@@ -244,7 +278,7 @@ debug = 1
 inherits = "release"
 panic = "unwind"
 
-[profile.release-esp32.package.fw-esp32]
+[profile.release-esp32.package.fw-esp32c6]
 debug = 1
 strip = "none"
 
@@ -262,6 +296,17 @@ opt-level = "z"
 
 [profile.release-esp32.package.esp-wifi-sys-esp32c6]
 opt-level = "z"
+
+# fw-esp32s3: speed-optimized codegen, NOT the workspace's opt-level="z".
+# Measured on silicon 2026-07-31: at "z" the ws281x RX drain path misses the
+# 30 µs half-window deadline on the cold first frame and the loopback
+# harness deterministically truncates channel 0's first capture at 24 of 48
+# items; at "s" (what the driver was validated at in the experiment repo) the
+# full suite passes. The S3 has a 6 MB app budget with ~4.7 MB headroom, so
+# size-optimized codegen buys nothing this chip needs.
+[profile.release-esp32s3]
+inherits = "release"
+opt-level = "s"
 
 # Profile for fw-emu: opt-level=3 avoids Cranelift codegen bugs in emulator (InvalidMemoryAccess).
 # Used by test_scene_render_fw_emu via ensure_binary_built(..with_profile("release-emu")).

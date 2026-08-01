@@ -134,7 +134,7 @@ cargo test -p lps-filetests --test filetests -- --ignored
 cargo build
 
 # Firmware check (on-device compiler included)
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --features esp32c6,server
 
 # Full CI build (host + RV32 builtins + emu guest)
 just build-ci

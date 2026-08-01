@@ -28,11 +28,12 @@ pub mod probe_domain;
 pub mod probe_reduce;
 pub mod probe_spec;
 pub mod probe_wrapper;
+pub mod uniform_walk;
 
 pub use diff::{DiffReport, diff_experiments};
 pub use experiment::{
-    MAX_EVALS_PER_PROBE, MAX_OPS_PER_EVAL, MAX_PROBES, MAX_RAW_VALUES, MAX_TOTAL_EVALS,
-    run_experiment,
+    ExperimentRunner, MAX_EVALS_PER_PROBE, MAX_OPS_PER_EVAL, MAX_PROBES, MAX_RAW_VALUES,
+    MAX_TOTAL_EVALS, run_experiment,
 };
 pub use experiment_result::{
     ExperimentResult, ProbeHistogram, ProbeOutcome, ProbeStats, ProbeStepHistogram, ProbeStepStats,
@@ -44,3 +45,4 @@ pub use interp_harness::{CompiledShader, InterpInstance};
 pub use probe_domain::ProbeDomain;
 pub use probe_reduce::ProbeReduce;
 pub use probe_spec::{ProbeSpec, ProbeType, ProbeVary};
+pub use uniform_walk::{RESERVED_UNIFORM, UniformLeaf, top_level_uniform_names, uniform_leaves};

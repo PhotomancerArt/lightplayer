@@ -186,6 +186,26 @@ pub const SRET_SCALAR_THRESHOLD: usize = 2;
 
 pub const STACK_ALIGNMENT: u32 = 16;
 
+/// Minimum value representable as a signed 12-bit RISC-V immediate.
+pub const IMM12_MIN: i32 = -2048;
+/// Maximum value representable as a signed 12-bit RISC-V immediate.
+pub const IMM12_MAX: i32 = 2047;
+
+/// Returns true iff `val` fits in a signed 12-bit immediate (`addi`, `andi`,
+/// `ori`, `xori`, `slti`, `sltiu`, load/store offset, …).
+///
+/// RV32's `OP-IMM` encoding gives every immediate-form ALU op the same range,
+/// so lowering and the `fold_immediates` peephole reach this predicate through
+/// [`crate::isa::IsaTarget::alu_imm_fits`] without inspecting the opcode.
+#[inline]
+pub fn fits_imm12(val: i32) -> bool {
+    (IMM12_MIN..=IMM12_MAX).contains(&val)
+}
+
+/// Bytes the ABI reserves at the **top** of every stack frame for the
+/// hardware/runtime to write into. RV32 has no such region.
+pub const FRAME_TOP_RESERVED_BYTES: u32 = 0;
+
 /// Flattened parameter locations: vmctx word first, then each scalar of each `FnParam` in order.
 /// All LPIR functions (entry and non-entry) receive vmctx as the first argument.
 pub fn classify_params(sig: &LpsFnSig, is_sret: bool) -> Vec<ArgLoc> {

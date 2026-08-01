@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    Asterisk, Boxes, ChartLine, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot,
+    Activity, Asterisk, Boxes, ChartLine, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot,
     CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical,
-    Folder, Funnel, Image, Info, Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed,
-    Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio, Save,
-    Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload,
-    Usb, Waypoints, X, Zap,
+    Folder, Funnel, Hash, Image, Info, Layers, Lightbulb, Link2, Link2Off, ListMusic, Locate,
+    LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio,
+    Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert,
+    Undo2, Upload, Usb, Waypoints, X, Zap,
 };
 
 #[component]
@@ -71,6 +71,10 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Upload => rsx! { Upload { size } },
         StudioIconName::Grow => rsx! { Maximize2 { size } },
         StudioIconName::Shrink => rsx! { Minimize2 { size } },
+        StudioIconName::MapNumbers => rsx! { Hash { size } },
+        StudioIconName::MapArrows => rsx! { Route { size } },
+        StudioIconName::MapUniverses => rsx! { Layers { size } },
+        StudioIconName::MapLive => rsx! { Activity { size } },
         StudioIconName::Console => rsx! { SquareTerminal { size } },
         StudioIconName::Cue => rsx! { Flag { size } },
         StudioIconName::Agent => rsx! { Sparkles { size } },
@@ -149,6 +153,14 @@ pub enum StudioIconName {
     Cancel,
     /// Ellipsis: the gallery card menu trigger.
     More,
+    /// Hash: wiring-order numbers on the mapping lamp view.
+    MapNumbers,
+    /// Route: wiring-direction arrows on the mapping lamp view.
+    MapArrows,
+    /// Layers: DMX-universe coloring on the mapping lamp view.
+    MapUniverses,
+    /// Activity: live output colors on the mapping lamp view.
+    MapLive,
     /// Duplicate/fork-a-copy affordances.
     Copy,
     /// Export-to-file affordances.

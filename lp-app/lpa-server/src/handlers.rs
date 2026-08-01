@@ -136,6 +136,11 @@ fn handle_project_command(
         WireProjectCommand::RemoveNode { request } => Ok(WireProjectCommandResponse::RemoveNode {
             response: project.remove_node(request)?,
         }),
+        WireProjectCommand::NodeCommand { node, command } => {
+            Ok(WireProjectCommandResponse::NodeCommand {
+                response: project.node_command(node, &command),
+            })
+        }
     }
 }
 

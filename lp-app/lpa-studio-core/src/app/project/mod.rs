@@ -27,6 +27,7 @@ pub mod demo_project;
 pub mod dirty_summary;
 pub mod loaded_project_choice;
 pub mod node;
+pub mod node_card_ui_state;
 pub mod project_connect_result;
 pub mod project_controller;
 pub mod project_editor_op;
@@ -48,6 +49,7 @@ pub mod slot;
 pub mod ui_affordance;
 pub mod ui_pending_edit;
 
+pub use agent_support::AgentEngineStatus;
 pub use asset::{
     AssetContentFetchOp, AssetEditOp, MAX_ASSET_BODY_BYTES, PendingAssetEdit, UiAssetContent,
     UiAssetContentBody, UiShaderError,
@@ -55,10 +57,12 @@ pub use asset::{
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeController, NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
-    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
-    UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
+    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp,
+    NodeRevertOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
+    ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
+    UiNodeRemovePreflight,
 };
+pub use node_card_ui_state::{NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{
     ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,
@@ -78,7 +82,7 @@ pub use project_sync::ProjectSync;
 pub use project_sync_phase::ProjectSyncPhase;
 pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;
-pub use project_value_format::{format_lp_value, format_slot_map_key};
+pub use project_value_format::{format_live_scalar, format_lp_value, format_slot_map_key};
 pub use slot::{
     PendingEdit, PendingEditOp, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot,
     SlotBindingFact, SlotBindingFactKind, SlotController, SlotControllerState, SlotEditOp,

@@ -68,10 +68,10 @@ impl CycleModelArg {
         }
     }
 
-    pub fn to_emu(self) -> lp_riscv_emu::CycleModel {
+    pub fn to_emu(self) -> lp_emu_core::CycleModel {
         match self {
-            Self::Esp32C6 => lp_riscv_emu::CycleModel::Esp32C6,
-            Self::Uniform => lp_riscv_emu::CycleModel::InstructionCount,
+            Self::Esp32C6 => lp_emu_core::CycleModel::Esp32C6,
+            Self::Uniform => lp_emu_core::CycleModel::InstructionCount,
         }
     }
 }

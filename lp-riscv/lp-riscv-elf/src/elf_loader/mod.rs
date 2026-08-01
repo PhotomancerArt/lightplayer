@@ -151,7 +151,9 @@ pub fn load_elf(elf_data: &[u8]) -> Result<ElfLoadInfo, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_riscv_emu::{LogLevel, Riscv32Emulator, StepResult};
+    use lp_emu_core::LogLevel;
+    use lp_emu_core::StepResult;
+    use lp_riscv_emu::Riscv32Emulator;
     use lp_riscv_inst::Gpr;
     use std::println;
 
@@ -230,7 +232,7 @@ mod tests {
         let load_info = match load_elf(&builtins_exe) {
             Ok(info) => info,
             Err(e) => {
-                panic!("Failed to load bootstrap app ELF: {}", e);
+                panic!("Failed to load bootstrap app ELF: {e}");
             }
         };
 
@@ -263,7 +265,7 @@ mod tests {
                 println!("{}", emu.dump_state());
                 println!("\n=== Debug Info ===");
                 println!("{}", emu.format_debug_info(Some(emu.get_pc()), 50));
-                panic!("Emulator exceeded {} steps", max_steps);
+                panic!("Emulator exceeded {max_steps} steps");
             }
 
             match emu.step() {
@@ -316,7 +318,7 @@ mod tests {
                     println!("{}", emu.dump_state());
                     println!("\n=== Debug Info ===");
                     println!("{}", emu.format_debug_info(Some(emu.get_pc()), 50));
-                    panic!("Emulator error: {}", e);
+                    panic!("Emulator error: {e}");
                 }
             }
         }
@@ -350,7 +352,7 @@ mod tests {
         let load_info = match load_elf(&builtins_exe) {
             Ok(info) => info,
             Err(e) => {
-                panic!("Failed to load bootstrap app ELF: {}", e);
+                panic!("Failed to load bootstrap app ELF: {e}");
             }
         };
 

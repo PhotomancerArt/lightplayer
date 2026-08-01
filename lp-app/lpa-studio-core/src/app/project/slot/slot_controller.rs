@@ -296,6 +296,20 @@ impl SlotController {
         }
     }
 
+    /// Attach a consumed channel's live reading to the named top-level
+    /// field's bound endpoint (display-only; P6 item 1). No-op when the
+    /// field is not bound — live readings only decorate existing wiring.
+    pub(in crate::app::project) fn apply_bound_live_value(&mut self, slot_name: &str, live: &str) {
+        for child in &mut self.children {
+            if child.root_field_name() != Some(slot_name) {
+                continue;
+            }
+            if let UiSlotSourceState::Bound(endpoint) = &mut child.source {
+                endpoint.live_value = Some(live.to_string());
+            }
+        }
+    }
+
     /// True when this root has a top-level field child named `name`.
     pub(in crate::app::project) fn has_root_field(&self, name: &str) -> bool {
         self.children
@@ -945,6 +959,13 @@ impl SlotController {
         match &self.body {
             SlotControllerBody::Empty => UiConfigSlotBody::Empty,
             SlotControllerBody::Value { value } => {
+                // Asset-like rows keep their asset presentation even when
+                // nested (e.g. an enum variant's `source` field) — the
+                // top-level walk only promotes root-record fields, and the
+                // inline editor pipeline keys off the Asset body.
+                if let Some(asset) = self.ui_slot_asset() {
+                    return UiConfigSlotBody::Asset(asset);
+                }
                 // A buffered or overlay-pending edit shadows the synced value
                 // (rubber-band protection: an older pulled value must not
                 // fight the value the user asked for).
@@ -1505,7 +1526,9 @@ fn asset_editor_kind(
     shape: Option<&SlotValueShape>,
 ) -> UiAssetEditorKind {
     let lower = source.to_ascii_lowercase();
-    if lower.ends_with(".glsl") || content.is_some_and(looks_like_inline_glsl) {
+    if lower.ends_with(".map2d.json") {
+        UiAssetEditorKind::Map2d
+    } else if lower.ends_with(".glsl") || content.is_some_and(looks_like_inline_glsl) {
         UiAssetEditorKind::Glsl
     } else if lower.ends_with(".svg") || content.is_some_and(looks_like_inline_svg) {
         UiAssetEditorKind::Svg

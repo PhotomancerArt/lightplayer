@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "sample_diameter": 2.0,
+  "objects": [
+    {
+      "name": "button rings",
+      "shape": {
+        "ring": {
+          "center": [240.0, 200.0],
+          "radius": 90.0,
+          "outer_count": 16,
+          "rings": 2
+        }
+      }
+    }
+  ]
+}

@@ -8,10 +8,15 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AgentProvider, SettingsCommand, SettingsLayer, UiAgentSettingsView, UiSettingsView,
+    AgentProvider, SettingsCommand, SettingsLayer, UiAgentSettingsView, UiModelOption,
+    UiSettingsView,
 };
 
 use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
+
+/// The model dropdown's free-text escape hatch (its option value; never a
+/// plausible model id).
+const CUSTOM_MODEL_VALUE: &str = "__custom__";
 
 /// Header gear button opening the Studio settings popover.
 #[component]
@@ -34,6 +39,9 @@ pub fn StudioSettingsPopover(
             popup_class: POPUP_CLASS.to_string(),
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomEnd,
+            // Panel children render only while open, so this mounts (and
+            // fires) exactly when the settings surface opens.
+            RequestModelsOnOpen { on_settings }
             AgentSettingsSection {
                 agent: settings.agent,
                 on_settings,
@@ -42,6 +50,17 @@ pub fn StudioSettingsPopover(
             }
         }
     }
+}
+
+/// Requests the selected provider's model list once on mount — the
+/// settings-surface-open trigger for the discovery dropdown (P8). The
+/// store debounces repeats against its config fingerprint, so re-opens
+/// are free once a list (or error) is in.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RequestModelsOnOpen(on_settings: EventHandler<SettingsCommand>) -> Element {
+    use_hook(move || on_settings.call(SettingsCommand::RequestModels { force: false }));
+    rsx! {}
 }
 
 /// Pure presentation of the agent settings (provider, credentials, model,
@@ -67,6 +86,15 @@ pub fn AgentSettingsSection(
     let price_output_value = agent.price_output_override.clone().unwrap_or_default();
     let provider = agent.provider;
     let key_field_provider = provider;
+    // Model discovery (P8): dropdown when a fetched list exists, free text
+    // otherwise. `model_custom` is the explicit "Custom…" escape; an
+    // override that is not in the list lands on Custom… by itself.
+    let mut model_custom = use_signal(|| false);
+    let model_select_value = selected_model_value(&agent, model_custom());
+    let has_model_options = !agent.model_options.is_empty();
+    let show_model_input = !has_model_options || model_select_value == CUSTOM_MODEL_VALUE;
+    let model_options = agent.model_options.clone();
+    let models_error = agent.models_error.clone();
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:p-3",
             div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
@@ -242,22 +270,77 @@ pub fn AgentSettingsSection(
                 }
             }
 
-            // Model id.
+            // Model id: discovery dropdown over the fetched `/models` list
+            // when one exists, free text otherwise (and behind "Custom…").
             div { class: "tw:grid tw:min-w-0 tw:gap-1",
-                label { class: LABEL_CLASS, r#for: "studio-settings-model", "Model" }
-                input {
-                    id: "studio-settings-model",
-                    class: INPUT_CLASS,
-                    r#type: "text",
-                    value: "{model_value}",
-                    placeholder: "{agent.model_placeholder}",
-                    autocomplete: "off",
-                    spellcheck: "false",
-                    onchange: move |event| {
-                        on_settings.call(SettingsCommand::SetAgentModel(Some(event.value())));
-                    },
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                    label {
+                        class: LABEL_CLASS,
+                        r#for: if has_model_options { "studio-settings-model-select" } else { "studio-settings-model" },
+                        "Model"
+                    }
+                    button {
+                        class: CLEAR_BUTTON_CLASS,
+                        r#type: "button",
+                        title: "Fetch the provider's model list again",
+                        onclick: move |_| {
+                            on_settings.call(SettingsCommand::RequestModels { force: true });
+                        },
+                        "Refresh"
+                    }
+                }
+                if has_model_options {
+                    select {
+                        id: "studio-settings-model-select",
+                        class: INPUT_CLASS,
+                        value: "{model_select_value}",
+                        onchange: move |event| {
+                            let value = event.value();
+                            if value == CUSTOM_MODEL_VALUE {
+                                model_custom.set(true);
+                            } else {
+                                model_custom.set(false);
+                                on_settings.call(SettingsCommand::SetAgentModel(Some(value)));
+                            }
+                        },
+                        for option in model_options {
+                            option {
+                                key: "{option.id}",
+                                value: "{option.id}",
+                                selected: option.id == model_select_value,
+                                "{model_option_label(&option)}"
+                            }
+                        }
+                        option {
+                            value: CUSTOM_MODEL_VALUE,
+                            selected: model_select_value == CUSTOM_MODEL_VALUE,
+                            "Custom…"
+                        }
+                    }
+                }
+                if show_model_input {
+                    input {
+                        id: "studio-settings-model",
+                        class: INPUT_CLASS,
+                        r#type: "text",
+                        value: "{model_value}",
+                        placeholder: "{agent.model_placeholder}",
+                        autocomplete: "off",
+                        spellcheck: "false",
+                        onchange: move |event| {
+                            on_settings.call(SettingsCommand::SetAgentModel(Some(event.value())));
+                        },
+                    }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2",
+                    if agent.models_loading {
+                        span { class: HINT_CLASS, "fetching model list…" }
+                    }
+                    if let Some(error) = models_error {
+                        span { class: "tw:text-[0.68rem] tw:font-bold tw:text-status-warning-foreground",
+                            "{error}"
+                        }
+                    }
                     if agent.model_missing {
                         span { class: "tw:text-[0.68rem] tw:font-bold tw:text-status-warning-foreground",
                             "required — the agent stays off until a model id is set"
@@ -387,6 +470,30 @@ fn base_url_placeholder(agent: &UiAgentSettingsView) -> String {
     }
 }
 
+/// The model dropdown's selected value: the effective model when the
+/// fetched list contains it, the Custom… sentinel otherwise (an explicit
+/// Custom… pick, a hand-typed id outside the list, or no resolvable model).
+fn selected_model_value(agent: &UiAgentSettingsView, custom_mode: bool) -> String {
+    if custom_mode {
+        return CUSTOM_MODEL_VALUE.to_string();
+    }
+    let current = agent
+        .model_override
+        .as_ref()
+        .or(agent.model_effective.as_ref());
+    match current {
+        Some(model) if agent.model_options.iter().any(|option| &option.id == model) => {
+            model.clone()
+        }
+        _ => CUSTOM_MODEL_VALUE.to_string(),
+    }
+}
+
+/// Option row text: the provider's display name over the raw id.
+fn model_option_label(option: &UiModelOption) -> &str {
+    option.label.as_deref().unwrap_or(&option.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,5 +560,58 @@ mod tests {
         // With a user override, the input has a value; the example returns.
         agent.base_url_override = Some("http://box:8080/v1".to_string());
         assert_eq!(base_url_placeholder(&agent), "http://localhost:11434/v1");
+    }
+
+    fn options(ids: &[&str]) -> Vec<UiModelOption> {
+        ids.iter()
+            .map(|id| UiModelOption {
+                id: id.to_string(),
+                label: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dropdown_selects_the_effective_model_when_listed() {
+        let mut agent = agent_view();
+        agent.model_options = options(&["claude-sonnet-5", "claude-opus-5"]);
+        // No override: the effective (default) model selects.
+        assert_eq!(selected_model_value(&agent, false), "claude-sonnet-5");
+        // An in-list override wins over the effective model.
+        agent.model_override = Some("claude-opus-5".to_string());
+        assert_eq!(selected_model_value(&agent, false), "claude-opus-5");
+    }
+
+    #[test]
+    fn unlisted_or_missing_models_land_on_custom() {
+        let mut agent = agent_view();
+        agent.model_options = options(&["claude-sonnet-5"]);
+        agent.model_override = Some("my-finetune".to_string());
+        assert_eq!(selected_model_value(&agent, false), CUSTOM_MODEL_VALUE);
+        // No resolvable model at all (OpenAI pre-onboarding) → Custom.
+        agent.model_override = None;
+        agent.model_effective = None;
+        assert_eq!(selected_model_value(&agent, false), CUSTOM_MODEL_VALUE);
+    }
+
+    #[test]
+    fn explicit_custom_mode_wins_over_a_listed_model() {
+        let mut agent = agent_view();
+        agent.model_options = options(&["claude-sonnet-5"]);
+        assert_eq!(selected_model_value(&agent, true), CUSTOM_MODEL_VALUE);
+    }
+
+    #[test]
+    fn option_rows_prefer_display_names_over_ids() {
+        let named = UiModelOption {
+            id: "claude-sonnet-5".to_string(),
+            label: Some("Claude Sonnet 5".to_string()),
+        };
+        assert_eq!(model_option_label(&named), "Claude Sonnet 5");
+        let bare = UiModelOption {
+            id: "llama3.2:latest".to_string(),
+            label: None,
+        };
+        assert_eq!(model_option_label(&bare), "llama3.2:latest");
     }
 }

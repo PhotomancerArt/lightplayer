@@ -19,6 +19,7 @@
 //! [`SettingsCommand`]s and persists the user layer through the controller's
 //! `on_user_settings` hook.
 
+pub mod agent_models;
 pub mod agent_provider;
 pub mod settings_command;
 pub mod settings_layer;
@@ -26,9 +27,10 @@ pub mod settings_store;
 pub mod studio_settings;
 pub mod ui_settings_view;
 
+pub use agent_models::{AgentModelsFetch, AgentModelsState, discovery_fingerprint};
 pub use agent_provider::{AgentProvider, AgentProviderGuidance, provider_guidance};
 pub use settings_command::SettingsCommand;
 pub use settings_layer::SettingsLayer;
 pub use settings_store::SettingsStore;
 pub use studio_settings::{AgentSettings, DEFAULT_AGENT_MODEL, StudioSettings};
-pub use ui_settings_view::{UiAgentSettingsView, UiSettingsView};
+pub use ui_settings_view::{UiAgentSettingsView, UiModelOption, UiSettingsView};

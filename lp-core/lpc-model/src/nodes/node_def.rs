@@ -435,10 +435,12 @@ fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
-    let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
-        return Ok(Vec::new());
-    };
-    assets_for_slot(source, containing_file, AssetContentType::FixtureSvg)
+    match fixture.mapping.value() {
+        MappingConfig::Map2d { source } => {
+            assets_for_slot(source, containing_file, AssetContentType::FixtureMap2d)
+        }
+        _ => Ok(Vec::new()),
+    }
 }
 
 fn assets_for_slot(
@@ -781,7 +783,7 @@ mod tests {
             r#"{
   "kind": "Output",
   "endpoint": "ws281x:rmt:D10",
-  "options": { "brightness": 0.5 }
+  "options": { "dithering_enabled": false }
 }"#,
         )
         .expect("output");
@@ -810,28 +812,22 @@ mod tests {
   "kind": "Fixture",
   "render_size": { "width": 64, "height": 16 },
   "mapping": {
-    "kind": "SvgPath",
-    "source": "./fyeah-mapping.svg",
-    "sample_diameter": 2.0
+    "kind": "Map2d",
+    "source": "./sign.map2d.json"
   }
 }"#,
         )
-        .expect("svg path fixture");
+        .expect("map2d fixture");
         let NodeDef::Fixture(fixture) = fixture else {
             panic!("expected fixture");
         };
-        let MappingConfig::SvgPath {
-            source,
-            sample_diameter,
-        } = fixture.mapping.value()
-        else {
-            panic!("expected SvgPath mapping");
+        let MappingConfig::Map2d { source } = fixture.mapping.value() else {
+            panic!("expected Map2d mapping");
         };
         assert_eq!(
             source.artifact_value().unwrap().to_string(),
-            "fyeah-mapping.svg"
+            "sign.map2d.json"
         );
-        assert_eq!(sample_diameter.value().0, 2.0);
     }
 
     #[test]
@@ -993,6 +989,9 @@ mod tests {
 
     #[test]
     fn project_format_probe_reads_top_level_format() {
+        // Deliberately not PROJECT_FORMAT_VERSION: the probe reports whatever
+        // the file says, and the gate compares — the probe must not know the
+        // current version.
         let probe = read_project_format_json(r#"{ "kind": "Project", "format": 1, "nodes": {} }"#)
             .expect("probe");
         assert_eq!(probe, ProjectFormatProbe::Project { format: Some(1) });
@@ -1166,9 +1165,8 @@ mod tests {
   "kind": "Fixture",
   "render_size": { "width": 64, "height": 16 },
   "mapping": {
-    "kind": "SvgPath",
-    "source": "fixture.svg",
-    "sample_diameter": 2.0
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
   }
 }"#,
         )
@@ -1177,7 +1175,7 @@ mod tests {
             fixture
                 .referenced_asset_paths(LpPath::new("/fixtures/fixture.json"))
                 .unwrap(),
-            vec![LpPathBuf::from("/fixtures/fixture.svg")]
+            vec![LpPathBuf::from("/fixtures/fixture.map2d.json")]
         );
     }
 
@@ -1197,9 +1195,8 @@ mod tests {
   "kind": "Fixture",
   "render_size": { "width": 64, "height": 16 },
   "mapping": {
-    "kind": "SvgPath",
-    "source": "fixture.svg",
-    "sample_diameter": 2.0
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
   }
 }"#,
         )
@@ -1210,8 +1207,8 @@ mod tests {
                 .referenced_assets(LpPath::new("/fixtures/f.json"))
                 .unwrap(),
             vec![ReferencedAsset::new(
-                AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.svg")),
-                AssetContentType::FixtureSvg,
+                AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.map2d.json")),
+                AssetContentType::FixtureMap2d,
             )]
         );
     }

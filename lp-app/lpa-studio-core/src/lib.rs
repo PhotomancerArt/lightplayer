@@ -12,8 +12,8 @@ pub use lpa_link::{
 };
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
-    ControlLayout2d, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue,
-    Revision, SlotMapKey, SlotPath, SlotPathSegment,
+    ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
+    ControlSampleSpan, LpValue, Revision, SlotMapKey, SlotPath, SlotPathSegment,
 };
 
 pub mod app;
@@ -26,9 +26,11 @@ pub use lpc_history::{ContentHash, SyncRelation};
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
 pub use app::agent::{
-    AgentController, AgentCostRates, AgentFeedback, AgentOp, AgentProviderConfig, AgentRunContext,
-    AgentSessionKey, AgentTaskFuture, AgentViewContext, UiAgentAvailability, UiAgentStatus,
-    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
+    AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
+    AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
+    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
+    UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
+    UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
@@ -43,15 +45,15 @@ pub use app::home::{
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiFixtureFace, UiNodeChild, UiNodeDirtyState, UiNodeFace, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
-    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
-    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
-    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
-    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
-    UiSlotValue, UiSlotValueKind,
+    UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiNodeChild, UiNodeDirtyState,
+    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPanelControl,
+    UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings,
+    UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame,
+    UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance,
+    UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite,
+    UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind,
+    UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -60,9 +62,10 @@ pub use app::preview_host::{
     PreviewTier,
 };
 pub use app::project::{
-    AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeController, NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
-    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, ProjectAssetContentRun,
+    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
+    MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeController, NodeControllerState,
+    NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PendingAssetEdit,
+    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
     ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
     ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
     ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
@@ -94,8 +97,12 @@ pub use app::server::{
 };
 pub use app::settings::{
     AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
-    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiSettingsView,
-    provider_guidance,
+    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiModelOption,
+    UiSettingsView, provider_guidance,
+};
+pub use app::share::{
+    NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
+    ShareFile, ShareHeader, peek_header,
 };
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
@@ -104,7 +111,7 @@ pub use app::studio::{
     StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLensRuntime, UiLogDraft,
     UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult,
     UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
-    ViewPublisher, studio_view_channel,
+    ViewPublisher, has_unsaved_work, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

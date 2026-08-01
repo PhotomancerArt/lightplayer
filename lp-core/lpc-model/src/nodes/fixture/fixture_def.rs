@@ -2,7 +2,7 @@ use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{
-    Brightness, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig,
+    Brightness, FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, MappingConfig,
 };
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
@@ -39,6 +39,8 @@ pub struct FixtureDef {
     pub brightness: OptionSlot<ValueSlot<Brightness>>,
     /// Enable gamma correction.
     pub gamma_correction: OptionSlot<ValueSlot<bool>>,
+    /// Lamp type and supply budget. Absent means output is never limited.
+    pub power: OptionSlot<ValueSlot<FixturePower>>,
 }
 
 impl Default for FixtureDef {
@@ -54,6 +56,7 @@ impl Default for FixtureDef {
             transform: Affine2dSlot::default(),
             brightness: default_brightness(),
             gamma_correction: default_gamma_correction(),
+            power: OptionSlot::none(),
         }
     }
 }
@@ -325,27 +328,14 @@ impl SlotValue for ColorOrder {
 mod tests {
     use super::*;
     use crate::NodeKind;
-    use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
+    use crate::nodes::fixture::mapping::PathSpec;
     use crate::{Affine2d, FixtureDefView, MapSlot, SlotPath, SlotShapeRegistry};
     use lp_collection::VecMap;
 
     #[test]
     fn test_fixture_def_kind() {
-        let mut ring_lamp_counts = VecMap::new();
-        ring_lamp_counts.insert(0, ValueSlot::new(1_u32));
         let mut paths = VecMap::new();
-        paths.insert(
-            0,
-            EnumSlot::new(PathSpec::ring_array(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                MapSlot::new(ring_lamp_counts),
-                0.0,
-                RingOrder::InnerFirst,
-            )),
-        );
+        paths.insert(0, EnumSlot::new(PathSpec::point_list(0, [[0.5, 0.5]])));
         let def = FixtureDef {
             input: VisualProductSlot::default(),
             render_size: default_render_size(),
@@ -357,6 +347,7 @@ mod tests {
             transform: Affine2dSlot::new(Affine2d::identity()),
             brightness: OptionSlot::none(),
             gamma_correction: OptionSlot::none(),
+            power: OptionSlot::none(),
         };
         assert_eq!(def.kind(), NodeKind::Fixture);
     }

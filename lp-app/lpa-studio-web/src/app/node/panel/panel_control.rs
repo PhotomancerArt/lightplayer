@@ -85,6 +85,9 @@ pub fn PanelControl(
         SlotDetailButton {
             label: control.label.clone(),
             aspects: control.aspects.clone(),
+            // The popover titles the control by its authored label (P6
+            // item 2) instead of the backing field row's name ("Default").
+            name_override: Some(control.label.clone()),
             initially_open: detail_initially_open,
             placement: PopoverPlacement::BottomMiddle,
             anchor_id: Some(anchor_id.clone()),
@@ -121,11 +124,24 @@ fn PanelControlBody(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let bound = control.bound();
-    let readout = rsx! {
-        span { class: "tw:inline-flex tw:items-baseline tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
-            span { "{control.value.display}" }
-            SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
-        }
+    // The live bus reading (display-only; P6 item 1): the readout leads
+    // with it in the bound-violet family while the authored default — still
+    // the edit target — rides secondary in parentheses.
+    let live = control.live_value.clone();
+    let readout = match &live {
+        Some(live) => rsx! {
+            span { class: "tw:inline-flex tw:items-baseline tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
+                span { class: "tw:text-status-bound-foreground", title: "live bus value", "{live}" }
+                SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
+                span { class: "tw:text-dim-foreground", title: "authored default", "({control.value.display})" }
+            }
+        },
+        None => rsx! {
+            span { class: "tw:inline-flex tw:items-baseline tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
+                span { "{control.value.display}" }
+                SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
+            }
+        },
     };
 
     match control.widget.clone() {
@@ -136,6 +152,7 @@ fn PanelControlBody(
             rsx! {
                 KnobField {
                     value,
+                    live_value: live_numeric(&control),
                     min,
                     max,
                     step,
@@ -160,6 +177,7 @@ fn PanelControlBody(
                 }
                 HFaderField {
                     value,
+                    live_value: live_numeric(&control),
                     min,
                     max,
                     step,
@@ -181,6 +199,7 @@ fn PanelControlBody(
                 span { class: "tw:flex tw:h-[46px] tw:items-center",
                     ToggleField {
                         value,
+                        live_value: live_bool(&control),
                         state: control.state.clone(),
                         bound,
                         address: control.address.clone(),
@@ -256,6 +275,18 @@ fn bool_value(control: &UiPanelControlData) -> Option<bool> {
     }
 }
 
+/// The live bus reading as a number for the knob arc / fader fill (the DTO
+/// carries the quantized display string; an unparseable reading falls back
+/// to the authored value's geometry).
+fn live_numeric(control: &UiPanelControlData) -> Option<f32> {
+    control.live_value.as_deref()?.parse().ok()
+}
+
+/// The live bus reading as a bool for the toggle pill's rendered state.
+fn live_bool(control: &UiPanelControlData) -> Option<bool> {
+    control.live_value.as_deref()?.parse().ok()
+}
+
 /// Read-only fallback when the widget family and value family disagree —
 /// the plain label plus the slot's own display string, no gesture surface.
 fn mismatch_fallback(control: &UiPanelControlData) -> Element {
@@ -276,7 +307,10 @@ mod tests {
         UiSlotFieldState, UiSlotSourceState, UiSlotValue,
     };
 
-    use super::{PanelEmit, bool_value, numeric_value, panel_label_class, value_matches_widget};
+    use super::{
+        PanelEmit, bool_value, live_bool, live_numeric, numeric_value, panel_label_class,
+        value_matches_widget,
+    };
 
     fn control_with_source(
         value: UiSlotValue,
@@ -298,6 +332,7 @@ mod tests {
                 step: None,
             },
             value,
+            live_value: None,
             unit: None,
             state,
             aspects: aspect_slot.visible_aspects(),
@@ -384,6 +419,25 @@ mod tests {
             bound_source(),
         );
         assert!(panel_label_class(&bound).contains("bound"));
+    }
+
+    #[test]
+    fn live_readings_parse_back_into_widget_geometry() {
+        let mut bound = control_with_source(
+            UiSlotValue::f32(1.6),
+            UiSlotFieldState::editable(),
+            bound_source(),
+        );
+        bound.live_value = Some("2.72".to_string());
+        assert_eq!(live_numeric(&bound), Some(2.72));
+        assert_eq!(live_bool(&bound), None, "a number is not a pill state");
+
+        bound.live_value = Some("true".to_string());
+        assert_eq!(live_bool(&bound), Some(true));
+        assert_eq!(live_numeric(&bound), None);
+
+        bound.live_value = None;
+        assert_eq!(live_numeric(&bound), None);
     }
 
     #[test]

@@ -28,6 +28,8 @@ vendor
 # port on every other worktree (docs/adr/2026-07-27-worktree-local-launch-json.md).
 /.claude/launch.json
 *.coredump
+# rustc internal-compiler-error dumps land in the CWD (repo root) on a crash.
+rustc-ice-*.txt
 *.smt2
 *.cwasm
 /artifacts
@@ -46,3 +48,8 @@ lp-app/lpa-studio-web/public/fw-browser-worker.js
 lp-app/lpa-studio-web/dist/
 lp-app/lpa-studio-web/story-images/.new/
 lp-app/lpa-studio-web/story-images/.scratch/
+
+# lp-xt fixture build artifacts (regenerable via lp-xt/fixtures/build.sh, esp toolchain)
+lp-xt/fixtures/elf/
+lp-xt/fixtures/reloc/obj/
+lp-xt/fixtures/fp/obj/

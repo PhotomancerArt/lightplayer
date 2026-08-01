@@ -1,11 +1,11 @@
-//! Engine shared region: bump allocator with guest addresses in [`lp_riscv_emu::DEFAULT_SHARED_START`].
+//! Engine shared region: bump allocator with guest addresses in [`lp_emu_core::DEFAULT_SHARED_START`].
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lp_riscv_emu::DEFAULT_SHARED_START;
+use lp_emu_core::DEFAULT_SHARED_START;
 use lpvm::{AllocError, LpvmBuffer, LpvmMemory};
 
 fn round_up(value: usize, align: usize) -> usize {
@@ -29,16 +29,28 @@ pub struct EmuSharedArena {
 }
 
 impl EmuSharedArena {
-    /// New arena filled with zeros.
+    /// New arena filled with zeros, exposed to the guest at
+    /// [`DEFAULT_SHARED_START`] — the rv32 guest map's free window.
     pub fn new(capacity: usize) -> Self {
+        Self::with_start(capacity, DEFAULT_SHARED_START)
+    }
+
+    /// New arena filled with zeros, exposed to the guest at `shared_start`.
+    ///
+    /// The base is **per-ISA**: each guest map has its own free window, and
+    /// [`DEFAULT_SHARED_START`] (`0x4000_0000`) is only free in rv32's. On
+    /// Xtensa that address is the emulator's unmapped return sentinel, so the
+    /// Xtensa host engine passes `lp_xt_emu::SHARED_DBUS_BASE` instead. See
+    /// `docs/adr/2026-07-30-xtensa-host-shared-memory.md`.
+    pub fn with_start(capacity: usize, shared_start: u32) -> Self {
         Self {
             storage: Arc::new(std::sync::Mutex::new(vec![0u8; capacity])),
             next: Arc::new(AtomicUsize::new(0)),
-            shared_start: DEFAULT_SHARED_START,
+            shared_start,
         }
     }
 
-    /// Bump allocator over an existing backing store (same `Arc` as [`lp_riscv_emu::Memory::new_with_shared`]).
+    /// Bump allocator over an existing backing store (same `Arc` as [`lp_emu_core::Memory::new_with_shared`]).
     /// `bump_start` is the first byte offset available for allocation (leave room for vmctx / headers).
     pub(crate) fn attach_shared_backing(
         storage: Arc<std::sync::Mutex<Vec<u8>>>,
@@ -51,7 +63,7 @@ impl EmuSharedArena {
         }
     }
 
-    /// Same backing storage as [`LpvmMemory`] allocations (for [`lp_riscv_emu::Memory::new_with_shared`]).
+    /// Same backing storage as [`LpvmMemory`] allocations (for [`lp_emu_core::Memory::new_with_shared`]).
     pub fn storage_arc(&self) -> Arc<std::sync::Mutex<Vec<u8>>> {
         self.storage.clone()
     }

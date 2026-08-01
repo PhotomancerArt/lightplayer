@@ -12,6 +12,9 @@ use lpa_studio_core::{
 };
 use wasm_bindgen::{Clamped, JsCast};
 
+use crate::app::node::map_view::{
+    MapArrowsOverlay, MapViewOptions, neutral_lamp_rgb, universe_rgb, wiring_arrow_overlay,
+};
 use crate::app::node::{BindingChip, BindingChipDirection, SlotPane, SlotPaneTreatment};
 
 #[component]
@@ -78,6 +81,10 @@ pub(crate) fn ProductPreview(
     frame: UiProductPreviewFrame,
     focus_action: Option<UiAction>,
     on_action: Option<EventHandler<UiAction>>,
+    /// Mapping view options for control lamp layouts (fixture face passes
+    /// its toggles; everywhere else keeps the default live look).
+    #[props(default)]
+    map_view: MapViewOptions,
 ) -> Element {
     let frame_class = product_frame_class(kind);
     let frame_style = preview_frame_style(&preview, frame);
@@ -95,7 +102,7 @@ pub(crate) fn ProductPreview(
                     ProductPreviewCanvas { width, height, revision, bytes }
                 },
                 UiProductPreview::ControlNative(preview) => rsx! {
-                    ControlProductPreview { preview }
+                    ControlProductPreview { preview, map_view }
                 },
                 UiProductPreview::Pending => rsx! {
                     ProductSkeleton {
@@ -164,7 +171,10 @@ fn product_frame_class(kind: UiProductKind) -> &'static str {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ControlProductPreview(preview: UiControlProductPreview) -> Element {
+fn ControlProductPreview(
+    preview: UiControlProductPreview,
+    #[props(default)] map_view: MapViewOptions,
+) -> Element {
     let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
         return rsx! {
             ProductMessage {
@@ -183,14 +193,38 @@ fn ControlProductPreview(preview: UiControlProductPreview) -> Element {
         };
     }
 
-    let lamps = control_lamp_styles(&preview);
+    let arrows = map_view
+        .arrows
+        .then(|| wiring_arrow_overlay(layout))
+        .unwrap_or_default();
+    let lamps = control_lamp_render(&preview, map_view);
     rsx! {
         div { class: "ux-produced-product-control-layout",
-            for (index, style) in lamps.into_iter().enumerate() {
-                span {
-                    key: "{index}",
-                    class: "ux-produced-product-control-lamp",
-                    style: "{style}",
+            // Inset wrapper pulls the whole lamp field off the frame edges so
+            // edge-mapped lamps read fully instead of half-clipping (M3 gate:
+            // "zoom it out a bit"). Geometry inside stays texture-faithful.
+            div { class: "ux-map-inset",
+                for (index, lamp) in lamps.iter().enumerate() {
+                    span {
+                        key: "{index}",
+                        class: "ux-produced-product-control-lamp",
+                        style: "{lamp.style}",
+                    }
+                }
+                MapArrowsOverlay { overlay: arrows }
+                // Numbers are a separate layer: the lamp elements screen-blend
+                // against the black frame, which would wash dark glyphs out.
+                if map_view.numbers {
+                    for (index, lamp) in lamps.iter().enumerate() {
+                        if let Some(number) = lamp.number.as_ref() {
+                            span {
+                                key: "num-{index}",
+                                class: "ux-map-lamp-num",
+                                style: "{lamp.position_style}",
+                                "{number}"
+                            }
+                        }
+                    }
                 }
             }
             if layout.lamps.is_empty() {
@@ -209,9 +243,17 @@ static NEXT_PREVIEW_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
 /// One visual preview = one `<canvas>` painted with `putImageData`. Replaces
 /// the per-pixel `<span>` grid, whose 1024 keyed DOM nodes were re-diffed on
 /// every view snapshot (the dominant UI-thread cost with live sim previews).
+/// `pub(crate)` so the agent history filmstrip renders its thumbnails through
+/// the exact preview path (same doctrine as [`ProductPreview`]'s reuse by
+/// faces and playlist strips).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProductPreviewCanvas(width: u32, height: u32, revision: i64, bytes: Rc<[u8]>) -> Element {
+pub(crate) fn ProductPreviewCanvas(
+    width: u32,
+    height: u32,
+    revision: i64,
+    bytes: Rc<[u8]>,
+) -> Element {
     let canvas_id = use_hook(|| {
         let id = NEXT_PREVIEW_CANVAS_ID.fetch_add(1, Ordering::Relaxed);
         format!("product-preview-canvas-{id}")
@@ -455,7 +497,16 @@ fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -> bool {
     })
 }
 
-fn control_lamp_styles(preview: &UiControlProductPreview) -> Vec<String> {
+struct ControlLampRender {
+    style: String,
+    position_style: String,
+    number: Option<String>,
+}
+
+fn control_lamp_render(
+    preview: &UiControlProductPreview,
+    map_view: MapViewOptions,
+) -> Vec<ControlLampRender> {
     let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
         return Vec::new();
     };
@@ -463,17 +514,53 @@ fn control_lamp_styles(preview: &UiControlProductPreview) -> Vec<String> {
         .lamps
         .iter()
         .map(|lamp| {
-            let [r, g, b] = control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0]);
+            // Fill precedence: live output > universe color > neutral.
+            let [r, g, b] = if map_view.live {
+                control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0])
+            } else if map_view.universes {
+                universe_rgb(lamp.lamp_index)
+            } else {
+                neutral_lamp_rgb()
+            };
             let diameter = (lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
-            format!(
-                "--lamp-r: {r}; --lamp-g: {g}; --lamp-b: {b}; left: {:.3}%; top: {:.3}%; width: max(5px, {:.3}%); height: max(5px, {:.3}%);",
+            let position_style = format!(
+                "left: {:.3}%; top: {:.3}%;",
                 lamp.center[0].clamp(0.0, 1.0) * 100.0,
                 lamp.center[1].clamp(0.0, 1.0) * 100.0,
-                diameter,
-                diameter,
-            )
+            );
+            let style = format!(
+                "--lamp-r: {r}; --lamp-g: {g}; --lamp-b: {b}; {position_style} width: max(5px, {diameter:.3}%); height: max(5px, {diameter:.3}%);"
+            );
+            ControlLampRender {
+                style,
+                position_style,
+                number: map_view
+                    .numbers
+                    .then(|| (lamp.lamp_index + 1).to_string()),
+            }
         })
         .collect()
+}
+
+/// Live lamp colors indexed by wiring index — the same sample decode the
+/// display renderer uses, packaged for the mapping editor's live view.
+pub(crate) fn control_live_lamp_colors(preview: &UiControlProductPreview) -> Vec<[u8; 3]> {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
+        return Vec::new();
+    };
+    let len = layout
+        .lamps
+        .iter()
+        .map(|lamp| lamp.lamp_index as usize + 1)
+        .max()
+        .unwrap_or(0);
+    let mut colors = vec![[0_u8; 3]; len];
+    for lamp in &layout.lamps {
+        if let Some(rgb) = control_rgb_at_sample(preview, lamp.sample_start) {
+            colors[lamp.lamp_index as usize] = rgb;
+        }
+    }
+    colors
 }
 
 fn control_rgb_at_sample(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {

@@ -54,7 +54,7 @@ fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consume
     assert_eq!(
         graph
             .asset_consumers
-            .get(&artifact_asset("/fyeah-mapping.svg"))
+            .get(&artifact_asset("/fyeah.map2d.json"))
             .unwrap(),
         &vec![root.child(SlotPath::parse("nodes[fixture]").unwrap())]
     );
@@ -66,7 +66,7 @@ fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
         r#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "a": {
       "ref": "./shader.json"
@@ -113,7 +113,7 @@ fn missing_children_are_graph_nodes() {
         r#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "missing": {
       "ref": "./missing.json"

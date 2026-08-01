@@ -1,0 +1,91 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "controls",
+        "shape": {
+          "record": {
+            "fields": [
+              {
+                "name": "running",
+                "policy": {
+                  "persistence": "transient"
+                },
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": "plain",
+                      "id": 1196386242,
+                      "meta": {},
+                      "ty": "bool"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "rate",
+                "policy": {
+                  "persistence": "transient"
+                },
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": {
+                        "slider": {
+                          "max": 4.0,
+                          "min": 0.0,
+                          "step": 0.05000000074505806
+                        }
+                      },
+                      "id": 885023043,
+                      "meta": {},
+                      "ty": "f32"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "scrub_offset_seconds",
+                "policy": {
+                  "persistence": "transient"
+                },
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": {
+                        "slider": {
+                          "max": 10.0,
+                          "min": -10.0,
+                          "step": 0.01666666753590107
+                        }
+                      },
+                      "id": 3375024484,
+                      "meta": {},
+                      "ty": "f32"
+                    }
+                  }
+                }
+              }
+            ],
+            "meta": {}
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

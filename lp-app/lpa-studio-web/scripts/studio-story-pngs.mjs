@@ -53,6 +53,16 @@ const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTAR
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
+// HARNESS SEAM — second half of the contract documented at
+// `component_overview_id` in src/stories/story_book.rs: the story book
+// synthesizes one `<family>/[<category>/]<component>/overview` page per
+// component that stacks every story of that component, and no `#[story]`
+// function can claim that id (pinned by a unit test there).
+// Declared with the other module constants, ABOVE the top-level await that
+// drives the run — a `const` further down the file is in its temporal dead
+// zone by the time `discoverStoryIds()` reads it, which `node --check` cannot
+// see because it only parses.
+const OVERVIEW_COMPOSITE_SUFFIX = "/overview";
 // Written beside `.check-complete` by a complete `check`: the baseline files
 // that actually need replacing/removing. See the write site for why consumers
 // must not just swap the whole set.
@@ -64,6 +74,10 @@ const REFRESH_MANIFEST_FILE = ".refresh-manifest.json";
 // pixelmatch-style — rather than gating on the single worst pixel. This has a noise
 // floor: changes below the ratio don't fail the check (reviewers still see the
 // baseline image diff in the PR).
+// Ceiling for the grow-to-fit viewport (see `fitViewportToStory`). Tall enough
+// for every current story sheet, low enough that a runaway one can't ask Chrome
+// for an enormous surface.
+const storyViewportMaxHeight = parsePositiveIntegerEnv("STUDIO_STORY_MAX_VIEWPORT_HEIGHT", 8000);
 const significanceDelta = parsePositiveIntegerEnv("STUDIO_STORY_MAX_CHANNEL_DELTA", 64);
 const maxSignificantPixelRatio = parseRatioEnv("STUDIO_STORY_MAX_DIFF_PIXEL_RATIO", 0.0005);
 const baseUrl = `http://127.0.0.1:${port}/`;
@@ -500,6 +514,20 @@ async function discoverStoryIds() {
   }
   return storyIds
     .filter((value, index, values) => values.indexOf(value) === index)
+    // Generated `overview` composites are NOT pixel baselines. They stack a
+    // whole component's stories on one page — 10k-25k px tall against a 760px
+    // viewport, where every non-composite story fits in 3400 — and
+    // `captureBeyondViewport` does not reliably paint composited effects that
+    // far below the fold: in the flip that filed
+    // docs/defects/2026-07-28-overview-composite-capture-races.md, the device
+    // card's `backdrop-filter` overlays kept their blur but lost their own
+    // background and children, at every overlay story in the page and nowhere
+    // above y=5658. Both terminals survive the stable pair, so each capture
+    // committed a coin flip and every auto-refresh commit retriggered CI.
+    // They also carried no coverage the per-story captures don't: every state
+    // in a composite is captured on its own page too. Browse them in the story
+    // book; do not baseline them.
+    .filter((storyId) => !storyId.endsWith(OVERVIEW_COMPOSITE_SUFFIX))
     .sort();
 }
 
@@ -750,6 +778,7 @@ async function createCapturePage(cdp) {
         })()
       `,
       );
+      await fitViewportToStory(cdp, sessionId, viewport, storyId);
       await settleFocus(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
@@ -907,6 +936,103 @@ async function settleFocus(cdp, sessionId, storyId) {
     })()
   `,
   );
+}
+
+// Grow the viewport so the whole story box is ON SCREEN before capturing.
+//
+// `captureBeyondViewport` photographs content that was never actually in view,
+// and widgets that only measure themselves once they become visible get frozen
+// in a pre-measurement state by that. CodeMirror is the case that forced this:
+// `ViewState.measure()` consumes its "re-measure the content" flags and then
+// returns early while the editor is outside the window, so an editor below the
+// fold never measures and keeps the library default 14px line height while its
+// content lays out at 18px — the line-number gutter then advances 14px against
+// 18px lines and the numbers walk out of alignment with the code they label.
+// Coming into view is the only thing that recovers it, and a story page does
+// not scroll, so without this the state is permanent. Whether a given editor
+// straddled the fold moved with a few pixels of layout, which is what flipped
+// the baseline run to run.
+//
+// Widening the viewport instead of scrolling is what actually works here: the
+// story page is not a scroll container, so `window.scrollTo` moves nothing.
+// Width is never touched — sm/md/lg mean width, and the responsive layout must
+// not change. The viewport is restored to its normal height before the capture
+// (see below), so the grown height is a measurement window, not the height any
+// story is photographed at.
+// See docs/defects/2026-07-27-code-editor-gutter-misaligned.md
+async function fitViewportToStory(cdp, sessionId, viewport, storyId) {
+  const needed = await evaluate(
+    cdp,
+    sessionId,
+    `
+    (() => {
+      const el = document.querySelector('[data-story-capture="1"]');
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const doc = document.documentElement;
+      // Everything the capture could photograph: the story box in page
+      // coordinates, plus whatever else the document reports.
+      return Math.ceil(Math.max(
+        rect.bottom + window.scrollY,
+        doc.scrollHeight,
+        document.body ? document.body.scrollHeight : 0,
+      ));
+    })()
+  `,
+  );
+  if (!needed) {
+    return;
+  }
+  // Cap it: a runaway story must not turn into a gigantic surface allocation.
+  // Anything past the cap keeps the old below-the-fold behaviour rather than
+  // failing the capture.
+  const height = Math.min(Math.max(needed, viewport.height), storyViewportMaxHeight);
+  if (height <= viewport.height) {
+    return;
+  }
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: viewport.width, height, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  // Measurement runs on requestAnimationFrame and a headless page stops
+  // producing frames on its own, so force one and let the story settle at the
+  // new height before anything reads geometry again.
+  await forceFrame(cdp, sessionId);
+  await waitForStoryReady(cdp, sessionId, storyId);
+  // Then put the viewport back. The point of growing it was to let widgets take
+  // a measurement they refuse to take off screen, and those measurements stick
+  // — CodeMirror's height oracle keeps the corrected line height once it has
+  // one. Capturing at the grown height would instead bake the taller viewport
+  // into every tall story: layout that keys on viewport height (a pane sized to
+  // fill the window) expands, and the story box grows by that much empty space.
+  // Measured on studio-shell/simulator-ready at sm, the grown capture was 91px
+  // taller with pixel-identical content — a baseline change that carries no
+  // information. Restoring first keeps the fix and leaves those baselines alone.
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    },
+    sessionId,
+  );
+  await forceFrame(cdp, sessionId);
+  await waitForStoryReady(cdp, sessionId, storyId);
+}
+
+// A discarded 1x1 screenshot forces a BeginFrame, so rAF-driven work (layout
+// measurement, popover positioning) can make progress in a headless page.
+async function forceFrame(cdp, sessionId) {
+  await cdp
+    .send(
+      "Page.captureScreenshot",
+      { format: "png", fromSurface: true, clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 } },
+      sessionId,
+    )
+    .catch(() => {});
 }
 
 async function waitForStoryReady(cdp, sessionId, storyId) {

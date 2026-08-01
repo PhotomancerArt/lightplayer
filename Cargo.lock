@@ -1527,7 +1527,7 @@ dependencies = [
  "cranelift-control 0.127.0",
  "cranelift-module",
  "log",
- "object",
+ "object 0.37.3",
  "target-lexicon",
 ]
 
@@ -2731,6 +2731,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-usb-driver"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa675c5f4349b6aa0fcffc4bf9b241f18cd11b97c1f8323273fb9a5449937fbd"
+dependencies = [
+ "embedded-io-async 0.6.1",
+ "embedded-io-async 0.7.0",
+]
+
+[[package]]
+name = "embassy-usb-synopsys-otg"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb205e26d59e483e8c48f91f637ec217ec7e2cfb0b61d50482301b991b4ff431"
+dependencies = [
+ "critical-section",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embassy-usb-driver",
+ "portable-atomic",
+]
+
+[[package]]
 name = "embedded-can"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2989,6 +3012,7 @@ dependencies = [
  "esp-println",
  "heapless 0.9.2",
  "riscv",
+ "semihosting",
  "xtensa-lx",
 ]
 
@@ -3039,6 +3063,8 @@ dependencies = [
  "embassy-embedded-hal",
  "embassy-futures",
  "embassy-sync 0.8.0",
+ "embassy-usb-driver",
+ "embassy-usb-synopsys-otg",
  "embedded-can",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -3053,6 +3079,7 @@ dependencies = [
  "esp-riscv-rt",
  "esp-rom-sys",
  "esp-sync",
+ "esp-synopsys-usb-otg",
  "esp32",
  "esp32c2",
  "esp32c3",
@@ -3083,7 +3110,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6aebfabb2c21bec45e575e4f6cb6bb7aa8e1b33e7ac45b5dffa0f9d33ff59105"
 dependencies = [
  "document-features",
- "object",
+ "object 0.37.3",
  "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
@@ -3220,6 +3247,7 @@ dependencies = [
  "document-features",
  "esp-metadata-generated",
  "esp32c6",
+ "esp32s3",
 ]
 
 [[package]]
@@ -3276,6 +3304,19 @@ dependencies = [
  "esp-metadata-generated",
  "riscv",
  "xtensa-lx",
+]
+
+[[package]]
+name = "esp-synopsys-usb-otg"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8938451cb19032f13365328ea66ab38c8d16deecdf322067442297110eb74468"
+dependencies = [
+ "critical-section",
+ "embedded-hal 0.2.7",
+ "ral-registers",
+ "usb-device",
+ "vcell",
 ]
 
 [[package]]
@@ -3799,13 +3840,13 @@ dependencies = [
  "fw-core",
  "hashbrown 0.15.5",
  "log",
+ "lp-emu-abi",
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
- "lp-riscv-emu-shared",
  "lpa-client",
  "lpa-server",
  "lpc-engine",
@@ -3822,7 +3863,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "fw-esp32"
+name = "fw-esp32-common"
+version = "40.0.0"
+dependencies = [
+ "embassy-futures",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embedded-io-async 0.6.1",
+ "fw-core",
+ "hashbrown 0.15.5",
+ "littlefs-rust",
+ "log",
+ "lp-collection 1.0.0",
+ "lp-recovery",
+ "lpa-server",
+ "lpc-hardware",
+ "lpc-model",
+ "lpc-shared",
+ "lpc-wire",
+ "lpfs",
+ "ser-write-json",
+ "smart-leds",
+]
+
+[[package]]
+name = "fw-esp32c6"
 version = "40.0.0"
 dependencies = [
  "embassy-executor",
@@ -3841,6 +3906,7 @@ dependencies = [
  "esp-storage",
  "fw-checks",
  "fw-core",
+ "fw-esp32-common",
  "hashbrown 0.15.5",
  "libm",
  "littlefs-rust",
@@ -3858,13 +3924,51 @@ dependencies = [
  "lpfs",
  "lpir",
  "lps-builtins",
+ "lps-glsl",
  "lps-q32",
  "lps-shared",
+ "lpvm",
  "lpvm-native",
- "ser-write-json",
  "serde",
  "smart-leds",
  "unwinding",
+]
+
+[[package]]
+name = "fw-esp32s3"
+version = "40.0.0"
+dependencies = [
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embedded-io-async 0.6.1",
+ "embedded-storage",
+ "esp-alloc",
+ "esp-backtrace",
+ "esp-bootloader-esp-idf",
+ "esp-hal",
+ "esp-println",
+ "esp-rtos",
+ "esp-storage",
+ "fw-core",
+ "fw-esp32-common",
+ "littlefs-rust",
+ "log",
+ "lp-gfx-lpvm",
+ "lp-recovery",
+ "lp-ws281x",
+ "lp-xt-fp-vectors",
+ "lpa-server",
+ "lpc-hardware",
+ "lpc-shared",
+ "lpc-wire",
+ "lpfs",
+ "lpir",
+ "lps-builtins",
+ "lps-shared",
+ "lpvm",
+ "lpvm-native",
 ]
 
 [[package]]
@@ -3892,10 +3996,11 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-cli",
+ "lp-emu-abi",
+ "lp-emu-core",
  "lp-recovery",
  "lp-riscv-elf",
  "lp-riscv-emu",
- "lp-riscv-emu-shared",
  "lp-riscv-inst",
  "lpa-client",
  "lpc-model",
@@ -5183,17 +5288,20 @@ dependencies = [
  "jsonschema",
  "log",
  "lp-collection 1.0.0",
+ "lp-emu-core",
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
+ "lpa-boards",
  "lpa-client",
  "lpa-link",
  "lpa-server",
  "lpc-engine",
  "lpc-hardware",
+ "lpc-mapping",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -5234,6 +5342,25 @@ version = "1.0.0"
 source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4bf6e7af1c3e1db84c20095d0aad56"
 dependencies = [
  "rustc-hash 2.1.1",
+]
+
+[[package]]
+name = "lp-emu-abi"
+version = "40.0.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "lp-emu-core"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-abi",
+ "rustc-demangle",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -5303,7 +5430,7 @@ name = "lp-perf"
 version = "40.0.0"
 dependencies = [
  "log",
- "lp-riscv-emu-shared",
+ "lp-emu-abi",
 ]
 
 [[package]]
@@ -5323,9 +5450,10 @@ dependencies = [
  "cranelift-object",
  "hashbrown 0.15.5",
  "log",
+ "lp-emu-core",
  "lp-riscv-emu",
  "lp-riscv-inst",
- "object",
+ "object 0.37.3",
  "rustc-demangle",
  "serde",
  "target-lexicon",
@@ -5342,12 +5470,11 @@ dependencies = [
  "hashbrown 0.15.5",
  "libc",
  "log",
+ "lp-emu-abi",
+ "lp-emu-core",
  "lp-riscv-elf",
- "lp-riscv-emu-shared",
+ "lp-riscv-emu",
  "lp-riscv-inst",
- "rustc-demangle",
- "serde",
- "serde_json",
  "tempfile",
 ]
 
@@ -5358,8 +5485,8 @@ dependencies = [
  "critical-section",
  "linked_list_allocator",
  "log",
+ "lp-emu-abi",
  "lp-recovery",
- "lp-riscv-emu-shared",
  "lpc-shared",
  "unwinding",
 ]
@@ -5372,16 +5499,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "lp-riscv-emu-shared"
-version = "40.0.0"
-dependencies = [
- "log",
-]
-
-[[package]]
 name = "lp-riscv-inst"
 version = "40.0.0"
 dependencies = [
+ "lp-emu-core",
  "lp-riscv-emu",
 ]
 
@@ -5396,6 +5517,39 @@ dependencies = [
  "lps-shared",
  "lpvm",
  "lpvm-wasm",
+]
+
+[[package]]
+name = "lp-ws281x"
+version = "0.1.0"
+
+[[package]]
+name = "lp-xt-elf"
+version = "40.0.0"
+dependencies = [
+ "lp-xt-emu",
+ "lp-xt-inst",
+ "object 0.36.7",
+]
+
+[[package]]
+name = "lp-xt-emu"
+version = "40.0.0"
+dependencies = [
+ "lp-emu-core",
+ "lp-xt-fp-vectors",
+ "lp-xt-inst",
+]
+
+[[package]]
+name = "lp-xt-fp-vectors"
+version = "40.0.0"
+
+[[package]]
+name = "lp-xt-inst"
+version = "40.0.0"
+dependencies = [
+ "object 0.36.7",
 ]
 
 [[package]]
@@ -5419,6 +5573,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-boards"
+version = "40.0.0"
+dependencies = [
+ "dioxus",
+ "lpc-hardware",
+ "schemars",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "lpa-client"
 version = "40.0.0"
 dependencies = [
@@ -5427,6 +5594,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.15.5",
  "log",
+ "lp-emu-core",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
@@ -5481,6 +5649,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-mapping-editor"
+version = "40.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "dioxus-icons",
+ "lpc-mapping",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [
@@ -5489,6 +5670,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
+ "lpa-client",
  "lpc-engine",
  "lpc-hardware",
  "lpc-history",
@@ -5498,6 +5680,7 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "lpfs",
+ "lpvm-native",
  "serde",
 ]
 
@@ -5544,11 +5727,14 @@ dependencies = [
  "js-sys",
  "log",
  "lpa-agent",
+ "lpa-boards",
  "lpa-client",
  "lpa-fs-opfs",
  "lpa-link",
+ "lpa-mapping-editor",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
+ "lpc-mapping",
  "lpc-wire",
  "lpfs",
  "lps-builtin-completions",
@@ -5587,6 +5773,7 @@ dependencies = [
  "lp-recovery",
  "lp-shader",
  "lpc-hardware",
+ "lpc-mapping",
  "lpc-model",
  "lpc-registry",
  "lpc-shared",
@@ -5622,6 +5809,15 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "lpc-mapping"
+version = "40.0.0"
+dependencies = [
+ "libm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5735,7 +5931,6 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lp-collection 1.0.0",
- "lps-q32",
 ]
 
 [[package]]
@@ -5754,6 +5949,7 @@ version = "40.0.0"
 name = "lps-builtins"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "log",
  "lpfn-impl-macro",
  "lps-builtin-ids",
@@ -5783,6 +5979,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lps-builtins-xt-image"
+version = "40.0.0"
+
+[[package]]
 name = "lps-diagnostics"
 version = "40.0.0"
 
@@ -5795,14 +5995,15 @@ dependencies = [
  "glsl",
  "libm",
  "lp-collection 1.0.0",
+ "lp-emu-core",
  "lp-gfx-lpvm",
  "lp-gfx-wgpu",
  "lp-riscv-elf",
- "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
  "lpir",
  "lps-builtins",
+ "lps-builtins-xt-image",
  "lps-diagnostics",
  "lps-frontend",
  "lps-glsl",
@@ -5931,6 +6132,7 @@ name = "lpvm-emu"
 version = "40.0.0"
 dependencies = [
  "cranelift-codegen 0.127.0",
+ "lp-emu-core",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
@@ -5948,20 +6150,25 @@ dependencies = [
  "cranelift-codegen 0.127.0",
  "log",
  "lp-collection 1.0.0",
+ "lp-emu-core",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
+ "lp-xt-elf",
+ "lp-xt-emu",
+ "lp-xt-inst",
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",
+ "lps-builtins-xt-image",
  "lps-q32",
  "lps-shared",
  "lpvm",
  "lpvm-cranelift",
  "lpvm-emu",
- "object",
+ "object 0.37.3",
  "rstest",
  "spin",
 ]
@@ -6906,6 +7113,15 @@ dependencies = [
 
 [[package]]
 name = "object"
+version = "0.36.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "object"
 version = "0.37.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
@@ -7464,6 +7680,12 @@ name = "radium"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
+
+[[package]]
+name = "ral-registers"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46b71a9d9206e8b46714c74255adcaea8b11e0350c1d8456165073c3f75fc81a"
 
 [[package]]
 name = "rand"
@@ -8116,6 +8338,12 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
+
+[[package]]
+name = "semihosting"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8e4abf97879f4e80db69a9fba7bd64998e9bdad25f58ef045a778e191172fd4"
 
 [[package]]
 name = "semver"
@@ -9473,6 +9701,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "usb-device"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98816b1accafbb09085168b90f27e93d790b4bfa19d883466b5e53315b5f06a6"
+dependencies = [
+ "heapless 0.8.0",
+ "portable-atomic",
+]
+
+[[package]]
 name = "utf-8"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9844,7 +10082,7 @@ dependencies = [
  "log",
  "mach2",
  "memfd",
- "object",
+ "object 0.37.3",
  "once_cell",
  "postcard",
  "pulley-interpreter",
@@ -9890,7 +10128,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "log",
- "object",
+ "object 0.37.3",
  "postcard",
  "rustc-demangle",
  "semver",
@@ -9971,7 +10209,7 @@ dependencies = [
  "gimli 0.33.0",
  "itertools",
  "log",
- "object",
+ "object 0.37.3",
  "pulley-interpreter",
  "smallvec",
  "target-lexicon",
@@ -10005,7 +10243,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "924980c50427885fd4feed2049b88380178e567768aaabf29045b02eb262eaa7"
 dependencies = [
  "cc",
- "object",
+ "object 0.37.3",
  "rustix 1.1.4",
  "wasmtime-internal-versioned-export-macros",
 ]
@@ -10039,7 +10277,7 @@ dependencies = [
  "cfg-if",
  "cranelift-codegen 0.129.1",
  "log",
- "object",
+ "object 0.37.3",
  "wasmtime-environ",
 ]
 
@@ -10063,7 +10301,7 @@ dependencies = [
  "cranelift-codegen 0.129.1",
  "gimli 0.33.0",
  "log",
- "object",
+ "object 0.37.3",
  "target-lexicon",
  "wasmparser 0.244.0",
  "wasmtime-environ",

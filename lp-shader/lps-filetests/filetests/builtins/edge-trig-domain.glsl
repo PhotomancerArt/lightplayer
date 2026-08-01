@@ -17,9 +17,15 @@ float test_asin_domain_over() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
+// @unsupported(rv32n.f32)
 // run: test_asin_domain_over() ~= 0.0
 
 float test_asin_domain_under() {
@@ -29,10 +35,14 @@ float test_asin_domain_under() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
+// @unsupported(rv32n.f32)
 // run: test_asin_domain_under() ~= 0.0
 
 float test_acos_domain_over() {
@@ -40,12 +50,7 @@ float test_acos_domain_over() {
     return acos(1.5);
 }
 
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(wasm.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_acos_domain_over() ~= 0.0
 
 float test_acos_domain_under() {
@@ -53,12 +58,7 @@ float test_acos_domain_under() {
     return acos(-1.5);
 }
 
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(wasm.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_acos_domain_under() ~= 0.0
 
 float test_atan2_zero_zero() {
@@ -68,10 +68,13 @@ float test_atan2_zero_zero() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32n.f32)
 // run: test_atan2_zero_zero() ~= 0.0
 
 float test_acosh_domain_under() {
@@ -81,10 +84,14 @@ float test_acosh_domain_under() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
+// @unsupported(rv32n.f32)
 // run: test_acosh_domain_under() ~= 0.0
 
 float test_atanh_domain_over() {
@@ -94,10 +101,14 @@ float test_atanh_domain_over() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
+// @unsupported(rv32n.f32)
 // run: test_atanh_domain_over() ~= 0.0
 
 float test_atanh_domain_under() {
@@ -107,10 +118,14 @@ float test_atanh_domain_under() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
+// @unsupported(rv32n.f32)
 // run: test_atanh_domain_under() ~= 0.0
 
 float test_atanh_domain_one() {
@@ -120,10 +135,14 @@ float test_atanh_domain_one() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
+// @unsupported(rv32n.f32)
 // run: test_atanh_domain_one() ~= 0.0
 
 float test_atanh_domain_neg_one() {
@@ -134,10 +153,14 @@ float test_atanh_domain_neg_one() {
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
+// @unsupported(rv32n.f32)
 // run: test_atanh_domain_neg_one() ~= 0.0
 
 

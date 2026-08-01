@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lpc_model::{NodeId, SlotData, SlotShapeLookup, SlotShapeView, TreePath};
+use lpc_model::{
+    NodeId, PlaylistDef, Revision, SlotData, SlotShapeLookup, SlotShapeView, TreePath,
+};
 use lpc_view::{ProjectView, SlotMirrorView, TreeEntryView};
 use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
@@ -64,6 +66,10 @@ pub struct NodeController {
     label: String,
     kind: String,
     status: ProjectNodeStatusView,
+    /// The engine frame the status last changed at (`TreeEntryView::
+    /// change_frame`, retained so "status newer than my apply" is an exact
+    /// Revision test — the agent bridge's engine-verdict wait keys on it).
+    status_frame: Revision,
     issues: Vec<String>,
     state: NodeControllerState,
     children: Vec<NodeController>,
@@ -85,6 +91,7 @@ impl NodeController {
             label: String::new(),
             kind: String::new(),
             status: ProjectNodeStatusView::new("Unknown", None, ProjectNodeStatusTone::Neutral),
+            status_frame: Revision::new(0),
             issues: Vec::new(),
             state: NodeControllerState::new(),
             children: Vec::new(),
@@ -127,6 +134,11 @@ impl NodeController {
     /// Current node status.
     pub fn status(&self) -> &ProjectNodeStatusView {
         &self.status
+    }
+
+    /// The engine frame [`Self::status`] last changed at.
+    pub fn status_frame(&self) -> Revision {
+        self.status_frame
     }
 
     /// Mirror/application issues attached to this node controller.
@@ -294,7 +306,7 @@ impl NodeController {
         sections: &[UiNodeSection],
         children: &mut Vec<UiNodeChild>,
     ) -> Option<UiNodeFace> {
-        super::node_face_builder::kind_face(self.node_ty()?, sections, children)
+        super::node_face_builder::kind_face(self.node_ty()?, self.address(), sections, children)
     }
 
     /// True when any of this node's slot roots carries a top-level field
@@ -342,6 +354,7 @@ impl NodeController {
         self.label = node_label(entry);
         self.kind = node_kind_label(&entry.path);
         self.status = node_status_view(entry);
+        self.status_frame = entry.change_frame;
         self.issues.clear();
         self.parent = parent_address(entry, view, &mut self.issues);
 
@@ -408,6 +421,20 @@ impl NodeController {
         for slot in &mut self.slots {
             slot.apply_default_binding_fact(fact);
         }
+    }
+
+    /// Attach a consumed channel's live reading to the named root field's
+    /// bound endpoint on every slot root (display-only; P6 item 1).
+    pub(in crate::app::project) fn apply_bound_live_value(&mut self, slot_name: &str, live: &str) {
+        for slot in &mut self.slots {
+            slot.apply_bound_live_value(slot_name, live);
+        }
+    }
+
+    /// Whether this node is a playlist — its card face is the entries strip,
+    /// whose chips warm their children's preview probes (P6 item 6).
+    pub(in crate::app::project) fn is_playlist_kind(&self) -> bool {
+        self.node_ty() == Some(PlaylistDef::KIND)
     }
 
     /// Find a mutable descendant node controller by runtime node id.

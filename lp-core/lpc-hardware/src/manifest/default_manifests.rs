@@ -6,11 +6,40 @@ use crate::{
 };
 
 const XIAO_ESP32_C6_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-c6.json");
+const XIAO_ESP32_S3_PLUS_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-s3-plus.json");
 
 pub fn default_esp32c6_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
         .and_then(|manifest| manifest.to_manifest())
         .expect("checked-in seeed/xiao-esp32-c6 hardware manifest must parse")
+}
+
+/// Compiled-in board profile for `fw-esp32s3`.
+///
+/// The profile is deliberately **incomplete**: a missing entry is a gap someone
+/// fills later, whereas a wrong GPIO number reaches a soldering iron. Absent on
+/// purpose, and pinned by
+/// [`tests::default_esp32s3_manifest_omits_unverified_and_in_package_pins`]:
+///
+/// - **The user LED — tested, and GPIO21 is ruled out.** The Seeed wiki gives
+///   GPIO21 for the plain XIAO ESP32-S3; espboards.dev gives GPIO22 for the
+///   *Plus*, which cannot be right — the ESP32-S3 has no GPIO22 (it numbers
+///   GPIO0-21 and GPIO26-48). GPIO21 was then driven on the desk board in a
+///   3-blink/pause pattern for 20 s (2026-07-30) with **no visible change**,
+///   so it is not the user LED on this variant either. The board's yellow LED
+///   appears to be a power/charge indicator on no GPIO we drive. Settling it
+///   wants the Seeed schematic or an S3 `test_gpio_calibrate` harness, not a
+///   third guess.
+/// - **The nine 1.27 mm castellated pads** the Plus adds over the plain XIAO.
+///   No source publishes their GPIO numbers.
+/// - **In-package flash and PSRAM (GPIO26-GPIO37).** Not header pins and never
+///   claimable; this part carries octal PSRAM, which uses the widest set.
+/// - **A radio resource.** `fw-esp32s3` registers no radio driver, so
+///   advertising `/radio/0` would offer a resource nothing can open.
+pub fn default_esp32s3_hardware_manifest() -> HwManifest {
+    HardwareManifestFile::read_json(XIAO_ESP32_S3_PLUS_JSON)
+        .and_then(|manifest| manifest.to_manifest())
+        .expect("checked-in seeed/xiao-esp32-s3-plus hardware manifest must parse")
 }
 
 /// Emulator manifest: XIAO ESP32-C6 pin map, board D-labels for endpoint specs,
@@ -77,6 +106,59 @@ mod tests {
                 .and_then(|resource| resource.reserved_reason())
                 .is_some()
         );
+    }
+
+    #[test]
+    fn default_esp32s3_manifest_loads_checked_in_board_profile() {
+        let manifest = default_esp32s3_hardware_manifest();
+
+        assert_eq!(manifest.board_id(), "seeed/xiao-esp32-s3-plus");
+        assert_eq!(manifest.target(), Some(HardwareTarget::Esp32s3));
+        // D10, the header pin the C6 profile uses for WS281x output.
+        assert!(manifest.resource(&HwAddress::gpio(9)).is_some());
+        // Four RMT timing resources, one per ESP32-S3 TX channel: the count of
+        // these is what `Esp32S3RmtWs281xDriver` offers, so a manifest that
+        // lost one would silently drop an output.
+        for channel in 0..4 {
+            assert!(
+                manifest.resource(&HwAddress::rmt_ws281x(channel)).is_some(),
+                "/rmt/ws281x{channel} must be declared"
+            );
+        }
+        // GPIO19/20 are USB-Serial-JTAG D-/D+. They are listed only so a
+        // driver cannot claim them: on this board that costs a physical replug.
+        for pin in [0, 19, 20] {
+            assert!(
+                manifest
+                    .resource(&HwAddress::gpio(pin))
+                    .and_then(|resource| resource.reserved_reason())
+                    .is_some(),
+                "gpio{pin} must be reserved"
+            );
+        }
+    }
+
+    /// The omissions are the point of this profile, so they are asserted rather
+    /// than left to a comment: each pin here is one somebody could plausibly
+    /// guess into the manifest, and guessing wrong shorts a pin.
+    #[test]
+    fn default_esp32s3_manifest_omits_unverified_and_in_package_pins() {
+        let manifest = default_esp32s3_hardware_manifest();
+
+        // 21: the contested user LED. 26-37: in-package flash and octal PSRAM.
+        // 45/46: strapping pins, not on the header. 10-18, 38-42, 47/48: the
+        // Plus's castellated pads have no published GPIO map, so no raw pin is
+        // offered speculatively.
+        let omitted = (10..=18)
+            .chain(core::iter::once(21))
+            .chain(26..=42)
+            .chain(47..=48);
+        for pin in omitted {
+            assert!(
+                manifest.resource(&HwAddress::gpio(pin)).is_none(),
+                "gpio{pin} is not verified on this board and must stay absent"
+            );
+        }
     }
 
     #[test]

@@ -13,6 +13,11 @@ pub struct UiBindingEndpoint {
     /// rather than an authored binding (ADR 2026-07-09). Indicators wear a
     /// DEF badge and popovers explain the origin.
     pub default_origin: bool,
+    /// The bound channel's current reading, display-only (the authored
+    /// value stays the edit target). Quantized (≤2 decimals) BEFORE it
+    /// enters the DTO and absent for monotonic/time-kind channels, so the
+    /// whole-DTO change gate does not fire per engine tick (P6 item 1).
+    pub live_value: Option<String>,
 }
 
 impl UiBindingEndpoint {
@@ -22,6 +27,7 @@ impl UiBindingEndpoint {
             label: label.into(),
             detail: None,
             default_origin: false,
+            live_value: None,
         }
     }
 
@@ -34,6 +40,12 @@ impl UiBindingEndpoint {
     /// Mark this endpoint as wired by declarative default policy.
     pub fn with_default_origin(mut self) -> Self {
         self.default_origin = true;
+        self
+    }
+
+    /// Attach the channel's quantized live reading (display-only).
+    pub fn with_live_value(mut self, live_value: impl Into<String>) -> Self {
+        self.live_value = Some(live_value.into());
         self
     }
 }

@@ -14,7 +14,17 @@ use lpc_model::{NodeId, Revision, SlotPath};
 
 /// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`Production`]).
 pub trait TickResolver {
-    fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError>;
+    /// Resolve `query`. Borrowed rather than owned so a node that reads the
+    /// same slot every frame can keep one key instead of rebuilding it.
+    fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError>;
+
+    /// Resolve one of `node`'s consumed slots named by a constant path,
+    /// without rebuilding the query each frame.
+    fn resolve_static_consumed(
+        &mut self,
+        node: NodeId,
+        path: &'static str,
+    ) -> Result<Production, ResolveError>;
 
     fn publish_produced_slot(
         &mut self,
@@ -54,9 +64,19 @@ pub struct SessionHostResolver<'sess, 'resolver, 'host> {
 }
 
 impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resolver, 'host> {
-    fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError> {
+    fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError> {
         self.session
             .resolve(self.host, query)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn resolve_static_consumed(
+        &mut self,
+        node: NodeId,
+        path: &'static str,
+    ) -> Result<Production, ResolveError> {
+        self.session
+            .resolve_static_consumed(self.host, node, path)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 

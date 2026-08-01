@@ -15,12 +15,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::node::kind::NodeKind;
-use crate::nodes::fixture::{FixtureDef, MappingConfig, PathSpec, RingOrder};
-use crate::nodes::shader::{
-    AddSubMode, ComputeShaderDef, DivMode, GlslOpts, MulMode, ShaderDef, ShaderSlotDef,
-};
+use crate::nodes::fixture::{FixtureDef, MappingConfig};
+use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSlotDef};
 use crate::nodes::texture::TextureDef;
-use crate::{AssetSlot, BindingRef, EnumSlot, MapSlot, NodeDef, ValueSlot};
+use crate::{AssetSlot, BindingRef, EnumSlot, MapSlot, NodeDef};
 
 /// Placeholder in starter asset names and asset references. Callers substitute
 /// the artifact file stem (e.g. `pulse.json` ⇒ stem `pulse`) via
@@ -43,6 +41,17 @@ vec4 render(vec2 pos) {
 /// real, trivially-compiling source.
 pub const STARTER_COMPUTE_GLSL: &str = "void tick() { phase = mod(time, 1.0); }
 ";
+
+/// Canonical scaffold mapping document: a small grid, immediately visible
+/// and immediately editable in the in-place mapping editor (resize it,
+/// replace it, or delete it and draw the real fixture).
+pub const STARTER_FIXTURE_MAP2D: &str = r#"{
+  "format": 1,
+  "objects": [
+    { "name": "grid", "shape": { "grid": { "origin": [0, 0], "cols": 8, "rows": 8, "pitch": 10 } } }
+  ]
+}
+"#;
 
 /// A starter node artifact: the authored definition plus any sibling assets
 /// it references (paths relative to the def file's directory, named with
@@ -81,9 +90,55 @@ impl NodeStarter {
                     compute.source = AssetSlot::path(substituted);
                 }
             }
+            NodeDef::Fixture(fixture) => {
+                if let MappingConfig::Map2d { source } = fixture.mapping.value()
+                    && let Some(spec) = source.artifact_value()
+                {
+                    let substituted = spec.to_string().replace(STARTER_STEM_PLACEHOLDER, stem);
+                    fixture.mapping = EnumSlot::new(MappingConfig::Map2d {
+                        source: AssetSlot::path(substituted),
+                    });
+                }
+            }
             _ => {}
         }
         self
+    }
+}
+
+/// A node def's sibling asset reference, when its kind carries one.
+///
+/// Shares [`NodeStarter::for_stem`]'s knowledge of which kinds reference
+/// assets, so a new asset-bearing kind is added in one place.
+pub fn node_def_asset_ref(def: &NodeDef) -> Option<String> {
+    match def {
+        NodeDef::Shader(shader) => shader.source.artifact_value().map(|spec| spec.to_string()),
+        NodeDef::ComputeShader(compute) => {
+            compute.source.artifact_value().map(|spec| spec.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Point a node def's sibling asset reference at `path`.
+///
+/// Used when a copied node is pasted into a project where its original
+/// filename is taken: the asset is written under a free name, and the def
+/// must follow it or the pasted node references a file that is not there.
+/// No-op for kinds that reference no asset.
+pub fn set_node_def_asset_ref(def: &mut NodeDef, path: &str) {
+    match def {
+        NodeDef::Shader(shader) => {
+            if shader.source.artifact_value().is_some() {
+                shader.source = AssetSlot::path(path);
+            }
+        }
+        NodeDef::ComputeShader(compute) => {
+            if compute.source.artifact_value().is_some() {
+                compute.source = AssetSlot::path(path);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -109,9 +164,13 @@ pub fn starter_for_kind(kind: NodeKind) -> Option<NodeStarter> {
                 STARTER_COMPUTE_GLSL.as_bytes().to_vec(),
             )],
         }),
-        NodeKind::Fixture => Some(NodeStarter::def_only(NodeDef::Fixture(
-            starter_fixture_def(),
-        ))),
+        NodeKind::Fixture => Some(NodeStarter {
+            def: NodeDef::Fixture(starter_fixture_def()),
+            assets: vec![(
+                alloc::format!("{STARTER_STEM_PLACEHOLDER}.map2d.json"),
+                STARTER_FIXTURE_MAP2D.as_bytes().to_vec(),
+            )],
+        }),
         _ => None,
     }
 }
@@ -121,16 +180,6 @@ pub fn starter_for_kind(kind: NodeKind) -> Option<NodeStarter> {
 /// [`starter_for_kind`].
 pub fn starter_def_for_kind(kind: NodeKind) -> NodeDef {
     starter_for_kind(kind).map_or_else(|| NodeDef::default_for_kind(kind), |starter| starter.def)
-}
-
-/// Saturating Q32 arithmetic for starter shaders: reference-accurate output
-/// over speed while a shader is being authored.
-pub fn starter_glsl_opts() -> GlslOpts {
-    GlslOpts {
-        add_sub: ValueSlot::new(AddSubMode::Saturating),
-        mul: ValueSlot::new(MulMode::Saturating),
-        div: ValueSlot::new(DivMode::Saturating),
-    }
 }
 
 /// The `time` consumed slot every starter shader declares, default-bound to
@@ -148,7 +197,6 @@ pub fn starter_time_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
 fn starter_shader_def() -> ShaderDef {
     ShaderDef {
         source: AssetSlot::path(alloc::format!("{STARTER_STEM_PLACEHOLDER}.glsl")),
-        glsl_opts: starter_glsl_opts(),
         consumed_slots: starter_time_consumed_slots(),
         ..ShaderDef::default()
     }
@@ -162,7 +210,6 @@ fn starter_compute_shader_def() -> ComputeShaderDef {
     );
     ComputeShaderDef {
         source: AssetSlot::path(alloc::format!("{STARTER_STEM_PLACEHOLDER}.glsl")),
-        glsl_opts: starter_glsl_opts(),
         consumed_slots: starter_time_consumed_slots(),
         produced_slots: MapSlot::new(produced),
         ..ComputeShaderDef::default()
@@ -171,26 +218,11 @@ fn starter_compute_shader_def() -> ComputeShaderDef {
 
 fn starter_fixture_def() -> FixtureDef {
     FixtureDef {
-        mapping: EnumSlot::new(starter_ring_mapping()),
+        mapping: EnumSlot::new(MappingConfig::Map2d {
+            source: AssetSlot::path(alloc::format!("{STARTER_STEM_PLACEHOLDER}.map2d.json")),
+        }),
         ..FixtureDef::default()
     }
-}
-
-/// The 9-ring concentric disc from `examples/basic/fixture.json` — a real
-/// physical fixture shape that lights up without an SVG asset.
-fn starter_ring_mapping() -> MappingConfig {
-    MappingConfig::path_points_vec(
-        vec![PathSpec::ring_array_counts(
-            [0.5, 0.5],
-            1.0,
-            0,
-            9,
-            &[1, 8, 12, 16, 24, 32, 40, 48, 60],
-            0.0,
-            RingOrder::InnerFirst,
-        )],
-        2.0,
-    )
 }
 
 #[cfg(test)]
@@ -309,9 +341,10 @@ mod tests {
                 .to_string(),
             "bus:time"
         );
-        assert_eq!(*shader.glsl_opts.add_sub.value(), AddSubMode::Saturating);
-        assert_eq!(*shader.glsl_opts.mul.value(), MulMode::Saturating);
-        assert_eq!(*shader.glsl_opts.div.value(), DivMode::Saturating);
+        assert_eq!(
+            *shader.float_mode.value(),
+            crate::nodes::shader::FloatMode::Fixed
+        );
         assert_eq!(
             starter.assets,
             vec![(
@@ -342,32 +375,29 @@ mod tests {
     }
 
     #[test]
-    fn fixture_starter_mapping_is_path_points_and_parses() {
+    fn fixture_starter_maps_via_a_stem_named_map2d_doc() {
         let registry = SlotShapeRegistry::default();
-        let def = starter_def_for_kind(NodeKind::Fixture);
-        let NodeDef::Fixture(fixture) = &def else {
+        let starter = starter_for_kind(NodeKind::Fixture)
+            .expect("fixture starter")
+            .for_stem("sign");
+        let NodeDef::Fixture(fixture) = &starter.def else {
             panic!("expected fixture");
         };
-        assert!(
-            matches!(fixture.mapping.value(), MappingConfig::PathPoints { .. }),
-            "starter fixture mapping must not be Unset"
+        let MappingConfig::Map2d { source } = fixture.mapping.value() else {
+            panic!("starter fixture mapping must be Map2d, not Unset");
+        };
+        assert_eq!(
+            source.artifact_value().unwrap().to_string(),
+            "sign.map2d.json"
         );
+        assert_eq!(starter.assets[0].0, "sign.map2d.json");
 
-        let text = def.write_json(&registry).expect("write fixture");
+        // The scaffold document itself parses and the def round-trips.
+        let doc = core::str::from_utf8(&starter.assets[0].1).expect("utf8 doc");
+        assert!(doc.contains("\"format\": 1"));
+        let text = starter.def.write_json(&registry).expect("write fixture");
         let read = NodeDef::read_json(&registry, &text).expect("read fixture");
-        let NodeDef::Fixture(read) = read else {
-            panic!("expected fixture");
-        };
-        let MappingConfig::PathPoints { paths, .. } = read.mapping.value() else {
-            panic!("expected PathPoints after parse");
-        };
-        let PathSpec::RingArray {
-            ring_lamp_counts, ..
-        } = paths.entries.get(&0).expect("ring path").value()
-        else {
-            panic!("expected RingArray");
-        };
-        assert_eq!(ring_lamp_counts.entries.len(), 9);
+        assert_eq!(read.write_json(&registry).expect("re-write"), text);
     }
 
     #[test]

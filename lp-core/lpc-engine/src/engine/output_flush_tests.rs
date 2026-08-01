@@ -22,7 +22,7 @@ use lp_gfx::{
     TextureData, TextureHandle,
 };
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
+use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{
     Dim2u, HwEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
@@ -61,6 +61,10 @@ impl OutputProvider for RcMemoryOutput {
 
     fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.close(handle)
+    }
+
+    fn hardware_generation(&self) -> u64 {
+        self.0.hardware_generation()
     }
 }
 
@@ -468,18 +472,7 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     )
     .unwrap();
 
-    let mapping = MappingConfig::path_points_vec(
-        vec![PathSpec::ring_array_counts(
-            [0.5, 0.5],
-            1.0,
-            0,
-            1,
-            &[1],
-            0.0,
-            RingOrder::InnerFirst,
-        )],
-        2.0,
-    );
+    let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
     let fix_id = rt
         .tree_mut()
@@ -595,18 +588,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     )
     .unwrap();
 
-    let mapping = MappingConfig::path_points_vec(
-        vec![PathSpec::ring_array_counts(
-            [0.5, 0.5],
-            1.0,
-            0,
-            1,
-            &[1],
-            0.0,
-            RingOrder::InnerFirst,
-        )],
-        2.0,
-    );
+    let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
     let fix_id = rt
         .tree_mut()
@@ -725,18 +707,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     )
     .unwrap();
 
-    let mapping = MappingConfig::path_points_vec(
-        vec![PathSpec::ring_array_counts(
-            [0.5, 0.5],
-            1.0,
-            0,
-            1,
-            &[1],
-            0.0,
-            RingOrder::InnerFirst,
-        )],
-        2.0,
-    );
+    let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
     let fix_id = rt
         .tree_mut()

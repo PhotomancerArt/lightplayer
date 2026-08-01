@@ -6,8 +6,9 @@
 use async_trait::async_trait;
 use hashbrown::HashMap;
 use log;
+use lp_emu_core::MemoryAccessKind;
 use lp_riscv_elf::format_backtrace;
-use lp_riscv_emu::{MemoryAccessKind, Riscv32Emulator};
+use lp_riscv_emu::Riscv32Emulator;
 use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, json, messages::ClientMessage};
 use std::sync::{Arc, Mutex};

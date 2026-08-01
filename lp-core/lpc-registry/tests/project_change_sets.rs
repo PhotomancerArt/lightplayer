@@ -61,7 +61,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         br#"
 {
   "kind": "Project",
-  "format": 1
+  "format": 2
 }
 "#,
     );
@@ -80,7 +80,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -112,7 +112,7 @@ fn missing_referenced_def_recovers_when_file_is_created() {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -190,16 +190,16 @@ fn changing_shader_def_kind_removes_its_referenced_source_asset() {
 }
 
 #[test]
-fn deleting_referenced_fixture_svg_reports_asset_entered_error() {
+fn deleting_referenced_fixture_mapping_doc_reports_asset_entered_error() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
-    let changes = scenario.delete_file_and_refresh("/fyeah-mapping.svg");
+    let changes = scenario.delete_file_and_refresh("/fyeah.map2d.json");
 
     assert!(changes.defs.is_empty());
     assert_eq!(
         changes.assets.changed,
         vec![AssetChange::new(
-            artifact_asset("/fyeah-mapping.svg"),
+            artifact_asset("/fyeah.map2d.json"),
             AssetChangeKind::EnteredError,
         )]
     );
@@ -265,7 +265,7 @@ fn changing_project_child_ref_reports_node_use_definition_change() {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "name": "fyeah-sign",
   "nodes": {
     "output": {
@@ -324,7 +324,6 @@ fn same_kind_body_value_edit_does_not_report_node_use_change() {
       1.0,
       1.0
     ],
-    "brightness": 0.25,
     "interpolation_enabled": true,
     "dithering_enabled": false,
     "lut_enabled": true

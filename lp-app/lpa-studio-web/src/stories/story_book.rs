@@ -410,6 +410,17 @@ fn component_source_path(stories: &[StoryDescriptor]) -> String {
     "multiple story files".to_string()
 }
 
+/// HARNESS SEAM — frozen contract with `scripts/studio-story-pngs.mjs`:
+/// a story id ending in [`OVERVIEW_ID_SUFFIX`] is a *generated composite*,
+/// never an authored story. The capture script drops those ids from the
+/// baseline set, because a composite stacks a whole component's stories into a
+/// 10k-25k px page and `captureBeyondViewport` renders composited effects that
+/// far below the fold nondeterministically (see
+/// `docs/defects/2026-07-28-overview-composite-capture-races.md`). Changing
+/// this suffix silently puts the composites back in the pixel pipeline, so
+/// `overview_ids_are_reserved_for_generated_composites` pins it.
+const OVERVIEW_ID_SUFFIX: &str = "/overview";
+
 fn component_overview_id(story: &StoryDescriptor) -> String {
     let mut id = story.family.to_string();
     id.push('/');
@@ -418,7 +429,7 @@ fn component_overview_id(story: &StoryDescriptor) -> String {
         id.push('/');
     }
     id.push_str(story.component);
-    id.push_str("/overview");
+    id.push_str(OVERVIEW_ID_SUFFIX);
     id
 }
 
@@ -813,4 +824,40 @@ fn location_hash() -> Option<String> {
     web_sys::window()
         .map(|window| window.location())
         .and_then(|location| location.hash().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The capture script (`scripts/studio-story-pngs.mjs`) tells generated
+    /// composites apart from authored stories by the `/overview` id suffix and
+    /// keeps the composites out of the committed baseline set. That only holds
+    /// while the suffix is exclusively ours: a `#[story] fn overview()` would
+    /// both collide with its own component's composite in the nav and quietly
+    /// lose its pixel baseline.
+    #[test]
+    fn overview_ids_are_reserved_for_generated_composites() {
+        let stories = all_stories();
+        assert!(!stories.is_empty(), "story registry is empty");
+
+        let authored: Vec<&str> = stories
+            .iter()
+            .map(|story| story.id)
+            .filter(|id| id.ends_with(OVERVIEW_ID_SUFFIX))
+            .collect();
+        assert!(
+            authored.is_empty(),
+            "authored stories may not end in `{OVERVIEW_ID_SUFFIX}` — that suffix marks the \
+             generated composites the capture script excludes from baselines: {authored:?}",
+        );
+
+        for story in &stories {
+            let overview_id = component_overview_id(story);
+            assert!(
+                overview_id.ends_with(OVERVIEW_ID_SUFFIX),
+                "generated overview id `{overview_id}` must end in `{OVERVIEW_ID_SUFFIX}`",
+            );
+        }
+    }
 }

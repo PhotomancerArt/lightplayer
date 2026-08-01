@@ -22,6 +22,12 @@ pub struct UiPanelControl {
     pub widget: UiPanelWidget,
     /// Current typed value, shared with the slot row's editor.
     pub value: UiSlotValue,
+    /// The bound channel's current reading, display-only (P6 item 1): the
+    /// widget renders it in the bound-violet family while [`Self::value`]
+    /// (the authored default) stays the edit target. Already quantized
+    /// (≤2 decimals) and absent for monotonic/time-kind channels — see
+    /// [`crate::UiBindingEndpoint::live_value`], the source it mirrors.
+    pub live_value: Option<String>,
     /// Optional display unit rendered near the value (e.g. "Hz", "%").
     pub unit: Option<UiSlotUnit>,
     /// Interaction, dirty, bound/live, and validation state (violet when
@@ -77,6 +83,7 @@ mod tests {
                 step: None,
             },
             value: UiSlotValue::f32(1.6),
+            live_value: None,
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects,

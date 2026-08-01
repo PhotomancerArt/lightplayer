@@ -46,8 +46,8 @@ pub use project::{
     WireRuntimeBufferPayload, WireTextureFormat,
 };
 pub use project_command::{
-    WireCreateNodeRequest, WireCreateNodeResponse, WireProjectCommand, WireProjectCommandResponse,
-    WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
+    WireProjectCommand, WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 pub use project_inventory::{
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,
@@ -58,7 +58,7 @@ pub use project_overlay::{
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
 };
 #[cfg(feature = "ser-write-json")]
-pub use ser_write::{CountingSerWrite, ser_write_json_len};
+pub use ser_write::{CountingSerWrite, ErasedWriteError, ser_write_json_len, ser_write_json_to};
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, FwProvenance, LoadedProject,
     MemoryStats, SampleStats, ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
