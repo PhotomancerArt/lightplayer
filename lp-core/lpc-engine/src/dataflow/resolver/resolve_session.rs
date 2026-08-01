@@ -1,17 +1,20 @@
 //! [`EngineSession`] — per-frame demand resolution and engine-dispatched work.
 
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
 use crate::dataflow::binding::{BindingEntry, BindingRef, BindingSource};
 use crate::dataflow::resolver::production::{Production, ProductionSource};
+use crate::dataflow::resolver::query_intern::QueryId;
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::SessionResolveError;
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_trace::ResolveTrace;
 use crate::dataflow::resolver::resolver::Resolver;
 use crate::dataflow::resolver::resolver::materialize_literal_product;
+use crate::dataflow::resolver::route::ResolvedRoute;
 use lpc_model::{ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMerge, SlotPath};
 
 /// Active engine session for one frame (or nested test scope).
@@ -48,57 +51,233 @@ impl<'a> EngineSession<'a> {
     }
 
     pub fn publish(&mut self, query: QueryKey, production: Production) {
-        self.resolver.cache_mut().insert(query, production);
+        let id = self.resolver.intern_query(&query);
+        self.resolver.cache_mut().insert(id, production);
     }
 
     pub fn publish_produced_slot(&mut self, node: NodeId, slot: SlotPath, production: Production) {
         self.publish(QueryKey::ProducedSlot { node, slot }, production);
     }
 
-    /// Demand-resolve `query` for this frame (cache + cycle stack + host-owned bindings).
+    /// Demand-resolve `query` (cache + cycle stack + host-owned bindings).
     pub fn resolve<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
         query: QueryKey,
     ) -> Result<Production, SessionResolveError> {
-        if let Some(pv) = self.resolver.cache().get(&query) {
+        let id = self.resolver.intern_query(&query);
+        self.resolve_interned(host, id, &query)
+    }
+
+    fn resolve_interned<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        id: QueryId,
+        query: &QueryKey,
+    ) -> Result<Production, SessionResolveError> {
+        if let Some(pv) = self.resolver.cache().get(id) {
             let pv = pv.clone();
             self.resolver.counters_mut().cache_hits += 1;
-            self.trace.record_cache_hit(&query);
+            self.trace.record_cache_hit(query);
             return Ok(pv);
         }
 
         self.resolver.counters_mut().uncached_resolves += 1;
         self.trace
-            .try_push_active(&query)
+            .try_push_active(id, query)
             .map_err(SessionResolveError::from)?;
-        match self.resolve_uncached(host, &query) {
-            Ok(result) => {
-                self.trace.exit(&query);
-                self.resolver.cache_mut().insert(query, result.clone());
-                Ok(result)
-            }
-            Err(err) => {
-                self.trace.exit(&query);
-                Err(err)
-            }
-        }
+        let result = self.resolve_uncached(host, id, query);
+        self.trace.exit(id);
+        let result = result?;
+        self.resolver.cache_mut().insert(id, result.clone());
+        Ok(result)
     }
 
     fn resolve_uncached<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
+        id: QueryId,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
+        if let QueryKey::ProducedSlot { .. } = query {
+            return self.produce_through_host(host, query);
+        }
+        let route = self.route_for(host, id, query)?;
+        self.resolve_through_route(host, &route, query)
+    }
+
+    /// The cached decision about how `query` is answered, computing it on
+    /// first use in this structural epoch.
+    ///
+    /// Everything this computes — which binding wins, the merge policy, the
+    /// expansion of bus providers — reads the binding graph and authored
+    /// definitions. None of it can change without a structural change, so it
+    /// is exactly the work a frame should not repeat.
+    ///
+    /// Failures are deliberately not cached: an ambiguous channel or a cyclic
+    /// graph is a broken project, and it should keep reporting itself rather
+    /// than be remembered as a decision.
+    fn route_for<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        id: QueryId,
+        query: &QueryKey,
+    ) -> Result<Rc<ResolvedRoute>, SessionResolveError> {
+        if let Some(route) = self.resolver.cache().route(id) {
+            return Ok(Rc::clone(route));
+        }
+        let route = Rc::new(self.compute_route(host, query)?);
+        self.resolver
+            .cache_mut()
+            .insert_route(id, Rc::clone(&route));
+        Ok(route)
+    }
+
+    fn compute_route<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        query: &QueryKey,
+    ) -> Result<ResolvedRoute, SessionResolveError> {
         match query {
-            QueryKey::Bus(channel) => self.resolve_bus(host, channel, query),
+            QueryKey::Bus(channel) => self.compute_bus_route(host, channel),
             QueryKey::ConsumedSlot { node, slot } => {
-                self.resolve_consumed_slot(host, *node, slot, query)
+                self.compute_consumed_route(host, *node, slot, query)
             }
             QueryKey::ConsumedSlotAccessor { node, accessor } => {
-                self.resolve_consumed_slot(host, *node, accessor.path(), query)
+                self.compute_consumed_route(host, *node, accessor.path(), query)
             }
-            QueryKey::ProducedSlot { .. } => self.produce_through_host(host, query),
+            QueryKey::ProducedSlot { .. } => Ok(ResolvedRoute::Produce),
+        }
+    }
+
+    fn compute_bus_route<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        channel: &ChannelName,
+    ) -> Result<ResolvedRoute, SessionResolveError> {
+        self.resolver.counters_mut().binding_lookups += 1;
+        let candidates = host.providers_for_bus(channel);
+        let (binding_ref, entry) = select_highest_priority_bus_provider(channel, &candidates)?;
+        Ok(ResolvedRoute::Binding {
+            binding_ref,
+            source: entry.source,
+        })
+    }
+
+    fn compute_consumed_route<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        node: NodeId,
+        slot: &SlotPath,
+        query: &QueryKey,
+    ) -> Result<ResolvedRoute, SessionResolveError> {
+        self.resolver.counters_mut().merge_policy_reads += 1;
+        let policy = host.merge_policy_for_consumed_slot(node, slot);
+        self.trace.record_select_merge_policy(query, policy);
+
+        if policy == SlotMerge::ByKey {
+            self.resolver.counters_mut().binding_lookups += 1;
+            let entries = host.bindings_for_consumed_slot(node, slot);
+            if !entries.is_empty() {
+                let mut inputs = Vec::new();
+                for (binding_ref, entry) in entries.iter() {
+                    self.expand_merge_inputs(host, *binding_ref, &entry.source, &mut inputs)?;
+                }
+                return Ok(ResolvedRoute::MergeByKey { inputs });
+            }
+            return self.compute_latest_consumed_route(host, node, slot);
+        }
+
+        if policy == SlotMerge::Error {
+            self.resolver.counters_mut().binding_lookups += 1;
+            if host.bindings_for_consumed_slot(node, slot).len() > 1 {
+                return Err(SessionResolveError::other(format!(
+                    "multiple bindings for non-mergeable consumed slot node={node:?} slot={slot}"
+                )));
+            }
+        }
+
+        self.compute_latest_consumed_route(host, node, slot)
+    }
+
+    fn compute_latest_consumed_route<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Result<ResolvedRoute, SessionResolveError> {
+        self.resolver.counters_mut().binding_lookups += 1;
+        Ok(match host.binding_for_consumed_slot(node, slot) {
+            Some((binding_ref, entry)) => ResolvedRoute::Binding {
+                binding_ref,
+                source: entry.source,
+            },
+            None => ResolvedRoute::Produce,
+        })
+    }
+
+    /// Flatten a mergeable receiver's bindings into leaf sources.
+    ///
+    /// A bus source contributes all of its providers, in priority order, and
+    /// those may themselves be buses. The walk reads only bindings, so its
+    /// result is part of the route rather than of the frame.
+    fn expand_merge_inputs<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        binding_ref: BindingRef,
+        source: &BindingSource,
+        out: &mut Vec<(BindingRef, BindingSource)>,
+    ) -> Result<(), SessionResolveError> {
+        let BindingSource::BusChannel(channel) = source else {
+            out.push((binding_ref, source.clone()));
+            return Ok(());
+        };
+
+        let bus_query = QueryKey::Bus(channel.clone());
+        let bus_id = self.resolver.intern_query(&bus_query);
+        self.trace
+            .try_push_active(bus_id, &bus_query)
+            .map_err(SessionResolveError::from)?;
+        self.resolver.counters_mut().binding_lookups += 1;
+        let mut providers = host.providers_for_bus(channel);
+        providers.sort_by_key(|(provider_ref, entry)| (entry.priority, *provider_ref));
+        for (provider_ref, provider) in providers.iter() {
+            if let Err(err) = self.expand_merge_inputs(host, *provider_ref, &provider.source, out) {
+                self.trace.exit(bus_id);
+                return Err(err);
+            }
+        }
+        self.trace.exit(bus_id);
+        Ok(())
+    }
+
+    fn resolve_through_route<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        route: &ResolvedRoute,
+        query: &QueryKey,
+    ) -> Result<Production, SessionResolveError> {
+        match route {
+            ResolvedRoute::Binding {
+                binding_ref,
+                source,
+            } => {
+                self.trace.record_select_binding(query, *binding_ref);
+                self.resolve_binding_source(host, *binding_ref, source)
+            }
+            ResolvedRoute::Produce => self.produce_through_host(host, query),
+            ResolvedRoute::MergeByKey { inputs } => {
+                let mut productions = Vec::with_capacity(inputs.len());
+                for (binding_ref, source) in inputs.iter() {
+                    self.trace.record_merge_input(query, *binding_ref);
+                    let mut production = self.resolve_binding_source(host, *binding_ref, source)?;
+                    production.source = ProductionSource::BusBinding {
+                        binding: *binding_ref,
+                    };
+                    productions.push(production);
+                }
+                merge_maps_by_key(productions, query, &self.trace)
+            }
         }
     }
 
@@ -127,100 +306,9 @@ impl<'a> EngineSession<'a> {
         r
     }
 
-    fn resolve_bus(
+    fn resolve_binding_source<H: ResolveHost + ?Sized>(
         &mut self,
-        host: &mut (impl ResolveHost + ?Sized),
-        channel: &ChannelName,
-        query: &QueryKey,
-    ) -> Result<Production, SessionResolveError> {
-        self.resolver.counters_mut().binding_lookups += 1;
-        let candidates = host.providers_for_bus(channel);
-        let entry = select_highest_priority_bus_provider(channel, &candidates)?;
-        self.trace.record_select_binding(query, entry.0);
-        self.resolve_binding_source(host, entry.0, &entry.1.source)
-    }
-
-    fn resolve_consumed_slot(
-        &mut self,
-        host: &mut (impl ResolveHost + ?Sized),
-        node: NodeId,
-        slot: &SlotPath,
-        query: &QueryKey,
-    ) -> Result<Production, SessionResolveError> {
-        self.resolver.counters_mut().merge_policy_reads += 1;
-        let policy = host.merge_policy_for_consumed_slot(node, slot);
-        self.trace.record_select_merge_policy(query, policy);
-        match policy {
-            SlotMerge::Latest => self.resolve_latest_consumed_slot(host, node, slot, query),
-            SlotMerge::Error => self.resolve_error_merge_consumed_slot(host, node, slot, query),
-            SlotMerge::ByKey => self.resolve_by_key_consumed_slot(host, node, slot, query),
-        }
-    }
-
-    fn resolve_latest_consumed_slot(
-        &mut self,
-        host: &mut (impl ResolveHost + ?Sized),
-        node: NodeId,
-        slot: &SlotPath,
-        query: &QueryKey,
-    ) -> Result<Production, SessionResolveError> {
-        self.resolver.counters_mut().binding_lookups += 1;
-        if let Some(entry) = host.binding_for_consumed_slot(node, slot) {
-            self.trace.record_select_binding(query, entry.0);
-            return self.resolve_binding_source(host, entry.0, &entry.1.source);
-        }
-        self.produce_through_host(host, query)
-    }
-
-    fn resolve_error_merge_consumed_slot(
-        &mut self,
-        host: &mut (impl ResolveHost + ?Sized),
-        node: NodeId,
-        slot: &SlotPath,
-        query: &QueryKey,
-    ) -> Result<Production, SessionResolveError> {
-        self.resolver.counters_mut().binding_lookups += 1;
-        let entries = host.bindings_for_consumed_slot(node, slot);
-        if entries.len() > 1 {
-            return Err(SessionResolveError::other(format!(
-                "multiple bindings for non-mergeable consumed slot node={node:?} slot={slot}"
-            )));
-        }
-        self.resolve_latest_consumed_slot(host, node, slot, query)
-    }
-
-    fn resolve_by_key_consumed_slot(
-        &mut self,
-        host: &mut (impl ResolveHost + ?Sized),
-        node: NodeId,
-        slot: &SlotPath,
-        query: &QueryKey,
-    ) -> Result<Production, SessionResolveError> {
-        self.resolver.counters_mut().binding_lookups += 1;
-        let entries = host.bindings_for_consumed_slot(node, slot);
-        if entries.is_empty() {
-            return self.resolve_latest_consumed_slot(host, node, slot, query);
-        }
-
-        let mut inputs = Vec::new();
-        for (binding_ref, entry) in entries.iter() {
-            let binding_ref = *binding_ref;
-            self.trace.record_merge_input(query, binding_ref);
-            self.resolve_binding_source_for_merge(
-                host,
-                query,
-                binding_ref,
-                &entry.source,
-                &mut inputs,
-            )?;
-        }
-
-        merge_maps_by_key(inputs, query, &self.trace)
-    }
-
-    fn resolve_binding_source(
-        &mut self,
-        host: &mut (impl ResolveHost + ?Sized),
+        host: &mut H,
         binding_ref: BindingRef,
         source: &BindingSource,
     ) -> Result<Production, SessionResolveError> {
@@ -248,54 +336,6 @@ impl<'a> EngineSession<'a> {
                     binding: binding_ref,
                 };
                 Ok(pv)
-            }
-        }
-    }
-
-    fn resolve_binding_source_for_merge(
-        &mut self,
-        host: &mut (impl ResolveHost + ?Sized),
-        query: &QueryKey,
-        binding_ref: BindingRef,
-        source: &BindingSource,
-        out: &mut Vec<Production>,
-    ) -> Result<(), SessionResolveError> {
-        match source {
-            BindingSource::BusChannel(channel) => {
-                let bus_query = QueryKey::Bus(channel.clone());
-                self.trace
-                    .try_push_active(&bus_query)
-                    .map_err(SessionResolveError::from)?;
-                self.resolver.counters_mut().binding_lookups += 1;
-                let mut providers = host.providers_for_bus(channel);
-                providers.sort_by_key(|(provider_ref, entry)| (entry.priority, *provider_ref));
-                for (provider_ref, provider) in providers.iter() {
-                    let provider_ref = *provider_ref;
-                    self.trace.record_merge_input(query, provider_ref);
-                    match self.resolve_binding_source_for_merge(
-                        host,
-                        query,
-                        provider_ref,
-                        &provider.source,
-                        out,
-                    ) {
-                        Ok(()) => {}
-                        Err(err) => {
-                            self.trace.exit(&bus_query);
-                            return Err(err);
-                        }
-                    }
-                }
-                self.trace.exit(&bus_query);
-                Ok(())
-            }
-            _ => {
-                let mut production = self.resolve_binding_source(host, binding_ref, source)?;
-                production.source = ProductionSource::BusBinding {
-                    binding: binding_ref,
-                };
-                out.push(production);
-                Ok(())
             }
         }
     }

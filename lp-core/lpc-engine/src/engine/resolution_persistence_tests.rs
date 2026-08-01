@@ -14,6 +14,7 @@
 
 use super::test_support::{EngineTestBuilder, bus, literal, output, produced_slot};
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+use alloc::vec::Vec;
 use lpc_model::{Kind, LpValue, Revision, SlotPath};
 
 fn path(p: &str) -> SlotPath {
@@ -190,12 +191,17 @@ fn producers_still_tick_every_frame_on_an_unchanged_graph() {
     );
 }
 
-/// Steady-state frames over an unchanged graph do the same amount of work.
+/// A steady frame over an unchanged graph does *no* structural work.
 ///
-/// This is the weaker, always-true form of the zero-structural-work assertion:
-/// whatever a frame costs, it must not grow frame over frame.
+/// This is the whole point of the change, stated as an assertion: once the
+/// graph has been resolved, a frame walks no binding indexes, reads no merge
+/// policies, and re-reads no authored definitions. It only runs producers.
+///
+/// If this test starts failing, resolution has gone back to re-deriving the
+/// graph every tick — which costs about 8 ms per fixture chain on an S3 and
+/// is invisible to every other test in the suite.
 #[test]
-fn steady_state_frames_report_stable_counters() {
+fn steady_state_frame_does_zero_structural_work() {
     let mut harness = EngineTestBuilder::new()
         .shader("src", output("outputs[0]", 1.5))
         .output_node("out")
@@ -204,14 +210,65 @@ fn steady_state_frames_report_stable_counters() {
         .build();
 
     harness.tick(16).expect("warm-up tick");
-    harness.tick(16).expect("second tick");
-    let second = *harness.engine.resolver().last_frame_counters();
-    harness.tick(16).expect("third tick");
-    let third = *harness.engine.resolver().last_frame_counters();
+    let warm = *harness.engine.resolver().frame_counters();
+    assert!(
+        warm.structural_work() > 0,
+        "the first frame must actually resolve the graph"
+    );
+
+    harness.tick(16).expect("steady tick");
+    let steady = *harness.engine.resolver().frame_counters();
 
     assert_eq!(
-        second, third,
-        "two steady frames over an unchanged graph must cost the same resolution work"
+        steady.structural_work(),
+        0,
+        "a steady frame re-derived the graph it already knew: {steady:?}"
+    );
+    assert!(
+        steady.producer_produces > 0,
+        "producers must still run every frame"
+    );
+}
+
+/// After a structural change, the graph is re-resolved exactly once.
+#[test]
+fn structural_change_costs_one_frame_of_re_resolution() {
+    let mut harness = EngineTestBuilder::new()
+        .shader("src", output("outputs[0]", 1.0))
+        .output_node("out")
+        .bind_demand_input("out", produced_slot("src", "outputs[0]"))
+        .demand_root("out")
+        .build();
+
+    harness.tick(16).expect("warm-up");
+    harness.tick(16).expect("steady");
+    assert_eq!(
+        harness.engine.resolver().frame_counters().structural_work(),
+        0
+    );
+
+    let src = harness.node("src");
+    harness
+        .engine
+        .reattach_runtime_node(
+            src,
+            super::test_support::dummy_shader_node(path("outputs[0]"), 6.0),
+            Revision::new(9),
+        )
+        .expect("reattach");
+
+    harness.tick(16).expect("frame after the change");
+    assert!(
+        harness.engine.resolver().frame_counters().structural_work() > 0,
+        "the frame after a structural change must resolve the graph again"
+    );
+    assert_eq!(harness.output_f32("out"), Some(6.0));
+
+    harness.tick(16).expect("back to steady");
+    assert_eq!(
+        harness.engine.resolver().frame_counters().structural_work(),
+        0,
+        "and then go quiet again"
     );
 }
 
@@ -271,5 +328,94 @@ fn structural_mutations_bump_the_epoch() {
     assert!(
         harness.engine.resolver().structure_epoch() > epoch_after_binding,
         "reattaching a node is a structural change"
+    );
+}
+
+/// The same scene, resolved cached and uncached, must produce the same values.
+///
+/// Every other test here asserts a specific thing that must not go stale. This
+/// one asserts the general case: run a scene that binds, re-binds, switches
+/// producers and reattaches nodes, once with resolution persisting and once
+/// with it thrown away every frame, and demand the two agree frame for frame.
+///
+/// It is the only check that catches a stale cache without someone having
+/// first thought of the particular way it could go stale — which matters,
+/// because a wrong cached answer is a *plausible* answer, and plausible
+/// answers survive assertions written by whoever wrote the cache.
+#[test]
+fn cached_and_uncached_resolution_agree_frame_for_frame() {
+    fn run(force_uncached: bool) -> Vec<(Option<f32>, Option<f32>)> {
+        let mut harness = EngineTestBuilder::new()
+            .shader("a", output("outputs[0]", 3.0))
+            .shader("b", output("outputs[0]", 4.0))
+            .selector("sel", &[("a", "outputs[0]"), ("b", "outputs[0]")])
+            .output_node("out")
+            .bind_demand_input("out", literal(1.0))
+            .demand_root("sel")
+            .demand_root("out")
+            .build();
+        harness
+            .engine
+            .resolver_mut()
+            .set_force_invalidate_per_frame(force_uncached);
+
+        let out = harness.node("out");
+        let mut observed = Vec::new();
+        for frame in 0..8u32 {
+            match frame {
+                // A playlist-style switch: runtime state only.
+                2 => harness.select("sel", 1),
+                // A re-bind: the binding set is replaced, as an apply does.
+                4 => {
+                    harness
+                        .engine
+                        .clear_bindings(Revision::new(100 + frame as i64));
+                    harness
+                        .engine
+                        .add_binding(
+                            BindingDraft {
+                                source: BindingSource::Literal(LpValue::F32(5.0)),
+                                target: BindingTarget::ConsumedSlot {
+                                    node: out,
+                                    slot: path("in"),
+                                },
+                                priority: BindingPriority::new(0),
+                                kind: Kind::Color,
+                                owner: out,
+                            },
+                            Revision::new(100 + frame as i64),
+                        )
+                        .expect("rebind");
+                }
+                // A node replacement under a consumer that is mid-run.
+                6 => {
+                    let b = harness.node("b");
+                    harness
+                        .engine
+                        .reattach_runtime_node(
+                            b,
+                            super::test_support::dummy_shader_node(path("outputs[0]"), 8.0),
+                            Revision::new(100 + frame as i64),
+                        )
+                        .expect("reattach");
+                }
+                _ => {}
+            }
+            harness.tick(16).expect("tick");
+            observed.push((harness.output_f32("sel"), harness.output_f32("out")));
+        }
+        observed
+    }
+
+    let cached = run(false);
+    let uncached = run(true);
+    assert_eq!(
+        cached, uncached,
+        "persisting resolution changed what the engine resolves to"
+    );
+    // Guard against the test passing because nothing ever changed.
+    assert!(
+        cached.windows(2).any(|w| w[0] != w[1]),
+        "the scenario must actually move, or agreement proves nothing"
     );
 }

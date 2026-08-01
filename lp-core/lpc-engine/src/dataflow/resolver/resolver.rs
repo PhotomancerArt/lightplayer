@@ -23,6 +23,8 @@
 //! frames is a change of what each one *does*, not a hunt for which callers
 //! meant which.
 
+use crate::dataflow::resolver::query_intern::{QueryId, QueryInternTable};
+use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::ResolveError;
 use crate::dataflow::resolver::resolver_cache::ResolverCache;
 use lpc_model::LpValue;
@@ -65,22 +67,24 @@ impl ResolveFrameCounters {
     }
 }
 
-/// Owns the [`ResolverCache`] for engine demand resolution.
+/// Owns the [`ResolverCache`] and the query intern table.
 #[derive(Clone, Debug, Default)]
 pub struct Resolver {
     cache: ResolverCache,
+    intern: QueryInternTable,
     structure_epoch: u64,
     frame_counters: ResolveFrameCounters,
-    last_frame_counters: ResolveFrameCounters,
+    force_invalidate_per_frame: bool,
 }
 
 impl Resolver {
     pub fn new() -> Self {
         Self {
             cache: ResolverCache::new(),
+            intern: QueryInternTable::new(),
             structure_epoch: 0,
             frame_counters: ResolveFrameCounters::default(),
-            last_frame_counters: ResolveFrameCounters::default(),
+            force_invalidate_per_frame: false,
         }
     }
 
@@ -92,17 +96,42 @@ impl Resolver {
         &mut self.cache
     }
 
+    pub fn intern(&self) -> &QueryInternTable {
+        &self.intern
+    }
+
+    /// Id for `query`, assigning one on first use this epoch.
+    pub fn intern_query(&mut self, query: &QueryKey) -> QueryId {
+        self.intern.intern(query)
+    }
+
     /// Start a new frame: per-frame resolved values are discarded.
     pub fn begin_frame(&mut self) {
-        self.last_frame_counters = self.frame_counters;
         self.frame_counters = ResolveFrameCounters::default();
-        self.cache.clear();
+        if self.force_invalidate_per_frame {
+            self.invalidate_structure();
+            return;
+        }
+        self.cache.begin_frame();
     }
 
     /// The graph changed shape: every cached decision and value is suspect.
     pub fn invalidate_structure(&mut self) {
         self.structure_epoch = self.structure_epoch.wrapping_add(1);
-        self.cache.clear();
+        self.cache.invalidate_structure();
+        self.intern.clear();
+    }
+
+    /// Throw away *all* resolution every frame, as if the graph changed shape
+    /// each tick — the behaviour that predates cross-frame persistence.
+    ///
+    /// This exists so a test can run the same scene twice, cached and
+    /// uncached, and demand identical output. That differential is the only
+    /// check that reliably catches a stale cache: a wrong cached answer is
+    /// still a *plausible* answer, so it survives assertions written against
+    /// what the code does rather than against what it should do.
+    pub fn set_force_invalidate_per_frame(&mut self, force: bool) {
+        self.force_invalidate_per_frame = force;
     }
 
     /// How many times the graph has changed shape. Only equality across two
@@ -111,15 +140,11 @@ impl Resolver {
         self.structure_epoch
     }
 
-    /// Counters for the frame currently being resolved.
+    /// Resolution work done for the current frame. Counting resets when the
+    /// next frame begins, so after a tick returns this reads as "what that
+    /// tick cost".
     pub fn frame_counters(&self) -> &ResolveFrameCounters {
         &self.frame_counters
-    }
-
-    /// Counters for the last frame that completed — readable after the tick
-    /// returns, which is when tests can look at them.
-    pub fn last_frame_counters(&self) -> &ResolveFrameCounters {
-        &self.last_frame_counters
     }
 
     pub(crate) fn counters_mut(&mut self) -> &mut ResolveFrameCounters {

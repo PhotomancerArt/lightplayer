@@ -10,6 +10,7 @@
 //! carry maps, records, options, and receiver-owned merge results.
 
 pub mod production;
+pub mod query_intern;
 pub mod query_key;
 pub mod resolve_error;
 pub mod resolve_host;
@@ -17,9 +18,11 @@ pub mod resolve_session;
 pub mod resolve_trace;
 pub mod resolver;
 pub mod resolver_cache;
+pub mod route;
 pub mod tick_resolver;
 
 pub use production::{Production, ProductionSource};
+pub use query_intern::{QueryId, QueryInternTable};
 pub use query_key::QueryKey;
 pub use resolve_error::{ResolveError, SessionResolveError};
 pub use resolve_host::ResolveHost;
@@ -29,4 +32,5 @@ pub use resolve_trace::{
 };
 pub use resolver::{ResolveFrameCounters, Resolver};
 pub use resolver_cache::ResolverCache;
+pub use route::ResolvedRoute;
 pub use tick_resolver::{SessionHostResolver, TickResolver};
