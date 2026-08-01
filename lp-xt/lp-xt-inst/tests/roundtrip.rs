@@ -7,6 +7,12 @@ use lp_xt_inst::*;
 fn r(n: u8) -> Reg {
     Reg::new(n)
 }
+fn f(n: u8) -> FReg {
+    FReg::new(n)
+}
+fn b(n: u8) -> BReg {
+    BReg::new(n)
+}
 
 /// Assert `inst` encodes to `expect_len` bytes and decodes back to itself.
 #[track_caller]
@@ -258,6 +264,159 @@ fn narrow_reg_and_nullary() {
     }
 }
 
+/// Every FP register field, over the register boundary set. Each of the FR/AR/BR
+/// operand *kinds* is exercised in every position it appears in, because a
+/// swapped `r`/`s`/`t` field is the mistake this catches.
+#[test]
+fn fp_registers() {
+    use FpRrOp::*;
+    use FpRrrOp::*;
+    for op in [AddS, SubS, MulS, MaddS, MsubS, MaddnS, DivnS] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::FpRrr(op, f(x), f(y), f(15 - x)), 3);
+            }
+        }
+    }
+    for op in [
+        MovS, AbsS, NegS, Div0S, Recip0S, Sqrt0S, Rsqrt0S, Nexp01S, MksadjS, MkdadjS, AddexpS,
+        AddexpmS,
+    ] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::FpRr(op, f(x), f(y)), 3);
+            }
+        }
+    }
+    for &x in &REGS {
+        for &y in &REGS {
+            rt(Inst::Rfr(r(x), f(y)), 3);
+            rt(Inst::Wfr(f(x), r(y)), 3);
+        }
+        // const.s takes a 0..=15 selector in the `s` field.
+        for imm in 0..=15u8 {
+            rt(Inst::ConstS(f(x), imm), 3);
+        }
+    }
+}
+
+#[test]
+fn fp_compares_and_moves() {
+    for op in [
+        FpCmpOp::UnS,
+        FpCmpOp::OeqS,
+        FpCmpOp::UeqS,
+        FpCmpOp::OltS,
+        FpCmpOp::UltS,
+        FpCmpOp::OleS,
+        FpCmpOp::UleS,
+    ] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::FpCmp(op, b(x), f(y), f(15 - x)), 3);
+            }
+        }
+    }
+    for op in [
+        FpMovArOp::MoveqzS,
+        FpMovArOp::MovnezS,
+        FpMovArOp::MovltzS,
+        FpMovArOp::MovgezS,
+    ] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::FpMovAr(op, f(x), f(y), r(15 - x)), 3);
+            }
+        }
+    }
+    for op in [FpMovBrOp::MovfS, FpMovBrOp::MovtS] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::FpMovBr(op, f(x), f(y), b(15 - x)), 3);
+            }
+        }
+    }
+}
+
+/// Conversions carry a 0..=15 scale immediate in the `t` field — the whole
+/// range, both directions.
+#[test]
+fn fp_conversions() {
+    for op in [
+        FpToIntOp::RoundS,
+        FpToIntOp::TruncS,
+        FpToIntOp::FloorS,
+        FpToIntOp::CeilS,
+        FpToIntOp::UtruncS,
+    ] {
+        for &x in &REGS {
+            for imm in 0..=15u8 {
+                rt(Inst::FpToInt(op, r(x), f(15 - x), imm), 3);
+            }
+        }
+    }
+    for op in [IntToFpOp::FloatS, IntToFpOp::UfloatS] {
+        for &x in &REGS {
+            for imm in 0..=15u8 {
+                rt(Inst::IntToFp(op, f(x), r(15 - x), imm), 3);
+            }
+        }
+    }
+}
+
+/// FP load/store offsets: 0..=1020 in steps of 4, the full `imm8` field.
+#[test]
+fn fp_loads_stores() {
+    for op in [FpLsiOp::Lsi, FpLsiOp::Ssi, FpLsiOp::Lsip, FpLsiOp::Ssip] {
+        for off in (0..=1020).step_by(4) {
+            rt(Inst::FpLsi(op, f(2), r(3), off), 3);
+        }
+    }
+    for op in [FpLsxOp::Lsx, FpLsxOp::Lsxp, FpLsxOp::Ssx, FpLsxOp::Ssxp] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::FpLsx(op, f(x), r(y), r(15 - x)), 3);
+            }
+        }
+    }
+}
+
+#[test]
+fn boolean_moves_and_branches() {
+    for set in [true, false] {
+        for &x in &REGS {
+            for &y in &REGS {
+                rt(Inst::MovBool(set, r(x), r(y), b(15 - x)), 3);
+            }
+        }
+        // bt/bf carry a signed 8-bit PC-relative offset, like the other RRI8
+        // branches.
+        for off in [-128i32, -22, -1, 0, 1, 5, 127] {
+            for &x in &REGS {
+                rt(Inst::BranchBool(set, b(x), off), 3);
+            }
+        }
+    }
+}
+
+#[test]
+fn special_and_user_registers() {
+    for op in [SrOp::Rsr, SrOp::Wsr, SrOp::Xsr] {
+        for sreg in [SpecialReg::Br, SpecialReg::Cpenable] {
+            for &x in &REGS {
+                rt(Inst::Sr(op, sreg, r(x)), 3);
+            }
+        }
+    }
+    for op in [UrOp::Rur, UrOp::Wur] {
+        for ureg in [UserReg::Fcr, UserReg::Fsr] {
+            for &x in &REGS {
+                rt(Inst::Ur(op, ureg, r(x)), 3);
+            }
+        }
+    }
+}
+
 /// The density length rule: op0 in 0x8..=0xD is 16-bit, everything else 24-bit.
 #[test]
 fn length_rule() {
@@ -271,11 +430,12 @@ fn length_rule() {
 }
 
 /// Unsupported / out-of-scope opcodes must decode as `Unsupported`, carrying the
-/// correct length so a stream walk stays aligned. (Examples: FPU `add.s`, system
-/// `rsil`.)
+/// correct length so a stream walk stays aligned.
 #[test]
 fn unsupported_reports_length() {
-    // `add.s f?, ...` (op0=0, op1=0xA) — FPU, out of scope; 3 bytes.
-    let e = decode(&[0x00, 0x00, 0x0a]).unwrap_err();
+    // `andb b0, b1, b2` (op0=0, op1=2, op2=0) — the boolean *logic* ops are
+    // deliberately outside the subset (M6 needs only the compare readback
+    // paths); 3 bytes. Assembler-derived bytes.
+    let e = decode(&[0x20, 0x01, 0x02]).unwrap_err();
     assert!(matches!(e, DecodeError::Unsupported { len: 3, .. }));
 }

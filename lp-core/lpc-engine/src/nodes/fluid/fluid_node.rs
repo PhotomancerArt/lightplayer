@@ -234,7 +234,7 @@ impl RenderNode for FluidNode {
 
 fn resolve_emitters(ctx: &mut TickContext<'_>) -> Result<Vec<FluidEmitter>, NodeError> {
     let production = ctx
-        .resolve(QueryKey::ConsumedSlot {
+        .resolve(&QueryKey::ConsumedSlot {
             node: ctx.node_id(),
             slot: fluid_emitters_path(),
         })

@@ -23,7 +23,6 @@ use crate::nodes::fixture::mapping::{
 use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureData, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
 
-use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
     MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, RuntimeStateShape,
@@ -254,8 +253,12 @@ struct FixtureDisplayLayoutKey {
     height: u32,
 }
 
+/// The fixture's authored input slot. Resolution takes it as a constant so
+/// the path is parsed once rather than per frame.
+pub(crate) const FIXTURE_INPUT_PATH: &str = "input";
+
 pub fn fixture_input_path() -> SlotPath {
-    SlotPath::parse("input").expect("fixture input path")
+    SlotPath::parse(FIXTURE_INPUT_PATH).expect("fixture input path")
 }
 
 pub fn fixture_output_path() -> SlotPath {
@@ -302,10 +305,7 @@ impl NodeRuntime for FixtureNode {
             // stays viewable/editable, with the cause surfaced as runtime
             // status. A resolved input carrying the wrong shape keeps
             // failing loudly — that is authored misconfiguration.
-            match ctx.resolve(QueryKey::ConsumedSlot {
-                node: ctx.node_id(),
-                slot: fixture_input_path(),
-            }) {
+            match ctx.resolve_static_consumed(FIXTURE_INPUT_PATH) {
                 Ok(prod) => {
                     let visual_product = match prod
                         .value_leaf()
@@ -500,22 +500,19 @@ fn sync_mapping_config_from_def(
 
 fn try_read_def_value<T: lpc_model::FromLpValue>(
     ctx: &mut TickContext<'_>,
-    path: &str,
+    path: &'static str,
 ) -> Result<Option<T>, NodeError> {
-    let slot = SlotPath::parse(path).map_err(|e| {
-        NodeError::msg(alloc::format!(
-            "invalid authored fixture path {path:?}: {e}"
-        ))
-    })?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: slot.clone(),
-    }) {
+    let production = match ctx.resolve_static_consumed(path) {
         Ok(production) => production,
         Err(e) => {
             // "Absent" (no def loaded, inactive enum variant, option none) is
             // expected and reads as None; a path that cannot exist in the
             // FixtureDef shape is a code bug and must not be swallowed.
+            let slot = SlotPath::parse(path).map_err(|e| {
+                NodeError::msg(alloc::format!(
+                    "invalid authored fixture path {path:?}: {e}"
+                ))
+            })?;
             ensure_path_exists_in_fixture_def_shape(ctx.slot_shapes(), &slot)?;
             log::debug!("[fixture] def path {path} unavailable: {}", e.message);
             return Ok(None);

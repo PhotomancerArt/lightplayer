@@ -1,7 +1,28 @@
-//! Test helper functions for q32 math functions.
+//! Test helper functions for q32 and native-f32 math functions.
 
 #[cfg(test)]
 extern crate std;
+
+/// Conformance check for a native-f32 builtin against its reference value.
+///
+/// The band is `max(|want| * rel, abs)` — relative so it scales with magnitude,
+/// with an absolute floor so results near zero are not held to an impossible
+/// standard. Every f32 builtin states its band in its module docs; this is what
+/// enforces it (`docs/design/float.md` §6).
+///
+/// **Never call this on a `docs/design/float.md` §5 Unspecified input** —
+/// `asin(2.0)`, `log(-1.0)`, `normalize(vec3(0))` and the rest of the GLSL
+/// "undefined if" catalog. Those are permitted to return anything, so asserting
+/// them pins behavior the spec deliberately leaves free.
+#[allow(dead_code, reason = "used by the f32 builtin conformance tests")]
+pub fn assert_f32_close(got: f32, want: f32, rel: f32, abs: f32, what: core::fmt::Arguments<'_>) {
+    let err = (got - want).abs();
+    let band = (want.abs() * rel).max(abs);
+    assert!(
+        err <= band,
+        "{what}: got {got}, want {want} (error {err}, band {band})"
+    );
+}
 
 /// Convert float to fixed16x16 with saturation
 pub fn float_to_fixed(f: f32) -> i32 {

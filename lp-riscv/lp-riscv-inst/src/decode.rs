@@ -59,6 +59,8 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                 (0x7, 0x20) => Ok(Inst::Andn { rd, rs1, rs2 }),
                 (0x6, 0x20) => Ok(Inst::Orn { rd, rs1, rs2 }),
                 (0x4, 0x20) => Ok(Inst::Xnor { rd, rs1, rs2 }),
+                // Zbb: zext.h — RV32 spells it `pack rd, rs1, x0`.
+                (0x4, 0x04) if rs2.num() == 0 => Ok(Inst::Zexth { rd, rs1 }),
                 // Zbb: Min/Max instructions
                 (0x4, 0x05) => Ok(Inst::Min { rd, rs1, rs2 }),
                 (0x5, 0x05) => Ok(Inst::Minu { rd, rs1, rs2 }),
@@ -102,20 +104,15 @@ pub fn decode_instruction(inst: u32) -> Result<Inst, alloc::string::String> {
                     rs1,
                     imm: imm_i,
                 }),
-                0x4 => {
-                    // XORI and ZEXTH
-                    // Check for ZEXTH (funct12=0x080)
-                    let funct12 = ((inst >> 20) & 0xfff) as u16;
-                    if funct12 == 0x080 {
-                        Ok(Inst::Zexth { rd, rs1 })
-                    } else {
-                        Ok(Inst::Xori {
-                            rd,
-                            rs1,
-                            imm: imm_i,
-                        })
-                    }
-                }
+                // XORI, for every immediate. `zext.h` is an OP encoding
+                // (`pack rd, rs, x0`) and must not be carved out of this
+                // space — funct12 0x080 here is `xori rd, rs1, 128`, which
+                // LLVM emits as the index bias of a large jump table.
+                0x4 => Ok(Inst::Xori {
+                    rd,
+                    rs1,
+                    imm: imm_i,
+                }),
                 0x6 => Ok(Inst::Ori {
                     rd,
                     rs1,

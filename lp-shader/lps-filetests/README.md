@@ -17,6 +17,8 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 | `xtn.q32` | Q32 fixed-point | `lpvm-native` → **Xtensa** emulator + linked builtins (ESP32-S3 board profile) | no — explicit `--target xtn.q32`; needs the Xtensa builtins image |
 | `xtlpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → Xtensa emulator | no — as above |
 | `wasm.f32` | IEEE f32 | `lpvm-wasm`'s f32 emit path → wasmtime | no — explicit `--target wasm.f32`; see below |
+| `rv32n.f32` | IEEE f32 (soft) | `lpvm-native` f32 lowering → RV32 emulator, float ops as soft-float calls | no — explicit `--target rv32n.f32`; see below |
+| `rv32lpn.f32` | IEEE f32 (soft) | `lps-glsl` frontend → the same soft-float path | no — as above |
 
 **Q32 is the primary tier**: the four Q32 targets assert exact on-device
 semantics and their expectations are the ground truth. `interp.f32` asserts
@@ -64,6 +66,46 @@ Its known dispositions, and what unblocks them:
 this target first ran; file-level dispositions for compile-only files landed
 with the axis selectors, so it now carries `@unimplemented(wasm.f32)` like any
 other builtin-blocked file.
+
+### The rv32 soft-float pair
+
+`rv32n.f32` / `rv32lpn.f32` are the Q32 rv32 targets' f32 siblings: same corpus,
+same `lpvm-native` backend, same emulator — compiled in `FloatMode::F32`, where
+every float op becomes a call to the platform soft-float library (`__addsf3`,
+`__ltsf2`, …) that the guest builtins image already links. See
+`docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+
+```bash
+scripts/filetests.sh --target rv32lpn.f32     # the device pipeline in Float mode
+scripts/filetests.sh --target rv32n.f32       # naga frontend, same backend
+```
+
+Note the `rv32n` and `rv32lpn` shorthands now expand to **both** float modes, so
+a run that means the shipping fixed-point target must say `rv32n.q32`.
+
+They are deliberately **not** in `DEFAULT_TARGETS` (f32 roadmap Q6): every float
+op is a function call inside an emulator, so they are the slowest targets in the
+set, and Float mode is not the shipping numeric mode for any rv32 board. Their
+cost belongs to a deliberate run.
+
+Disposition when first exercised (2026-07-31, roadmap M9): **849/849 files** on
+both, with 6367/6367 and 6342/6342 test-level passes. Nothing needed a new
+backend fix — the annotations added were all existing gaps that name targets one
+by one:
+
+- **11 `global-future/*` files** — the `lps-glsl` frontend cannot parse them at
+  all, exactly as recorded for `rv32lpn.q32` / `xtlpn.q32`.
+- **`builtins/edge-{exp,trig}-domain`, `edge-nan-inf-propagation`** —
+  undefined-behaviour domain probes whose `~= 0.0` expectation was written for
+  the clamping Q32 path, plus two files naga rejects outright.
+- **`builtins/edge-precision:19`** (`rv32lpn.f32` only) — `round(2.5)`. The tie
+  direction is *target-defined* (`docs/design/float.md` §4), and the `lps-glsl`
+  frontend routes `round` to the ties-away-from-zero builtin where naga lowers it
+  to ties-to-even. A real frontend divergence, legal under the spec.
+- **`function/overload-local-duplicate`** — genuine overloads still hit a
+  `lpvm-native` regalloc limit, the same one its `float_mode=q32` row records;
+  the new `@broken(float_mode=f32, backend=rv32n)` covers both f32 siblings in
+  one predicate, because `backend=rv32n` names `Backend::Rv32fa`.
 
 ### The Xtensa pair
 
@@ -314,8 +356,25 @@ five different reasons, five annotations with five reasons is the honest record.
 written into them is reverted by the next `--write`. Put the disposition in the
 generator instead — the torture generator's `INTRINS` table has an
 `unimplemented` field that accepts any selector. `--mark-unimplemented` refuses
-to edit these files and tells you where the disposition belongs, and
-`just lint-torture-corpus` catches drift.
+to edit these files and tells you where the disposition belongs.
+
+Both corpora have a drift gate, run as part of `just check-lint`:
+
+| Corpus | Gate | Regenerate with |
+| --- | --- | --- |
+| `vec/**/*.gen.glsl` | `just lint-vec-corpus` | `cargo run -p lps-filetests-gen-app -- vec --write` |
+| `control/torture/` | `just lint-torture-corpus` | `python3 lp-shader/scripts/gen-control-torture.py --write` |
+
+Each gate compares the checked-in bytes against a fresh render and reports every
+file that `differs`, is `missing`, or is `stale` (still on disk but no longer
+produced). They exist because drift here is invisible: `lint-vec-corpus` was
+added after the vec generator was found to have drifted 2,700 lines of body
+indentation away from its own output, and to be one `--write` away from silently
+dropping the `run[f32]` channels hand-added to the float `op-add`/`op-multiply`
+large-numbers cases.
+
+Note that `bvec` is not a generator target — `vec/bvecN/` holds hand-written
+tests, and `lps-filetests-gen-app vec/bvecN` is a hard error explaining why.
 
 ## Test file format
 
@@ -343,6 +402,8 @@ int add_int(int a, int b) {
 ### Directives
 
 - `// test run` — marks an execution test file (required for run tests).
+- `// test error` — the file must fail to compile; see
+  [Error tests](#error-tests--test-error-cover-both-frontends).
 - `// target <backend>.<format>` — file-level default target (e.g. `wasm.q32`, `rv32c.q32`).
 - `// @<kind>(<selector>)` — per-directive disposition; see
   [Dispositions](#dispositions-unsupported-unimplemented-broken-ignore).
@@ -352,8 +413,34 @@ could not read" path — that is how a malformed selector stays visible.
 
 **`DEFAULT_TARGETS`** (when the runner does not pass `--target`): `rv32n.q32`,
 `rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
-`just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32` and `wasm.f32` are
-explicit-only (see Targets above).
+`just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32`, `wasm.f32`,
+`rv32n.f32` and `rv32lpn.f32` are explicit-only (see Targets above).
+
+### Error tests (`// test error`) cover **both** frontends
+
+An error test compiles the file through the naga pipeline and matches its
+diagnostics against the inline `// expected-error {{…}}` expectations. It then
+also compiles the file through **`lps-glsl`** — the frontend `rv32lpn.q32` and
+`xtlpn.q32` use, i.e. the on-device one — and requires that to fail too.
+
+Only the *rejection* is asserted for the lp frontend, not the wording: the two
+frontends phrase diagnostics differently and the expectations above are written
+against naga's. `lps-glsl`'s own phrasing belongs in that crate's unit tests.
+
+Without this arm an error test says nothing about the device frontend, and
+invalid GLSL that only naga catches ships. `lps-glsl` accepting `bvec2 + bvec2`
+is exactly how that looked in practice.
+
+The lp arm is dispositioned like any other case, resolved against
+`rv32lpn.q32`, so a check `lps-glsl` has not grown yet is recorded rather than
+silently tolerated — and goes stale loudly once it grows one:
+
+```glsl
+// test error
+
+// lps-glsl does not yet enforce the const qualifier on assignment (naga does).
+// @unimplemented(frontend=lp)
+```
 
 ### Run directives
 

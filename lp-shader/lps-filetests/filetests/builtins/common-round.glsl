@@ -11,9 +11,6 @@ float test_round_integer() {
     return round(5.0);
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_round_integer() ~= 5.0
 
 float test_round_up() {
@@ -21,7 +18,6 @@ float test_round_up() {
     return round(3.7);
 }
 
-// @unimplemented(wasm.f32)
 // run: test_round_up() ~= 4.0
 
 float test_round_down() {
@@ -29,7 +25,6 @@ float test_round_down() {
     return round(3.2);
 }
 
-// @unimplemented(wasm.f32)
 // run: test_round_down() ~= 3.0
 
 float test_round_half() {
@@ -40,7 +35,6 @@ float test_round_half() {
 }
 
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_round_half() ~= 3.0
 
 float test_round_neg_half() {
@@ -50,7 +44,6 @@ float test_round_neg_half() {
 }
 
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_round_neg_half() ~= -3.0
 
 float test_round_negative() {
@@ -58,7 +51,6 @@ float test_round_negative() {
     return round(-1.7);
 }
 
-// @unimplemented(wasm.f32)
 // run: test_round_negative() ~= -2.0
 
 vec2 test_round_vec2() {
@@ -66,7 +58,6 @@ vec2 test_round_vec2() {
     return round(vec2(1.4, -2.6));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_round_vec2() ~= vec2(1.0, -3.0)
 
 vec3 test_round_vec3() {
@@ -74,7 +65,6 @@ vec3 test_round_vec3() {
     return round(vec3(0.0, 3.7, -1.2));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_round_vec3() ~= vec3(0.0, 4.0, -1.0)
 
 vec4 test_round_vec4() {
@@ -85,7 +75,6 @@ vec4 test_round_vec4() {
 
 // wgpu.f32: WGSL round() is round-half-to-even; libm (interp.f32) rounds half away — both are valid GLSL
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_round_vec4() ~= vec4(1.0, 3.0, -1.0, 4.0)
 
 

@@ -1,5 +1,11 @@
 //! LPIR [`LpirOp`] → [`VInst`] lowering (M1 subset).
 //!
+//! **This module is the `FloatMode::Q32` half only.** A GLSL `float` here *is*
+//! an integer — Q16.16 in a GPR — and every "float" op below is integer
+//! arithmetic. Native IEEE f32 lowering is [`crate::lower_f32`], behind
+//! `float-f32`; `compile_module` picks between the two on the mode parameter.
+//! See the crate README's float-mode seam section.
+//!
 //! # Q32 op lowering policy
 //!
 //! For each Q32 LPIR op the backend chooses one of four strategies:
@@ -57,8 +63,8 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FloatMode, IrFunction, LpirModule, LpirOp};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id,
+    BuiltinId, GlslParamKind, Mode as BuiltinMode, glsl_lpfn_builtin_id, glsl_math_builtin_id,
+    lpir_builtin_id, texture_builtin_id, vm_builtin_id,
 };
 
 use crate::LowerOpts;
@@ -72,14 +78,83 @@ use crate::vinst::{
 };
 use lps_q32::q32_encode;
 
+/// True when this compile emits hardware FP instructions, and therefore owes
+/// the AR↔FR transfers at the four ABI boundaries.
+///
+/// Two implementations rather than one runtime call, so that a build without
+/// `float-f32` gets a **compile-time** `false` and every guarded branch below
+/// disappears. That is not tidiness: `FloatMode` is a runtime value, so a
+/// single implementation would keep the float lowering paths live in a
+/// Fixed-only device image, which is the leak the feature exists to prevent.
+#[cfg(feature = "float-f32")]
 #[inline]
-fn fa_vreg(v: lpir::VReg) -> VReg {
+fn hardware_fpu(opts: &LowerOpts, abi: &ModuleAbi) -> bool {
+    crate::lower_f32::uses_hardware_fpu(abi.isa(), opts.float_mode)
+}
+
+/// See the sibling above — without the feature there is no FP emitter to lower
+/// for, and this folds every float branch in this module away.
+#[cfg(not(feature = "float-f32"))]
+#[inline]
+fn hardware_fpu(_opts: &LowerOpts, _abi: &ModuleAbi) -> bool {
+    false
+}
+
+/// One past the highest backend vreg reserved before lowering mints temps.
+///
+/// Hardware float reserves a shadow vreg per parameter slot (see
+/// [`crate::lower_f32::float_vreg`]); every other mode keeps the IR vreg count
+/// exactly as it was, which is what keeps Q32's vreg numbering — and therefore
+/// its filetest snapshots — byte-identical.
+#[cfg(feature = "float-f32")]
+#[inline]
+fn vreg_watermark(func: &IrFunction, hardware_fpu: bool) -> u16 {
+    crate::lower_f32::vreg_watermark(func, hardware_fpu)
+}
+
+#[cfg(not(feature = "float-f32"))]
+#[inline]
+fn vreg_watermark(func: &IrFunction, _hardware_fpu: bool) -> u16 {
+    func.vreg_types.len() as u16
+}
+
+/// Append already-lowered backend vregs to the pool, returning their slice.
+///
+/// The counterpart of [`push_vregs_slice`] for operands lowering has built
+/// itself — the transfer temps that carry float values across a call boundary,
+/// in particular, which have no LPIR vreg to map from. Those are its only
+/// callers, so it is gated with them.
+#[cfg(feature = "float-f32")]
+pub(crate) fn push_backend_vregs(
+    pool: &mut Vec<VReg>,
+    vregs: &[VReg],
+) -> Result<VRegSlice, LowerError> {
+    if vregs.len() > u8::MAX as usize {
+        return Err(LowerError::UnsupportedOp {
+            description: String::from("vreg slice too long for the native backend"),
+        });
+    }
+    let start = u16::try_from(pool.len()).map_err(|_| LowerError::UnsupportedOp {
+        description: String::from("vreg pool exhausted (u16)"),
+    })?;
+    pool.extend_from_slice(vregs);
+    Ok(VRegSlice {
+        start,
+        count: vregs.len() as u8,
+    })
+}
+
+#[inline]
+pub(crate) fn fa_vreg(v: lpir::VReg) -> VReg {
     VReg(v.0 as u16)
 }
 
 /// Map LPIR vregs into the shared operand pool without an intermediate Vec
 /// (one call per Call VInst; Q32 code is call-dense).
-fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice, LowerError> {
+pub(crate) fn push_vregs_slice(
+    pool: &mut Vec<VReg>,
+    ir: &[lpir::VReg],
+) -> Result<VRegSlice, LowerError> {
     if ir.len() > u8::MAX as usize {
         return Err(LowerError::UnsupportedOp {
             description: String::from("vreg slice too long for FA backend"),
@@ -864,6 +939,20 @@ pub fn lower_lpir_op(
             if_true,
             if_false,
         } => {
+            // A select over float values is a float instruction, even though
+            // the op itself is type-agnostic in LPIR. The condition stays an
+            // integer 0/1 on both sides.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *dst) {
+                out.push(VInst::FSelect {
+                    dst: crate::lower_f32::float_vreg(func, *dst),
+                    cond: fa_vreg(*cond),
+                    if_true: crate::lower_f32::float_vreg(func, *if_true),
+                    if_false: crate::lower_f32::float_vreg(func, *if_false),
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Select {
                 dst: fa_vreg(*dst),
                 cond: fa_vreg(*cond),
@@ -874,6 +963,18 @@ pub fn lower_lpir_op(
             Ok(())
         }
         LpirOp::Copy { dst, src } => {
+            // `mov.s`, not an integer move: the value is in the float file and
+            // an integer `Mov` would name an address register for it.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *dst) {
+                out.push(VInst::FAluRR {
+                    op: crate::vinst::FAluRROp::Mov,
+                    dst: crate::lower_f32::float_vreg(func, *dst),
+                    src: crate::lower_f32::float_vreg(func, *src),
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Mov {
                 dst: fa_vreg(*dst),
                 src: fa_vreg(*src),
@@ -894,6 +995,19 @@ pub fn lower_lpir_op(
             let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
                 description: String::from("Load: offset does not fit i32"),
             })?;
+            // A memory access, not a call boundary: the value goes straight
+            // into the float file with no transfer. The address is an integer
+            // on both paths.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *dst) {
+                out.push(VInst::FLoad32 {
+                    dst: crate::lower_f32::float_vreg(func, *dst),
+                    base: fa_vreg(*base),
+                    offset: off,
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Load32 {
                 dst: fa_vreg(*dst),
                 base: fa_vreg(*base),
@@ -910,6 +1024,16 @@ pub fn lower_lpir_op(
             let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
                 description: String::from("Store: offset does not fit i32"),
             })?;
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *value) {
+                out.push(VInst::FStore32 {
+                    src: crate::lower_f32::float_vreg(func, *value),
+                    base: fa_vreg(*base),
+                    offset: off,
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Store32 {
                 src: fa_vreg(*value),
                 base: fa_vreg(*base),
@@ -1031,6 +1155,20 @@ pub fn lower_lpir_op(
                 return Err(LowerError::UnsupportedOp {
                     description: String::from("Return: vreg_pool slice out of range"),
                 });
+            }
+            // Boundary four: a float return value travels in an address
+            // register, so it comes out of the float file first.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) {
+                let mut words = Vec::with_capacity(slice.len());
+                for v in slice {
+                    words.push(crate::lower_f32::word_operand(out, func, *v, temps, po));
+                }
+                out.push(VInst::Ret {
+                    vals: push_backend_vregs(vreg_pool, &words)?,
+                    src_op: po,
+                });
+                return Ok(());
             }
             out.push(VInst::Ret {
                 vals: push_vregs_slice(vreg_pool, slice)?,
@@ -1460,6 +1598,8 @@ pub fn lower_lpir_op(
             Ok(())
         }
 
+        // Every float arm above carries an `opts.float_mode == FloatMode::Q32`
+        // guard, so reaching this arm means the shader asked for native f32.
         LpirOp::Fadd { .. }
         | LpirOp::Fsub { .. }
         | LpirOp::Fmul { .. }
@@ -1489,9 +1629,35 @@ pub fn lower_lpir_op(
         | LpirOp::FtoUnorm16 { .. }
         | LpirOp::FtoUnorm8 { .. }
         | LpirOp::Unorm16toF { .. }
-        | LpirOp::Unorm8toF { .. } => Err(LowerError::UnsupportedOp {
-            description: String::from("float op requires Q32 mode (F32 not supported on rv32c)"),
-        }),
+        | LpirOp::Unorm8toF { .. } => {
+            #[cfg(feature = "float-f32")]
+            {
+                crate::lower_f32::lower_f32_op(
+                    out,
+                    op,
+                    abi.isa(),
+                    src_op,
+                    func,
+                    symbols,
+                    vreg_pool,
+                    temps,
+                )
+            }
+            // Without the feature the f32 lowering is not linked at all, which
+            // is the point of the gate (roadmap D2: `FloatMode` is matched on a
+            // runtime value, so LTO cannot drop it on its own). Name the feature
+            // — "unsupported op" alone sends people looking for a missing
+            // backend that is right there behind a flag.
+            #[cfg(not(feature = "float-f32"))]
+            {
+                let _ = (out, symbols, vreg_pool, temps);
+                Err(LowerError::UnsupportedOp {
+                    description: String::from(
+                        "float_mode=f32 needs the `float-f32` feature on lpvm-native",
+                    ),
+                })
+            }
+        }
 
         LpirOp::IfStart { .. }
         | LpirOp::Else
@@ -1516,10 +1682,11 @@ pub fn lower_lpir_op(
             args,
             results,
         } => {
-            let name =
-                resolve_callee_name(ir, *callee).ok_or_else(|| LowerError::UnsupportedOp {
+            let name = resolve_callee_name(ir, *callee, opts.float_mode).ok_or_else(|| {
+                LowerError::UnsupportedOp {
                     description: format!("Call: callee index out of range ({callee:?})"),
-                })?;
+                }
+            })?;
             let args_slice = func.pool_slice(*args);
             if args_slice.len() != args.count as usize {
                 return Err(LowerError::UnsupportedOp {
@@ -1536,6 +1703,39 @@ pub fn lower_lpir_op(
             let caller_passes_sret_ptr = callee_sret_ptr_in_lpir_args(ir, *callee);
             let caller_sret_vm_abi_swap =
                 caller_passes_sret_ptr && callee_sret_vm_abi_swap(ir, *callee);
+            // Boundaries two and three. Float arguments come out of the float
+            // file before the call and float results go back in after it, so
+            // the `Call`'s own operands are entirely integer-class — which is
+            // what leaves the sret/vmctx slot machinery and
+            // `lpir_call_arg_target` working unchanged.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) {
+                let target = symbols.intern(name);
+                let mut arg_words = Vec::with_capacity(args_slice.len());
+                for a in args_slice {
+                    arg_words.push(crate::lower_f32::word_operand(out, func, *a, temps, po));
+                }
+                let mut ret_words = Vec::with_capacity(results_slice.len());
+                let mut ret_transfers = Vec::with_capacity(results_slice.len());
+                for r in results_slice {
+                    let (word, float_dst) = crate::lower_f32::word_result(func, *r, temps);
+                    ret_words.push(word);
+                    ret_transfers.push((word, float_dst));
+                }
+                out.push(VInst::Call {
+                    target,
+                    args: push_backend_vregs(vreg_pool, &arg_words)?,
+                    rets: push_backend_vregs(vreg_pool, &ret_words)?,
+                    callee_uses_sret,
+                    caller_passes_sret_ptr,
+                    caller_sret_vm_abi_swap,
+                    src_op: po,
+                });
+                for (word, float_dst) in ret_transfers {
+                    crate::lower_f32::push_return_transfer(out, word, float_dst, po);
+                }
+                return Ok(());
+            }
             out.push(VInst::Call {
                 target: symbols.intern(name),
                 args: push_vregs_slice(vreg_pool, args_slice)?,
@@ -2053,6 +2253,7 @@ pub fn lower_ops(
     abi: &ModuleAbi,
     opts: &LowerOpts,
 ) -> Result<LoweredFunction, LowerError> {
+    let hw_fpu = hardware_fpu(opts, abi);
     // Pre-size vectors to reduce allocation overhead during lowering.
     // Estimate: ~2 vinsts per LPIR op, vreg pool from IR plus headroom for temps.
     let mut ctx = LowerCtx {
@@ -2063,7 +2264,7 @@ pub fn lower_ops(
         out: Vec::with_capacity(func.body.len().saturating_mul(2)),
         vreg_pool: Vec::with_capacity(func.vreg_pool.len().saturating_add(64)),
         symbols: ModuleSymbols::default(),
-        temps: TempVRegs::new(func.vreg_types.len() as u16),
+        temps: TempVRegs::new(vreg_watermark(func, hw_fpu)),
         next_label: 0,
         loop_stack: Vec::new(),
         epilogue_label: 0,
@@ -2084,15 +2285,25 @@ pub fn lower_ops(
             src_op: SRC_OP_NONE,
         });
     }
+    // Boundary one: float parameters arrive in address registers and are moved
+    // into the float file once, here, before any body op reads them.
+    #[cfg(feature = "float-f32")]
+    if hw_fpu {
+        crate::lower_f32::push_entry_param_transfers(&mut ctx.out, func);
+    }
+    let prologue_len = ctx.out.len();
     let body_root = ctx.lower_range(0, func.body.len())?;
     ctx.out.push(VInst::Label(ctx.epilogue_label, SRC_OP_NONE));
-    // The entry FuelCheck sits before the body's regions; give it its own
-    // Linear region so the regalloc walk covers it (the walk only visits
-    // VInsts reachable through the region tree).
-    let root = if opts.fuel {
-        let entry_lin = ctx
-            .region_tree
-            .push(crate::region::Region::Linear { start: 0, end: 1 });
+    // The prologue (entry FuelCheck, float parameter transfers) sits before the
+    // body's regions; give it its own Linear region so the regalloc walk covers
+    // it — the walk only visits VInsts reachable through the region tree, and a
+    // parameter transfer it never saw would be dropped from the allocation
+    // silently.
+    let root = if prologue_len > 0 {
+        let entry_lin = ctx.region_tree.push(crate::region::Region::Linear {
+            start: 0,
+            end: prologue_len as u16,
+        });
         if body_root == REGION_ID_NONE {
             entry_lin
         } else {
@@ -2124,10 +2335,10 @@ pub fn lower_ops(
 /// Resolve a callee to its symbol name, borrowed from the module (or
 /// `'static` for builtins) — no per-call-site String; interning copies only
 /// on first sight of a symbol.
-fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<&str> {
+fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef, mode: FloatMode) -> Option<&str> {
     if let Some(idx) = ir.callee_as_import(callee) {
         ir.imports.get(idx).map(|imp| {
-            if let Some(bid) = resolve_import_to_builtin(imp) {
+            if let Some(bid) = resolve_import_to_builtin(imp, mode) {
                 bid.name()
             } else {
                 imp.func_name.as_str()
@@ -2142,34 +2353,74 @@ fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<&str> {
 
 /// Map an LPIR import declaration to a BuiltinId to get the C ABI symbol name.
 /// Mirrors Cranelift's resolve_import in lpvm-cranelift/src/builtins.rs
-fn resolve_import_to_builtin(decl: &lpir::lpir_module::ImportDecl) -> Option<BuiltinId> {
+///
+/// **`mode` is load-bearing, not decoration.** Resolving an import without it
+/// was the wasm backend's B1 defect (M1 corpus findings §3): in f32 mode the
+/// Q32 ids came back, and a builtin taking a *pointer* has an `i32` signature
+/// in both modes, so the call linked and ran while reinterpreting f32 bit
+/// patterns as Q16.16. There is no type error to catch it — only wrong colors.
+/// `lps-builtin-ids`' resolvers never fall back across modes, so an unmapped
+/// name surfaces as a named "unknown builtin symbol" relocation failure.
+fn resolve_import_to_builtin(
+    decl: &lpir::lpir_module::ImportDecl,
+    mode: FloatMode,
+) -> Option<BuiltinId> {
+    let bmode = builtin_mode(mode);
     match decl.module_name.as_str() {
         "glsl" => {
             let ac = decl.param_types.len();
-            glsl_q32_math_builtin_id(&decl.func_name, ac)
+            glsl_math_builtin_id(&decl.func_name, ac, bmode)
         }
         "lpir" => {
             let ac = decl.param_types.len();
-            lpir_q32_builtin_id(&decl.func_name, ac)
+            lpir_builtin_id(&decl.func_name, ac, bmode)
         }
         "lpfn" => {
             // LPFX builtins are named like "lpfn_psrdnoise_34" - strip the suffix
             let base = lpfn_strip_suffix(&decl.func_name)?;
             // Get GLSL kinds from lpfn_glsl_params CSV or fall back to IR types
             let kinds = lpfn_glsl_kinds_from_decl(decl);
-            glsl_lpfn_q32_builtin_id(base, &kinds)
+            glsl_lpfn_builtin_id(base, &kinds, bmode)
         }
         "vm" => {
             let ac = decl.param_types.len();
-            vm_q32_builtin_id(&decl.func_name, ac)
+            vm_builtin_id(&decl.func_name, ac, bmode)
         }
         "texture" => {
             let base = texture_strip_suffix(&decl.func_name);
             let ac = decl.param_types.len();
-            texture_q32_builtin_id(base, ac)
+            texture_builtin_id(base, ac, bmode)
         }
         _ => None,
     }
+}
+
+/// [`FloatMode`] → the builtin-id resolver's mode.
+///
+/// **Pinned to Q32 when `float-f32` is off, and that is a flash decision.**
+/// `lps-builtin-ids` is a separate crate that every firmware image links, and
+/// its f32 name→id tables are reachable from exactly one place: this call. Ask
+/// for them on a *runtime* value and LTO has to keep all of them —
+/// **+3,904 B measured on the ESP32-C6 image**, for tables a Fixed-only device
+/// can never reach, because without `float-f32` a `FloatMode::F32` shader is a
+/// named lowering error long before it gets here.
+///
+/// This is the same shape as the `isa-*` gates, and it is worth knowing that the
+/// gate on `lpvm-native`'s own f32 code was *not* enough on its own: the id
+/// tables live in another crate and needed their own cut point.
+#[cfg(feature = "float-f32")]
+fn builtin_mode(mode: FloatMode) -> BuiltinMode {
+    match mode {
+        FloatMode::Q32 => BuiltinMode::Q32,
+        FloatMode::F32 => BuiltinMode::F32,
+    }
+}
+
+/// See the sibling above — without `float-f32` there is no f32 lowering to
+/// resolve imports for, so the f32 resolvers stay unreachable and drop out.
+#[cfg(not(feature = "float-f32"))]
+fn builtin_mode(_mode: FloatMode) -> BuiltinMode {
+    BuiltinMode::Q32
 }
 
 /// Strip the numeric suffix from LPFX import names (e.g., "lpfn_psrdnoise_34" → "lpfn_psrdnoise").
@@ -3308,8 +3559,41 @@ mod tests {
         }
     }
 
+    /// F32 mode leaves the Q32 arms and reaches the soft-float lowering; the
+    /// per-op shape is asserted in [`crate::lower_f32`]'s own tests. What is
+    /// worth pinning *here* is that the hand-off happens at all — the fallthrough
+    /// arm is easy to leave behind when a new float op is added.
+    #[cfg(feature = "float-f32")]
     #[test]
-    fn lower_f32_float_unsupported() {
+    fn lower_f32_hands_off_to_the_soft_float_path() {
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        for op in [
+            LpirOp::Fadd {
+                dst: v(0),
+                lhs: v(1),
+                rhs: v(2),
+            },
+            LpirOp::Fdiv {
+                dst: v(0),
+                lhs: v(1),
+                rhs: v(2),
+            },
+        ] {
+            let vinsts =
+                call_lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).expect("f32 lowers");
+            assert!(
+                vinsts.iter().any(|i| matches!(i, VInst::Call { .. })),
+                "expected a soft-float call for {op:?}, got {vinsts:?}"
+            );
+        }
+    }
+
+    /// With the gate off there is no f32 backend linked, and the error must say
+    /// so by name rather than looking like a missing feature of the compiler.
+    #[cfg(not(feature = "float-f32"))]
+    #[test]
+    fn lower_f32_without_the_feature_names_the_feature() {
         let op = LpirOp::Fadd {
             dst: v(0),
             lhs: v(1),
@@ -3318,23 +3602,11 @@ mod tests {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         let err = call_lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).expect_err("F32 float");
-        match err {
-            LowerError::UnsupportedOp { description } => {
-                assert!(
-                    description.contains("Q32"),
-                    "expected Q32 hint in {description:?}"
-                );
-            }
-        }
-        let div = LpirOp::Fdiv {
-            dst: v(0),
-            lhs: v(1),
-            rhs: v(2),
-        };
-        assert!(matches!(
-            call_lower_op(&div, FloatMode::F32, None, &f, &ir, &abi),
-            Err(LowerError::UnsupportedOp { .. })
-        ));
+        let LowerError::UnsupportedOp { description } = err;
+        assert!(
+            description.contains("float-f32"),
+            "expected the feature name in {description:?}"
+        );
     }
 
     #[test]

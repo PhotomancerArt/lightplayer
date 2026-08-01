@@ -20,10 +20,22 @@ pub(super) fn dispatch_native_builtin(
     results: &mut [Val],
 ) -> Result<(), wasmtime::Error> {
     match id {
+        BuiltinId::LpGlslAcosF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::acos_f32::__lps_acos_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslAcosQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::acos_q32::__lps_acos_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslAcoshF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::acosh_f32::__lps_acosh_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslAcoshQ32 => {
@@ -32,16 +44,35 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslAsinF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::asin_f32::__lps_asin_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslAsinQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::asin_q32::__lps_asin_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslAsinhF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::asinh_f32::__lps_asinh_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslAsinhQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::asinh_q32::__lps_asinh_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslAtan2F32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::atan2_f32::__lps_atan2_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslAtan2Q32 => {
@@ -51,10 +82,22 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslAtanF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::atan_f32::__lps_atan_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslAtanQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::atan_q32::__lps_atan_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslAtanhF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::atanh_f32::__lps_atanh_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslAtanhQ32 => {
@@ -63,10 +106,22 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslCosF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::cos_f32::__lps_cos_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslCosQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::cos_q32::__lps_cos_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslCoshF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::cosh_f32::__lps_cosh_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslCoshQ32 => {
@@ -75,16 +130,36 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslExp2F32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::exp2_f32::__lps_exp2_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslExp2Q32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::exp2_q32::__lps_exp2_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslExpF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::exp_f32::__lps_exp_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslExpQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::exp_q32::__lps_exp_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslFmaF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let p2 = params[2].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::fma_f32::__lps_fma_f32(p0, p1, p2);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslFmaQ32 => {
@@ -95,10 +170,23 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslInversesqrtF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::inversesqrt_f32::__lps_inversesqrt_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslInversesqrtQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::inversesqrt_q32::__lps_inversesqrt_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslLdexpF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_i32();
+            let r = lps_builtins::builtins::glsl::ldexp_f32::__lps_ldexp_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslLdexpQ32 => {
@@ -108,16 +196,35 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslLog2F32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::log2_f32::__lps_log2_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslLog2Q32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::log2_q32::__lps_log2_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslLogF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::log_f32::__lps_log_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslLogQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::log_q32::__lps_log_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslModF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::mod_f32::__lps_mod_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslModQ32 => {
@@ -127,11 +234,24 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslPowF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::pow_f32::__lps_pow_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslPowQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let r = lps_builtins::builtins::glsl::pow_q32::__lps_pow_q32(p0, p1);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslRoundF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::round_f32::__lps_round_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslRoundQ32 => {
@@ -140,10 +260,38 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslSinF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::sin_f32::__lps_sin_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslSinQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::sin_q32::__lps_sin_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslSincosF32 => {
+            let mem = linked_env_memory;
+            let off_1 = params[1].unwrap_i32() as u32 as usize;
+            let mut buf_1 = [0f32; 1];
+            let off_2 = params[2].unwrap_i32() as u32 as usize;
+            let mut buf_2 = [0f32; 1];
+            let p0 = params[0].unwrap_f32();
+            lps_builtins::builtins::glsl::sincos_f32::__lps_sincos_f32(
+                p0,
+                buf_1.as_mut_ptr(),
+                buf_2.as_mut_ptr(),
+            );
+            for (i, v) in buf_1.iter().enumerate() {
+                mem.write(&mut caller, off_1 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            for (i, v) in buf_2.iter().enumerate() {
+                mem.write(&mut caller, off_2 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
             Ok(())
         }
         BuiltinId::LpGlslSincosQ32 => {
@@ -168,16 +316,34 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
+        BuiltinId::LpGlslSinhF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::sinh_f32::__lps_sinh_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslSinhQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::sinh_q32::__lps_sinh_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpGlslTanF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::tan_f32::__lps_tan_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpGlslTanQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::glsl::tan_q32::__lps_tan_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpGlslTanhF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::glsl::tanh_f32::__lps_tanh_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpGlslTanhQ32 => {
@@ -978,10 +1144,23 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFabsF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::float_misc_f32::__lp_lpir_fabs_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFabsQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_fabs_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFaddF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::fadd_f32::__lp_lpir_fadd_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpLpirFaddQ32 => {
@@ -991,10 +1170,23 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFceilF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::float_misc_f32::__lp_lpir_fceil_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFceilQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_fceil_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFdivF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::fdiv_f32::__lp_lpir_fdiv_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpLpirFdivQ32 => {
@@ -1004,6 +1196,13 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFdivRecipF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::fdiv_recip_f32::__lp_lpir_fdiv_recip_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFdivRecipQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
@@ -1011,10 +1210,23 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFfloorF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::float_misc_f32::__lp_lpir_ffloor_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFfloorQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_ffloor_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFmaxF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::float_misc_f32::__lp_lpir_fmax_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpLpirFmaxQ32 => {
@@ -1024,11 +1236,25 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFminF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::float_misc_f32::__lp_lpir_fmin_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFminQ32 => {
             let p0 = params[0].unwrap_i32();
             let p1 = params[1].unwrap_i32();
             let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_fmin_q32(p0, p1);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFmulF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::fmul_f32::__lp_lpir_fmul_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpLpirFmulQ32 => {
@@ -1038,16 +1264,35 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFnearestF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::fnearest_f32::__lp_lpir_fnearest_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFnearestQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::fnearest_q32::__lp_lpir_fnearest_q32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFsqrtF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::fsqrt_f32::__lp_lpir_fsqrt_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFsqrtQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::fsqrt_q32::__lp_lpir_fsqrt_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFsubF32 => {
+            let p0 = params[0].unwrap_f32();
+            let p1 = params[1].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::fsub_f32::__lp_lpir_fsub_f32(p0, p1);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpLpirFsubQ32 => {
@@ -1057,9 +1302,21 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFtoUnorm16F32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_f32::__lp_lpir_fto_unorm16_f32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpLpirFtoUnorm16Q32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_fto_unorm16_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFtoUnorm8F32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_f32::__lp_lpir_fto_unorm8_f32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
@@ -1069,9 +1326,21 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFtoiSatSF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::ftoi_sat_f32::__lp_lpir_ftoi_sat_s_f32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
         BuiltinId::LpLpirFtoiSatSQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::ftoi_sat_q32::__lp_lpir_ftoi_sat_s_q32(p0);
+            results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirFtoiSatUF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::ftoi_sat_f32::__lp_lpir_ftoi_sat_u_f32(p0);
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
@@ -1081,10 +1350,22 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirFtruncF32 => {
+            let p0 = params[0].unwrap_f32();
+            let r = lps_builtins::builtins::lpir::float_misc_f32::__lp_lpir_ftrunc_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirFtruncQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::float_misc_q32::__lp_lpir_ftrunc_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirItofSF32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::itof_s_f32::__lp_lpir_itof_s_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpLpirItofSQ32 => {
@@ -1093,10 +1374,22 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirItofUF32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::itof_u_f32::__lp_lpir_itof_u_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirItofUQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::itof_u_q32::__lp_lpir_itof_u_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpLpirUnorm16ToFF32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_f32::__lp_lpir_unorm16_to_f_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
             Ok(())
         }
         BuiltinId::LpLpirUnorm16ToFQ32 => {
@@ -1105,10 +1398,46 @@ pub(super) fn dispatch_native_builtin(
             results[0] = wasmtime::Val::I32(r);
             Ok(())
         }
+        BuiltinId::LpLpirUnorm8ToFF32 => {
+            let p0 = params[0].unwrap_i32();
+            let r = lps_builtins::builtins::lpir::unorm_conv_f32::__lp_lpir_unorm8_to_f_f32(p0);
+            results[0] = wasmtime::Val::F32(r.to_bits());
+            Ok(())
+        }
         BuiltinId::LpLpirUnorm8ToFQ32 => {
             let p0 = params[0].unwrap_i32();
             let r = lps_builtins::builtins::lpir::unorm_conv_q32::__lp_lpir_unorm8_to_f_q32(p0);
             results[0] = wasmtime::Val::I32(r);
+            Ok(())
+        }
+        BuiltinId::LpTexTexture1dR16UnormF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_f32();
+            let p5 = params[5].unwrap_i32() as u32;
+            let p6 = params[6].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture1dUnormSampleArgsF32 {
+                width: p2,
+                row_stride: p3,
+                u: p4,
+                filter_abi: p5,
+                wrap_x_abi: p6,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::r16_unorm_f32::texture1d_r16_unorm_sample_f32(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
             Ok(())
         }
         BuiltinId::LpTexTexture1dR16UnormQ32 => {
@@ -1141,6 +1470,36 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
+        BuiltinId::LpTexTexture1dRgba16UnormF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_f32();
+            let p5 = params[5].unwrap_i32() as u32;
+            let p6 = params[6].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture1dUnormSampleArgsF32 {
+                width: p2,
+                row_stride: p3,
+                u: p4,
+                filter_abi: p5,
+                wrap_x_abi: p6,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::rgba16_unorm_f32::texture1d_rgba16_unorm_sample_f32(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
         BuiltinId::LpTexTexture1dRgba16UnormQ32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
@@ -1161,6 +1520,42 @@ pub(super) fn dispatch_native_builtin(
             let lanes = unsafe {
                 // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
                 lps_builtins::builtins::texture::rgba16_unorm_q32::texture1d_rgba16_unorm_sample(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpTexTexture2dR16UnormF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32() as u32;
+            let p5 = params[5].unwrap_f32();
+            let p6 = params[6].unwrap_f32();
+            let p7 = params[7].unwrap_i32() as u32;
+            let p8 = params[8].unwrap_i32() as u32;
+            let p9 = params[9].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture2dUnormSampleArgsF32 {
+                width: p2,
+                height: p3,
+                row_stride: p4,
+                u: p5,
+                v: p6,
+                filter_abi: p7,
+                wrap_x_abi: p8,
+                wrap_y_abi: p9,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::r16_unorm_f32::texture2d_r16_unorm_sample_f32(
                     tex_base_host,
                     args,
                 )
@@ -1207,6 +1602,42 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
+        BuiltinId::LpTexTexture2dRgba16UnormF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let tex_guest_off = params[1].unwrap_i32() as u32 as usize;
+            let tex_base_host = mem.data(&caller).as_ptr().wrapping_add(tex_guest_off);
+            let p2 = params[2].unwrap_i32() as u32;
+            let p3 = params[3].unwrap_i32() as u32;
+            let p4 = params[4].unwrap_i32() as u32;
+            let p5 = params[5].unwrap_f32();
+            let p6 = params[6].unwrap_f32();
+            let p7 = params[7].unwrap_i32() as u32;
+            let p8 = params[8].unwrap_i32() as u32;
+            let p9 = params[9].unwrap_i32() as u32;
+            let args = lps_builtins::builtins::texture::Texture2dUnormSampleArgsF32 {
+                width: p2,
+                height: p3,
+                row_stride: p4,
+                u: p5,
+                v: p6,
+                filter_abi: p7,
+                wrap_x_abi: p8,
+                wrap_y_abi: p9,
+            };
+            let lanes = unsafe {
+                // SAFETY: guest `ptr` translated through Wasmtime linear memory; bounds match descriptor lanes.
+                lps_builtins::builtins::texture::rgba16_unorm_f32::texture2d_rgba16_unorm_sample_f32(
+                    tex_base_host,
+                    args,
+                )
+            };
+            for (i, v) in lanes.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
         BuiltinId::LpTexTexture2dRgba16UnormQ32 => {
             let mem = linked_env_memory;
             let off_0 = params[0].unwrap_i32() as u32 as usize;
@@ -1243,7 +1674,7 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
-        BuiltinId::LpVmGetFuelQ32 => {
+        BuiltinId::LpVmGetFuel => {
             let vmctx_word = params[0].unwrap_i32();
             let mem = linked_env_memory;
             let base = vmctx_word as u32 as usize;

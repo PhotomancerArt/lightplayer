@@ -77,7 +77,52 @@ pub(super) fn coerce_constructor_args(
     ))
 }
 
+/// Coerce a pair of operands for an **arithmetic** context.
+///
+/// GLSL defines no arithmetic over `bool` / `bvecN` and no implicit conversion
+/// out of `bool`, so a bool lane on either side is rejected here rather than
+/// falling through to [`vector_dominant_type`], whose neutral element is
+/// `Bool` and which therefore happily reports `bvec2 + bvec2 -> bvec2`.
+///
+/// Contexts that *are* defined over `genBType` (component selection in `mix`)
+/// use [`coerce_selection_pair`] instead.
 pub(super) fn coerce_arithmetic_pair(
+    arena: &mut HirArena,
+    span: Span,
+    lhs: ExprId,
+    rhs: ExprId,
+) -> Result<(ExprId, ExprId, LpsType), Diagnostic> {
+    reject_bool_arithmetic_operands(arena, span, lhs, rhs)?;
+    coerce_selection_pair(arena, span, lhs, rhs)
+}
+
+/// True when `ty` is `bool`, `bvecN`, or an array of those.
+pub(super) fn has_bool_lanes(ty: &LpsType) -> bool {
+    scalar_base_type(ty) == Some(LpsType::Bool)
+}
+
+/// Reject `bool` / `bvecN` operands in an arithmetic context, naming both types.
+fn reject_bool_arithmetic_operands(
+    arena: &HirArena,
+    span: Span,
+    lhs: ExprId,
+    rhs: ExprId,
+) -> Result<(), Diagnostic> {
+    let lhs_ty = arena.expr_ty(lhs);
+    let rhs_ty = arena.expr_ty(rhs);
+    if has_bool_lanes(lhs_ty) || has_bool_lanes(rhs_ty) {
+        return Err(Diagnostic::error(
+            span,
+            format!("arithmetic expects numeric lanes, got {lhs_ty:?} and {rhs_ty:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Coerce a pair of operands to a common type without the arithmetic bool
+/// rejection — for the `mix(genBType, genBType, genBType)` overload, the one
+/// place GLSL pairs bool operands under a non-logical builtin.
+pub(super) fn coerce_selection_pair(
     arena: &mut HirArena,
     span: Span,
     lhs: ExprId,

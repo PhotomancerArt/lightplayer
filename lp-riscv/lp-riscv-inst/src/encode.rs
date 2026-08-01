@@ -412,8 +412,17 @@ pub fn sexth(rd: Gpr, rs1: Gpr) -> u32 {
     encode_i_with_funct12(0x13, rd, rs1, 0x605, 0x1)
 }
 
+/// Zbb `zext.h rd, rs1` — RV32 spells this `pack rd, rs1, x0`, an **OP**
+/// (R-type) encoding, not OP-IMM.
+///
+/// `clz` / `ctz` / `cpop` / `sext.b` / `sext.h` really are OP-IMM funct12
+/// forms, so the family looks like it should extend to `zext.h`. It does not.
+/// Encoding it as OP-IMM funct3=100 / funct12=0x080 — which is what this used
+/// to do — is bit-for-bit `xori rd, rs1, 128`, and the decoder that matched it
+/// stole that instruction from the base ISA. See
+/// `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`.
 pub fn zexth(rd: Gpr, rs1: Gpr) -> u32 {
-    encode_i_with_funct12(0x13, rd, rs1, 0x080, 0x4)
+    encode_r(0x33, rd, rs1, Gpr::new(0), 0x4, 0x04)
 }
 
 // Zbb: Rotate instructions

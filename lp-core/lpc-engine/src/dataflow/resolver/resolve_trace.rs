@@ -1,6 +1,7 @@
 //! Active query stack (correctness) plus optional structured resolver events.
 
 use crate::dataflow::binding::BindingRef;
+use crate::dataflow::resolver::query_intern::QueryId;
 use crate::dataflow::resolver::query_key::QueryKey;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -57,20 +58,18 @@ pub enum ResolveTraceError {
 /// RAII scope for one active query; pops the stack on drop.
 pub struct TraceGuard<'a> {
     trace: &'a ResolveTrace,
-    query: QueryKey,
+    id: QueryId,
 }
 
 impl fmt::Debug for TraceGuard<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TraceGuard")
-            .field("query", &self.query)
-            .finish()
+        f.debug_struct("TraceGuard").field("id", &self.id).finish()
     }
 }
 
 impl Drop for TraceGuard<'_> {
     fn drop(&mut self) {
-        self.trace.pop_guarded(&self.query);
+        self.trace.pop_guarded(self.id);
     }
 }
 
@@ -79,8 +78,8 @@ impl<'a> TraceGuard<'a> {
         self.trace.active_stack.borrow().len()
     }
 
-    pub fn is_active(&self, key: &QueryKey) -> bool {
-        self.trace.is_active(key)
+    pub fn is_active(&self, id: QueryId) -> bool {
+        self.trace.is_active(id)
     }
 
     pub fn record_event(&self, event: ResolveTraceEvent) {
@@ -96,10 +95,15 @@ impl<'a> TraceGuard<'a> {
     }
 }
 
-/// Combined active stack and optional trace log.
+/// Cycle detection plus optional structured events.
+///
+/// The active stack holds [`QueryId`]s rather than keys: it is pushed and
+/// popped on every uncached resolve, including with tracing off, so cloning a
+/// heap-backed key into it was pure per-frame allocation. Events still carry
+/// keys — they are only built when logging is on.
 pub struct ResolveTrace {
     log_level: ResolveLogLevel,
-    active_stack: RefCell<Vec<QueryKey>>,
+    active_stack: RefCell<Vec<QueryId>>,
     events: RefCell<Vec<ResolveTraceEvent>>,
 }
 
@@ -132,11 +136,12 @@ impl ResolveTrace {
         }
     }
 
-    /// Push `query` onto the active stack, or error if it is already active (cycle).
-    pub fn try_push_active(&self, query: &QueryKey) -> Result<(), ResolveTraceError> {
+    /// Push `id` onto the active stack, or error if it is already active
+    /// (cycle). `query` is only used to describe the cycle.
+    pub fn try_push_active(&self, id: QueryId, query: &QueryKey) -> Result<(), ResolveTraceError> {
         {
             let stack = self.active_stack.borrow();
-            if stack.contains(query) {
+            if stack.contains(&id) {
                 drop(stack);
                 self.record_cycle_detected(query);
                 return Err(ResolveTraceError::Cycle {
@@ -144,27 +149,31 @@ impl ResolveTrace {
                 });
             }
         }
-        self.active_stack.borrow_mut().push(query.clone());
+        self.active_stack.borrow_mut().push(id);
         self.record_begin_query(query);
         Ok(())
     }
 
-    /// Push `query` if not already active; on success returns a guard that pops on drop.
-    pub fn enter<'a>(&'a self, query: QueryKey) -> Result<TraceGuard<'a>, ResolveTraceError> {
-        self.try_push_active(&query)?;
-        Ok(TraceGuard { trace: self, query })
+    /// Push `id` if not already active; on success returns a guard that pops on drop.
+    pub fn enter<'a>(
+        &'a self,
+        id: QueryId,
+        query: QueryKey,
+    ) -> Result<TraceGuard<'a>, ResolveTraceError> {
+        self.try_push_active(id, &query)?;
+        Ok(TraceGuard { trace: self, id })
     }
 
-    /// Pop `query` if it is the top of the active stack.
-    pub fn exit(&self, query: &QueryKey) {
-        self.pop_guarded(query);
+    /// Pop `id` if it is the top of the active stack.
+    pub fn exit(&self, id: QueryId) {
+        self.pop_guarded(id);
     }
 
-    pub fn is_active(&self, query: &QueryKey) -> bool {
-        self.active_stack.borrow().contains(query)
+    pub fn is_active(&self, id: QueryId) -> bool {
+        self.active_stack.borrow().contains(&id)
     }
 
-    pub fn active_stack(&self) -> Vec<QueryKey> {
+    pub fn active_stack(&self) -> Vec<QueryId> {
         self.active_stack.borrow().clone()
     }
 
@@ -308,14 +317,10 @@ impl ResolveTrace {
         self.events.borrow_mut().push(event);
     }
 
-    fn pop_guarded(&self, query: &QueryKey) {
+    fn pop_guarded(&self, id: QueryId) {
         let mut stack = self.active_stack.borrow_mut();
-        debug_assert_eq!(
-            stack.last(),
-            Some(query),
-            "ResolveTrace guard exit mismatch",
-        );
-        if stack.last() == Some(query) {
+        debug_assert_eq!(stack.last(), Some(&id), "ResolveTrace guard exit mismatch");
+        if stack.last() == Some(&id) {
             stack.pop();
         }
     }
@@ -325,6 +330,7 @@ impl ResolveTrace {
 mod tests {
     use super::{ResolveLogLevel, ResolveTrace, ResolveTraceError, ResolveTraceEvent, TraceGuard};
     use crate::dataflow::binding::BindingRef;
+    use crate::dataflow::resolver::query_intern::{QueryId, QueryInternTable};
     use crate::dataflow::resolver::query_key::QueryKey;
     use lpc_model::NodeId;
     use lpc_model::SlotPath;
@@ -336,35 +342,47 @@ mod tests {
         }
     }
 
+    /// The active stack works in ids, so tests need the same interning the
+    /// session does.
+    fn sample_id(table: &mut QueryInternTable, query: &QueryKey) -> QueryId {
+        table.intern(query)
+    }
+
     #[test]
     fn detect_cycle_on_reenter_same_query() {
         let t = ResolveTrace::new(ResolveLogLevel::Off);
         let q = sample_key();
-        let _g = t.enter(q.clone()).unwrap();
-        let err = t.enter(q.clone()).unwrap_err();
+        let mut table = QueryInternTable::new();
+        let id = sample_id(&mut table, &q);
+        let _g = t.enter(id, q.clone()).unwrap();
+        let err = t.enter(id, q.clone()).unwrap_err();
         assert_eq!(err, ResolveTraceError::Cycle { query: q.clone() });
-        assert!(t.is_active(&q));
+        assert!(t.is_active(id));
     }
 
     #[test]
     fn trace_guard_pops_active_stack() {
         let t = ResolveTrace::new(ResolveLogLevel::Off);
         let q = sample_key();
+        let mut table = QueryInternTable::new();
+        let id = sample_id(&mut table, &q);
         {
-            let g: TraceGuard<'_> = t.enter(q.clone()).unwrap();
+            let g: TraceGuard<'_> = t.enter(id, q.clone()).unwrap();
             assert_eq!(g.active_stack_len(), 1);
-            assert!(g.is_active(&q));
+            assert!(g.is_active(id));
         }
         assert!(t.active_stack().is_empty());
-        assert!(!t.is_active(&q));
+        assert!(!t.is_active(id));
     }
 
     #[test]
     fn no_events_when_log_off() {
         let t = ResolveTrace::new(ResolveLogLevel::Off);
         let q = sample_key();
+        let mut table = QueryInternTable::new();
+        let id = sample_id(&mut table, &q);
         {
-            let _g = t.enter(q.clone()).unwrap();
+            let _g = t.enter(id, q.clone()).unwrap();
             drop(_g);
         }
         assert!(t.events().is_empty());
@@ -374,8 +392,10 @@ mod tests {
     fn no_events_when_log_off_including_cycle() {
         let t = ResolveTrace::new(ResolveLogLevel::Off);
         let q = sample_key();
-        let _g = t.enter(q.clone()).unwrap();
-        let _ = t.enter(q.clone());
+        let mut table = QueryInternTable::new();
+        let id = sample_id(&mut table, &q);
+        let _g = t.enter(id, q.clone()).unwrap();
+        let _ = t.enter(id, q.clone());
         assert!(t.events().is_empty());
     }
 
@@ -383,8 +403,10 @@ mod tests {
     fn basic_level_records_useful_events() {
         let t = ResolveTrace::new(ResolveLogLevel::Basic);
         let q = sample_key();
+        let mut table = QueryInternTable::new();
+        let id = sample_id(&mut table, &q);
         {
-            let g = t.enter(q.clone()).unwrap();
+            let g = t.enter(id, q.clone()).unwrap();
             g.record_event(ResolveTraceEvent::CacheHit(q.clone()));
             g.record_event(ResolveTraceEvent::SelectBinding {
                 query: q.clone(),
@@ -411,8 +433,10 @@ mod tests {
     fn cycle_emits_event_when_logging_on() {
         let t = ResolveTrace::new(ResolveLogLevel::Basic);
         let q = sample_key();
-        let _g = t.enter(q.clone()).unwrap();
-        let _ = t.enter(q.clone());
+        let mut table = QueryInternTable::new();
+        let id = sample_id(&mut table, &q);
+        let _g = t.enter(id, q.clone()).unwrap();
+        let _ = t.enter(id, q.clone());
         assert!(t.events().iter().any(|e| matches!(
             e,
             ResolveTraceEvent::CycleDetected { query: k } if k == &q

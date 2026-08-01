@@ -276,6 +276,8 @@ use {
 
 #[cfg(fw_harness)]
 mod tests {
+    #[cfg(feature = "test_f32_softfloat")]
+    pub mod f32_softfloat;
     #[cfg(feature = "test_fluid_demo")]
     pub mod fluid_demo;
     #[cfg(feature = "test_shader_compile_incremental")]
@@ -667,6 +669,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_espnow::run_espnow_test;
         run_espnow_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_f32_softfloat")]
+    {
+        use tests::f32_softfloat::run_f32_softfloat_test;
+        run_f32_softfloat_test(spawner).await;
     }
 
     #[cfg(not(fw_harness))]
