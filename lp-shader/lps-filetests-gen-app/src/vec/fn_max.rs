@@ -82,13 +82,13 @@ fn generate_test_first_larger(vec_type: VecType, dimension: Dimension) -> String
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_first_larger() {{\n\
-    // Function max() returns {type_name} (component-wise maximum)\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return max(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_first_larger() {{
+    // Function max() returns {type_name} (component-wise maximum)
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return max(a, b);
+}}
+
 // run: test_{type_name}_max_first_larger() == {expected_constructor}\n"
     )
 }
@@ -119,12 +119,12 @@ fn generate_test_second_larger(vec_type: VecType, dimension: Dimension) -> Strin
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_second_larger() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return max(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_second_larger() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return max(a, b);
+}}
+
 // run: test_{type_name}_max_second_larger() == {expected_constructor}\n"
     )
 }
@@ -155,12 +155,12 @@ fn generate_test_mixed(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_mixed() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return max(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_mixed() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return max(a, b);
+}}
+
 // run: test_{type_name}_max_mixed() == {expected_constructor}\n"
     )
 }
@@ -179,12 +179,12 @@ fn generate_test_equal(vec_type: VecType, dimension: Dimension) -> String {
     let constructor = format_vector_constructor(vec_type, dimension, &values);
 
     format!(
-        "{type_name} test_{type_name}_max_equal() {{\n\
-    {type_name} a = {constructor};\n\
-    {type_name} b = {constructor};\n\
-    return max(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_equal() {{
+    {type_name} a = {constructor};
+    {type_name} b = {constructor};
+    return max(a, b);
+}}
+
 // run: test_{type_name}_max_equal() == {constructor}\n"
     )
 }
@@ -220,12 +220,12 @@ fn generate_test_negative(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_negative() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return max(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_negative() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return max(a, b);
+}}
+
 // run: test_{type_name}_max_negative() == {expected_constructor}\n"
     )
 }
@@ -257,12 +257,12 @@ fn generate_test_zero(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_zero() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return max(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_zero() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return max(a, b);
+}}
+
 // run: test_{type_name}_max_zero() == {expected_constructor}\n"
     )
 }
@@ -293,12 +293,12 @@ fn generate_test_variables(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_variables() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return max(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_variables() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return max(a, b);
+}}
+
 // run: test_{type_name}_max_variables() == {expected_constructor}\n"
     )
 }
@@ -329,10 +329,10 @@ fn generate_test_expressions(vec_type: VecType, dimension: Dimension) -> String 
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_expressions() {{\n\
-    return max({a_constructor}, {b_constructor});\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_expressions() {{
+    return max({a_constructor}, {b_constructor});
+}}
+
 // run: test_{type_name}_max_expressions() == {expected_constructor}\n"
     )
 }
@@ -369,13 +369,13 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_max_in_expression() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    {type_name} c = {c_constructor};\n\
-    return max(a, max(b, c));\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_max_in_expression() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    {type_name} c = {c_constructor};
+    return max(a, max(b, c));
+}}
+
 // run: test_{type_name}_max_in_expression() == {expected_constructor}\n"
     )
 }

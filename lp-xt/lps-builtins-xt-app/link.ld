@@ -1,45 +1,63 @@
 /* Linker script for the Xtensa builtins image.
  *
- * Same address model as fixtures/link.ld (see its header for the full
- * rationale) — the emulator's 128 KiB code region at D-bus
- * 0x3FC88000..0x3FCA8000, I-bus alias +0x6F0000 — but with a **different
- * split of that region**.
+ * This image is **firmware**, and firmware on an ESP32 executes from flash
+ * through the cache (XIP). So it links exactly where a real app's flash
+ * segments go, and nowhere near the SRAM the JIT writes into:
  *
- * The fixtures script splits it evenly (64 KiB text / 64 KiB data), which
- * matches lp-xt-elf's `DATA_BASE = CODE_DBUS_BASE + CODE_REGION_LEN/2`
- * convention its reloc engine relies on. This image is the opposite shape:
- * it is nearly all code (every `__lps_*` builtin — ~71 KiB, which overflows
- * a 64 KiB text region) and carries almost no data. So it takes 112 KiB of
- * text and 16 KiB of data, staying inside the same 128 KiB region.
+ *   .text            -> IROM, the flash instruction window (read-only, XIP)
+ *   .rodata          -> DROM, the flash data window (read-only)
+ *   .data/.bss       -> DRAM, internal SRAM
  *
- * Nothing hardcodes this split: `rt_emu_xt` loads PT_LOAD segments at their
- * p_vaddr straight out of this ELF, so the addresses come from the image
- * itself. The fixtures' even split and the reloc engine's DATA_BASE are
- * untouched.
+ * The addresses are lp-xt-emu's BoardProfile::esp32s3() — see board.rs for the
+ * provenance of each (esp-hal's MIT/Apache-2.0 ld/esp32s3/memory.x, plus
+ * in-repo corroboration). Lengths here are the *modeled* window lengths, not
+ * the hardware ones (hardware gives 32 MB of each flash window); a segment
+ * that outgrew them would fail to link here rather than fail to load later.
+ *
+ * Contrast fixtures/link.ld, which links its guests into the SRAM code region:
+ * those are raw payloads a runner writes into RAM, which is a different thing
+ * from a flash-resident image and stays as it is.
+ *
+ * No boot-time copy machinery, and LMA = VMA throughout: the emulator's loader
+ * writes each PT_LOAD segment straight to its p_vaddr, the way a flasher plus a
+ * configured cache MMU would leave memory. There is no second-stage bootloader
+ * here to copy .data out of flash, which is why .data/.bss get an SRAM VMA
+ * directly.
+ *
+ * Nothing downstream hardcodes this split: `rt_emu::xt_image` classifies each
+ * segment by its p_vaddr against the board profile, so moving a section here
+ * moves it there.
  */
 
 ENTRY(_start)
 
 MEMORY
 {
-  IRAM (x)  : ORIGIN = 0x40378000, LENGTH = 112K   /* code region bytes 0..112K   */
-  DRAM (rw) : ORIGIN = 0x3FCA4000, LENGTH = 16K    /* code region bytes 112K..128K */
+  /* Flash, mapped through the cache. Read-only in the emulator's model, as on
+   * hardware. 256K/64K are BoardProfile::MODELED_IROM_LEN / MODELED_DROM_LEN. */
+  IROM (rx) : ORIGIN = 0x42000000, LENGTH = 256K
+  DROM (r)  : ORIGIN = 0x3C000000, LENGTH = 64K
+
+  /* Internal SRAM between the emulator's code region (ends 0x3FCA8000) and its
+   * stack region (starts 0x3FCC0000) — BoardProfile::image_data_base. */
+  DRAM (rw) : ORIGIN = 0x3FCA8000, LENGTH = 32K
 }
 
 SECTIONS
 {
-  /* l32r is backward-only, so literal pools must precede the text using them. */
+  /* l32r is backward-only, so literal pools must precede the text using them.
+   * Both live in IROM: a literal is loaded from the instruction stream. */
   .text : ALIGN(4)
   {
     *(.literal .literal.*)
     *(.text .text.*)
-  } > IRAM
+  } > IROM
 
   .rodata : ALIGN(4)
   {
     *(.rodata .rodata.*)
     *(.srodata .srodata.*)
-  } > DRAM
+  } > DROM
 
   .data : ALIGN(4)
   {

@@ -48,8 +48,7 @@ uvec2 test_uvec2_add_in_assignment() {
 // run: test_uvec2_add_in_assignment() == uvec2(15u, 10u)
 
 uvec2 test_uvec2_add_large_numbers() {
-    // Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)
-    // Addition saturates to max for each component
+    // Integer vectors use exact arithmetic.
     uvec2 a = uvec2(100000u, 50000u);
     uvec2 b = uvec2(200000u, 30000u);
     return a + b;

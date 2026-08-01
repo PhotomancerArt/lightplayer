@@ -51,6 +51,15 @@
 //! documented hard error (no `MOVSP` idiom — pinned by the experiment's ABI
 //! ADR).
 //!
+//! ## The float half
+//!
+//! Every float `VInst`, the float spill/reload edits and the FP register model
+//! live in [`super::emit_fp`], behind the `float-f32` feature. This module owns
+//! the layout contract, the literal pool, branch relaxation, the frame and the
+//! integer instruction set; that one owns the FP encodings, the Boolean-
+//! register discipline and the `lsi`/`ssi` immediate discipline. The frame is
+//! *not* split between them: float support changes nothing about it.
+//!
 //! ## Branch fixups
 //!
 //! Conditional branches (`beqz`/`bnez`, BRI12 ±2 KB) are layout items resolved
@@ -74,11 +83,11 @@ use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
 use crate::vinst::{AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, VInst, VReg};
 
 /// Primary emitter scratch (`a8`) as an encoder operand.
-const S0: Reg = Reg::new(SCRATCH);
+pub(super) const S0: Reg = Reg::new(SCRATCH);
 /// Secondary emitter scratch (`a9`) as an encoder operand.
-const S1: Reg = Reg::new(SCRATCH2);
+pub(super) const S1: Reg = Reg::new(SCRATCH2);
 /// The stack pointer (`a1`) as an encoder operand.
-const SP: Reg = Reg::new(SP_REG);
+pub(super) const SP: Reg = Reg::new(SP_REG);
 
 /// The windowed call increment this backend emits (`CALLX8`), fixed by
 /// [`super::gpr::CALL_ROTATION`]'s register model.
@@ -183,7 +192,7 @@ pub struct EmitContext<'a> {
     /// `(item index, byte offset within that Bytes run, src_op)` — translated
     /// to absolute `(code_offset, Some(src_op))` debug lines after layout.
     marks: Vec<(usize, u32, u32)>,
-    frame: FrameLayout,
+    pub(super) frame: FrameLayout,
     symbols: &'a ModuleSymbols,
     /// Kept for API parity with [`emit_function`] (e.g. future pool-indexed lowering).
     #[allow(
@@ -238,7 +247,7 @@ impl<'a> EmitContext<'a> {
     }
 
     /// Append one encoded instruction to the current `Bytes` run.
-    fn inst(&mut self, i: Inst, src_op: Option<u32>) {
+    pub(super) fn inst(&mut self, i: Inst, src_op: Option<u32>) {
         let bytes = encode(&i);
         let idx = match self.items.last() {
             Some(Slot {
@@ -307,7 +316,7 @@ impl<'a> EmitContext<'a> {
 
     /// Materialize a 32-bit constant into `rd` (`movi`, else pooled `l32r` —
     /// the table's [`ImmOp::Movi`] fallback `LiteralPool`).
-    fn iconst(&mut self, rd: Reg, val: i32, src_op: Option<u32>) {
+    pub(super) fn iconst(&mut self, rd: Reg, val: i32, src_op: Option<u32>) {
         if imm::is_legal(ImmOp::Movi, val) {
             self.inst(Inst::Movi(rd, val), src_op);
         } else {
@@ -321,7 +330,7 @@ impl<'a> EmitContext<'a> {
     /// `tmp` must differ from `rs` when the constant path is reachable
     /// (checked; `tmp == rd` is fine — the constant path allows it only when
     /// `rd != rs`).
-    fn add_imm(
+    pub(super) fn add_imm(
         &mut self,
         rd: Reg,
         rs: Reg,
@@ -360,7 +369,7 @@ impl<'a> EmitContext<'a> {
     /// `op` (negative, out of range, or misaligned — the table's
     /// `AddressScratch` fallback). The value operand must therefore not live
     /// in `S0` when the fallback is reachable; the constant scratch is `S1`.
-    fn mem_addr(
+    pub(super) fn mem_addr(
         &mut self,
         base: Reg,
         offset: i32,
@@ -411,11 +420,15 @@ impl<'a> EmitContext<'a> {
 
     // --- operand plumbing (rv32-parity) ------------------------------------
 
-    fn operand_alloc(output: &AllocOutput, inst_idx: usize, operand_idx: usize) -> Alloc {
+    pub(super) fn operand_alloc(
+        output: &AllocOutput,
+        inst_idx: usize,
+        operand_idx: usize,
+    ) -> Alloc {
         output.operand_alloc(inst_idx as u16, operand_idx as u16)
     }
 
-    fn is_dead_def(output: &AllocOutput, inst_idx: usize, def_op_idx: usize) -> bool {
+    pub(super) fn is_dead_def(output: &AllocOutput, inst_idx: usize, def_op_idx: usize) -> bool {
         matches!(
             Self::operand_alloc(output, inst_idx, def_op_idx),
             Alloc::None
@@ -430,7 +443,7 @@ impl<'a> EmitContext<'a> {
     /// milestone, and `a0..a15` and `f0..f15` are different register files, so
     /// an integer instruction against a float index would be silently wrong
     /// rather than merely unimplemented.
-    fn hw(preg: crate::abi::PackedPReg) -> Result<Reg, AllocError> {
+    pub(super) fn hw(preg: crate::abi::PackedPReg) -> Result<Reg, AllocError> {
         match preg.class() {
             RegClass::Float => Err(crate::emit_err!(
                 "allocation names float register f{} — Xtensa has no FPU backend",
@@ -443,7 +456,7 @@ impl<'a> EmitContext<'a> {
 
     /// Use a vreg: return its physical register, reloading from spill into
     /// `temp` if needed.
-    fn use_vreg(
+    pub(super) fn use_vreg(
         &mut self,
         output: &AllocOutput,
         inst_idx: usize,
@@ -463,7 +476,7 @@ impl<'a> EmitContext<'a> {
 
     /// Def a vreg: return the physical register to write to (the caller must
     /// [`Self::store_def_vreg`] afterwards when the def is spilled).
-    fn def_vreg(
+    pub(super) fn def_vreg(
         &mut self,
         output: &AllocOutput,
         inst_idx: usize,
@@ -478,7 +491,7 @@ impl<'a> EmitContext<'a> {
     }
 
     /// Store a spilled def after it was written to `temp`.
-    fn store_def_vreg(
+    pub(super) fn store_def_vreg(
         &mut self,
         output: &AllocOutput,
         inst_idx: usize,
@@ -494,6 +507,13 @@ impl<'a> EmitContext<'a> {
 
     /// Emit an allocator edit (reload/spill/reg move) as concrete instructions.
     fn emit_edit(&mut self, edit: &Edit, src_op: Option<u32>) -> Result<(), AllocError> {
+        // Float-class edits use `lsi`/`ssi`/`mov.s`; see `emit_fp` for which
+        // shapes it claims and why stack-to-stack deliberately is not one of
+        // them (it is a class-free word copy the integer path already does).
+        #[cfg(feature = "float-f32")]
+        if self.emit_float_edit(edit, src_op)? {
+            return Ok(());
+        }
         match edit {
             Edit::Move { from, to } => match (*from, *to) {
                 (Alloc::None, _) | (_, Alloc::None) => return Err(crate::emit_err!()),
@@ -1354,6 +1374,40 @@ impl<'a> EmitContext<'a> {
                 ..
             } => {
                 self.emit_fuel_check(output, inst_idx, *decrement, *trap_label, src_op)?;
+            }
+            // Hardware float — the float half lives in `super::emit_fp`.
+            #[cfg(feature = "float-f32")]
+            VInst::FAluRRR { .. }
+            | VInst::FAluRR { .. }
+            | VInst::Fcmp { .. }
+            | VInst::FSelect { .. }
+            | VInst::FLoad32 { .. }
+            | VInst::FStore32 { .. }
+            | VInst::Wfr { .. }
+            | VInst::Rfr { .. }
+            | VInst::IToF { .. } => {
+                self.emit_float_vinst(vinst, output, inst_idx, src_op)?;
+            }
+            // Without `float-f32` there is no FP emitter linked, so a float
+            // VInst reaching here means lowering produced instructions this
+            // build cannot encode, and the only safe answer is to refuse
+            // loudly. Erroring rather than skipping matters: a silently dropped
+            // FP instruction leaves the destination holding whatever was there
+            // before and renders a plausible wrong frame.
+            #[cfg(not(feature = "float-f32"))]
+            VInst::FAluRRR { .. }
+            | VInst::FAluRR { .. }
+            | VInst::Fcmp { .. }
+            | VInst::FSelect { .. }
+            | VInst::FLoad32 { .. }
+            | VInst::FStore32 { .. }
+            | VInst::Wfr { .. }
+            | VInst::Rfr { .. }
+            | VInst::IToF { .. } => {
+                return Err(crate::emit_err!(
+                    "xt emitter: {} needs the `float-f32` feature (M7 D9)",
+                    vinst.mnemonic()
+                ));
             }
         }
         Ok(())

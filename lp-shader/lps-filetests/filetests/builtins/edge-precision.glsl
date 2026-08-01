@@ -16,6 +16,7 @@ float test_round_half_up() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // run[q32]: test_round_half_up() ~= 3.0
+// @unsupported(rv32lpn.f32)
 // run[f32]: test_round_half_up() ~= 2.0
 
 float test_round_half_down() {

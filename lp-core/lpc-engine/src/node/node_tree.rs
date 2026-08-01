@@ -372,6 +372,27 @@ impl<N> RuntimeNodeTree<N> {
         Ok(())
     }
 
+    /// A cheap summary of the tree's *shape*, for catching structural changes
+    /// that forgot to invalidate resolution.
+    ///
+    /// Node count, binding count and the newest binding revision together move
+    /// whenever the binding graph or the topology does. This is not a hash and
+    /// does not need to be: it is compared against its own previous value one
+    /// frame later, by a debug-only assertion, to answer "did the graph change
+    /// without saying so?".
+    #[cfg(debug_assertions)]
+    pub fn structural_fingerprint(&self) -> (usize, usize, Revision) {
+        let mut nodes = 0;
+        let mut bindings = 0;
+        let mut newest = Revision::default();
+        for entry in self.entries() {
+            nodes += 1;
+            bindings += entry.bindings.value().len();
+            newest = core::cmp::max(newest, entry.bindings.changed_at());
+        }
+        (nodes, bindings, newest)
+    }
+
     /// Get the number of live entries (excludes tombstones).
     pub fn len(&self) -> usize {
         self.nodes.iter().filter(|opt| opt.is_some()).count()

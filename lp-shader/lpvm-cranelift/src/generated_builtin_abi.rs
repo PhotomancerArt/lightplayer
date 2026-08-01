@@ -23,6 +23,35 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
 ) -> Signature {
     let mut sig = Signature::new(call_conv);
     match builtin {
+        BuiltinId::LpGlslAcosF32
+        | BuiltinId::LpGlslAcoshF32
+        | BuiltinId::LpGlslAsinF32
+        | BuiltinId::LpGlslAsinhF32
+        | BuiltinId::LpGlslAtanF32
+        | BuiltinId::LpGlslAtanhF32
+        | BuiltinId::LpGlslCosF32
+        | BuiltinId::LpGlslCoshF32
+        | BuiltinId::LpGlslExp2F32
+        | BuiltinId::LpGlslExpF32
+        | BuiltinId::LpGlslInversesqrtF32
+        | BuiltinId::LpGlslLog2F32
+        | BuiltinId::LpGlslLogF32
+        | BuiltinId::LpGlslRoundF32
+        | BuiltinId::LpGlslSinF32
+        | BuiltinId::LpGlslSinhF32
+        | BuiltinId::LpGlslTanF32
+        | BuiltinId::LpGlslTanhF32
+        | BuiltinId::LpLpirFabsF32
+        | BuiltinId::LpLpirFceilF32
+        | BuiltinId::LpLpirFfloorF32
+        | BuiltinId::LpLpirFnearestF32
+        | BuiltinId::LpLpirFsqrtF32
+        | BuiltinId::LpLpirFtruncF32
+        | BuiltinId::LpLpfnSaturateF32 => {
+            // extern "C" fn(f32) -> f32
+            sig.params.push(AbiParam::new(types::F32));
+            sig.returns.push(AbiParam::new(types::F32));
+        }
         BuiltinId::LpGlslAcosQ32
         | BuiltinId::LpGlslAcoshQ32
         | BuiltinId::LpGlslAsinQ32
@@ -56,10 +85,25 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
         | BuiltinId::LpLpirUnorm16ToFQ32
         | BuiltinId::LpLpirUnorm8ToFQ32
         | BuiltinId::LpLpfnSaturateQ32
-        | BuiltinId::LpVmGetFuelQ32 => {
+        | BuiltinId::LpVmGetFuel => {
             // extern "C" fn(i32) -> i32
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
+        }
+        BuiltinId::LpGlslAtan2F32
+        | BuiltinId::LpGlslModF32
+        | BuiltinId::LpGlslPowF32
+        | BuiltinId::LpLpirFaddF32
+        | BuiltinId::LpLpirFdivF32
+        | BuiltinId::LpLpirFdivRecipF32
+        | BuiltinId::LpLpirFmaxF32
+        | BuiltinId::LpLpirFminF32
+        | BuiltinId::LpLpirFmulF32
+        | BuiltinId::LpLpirFsubF32 => {
+            // extern "C" fn(f32, f32) -> f32
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::F32));
+            sig.returns.push(AbiParam::new(types::F32));
         }
         BuiltinId::LpGlslAtan2Q32
         | BuiltinId::LpGlslLdexpQ32
@@ -82,6 +126,13 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
+        BuiltinId::LpGlslFmaF32 => {
+            // extern "C" fn(f32, f32, f32) -> f32
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::F32));
+            sig.returns.push(AbiParam::new(types::F32));
+        }
         BuiltinId::LpGlslFmaQ32
         | BuiltinId::LpLpfnGnoise2Q32
         | BuiltinId::LpLpfnHash2
@@ -95,6 +146,22 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
+        }
+        BuiltinId::LpGlslLdexpF32
+        | BuiltinId::LpLpfnGnoise1F32
+        | BuiltinId::LpLpfnRandom1F32
+        | BuiltinId::LpLpfnSnoise1F32
+        | BuiltinId::LpLpfnSrandom1F32 => {
+            // extern "C" fn(f32, i32) -> f32
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.returns.push(AbiParam::new(types::F32));
+        }
+        BuiltinId::LpGlslSincosF32 => {
+            // extern "C" fn(f32, *mut f32, *mut f32) -> ()
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(pointer_type));
+            sig.params.push(AbiParam::new(pointer_type));
         }
         BuiltinId::LpGlslSincosQ32 => {
             // extern "C" fn(i32, *mut i32, *mut i32) -> ()
@@ -162,15 +229,6 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
-        }
-        BuiltinId::LpLpfnGnoise1F32
-        | BuiltinId::LpLpfnRandom1F32
-        | BuiltinId::LpLpfnSnoise1F32
-        | BuiltinId::LpLpfnSrandom1F32 => {
-            // extern "C" fn(f32, u32) -> f32
-            sig.params.push(AbiParam::new(types::F32));
-            sig.params.push(AbiParam::new(types::I32));
-            sig.returns.push(AbiParam::new(types::F32));
         }
         BuiltinId::LpLpfnGnoise2F32
         | BuiltinId::LpLpfnRandom2F32
@@ -303,11 +361,6 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::I32));
         }
-        BuiltinId::LpLpfnSaturateF32 => {
-            // extern "C" fn(f32) -> f32
-            sig.params.push(AbiParam::new(types::F32));
-            sig.returns.push(AbiParam::new(types::F32));
-        }
         BuiltinId::LpLpfnSrandom3TileF32 => {
             // extern "C" fn(*mut f32, f32, f32, f32, f32, u32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
@@ -334,12 +387,51 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::I32));
         }
+        BuiltinId::LpLpirFtoUnorm16F32
+        | BuiltinId::LpLpirFtoUnorm8F32
+        | BuiltinId::LpLpirFtoiSatSF32
+        | BuiltinId::LpLpirFtoiSatUF32 => {
+            // extern "C" fn(f32) -> i32
+            sig.params.push(AbiParam::new(types::F32));
+            sig.returns.push(AbiParam::new(types::I32));
+        }
+        BuiltinId::LpLpirItofSF32
+        | BuiltinId::LpLpirItofUF32
+        | BuiltinId::LpLpirUnorm16ToFF32
+        | BuiltinId::LpLpirUnorm8ToFF32 => {
+            // extern "C" fn(i32) -> f32
+            sig.params.push(AbiParam::new(types::I32));
+            sig.returns.push(AbiParam::new(types::F32));
+        }
+        BuiltinId::LpTexTexture1dR16UnormF32 | BuiltinId::LpTexTexture1dRgba16UnormF32 => {
+            // unsafe extern "C" fn(*mut f32, u32, u32, u32, f32, u32, u32) -> ()
+            sig.params.push(AbiParam::new(pointer_type));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+        }
         BuiltinId::LpTexTexture1dR16UnormQ32 | BuiltinId::LpTexTexture1dRgba16UnormQ32 => {
             // unsafe extern "C" fn(*mut i32, u32, u32, u32, i32, u32, u32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+        }
+        BuiltinId::LpTexTexture2dR16UnormF32 | BuiltinId::LpTexTexture2dRgba16UnormF32 => {
+            // unsafe extern "C" fn(*mut f32, u32, u32, u32, u32, f32, f32, u32, u32, u32) -> ()
+            sig.params.push(AbiParam::new(pointer_type));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));

@@ -3,18 +3,26 @@
 LightPlayer firmware for the **ESP32-S3** (Xtensa LX7). Sibling of
 `fw-esp32c6` (RISC-V).
 
-> **Not yet a consumer of `fw-esp32-common`.** An earlier version of this file
-> called the crate its "third consumer"; that was wrong at the dependency
-> level and is corrected here. What was actually proven during M5 is weaker
-> but still useful: `fw-esp32-common` *compiles* for `xtensa-esp32s3-none-elf`
-> pulling no `esp-hal`, so the chip-agnostic seam holds against a second
-> architecture. Wiring it in is the app-layer milestone's job.
+> **Now a real consumer of `fw-esp32-common`, not just a compile target.** An
+> earlier version of this file called the crate `fw-esp32-common`'s "third
+> consumer" before any dependency existed; a later correction went the other
+> way and said "not yet a consumer" while M5 had only proven that
+> `fw-esp32-common` *compiles* for `xtensa-esp32s3-none-elf` pulling no
+> `esp-hal`. Both are now stale: the app-layer milestone wired it in for
+> real — `server_loop`, `boot`, `logger`, `lp_fs`, `transport`, and the
+> chip-agnostic `Esp32OutputProvider` this crate's RMT driver plugs into
+> (below) all come from `fw-esp32-common`.
 
-Currently a **boot skeleton plus hardware harnesses**: clocks, heap, and serial
-logging far enough to print the `[INIT]` marker family, and a JIT corpus runner
-(below). The server, storage, and output stacks are the app-layer milestone of
-`~/.photomancer/planning/lp2025/2026-07-30-s3-app-layer-with-jit/`; the Xtensa
-backport roadmap that created this crate is closed.
+Runs the LightPlayer app on device: `lp-server` over USB-Serial-JTAG, littlefs
+storage, GLSL compiled to Xtensa machine code by the on-device JIT, and real
+WS281x output on 4 concurrent RMT channels (below) — plus the hardware
+harnesses (clocks, heap, and serial logging far enough to print the `[INIT]`
+marker family, a JIT corpus runner, and the RMT loopback self-test). The
+server and storage stacks landed as the app-layer milestone of
+`~/.photomancer/planning/lp2025/2026-07-30-s3-app-layer-with-jit/`; the
+4-channel RMT output replaced the serial-readout stand-in that milestone
+shipped with, in `~/.photomancer/planning/lp2025/2026-07-31-0720-s3-led-output-4ch/`.
+The Xtensa backport roadmap that created this crate is closed.
 
 Verified on hardware 2026-07-30 (ESP32-S3 rev v0.2, 16 MB flash): flashes and
 boots to `[INIT] ready`, and runs the Xtensa JIT corpus (below) with 11/11
@@ -55,6 +63,62 @@ Run the host oracle first:
 cargo test -p lpvm-native --features xt-corpus,emu-xt
 ```
 
+### `test_xt_fp_conformance`
+
+```bash
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # the whole corpus
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX helpers         # divide-step helpers + probe2
+```
+
+The M6 hardware campaign's rig. Runs `lp-xt-fp-vectors`' 5 630-vector corpus on
+this chip's FPU and prints `(result, FSR)` per vector as hex blocks; the recipe
+captures the transcript to `target/fp-capture/` and diffs it with `just fp-diff`.
+
+Three things about it are load-bearing:
+
+**The device regenerates its own inputs.** It links the *same* generator crate
+the host predicted with, so vector 4 137 is the same vector on both sides by
+construction — no transfer protocol and no reflash per batch. Both sides print
+the generator's fingerprint and the diff tool **aborts** on a mismatch, because
+a disagreement there means the two sides ran different vectors and every
+comparison after it is meaningless.
+
+**The harness decides nothing.** No `PASS`, no `FAIL`, no comparison. The
+predictions live in `lp-xt/lp-xt-emu/tests/fixtures/fp/` and were committed
+before any board ran (M6 D2); classification is the host's job. A device that
+graded itself would be the tautology the whole milestone is arranged to avoid —
+so, as with `test_xt_jit_corpus`, **a disagreement is a finding to triage and
+never a reason to edit a golden.**
+
+**A truncated capture is an error, not a partial pass.** Every family ends with
+a sentinel stating its row count, and the parse fails if the count and the rows
+disagree or the final `END-ALL` never arrives. That rejection is asserted by
+unit tests against deliberately damaged fixtures, not by having tried it once.
+
+The instructions themselves are `global_asm!` kernels — one per operation shape,
+plus one per `(conversion, scale)` pair since the scale is an instruction
+immediate — and every vector is a *call* into one of them. That is what keeps
+the kernel count near thirty instead of 5 630, and why the campaign needs no FP
+emitter. `LP_FP_MODE=tables` switches to the estimate-table sweep, which reads
+the implementation-defined lookup ROMs behind
+`recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s` back exhaustively and run-length
+encodes them.
+
+Run the host oracle first; it replays the whole corpus with no board attached:
+
+```bash
+cargo test -p lp-xt-emu --test fp_conformance
+```
+
+Measured on the desk S3 (MAC `D8:3B:DA:47:29:70`, chip rev v0.2), 2026-07-31:
+`CPENABLE` arrives as **`0x000000ff`** — every coprocessor enabled, not merely
+the FPU's bit 0 — under this boot chain. M6 P1 established that it arrives
+armed; this says how widely. The provenance is still unpinned (no write exists
+in esp-hal 1.1.1 or xtensa-lx-rt 0.22), so the harness arms bit 0 explicitly
+anyway and prints both sides.
+
 ### `test_backtrace_oracle`
 
 ```bash
@@ -84,6 +148,90 @@ built inside the real S3 DRAM window:
 cargo test -p lpc-shared
 ```
 
+### `test_loopback`
+
+```bash
+just fwtest-loopback-esp32s3 /dev/cu.usbmodemXXXX
+```
+
+The WS281x timing oracle, with no oscilloscope and no strips: each of the four
+RMT TX channels (GPIO4-7) is routed into its own RX channel through the GPIO
+matrix, so the firmware captures its own waveform at 12.5 ns resolution and
+asserts it numerically while all four transmit at once — decode against the
+sent bytes, per-bit high time and period within **±25 ns** of that channel's
+own configuration, no cross-talk, the 300 µs latch, a 100-frame concurrent
+soak with zero guard trips, and a guard-word truncation on one channel that
+must leave the other three's frames intact.
+
+It also probes the RMT RAM address on-chip (`E1:` lines) by making the
+peripheral itself deposit a word through its APB FIFO port: the S3's RAM is at
+`RMT_BASE + 0x800`, not the C6's `+0x400`, and getting that wrong transmits the
+tail of the register file.
+
+The `E4: MEASURE golden_*` block is the re-derivation of the committed
+hardware golden `lp-fw/lp-ws281x/tests/golden/ws2812_grb_esp32s3.txt`. As
+everywhere else here, **a device mismatch is a finding to triage, never a
+reason to edit the golden.** Run the host oracle first — it drives the same
+sequencing against a mock and the same classifier against that capture:
+
+```bash
+cargo test -p lp-ws281x
+```
+
+### `test_button`
+
+```bash
+just fwtest-button-esp32s3 /dev/cu.usbmodemXXXX
+```
+
+GPIO button diagnostic mode: D9 (GPIO8) with an internal pull-up, normally-open
+button to GND. Prints a `BUTTON gpio=... seq=... kind=...` line per debounced
+press/release. Ported from fw-esp32c6's `test_button`, but synchronous instead
+of an embassy task — this chip's harness entrypoint never starts the embassy
+runtime, so the poll loop busy-waits between samples instead of awaiting
+`embassy_time::Timer`. Hardware verification (flash + jumper walk) happens at
+the milestone gate that first has a use for the button; this harness exists so
+the driver cannot rot uncompiled — see
+`docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md`.
+
+## Output
+
+`src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
+channels at once**, over `lp-fw/lp-ws281x` — the portable transmitter whose
+sequencing (ping-pong refill, bit cursor, guard word) is tested on the host and
+shared with every chip. Three layers:
+
+| File | Owns |
+|---|---|
+| `rmt/s3_rmt.rs` | the chip: seven register operations, the `0x800` RAM offset, the S3's by-event-then-channel interrupt layout |
+| `rmt/shared_driver.rs` | the single `Ws281xDriver` static and the IRAM interrupt trampoline that feeds it |
+| `rmt/esp32s3_rmt_ws281x_driver.rs` | the `lpc-hardware` seam: endpoints, leases, open-time pin binding |
+
+The number of channels offered comes from the **manifest** — one per
+`/rmt/ws281xK` resource, four on this board — never from a literal in driver
+logic. Each channel gets one 48-word memory block, which is what makes four
+outputs possible at all: a 48-word window halves into exactly one LED, the
+tightest refill deadline the hardware can pose.
+
+Pins are bound at `open`, not at boot. An endpoint is a board label
+(`ws281x:rmt:D10`) and which one a project drives is authored data, so the
+channel is configured up front and its pad connected when the endpoint opens,
+under the registry lease that grants exclusive use of that GPIO.
+
+Timing is WS2812-class (GRB, 300 µs latch) on every channel. A strip wired in
+another colour order is the fixture node's `color_order`, above this boundary —
+the driver stays GRB, exactly like the C6's.
+
+## Input
+
+`src/hardware/button.rs` is a board-manifest-driven GPIO button driver, ported
+from `fw-esp32c6`'s `Esp32GpioButtonDriver` — same driver id
+(`esp32-gpio-button`), same manifest-driven endpoint enumeration
+(`GpioInput` capability + board-assigned label), same internal-pull-up wiring.
+The only chip-specific piece is the GPIO range check
+(`board::esp32s3::constants::MAX_GPIO`, 48 versus the C6's 30). On this
+board's manifest it exposes D0-D10.
+
 ## Building
 
 ```bash
@@ -101,6 +249,17 @@ fails to compile — 70 × E0716 from the `Slotted` derive's const-promotion of 
 temporary — so an MSRV error here means `espup update`, not a code problem.
 The recipe also puts the toolchain's bundled GNU binutils on `PATH`, because
 the Rust target spec links through `xtensa-esp32s3-elf-gcc`.
+
+### Release profile
+
+This crate builds under `[profile.release-esp32s3]` (`inherits = "release"`,
+`opt-level = "s"`), not the workspace's default `opt-level = "z"`. The `"z"`
+codegen was slow enough on the cold first frame to miss the RMT loopback
+harness's 30 µs refill deadline on one channel — see
+`docs/defects/2026-07-31-opt-z-missed-rmt-drain-deadline.md`. `"z"` stays the
+default for the C6, whose flash budget is genuinely tight; the S3 has ~4.6 MB
+of headroom in its 6 MB app partition, so trading ~104 KB of image size for
+codegen the timing-critical driver was actually validated at is free here.
 
 ## Flashing
 
@@ -248,10 +407,12 @@ compiles GLSL on the board.
 
 ### Verifying the render without LEDs
 
-The serial readout driver (`src/output/readout_driver.rs`) prints the frame
-bytes instead of driving LEDs: one full hex dump when a channel opens or
-resizes, then a checksum and lit-LED count once a second. That makes the render
-path *comparable*, which an LED never is.
+> **The serial readout driver is gone.** `src/output/readout_driver.rs` printed
+> the frame bytes instead of driving LEDs, and it was replaced by the real RMT
+> driver (above) when four-channel output landed. `scripts/m4-hardware-walk.sh`
+> and `lp-app/lpa-server/tests/shader_oracle_frame.rs` still describe its
+> `[OUT] dump` lines; that comparison needs a new source of frame bytes before
+> the walk can be re-run.
 
 `examples/shader-oracle` is the project built for that comparison. It is
 deliberately clock-free, so every frame is identical and no time

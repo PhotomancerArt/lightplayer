@@ -304,7 +304,7 @@ impl NodeRuntime for ControlRadioNode {
 
 fn resolve_input_messages(ctx: &mut TickContext<'_>) -> Result<Vec<ControlMessage>, NodeError> {
     let production = ctx
-        .resolve(QueryKey::ConsumedSlot {
+        .resolve(&QueryKey::ConsumedSlot {
             node: ctx.node_id(),
             slot: control_radio_input_path(),
         })

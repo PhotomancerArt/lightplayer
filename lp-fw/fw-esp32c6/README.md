@@ -88,3 +88,34 @@ The default feature set targets ESP32-C6 with server and radio support. Many
 profiling, or smoke tests. Keep feature additions honest: test and check modes
 may narrow behavior for a harness, but the normal firmware path must preserve
 runtime shader compilation on device.
+
+### `test_f32_softfloat` — IEEE f32 on a chip with no FPU
+
+The C6 is RV32IMAC: no F extension. It can still execute **f32 semantics**
+through soft-float calls, which makes it the only rv32 *hardware* oracle for
+f32 until an F-bearing part (ESP32-S31) is on the desk.
+
+```bash
+just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodemXXXX
+```
+
+**Pass the port explicitly.** Several ESP32 boards are usually attached and
+auto-detection has flashed the wrong one before; the recipe refuses rather than
+guessing. The harness configures **no GPIO** — on the C6, GPIO12/13 are the USB
+D-/D+ lines and driving them costs a physical replug.
+
+Two halves. `abi_probe` calls `__addsf3`/`__ltsf2`/… directly and compares raw
+result words against IEEE reference bit patterns computed **off-device** — on
+this chip a Rust `a + b` on two `f32`s *is* a call to `__addsf3`, so computing
+the expected value here would compare the routine to itself. What that measures
+is the **mask ROM**: the linker resolves these names through `esp-rom-sys`'s
+`esp32c6.rom.rvfp.ld` to Espressif's ROM `rvfplib`, a different implementation
+from the `compiler_builtins` the host emulator runs. `shader_cases` then
+compiles a GLSL shader on the device in `FloatMode::F32`, JITs it, and calls it.
+
+**This is the only configuration in this crate that turns on `float-f32`**, and
+it does so deliberately: the shipping image runs Fixed-mode shaders and must not
+carry an f32 backend it never enters. That is what keeps
+`just fw-esp32c6-size-check` measuring an unchanged product image — check both
+sides of the gate when you touch it. See
+`docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.

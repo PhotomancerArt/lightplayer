@@ -19,8 +19,9 @@ pub enum DecodeError {
         /// Bytes actually present.
         got: usize,
     },
-    /// The opcode is well-formed but outside the integer subset this crate models
-    /// (FPU, ESP32-S3 DSP `ee.*`, system/privileged, boolean, loop, etc.).
+    /// The opcode is well-formed but outside the subset this crate models
+    /// (ESP32-S3 DSP `ee.*`, most system/privileged registers, boolean logic
+    /// ops, loop, atomics, windowed spill, etc.).
     Unsupported {
         /// The instruction word (up to 3 bytes, little-endian assembled).
         word: u32,
@@ -95,6 +96,30 @@ fn reg_s(w: u32) -> Reg {
 fn reg_r(w: u32) -> Reg {
     Reg::from_nibble(r(w))
 }
+#[inline]
+fn freg_t(w: u32) -> FReg {
+    FReg::from_nibble(t(w))
+}
+#[inline]
+fn freg_s(w: u32) -> FReg {
+    FReg::from_nibble(s(w))
+}
+#[inline]
+fn freg_r(w: u32) -> FReg {
+    FReg::from_nibble(r(w))
+}
+#[inline]
+fn breg_t(w: u32) -> BReg {
+    BReg::from_nibble(t(w))
+}
+#[inline]
+fn breg_s(w: u32) -> BReg {
+    BReg::from_nibble(s(w))
+}
+#[inline]
+fn breg_r(w: u32) -> BReg {
+    BReg::from_nibble(r(w))
+}
 
 /// Sign-extend the low `bits` of `v`.
 #[inline]
@@ -136,6 +161,7 @@ fn decode24(w: u32) -> Option<Inst> {
         0x0 => decode_qrst(w),
         0x1 => Some(Inst::L32r(reg_t(w), ((w >> 8) & 0xffff) as u16)),
         0x2 => decode_rri8_ls_movi(w),
+        0x3 => decode_fp_lsi(w),
         0x5 => {
             // CALL format: call0/4/8/12
             let n = (w >> 4) & 0x3;
@@ -169,8 +195,116 @@ fn decode_qrst(w: u32) -> Option<Inst> {
             let maskimm = op2(w) + 1; // 1..16
             Some(Inst::Extui(reg_r(w), reg_t(w), shiftimm, maskimm))
         }
+        0x8 => decode_fp_lsx(w),
+        0xa => decode_fp0(w),
+        0xb => decode_fp1(w),
         _ => None,
     }
+}
+
+/// `op0 = 0, op1 = 8`: indexed FP load/store, sub-decoded by `op2`.
+fn decode_fp_lsx(w: u32) -> Option<Inst> {
+    let op = match op2(w) {
+        0x0 => FpLsxOp::Lsx,
+        0x1 => FpLsxOp::Lsxp,
+        0x4 => FpLsxOp::Ssx,
+        0x5 => FpLsxOp::Ssxp,
+        _ => return None,
+    };
+    Some(Inst::FpLsx(op, freg_r(w), reg_s(w), reg_t(w)))
+}
+
+/// `op0 = 0, op1 = 0xA`: FP arithmetic and conversions, sub-decoded by `op2`.
+/// `op2 = 0xF` is the FP1 sub-group, keyed by `t` instead.
+fn decode_fp0(w: u32) -> Option<Inst> {
+    let rrr = |op| Some(Inst::FpRrr(op, freg_r(w), freg_s(w), freg_t(w)));
+    // Conversions carry a 0..=15 binary scale in the `t` field.
+    let to_int = |op| Some(Inst::FpToInt(op, reg_r(w), freg_s(w), t(w)));
+    let to_fp = |op| Some(Inst::IntToFp(op, freg_r(w), reg_s(w), t(w)));
+    match op2(w) {
+        0x0 => rrr(FpRrrOp::AddS),
+        0x1 => rrr(FpRrrOp::SubS),
+        0x2 => rrr(FpRrrOp::MulS),
+        0x4 => rrr(FpRrrOp::MaddS),
+        0x5 => rrr(FpRrrOp::MsubS),
+        0x6 => rrr(FpRrrOp::MaddnS),
+        0x7 => rrr(FpRrrOp::DivnS),
+        0x8 => to_int(FpToIntOp::RoundS),
+        0x9 => to_int(FpToIntOp::TruncS),
+        0xa => to_int(FpToIntOp::FloorS),
+        0xb => to_int(FpToIntOp::CeilS),
+        0xc => to_fp(IntToFpOp::FloatS),
+        0xd => to_fp(IntToFpOp::UfloatS),
+        0xe => to_int(FpToIntOp::UtruncS),
+        0xf => decode_fp1_unary(w),
+        _ => None,
+    }
+}
+
+/// `op0 = 0, op1 = 0xA, op2 = 0xF`: the FP1 unary group, keyed by `t`.
+///
+/// `t = 2` is unassigned as far as `xtensa-esp32s3-elf-objdump` is concerned;
+/// it stays unsupported rather than being guessed at. (`t = 0xC` was once on
+/// that list too — wrongly: objdump disassembles it as `mksadj.s`, and the
+/// toolchain's `__ieee754_sqrtf` sequence uses it. Found by M6 P6.)
+fn decode_fp1_unary(w: u32) -> Option<Inst> {
+    let rr = |op| Some(Inst::FpRr(op, freg_r(w), freg_s(w)));
+    match t(w) {
+        0x0 => rr(FpRrOp::MovS),
+        0x1 => rr(FpRrOp::AbsS),
+        // const.s takes an immediate in the `s` field, not a source register.
+        0x3 => Some(Inst::ConstS(freg_r(w), s(w))),
+        0x4 => Some(Inst::Rfr(reg_r(w), freg_s(w))),
+        0x5 => Some(Inst::Wfr(freg_r(w), reg_s(w))),
+        0x6 => rr(FpRrOp::NegS),
+        0x7 => rr(FpRrOp::Div0S),
+        0x8 => rr(FpRrOp::Recip0S),
+        0x9 => rr(FpRrOp::Sqrt0S),
+        0xa => rr(FpRrOp::Rsqrt0S),
+        0xb => rr(FpRrOp::Nexp01S),
+        0xc => rr(FpRrOp::MksadjS),
+        0xd => rr(FpRrOp::MkdadjS),
+        0xe => rr(FpRrOp::AddexpS),
+        0xf => rr(FpRrOp::AddexpmS),
+        _ => None,
+    }
+}
+
+/// `op0 = 0, op1 = 0xB`: FP compares (result → BR) and conditional moves,
+/// sub-decoded by `op2`.
+fn decode_fp1(w: u32) -> Option<Inst> {
+    let cmp = |op| Some(Inst::FpCmp(op, breg_r(w), freg_s(w), freg_t(w)));
+    let mov_ar = |op| Some(Inst::FpMovAr(op, freg_r(w), freg_s(w), reg_t(w)));
+    let mov_br = |op| Some(Inst::FpMovBr(op, freg_r(w), freg_s(w), breg_t(w)));
+    match op2(w) {
+        0x1 => cmp(FpCmpOp::UnS),
+        0x2 => cmp(FpCmpOp::OeqS),
+        0x3 => cmp(FpCmpOp::UeqS),
+        0x4 => cmp(FpCmpOp::OltS),
+        0x5 => cmp(FpCmpOp::UltS),
+        0x6 => cmp(FpCmpOp::OleS),
+        0x7 => cmp(FpCmpOp::UleS),
+        0x8 => mov_ar(FpMovArOp::MoveqzS),
+        0x9 => mov_ar(FpMovArOp::MovnezS),
+        0xa => mov_ar(FpMovArOp::MovltzS),
+        0xb => mov_ar(FpMovArOp::MovgezS),
+        0xc => mov_br(FpMovBrOp::MovfS),
+        0xd => mov_br(FpMovBrOp::MovtS),
+        _ => None,
+    }
+}
+
+/// `op0 = 3`: immediate-offset FP load/store (`RRI8`), disambiguated by `r`.
+/// The `imm8` field holds `offset / 4`.
+fn decode_fp_lsi(w: u32) -> Option<Inst> {
+    let op = match r(w) {
+        0x0 => FpLsiOp::Lsi,
+        0x4 => FpLsiOp::Ssi,
+        0x8 => FpLsiOp::Lsip,
+        0xc => FpLsiOp::Ssip,
+        _ => return None,
+    };
+    Some(Inst::FpLsi(op, freg_t(w), reg_s(w), imm8(w) as u32 * 4))
 }
 
 /// `op0 = 0, op1 = 0`: RST0, sub-decoded by `op2`.
@@ -285,6 +419,8 @@ fn decode_rst1(w: u32) -> Option<Inst> {
             Some(Inst::Srai(reg_r(w), reg_t(w), sa))
         }
         0x4 => Some(Inst::Srli(reg_r(w), reg_t(w), s(w))),
+        // XSR sits in RST1, unlike RSR/WSR which sit in RST3.
+        0x6 => sr_access(w, SrOp::Xsr),
         0x8 => Some(Inst::Rrr(AluRrr::Src, reg_r(w), reg_s(w), reg_t(w))),
         0x9 if s(w) == 0 => Some(Inst::Rt(AluRt::Srl, reg_r(w), reg_t(w))),
         0xa if t(w) == 0 => Some(Inst::Rs(AluRs::Sll, reg_r(w), reg_s(w))),
@@ -314,6 +450,8 @@ fn decode_rst2(w: u32) -> Option<Inst> {
 fn decode_rst3(w: u32) -> Option<Inst> {
     let alu = |op| Some(Inst::Rrr(op, reg_r(w), reg_s(w), reg_t(w)));
     match op2(w) {
+        0x0 => sr_access(w, SrOp::Rsr),
+        0x1 => sr_access(w, SrOp::Wsr),
         0x2 => Some(Inst::Sext(reg_r(w), reg_s(w), t(w) + 7)),
         0x4 => alu(AluRrr::Min),
         0x5 => alu(AluRrr::Max),
@@ -323,8 +461,23 @@ fn decode_rst3(w: u32) -> Option<Inst> {
         0x9 => alu(AluRrr::Movnez),
         0xa => alu(AluRrr::Movltz),
         0xb => alu(AluRrr::Movgez),
+        0xc => Some(Inst::MovBool(false, reg_r(w), reg_s(w), breg_t(w))),
+        0xd => Some(Inst::MovBool(true, reg_r(w), reg_s(w), breg_t(w))),
+        // RUR reads the user register from (s << 4) | t, and writes `r`.
+        0xe => UserReg::from_num((s(w) << 4) | t(w))
+            .map(|ur| Inst::Ur(UrOp::Rur, ur, Reg::from_nibble(r(w)))),
+        // WUR takes the user register from (r << 4) | s, and reads `t`.
+        0xf => UserReg::from_num((r(w) << 4) | s(w))
+            .map(|ur| Inst::Ur(UrOp::Wur, ur, Reg::from_nibble(t(w)))),
         _ => None,
     }
+}
+
+/// Decode an `RSR`/`WSR`/`XSR` word: the special-register number is
+/// `(r << 4) | s` and `t` is the address register. `None` for any register
+/// outside [`SpecialReg`]'s narrow modeled set.
+fn sr_access(w: u32, op: SrOp) -> Option<Inst> {
+    SpecialReg::from_num((r(w) << 4) | s(w)).map(|sreg| Inst::Sr(op, sreg, reg_t(w)))
 }
 
 /// `op0 = 2`: RRI8 loads/stores plus movi/addi/addmi (disambiguated by `r`).
@@ -413,7 +566,14 @@ fn decode_op0_6(w: u32) -> Option<Inst> {
                     off,
                 ))
             }
-            _ => None, // m == 1: BI1 (bf/bt boolean, loop) — unsupported
+            // BI1: bf/bt boolean branches (r = 0/1); the loop family
+            // (r = 8/9/0xA) stays unsupported.
+            0x1 => match r(w) {
+                0x0 => Some(Inst::BranchBool(false, breg_s(w), imm8(w) as i8 as i32)),
+                0x1 => Some(Inst::BranchBool(true, breg_s(w), imm8(w) as i8 as i32)),
+                _ => None,
+            },
+            _ => unreachable!(),
         },
         _ => unreachable!(),
     }

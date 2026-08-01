@@ -235,6 +235,26 @@ pub enum ImmOp {
     /// `(PC & !3) + 4`, multiple of 4 (signed 18-bit *word* offset; target is
     /// always 4-aligned).
     CallDisp,
+    /// `lsi`/`ssi ft, as, off` — the **float** load/store offset: unsigned
+    /// 0..=1020, multiple of 4 (ISA RM, *Load Single Immediate*, p. 399 — the
+    /// `imm8` field holds `off / 4`).
+    ///
+    /// Numerically identical to [`ImmOp::L32i`]/[`ImmOp::S32i`], and a separate
+    /// entry anyway, for two reasons. It is the offset of a *different*
+    /// instruction on a different register file, so the two ranges are free to
+    /// diverge without this table lying; and, more urgently, it is the entry
+    /// that gates a known silent-corruption hazard.
+    ///
+    /// **The hazard:** `lp_xt_inst`'s encoder computes the field as
+    /// `(offset / 4) & 0xff` with no range check. A float spill slot at offset
+    /// 1024 therefore encodes as field 0 — it stores to `[base + 0]`, a
+    /// perfectly valid address holding some other live value, with no
+    /// diagnostic anywhere. Nothing downstream can distinguish that from a
+    /// correct spill. Every float spill offset must be gated through
+    /// [`is_legal`] before it reaches the encoder; past the limit, the emitter
+    /// takes [`Fallback::AddressScratch`] (compute `base + offset` into `a8`
+    /// and use offset 0) rather than truncating.
+    FpLsiOffset,
 }
 
 impl ImmOp {
@@ -274,6 +294,7 @@ impl ImmOp {
         ImmOp::BranchB4Constu,
         ImmOp::JDisp,
         ImmOp::CallDisp,
+        ImmOp::FpLsiOffset,
     ];
 }
 
@@ -325,6 +346,9 @@ pub const fn spec(op: ImmOp) -> ImmSpec {
         }
         ImmOp::L32i | ImmOp::S32i => plain(scaled(0, 1020, 4), false, Fallback::AddressScratch),
         ImmOp::L32iN | ImmOp::S32iN => plain(scaled(0, 60, 4), false, Fallback::WideForm),
+        // -- float load/store offset (`lsi`/`ssi`); see the variant's doc for
+        //    why the encoder's missing range check makes this load-bearing --
+        ImmOp::FpLsiOffset => plain(scaled(0, 1020, 4), false, Fallback::AddressScratch),
         // -- literal pool --
         ImmOp::L32rDisp => pcrel(
             scaled(-262144, -4, 4),

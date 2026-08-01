@@ -89,12 +89,27 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu, xtn, xtlpn — used for error
-/// messages and CLI.
+/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu, xtn, xtlpn, wasm.f32 — used
+/// for error messages and CLI.
 ///
-/// The Xtensa pair is **appended**, deliberately: [`DEFAULT_TARGETS`] indexes into
-/// this list, so inserting anywhere else would silently repoint the defaults.
-/// `test_default_targets_order_matches_const` is the guard.
+/// Everything after `rv32lpn.q32` is **appended**, deliberately: [`DEFAULT_TARGETS`]
+/// indexes into this list, so inserting anywhere else would silently repoint the
+/// defaults. `test_default_targets_order_matches_const` is the guard.
+///
+/// `wasm.f32` is the first *native-code* f32 target: the `lpvm-wasm` backend has
+/// always had a `FloatMode::F32` emit path, but nothing ever executed it. It is
+/// deliberately **not** in [`DEFAULT_TARGETS`] — see the corpus findings from the
+/// run that first exercised it (`@lpfn`/`@glsl` builtin imports still resolve to
+/// the Q32 builtin ids, so any file calling one produces an invalid module).
+///
+/// `rv32n.f32` / `rv32lpn.f32` are the **soft-float** rv32 targets (roadmap M9):
+/// the same `lpvm-native` backend, compiled in `FloatMode::F32`, where every
+/// float op is a call to `__addsf3` and friends inside `lp-riscv-emu`. Also
+/// deliberately **not** in [`DEFAULT_TARGETS`] (roadmap Q6: rv32 f32 variants run
+/// on demand). They are slow — each arithmetic op is a function call through the
+/// emulator — and they are not the shipping numeric mode for any rv32 board, so
+/// their cost belongs to a deliberate run, not to every `cargo test`. Select them
+/// explicitly: `-t rv32lpn.f32`.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         frontend: Frontend::Naga,
@@ -150,6 +165,27 @@ pub const ALL_TARGETS: &[Target] = &[
         backend: Backend::Xtfa,
         float_mode: FloatMode::Q32,
         isa: Isa::Xtensa,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Wasm,
+        float_mode: FloatMode::F32,
+        isa: Isa::Wasm32,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Rv32fa,
+        float_mode: FloatMode::F32,
+        isa: Isa::Riscv32,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Lp,
+        backend: Backend::Rv32fa,
+        float_mode: FloatMode::F32,
+        isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
 ];

@@ -38,6 +38,14 @@ impl LpvmModule for NativeEmuModule {
         &self.meta
     }
 
+    /// Both halves of the answer are on this module already: the mode it was
+    /// compiled in and the ISA it was compiled for. Neither alone is enough —
+    /// the same `FloatMode::F32` is hardware float on an S3 and soft float on
+    /// a C6.
+    fn float_impl(&self) -> lpvm::FloatImpl {
+        self.isa.float_impl_for(self.options.float_mode)
+    }
+
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         use lpvm::AllocError;
 
