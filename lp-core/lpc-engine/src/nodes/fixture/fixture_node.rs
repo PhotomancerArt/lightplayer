@@ -2680,11 +2680,11 @@ mod tests {
         let accs = [
             Q32::ZERO,
             Q32(1),
-            Q32(16384),  // 0.25
-            Q32(32768),  // 0.5
-            Q32(65535),  // one raw count under 1.0
-            Q32::ONE,    // exactly 1.0 — the saturation edge
-            Q32(90000),  // accumulation overshoot, saturates
+            Q32(16384), // 0.25
+            Q32(32768), // 0.5
+            Q32(65535), // one raw count under 1.0
+            Q32::ONE,   // exactly 1.0 — the saturation edge
+            Q32(90000), // accumulation overshoot, saturates
         ];
         for brightness_u8 in [0u8, 1, 38, 64, 127, 128, 254, 255] {
             let brightness = brightness_u8.to_q32() / 255.to_q32();
