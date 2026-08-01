@@ -44,6 +44,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 
 use lp_xt_emu::cpu::CPENABLE_FPU;
+use lp_xt_emu::fp_capture::{Prediction, parse_predictions};
 use lp_xt_emu::fp_policy::parse_unresolved;
 use lp_xt_emu::{Emulator, Trap};
 use lp_xt_fp_vectors::{Family, OpCode, Vector, count, fingerprint, vector};
@@ -56,37 +57,6 @@ const SRC_B_F: u8 = 2;
 const DEST_B: u8 = 0;
 const SRC_INT_A: u8 = 2;
 const DEST_INT_A: u8 = 3;
-
-/// What the emulator predicts for one vector.
-#[derive(Clone, PartialEq, Eq, Debug)]
-enum Prediction {
-    /// A concrete answer: IEEE-fixed, or resolved policy.
-    Bits(u32),
-    /// The instruction faulted; the value is the EXCCAUSE.
-    Trap(u32),
-    /// The prediction needs a policy field nothing has measured yet.
-    Unknown(String),
-}
-
-impl Prediction {
-    fn render(&self) -> String {
-        match self {
-            Prediction::Bits(b) => format!("{b:#010x}"),
-            Prediction::Trap(c) => format!("TRAP:{c}"),
-            Prediction::Unknown(f) => format!("UNKNOWN:{f}"),
-        }
-    }
-
-    fn parse(s: &str) -> Prediction {
-        if let Some(f) = s.strip_prefix("UNKNOWN:") {
-            Prediction::Unknown(f.to_string())
-        } else if let Some(c) = s.strip_prefix("TRAP:") {
-            Prediction::Trap(c.parse().expect("trap cause"))
-        } else {
-            Prediction::Bits(u32::from_str_radix(s.trim_start_matches("0x"), 16).expect("bits"))
-        }
-    }
-}
 
 /// Build the instruction a vector names, or `None` for the pseudo-ops.
 fn instruction(v: &Vector) -> Option<Inst> {
@@ -298,30 +268,19 @@ fn row(v: &Vector, p: &Prediction) -> String {
     )
 }
 
-/// The committed predictions for one family: `index -> (rendered row, result)`.
+/// The committed predictions for one family.
+///
+/// Parsed by [`parse_predictions`] — the *same* parser the campaign's diff tool
+/// uses (`just fp-diff`), so a corpus file this replay accepts and the diff tool
+/// chokes on cannot exist.
 fn read_fixture(family: Family) -> Option<(u32, Vec<(u32, Prediction)>)> {
     let text =
         std::fs::read_to_string(fixtures_dir().join(format!("{}.txt", family.name()))).ok()?;
-    let mut fp = 0u32;
-    let mut rows = Vec::new();
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("# generator:") {
-            let tok = rest
-                .split_whitespace()
-                .find(|t| t.starts_with("0x"))
-                .expect("fingerprint in the header");
-            fp = u32::from_str_radix(tok.trim_end_matches(',').trim_start_matches("0x"), 16)
-                .expect("fingerprint hex");
-        }
-        if line.starts_with('#') || line.trim().is_empty() {
-            continue;
-        }
-        let (lhs, rhs) = line.split_once("->").expect("every row has an arrow");
-        let index: u32 = lhs.split_whitespace().next().unwrap().parse().unwrap();
-        let result = rhs.split_whitespace().next().unwrap();
-        rows.push((index, Prediction::parse(result)));
-    }
-    Some((fp, rows))
+    let p = parse_predictions(family.name(), &text).expect("committed corpus must parse");
+    Some((
+        p.fingerprint,
+        p.rows.into_iter().map(|(i, _, pred)| (i, pred)).collect(),
+    ))
 }
 
 fn write_fixture(family: Family, rows: &[(Vector, Prediction)]) {

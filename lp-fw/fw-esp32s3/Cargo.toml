@@ -65,6 +65,19 @@ test_xt_jit_corpus = [
     "dep:lps-builtins",
 ]
 
+# The M6 FP conformance rig: runs the `lp-xt-fp-vectors` corpus on the FPU and
+# prints `(result, FSR)` per vector for the host to diff against predictions
+# committed before any board ran. Also carries the estimate-table sweep
+# (`LP_FP_MODE=tables`), which reads the implementation-defined lookup ROMs
+# behind `recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s` back exhaustively.
+#
+# The generator crate is the SAME one the host predicted with — that is the
+# whole design (M6 D3), and both sides print its fingerprint so a drift is a
+# hard stop rather than a quiet mis-comparison. It is `no_std`, dependency-free
+# and performs no float arithmetic, so it costs this image nothing but its own
+# table constants.
+test_xt_fp_conformance = ["dep:lp-xt-fp-vectors"]
+
 [dependencies]
 esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
 esp-backtrace = { version = "0.19.0", features = ["println"] }
@@ -183,6 +196,11 @@ lpvm = { path = "../../lp-shader/lpvm", default-features = false, optional = tru
 lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, optional = true }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
+
+# The M6 FP conformance corpus generator. Harness-only, `no_std`, no
+# dependencies of its own, and float-free by a checked property — it must be,
+# since on this board it would otherwise need the very FPU it characterizes.
+lp-xt-fp-vectors = { path = "../../lp-xt/lp-xt-fp-vectors", optional = true }
 
 [lints]
 workspace = true

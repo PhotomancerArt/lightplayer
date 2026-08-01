@@ -606,7 +606,7 @@ clippy-fw-esp32s3:
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -751,6 +751,92 @@ fwtest-loopback-esp32s3 port="":
       args+=(--port "{{ port }}")
     fi
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Run the M6 FP conformance corpus on a connected ESP32-S3 and capture it.
+#
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # everything
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+#
+# `family` is an `lp-xt-fp-vectors` family name (rounding, nan_payload,
+# denormal, signed_zero, div_sqrt, convert), or `tables` for the estimate-table
+# sweep. `limit` caps each family; 0 runs all of it.
+#
+# ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
+# predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
+# `cargo test -p lp-xt-emu --test fp_conformance`, which needs no board. A
+# device disagreement is a finding to triage — never a reason to edit a golden.
+# Regenerating a prediction from device output turns the whole campaign into a
+# tautology that passes forever.
+#
+# CAPTURE MECHANISM (an operational finding, recorded here so it is not
+# rediscovered): `espflash flash --monitor` needs a pty, so a naive `| tee`
+# breaks it. `script -q <file> espflash …` supplies one and tees in a single
+# step. The harness never exits — it prints its sentinel and parks — so this
+# polls the capture for `END-ALL` and then interrupts espflash. A bare
+# `espflash monitor` NEVER attaches on the S3's USB-Serial-JTAG; that is a
+# different thing from a raw port open. See docs/debt/ if this ever needs a
+# second mechanism.
+#
+# `--flash-size {{ s3_flash_size }}` is not optional: omitting it boot-loops a
+# 16 MB board. If the port wedges (`ps` shows STAT `Us+` and `kill -9` does not
+# land), STOP and ask for a physical replug — do not thrash.
+fwtest-xt-fp-esp32s3 port="" family="" limit="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mode=families
+    family="{{ family }}"
+    if [[ "$family" == "tables" ]]; then
+      mode=tables
+      family=""
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/fpconf-$(date +%Y%m%d-%H%M%S).txt"
+    (cd lp-fw/fw-esp32s3 && \
+      LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
+      cargo build --profile release-esp32s3 --features test_xt_fp_conformance)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    # `</dev/null` is load-bearing: `script` hands its child the terminal, and a
+    # backgrounded espflash reading the same stdin as this shell eats keystrokes
+    # and gets an EOF for its port prompt. The harness never reads anything, so
+    # there is nothing to give it.
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32s3_elf }} </dev/null &
+    cap=$!
+    # Poll rather than wait: the harness parks forever after its sentinel, so
+    # there is nothing to wait FOR except the sentinel itself.
+    for _ in $(seq 1 600); do
+      if grep -q 'END-ALL' "$out" 2>/dev/null; then break; fi
+      if ! kill -0 "$cap" 2>/dev/null; then break; fi
+      sleep 1
+    done
+    # SIGINT first — that is what Ctrl-C sends, and espflash releases the port
+    # cleanly on it. Escalate only if it does not.
+    kill -INT "$cap" 2>/dev/null || true
+    sleep 2
+    kill -TERM "$cap" 2>/dev/null || true
+    wait "$cap" 2>/dev/null || true
+    echo "captured $(wc -l < "$out") lines to $out"
+    just fp-diff "$out"
+
+# Diff an FP conformance capture against the committed host predictions.
+#
+# Classifies every row AGREE / DIVERGE / RESOLVED / SKIPPED and prints the full
+# divergence list. ABORTS on a fingerprint mismatch (the two sides generated
+# different inputs, so nothing after it means anything) and on a missing end
+# sentinel (a truncated capture is an error, not a partial pass).
+#
+#   just fp-diff target/fp-capture/fpconf-20260731-190000.txt
+fp-diff capture:
+    FP_CAPTURE="{{ absolute_path(capture) }}" \
+      cargo test -p lp-xt-emu --test fp_capture -- --nocapture --test-threads=1
 
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
