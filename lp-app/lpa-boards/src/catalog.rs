@@ -41,6 +41,10 @@ pub const DISPLAY_MANIFEST_SOURCES: &[(&str, &str)] = &[
         "quinled/dig-uno",
         include_str!("../../../lp-core/lpc-hardware/boards/quinled/dig-uno.display.json"),
     ),
+    (
+        "domraem/dom-z-102",
+        include_str!("../../../lp-core/lpc-hardware/boards/domraem/dom-z-102.display.json"),
+    ),
 ];
 
 /// Every checked-in board, parsed once. Panics on malformed embedded data —

@@ -73,6 +73,9 @@ code and its exclusive dependencies from the build; it never changes what a
 default build (`default-features = true`, the normal host/studio/test build)
 compiles or runs. They exist so a constrained firmware build — the S3 app
 layer; see the M2 plan — can link only the node kinds it actually uses.
+As of 2026-07-31 (the S3 node-gates plan) no in-tree firmware is gated down:
+`fw-esp32c6` and `fw-esp32s3` both enable all eight, and the gates remain for
+genuinely constrained future boards.
 
 Do not read `node-shader` as a step toward making the GLSL JIT compiler
 itself opt-in on `lpc-engine`/`lpa-server` — see the hard rule in

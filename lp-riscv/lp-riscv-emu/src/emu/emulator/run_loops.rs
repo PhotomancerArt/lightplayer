@@ -271,8 +271,13 @@ impl Riscv32Emulator {
 
             let pc = self.pc;
             // Execute using fast path (no logging)
-            let exec_result =
-                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            let exec_result = decode_execute::<LoggingDisabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?;
             self.after_execute(pc, &exec_result);
 
             let pc_increment = u32::from(exec_result.inst_size);
@@ -356,8 +361,13 @@ impl Riscv32Emulator {
 
             let pc = self.pc;
             // Execute using logging path
-            let exec_result =
-                decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            let exec_result = decode_execute::<LoggingEnabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?;
             self.after_execute(pc, &exec_result);
 
             let pc_increment = u32::from(exec_result.inst_size);

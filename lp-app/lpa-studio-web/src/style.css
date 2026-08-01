@@ -2967,3 +2967,211 @@ label:has(> input:not(:disabled)) {
     }
 
 }
+
+/* ---- board diagrams (lpa-boards BoardDiagram) --------------------------
+   The row-engine renderer's palette, mapped onto the studio system. Where a
+   studio semantic family exists it is used directly — conn = bound (violet,
+   never green), adc = good, touch = attention, dac = live, pwr = error —
+   and hues the palette lacks (spi, i2c, uart, amber strap/usb, silk slate)
+   carry literal values tuned against the dark surfaces in the approved
+   spike (spikes/hardware-boards, rev 5). Geometry never lives here: every
+   size the design language derives from `u` is computed in
+   lpa-boards/src/geometry.rs and arrives inline. */
+
+.lpb-diagram {
+    display: block;
+}
+
+.lpb-pcb {
+    fill: #101418;
+    stroke: #2c3440;
+    stroke-width: 1.5;
+}
+
+.lpb-hole {
+    fill: var(--studio-color-bg);
+    stroke: #2c3440;
+}
+
+.lpb-antenna {
+    fill: none;
+    stroke: #2c3440;
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+
+.lpb-antenna-zigzag {
+    fill: none;
+    stroke: #8b93a0;
+    stroke-width: 1;
+    opacity: 0.7;
+}
+
+.lpb-module {
+    fill: #1a2027;
+    stroke: #39414d;
+    stroke-width: 1.2;
+}
+
+.lpb-module-label {
+    font-family: var(--studio-font-mono);
+    font-weight: 700;
+    fill: #8d96a4;
+}
+
+.lpb-usb {
+    fill: #2b313a;
+    stroke: #454d59;
+    stroke-width: 1;
+}
+
+.lpb-button {
+    fill: #232830;
+    stroke: #454d59;
+}
+
+.lpb-button-cap {
+    fill: #3a414c;
+}
+
+.lpb-rgb {
+    fill: #20262e;
+    stroke: #454d59;
+}
+
+.lpb-rgb-die {
+    fill: #5a5470;
+}
+
+.lpb-terminal {
+    fill: #1d232b;
+    stroke: #454d59;
+}
+
+.lpb-screw {
+    fill: none;
+    stroke: #5a6270;
+    stroke-width: 1.6;
+}
+
+.lpb-silk {
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+    font-size: 6.5px;
+    fill: #8b93a0;
+}
+
+.lpb-pinlabel {
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+}
+
+.lpb-leader {
+    fill: none;
+    stroke: var(--studio-color-border-strong);
+    stroke-width: 1;
+}
+
+.lpb-cell-rect {
+    stroke-width: 0.8;
+}
+
+.lpb-cell-text {
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+}
+
+/* Pad fills by pin role: physical-marker colors, not UI semantics. */
+.lpb-pad--pwr5 { fill: #b3564f; }
+.lpb-pad--pwr3 { fill: #a3703f; }
+.lpb-pad--gnd  { fill: #3a3f48; }
+.lpb-pad--io   { fill: #4a5260; }
+.lpb-pad--ioin { fill: #3d4854; }
+.lpb-pad--strap { fill: #8a6d3a; }
+.lpb-pad--usb  { fill: #8a6d3a; }
+.lpb-pad--ctl  { fill: #556070; }
+.lpb-pad--nc   { fill: #2a2e35; }
+
+/* Cell families: rect fill/stroke + text fill (labels reuse via lpb-fg--*). */
+.lpb-cell--name .lpb-cell-rect { fill: rgba(138, 143, 152, 0.1); stroke: #4a5260; }
+.lpb-cell--name .lpb-cell-text, .lpb-fg--name { fill: #c7cdd6; }
+
+.lpb-cell--pwr .lpb-cell-rect { fill: var(--studio-status-error-bg); stroke: var(--studio-status-error-border); }
+.lpb-cell--pwr .lpb-cell-text, .lpb-fg--pwr { fill: #e99a97; }
+
+.lpb-cell--gnd .lpb-cell-rect { fill: rgba(255, 255, 255, 0.03); stroke: #33383f; }
+.lpb-cell--gnd .lpb-cell-text, .lpb-fg--gnd { fill: #767c85; }
+
+.lpb-cell--ctl .lpb-cell-rect { fill: rgba(138, 143, 152, 0.08); stroke: #454b54; }
+.lpb-cell--ctl .lpb-cell-text, .lpb-fg--ctl { fill: #9aa1ab; }
+
+.lpb-cell--adc .lpb-cell-rect { fill: var(--studio-status-good-bg); stroke: var(--studio-status-good-border); }
+.lpb-cell--adc .lpb-cell-text, .lpb-fg--adc { fill: var(--studio-status-good-text); }
+
+.lpb-cell--dac .lpb-cell-rect { fill: var(--studio-status-live-bg); stroke: var(--studio-status-live-border); }
+.lpb-cell--dac .lpb-cell-text, .lpb-fg--dac { fill: var(--studio-status-live-text); }
+
+.lpb-cell--touch .lpb-cell-rect { fill: var(--studio-status-attention-bg); stroke: var(--studio-status-attention-border); }
+.lpb-cell--touch .lpb-cell-text, .lpb-fg--touch { fill: var(--studio-status-attention-text); }
+
+.lpb-cell--spi .lpb-cell-rect { fill: rgba(167, 139, 250, 0.1); stroke: #54487c; }
+.lpb-cell--spi .lpb-cell-text, .lpb-fg--spi { fill: #b9a2f6; }
+
+.lpb-cell--i2c .lpb-cell-rect { fill: rgba(47, 212, 201, 0.09); stroke: #265c58; }
+.lpb-cell--i2c .lpb-cell-text, .lpb-fg--i2c { fill: #59d8cf; }
+
+.lpb-cell--uart .lpb-cell-rect { fill: rgba(201, 141, 92, 0.1); stroke: #5f4530; }
+.lpb-cell--uart .lpb-cell-text, .lpb-fg--uart { fill: #d3a077; }
+
+.lpb-cell--usb .lpb-cell-rect { fill: rgba(228, 192, 101, 0.1); stroke: #6a5a30; }
+.lpb-cell--usb .lpb-cell-text, .lpb-fg--usb { fill: #e0c377; }
+
+.lpb-cell--strap .lpb-cell-rect { fill: rgba(228, 192, 101, 0.08); stroke: #5c512e; }
+.lpb-cell--strap .lpb-cell-text, .lpb-fg--strap { fill: #cbb168; }
+
+.lpb-cell--warn .lpb-cell-rect { fill: rgba(240, 145, 59, 0.07); stroke: #5c4224; }
+.lpb-cell--warn .lpb-cell-text, .lpb-fg--warn { fill: #c98d5c; }
+
+.lpb-cell--note .lpb-cell-rect { fill: rgba(255, 255, 255, 0.03); stroke: #3a3f48; }
+.lpb-cell--note .lpb-cell-text, .lpb-fg--note { fill: #8b93a0; }
+
+/* Bound connection: the studio bound family. Violet, never green. */
+.lpb-cell--conn .lpb-cell-rect { fill: var(--studio-status-bound-bg); stroke: var(--studio-status-bound-border); stroke-width: 1; }
+.lpb-cell--conn .lpb-cell-text, .lpb-fg--conn { fill: var(--studio-status-bound-text); }
+
+/* Discovery swatch cells: neutral frame; the confirmed pin goes bound. */
+.lpb-cell--swatch .lpb-cell-rect { fill: rgba(138, 143, 152, 0.1); stroke: #3a3f48; }
+.lpb-cell--swatch-selected .lpb-cell-rect { fill: var(--studio-status-bound-bg); stroke: var(--studio-status-bound-border); stroke-width: 1.4; }
+.lpb-swatch-px { stroke: rgba(255, 255, 255, 0.12); stroke-width: 0.5; }
+
+/* Anatomy annotations (the design-language figure). */
+.lpb-anat-line {
+    stroke: #e4c065;
+    stroke-width: 0.9;
+    stroke-dasharray: 2 2.5;
+    opacity: 0.65;
+    fill: none;
+}
+
+.lpb-anat-dot {
+    fill: #e4c065;
+}
+
+.lpb-anat-label {
+    font-family: var(--studio-font-sans);
+    font-weight: 700;
+    font-size: 8px;
+    fill: #e4c065;
+}
+
+.lpb-anat-shape {
+    stroke: #e4c065;
+    fill: none;
+    stroke-width: 1;
+    stroke-dasharray: 3 2.5;
+    opacity: 0.8;
+}
+
+.lpb-anat-solid {
+    stroke-dasharray: none;
+}
