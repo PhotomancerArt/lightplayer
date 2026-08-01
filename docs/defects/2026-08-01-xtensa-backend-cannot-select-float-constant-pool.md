@@ -2,8 +2,11 @@
 status: open           # the backend is still broken; our source avoids it (see "The workaround")
 found: 2026-08-01      # how: build (M7 P4, flipping the Xtensa builtins image to float-f32)
 worked-around: 2026-08-01   # rgb2hsv_f32.rs; f32 image and filetests unblocked
+re-broke: 2026-08-01        # same function, `w` lanes, under fw-esp32s3's LTO — see "It recurred"
+worked-around-again: 2026-08-01  # black_box barrier at the bitcast (pick_bits)
 area: lp-xt/lps-builtins-xt-app, lp-shader/lps-builtins, esp Rust toolchain
 class: upstream-toolchain-limitation
+upstream: https://github.com/esp-rs/rust/issues/282   # filed 2026-08-01
 related:
   - docs/design/float.md
   - docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md
@@ -124,19 +127,54 @@ flash-resident, so it never shared the code region to begin with), and
 `--features float-f32` **is** the Xtensa builtins image's unconditional
 default.
 
+## It recurred, in the same function, three hours later (2026-08-01)
+
+The paragraph below predicted M7 P5 would be exposed to this. It was, and the
+detail is the useful part: **the workaround had silently undone itself.**
+
+`fw-esp32s3` naming `lps-builtins/float-f32` failed with the same error on a
+*different* pair — `[2 x float] [-0.33333334, 0.66666669]`, which is
+`P_W_ELSE`/`P_W_IF`, the `w` lanes. Those were already u32 constants selected
+in the integer domain. `f32::from_bits` is a no-op bitcast, so LLVM rewrote
+`bitcast(select(c, i32 A, i32 B))` back into `select(c, float A', float B')`
+and then pooled the two constants as a lookup table — reconstructing exactly
+the node the first fix removed.
+
+Why it appeared now and not in July: it is **optimisation-context dependent**.
+The builtins image (`lps-builtins-xt-app`) still compiled clean; `fw-esp32s3`
+inlines this through fat LTO in one codegen unit and made a different choice.
+So "the workaround works" was only ever a statement about one build.
+
+**Second fix, and the reason it is structural rather than lucky:** a
+`core::hint::black_box` between the integer select and the bitcast
+(`pick_bits` in `rgb2hsv_f32.rs`). The value is opaque at the bitcast, so no
+fold can reach back to the constants and no float pair is ever available to
+pool. It costs an optimiser barrier on two words in one builtin.
+
+The lesson generalises past this defect: **a workaround expressed as "write it
+in a form the optimiser currently prefers" is not a workaround, it is a
+coincidence with a timer on it.** The first fix was verified against the build
+that failed and declared done; nothing pinned it against a *different*
+optimisation context, and there was no test that could have — the failure is a
+compile error in one crate graph and clean in another.
+
 ## Why this stays open
 
 The backend limitation is untouched. A new `[f32; N]` constant aggregate
 anywhere in `lps-builtins` will fail the same way, with the same one-function-
-at-a-time reporting, and **M7 P5's `fw-esp32s3` naming `lps-builtins/float-f32`
-is exposed to it**. It closes when the esp fork can select
-`PCREL_WRAPPER(TargetConstantPool)` and the toolchain is pinned past that.
+at-a-time reporting, and any *existing* float-constant select can be re-formed
+into one by an optimisation context we have not built yet. It closes when the
+esp fork can select `PCREL_WRAPPER(TargetConstantPool)` and the toolchain is
+pinned past that — filed as
+[esp-rs/rust#282](https://github.com/esp-rs/rust/issues/282).
 
 ## Remaining resolutions
 
-1. **Report upstream** to `esp-rs/rust` and pin the toolchain once fixed. Not
-   yet filed; the comment in `rgb2hsv_f32.rs` and the one in
-   `build-builtins-xt.sh` are shaped for the URL to be dropped in.
+1. **Report upstream** to `esp-rs/rust` and pin the toolchain once fixed.
+   **Filed 2026-08-01 as [esp-rs/rust#282](https://github.com/esp-rs/rust/issues/282)**,
+   and both workaround sites (`rgb2hsv_f32.rs`, `build-builtins-xt.sh`) now
+   carry that URL, so each one states its own expiry. What remains is the
+   toolchain pin, which cannot happen until the issue closes.
 2. **Split the f32 builtin feature** so the generative-noise family is
    separately gated. No longer needed — this was the fallback for "Xtensa
    cannot have the noise family at all", and it can.

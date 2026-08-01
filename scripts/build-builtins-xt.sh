@@ -55,6 +55,7 @@ export CARGO_TARGET_DIR="$PWD/target"
 #    cannot select a float constant pool. Worked around on our side, with a
 #    bit-equivalence test, in lps-builtins' rgb2hsv_f32.rs.
 #      docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
+#      upstream: https://github.com/esp-rs/rust/issues/282
 # 2. It then did not *fit*: link.ld gave .text 112 KiB of the emulator's 128 KiB
 #    code region and `rt_emu::xt_image` placed compiled shader code in whatever
 #    was left after it — 931 bytes with float-f32 in, which dropped the xtn.q32
