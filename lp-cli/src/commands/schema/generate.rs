@@ -5,7 +5,7 @@
 //!
 //! - `project.schema.json` — authored `project.json` roots: top-level
 //!   `kind: "Project"` const, `format` pinned to
-//!   [`lpc_model::PROJECT_FORMAT_VERSION`], and the compiled `ProjectDef`
+//!   [`lpc_model::PROJECT_FORMAT_VERSION`], and the compiled `ModuleDef`
 //!   shape (mirrors the loader gate in `lpc-registry`, which rejects project
 //!   roots whose `format` is missing or mismatched).
 //! - `node.schema.json` — any authored node artifact: `oneOf` over every
@@ -35,7 +35,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use lpc_hardware::HardwareManifestFile;
 use lpc_model::schema_gen::{compile_registered_slot_shape_schema, compile_slot_shape_schema};
 use lpc_model::{
-    NodeArtifact, PROJECT_FORMAT_VERSION, ProjectDef, Revision, SlotEnumEncoding, SlotMeta,
+    NodeArtifact, PROJECT_FORMAT_VERSION, ModuleDef, Revision, SlotEnumEncoding, SlotMeta,
     SlotShape, SlotShapeRegistry, SlotVariantShape, StaticSlotShape,
 };
 use serde_json::{Map, Value, json};
@@ -135,7 +135,7 @@ fn populated_registry() -> Result<SlotShapeRegistry> {
 
 /// Schema for authored `project.json` roots.
 ///
-/// Compiled as a single-variant `kind`-tagged enum over `ProjectDef`, so the
+/// Compiled as a single-variant `kind`-tagged enum over `ModuleDef`, so the
 /// discriminator/flattening semantics come from the same compiler that
 /// produces `node.schema.json`; then `format` is pinned to the current
 /// [`PROJECT_FORMAT_VERSION`] and required alongside `kind`, mirroring the
@@ -146,7 +146,7 @@ fn project_schema(registry: &SlotShapeRegistry) -> Result<Value> {
         meta: SlotMeta::empty(),
         encoding: SlotEnumEncoding::tagged_kind(),
         variants: vec![
-            SlotVariantShape::new("Project", SlotShape::reference(ProjectDef::SHAPE_ID))
+            SlotVariantShape::new("Project", SlotShape::reference(ModuleDef::SHAPE_ID))
                 .map_err(|error| anyhow!("project variant name: {error}"))?,
         ],
     };
@@ -176,7 +176,7 @@ fn project_schema(registry: &SlotShapeRegistry) -> Result<Value> {
         .ok_or_else(|| anyhow!("compiled project schema has no properties object"))?;
     let compiled_format = properties
         .remove("format")
-        .ok_or_else(|| anyhow!("compiled ProjectDef shape has no `format` field"))?;
+        .ok_or_else(|| anyhow!("compiled ModuleDef shape has no `format` field"))?;
     let mut format = Map::new();
     // Keep compiler-emitted presentation text on the pinned constant.
     if let Value::Object(compiled_format) = compiled_format {

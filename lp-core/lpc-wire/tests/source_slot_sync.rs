@@ -1,7 +1,7 @@
 use lpc_model::nodes::fixture::FixtureDef;
 use lpc_model::nodes::node_def::NodeDef;
 use lpc_model::nodes::output::OutputDef;
-use lpc_model::nodes::project::project_def::ProjectDef;
+use lpc_model::nodes::module::module_def::ModuleDef;
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::{
     LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
@@ -21,8 +21,8 @@ fn real_source_defs_sync_as_slot_roots() {
     println!("server loaded");
     print_root(
         "project",
-        ProjectDef::SHAPE_ID.slot_shape_from(&shape_registry),
-        &project.data().into_owned(&ProjectDef::SHAPE_ID, &registry),
+        ModuleDef::SHAPE_ID.slot_shape_from(&shape_registry),
+        &project.data().into_owned(&ModuleDef::SHAPE_ID, &registry),
         &shape_registry,
     );
     print_root(
@@ -51,7 +51,7 @@ fn real_source_defs_sync_as_slot_roots() {
     assert_value(
         select(
             &project_data,
-            ProjectDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            ModuleDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
             "nodes[shader].ref",
         ),
@@ -183,9 +183,9 @@ fn paged_static_shape_registry_for_test() -> SlotShapeRegistry {
     }
 }
 
-fn read_basic_project(name: &str) -> ProjectDef {
+fn read_basic_project(name: &str) -> ModuleDef {
     match read_basic_node_def(name) {
-        NodeDef::Project(def) => def,
+        NodeDef::Module(def) => def,
         other => panic!("expected project, got {:?}", other.kind()),
     }
 }

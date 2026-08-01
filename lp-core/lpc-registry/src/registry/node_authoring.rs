@@ -1,6 +1,6 @@
 //! Dedicated node-authoring semantics on the project registry.
 //!
-//! `create_node` and `remove_node` are the operations the `ProjectDef.nodes`
+//! `create_node` and `remove_node` are the operations the `ModuleDef.nodes`
 //! `read_only_persisted` policy promises: node creation and removal never
 //! arrive as raw slot edits, they arrive here. Both address the node through
 //! a [`NodeAttachSite`] — either the policy-locked project `nodes` map (the
@@ -139,7 +139,7 @@ impl ProjectRegistry {
                 format!("node body does not parse as a node definition: {err}"),
             )
         })?;
-        if matches!(def, NodeDef::Project(_)) {
+        if matches!(def, NodeDef::Module(_)) {
             return Err(reject(
                 MutationRejectionReason::InvalidBody,
                 "kind Project cannot be created as a child node".into(),
@@ -174,7 +174,7 @@ impl ProjectRegistry {
                     ));
                 }
                 let def = self.loaded_def_for_mutation(&root_artifact)?;
-                let Some(project) = def.as_project() else {
+                let Some(project) = def.as_module() else {
                     return Err(reject(
                         MutationRejectionReason::UnknownArtifact,
                         "project root definition is not a Project".into(),
@@ -544,7 +544,7 @@ impl ProjectRegistry {
                 };
                 let root_artifact = root.artifact.clone();
                 let def = self.loaded_def_for_mutation(&root_artifact)?;
-                let Some(project) = def.as_project() else {
+                let Some(project) = def.as_module() else {
                     return Err(reject(
                         MutationRejectionReason::UnknownArtifact,
                         "project root definition is not a Project".into(),
@@ -847,7 +847,7 @@ mod tests {
             "attachment rewrite must be canonical-writer output"
         );
         let invocation = project
-            .as_project()
+            .as_module()
             .unwrap()
             .nodes
             .entries
@@ -1000,7 +1000,7 @@ mod tests {
         let effective = registry
             .def(&root_def("/project.json"))
             .and_then(|entry| entry.state.loaded_def())
-            .and_then(NodeDef::as_project)
+            .and_then(NodeDef::as_module)
             .expect("effective project def");
         assert_eq!(effective.name(), Some("Renamed"));
         assert!(effective.nodes.entries.contains_key("texture"));
@@ -1386,7 +1386,7 @@ mod tests {
         let project_bytes = fs.read_file(LpPath::new("/project.json")).unwrap();
         let project_text = core::str::from_utf8(&project_bytes).unwrap();
         let project = NodeDef::read_json(&shapes, project_text).expect("project reparses");
-        assert!(project.as_project().unwrap().nodes.entries.is_empty());
+        assert!(project.as_module().unwrap().nodes.entries.is_empty());
         assert!(registry.overlay().get().is_empty());
     }
 
@@ -1820,7 +1820,7 @@ mod tests {
         let text = core::str::from_utf8(&bytes).unwrap();
         let project = NodeDef::read_json(&SlotShapeRegistry::default(), text).unwrap();
         assert_eq!(
-            project.as_project().unwrap().nodes.entries.len(),
+            project.as_module().unwrap().nodes.entries.len(),
             1,
             "project root gained an entry despite the rejection"
         );

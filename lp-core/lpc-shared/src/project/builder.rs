@@ -12,7 +12,7 @@ use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, ChannelName, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode,
     FixtureSamplingConfig, HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot,
-    OptionSlot, ProjectDef, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
+    OptionSlot, ModuleDef, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -206,13 +206,13 @@ impl ProjectBuilder {
                 )))),
             );
         }
-        let project = ProjectDef {
-            format: ProjectDef::current_format_slot(),
+        let project = ModuleDef {
+            format: ModuleDef::current_format_slot(),
             uid: OptionSlot::none(),
             name: OptionSlot::some(ValueSlot::new(self.name.clone())),
             nodes: MapSlot::new(nodes),
         };
-        let project_json = authored_node_json(&registry, &NodeDef::Project(project));
+        let project_json = authored_node_json(&registry, &NodeDef::Module(project));
         self.write_file_helper("/project.json", project_json.as_bytes())
             .expect("Failed to write project.json");
     }
@@ -525,7 +525,7 @@ mod tests {
         let project_json_str = core::str::from_utf8(&project_json_bytes).unwrap();
 
         let def = NodeDef::read_json(&slot_shape_registry(), project_json_str).unwrap();
-        let NodeDef::Project(def) = def else {
+        let NodeDef::Module(def) = def else {
             panic!("expected project def");
         };
         assert_eq!(def.name(), Some("Test Project"));

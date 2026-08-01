@@ -87,7 +87,7 @@ mod tests {
         let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
 
         assert_eq!(menu.entries.len(), 10, "all kinds except Project");
-        assert!(menu.entries.iter().all(|e| e.kind != NodeKind::Project));
+        assert!(menu.entries.iter().all(|e| e.kind != NodeKind::Module));
         assert_eq!(menu.entries[0].kind, NodeKind::Shader);
         assert_eq!(menu.entries[0].label, "Shader");
         assert_eq!(menu.entries[0].icon, "shader");

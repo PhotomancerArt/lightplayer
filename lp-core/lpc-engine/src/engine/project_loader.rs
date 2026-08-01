@@ -170,7 +170,7 @@ impl ProjectLoader {
             })?;
 
         match &entry.state {
-            NodeDefState::Loaded(NodeDef::Project(_)) => Ok(()),
+            NodeDefState::Loaded(NodeDef::Module(_)) => Ok(()),
             NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectParse {
                 file: path.as_str().to_string(),
                 error: format!("root artifact must be Project, got {:?}", other.kind()),
@@ -203,7 +203,7 @@ impl ProjectLoader {
         runtime
             .attach_runtime_node(
                 root,
-                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
+                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Module)),
                 frame,
             )
             .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -247,7 +247,7 @@ impl ProjectLoader {
             // per-kind attach loops below — it is present in the tree but
             // drives nothing. `mark_node_load_error` is what makes that
             // visible; do not read this fallback as "it is a project".
-            let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
+            let kind = def_entry.state.kind().unwrap_or(NodeKind::Module);
             let state_error = def_entry
                 .state
                 .is_error()
@@ -1349,7 +1349,7 @@ fn register_node_bindings(
     // Unloaded/errored defs project with the `Project` fallback kind and
     // register nothing — same tolerance the attach arms' kind filters gave
     // them (the node renders as an error node; the load must not fail).
-    if node.kind == NodeKind::Project {
+    if node.kind == NodeKind::Module {
         return Ok(());
     }
     match projected_node_config(registry, node)?.clone() {
@@ -1590,7 +1590,7 @@ fn register_node_bindings(
             )?;
             register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
-        NodeDef::Project(_) | NodeDef::Texture(_) => {}
+        NodeDef::Module(_) | NodeDef::Texture(_) => {}
     }
     Ok(())
 }
@@ -4486,7 +4486,7 @@ mod tests {
     fn every_node_kind_is_explicitly_gated_or_always_on() {
         fn classify(kind: NodeKind) -> &'static str {
             match kind {
-                NodeKind::Project => "always-on",
+                NodeKind::Module => "always-on",
                 NodeKind::Output => "always-on",
                 NodeKind::Button => "node-button",
                 NodeKind::Clock => "node-clock",
@@ -4500,7 +4500,7 @@ mod tests {
             }
         }
         for kind in [
-            NodeKind::Project,
+            NodeKind::Module,
             NodeKind::Output,
             NodeKind::Button,
             NodeKind::Clock,

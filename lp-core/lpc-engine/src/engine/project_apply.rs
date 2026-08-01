@@ -142,7 +142,7 @@ impl Engine {
                 if reattach_roots.contains(&location) {
                     self.reattach_runtime_node(
                         self.tree().root(),
-                        alloc::boxed::Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
+                        alloc::boxed::Box::new(CorePlaceholderNode::new_leaf(NodeKind::Module)),
                         frame,
                     )
                     .map_err(|e| {

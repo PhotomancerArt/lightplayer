@@ -7,7 +7,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        ColorOrder, ControlLamp2d, NodeInvocation, ProjectDef, SlotMapDyn,
+        ColorOrder, ControlLamp2d, NodeInvocation, ModuleDef, SlotMapDyn,
         SlotShapeRegistrySnapshot,
     };
 
@@ -27,7 +27,7 @@ mod tests {
 
     #[test]
     fn schema_project_def() {
-        assert_schema_compiles!(ProjectDef);
+        assert_schema_compiles!(ModuleDef);
     }
 
     #[test]

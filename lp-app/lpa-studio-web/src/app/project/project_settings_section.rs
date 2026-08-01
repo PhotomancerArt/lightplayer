@@ -5,7 +5,7 @@
 //! dresses identity as authoring: option-presence toggles on `uid`, a full
 //! map editor for the `nodes` table, edit chrome on rows nothing may edit.
 //! A demo walk read that as "the Studio lets you retype your project's
-//! uid" — which, until 2026-07-28, it did (`ProjectDef::uid` carried the
+//! uid" — which, until 2026-07-28, it did (`ModuleDef::uid` carried the
 //! default writable policy).
 //!
 //! So this section renders four purpose-built rows instead:
@@ -21,7 +21,7 @@
 //!   editor in the popup was noise.
 //!
 //! `uid`, `format`, and `nodes` are all `read_only_persisted` in
-//! `lpc_model::ProjectDef`, so the read-only presentation here agrees with
+//! `lpc_model::ModuleDef`, so the read-only presentation here agrees with
 //! the model rather than merely hiding a writable slot.
 
 use dioxus::prelude::*;
@@ -178,7 +178,7 @@ mod tests {
         );
         assert!(
             row(&slots, "notes").is_none(),
-            "no such field on ProjectDef"
+            "no such field on ModuleDef"
         );
     }
 

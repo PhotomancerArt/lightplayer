@@ -21,7 +21,7 @@ pub(crate) fn infer_type_path(
 
     // Concept files are expected to re-export their headline type from the
     // parent module, so `source/project_def.rs` becomes
-    // `crate::source::ProjectDef`. `mod.rs` files naturally use their parent
+    // `crate::source::ModuleDef`. `mod.rs` files naturally use their parent
     // directory path as the module path.
     components.pop().expect("rust file has a filename");
 

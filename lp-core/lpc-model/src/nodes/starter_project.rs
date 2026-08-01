@@ -22,7 +22,7 @@ use crate::nodes::node_def::NodeDefWriteError;
 use crate::nodes::starter::{starter_def_for_kind, starter_for_kind};
 use crate::{
     ArtifactSpec, BindingDef, BindingDefs, BindingRef, BusSlotRef, ChannelName, MapSlot, NodeDef,
-    NodeInvocation, NodeInvocationSlot, OptionSlot, ProjectDef, SlotShapeRegistry, ValueSlot,
+    NodeInvocation, NodeInvocationSlot, OptionSlot, ModuleDef, SlotShapeRegistry, ValueSlot,
 };
 
 /// The starter project's complete file set as `(relative path, bytes)` —
@@ -101,8 +101,8 @@ fn starter_project_def(name: &str) -> NodeDef {
             )))),
         );
     }
-    NodeDef::Project(ProjectDef {
-        format: ProjectDef::current_format_slot(),
+    NodeDef::Module(ModuleDef {
+        format: ModuleDef::current_format_slot(),
         uid: OptionSlot::none(),
         name: OptionSlot::some(ValueSlot::new(String::from(name))),
         nodes: MapSlot::new(nodes),
@@ -258,7 +258,7 @@ mod tests {
             .find(|(name, _)| name == "project.json")
             .unwrap();
         let def = NodeDef::read_json(&registry, core::str::from_utf8(bytes).unwrap()).unwrap();
-        let NodeDef::Project(project) = def else {
+        let NodeDef::Module(project) = def else {
             panic!("expected project root");
         };
         assert_eq!(
