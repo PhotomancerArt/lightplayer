@@ -61,6 +61,11 @@ pub struct Engine {
     services: EngineServices,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
+    /// The tree shape and resolver epoch as of the last tick, so that a
+    /// structural change that forgot to invalidate resolution is caught here
+    /// rather than by someone noticing a stale value on a device.
+    #[cfg(debug_assertions)]
+    last_structural_check: Option<((usize, usize, Revision), u64)>,
 }
 
 impl Engine {
@@ -83,6 +88,8 @@ impl Engine {
             services,
             demand_roots: Vec::new(),
             graphics: None,
+            #[cfg(debug_assertions)]
+            last_structural_check: None,
         }
     }
 
@@ -430,6 +437,8 @@ impl Engine {
     }
 
     fn tick_nodes(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
+        #[cfg(debug_assertions)]
+        self.assert_structural_changes_were_announced();
         self.resolver.begin_frame();
         self.frame_num = self.frame_num.next();
         self.revision = advance_revision();
@@ -466,6 +475,34 @@ impl Engine {
 
         self.resolver = resolver;
         Ok(())
+    }
+
+    /// Fail loudly when the graph changed shape without anyone calling
+    /// [`Resolver::invalidate_structure`].
+    ///
+    /// The invalidation contract is the load-bearing rule behind persisting
+    /// resolution across frames, and breaking it is silent by nature: the
+    /// resolver keeps serving an answer that is stale but entirely plausible.
+    /// Prose in an ADR does not survive contact with a new mutation site, so
+    /// the rule checks itself.
+    ///
+    /// Debug builds only — release firmware pays nothing. That is the right
+    /// trade for a guard whose whole job is to fire during development and
+    /// tests, long before a device is involved.
+    #[cfg(debug_assertions)]
+    fn assert_structural_changes_were_announced(&mut self) {
+        let fingerprint = self.tree.structural_fingerprint();
+        let epoch = self.resolver.structure_epoch();
+        if let Some((previous_fingerprint, previous_epoch)) = self.last_structural_check {
+            debug_assert!(
+                fingerprint == previous_fingerprint || epoch != previous_epoch,
+                "the node tree changed shape ({previous_fingerprint:?} -> {fingerprint:?}) \
+                 without Resolver::invalidate_structure(); resolution cached against the old \
+                 graph is now being served. Whatever mutated the tree or its bindings must \
+                 announce it — see docs/adr/2026-07-31-resolver-persistent-resolution.md"
+            );
+        }
+        self.last_structural_check = Some((fingerprint, epoch));
     }
 
     /// Materialize a visual product handle into a CPU texture.
