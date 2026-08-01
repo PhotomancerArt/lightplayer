@@ -57,8 +57,8 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FloatMode, IrFunction, LpirModule, LpirOp};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id,
+    BuiltinId, GlslParamKind, Mode as BuiltinMode, glsl_lpfn_builtin_id, glsl_math_builtin_id,
+    lpir_builtin_id, texture_builtin_id, vm_builtin_id,
 };
 
 use crate::LowerOpts;
@@ -73,13 +73,16 @@ use crate::vinst::{
 use lps_q32::q32_encode;
 
 #[inline]
-fn fa_vreg(v: lpir::VReg) -> VReg {
+pub(crate) fn fa_vreg(v: lpir::VReg) -> VReg {
     VReg(v.0 as u16)
 }
 
 /// Map LPIR vregs into the shared operand pool without an intermediate Vec
 /// (one call per Call VInst; Q32 code is call-dense).
-fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice, LowerError> {
+pub(crate) fn push_vregs_slice(
+    pool: &mut Vec<VReg>,
+    ir: &[lpir::VReg],
+) -> Result<VRegSlice, LowerError> {
     if ir.len() > u8::MAX as usize {
         return Err(LowerError::UnsupportedOp {
             description: String::from("vreg slice too long for FA backend"),
@@ -1460,6 +1463,8 @@ pub fn lower_lpir_op(
             Ok(())
         }
 
+        // Every float arm above carries an `opts.float_mode == FloatMode::Q32`
+        // guard, so reaching this arm means the shader asked for native f32.
         LpirOp::Fadd { .. }
         | LpirOp::Fsub { .. }
         | LpirOp::Fmul { .. }
@@ -1489,9 +1494,26 @@ pub fn lower_lpir_op(
         | LpirOp::FtoUnorm16 { .. }
         | LpirOp::FtoUnorm8 { .. }
         | LpirOp::Unorm16toF { .. }
-        | LpirOp::Unorm8toF { .. } => Err(LowerError::UnsupportedOp {
-            description: String::from("float op requires Q32 mode (F32 not supported on rv32c)"),
-        }),
+        | LpirOp::Unorm8toF { .. } => {
+            #[cfg(feature = "float-f32")]
+            {
+                crate::lower_f32::lower_f32_op(out, op, abi.isa(), src_op, symbols, vreg_pool, temps)
+            }
+            // Without the feature the f32 lowering is not linked at all, which
+            // is the point of the gate (roadmap D2: `FloatMode` is matched on a
+            // runtime value, so LTO cannot drop it on its own). Name the feature
+            // — "unsupported op" alone sends people looking for a missing
+            // backend that is right there behind a flag.
+            #[cfg(not(feature = "float-f32"))]
+            {
+                let _ = (out, symbols, vreg_pool, temps);
+                Err(LowerError::UnsupportedOp {
+                    description: String::from(
+                        "float_mode=f32 needs the `float-f32` feature on lpvm-native",
+                    ),
+                })
+            }
+        }
 
         LpirOp::IfStart { .. }
         | LpirOp::Else
@@ -1516,10 +1538,11 @@ pub fn lower_lpir_op(
             args,
             results,
         } => {
-            let name =
-                resolve_callee_name(ir, *callee).ok_or_else(|| LowerError::UnsupportedOp {
+            let name = resolve_callee_name(ir, *callee, opts.float_mode).ok_or_else(|| {
+                LowerError::UnsupportedOp {
                     description: format!("Call: callee index out of range ({callee:?})"),
-                })?;
+                }
+            })?;
             let args_slice = func.pool_slice(*args);
             if args_slice.len() != args.count as usize {
                 return Err(LowerError::UnsupportedOp {
@@ -2124,10 +2147,10 @@ pub fn lower_ops(
 /// Resolve a callee to its symbol name, borrowed from the module (or
 /// `'static` for builtins) — no per-call-site String; interning copies only
 /// on first sight of a symbol.
-fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<&str> {
+fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef, mode: FloatMode) -> Option<&str> {
     if let Some(idx) = ir.callee_as_import(callee) {
         ir.imports.get(idx).map(|imp| {
-            if let Some(bid) = resolve_import_to_builtin(imp) {
+            if let Some(bid) = resolve_import_to_builtin(imp, mode) {
                 bid.name()
             } else {
                 imp.func_name.as_str()
@@ -2142,31 +2165,46 @@ fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<&str> {
 
 /// Map an LPIR import declaration to a BuiltinId to get the C ABI symbol name.
 /// Mirrors Cranelift's resolve_import in lpvm-cranelift/src/builtins.rs
-fn resolve_import_to_builtin(decl: &lpir::lpir_module::ImportDecl) -> Option<BuiltinId> {
+///
+/// **`mode` is load-bearing, not decoration.** Resolving an import without it
+/// was the wasm backend's B1 defect (M1 corpus findings §3): in f32 mode the
+/// Q32 ids came back, and a builtin taking a *pointer* has an `i32` signature
+/// in both modes, so the call linked and ran while reinterpreting f32 bit
+/// patterns as Q16.16. There is no type error to catch it — only wrong colors.
+/// `lps-builtin-ids`' resolvers never fall back across modes, so an unmapped
+/// name surfaces as a named "unknown builtin symbol" relocation failure.
+fn resolve_import_to_builtin(
+    decl: &lpir::lpir_module::ImportDecl,
+    mode: FloatMode,
+) -> Option<BuiltinId> {
+    let bmode = match mode {
+        FloatMode::Q32 => BuiltinMode::Q32,
+        FloatMode::F32 => BuiltinMode::F32,
+    };
     match decl.module_name.as_str() {
         "glsl" => {
             let ac = decl.param_types.len();
-            glsl_q32_math_builtin_id(&decl.func_name, ac)
+            glsl_math_builtin_id(&decl.func_name, ac, bmode)
         }
         "lpir" => {
             let ac = decl.param_types.len();
-            lpir_q32_builtin_id(&decl.func_name, ac)
+            lpir_builtin_id(&decl.func_name, ac, bmode)
         }
         "lpfn" => {
             // LPFX builtins are named like "lpfn_psrdnoise_34" - strip the suffix
             let base = lpfn_strip_suffix(&decl.func_name)?;
             // Get GLSL kinds from lpfn_glsl_params CSV or fall back to IR types
             let kinds = lpfn_glsl_kinds_from_decl(decl);
-            glsl_lpfn_q32_builtin_id(base, &kinds)
+            glsl_lpfn_builtin_id(base, &kinds, bmode)
         }
         "vm" => {
             let ac = decl.param_types.len();
-            vm_q32_builtin_id(&decl.func_name, ac)
+            vm_builtin_id(&decl.func_name, ac, bmode)
         }
         "texture" => {
             let base = texture_strip_suffix(&decl.func_name);
             let ac = decl.param_types.len();
-            texture_q32_builtin_id(base, ac)
+            texture_builtin_id(base, ac, bmode)
         }
         _ => None,
     }
@@ -3308,8 +3346,41 @@ mod tests {
         }
     }
 
+    /// F32 mode leaves the Q32 arms and reaches the soft-float lowering; the
+    /// per-op shape is asserted in [`crate::lower_f32`]'s own tests. What is
+    /// worth pinning *here* is that the hand-off happens at all — the fallthrough
+    /// arm is easy to leave behind when a new float op is added.
+    #[cfg(feature = "float-f32")]
     #[test]
-    fn lower_f32_float_unsupported() {
+    fn lower_f32_hands_off_to_the_soft_float_path() {
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        for op in [
+            LpirOp::Fadd {
+                dst: v(0),
+                lhs: v(1),
+                rhs: v(2),
+            },
+            LpirOp::Fdiv {
+                dst: v(0),
+                lhs: v(1),
+                rhs: v(2),
+            },
+        ] {
+            let vinsts =
+                call_lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).expect("f32 lowers");
+            assert!(
+                vinsts.iter().any(|i| matches!(i, VInst::Call { .. })),
+                "expected a soft-float call for {op:?}, got {vinsts:?}"
+            );
+        }
+    }
+
+    /// With the gate off there is no f32 backend linked, and the error must say
+    /// so by name rather than looking like a missing feature of the compiler.
+    #[cfg(not(feature = "float-f32"))]
+    #[test]
+    fn lower_f32_without_the_feature_names_the_feature() {
         let op = LpirOp::Fadd {
             dst: v(0),
             lhs: v(1),
@@ -3318,23 +3389,11 @@ mod tests {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         let err = call_lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).expect_err("F32 float");
-        match err {
-            LowerError::UnsupportedOp { description } => {
-                assert!(
-                    description.contains("Q32"),
-                    "expected Q32 hint in {description:?}"
-                );
-            }
-        }
-        let div = LpirOp::Fdiv {
-            dst: v(0),
-            lhs: v(1),
-            rhs: v(2),
-        };
-        assert!(matches!(
-            call_lower_op(&div, FloatMode::F32, None, &f, &ir, &abi),
-            Err(LowerError::UnsupportedOp { .. })
-        ));
+        let LowerError::UnsupportedOp { description } = err;
+        assert!(
+            description.contains("float-f32"),
+            "expected the feature name in {description:?}"
+        );
     }
 
     #[test]
