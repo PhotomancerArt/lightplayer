@@ -21,6 +21,14 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
             .all(|row| row.pad_style == Some(PadStyle::Screw));
     let show_bulk = target != RailTarget::Terminals && count > 0;
 
+    // Rails carry a pad-style column; the band doesn't — two grid templates
+    // keep each table's columns honest.
+    let pins_class = if target == RailTarget::Terminals {
+        "lpb-ed-pins lpb-ed-pins--terminals"
+    } else {
+        "lpb-ed-pins"
+    };
+
     rsx! {
         section { class: "lpb-ed-section",
             div { class: "lpb-ed-section-head",
@@ -28,7 +36,7 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
                 span { class: "lpb-ed-count", "{count}" }
                 if show_bulk {
                     button {
-                        class: "lpb-ed-btn lpb-ed-btn--add",
+                        class: "lpb-ed-btn",
                         title: "set every pin in this rail",
                         onclick: move |_| {
                             let style = if all_screw { PadStyle::Pad } else { PadStyle::Screw };
@@ -38,7 +46,20 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
                     }
                 }
             }
-            div { class: "lpb-ed-pins",
+            div { class: pins_class,
+                if count > 0 {
+                    div { class: "lpb-ed-pin lpb-ed-pin--head",
+                        span {}
+                        span { "label" }
+                        span { "role" }
+                        if target != RailTarget::Terminals {
+                            span { "style" }
+                        }
+                        span { "gpio" }
+                        span { "caps" }
+                        span {}
+                    }
+                }
                 for (index, row) in rows.iter().enumerate() {
                     div { key: "{index}", class: "lpb-ed-pin",
                         div { class: "lpb-ed-pin-order",
@@ -113,10 +134,10 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
                         }
                     }
                 }
-                // Add sits where the new row will appear — bottom of the
-                // list, not the header (put the button where the eye goes).
+                // Add sits where the new row will appear — a full-width,
+                // row-height CTA at the list bottom (natural mapping).
                 button {
-                    class: "lpb-ed-btn lpb-ed-btn--add",
+                    class: "lpb-ed-add-row",
                     onclick: move |_| doc.write().add_pin(target),
                     "+ pin"
                 }

@@ -100,7 +100,7 @@ pub fn DrawingSection(doc: Signal<EditorDoc>) -> Element {
                     }
                 }
                 button {
-                    class: "lpb-ed-btn lpb-ed-btn--add",
+                    class: "lpb-ed-add-row",
                     onclick: move |_| {
                         doc.write().edit(|b| {
                             b.hw.usb.push(DrawnUsb {
@@ -166,7 +166,7 @@ pub fn DrawingSection(doc: Signal<EditorDoc>) -> Element {
                     }
                 }
                 button {
-                    class: "lpb-ed-btn lpb-ed-btn--add",
+                    class: "lpb-ed-add-row",
                     onclick: move |_| {
                         doc.write().edit(|b| {
                             b.hw.buttons.push(DrawnButton {
@@ -224,7 +224,7 @@ pub fn DrawingSection(doc: Signal<EditorDoc>) -> Element {
                 }
             } else {
                 button {
-                    class: "lpb-ed-btn lpb-ed-btn--add",
+                    class: "lpb-ed-add-row",
                     onclick: move |_| {
                         doc.write().edit(|b| {
                             b.hw.rgb = Some(DrawnRgb {

@@ -202,7 +202,7 @@ fn PurchaseUrlRows(doc: Signal<EditorDoc>, urls: Vec<PurchaseUrl>) -> Element {
                     }
                 }
                 button {
-                    class: "lpb-ed-btn lpb-ed-btn--add",
+                    class: "lpb-ed-add-row",
                     onclick: move |_| {
                         doc.write().edit(|b| {
                             b.purchase_urls.push(PurchaseUrl {
@@ -293,7 +293,7 @@ fn NoteRows(doc: Signal<EditorDoc>, notes: Vec<BoardNote>) -> Element {
                     }
                 }
                 button {
-                    class: "lpb-ed-btn lpb-ed-btn--add",
+                    class: "lpb-ed-add-row",
                     onclick: move |_| {
                         doc.write().edit(|b| {
                             b.notes.push(BoardNote {
