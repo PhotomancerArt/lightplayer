@@ -956,14 +956,47 @@ mod tests {
     #[test]
     fn auto_save_and_group_disclosure_are_view_gestures() {
         let mut spike = spike();
-        assert!(spike.face().auto_save);
+        assert_eq!(spike.face().auto_save, Some(true));
         spike.apply_gesture(&PanelGesture::SetAutoSave(false));
-        assert!(!spike.face().auto_save);
+        assert_eq!(spike.face().auto_save, Some(false));
 
         assert!(!spike.face().panel.groups[1].collapsed);
         spike.apply_gesture(&PanelGesture::ToggleGroup {
             scope: PLASMA_2_SCOPE.to_string(),
         });
         assert!(spike.face().panel.groups[1].collapsed);
+    }
+
+    /// The G2 revision-1 claim: children are sibling cards under the module
+    /// card, not sections inside its face — and every one of them renders,
+    /// with no active-child filtering the way a playlist has.
+    #[test]
+    fn children_hang_below_the_card_not_inside_the_face() {
+        let view = root_module_node_view();
+        assert_eq!(view.children.len(), 5);
+        // An embedded module keeps its own children on the same rail, one
+        // level down: the nesting grammar does not change with depth.
+        let plasma = &view.children[2];
+        assert_eq!(plasma.label, "plasma_1");
+        assert!(matches!(plasma.face, Some(UiNodeFace::Module(_))));
+        assert_eq!(plasma.children.len(), 1);
+    }
+
+    /// A leaf's controls and the module panel's are ONE control (P1), even
+    /// though they now live on two different cards: holding it on the panel
+    /// has to move the fixture card below.
+    #[test]
+    fn one_control_two_cards_move_together() {
+        let spike = spike();
+        let Some(UiNodeFace::Controls(halo)) = &spike.view.children[4].face else {
+            panic!("the fixture child wears a controls face");
+        };
+        assert_eq!(halo.controls[0].channel, "brightness");
+        assert_eq!(halo.controls[0].state, UiPanelControlState::Engaged);
+        assert_eq!(
+            halo.controls[0].control.value.display,
+            spike.face().panel.controls[0].control.value.display,
+            "the panel and the fixture card show the same held value"
+        );
     }
 }
