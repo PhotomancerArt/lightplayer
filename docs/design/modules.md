@@ -501,18 +501,24 @@ Known vocabulary pressure beyond scalars: **touch/gesture sets** (E7 —
 multi-point, per-touch identity; shape question tracked as panel.md
 P-Q5) and the `phase` convention (panel.md P3).
 
-## 8. Provenance (proposed field set — Q7)
+## 8. Provenance (field set settled — Q7)
 
 `author`, `version`, `license`, `created` (ISO date). Optional on any
 node and on `project.json`; skip-if-default; no semver semantics yet.
 Copy-on-extract per R14.
 
+> Status: landed 2026-08-01 as `ProvenanceDef` (module defs carry it;
+> the container manifest carries the same four keys at its top level).
+> Copy-on-extract mechanics arrive with the vendoring flows.
+
 ## 9. Open questions (G1 redline register)
 
 - **Q3:** → specced as `panel.md` P8/P11 (wire ops, state file shape);
   ratify there.
-- **Q7:** provenance field set (§8) — enough? (`description`/`homepage`
-  deferred?)
+- **Q7:** SETTLED (2026-08-01, implementation P3): the §8 four-field set
+  as proposed (`author`/`version`/`license`/`created`); `description`/
+  `homepage` deferred until a real need shows up in the registry/import
+  flow.
 - **Q10:** SETTLED (2026-08-01, implementation P2): format is a
   container-level concept. A module folder inside a project is gated by
   the project's container manifest; the loader never re-runs the gate for
