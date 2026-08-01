@@ -13,6 +13,12 @@
 //!   0x3FFE_0000)` — the two windows run in opposite directions at word
 //!   granularity, bytes within each word verbatim (C2b, 5 sentinels).
 //!
+//! Not every region is SRAM. Firmware `.text` executes from **flash through
+//! the cache** (XIP), which the address space exposes as two read-only windows
+//! — an executable IROM window and a data-only DROM window — so
+//! [`Memory::add_rom`] adds regions that fault on a store. See
+//! [`crate::board::BoardProfile`] for the per-chip addresses.
+//!
 //! Original code; no derivation from QEMU/binutils (see the repo license ADR).
 
 use std::sync::{Arc, Mutex};
@@ -28,12 +34,17 @@ use crate::error::{Trap, TrapKind};
 /// like this; the address exists only so a host engine can hand the guest a
 /// pointer into host memory.
 ///
-/// Chosen unmapped on **both** board profiles and outside the `0x4xxx_xxxx`
-/// I-bus quadrant: the S3 installs SRAM1 code/stack at `0x3FC8_8000` /
-/// `0x3FCC_0000` (I-bus images `0x4037_8000+`), and classic installs
-/// `0x3FFE_8000` / `0x3FFC_0000` (I-bus image `0x400A_1000..0x400B_8000`).
-/// `0x3F40_0000` is in the external-memory-mapped range on both chips, which no
-/// profile models.
+/// Chosen **reserved on both chips**, not merely unused by a profile:
+/// `0x3000_0000` is below the lowest address either data bus decodes (the S3's
+/// external-memory window opens at `0x3C00_0000`; classic's DROM0 opens at
+/// `0x3F40_0000`), so no future profile can grow into it.
+///
+/// It used to be `0x3F40_0000`, on the weaker ground that no *profile* mapped
+/// it. That stopped being true the moment the profiles gained modeled flash
+/// windows: `0x3F40_0000` **is** classic's DROM base
+/// ([`crate::board::BoardProfile::esp32`]). The `add_shared` overlap assertion
+/// caught it, which is exactly what it is for; the fix is a base that is not a
+/// hardware address at all.
 ///
 /// It is deliberately **not** `lp_emu_core::DEFAULT_SHARED_START` (the rv32
 /// engine's `0x4000_0000`): that address is [`crate::SENTINEL_PC`], the
@@ -42,7 +53,7 @@ use crate::error::{Trap, TrapKind};
 /// and silently undermine the "chosen unmapped" property that harness relies
 /// on. The two ISAs therefore use different shared bases, which costs nothing —
 /// the guest reaches the region only through a pointer argument.
-pub const SHARED_DBUS_BASE: u32 = 0x3F40_0000;
+pub const SHARED_DBUS_BASE: u32 = 0x3000_0000;
 
 /// ESP32-S3 SRAM1 D-bus window start (data view).
 pub const SRAM1_DBUS_START: u32 = 0x3FC8_8000;
@@ -145,13 +156,31 @@ impl Region {
     /// it has no alias. Conservative: computed from the endpoints and rounded
     /// out to word boundaries, because a word-mirrored alias runs *downward*
     /// and so maps the region's low D-bus address to its image's high end.
-    /// Used only by [`Memory::add_shared`]'s overlap check.
     fn ibus_bounds(&self) -> Option<(u32, u32)> {
         let rule = self.alias?;
         let last = self.dbus_start.wrapping_add(self.data.len() as u32 - 1);
         let a = rule.dbus_to_ibus(self.dbus_start);
         let b = rule.dbus_to_ibus(last);
         Some((a.min(b) & !3, (a.max(b) | 3)))
+    }
+
+    /// Every inclusive address range this region answers to, each with the name
+    /// of the view it comes from: its D-bus range, plus its I-bus image when it
+    /// has one. Used by the overlap checks — an address in *either* view
+    /// resolves to this region, so both count.
+    ///
+    /// Under [`AliasRule::Identity`] the two coincide and the duplicate is
+    /// harmless: the checks are pure comparisons.
+    fn address_views(&self) -> impl Iterator<Item = (&'static str, u32, u32)> {
+        let dbus = (
+            "D-bus range",
+            self.dbus_start,
+            self.dbus_start.wrapping_add(self.data.len() as u32 - 1),
+        );
+        core::iter::once(dbus).chain(
+            self.ibus_bounds()
+                .map(|(lo, hi)| ("I-bus image", lo, hi)),
+        )
     }
 }
 
@@ -216,12 +245,7 @@ impl Memory {
 
     /// Add a plain read/write data region with no executable alias.
     pub fn add_ram(&mut self, dbus_start: u32, len: usize) {
-        self.regions.push(Region {
-            dbus_start,
-            alias: None,
-            data: vec![0u8; len],
-            writable: true,
-        });
+        self.push_region(dbus_start, len, None, true);
     }
 
     /// Add a writable region whose bytes are also fetchable at the I-bus view
@@ -229,12 +253,70 @@ impl Memory {
     /// board profile validates its regions against its own dual-mapped window
     /// (see [`crate::board::BoardProfile::install`]).
     pub fn add_executable(&mut self, dbus_start: u32, len: usize, rule: AliasRule) {
-        self.regions.push(Region {
+        self.push_region(dbus_start, len, Some(rule), true);
+    }
+
+    /// Add a **read-only** region: guest loads and fetches behave as for any
+    /// other region, guest stores fault with [`EXC_LOAD_STORE_ERROR`].
+    ///
+    /// This is how flash-resident firmware is modeled. On every ESP32 the
+    /// application's `.text` and `.rodata` execute and load *from flash through
+    /// the cache* (XIP), which the address space exposes as read-only windows;
+    /// a store there is a bug on hardware and is a bug here.
+    ///
+    /// `alias` is `Some(AliasRule::Identity)` for an executable (IROM) window —
+    /// flash instruction addresses are already the fetch addresses, there is no
+    /// separate data view to alias from — and `None` for a data-only (DROM)
+    /// window, which then faults on fetch exactly as any data region does.
+    ///
+    /// The loader paths ([`load_bytes`](Self::load_bytes),
+    /// [`load_region`](Self::load_region)) deliberately ignore the read-only
+    /// flag: placing an image into flash is what a flasher does, not what the
+    /// guest does.
+    pub fn add_rom(&mut self, dbus_start: u32, len: usize, alias: Option<AliasRule>) {
+        self.push_region(dbus_start, len, alias, false);
+    }
+
+    /// Install a region, asserting it overlaps no existing one — in either
+    /// address view.
+    ///
+    /// The board profiles now install five regions apiece across three address
+    /// quadrants (SRAM code, SRAM data, stack, flash IROM, flash DROM), and
+    /// [`resolve`](Self::resolve) is first-match-wins, so an overlap would not
+    /// fault — it would silently shadow. [`add_shared`](Self::add_shared) has
+    /// asserted this for its one window since it was added; the regions
+    /// themselves now get the same guarantee from the same check.
+    fn push_region(
+        &mut self,
+        dbus_start: u32,
+        len: usize,
+        alias: Option<AliasRule>,
+        writable: bool,
+    ) {
+        assert!(len > 0, "region at {dbus_start:#x} is empty");
+        let region = Region {
             dbus_start,
-            alias: Some(rule),
+            alias,
             data: vec![0u8; len],
-            writable: true,
-        });
+            writable,
+        };
+        for (view, lo, hi) in region.address_views() {
+            self.assert_free((lo, hi), &format!("new region's {view}"));
+        }
+        self.regions.push(region);
+    }
+
+    /// Assert `[lo, hi]` overlaps no installed region, in either view.
+    fn assert_free(&self, (lo, hi): (u32, u32), what: &str) {
+        for r in &self.regions {
+            for (view, r_lo, r_hi) in r.address_views() {
+                assert!(
+                    hi < r_lo || lo > r_hi,
+                    "{what} {lo:#x}..={hi:#x} overlaps the {view} \
+                     {r_lo:#x}..={r_hi:#x} of an installed region"
+                );
+            }
+        }
     }
 
     /// S3 convenience: add a region backing the ESP32-S3 SRAM1 dual mapping —
@@ -279,22 +361,7 @@ impl Memory {
         assert!(len > 0, "shared backing is empty");
         let lo = dbus_start;
         let hi = dbus_start.wrapping_add(len as u32 - 1);
-        for r in &self.regions {
-            let r_lo = r.dbus_start;
-            let r_hi = r.dbus_start.wrapping_add(r.data.len() as u32 - 1);
-            assert!(
-                hi < r_lo || lo > r_hi,
-                "shared region {lo:#x}..={hi:#x} overlaps the D-bus range \
-                 {r_lo:#x}..={r_hi:#x} of an installed region"
-            );
-            if let Some((i_lo, i_hi)) = r.ibus_bounds() {
-                assert!(
-                    hi < i_lo || lo > i_hi,
-                    "shared region {lo:#x}..={hi:#x} overlaps the I-bus image \
-                     {i_lo:#x}..={i_hi:#x} of an installed region"
-                );
-            }
-        }
+        self.assert_free((lo, hi), "shared region");
         self.shared = Some(SharedRegion {
             dbus_start,
             len,
@@ -332,6 +399,18 @@ impl Memory {
     /// under a word-mirrored alias (where the backing D-bus image is not
     /// contiguous).
     pub fn load_bytes(&mut self, addr: u32, bytes: &[u8]) {
+        if let Err(a) = self.try_load_bytes(addr, bytes) {
+            panic!("load_bytes: address {a:#x} not mapped");
+        }
+    }
+
+    /// Fallible [`load_bytes`](Self::load_bytes): on failure returns the first
+    /// unmapped address instead of panicking.
+    ///
+    /// An image loader is given whatever addresses its ELF names, and "this
+    /// segment is not in the modeled map" is a diagnosable condition its caller
+    /// should report — not a panic from inside the memory model.
+    pub fn try_load_bytes(&mut self, addr: u32, bytes: &[u8]) -> Result<(), u32> {
         if let Some(s) = &self.shared {
             if let Some(idx) = s.index(addr) {
                 let mut v = s.backing.lock().expect("shared backing lock");
@@ -342,16 +421,36 @@ impl Memory {
                     bytes.len()
                 );
                 v[idx..end].copy_from_slice(bytes);
-                return;
+                return Ok(());
             }
         }
         for (i, b) in bytes.iter().enumerate() {
             let a = addr.wrapping_add(i as u32);
-            let (ri, idx) = self
-                .resolve(a, Access::Data)
-                .unwrap_or_else(|| panic!("load_bytes: address {a:#x} not mapped"));
+            let (ri, idx) = self.resolve(a, Access::Data).ok_or(a)?;
             self.regions[ri].data[idx] = *b;
         }
+        Ok(())
+    }
+
+    /// Zero `len` bytes at `addr` through the loader path (the `p_memsz` tail of
+    /// a `PT_LOAD` segment). Fallible for the same reason
+    /// [`try_load_bytes`](Self::try_load_bytes) is.
+    pub fn try_zero(&mut self, addr: u32, len: u32) -> Result<(), u32> {
+        for i in 0..len {
+            let a = addr.wrapping_add(i);
+            match &mut self.shared {
+                Some(s) if s.index(a).is_some() => {
+                    let idx = s.index(a).expect("checked above");
+                    let mut v = s.backing.lock().expect("shared backing lock");
+                    v[idx] = 0;
+                }
+                _ => {
+                    let (ri, idx) = self.resolve(a, Access::Data).ok_or(a)?;
+                    self.regions[ri].data[idx] = 0;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Copy `bytes` into the single region that starts at `dbus_start`, in one
