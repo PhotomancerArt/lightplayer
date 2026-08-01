@@ -131,6 +131,9 @@ impl Emulator {
                     FpRrOp::Nexp01S => {
                         divide_step("nexp01.s", self.fp_policy.divide_step_helpers.get())
                     }
+                    FpRrOp::MksadjS => {
+                        divide_step("mksadj.s", self.fp_policy.divide_step_helpers.get())
+                    }
                     FpRrOp::MkdadjS => {
                         divide_step("mkdadj.s", self.fp_policy.divide_step_helpers.get())
                     }
