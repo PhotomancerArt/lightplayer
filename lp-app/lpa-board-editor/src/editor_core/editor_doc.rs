@@ -5,7 +5,7 @@
 //! re-serializing one that was merely opened would churn the file. Only the
 //! first edit switches export to the canonical serialization.
 
-use lpa_boards::{BoardDisplayFile, DrawnModule, DrawnPin, PinCap, PinRole};
+use lpa_boards::{BoardDisplayFile, DrawnModule, DrawnPin, PadStyle, PinCap, PinRole};
 
 /// Which pin list an index-based edit targets. Left/right are the header
 /// rails; `Terminals` is the top-edge screw-terminal band. All three carry
@@ -35,6 +35,9 @@ pub struct PinRowData {
     pub label: String,
     pub role: PinRole,
     pub gpio: Option<u8>,
+    /// `None` for band terminals — those are always screws; only rail pins
+    /// choose between header pad and screw terminal.
+    pub pad_style: Option<PadStyle>,
     pub caps: Vec<PinCap>,
 }
 
@@ -43,6 +46,8 @@ pub struct PinFieldsMut<'a> {
     pub label: &'a mut String,
     pub role: &'a mut PinRole,
     pub gpio: &'a mut Option<u8>,
+    /// `None` for band terminals (no style choice there).
+    pub pad_style: Option<&'a mut PadStyle>,
     pub caps: &'a mut Vec<PinCap>,
 }
 
@@ -119,6 +124,7 @@ impl EditorDoc {
                     label: "4".into(),
                     role: PinRole::Io,
                     gpio: Some(4),
+                    pad_style: PadStyle::Pad,
                     caps: vec![],
                 }],
                 right: vec![],
@@ -174,6 +180,7 @@ impl EditorDoc {
                     label: terminal.label.clone(),
                     role: terminal.role,
                     gpio: terminal.gpio,
+                    pad_style: None,
                     caps: terminal.caps.clone(),
                 })
                 .collect(),
@@ -204,6 +211,7 @@ impl EditorDoc {
                         label: &mut terminal.label,
                         role: &mut terminal.role,
                         gpio: &mut terminal.gpio,
+                        pad_style: None,
                         caps: &mut terminal.caps,
                     });
                 }
@@ -261,6 +269,22 @@ impl EditorDoc {
             _ => {}
         });
     }
+
+    /// Set every pin in a rail to `style` — the "this whole block is screw
+    /// terminals" authoring case (DIN-rail controllers). No-op for the band,
+    /// whose terminals are always screws.
+    pub fn set_rail_pad_style(&mut self, target: RailTarget, style: PadStyle) {
+        self.edit(|board| {
+            let rail = match target {
+                RailTarget::Left => &mut board.hw.left,
+                RailTarget::Right => &mut board.hw.right,
+                RailTarget::Terminals => return,
+            };
+            for pin in rail {
+                pin.pad_style = style;
+            }
+        });
+    }
 }
 
 fn pin_row(pin: &DrawnPin) -> PinRowData {
@@ -268,6 +292,7 @@ fn pin_row(pin: &DrawnPin) -> PinRowData {
         label: pin.label.clone(),
         role: pin.role,
         gpio: pin.gpio,
+        pad_style: Some(pin.pad_style),
         caps: pin.caps.clone(),
     }
 }
@@ -277,6 +302,7 @@ fn pin_fields(pin: &mut DrawnPin) -> PinFieldsMut<'_> {
         label: &mut pin.label,
         role: &mut pin.role,
         gpio: &mut pin.gpio,
+        pad_style: Some(&mut pin.pad_style),
         caps: &mut pin.caps,
     }
 }
@@ -286,6 +312,7 @@ fn blank_pin() -> DrawnPin {
         label: "IO".into(),
         role: PinRole::Io,
         gpio: None,
+        pad_style: PadStyle::Pad,
         caps: vec![],
     }
 }
@@ -373,6 +400,41 @@ mod tests {
         doc.move_pin(RailTarget::Left, 1, 1);
         doc.move_pin(RailTarget::Left, 0, -1);
         assert_eq!(labels(&doc), after);
+    }
+
+    #[test]
+    fn rail_pad_style_edits_and_bulk_set() {
+        let mut doc = EditorDoc::new_template();
+        // Per-pin: rails expose the style; the band does not.
+        assert_eq!(
+            doc.rail_rows(RailTarget::Left)[0].pad_style,
+            Some(PadStyle::Pad)
+        );
+        doc.add_pin(RailTarget::Terminals);
+        assert_eq!(doc.rail_rows(RailTarget::Terminals)[0].pad_style, None);
+        doc.edit_pin(RailTarget::Left, 0, |fields| {
+            if let Some(style) = fields.pad_style {
+                *style = PadStyle::Screw;
+            }
+        });
+        assert_eq!(
+            doc.rail_rows(RailTarget::Left)[0].pad_style,
+            Some(PadStyle::Screw)
+        );
+        // Bulk: the whole rail flips at once.
+        doc.add_pin(RailTarget::Left);
+        doc.set_rail_pad_style(RailTarget::Left, PadStyle::Screw);
+        assert!(
+            doc.rail_rows(RailTarget::Left)
+                .iter()
+                .all(|row| row.pad_style == Some(PadStyle::Screw))
+        );
+        doc.set_rail_pad_style(RailTarget::Left, PadStyle::Pad);
+        assert!(
+            doc.rail_rows(RailTarget::Left)
+                .iter()
+                .all(|row| row.pad_style == Some(PadStyle::Pad))
+        );
     }
 
     #[test]
