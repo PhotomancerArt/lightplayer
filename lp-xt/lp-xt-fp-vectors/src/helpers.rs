@@ -230,6 +230,185 @@ pub fn fingerprint() -> u32 {
     h
 }
 
+/// The second probe round, designed after the first round's fit: a dense map
+/// of `divn.s`'s exponent-reassembly plane (including the class region that
+/// `mkdadj.s`/`mksadj.s` encode at `A − 384 ∈ {0..5}`), and mixed-sign
+/// NaN-position grids for the accumulate ops, whose first-round grid staged
+/// only the canonical NaN and therefore could not resolve operand priority.
+pub mod probe2 {
+    use super::HelperVector;
+    use crate::mix;
+
+    /// Second-round ops. All three dispatch to existing kernels; the grids
+    /// are what changed.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    #[repr(u8)]
+    pub enum Op2 {
+        /// `divn.s` over a coarse (r-exp × t-exp) plane, `s = 0`, sig 1.0.
+        DivnMap = 1,
+        /// The fine sweep around the class region (`r` exp 208..=240).
+        DivnFine = 2,
+        /// Sign combinations across the plane.
+        DivnSigned = 3,
+        /// A small non-zero `s`, so the sum path and flags are exercised in
+        /// the wrap regions too.
+        DivnSmallS = 4,
+        /// `madd.s` over every combination of mixed-sign/payload NaNs.
+        MaddNan = 5,
+        /// `maddn.s` over the same grid.
+        MaddnNan = 6,
+        /// `divn.s` with NaN operands in each position.
+        DivnNan = 7,
+    }
+
+    impl Op2 {
+        pub const ALL: [Op2; 7] = [
+            Op2::DivnMap,
+            Op2::DivnFine,
+            Op2::DivnSigned,
+            Op2::DivnSmallS,
+            Op2::MaddNan,
+            Op2::MaddnNan,
+            Op2::DivnNan,
+        ];
+
+        pub const fn name(self) -> &'static str {
+            match self {
+                Op2::DivnMap => "h2_divnmap",
+                Op2::DivnFine => "h2_divnfine",
+                Op2::DivnSigned => "h2_divnsign",
+                Op2::DivnSmallS => "h2_divnsmalls",
+                Op2::MaddNan => "h2_maddnan",
+                Op2::MaddnNan => "h2_maddnnan",
+                Op2::DivnNan => "h2_divnnan",
+            }
+        }
+
+        pub fn from_name(s: &str) -> Option<Op2> {
+            Op2::ALL.into_iter().find(|o| o.name() == s)
+        }
+
+        /// Which kernel runs this grid: 0 = divn.s, 1 = madd.s, 2 = maddn.s.
+        pub const fn kernel(self) -> u8 {
+            match self {
+                Op2::MaddNan => 1,
+                Op2::MaddnNan => 2,
+                _ => 0,
+            }
+        }
+    }
+
+    const fn e(exp: u32) -> u32 {
+        exp << 23
+    }
+
+    /// Mixed-sign, distinct-payload NaNs plus a normal, for the position
+    /// grids. Payloads distinct so "which operand survived" is readable.
+    pub const NANS: [u32; 4] = [0x7FC1_1111, 0xFFC2_2222, 0x7F83_3333, 0x3F80_0000];
+
+    /// NaN-position values for the divn grid.
+    pub const DIVN_NAN_R: [u32; 3] = [0xAFC0_0000, 0x2FC0_0000, 0x3F80_0000];
+    pub const DIVN_NAN_S: [u32; 4] = [0x7FC1_1111, 0xFFC2_2222, 0x7F83_3333, 0x3380_0000];
+    pub const DIVN_NAN_T: [u32; 4] = [0x8FC0_0000, 0x4F80_0000, 0x3F80_0000, 0xC380_0000];
+
+    pub const fn count(op: Op2) -> u32 {
+        match op {
+            Op2::DivnMap => 64 * 64,
+            Op2::DivnFine => 33 * 65,
+            Op2::DivnSigned => 4 * 10 * 10,
+            Op2::DivnSmallS => 16 * 16,
+            Op2::MaddNan | Op2::MaddnNan => 4 * 4 * 4,
+            Op2::DivnNan => 3 * 4 * 4,
+        }
+    }
+
+    pub fn total() -> u32 {
+        Op2::ALL.iter().map(|o| count(*o)).sum()
+    }
+
+    /// The probe at `index` — pure and index-addressable, like everything
+    /// else in this crate.
+    pub fn probe(op: Op2, index: u32) -> (u32, u32, u32) {
+        assert!(index < count(op), "probe2 index out of range");
+        let i = index as usize;
+        match op {
+            Op2::DivnMap => {
+                let (er, et) = ((i / 64) as u32 * 4, (i % 64) as u32 * 4);
+                (e(er), 0, e(et))
+            }
+            Op2::DivnFine => {
+                let (er, et) = (208 + (i / 65) as u32, 111 + (i % 65) as u32);
+                (e(er), 0, e(et))
+            }
+            Op2::DivnSigned => {
+                let combo = (i / 100) as u32; // 0..=3
+                let (sr, st) = (combo >> 1, combo & 1);
+                let er = 96 + ((i / 10) % 10) as u32 * 16;
+                let et = 96 + (i % 10) as u32 * 16;
+                ((sr << 31) | e(er), 0, (st << 31) | e(et))
+            }
+            Op2::DivnSmallS => {
+                let er = ((i / 16) as u32) * 16;
+                let et = ((i % 16) as u32) * 16;
+                (e(er), 0x3380_0000, e(et))
+            }
+            Op2::MaddNan | Op2::MaddnNan => (NANS[i / 16], NANS[(i / 4) % 4], NANS[i % 4]),
+            Op2::DivnNan => (
+                DIVN_NAN_R[i / 16],
+                DIVN_NAN_S[(i / 4) % 4],
+                DIVN_NAN_T[i % 4],
+            ),
+        }
+    }
+
+    /// Every probe2 vector, exposed to both sides like [`super::probe`].
+    pub fn vector(op: Op2, index: u32) -> HelperVector {
+        let (r, s, t) = probe(op, index);
+        HelperVector {
+            op: super::HelperOp::DivnS, // placeholder discriminant, unused
+            index,
+            r,
+            s,
+            t,
+        }
+    }
+
+    /// The second-round fingerprint, printed by both sides.
+    pub fn fingerprint() -> u32 {
+        let mut h: u32 = 0x811C_9DC5;
+        for op in Op2::ALL {
+            h = mix(h ^ op as u32);
+            for i in 0..count(op) {
+                let (r, s, t) = probe(op, i);
+                for word in [r, s, t] {
+                    h = mix(h ^ word).wrapping_add(word);
+                }
+            }
+        }
+        h
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn grids_are_pure_and_sized() {
+            assert_eq!(total(), 4096 + 2145 + 400 + 256 + 64 + 64 + 48);
+            for op in Op2::ALL {
+                for i in [0, count(op) / 2, count(op) - 1] {
+                    assert_eq!(probe(op, i), probe(op, i));
+                }
+            }
+        }
+
+        #[test]
+        fn the_probe2_fingerprint_is_stable() {
+            assert_eq!(fingerprint(), 0x67C2_9B75);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
