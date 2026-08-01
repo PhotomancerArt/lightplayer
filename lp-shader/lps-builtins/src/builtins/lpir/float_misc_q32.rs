@@ -11,7 +11,11 @@
 
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fabs_q32(v: i32) -> i32 {
-    if v < 0 { v.wrapping_neg() } else { v }
+    if v < 0 {
+        v.wrapping_neg()
+    } else {
+        v
+    }
 }
 
 #[unsafe(no_mangle)]
