@@ -1,5 +1,5 @@
 ---
-status: carried
+status: retired
 since: 2026-08-01      # first hardware walk of the arm-safe-mode chain
 logged: 2026-08-01
 area: fw-esp32c6/bootctl + lpc-engine safe clamp
@@ -48,6 +48,18 @@ we find out during a real rescue.
   the record — but the board's MAC (`a0:f2:62:87:b4:8c`) did not match
   the bench board from the walk (`a0:f2:62:85:85:d8`), so the read may
   have been of a never-armed board. Evidence inconclusive.
+- 2026-08-01 (evening) — closing walk PASSED; see Resolution.
+
+**Resolution (2026-08-01 evening)** — Exit criteria met on the bench:
+merged-branch firmware flashed to the desk C6, the Studio-identical
+record host-written and readback-verified at 0xE000, physical replug.
+Serial capture shows the full chain: `[BOOTCTL] record found:
+flags=0x00001a01` → `record consumed` → `SAFE MODE: output clamped to
+26/255 — loading the project dimmed`; the heartbeat reports
+`"outputClamp":26` (the new wire field); Yona confirmed the LEDs came
+up dim. The first walk's full-brightness boot was never reproduced —
+most consistent with an unobserved dim boot between replugs, which is
+exactly the observability gap the heartbeat field now closes.
 
 **Exit criteria** — One bench session: arm safe mode from Studio,
 replug, and either see the LEDs come up dim or capture the serial boot
