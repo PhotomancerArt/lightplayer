@@ -3954,6 +3954,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
+ "lp-xt-fp-vectors",
  "lpa-server",
  "lpc-hardware",
  "lpc-shared",
