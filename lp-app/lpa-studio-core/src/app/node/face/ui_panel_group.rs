@@ -7,7 +7,9 @@
 //! behind a group, and two embedded instances of the same effect present
 //! two independent groups because they are two different scopes.
 
-use crate::UiPanelControlView;
+use crate::{
+    UiPanelControlView, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+};
 
 /// One panel: the channels of one scope, plus its child modules' panels.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -90,6 +92,37 @@ impl UiPanelGroup {
             0 => format!("{controls} {noun}"),
             engaged => format!("{controls} {noun} · {engaged} held"),
         }
+    }
+
+    /// The group heading's detail-popup sections.
+    ///
+    /// A nested group's heading is a hairline rule with its name on it and
+    /// nothing else — the scope path and the control tally are identity and
+    /// bookkeeping, not things to read while playing, so they live here,
+    /// behind the same label-popup gesture the controls use.
+    pub fn detail_aspects(&self) -> Vec<UiSlotAspect> {
+        let held = self.engaged_total();
+        let state = if held == 0 {
+            UiSlotAspect::new(UiSlotAspectKind::PanelState, "Nothing held").with_row(
+                UiSlotAspectRow::new("", "Every control in this group follows the project."),
+            )
+        } else {
+            let noun = if held == 1 { "control" } else { "controls" };
+            UiSlotAspect::new(UiSlotAspectKind::PanelState, "Held")
+                .with_affordance(UiSlotAffordance::Edited)
+                .with_row(UiSlotAspectRow::new(
+                    "",
+                    format!("{held} {noun} in this group are held by the panel."),
+                ))
+        };
+
+        vec![
+            state,
+            UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Group")
+                .with_row(UiSlotAspectRow::new("Name", self.label.clone()))
+                .with_row(UiSlotAspectRow::new("Scope", self.scope.clone()))
+                .with_row(UiSlotAspectRow::new("Controls", self.summary())),
+        ]
     }
 }
 

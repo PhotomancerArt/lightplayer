@@ -362,6 +362,24 @@ fn aspect_summary(aspect: &UiSlotAspect) -> AspectSummary {
         UiSlotAspectKind::Validation => validation_summary(aspect),
         UiSlotAspectKind::EditState => edit_state_summary(aspect),
         UiSlotAspectKind::Binding => binding_summary(aspect),
+        // Panel state titles itself: "Held" / "Following" / "At default"
+        // are the section's whole content, so there is nothing to derive.
+        UiSlotAspectKind::PanelState => AspectSummary {
+            title: aspect.title.clone(),
+            code: None,
+            title_is_code: false,
+            icon: match aspect.affordance {
+                Some(UiSlotAffordance::Edited) => StudioIconName::Edited,
+                Some(UiSlotAffordance::Bound) => StudioIconName::BoundValue,
+                _ => StudioIconName::UnboundValue,
+            },
+            tone: match aspect.affordance {
+                Some(UiSlotAffordance::Edited) => AspectTone::Warning,
+                Some(UiSlotAffordance::Bound) => AspectTone::Bound,
+                _ => AspectTone::Quiet,
+            },
+            highlight: aspect.affordance,
+        },
         UiSlotAspectKind::TypeInfo => AspectSummary {
             title: type_info_title(aspect),
             code: None,
