@@ -2,10 +2,10 @@ pub mod button;
 pub mod clock;
 pub mod fixture;
 pub mod fluid;
+pub mod module;
 pub mod node_def;
 pub mod output;
 pub mod playlist;
-pub mod module;
 pub mod radio;
 pub mod shader;
 pub mod starter;
@@ -19,9 +19,10 @@ pub use fixture::{
     FixtureSamplingConfig, FixtureState, FixtureStateView, MappingConfig, PathSpec,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
+pub use module::{ModuleDef, ModuleDefView, PROJECT_FORMAT_VERSION};
 pub use node_def::{
-    ArtifactPathResolutionError, InvocationSite, NodeArtifact, NodeDef, NodeDefParseError,
-    NodeDefWriteError, ModuleFormatProbe, read_module_format_json, resolve_artifact_specifier,
+    ArtifactPathResolutionError, InvocationSite, ModuleFormatProbe, NodeArtifact, NodeDef,
+    NodeDefParseError, NodeDefWriteError, read_module_format_json, resolve_artifact_specifier,
 };
 pub use output::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
@@ -30,7 +31,6 @@ pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
     PlaylistStateView,
 };
-pub use module::{PROJECT_FORMAT_VERSION, ModuleDef, ModuleDefView};
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{
     ComputeShaderDef, ComputeShaderDefView, FloatMode, ScalarHint, ScalarHintView, ShaderDef,

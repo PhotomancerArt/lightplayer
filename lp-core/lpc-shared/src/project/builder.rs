@@ -11,8 +11,8 @@ use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, ChannelName, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode,
-    FixtureSamplingConfig, HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot,
-    OptionSlot, ModuleDef, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
+    FixtureSamplingConfig, HwEndpointSpec, MapSlot, ModuleDef, NodeDef, NodeInvocation,
+    NodeInvocationSlot, OptionSlot, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;

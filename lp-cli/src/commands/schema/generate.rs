@@ -35,7 +35,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use lpc_hardware::HardwareManifestFile;
 use lpc_model::schema_gen::{compile_registered_slot_shape_schema, compile_slot_shape_schema};
 use lpc_model::{
-    NodeArtifact, PROJECT_FORMAT_VERSION, ModuleDef, Revision, SlotEnumEncoding, SlotMeta,
+    ModuleDef, NodeArtifact, PROJECT_FORMAT_VERSION, Revision, SlotEnumEncoding, SlotMeta,
     SlotShape, SlotShapeRegistry, SlotVariantShape, StaticSlotShape,
 };
 use serde_json::{Map, Value, json};

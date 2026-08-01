@@ -21,8 +21,8 @@ use crate::nodes::fixture::{ColorOrder, FixtureSamplingConfig};
 use crate::nodes::node_def::NodeDefWriteError;
 use crate::nodes::starter::{starter_def_for_kind, starter_for_kind};
 use crate::{
-    ArtifactSpec, BindingDef, BindingDefs, BindingRef, BusSlotRef, ChannelName, MapSlot, NodeDef,
-    NodeInvocation, NodeInvocationSlot, OptionSlot, ModuleDef, SlotShapeRegistry, ValueSlot,
+    ArtifactSpec, BindingDef, BindingDefs, BindingRef, BusSlotRef, ChannelName, MapSlot, ModuleDef,
+    NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot, SlotShapeRegistry, ValueSlot,
 };
 
 /// The starter project's complete file set as `(relative path, bytes)` —

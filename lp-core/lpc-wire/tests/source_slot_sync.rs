@@ -1,7 +1,7 @@
 use lpc_model::nodes::fixture::FixtureDef;
+use lpc_model::nodes::module::module_def::ModuleDef;
 use lpc_model::nodes::node_def::NodeDef;
 use lpc_model::nodes::output::OutputDef;
-use lpc_model::nodes::module::module_def::ModuleDef;
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::{
     LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,

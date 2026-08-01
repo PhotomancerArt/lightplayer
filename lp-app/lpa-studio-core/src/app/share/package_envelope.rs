@@ -113,10 +113,7 @@ mod tests {
         let files = vec![
             ("logo.png".to_string(), vec![0x89, b'P', b'N', b'G', 0x00]),
             ("orbit.glsl".to_string(), b"void main() {}".to_vec()),
-            (
-                "project.json".to_string(),
-                br#"{"kind":"Module"}"#.to_vec(),
-            ),
+            ("project.json".to_string(), br#"{"kind":"Module"}"#.to_vec()),
         ];
         let json = PackageEnvelope::encode("Demo", &files).to_json().unwrap();
 
@@ -130,10 +127,7 @@ mod tests {
         // The reason JSON exists alongside zip: you can read the thing you
         // pasted. If this regresses, the channel loses its point.
         let files = vec![
-            (
-                "project.json".to_string(),
-                br#"{"kind":"Module"}"#.to_vec(),
-            ),
+            ("project.json".to_string(), br#"{"kind":"Module"}"#.to_vec()),
             ("orbit.glsl".to_string(), b"void main() {}".to_vec()),
         ];
         let json = PackageEnvelope::encode("Demo", &files).to_json().unwrap();
@@ -207,10 +201,7 @@ mod tests {
         // A project that never entered a library has no uid to carry.
         let anonymous = PackageEnvelope::encode(
             "Demo",
-            &[(
-                "project.json".to_string(),
-                br#"{"kind":"Module"}"#.to_vec(),
-            )],
+            &[("project.json".to_string(), br#"{"kind":"Module"}"#.to_vec())],
         );
         assert_eq!(anonymous.original_uid(), None);
     }
