@@ -30,6 +30,10 @@ members = [
     "lp-cli",
     "lp-fw/fw-esp32c6",
     "lp-fw/fw-esp32s3",
+    # NOT in default-members (like the two above): a cross-target Xtensa crate
+    # that only `just build-fw-esp32v3` / `just clippy-fw-esp32v3` build, under
+    # its own `esp` toolchain.
+    "lp-fw/fw-esp32v3",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lpc-mapping",
@@ -303,6 +307,16 @@ opt-level = "z"
 # full suite passes. The S3 has a 6 MB app budget with ~4.7 MB headroom, so
 # size-optimized codegen buys nothing this chip needs.
 [profile.release-esp32s3]
+inherits = "release"
+opt-level = "s"
+
+# fw-esp32v3 (classic ESP32, LX6): same reasoning as the S3 profile above, and
+# deliberately the same `opt-level = "s"` rather than the workspace default
+# "z". The S3's evidence is that "z" missed a 30 µs cold-frame RMT deadline on
+# the *faster* LX7; there is no reason to assume the LX6 is safe where the LX7
+# was not. M4 re-checks the cold first frame with real RMT output on this chip.
+# No per-package overrides — the S3 profile carries none either.
+[profile.release-esp32v3]
 inherits = "release"
 opt-level = "s"
 

@@ -26,13 +26,14 @@ fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 s3_flash_size := "8mb"
 
 # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) also builds on Espressif's Rust
-# fork (see lp-fw/fw-esp32v3/rust-toolchain.toml), but unlike fw-esp32s3 it is
-# its OWN Cargo workspace, not a repo-root workspace member (see that crate's
-# README "Workspace shape") — so its target dir lives under the crate itself,
-# not the shared root `target/`.
+# fork (see lp-fw/fw-esp32v3/rust-toolchain.toml). Like fw-esp32s3 it is a
+# repo-root workspace member excluded from `default-members` (M3-P1 folded it
+# in when it gained real lp2025-internal path dependencies), so its artifacts
+# land in the shared root `target/`. The build still runs from the crate
+# directory — see `build-fw-esp32v3`.
 xt_v3_target := "xtensa-esp32-none-elf"
 fw_esp32v3_dir := "lp-fw/fw-esp32v3"
-fw_esp32v3_elf := fw_esp32v3_dir + "/target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
+fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 
 # This crate's 4 MB flash size (docs/adr/2026-07-29-per-chip-fw-toolchains.md,
 # Q7 in the classic-ESP32 bring-up plan: C6-shaped table, not the S3's 8 MB
@@ -628,10 +629,9 @@ clippy-fw-esp32s3:
     done
 
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
-# `clippy-host` for the same reason as the S3: this crate isn't even a
-# root-workspace member, so nothing else lints it. No `test_*` harness
-# features exist yet (P1 is boot-to-hello only) — add a loop like the S3's
-# above when a harness feature lands.
+# `clippy-host` for the same reason as the S3: the crate is excluded there
+# (it cross-compiles for Xtensa under a different toolchain), so nothing else
+# lints it.
 clippy-fw-esp32v3:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -639,8 +639,25 @@ clippy-fw-esp32v3:
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
+    # `cd` for the same reason the build recipe does it: .cargo/config.toml
+    # here selects the Xtensa target, and cargo reads it from the CWD upward.
     cd {{ fw_esp32v3_dir }}
-    cargo clippy --release -- --no-deps -D warnings
+    # `--profile release-esp32v3`, NOT fw-esp32s3's `--release`: esp-storage's
+    # build script hard-errors on this chip at the workspace release profile's
+    # `opt-level = "z"` ("Building esp-storage for ESP32 needs optimization
+    # level 2, 3 or s"), because classic-ESP32 flash operations must execute
+    # from IRAM inside a tight window that "z" codegen misses. `release-esp32v3`
+    # is "s", which is also what ships — so this lints the real image.
+    #
+    # The app path (default features = esp32 + server).
+    cargo clippy --profile release-esp32v3 -- --no-deps -D warnings
+    # The two non-default entrypoints in main.rs. Neither is reachable from
+    # the default build, so linting only the defaults would leave both
+    # completely uncovered — the same way 13 fw-esp32 harnesses once rotted.
+    for feats in "esp32" "esp32,radio_ram_probe"; do
+      echo "clippy: --no-default-features --features $feats"
+      cargo clippy --profile release-esp32v3 --no-default-features --features "$feats" -- --no-deps -D warnings
+    done
 
 build-fw-esp32s3:
     #!/usr/bin/env bash
@@ -652,10 +669,12 @@ build-fw-esp32s3:
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3
 
 # Build the classic ESP32 ("v3") firmware. Same Xtensa-fork story as the S3
-# (see build-fw-esp32s3 above), but this crate is its OWN Cargo workspace
-# (lp-fw/fw-esp32v3/Cargo.toml has `[workspace]`), so the build must run with
-# that directory as `cargo`'s root — it cannot be invoked from the repo root
-# the way fw-esp32s3 (a root-workspace member) can.
+# (see build-fw-esp32s3 above), and — since M3-P1 — the same workspace shape:
+# a root-workspace member writing into the shared root `target/`. The `cd` is
+# still required, exactly as it is for fw-esp32s3: `.cargo/config.toml` inside
+# the crate selects the Xtensa target, the linker flags and the espflash
+# runner, and cargo reads that file from the CWD upward — invoking from the
+# repo root would silently build for the host.
 build-fw-esp32v3:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1003,7 +1022,7 @@ fmt-check:
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
