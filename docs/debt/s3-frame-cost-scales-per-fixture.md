@@ -11,6 +11,11 @@ related:
 ---
 # Frame cost is per-frame resolution machinery, not the shader: ~8.4 ms/fixture flat on the S3
 
+> **2026-08-01 status:** both mechanisms named below are fixed (PRs #243,
+> #244). The per-chain cost they were blamed for moved only 9.7 → 8.0 ms, so
+> the linear degradation this entry exists for **remains open** and is now
+> unattributed. See the 2026-08-01 incident-log entry.
+
 **Shape** — Measured on the desk ESP32-S3 (2026-07-31, all eight node gates,
 quad-strips variants, 30-LED strips), then attributed with `lp-cli profile`
 (emulator, esp32-c6 cycle model). The table below is the ORIGINAL measurement;
@@ -52,11 +57,13 @@ frame; per-clock comparison with the C6 is resolver-bound on both chips.
 Profiles: `profiles/2026-07-31T18-02-07--…-1fix--steady-render--s3-gate-perf-1fix/`
 and `…18-02-44--…quad-strips--steady-render--s3-gate-perf-4fix/` (report.txt).
 
-**Carrying cost** — Multi-fixture projects degrade linearly (~8.4 ms per
-fixture+output chain): 4 fixtures = 20 fps today; ~10 fixtures ≈ single-digit
-fps, regardless of how small the fixtures are. Authors cannot buy the cost
-down with lower resolution or fewer LEDs, which makes the scaling feel
-arbitrary from the outside.
+**Carrying cost** — Multi-fixture projects degrade linearly. As filed:
+~8.4 ms per fixture+output chain, 4 fixtures = 20 fps, ~10 fixtures ≈
+single-digit fps. **After both fixes (2026-08-01): ~8.0 ms per chain, 4
+fixtures = 25 fps, ~10 fixtures ≈ 12 fps.** The linear term is essentially
+unchanged; what improved was fixed per-frame overhead. Authors still cannot
+buy the cost down with lower resolution or fewer LEDs, which is what makes
+the scaling feel arbitrary from the outside.
 
 **Workarounds** — Fewer fixture+output chains (one fixture spanning strips);
 nothing else helps, by measurement.
@@ -173,6 +180,45 @@ nothing else helps, by measurement.
   the per-chain scaling this entry is named for. A 10-fixture project would
   still be in the low teens. Endpoint status owns that scaling.
 
+- **2026-08-01** — **Both halves on one image, measured together.** Emulator
+  (`quad-strips`, steady render): **65,811,630 → 3,011,467 cycles, 21.9×**, and
+  `[jit] render` is now the largest engine entry (3.6%). Desk S3
+  (d8:3b:da:47:29:70, both fixes flashed, project confirmed from the device
+  heartbeat as `/projects/Quad strips`):
+
+  | Project | Original | Resolver only | Both halves |
+  |---|---|---|---|
+  | 4 fixtures | 20 fps / 48 ms | 25 fps / 37.5 ms | **25 fps / 37 ms** |
+  | 1 fixture | 50 fps / 19 ms | 67 fps / 13.5 ms | **68 fps / 13 ms** |
+
+  The endpoint-status half contributes **nothing on silicon**, exactly as its
+  own ADR predicted: the S3 opens all four channels on frame one and never
+  entered the retry storm. The 21.9× is real but is an artifact of the
+  emulator's virtual board declaring one WS281x channel — worth remembering
+  before quoting emulator ratios as device wins.
+
+  **⚠️ The shape this entry is named for is NOT fixed.** Decomposing the two
+  measurements into fixed overhead plus per-chain cost:
+
+  | | per fixture+output chain | fixed per-frame |
+  |---|---|---|
+  | Original | 9.7 ms | 9.3 ms |
+  | Both halves | **8.0 ms** | 5.0 ms |
+
+  Per-chain cost fell only **−17%**; the fixed overhead nearly halved. That is
+  why 1 fixture improved 36% and 4 fixtures only 25%. Projected 10 fixtures:
+  **9 fps → 12 fps** — still unusable, still linear. Authors still cannot buy
+  the cost down with resolution or LED count.
+
+  So both *named mechanisms* are fixed and the carrying cost below is not.
+  Whatever owns the remaining ~8 ms per chain has not been attributed: the
+  1-fixture profile's top entries are memcpy and the allocator (30% combined),
+  with measured candidates being the shader node's per-frame re-read of its
+  consumed-slot definitions via `format!`-built paths, per-hit
+  `ProductionSource` clones, `FixtureNode::render_control`, and the 1.3 ms/
+  channel blocking RMT send. **This entry stays open on that basis** — a third
+  attribution pass on the 8 ms, not a third guess.
+
 **Exit criteria** — A profiled optimization pass that makes resolved bindings
 and endpoint status persist across frames (invalidate on tree/binding/
 hardware change, not per tick), after which frame cost is dominated by actual
@@ -185,7 +231,11 @@ the desk S3 as the oracle.
       failed-open retry storm, fixed by parking sinks on
       `HwRegistry::generation()` rather than by caching status. Emulator-only
       in steady state; the S3 never paid it.
-- [x] **Desk-S3 re-measurement** — each half measured separately 2026-08-01
-      (resolver: 20 → 25 fps at 4 fixtures; endpoint status: flat, as its fix
-      predicted for silicon). Joint measurement with both halves on one image:
-      see the closing incident-log entry.
+- [x] **Desk-S3 re-measurement** — done 2026-08-01, separately and jointly.
+      Both halves on one image: 25 fps at 4 fixtures, 68 fps at 1.
+- [ ] **The linear term itself** — the two named mechanisms are fixed and
+      per-chain cost still sits at ~8.0 ms (was ~9.7). This entry stays open
+      on that number, not on either mechanism. Next step is attribution of
+      that 8 ms, not another guess; `projects/test/quad-strips-1fix` vs
+      `quad-strips` under `lp-cli profile` is the differential that isolates
+      it.
