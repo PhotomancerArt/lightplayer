@@ -47,6 +47,7 @@ export CARGO_TARGET_DIR="$PWD/target"
 # and staleness is not harmless here — on esp Rust 1.88 `lpc-model` genuinely
 # fails to compile (70x E0716 from the Slotted derive's const-promotion of a
 # temporary), which is what blocked the firmware crates. Fail loudly instead.
+#
 # The native-f32 builtin family is **unconditional**. It was opt-in twice, for
 # two different reasons, and both are now closed:
 #
