@@ -278,9 +278,25 @@ label:has(> input:not(:disabled)) {
    stays visible — you always know whose sheet this is) and spares the
    tint edge. One at a time; clicking the backdrop dismisses. */
 
+/* Grid stack (2026-07-31): the below-the-header wrapper stacks the tab
+   content, the sheet, and the op overlay in ONE grid cell, so the region
+   is as tall as the tallest of them and a sheet can grow the card. The
+   old absolute overlays needed a hand-maintained per-sheet min-height
+   table — a recurring clipping-bug class, now deleted. */
+
+.ux-card-stack {
+    position: relative;
+    display: grid;
+}
+
+.ux-card-stack > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+}
+
 .ux-card-sheet {
-    position: absolute;
-    inset: 0;
+    /* In-flow grid item: contributes height instead of clipping. The
+       z-index still layers it over the content cell. */
     z-index: 6;
     display: grid;
     place-items: center;
@@ -401,8 +417,7 @@ label:has(> input:not(:disabled)) {
    and the same console tail, shown as a technical terminal. */
 
 .ux-card-op {
-    position: absolute;
-    inset: 0;
+    /* In-flow grid-stack item, same as .ux-card-sheet above. */
     z-index: 5;
     display: flex;
     flex-direction: column;
@@ -465,9 +480,28 @@ label:has(> input:not(:disabled)) {
     100% { left: 100%; }
 }
 
+/* Safe-mode callout: the device booted with the recovery output clamp.
+   Warning family (device condition), NOT the node language's unsaved
+   yellow; sits above the card's tab body so every tab shows it. */
+.ux-safe-mode-callout {
+    display: grid;
+    gap: 2px;
+    margin: 6px 8px 0;
+    padding: 6px 10px;
+    background: var(--studio-status-warning-bg);
+    border: 1px solid var(--studio-status-warning-border);
+    border-radius: 4px;
+    color: var(--studio-status-warning-text);
+}
+
 .ux-card-op-term {
     flex: 1;
     min-height: 0;
+    /* The grid-stack made the op overlay content-sized (2026-07-31): a
+       flex:1 + overflow scroller only scrolls when its parent is bounded,
+       and the parent no longer is. Unbounded streams own their cap now —
+       without this, a flash's terminal grows the card by its whole log. */
+    max-height: 220px;
     margin: 0;
     overflow-y: auto;
     padding: 8px 10px;
@@ -490,6 +524,17 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-color-text-muted);
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* The error line is the one thing the user must read IN FULL — the tail
+   lines above stay one-line-ellipsized like a console, but ellipsizing the
+   failure reason hid the actionable half of an esptool warning on the bench
+   ("Boot-control write failed: Flash…", 2026-07-31). */
+.ux-card-op-term > .ux-console-line-error {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .ux-card-op-term > .ux-console-line-warn {

@@ -17,7 +17,8 @@
 //! | [`ConnectEvidence::PortHeldElsewhere`] | In use elsewhere |
 //! | [`ConnectEvidence::Failed`] (ladder exhausted) | Not responding |
 //! | [`DeviceState::Booting`] | Connecting/retrying |
-//! | [`DeviceState::BlankFlash`] / [`DeviceState::Bootloader`] | Ready to set up |
+//! | [`DeviceState::BlankFlash`] | Ready to set up |
+//! | [`DeviceState::Bootloader`] | Recovery mode |
 //! | [`DeviceState::ForeignFirmware`] | Other firmware |
 //! | [`DeviceState::Incompatible`] | Needs firmware update |
 //! | [`DeviceState::Unresponsive`] | Not responding |
@@ -117,7 +118,12 @@ pub fn derive_roster_card_state(evidence: &RosterEvidence<'_>) -> RosterCardStat
         Some(DeviceState::Booting) => RosterCardState::ConnectingRetrying {
             phase: ConnectPhase::Connecting,
         },
-        Some(DeviceState::BlankFlash | DeviceState::Bootloader) => RosterCardState::ReadyToSetUp,
+        Some(DeviceState::BlankFlash) => RosterCardState::ReadyToSetUp,
+        // Split from ReadyToSetUp 2026-07-31: these were collapsed, so the
+        // session detected ROM download mode and the card discarded it. A
+        // board in download mode is not a blank board — it will not boot a
+        // freshly flashed image without a physical replug.
+        Some(DeviceState::Bootloader) => RosterCardState::RecoveryMode,
         Some(DeviceState::ForeignFirmware) => RosterCardState::OtherFirmware,
         Some(DeviceState::Incompatible { .. }) => RosterCardState::NeedsFirmwareUpdate,
         Some(DeviceState::Unresponsive { .. }) => RosterCardState::NotResponding,
@@ -177,12 +183,22 @@ mod tests {
     }
 
     #[test]
-    fn bootloader_maps_to_ready_to_set_up() {
-        // ROM download mode is the no-firmware family: waiting to be
-        // flashed IS "ready to set up"
+    fn bootloader_maps_to_recovery_mode_not_ready_to_set_up() {
+        // These were collapsed until 2026-07-31, on the reasoning that
+        // "waiting to be flashed IS ready to set up". A bench report
+        // falsified it: the session detected ROM download mode and the card
+        // discarded the fact, so a user in download mode was shown the
+        // blank-board flow. They are different situations — a device
+        // flashed from download mode does not boot the new image without a
+        // physical replug — and they take different verbs.
         assert_eq!(
             derive(&evidence().with_link(&DeviceState::Bootloader)),
-            RosterCardState::ReadyToSetUp
+            RosterCardState::RecoveryMode
+        );
+        assert_ne!(
+            derive(&evidence().with_link(&DeviceState::Bootloader)),
+            derive(&evidence().with_link(&DeviceState::BlankFlash)),
+            "download mode and blank flash must stay distinguishable"
         );
     }
 

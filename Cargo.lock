@@ -3918,6 +3918,7 @@ dependencies = [
  "libm",
  "littlefs-rust",
  "log",
+ "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-gfx-lpvm",
  "lp-perf",
@@ -5313,6 +5314,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-bootctl"
+version = "1.0.0"
+
+[[package]]
 name = "lp-cli"
 version = "40.0.0"
 dependencies = [
@@ -5688,10 +5693,13 @@ dependencies = [
  "espflash",
  "fw-host",
  "js-sys",
+ "littlefs-rust",
+ "lp-bootctl",
  "lpa-client",
  "lpc-model",
  "lpc-wire",
  "lpfs",
+ "md-5",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -5746,6 +5754,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "js-sys",
+ "littlefs-rust",
  "log",
  "lp-gfx-lpvm",
  "lpa-agent",

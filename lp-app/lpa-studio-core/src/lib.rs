@@ -34,8 +34,9 @@ pub use app::agent::{
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
-    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployTarget,
-    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
+    BootloaderEntryFlow, ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp,
+    DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
+    RecoveryInstructions, RecoveryStep, UiDeviceBackup,
 };
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, HOME_NODE_ID,

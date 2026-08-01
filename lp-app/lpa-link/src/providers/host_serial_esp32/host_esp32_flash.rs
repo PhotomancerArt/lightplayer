@@ -16,15 +16,20 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use espflash::command::{Command, CommandType};
 use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::{Flasher, ProgressCallbacks};
 use espflash::targets::Chip;
+use md5::Digest;
 use serde::Deserialize;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 
+use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, BootFlags, encode_record};
+
 use crate::{
-    LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult, LinkFirmwareManifest,
-    LinkManagementEvent, LinkManagementEventSink, LinkManagementProgress,
+    LinkBootControlResult, LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult,
+    LinkFirmwareManifest, LinkFlashRegion, LinkManagementEvent, LinkManagementEventSink,
+    LinkManagementProgress, LinkRawFilesystemReadResult,
 };
 
 /// Chip this provider flashes. The firmware package targets the ESP32-C6
@@ -35,6 +40,12 @@ const TARGET_CHIP: Chip = Chip::Esp32c6;
 /// Baud rate for the espflash connection. 115200 is the ROM/stub default and
 /// matches the browser provider; espflash negotiates faster stub baud itself.
 const CONNECT_BAUD: u32 = 115_200;
+
+/// `ESP_READ_FLASH` packet size and in-flight window. Both are the values the
+/// M1 spike measured on hardware; the stub is already running by the time we
+/// read (`Flasher::connect` uploads it), so this is the fast path.
+const READ_BLOCK_SIZE: u32 = 4096;
+const READ_MAX_IN_FLIGHT: u32 = 1024;
 
 /// Flash firmware from the merged-image manifest at `manifest_path` over the
 /// serial port `port_name`. Emits live progress into `events` and returns the
@@ -113,6 +124,222 @@ pub(super) fn erase_device_flash(
         logs: recorder.logs.clone(),
         progress: recorder.progress.clone(),
     })
+}
+
+/// Write the boot-control sector, instructing the device's next boot.
+///
+/// **One write, not several.** `write_bin_to_flash` issues `FLASH_BEGIN`,
+/// which erases the sectors it is about to write — so splitting the 16-byte
+/// record across two writes would have the second erase the first, leaving a
+/// record that always fails its CRC and a feature that silently never works.
+/// The explicit `erase_region` below is belt-and-braces for the rest of the
+/// sector; integrity of the record itself comes from its magic and CRC.
+pub(super) fn write_boot_control(
+    port_name: &str,
+    flags: BootFlags,
+    events: &LinkManagementEventSink,
+) -> Result<LinkBootControlResult, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    recorder.log(format!(
+        "Writing boot-control record (flags {:#010x})",
+        flags.bits()
+    ));
+
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+
+    recorder.progress(LinkManagementProgress::new("Erasing boot-control sector"));
+    flasher
+        .erase_region(BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE)
+        .map_err(|error| LinkError::other(format!("boot-control erase failed: {error}")))?;
+
+    recorder.progress(LinkManagementProgress::new("Writing boot-control record"));
+    flasher
+        .write_bin_to_flash(BOOTCTL_PARTITION_OFFSET, &encode_record(flags), None)
+        .map_err(|error| LinkError::other(format!("boot-control write failed: {error}")))?;
+    recorder.progress(LinkManagementProgress::new("Writing boot-control record").with_percent(100));
+
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log("Boot-control record written; it applies on the next restart");
+
+    Ok(LinkBootControlResult {
+        flags: flags.bits(),
+        chip_name,
+        logs: recorder.logs.clone(),
+        progress: recorder.progress.clone(),
+    })
+}
+
+/// Read the device's `lpfs` partition back to the host, verbatim.
+///
+/// The region is resolved from the chip the SYNC handshake names, never
+/// hardcoded: the C6 and S3 put `lpfs` in different places, and a backup of
+/// the wrong 960 KB looks exactly like a backup of the right one.
+///
+/// **Default baud, deliberately.** These parts speak USB-Serial-JTAG, where
+/// the baud parameter is meaningless and negotiating a higher one costs real
+/// time — measured on the bench (M1): 3.2 s at the default versus 4.2 s at
+/// 921600 for the same 960 KB. Do not "optimize" this by raising it.
+///
+/// The read is acked per packet, so progress is genuinely per-block rather
+/// than a spinner: 240 packets for a C6's partition.
+pub(super) fn read_raw_filesystem(
+    port_name: &str,
+    events: &LinkManagementEventSink,
+) -> Result<LinkRawFilesystemReadResult, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+    let region = chip_name
+        .as_deref()
+        .and_then(LinkFlashRegion::lpfs_for_chip)
+        .ok_or_else(|| {
+            LinkError::other(format!(
+                "no lpfs partition layout for chip {}",
+                chip_name.as_deref().unwrap_or("(unidentified)")
+            ))
+        })?;
+    recorder.log(format!(
+        "Reading {} bytes of filesystem at {:#x}",
+        region.length, region.offset
+    ));
+
+    let image = read_flash_region(&mut flasher, region, &mut recorder)?;
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log("Filesystem read complete");
+
+    Ok(LinkRawFilesystemReadResult {
+        image,
+        region,
+        chip_name,
+        logs: recorder.logs.clone(),
+        progress: recorder.progress.clone(),
+    })
+}
+
+/// Drive `ESP_READ_FLASH` over an established connection, acking each packet
+/// and reporting progress, and verify the trailing MD5 the device sends.
+///
+/// espflash's own `Flasher::read_flash` writes straight to a file and reports
+/// nothing, neither of which suits a browser-shaped operation whose whole UX
+/// problem is looking hung; this keeps the bytes in memory and narrates.
+fn read_flash_region(
+    flasher: &mut Flasher,
+    region: LinkFlashRegion,
+    recorder: &mut EventRecorder,
+) -> Result<Vec<u8>, LinkError> {
+    let label = "Reading filesystem";
+    recorder.progress(
+        LinkManagementProgress::new(label)
+            .with_steps(0, region.length)
+            .with_percent(0),
+    );
+
+    let connection = flasher.connection();
+    connection
+        .with_timeout(CommandType::ReadFlash.timeout(), |connection| {
+            connection.command(Command::ReadFlash {
+                offset: region.offset,
+                size: region.length,
+                block_size: READ_BLOCK_SIZE,
+                max_in_flight: READ_MAX_IN_FLIGHT,
+            })
+        })
+        .map_err(|error| LinkError::other(format!("filesystem read failed to start: {error}")))?;
+
+    let total = region.length as usize;
+    let mut image: Vec<u8> = Vec::with_capacity(total);
+    while image.len() < total {
+        let chunk = read_vector_response(connection, "filesystem data")?;
+        // A short packet before the end means the device stopped mid-stream;
+        // a silently truncated backup is the worst possible outcome here.
+        if image.len() + chunk.len() < total && chunk.len() < READ_BLOCK_SIZE as usize {
+            return Err(LinkError::other(format!(
+                "filesystem read truncated at {} of {total} bytes",
+                image.len() + chunk.len()
+            )));
+        }
+        image.extend_from_slice(&chunk);
+        // The device waits for the running total before sending more.
+        connection
+            .write_raw(image.len() as u32)
+            .map_err(|error| LinkError::other(format!("filesystem read ack failed: {error}")))?;
+        recorder.progress(
+            LinkManagementProgress::new(label)
+                .with_steps(image.len().min(total) as u32, region.length)
+                .with_percent(((image.len().min(total) as u64 * 100) / total as u64) as u32),
+        );
+    }
+    if image.len() > total {
+        return Err(LinkError::other(format!(
+            "filesystem read returned {} bytes, expected {total}",
+            image.len()
+        )));
+    }
+
+    let digest = read_vector_response(connection, "filesystem digest")?;
+    let mut hasher = md5::Md5::new();
+    hasher.update(&image);
+    if digest != hasher.finalize().as_slice() {
+        return Err(LinkError::other(
+            "filesystem read failed its checksum — the image is not trustworthy",
+        ));
+    }
+    recorder.progress(
+        LinkManagementProgress::new(label)
+            .with_steps(region.length, region.length)
+            .with_percent(100),
+    );
+    Ok(image)
+}
+
+/// One `Vector` response from the flash-read stream.
+fn read_vector_response(
+    connection: &mut espflash::connection::Connection,
+    what: &str,
+) -> Result<Vec<u8>, LinkError> {
+    let response = connection
+        .read_response()
+        .map_err(|error| LinkError::other(format!("{what} read failed: {error}")))?
+        .ok_or_else(|| LinkError::other(format!("{what}: the device stopped responding")))?;
+    match response.value {
+        espflash::connection::CommandResponseValue::Vector(bytes) => Ok(bytes),
+        other => Err(LinkError::other(format!(
+            "{what}: unexpected response {other:?}"
+        ))),
+    }
+}
+
+/// Ask the device whether a ROM/stub bootloader is listening, and which chip
+/// it is.
+///
+/// This is the **authoritative** bootloader-mode test: `connect` performs the
+/// esptool SYNC handshake, which only a bootloader answers. Enumeration data
+/// cannot substitute — USB-Serial-JTAG parts present the same VID/PID in app
+/// mode and download mode.
+///
+/// **It reboots the device.** `connect` drives DTR/RTS to enter download
+/// mode, and on USB-Serial-JTAG that reset drops USB enumeration. Callers
+/// must own the wire exclusively and rebuild the link afterwards; never run
+/// this speculatively against a healthy board.
+///
+/// `Ok(None)` means "answered, but would not name itself" — still a
+/// bootloader. `Err` means nothing answered, which is *not* proof the device
+/// is absent; it may be running the app.
+pub(super) fn probe_target(
+    port_name: &str,
+    events: &LinkManagementEventSink,
+) -> Result<Option<String>, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    recorder.log(format!("Probing {port_name} for a bootloader"));
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log(match &chip_name {
+        Some(name) => format!("Bootloader answered: {name}"),
+        None => "Bootloader answered (chip did not identify itself)".to_string(),
+    });
+    Ok(chip_name)
 }
 
 /// Reboot the device into its application firmware via a hard-reset signal

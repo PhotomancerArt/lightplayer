@@ -405,20 +405,8 @@
   .tw\:min-h-\[46px\] {
     min-height: 46px;
   }
-  .tw\:min-h-\[210px\] {
-    min-height: 210px;
-  }
-  .tw\:min-h-\[240px\] {
-    min-height: 240px;
-  }
-  .tw\:min-h-\[260px\] {
-    min-height: 260px;
-  }
   .tw\:min-h-\[320px\] {
     min-height: 320px;
-  }
-  .tw\:min-h-\[370px\] {
-    min-height: 370px;
   }
   .tw\:min-h-\[380px\] {
     min-height: 380px;
@@ -1617,6 +1605,9 @@
     --tw-tracking: var(--tw-tracking-wide);
     letter-spacing: var(--tw-tracking-wide);
   }
+  .tw\:\[overflow-wrap\:anywhere\] {
+    overflow-wrap: anywhere;
+  }
   .tw\:break-words {
     overflow-wrap: break-word;
   }
@@ -1834,6 +1825,10 @@
   .tw\:outline-none {
     --tw-outline-style: none;
     outline-style: none;
+  }
+  .tw\:select-all {
+    -webkit-user-select: all;
+    user-select: all;
   }
   .tw\:select-none {
     -webkit-user-select: none;
@@ -2228,6 +2223,11 @@
   .tw\:disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
+    }
+  }
+  .tw\:disabled\:text-dim-foreground {
+    &:disabled {
+      color: var(--tw-color-dim-foreground);
     }
   }
   .tw\:disabled\:opacity-40 {

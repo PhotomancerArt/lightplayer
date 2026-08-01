@@ -19,6 +19,11 @@ lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+# Mounts raw `lpfs` images in wasm for the device filesystem backup (see
+# `app/device/filesystem_backup`). Pure Rust, so the browser can do it.
+littlefs-rust = { version = "0.1.0", default-features = false, features = [
+    "alloc",
+] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lps-probe = { path = "../../lp-shader/lps-probe" }
 log = { workspace = true }

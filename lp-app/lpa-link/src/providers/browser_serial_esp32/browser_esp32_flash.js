@@ -189,6 +189,204 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
   }
 }
 
+/**
+ * Write the boot-control record — an instruction to the device's next boot,
+ * delivered through flash because a device that cannot boot has no other
+ * channel.
+ *
+ * `record` arrives already encoded (magic, version, flags, CRC) from
+ * `lp-bootctl` on the Rust side. Do NOT reconstruct it here: the firmware
+ * that reads these bytes cannot renegotiate the format at runtime, so one
+ * implementation of it is the point.
+ *
+ * One `writeFlash` call, deliberately. Its FLASH_BEGIN erases the sectors it
+ * is about to write, so splitting the record across two writes would have the
+ * second erase the first.
+ */
+export async function writeBootControl(portId, esptoolModulePath, address, record, onEvent) {
+  if (!isSupported()) {
+    throw new Error("Web Serial boot-control write is not supported in this browser.");
+  }
+
+  const logs = [];
+  const progress = [];
+  const terminal = terminalFor(logs, "esp32-bootctl", onEvent);
+  try {
+    const port = getPort(portId);
+    await releasePort(portId);
+
+    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
+    const loader = new ESPLoader({
+      transport,
+      baudrate: 115200,
+      terminal,
+      debugLogging: false,
+    });
+
+    try {
+      const chipName = await loader.main();
+      pushProgress(progress, onEvent, {
+        label: "Connected to ESP32 bootloader",
+        completedSteps: 1,
+        totalSteps: 2,
+        percent: 25,
+      });
+      await loader.writeFlash({
+        fileArray: [{ data: new Uint8Array(record), address }],
+        flashSize: "keep",
+        flashMode: "keep",
+        flashFreq: "keep",
+        eraseAll: false,
+        // MUST be true: esptool-js 0.6.0 implements ONLY deflate writes and
+        // throws "Yet to handle Non Compressed Writes" otherwise — found on
+        // the bench (2026-07-31) as "Arming safe mode failed". The ROM/stub
+        // accepts FLASH_DEFL_BEGIN in download mode; flashFirmware above has
+        // always used it.
+        compress: true,
+      });
+      // Verify by READBACK, not by esptool's flash-ID warning. On the bench
+      // (2026-07-31, ESP32-C6 rev 2 over USB-Serial-JTAG) the ID probe reads
+      // 0 and esptool prints "Failed to communicate with the flash chip" —
+      // while actual stub reads AND writes work fine (the 2.9 MB firmware
+      // write and the filesystem backup both succeeded on the same plug
+      // session). The ID probe drives per-chip SPI registers; the stub's
+      // FLASH_DEFL_*/READ_FLASH commands are a different path. Gating on the
+      // warning blocked every boot-control write on that board; comparing
+      // the record byte-for-byte in flash is the guarantee we actually want.
+      const readBack = await loader.readFlash(address, record.byteLength ?? record.length);
+      const written = new Uint8Array(record);
+      const matches =
+        readBack &&
+        readBack.length === written.length &&
+        written.every((byte, i) => readBack[i] === byte);
+      if (!matches) {
+        throw new Error(
+          `Boot-control record readback mismatch at 0x${address.toString(16)}: ` +
+            `wrote [${Array.from(written, (b) => b.toString(16).padStart(2, "0")).join(" ")}], ` +
+            `read ${readBack ? `[${Array.from(readBack, (b) => b.toString(16).padStart(2, "0")).join(" ")}]` : "nothing"}`,
+        );
+      }
+      pushProgress(progress, onEvent, {
+        label: "Boot-control record written",
+        completedSteps: 2,
+        totalSteps: 2,
+        percent: 100,
+      });
+      await loader.after("hard_reset");
+      return {
+        chipName: chipName ? String(chipName) : null,
+        logs,
+        progress: compactProgress(progress),
+      };
+    } finally {
+      try {
+        await transport.disconnect();
+      } catch (error) {
+        console.warn("[esp32-bootctl] transport disconnect failed", error);
+      }
+    }
+  } catch (error) {
+    reportFailure("esp32-bootctl", error, onEvent);
+    throw error;
+  }
+}
+
+/**
+ * Read the device's filesystem partition back to the host, verbatim.
+ *
+ * The partition is per board, and which board this is only becomes known
+ * when `loader.main()` completes its SYNC handshake — a device that cannot
+ * boot cannot be asked. So the region is resolved MID-FLOW, by calling back
+ * into `resolveRegion(chipName)` on the Rust side; the per-board table stays
+ * in one place instead of being mirrored here.
+ *
+ * **Default baud, deliberately.** These parts speak USB-Serial-JTAG, where
+ * the baud parameter is meaningless and negotiating a higher one is measurably
+ * SLOWER (3.2 s vs 4.2 s for 960 KB on the bench). Do not raise it.
+ */
+export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion, onEvent) {
+  if (!isSupported()) {
+    throw new Error("Web Serial filesystem backup is not supported in this browser.");
+  }
+
+  const logs = [];
+  const progress = [];
+  const terminal = terminalFor(logs, "esp32-fsread", onEvent);
+  try {
+    const port = getPort(portId);
+    await releasePort(portId);
+
+    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
+    const loader = new ESPLoader({
+      transport,
+      baudrate: 115200,
+      terminal,
+      debugLogging: false,
+    });
+
+    try {
+      const chipName = await loader.main();
+      pushProgress(progress, onEvent, {
+        label: "Connected to ESP32 bootloader",
+        completedSteps: 0,
+        totalSteps: 1,
+        percent: 0,
+      });
+      const region = resolveRegion(chipName ? String(chipName) : "");
+      if (!region) {
+        throw new Error(
+          `No filesystem partition layout for chip ${chipName ?? "(unidentified)"}.`,
+        );
+      }
+      const image = await loader.readFlash(
+        region.offset,
+        region.length,
+        (_packet, bytesRead, totalBytes) => {
+          const percent = totalBytes > 0 ? Math.round((bytesRead / totalBytes) * 100) : 0;
+          pushProgress(progress, onEvent, {
+            label: "Reading filesystem",
+            completedSteps: bytesRead,
+            totalSteps: totalBytes,
+            percent,
+          });
+        },
+      );
+      if (!image || image.length !== region.length) {
+        // A short image would mount as a damaged filesystem and look like
+        // data loss on the device rather than a truncated transfer.
+        throw new Error(
+          `Filesystem read returned ${image ? image.length : 0} bytes, expected ${region.length}.`,
+        );
+      }
+      pushProgress(progress, onEvent, {
+        label: "Filesystem read",
+        completedSteps: region.length,
+        totalSteps: region.length,
+        percent: 100,
+      });
+      return {
+        chipName: chipName ? String(chipName) : null,
+        offset: region.offset,
+        length: region.length,
+        image,
+        logs,
+        progress: compactProgress(progress),
+      };
+    } finally {
+      try {
+        await transport.disconnect();
+      } catch (error) {
+        console.warn("[esp32-fsread] transport disconnect failed", error);
+      }
+    }
+  } catch (error) {
+    reportFailure("esp32-fsread", error, onEvent);
+    throw error;
+  }
+}
+
 function assertNoFlashCommunicationWarning(logs, context) {
   const warning = logs.find((line) =>
     line.includes("Failed to communicate with the flash chip") ||
@@ -363,7 +561,11 @@ function parseAddress(address) {
 function reportFailure(target, error, onEvent = null) {
   const message = `${errorMessage(error)}${error?.stack ? `\n${error.stack}` : ""}`;
   emitEvent(onEvent, { kind: "log", message });
-  console.error(`[${target}] ${message}`, error);
+  // String-only, deliberately: the console forwarder ships arguments to the
+  // Rust log bridge, which expects strings — a raw Error object arrives as
+  // `{}` and the whole entry dies with "invalid type: map, expected a
+  // string" (bench, 2026-07-31). The message already carries the stack.
+  console.error(`[${target}] ${message}`);
 }
 
 function errorMessage(error) {

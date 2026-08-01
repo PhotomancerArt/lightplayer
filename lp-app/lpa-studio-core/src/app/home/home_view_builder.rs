@@ -101,6 +101,18 @@ pub struct HomeDeviceEvidence {
     pub pending_uid: Option<String>,
     /// The session's console tail (D42), oldest first.
     pub console_tail: Vec<crate::UiLogEntry>,
+    /// A card-owned op flow is mid-flight on this device (model §2, I1).
+    ///
+    /// Load-bearing for the card's EXISTENCE, not just its overlay: an
+    /// identity-less recovery board whose session lands `Gone` mid-op would
+    /// otherwise derive Offline and be dropped — which erased the card at
+    /// the exact moment its op was showing "unplug the board and plug it
+    /// back in" (bench, 2026-07-31). An op in flight pins the card.
+    pub op_in_flight: bool,
+    /// The session's latest heartbeat-reported recovery status. Carries
+    /// the safe-mode output clamp the card must surface (with its exit:
+    /// a power cycle).
+    pub recovery: Option<lpc_wire::server::RecoveryStatus>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -185,6 +197,7 @@ pub fn build_home_view(
             library_available: false,
             opening,
             issue,
+            backup: None,
         };
     };
 
@@ -211,6 +224,9 @@ pub fn build_home_view(
         library_available: true,
         opening,
         issue: issue.or_else(|| inputs.issue.clone()),
+        // The controller overlays a finished backup after the build (it is
+        // controller state, not library/roster evidence).
+        backup: None,
     }
 }
 
@@ -330,6 +346,7 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         transport: String::new(),
         state,
         project: sim.project.clone(),
+        safe_clamp: None,
         fw: None,
         sim: true,
         console_tail: sim.console_tail.clone(),
@@ -347,7 +364,11 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         return None;
     }
     let card = device_card_from_live_evidence(live);
-    if matches!(card.state, RosterCardState::Offline { .. }) {
+    if matches!(card.state, RosterCardState::Offline { .. }) && !live.op_in_flight {
+        // EXCEPT while a card-owned op flow is narrating (awaiting the
+        // replug that finishes a recovery write): an anonymous session has
+        // no registry card to yield to, so dropping the live row would take
+        // the instruction with it.
         return None;
     }
     Some(card)
@@ -406,6 +427,16 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         state,
         project,
         fw,
+        // Only a LIVE link's report counts: a stale clamp on a card whose
+        // session is gone would tell the user a replug is still needed
+        // after they already did it.
+        safe_clamp: match &live.link {
+            Some(DeviceState::Ready { .. }) => live
+                .recovery
+                .as_ref()
+                .and_then(|recovery| recovery.output_clamp),
+            _ => None,
+        },
         sim: false,
         console_tail: live.console_tail.clone(),
         ui: CardUiState::default(),
@@ -521,6 +552,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
     UiDeviceCard {
         uid: Some(device.uid.clone()),
         name: device.name.clone(),
+        safe_clamp: None,
         // recorded at last sight from the live session's connector class
         transport: device.transport.clone(),
         state,
@@ -579,6 +611,56 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_pinned_anonymous_card_takes_the_uid_less_op() {
+        // The two halves of the recovery-write ending, together: the pin
+        // keeps the anonymous card alive, AND the awaiting op rides it —
+        // half a fix showed the user a bare "Not seen yet" with no
+        // instruction (bench, 2026-07-31).
+        let evidence = HomeDeviceEvidence {
+            link: Some(DeviceState::Gone),
+            op_in_flight: true,
+            ..HomeDeviceEvidence::default()
+        };
+        let card = live_device_card(&evidence).expect("pinned");
+        assert!(
+            card.takes_card_op(None),
+            "the instruction must ride the pinned card"
+        );
+
+        // A REGISTERED offline card (uid'd) must not adopt a stray
+        // anonymous op — that guard is what the old rule was for.
+        let mut registered = card.clone();
+        registered.uid = Some("dev_other".to_string());
+        assert!(!registered.takes_card_op(None));
+    }
+
+    #[test]
+    fn an_in_flight_op_pins_the_card_through_gone() {
+        // The bench bug (2026-07-31): "Start in safe mode" resets the board,
+        // the anonymous recovery session lands Gone, the state derives
+        // Offline, and the card VANISHED — taking the "unplug the board and
+        // plug it back in" instruction with it. An op in flight must pin the
+        // card; without one, a Gone anonymous session stays invisible.
+        let evidence = HomeDeviceEvidence {
+            link: Some(DeviceState::Gone),
+            op_in_flight: true,
+            ..HomeDeviceEvidence::default()
+        };
+        let card = live_device_card(&evidence).expect("op in flight pins the card");
+        assert!(matches!(card.state, RosterCardState::Offline { .. }));
+
+        let without_op = HomeDeviceEvidence {
+            link: Some(DeviceState::Gone),
+            op_in_flight: false,
+            ..HomeDeviceEvidence::default()
+        };
+        assert!(
+            live_device_card(&without_op).is_none(),
+            "a Gone anonymous session with no op stays invisible"
+        );
+    }
+
     /// Evidence for a live, Ready device carrying `sync`.
     fn live(sync: DeviceSyncState) -> HomeDeviceEvidence {
         HomeDeviceEvidence {
@@ -587,6 +669,40 @@ mod tests {
             transport: Some("USB".to_string()),
             ..HomeDeviceEvidence::default()
         }
+    }
+
+    #[test]
+    fn a_live_heartbeat_clamp_reaches_the_card_and_a_dead_link_drops_it() {
+        let clamped_recovery = lpc_wire::server::RecoveryStatus {
+            level: lpc_wire::server::RecoveryLevelWire::Green,
+            reset_reason: "power-on".to_string(),
+            boot_count: 1,
+            safe_mode: false,
+            output_clamp: Some(26),
+            last_crash: None,
+            paths: Vec::new(),
+        };
+        let mut evidence = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+            }),
+            content: DeviceContent::Empty,
+        });
+        evidence.recovery = Some(clamped_recovery.clone());
+
+        let card = device_card_from_live_evidence(&evidence);
+        assert_eq!(
+            card.safe_clamp,
+            Some(26),
+            "a Ready link's reported clamp is the card's safe-mode evidence"
+        );
+
+        // A Gone link keeps the last heartbeat in memory but the card must
+        // not claim the (rebooted, unclamped) board is still in safe mode.
+        evidence.link = Some(DeviceState::Gone);
+        let card = device_card_from_live_evidence(&evidence);
+        assert_eq!(card.safe_clamp, None);
     }
 
     /// A pool carrying one device session's evidence and no sim.
@@ -737,6 +853,7 @@ mod tests {
                 state: offline.clone(),
                 project: None,
                 fw: None,
+                safe_clamp: None,
                 sim: false,
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
@@ -748,6 +865,7 @@ mod tests {
                 state: offline,
                 project: None,
                 fw: None,
+                safe_clamp: None,
                 sim: false,
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),

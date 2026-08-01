@@ -37,6 +37,12 @@ pub struct LpServer {
     base_fs: Box<dyn LpFs>,
     /// Last frame processing time in microseconds (for theoretical FPS calculation)
     last_frame_time_us: RefCell<Option<u64>>,
+    /// Device-level safe-mode output ceiling (0..=255, `None` = no clamp).
+    ///
+    /// DEVICE state set by the embedder (firmware, from a consumed
+    /// boot-control record) — deliberately not project data, and applied to
+    /// every engine this server creates, present and future.
+    safe_output_clamp: Option<u8>,
     /// Optional memory stats callback for logging (ESP32 passes impl, others pass None)
     memory_stats: Option<MemoryStatsFn>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
@@ -160,6 +166,7 @@ impl LpServer {
             project_manager,
             base_fs,
             last_frame_time_us: RefCell::new(None),
+            safe_output_clamp: None,
             memory_stats,
             time_provider,
             button_service,
@@ -518,7 +525,7 @@ impl LpServer {
         &mut self,
         path: &lpfs::lp_path::LpPath,
     ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
-        self.project_manager.load_project(
+        let handle = self.project_manager.load_project(
             path,
             &mut *self.base_fs,
             self.output_provider.clone(),
@@ -527,7 +534,38 @@ impl LpServer {
             self.button_service.clone(),
             self.radio_service.clone(),
             self.graphics.clone(),
-        )
+        )?;
+        // The clamp is device state: every engine wears it, including this
+        // freshly created one.
+        if let Some(project) = self.project_manager.get_project_mut(handle) {
+            project
+                .engine_mut()
+                .set_safe_output_clamp(self.safe_output_clamp);
+        }
+        Ok(handle)
+    }
+
+    /// Set (or clear) the device-level safe-mode output ceiling and apply it
+    /// to every loaded project's engine. Future loads inherit it too.
+    pub fn set_safe_output_clamp(&mut self, level: Option<u8>) {
+        self.safe_output_clamp = level;
+        let handles: alloc::vec::Vec<_> = self
+            .project_manager
+            .list_loaded_projects()
+            .into_iter()
+            .map(|loaded| loaded.handle)
+            .collect();
+        for handle in handles {
+            if let Some(project) = self.project_manager.get_project_mut(handle) {
+                project.engine_mut().set_safe_output_clamp(level);
+            }
+        }
+    }
+
+    /// The active device-level safe-mode output ceiling, for heartbeat
+    /// reporting (clients surface the safe-mode state and its exit).
+    pub fn safe_output_clamp(&self) -> Option<u8> {
+        self.safe_output_clamp
     }
 
     /// Set the last frame processing time (called by server loop)
