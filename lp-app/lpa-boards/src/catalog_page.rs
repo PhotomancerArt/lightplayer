@@ -94,27 +94,26 @@ fn mirror_selection_hash(selected: Option<&str>) {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn BoardsCatalogPage(os: HostOs, #[props(default)] initial_board: Option<String>) -> Element {
+    let deep_linked = initial_board.is_some();
     let mut sort_by = use_signal(|| SortBy::Recommended);
     let mut family_filter = use_signal(|| Option::<String>::None);
     let mut selected =
         use_signal(|| initial_board.filter(|board_id| board_by_id(board_id).is_some()));
-
-    if let Some(board_id) = selected() {
-        let board = board_by_id(&board_id).expect("selection validated on set");
-        return rsx! {
-            div { class: "lpb-cat-page",
-                button {
-                    class: "lpb-det-back",
-                    onclick: move |_| {
-                        selected.set(None);
-                        mirror_selection_hash(None);
-                    },
-                    "← All boards"
-                }
-                BoardDetail { board: board.clone(), os }
+    // Deep links land with the expanded card scrolled into view; in-page
+    // expansion never scrolls (the card grows where the user clicked).
+    let mut pending_scroll = use_signal(|| deep_linked);
+    use_effect(move || {
+        if pending_scroll() && selected.read().is_some() {
+            #[cfg(target_arch = "wasm32")]
+            if let Some(element) = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.get_element_by_id("lpb-expanded-board"))
+            {
+                element.scroll_into_view();
             }
-        };
-    }
+            pending_scroll.set(false);
+        }
+    });
 
     let mut boards: Vec<&'static BoardDisplayFile> = all_boards()
         .iter()
@@ -179,7 +178,11 @@ pub fn BoardsCatalogPage(os: HostOs, #[props(default)] initial_board: Option<Str
                         button {
                             class: "lpb-cat-fchip",
                             "aria-pressed": if family_filter().is_none() { "true" } else { "false" },
-                            onclick: move |_| family_filter.set(None),
+                            onclick: move |_| {
+                                family_filter.set(None);
+                                selected.set(None);
+                                mirror_selection_hash(None);
+                            },
                             "All"
                         }
                         for (family, soc) in family_chips() {
@@ -188,7 +191,14 @@ pub fn BoardsCatalogPage(os: HostOs, #[props(default)] initial_board: Option<Str
                                 "aria-pressed": if family_filter().as_deref() == Some(family.as_str()) { "true" } else { "false" },
                                 onclick: {
                                     let family = family.clone();
-                                    move |_| family_filter.set(Some(family.clone()))
+                                    // Filtering collapses any expanded card —
+                                    // a hidden selection would strand the
+                                    // mirrored deep link.
+                                    move |_| {
+                                        family_filter.set(Some(family.clone()));
+                                        selected.set(None);
+                                        mirror_selection_hash(None);
+                                    }
                                 },
                                 "{soc}"
                             }
@@ -198,16 +208,41 @@ pub fn BoardsCatalogPage(os: HostOs, #[props(default)] initial_board: Option<Str
             }
             div { class: "lpb-cat-grid",
                 for board in boards {
-                    BoardCard {
-                        board: board.clone(),
-                        os,
-                        on_open: {
-                            let board_id = board.board_id.clone();
-                            move |_| {
-                                selected.set(Some(board_id.clone()));
-                                mirror_selection_hash(Some(&board_id));
+                    if selected().as_deref() == Some(board.board_id.as_str()) {
+                        // Expand-in-place: the card grows to a full-width row
+                        // at its grid position — no navigation, so the back
+                        // button has nothing to break; the mirrored hash is a
+                        // bookmark, not a history entry.
+                        article {
+                            id: "lpb-expanded-board",
+                            class: "lpb-cat-card lpb-cat-card--expanded",
+                            div { class: "lpb-cat-expanded-bar",
+                                span { class: "lpb-cat-expanded-id", "{board.board_id}" }
+                                button {
+                                    class: "lpb-det-back",
+                                    onclick: move |_| {
+                                        selected.set(None);
+                                        mirror_selection_hash(None);
+                                    },
+                                    "✕ Collapse"
+                                }
                             }
-                        },
+                            div { class: "lpb-cat-expanded-body",
+                                BoardDetail { board: board.clone(), os }
+                            }
+                        }
+                    } else {
+                        BoardCard {
+                            board: board.clone(),
+                            os,
+                            on_open: {
+                                let board_id = board.board_id.clone();
+                                move |_| {
+                                    selected.set(Some(board_id.clone()));
+                                    mirror_selection_hash(Some(&board_id));
+                                }
+                            },
+                        }
                     }
                 }
             }
