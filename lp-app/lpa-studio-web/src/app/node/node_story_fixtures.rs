@@ -127,21 +127,6 @@ pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
         persisted: 2,
-        transient: 0,
-        failed: 0,
-    };
-    view.header_actions = vec![node_revert_pane_action()];
-    view
-}
-
-/// Playlist node whose subtree carries live-only (transient) edits — drives
-/// the blue (live) pencil affordance, the header batch-revert action, and D7
-/// tint variants.
-pub(crate) fn live_dirty_node_view() -> UiNodeView {
-    let mut view = playlist_node_view();
-    view.header.dirty = DirtySummary {
-        persisted: 0,
-        transient: 1,
         failed: 0,
     };
     view.header_actions = vec![node_revert_pane_action()];
@@ -149,9 +134,10 @@ pub(crate) fn live_dirty_node_view() -> UiNodeView {
 }
 
 /// The editor-level change list the dirty playlist popup stories thread in:
-/// the playlist's OWN edits (two persisted plus one live control, matching
-/// the dirty-fixture counts) and one edit addressed to ANOTHER node that the
-/// popover must filter out of its list.
+/// the playlist's OWN edits (two persisted, matching the dirty-fixture
+/// counts) and one edit addressed to ANOTHER node that the popover must
+/// filter out of its list. There is no debug row: debug overrides are not
+/// dirty (D7), so the controller never lists them.
 pub(crate) fn playlist_pending_edits() -> Vec<UiPendingEdit> {
     let mut time_edit = story_pending_edit(
         "/fyeah_sign.show/playlist.playlist",
@@ -172,15 +158,6 @@ pub(crate) fn playlist_pending_edits() -> Vec<UiPendingEdit> {
             "entries[blast]",
             UiPendingEditKind::Added,
             UiPendingEditPhase::Persisted,
-        ),
-        story_pending_edit(
-            "/fyeah_sign.show/playlist.playlist",
-            "Playlist",
-            "controls.rate",
-            UiPendingEditKind::Assign {
-                value_display: "2.0".to_string(),
-            },
-            UiPendingEditPhase::Live,
         ),
         story_pending_edit(
             "/fyeah_sign.show/other.shader",
@@ -229,7 +206,6 @@ pub(crate) fn failed_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
         persisted: 1,
-        transient: 0,
         failed: 1,
     };
     view.header_actions = vec![node_revert_pane_action()];
@@ -238,12 +214,11 @@ pub(crate) fn failed_dirty_node_view() -> UiNodeView {
 
 /// Three-level bubbling fixture: the grandchild carries the edits and every
 /// ancestor's summary includes them, exactly as the controller's aggregation
-/// walk produces (grandchild {1p,1t} → child {1p,1t} → parent adds one
-/// persisted edit of its own → {2p,1t}).
+/// walk produces (grandchild {1p} → child {1p} → parent adds one persisted
+/// edit of its own → {2p}).
 pub(crate) fn nested_dirty_node_view() -> UiNodeView {
     let bubbled = DirtySummary {
         persisted: 1,
-        transient: 1,
         failed: 0,
     };
 
@@ -285,7 +260,6 @@ pub(crate) fn nested_dirty_node_view() -> UiNodeView {
     ]);
     view.header.dirty = bubbled.merge(DirtySummary {
         persisted: 1,
-        transient: 0,
         failed: 0,
     });
     view.header_actions = vec![node_revert_pane_action()];

@@ -17,11 +17,21 @@ pub(crate) fn slot_set_value_action(address: ProjectSlotAddress, value: LpValue)
     )
 }
 
-/// Build the per-slot revert action (labelled "Reset" on live rows).
+/// Build the per-slot revert action for a persisted (unsaved) edit.
 pub(crate) fn slot_revert_action(address: ProjectSlotAddress) -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         SlotEditOp::Revert { address },
+    )
+}
+
+/// Build the per-value **Clear** action for a debug (live-only) override
+/// (D7): the same `RemoveSlotEdit` mechanism as revert, under the verb debug
+/// values use — for a Debug slot the authored default IS the shape default.
+pub(crate) fn slot_clear_action(address: ProjectSlotAddress) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::Clear { address },
     )
 }
 

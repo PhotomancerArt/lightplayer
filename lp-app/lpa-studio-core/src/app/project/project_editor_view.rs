@@ -33,8 +33,9 @@ pub struct ProjectEditorView {
     /// rather than a broken one.
     pub library_identity: Option<(String, String)>,
     /// Project-level aggregate of the per-node dirty summaries (persisted /
-    /// transient / failed) driving the save affordances; derived from the
-    /// same edit-state join as the per-field dirty affordances.
+    /// failed) driving the save affordances; derived from the same
+    /// edit-state join as the per-field dirty affordances. Debug overrides
+    /// are absent by construction (D7).
     pub dirty: DirtySummary,
     /// The save panel's labeled change list: one entry per pending edit,
     /// built from the same edit-state join as [`Self::dirty`], so the list

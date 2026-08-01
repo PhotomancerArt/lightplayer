@@ -55,26 +55,24 @@ pub(crate) fn device_project_selection() -> Element {
 }
 
 #[story(
-    description = "The project pane with a dirty tree: uncommitted header with Save/Revert icons and the pencil trigger; the focused shader row's selection highlight mixes in the unsaved yellow, the palette row wears the live blue header tint, the root row the aggregate unsaved tint — rows carry only the small affordance glyph (no status words or count badges; the breakdown is in the tooltip, counts in the popup)."
+    description = "The project pane with a dirty tree: uncommitted header with Save/Revert icons and the pencil trigger; the focused shader row's selection highlight mixes in the unsaved yellow, the palette row wears the failed red tint, the root row the aggregate tint — rows carry only the small affordance glyph (no status words or count badges; the breakdown is in the tooltip, counts in the popup)."
 )]
 pub(crate) fn sidebar_dirty_tree() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
     let unsaved = DirtySummary {
         persisted: 2,
-        transient: 0,
         failed: 0,
     };
-    let live = DirtySummary {
+    let failed = DirtySummary {
         persisted: 0,
-        transient: 1,
-        failed: 0,
+        failed: 1,
     };
     if let Some(root) = view.tree.roots.first_mut() {
-        root.dirty = unsaved.merge(live);
+        root.dirty = unsaved.merge(failed);
         root.children[1].dirty = unsaved;
-        root.children[2].dirty = live;
+        root.children[2].dirty = failed;
     }
-    view.dirty = unsaved.merge(live);
+    view.dirty = unsaved.merge(failed);
     view.edits_in_flight = 0;
     view.header_actions = vec![
         UiPaneAction::new(

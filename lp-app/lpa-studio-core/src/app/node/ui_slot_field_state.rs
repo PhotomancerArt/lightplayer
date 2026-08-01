@@ -11,9 +11,12 @@ pub struct UiSlotFieldState {
     pub dirty: UiNodeDirtyState,
     /// Validation error shown near the field when present.
     pub invalid: Option<String>,
-    /// True when the slot's policy persistence is transient: edits apply
+    /// True when the slot is live-only (a Debug-role field, or any produced
+    /// field): edits apply
     /// live to the running project and are **not** written back by save.
-    /// M2 styles transient (`live`) dirty differently from persisted dirty.
+    /// M2 styles live dirty differently from persisted dirty; note such a
+    /// slot is not "dirty" in the `DirtySummary` sense at all (D7) — its
+    /// verb is Clear.
     pub live: bool,
 }
 
@@ -50,7 +53,7 @@ impl UiSlotFieldState {
         self
     }
 
-    /// Mark whether the field is a live (transient-persistence) control.
+    /// Mark whether the field is a live (Debug/produced) control.
     pub fn with_live(mut self, live: bool) -> Self {
         self.live = live;
         self

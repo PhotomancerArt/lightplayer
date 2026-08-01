@@ -173,7 +173,7 @@ pub(crate) fn write_failed() -> Element {
 
 #[story(
     label = "Live Chrome",
-    description = "Touched transient controls: the live (blue) row tint, the detail icon, and the inline Reset icon on rows with an own edit entry — no text chips."
+    description = "Touched debug controls: the live (blue) row tint, the detail icon, and the inline Clear icon on rows with an own edit entry — no text chips."
 )]
 pub(crate) fn live_chrome() -> Element {
     rsx! {
@@ -218,7 +218,7 @@ pub(crate) fn live_chrome() -> Element {
 
 #[story(
     label = "Live Detail Popup",
-    description = "The detail popup for a touched live control: the edited section hosts the Reset button; no saved value is known for a transient control, so no Was row (degraded state)."
+    description = "The detail popup for a touched debug control: the edited section hosts the Clear button; no saved value is known for a debug override, so no Was row (degraded state)."
 )]
 pub(crate) fn live_detail_popup() -> Element {
     rsx! {

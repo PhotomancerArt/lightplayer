@@ -2,10 +2,9 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ProjectSlotAddress, UiAction, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiAction, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
 };
 
-use crate::app::node::slot_edit_actions::slot_revert_action;
 use crate::app::node::{
     SlotShapeDisplay, SlotShapeDisplayMode, SlotUnitDisplay, SlotUnitDisplayMode,
     legacy_shape_from_parts,
@@ -15,19 +14,19 @@ use crate::base::{
     detail_popover_section_class,
 };
 
-/// Revert/reset affordance rendered INSIDE the slot detail popup's edited
+/// Revert/clear affordance rendered INSIDE the slot detail popup's edited
 /// (edit-state) section for a touched editable slot — beside the state and
 /// old-value rows it acts on, like the save panel's per-entry revert rows
 /// (the row's inline icon stays the quick path).
 #[derive(Clone, PartialEq)]
 pub struct SlotDetailRevert {
-    /// Button label: "Revert" for unsaved persisted edits, "Reset" for live
-    /// (transient) controls.
+    /// Button label: "Revert" for unsaved persisted edits, "Clear" for
+    /// live/debug overrides (D7 — never "Reset").
     pub label: &'static str,
-    /// Tooltip explaining what dispatching the revert discards.
+    /// Tooltip explaining what dispatching the button discards.
     pub title: &'static str,
-    /// Slot address the revert op targets.
-    pub address: ProjectSlotAddress,
+    /// The already-built op action (revert or clear) this button dispatches.
+    pub action: UiAction,
     /// Shared action conduit.
     pub on_action: EventHandler<UiAction>,
 }
@@ -161,7 +160,7 @@ fn SlotDetailRevertButton(revert: SlotDetailRevert) -> Element {
     let SlotDetailRevert {
         label,
         title,
-        address,
+        action,
         on_action,
     } = revert;
 
@@ -173,7 +172,7 @@ fn SlotDetailRevertButton(revert: SlotDetailRevert) -> Element {
                 title,
                 onclick: move |event| {
                     event.stop_propagation();
-                    on_action.call(slot_revert_action(address.clone()));
+                    on_action.call(action.clone());
                 },
                 StudioIcon {
                     name: StudioIconName::Revert,

@@ -336,8 +336,6 @@ fn pane_surface_tint_class(variant: NodeDirtyTint, dirty: DirtySummary) -> &'sta
                 "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface-muted))]"
             } else if dirty.persisted > 0 {
                 "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface-muted))]"
-            } else if dirty.transient > 0 {
-                "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface-muted))]"
             } else {
                 "tw:contents tw:[--tw-color-card:var(--studio-color-surface)] tw:[--tw-color-card-subtle:var(--studio-color-surface-subtle)] tw:[--tw-color-card-muted:var(--studio-color-surface-muted)]"
             }
@@ -379,12 +377,8 @@ fn NodeTabs(
 mod tests {
     use super::*;
 
-    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
-        DirtySummary {
-            persisted,
-            transient,
-            failed,
-        }
+    fn dirty(persisted: usize, failed: usize) -> DirtySummary {
+        DirtySummary { persisted, failed }
     }
 
     #[test]
@@ -405,22 +399,24 @@ mod tests {
             tone(UiStatus::good("Running"), DirtySummary::clean()),
             PaneTone::Good
         );
-        // Dirty precedence: failed > unsaved > live.
+        // Dirty precedence: failed > unsaved.
         assert_eq!(
-            tone(UiStatus::good("Running"), dirty(2, 1, 1)),
+            tone(UiStatus::good("Running"), dirty(2, 1)),
             PaneTone::Error
         );
         assert_eq!(
-            tone(UiStatus::good("Running"), dirty(2, 1, 0)),
+            tone(UiStatus::good("Running"), dirty(2, 0)),
             PaneTone::Warning
         );
+        // D7: debug overrides never enter the summary, so a debug-only node
+        // keeps its runtime tone — no wash at all.
         assert_eq!(
-            tone(UiStatus::good("Running"), dirty(0, 1, 0)),
-            PaneTone::Live
+            tone(UiStatus::good("Running"), DirtySummary::clean()),
+            PaneTone::Good
         );
         // An error status is never masked by a dirty wash.
         assert_eq!(
-            tone(UiStatus::error("Failed"), dirty(0, 1, 0)),
+            tone(UiStatus::error("Failed"), dirty(1, 0)),
             PaneTone::Error
         );
     }
@@ -428,15 +424,13 @@ mod tests {
     #[test]
     fn surface_tint_applies_only_in_full_surface_variant_on_dirty_panes() {
         assert_eq!(
-            pane_surface_tint_class(NodeDirtyTint::HeaderOnly, dirty(2, 0, 0)),
+            pane_surface_tint_class(NodeDirtyTint::HeaderOnly, dirty(2, 0)),
             "tw:contents"
         );
 
-        let unsaved = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(2, 0, 0));
+        let unsaved = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(2, 0));
         assert!(unsaved.contains("--studio-status-warning-bg"));
-        let live = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(0, 1, 0));
-        assert!(live.contains("--studio-status-live-bg"));
-        let failed = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(1, 1, 1));
+        let failed = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(1, 1));
         assert!(failed.contains("--studio-status-error-bg"));
 
         let clean = pane_surface_tint_class(NodeDirtyTint::FullSurface, DirtySummary::clean());
