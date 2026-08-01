@@ -7,13 +7,14 @@
   "flash": "16 MB",
   "psram": "8 MB",
   "price_usd": 9.9,
-  "tier": "silver",
+  "tier": "gold",
   "capabilities": ["Wi-Fi", "BLE 5", "thumb-sized", "camera header"],
   "blurb": "Tiny S3 with real memory headroom. Calibrated profile in the repo; the castellated pads are deliberately unlisted.",
   "support_note": "S3 support is new — tested as the S3 track matures.",
   "purchase_urls": [
     { "label": "Seeed", "href": "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32S3-Plus-p-6361.html" }
   ],
+  "usb_bridge": "native-usb-jtag",
   "hw": {
     "width": 76,
     "module": { "x": 14, "y": 6, "w": 48, "h": 30, "label": "S3", "antenna": false },

@@ -92,6 +92,38 @@ pub fn alloca_base_int() -> PregSet {
     ]))
 }
 
+/// Caller-saved FRs for clobber sets — **all 16** (M6-P4: no FR survives a
+/// `call8` under the esp toolchain that compiles our float builtins).
+///
+/// The `_float` sibling of [`caller_saved_int`]. There is deliberately no
+/// `callee_saved_float`: the empty set has no callers, and writing one would
+/// suggest an FP callee-save frame region exists. It does not (M7 D7) — which
+/// is exactly why [`FRAME_TOP_RESERVED_BYTES`] and `FrameLayout::compute` are
+/// unchanged by float support.
+#[cfg(feature = "float-f32")]
+pub fn caller_saved_float() -> PregSet {
+    float_set(super::fpr::CALLER_SAVED_POOL)
+}
+
+/// Base allocatable float set: the whole FR file (M7 D8 reserves no scratch).
+///
+/// Unlike [`alloca_base_int`] there is no sret adjustment to make — the sret
+/// pointer is an address, and addresses are never float.
+#[cfg(feature = "float-f32")]
+pub fn alloca_base_float() -> PregSet {
+    float_set(super::fpr::ALLOC_POOL)
+}
+
+/// Build a [`PregSet`] over the float lanes from raw FR indices.
+#[cfg(feature = "float-f32")]
+fn float_set(regs: &[u8]) -> PregSet {
+    let mut s = PregSet::EMPTY;
+    for &r in regs {
+        s.insert(PReg::float(r));
+    }
+    s
+}
+
 /// Direct-return width: more than 2 scalar return words go through an sret
 /// buffer. Same value as rv32 deliberately — keeps LPIR-level return
 /// classification target-invariant (the windowed ABI would permit 4, but
@@ -241,10 +273,25 @@ pub fn func_abi_xt(sig: &LpsFnSig, func: Option<&IrFunction>) -> crate::abi::Fun
     };
 
     let mut allocatable = alloca_base_int();
+    // The two classes are independent lanes of the same set, so the float file
+    // joins the pool by union and needs no sret adjustment of its own — the
+    // sret pointer is an address.
+    #[cfg(feature = "float-f32")]
+    {
+        allocatable = allocatable.union(alloca_base_float());
+    }
     if is_sret {
         // The sret pointer lives in a2 for the whole function.
         allocatable.remove(A2);
     }
+
+    // Every FR is clobbered by a call (M6-P4). The clobber set is what makes
+    // the allocator evict live floats around a call, so omitting the float
+    // lanes here would leave a value in a register the callee overwrites.
+    #[cfg(feature = "float-f32")]
+    let caller_saved = caller_saved_int().union(caller_saved_float());
+    #[cfg(not(feature = "float-f32"))]
+    let caller_saved = caller_saved_int();
 
     let total_param_slots = match func {
         Some(f) => f.total_param_slots() as usize,
@@ -257,7 +304,9 @@ pub fn func_abi_xt(sig: &LpsFnSig, func: Option<&IrFunction>) -> crate::abi::Fun
         return_method,
         allocatable,
         precolors,
-        caller_saved_int(),
+        caller_saved,
+        // No float lane here, deliberately: no FR is callee-saved, which is
+        // what removes the FP callee-save frame region entirely (M7 D7).
         callee_saved_int(),
         crate::isa::IsaTarget::Xtensa,
     )

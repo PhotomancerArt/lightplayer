@@ -21,6 +21,8 @@ mod project_read_runtime;
 mod project_read_shapes;
 mod project_read_stream;
 mod project_runtime_index;
+#[cfg(test)]
+mod resolution_persistence_tests;
 mod srgb8_lut;
 #[cfg(test)]
 pub(crate) mod test_support;

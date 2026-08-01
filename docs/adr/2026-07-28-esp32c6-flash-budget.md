@@ -179,6 +179,18 @@ rather than a cliff discovered by a deploy job.
 - Growth discipline moves to the CI gate. Features that need more than 64 KB
   of headroom must find their own savings or make an explicit budget case.
 
+## Spend ledger (running)
+
+Deliberate spends since this ADR landed, so that future size work finds them
+here — at the entry point the size gate's error message names — rather than
+re-attributing them from a bloat diff. One line per spend: what it bought,
+what (if anything) is clawback-able, and what clawing it back would cost.
+Append; do not editorialize old entries.
+
+| Date | Spend | Bought | Clawback lever |
+|---|---|---|---|
+| 2026-08-01 | **+10,208 B** — resolver persistent resolution (PR #243, `docs/adr/2026-07-31-resolver-persistent-resolution.md`) | −54% engine cycles on the 1-fixture oracle; S3 quad-strips 20→25 fps | **Mostly none** — the spend is the feature; reverting costs the perf win back. The only cheap slice is the intern table's reverse-lookup + error-formatting paths (cycle errors would report ids instead of names): unmeasured, likely single-digit KB flash — its real holding is a few KB of *heap*, not flash. Do not spend an afternoon here expecting 10 KB. |
+
 ## Alternatives Considered
 
 - **Swap ESP-NOW for raw IEEE 802.15.4** (~460 KB). Rejected for now — see

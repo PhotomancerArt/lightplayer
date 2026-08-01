@@ -491,6 +491,10 @@ impl OutputProvider for SharedOutputProvider {
     fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.borrow().close(handle)
     }
+
+    fn hardware_generation(&self) -> u64 {
+        self.0.borrow().hardware_generation()
+    }
 }
 
 fn project_root_path(name: &str) -> Result<TreePath, ServerError> {

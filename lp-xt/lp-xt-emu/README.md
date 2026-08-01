@@ -13,10 +13,17 @@ Scope is *core*: executors + memory + the window machinery, plus the
 (`CycleModel::InstructionCount` is the default), and full `InstLog` parity
 remain out of scope.
 
-The **FPU is in scope as of M6** and partially built — see
-[Floating point](#floating-point). **None of its numeric behavior is proven
-against silicon until the M6 P6 hardware campaign runs.** Do not trust an FP
-result out of this emulator before then.
+The **FPU is in scope as of M6** — see [Floating point](#floating-point).
+**Its numeric behavior is proven equal to real ESP32-S3 silicon**: the M6
+hardware conformance campaign diffed 5 630 committed-first predictions
+against a full device sweep and closed every divergence, then extracted the
+three implementation-defined estimate ROMs exhaustively (~503M points) and
+transcribed the toolchain's real divide/sqrt sequences end to end. Result:
+**zero divergence, result bits and FSR both**, replayed with no board
+attached by `tests/fp_silicon_replay.rs`, forever. The behavior contract —
+what is measured, what is still open, and by which vector family each row is
+proven — is `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`. Trust the
+ADR, not this paragraph, if the two ever disagree.
 
 ## Architecture
 
@@ -112,6 +119,39 @@ out. Not modeled: classic's *word-only* data access to I-bus addresses (byte
 stores to SRAM0/I-bus fault EXCCAUSE=3 on hardware) — the emulator is more
 permissive there; the device-side writer honors the constraint.
 
+### Flash — where firmware actually executes from
+
+The code region above is **SRAM**, and on an ESP32 that is not where firmware
+lives. The application's `.text` executes from flash through the cache (XIP; a
+boot log shows `vaddr=0x4200_0020 map` segments); only code a JIT produces at
+runtime is in SRAM. So each profile also models two **read-only** flash
+windows and a small internal-SRAM region for a flash-resident image's
+`.data`/`.bss`:
+
+| | ESP32-S3 | classic ESP32 |
+| --- | --- | --- |
+| IROM (executable, `AliasRule::Identity`) | `0x4200_0000` | `0x400D_0000` |
+| DROM (data only) | `0x3C00_0000` | `0x3F40_0000` |
+| image `.data`/`.bss` (plain SRAM) | `0x3FCA_8000` | `0x3FFD_0000` |
+
+Guest stores into either flash window fault; the loader paths
+(`load_bytes`/`load_region`) write them anyway, because placing an image in
+flash is what a flasher does, not what the guest does. The **lengths** are the
+model's, not hardware's (256 KiB / 64 KiB / 32 KiB against 32 MB of real
+`irom_seg` on the S3) — regions are allocated per emulator, and one emulator is
+built per host call. The **bases** are hardware, sourced in `board.rs` from
+esp-hal's MIT/Apache-2.0 `ld/esp32{,s3}/memory.x` with in-repo corroboration,
+and labelled *documented/observed* rather than measured, unlike the SRAM
+numbers around them.
+
+Until 2026-08-01 the resident builtins image shared the SRAM code region with
+JIT'd shader code. That coupled the largest compilable shader to the size of
+the builtins — turning on the f32 builtin family left 931 bytes and took the
+`xtn.q32` filetest suite from 849/849 files to 522/849 — and it hid the fact
+that a shader→builtin call spans SRAM→flash, far outside `call8`'s ±512 KiB
+direct reach. `tests/call_range.rs` pins both halves of that now. See
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
+
 ### D-bus / I-bus dual mapping
 
 The runner firmware writes payloads via the D-bus view and *executes them at
@@ -132,10 +172,14 @@ globals, snapshot region, texture buffers — and reads results back out.
 
 The window is **data only**: it carries no `AliasRule`, so an instruction fetch
 from it faults (`EXC_INSTR_FETCH_ERROR`) exactly as jumping into a data region
-does. `SHARED_DBUS_BASE` (`0x3F40_0000`) is the base both board profiles leave
-free; `add_shared` **asserts** the range does not overlap any installed region,
-in either its D-bus range or its I-bus image, so the choice cannot rot silently
-as profiles change.
+does. `SHARED_DBUS_BASE` (`0x3000_0000`) is below the lowest address either
+chip's data bus decodes, so no future profile can grow into it; `add_shared`
+**asserts** the range does not overlap any installed region, in either its
+D-bus range or its I-bus image, so the choice cannot rot silently as profiles
+change. It did rot once, which is how we know: the base used to be
+`0x3F40_0000` on the weaker ground that no *profile* mapped it, and that
+address turned out to be classic's DROM base the moment flash was modeled. The
+assertion caught it.
 
 This address is **host-emulator fiction** — no ESP32 has a host-shared region,
 and the on-device JIT never needs one. See
@@ -178,16 +222,28 @@ deliberate: a plausible default is indistinguishable from knowledge once it is
 in the code, and an emulator that is 99% right and silently confident about the
 rest is the exact failure M6 exists to prevent.
 
-Seven of the seventeen fields are resolved, and the citation says how:
-**`fsr_sticky`** from the 2026-07-31 desk session, and six — `madd_fused`,
-`conversion_scale`, `float_to_int_out_of_range`, `float_to_int_nan`,
-`utrunc_negative`, `snan_compare_signals` — from the Xtensa ISA Reference
-Manual, each citing the instruction page that states it. The distinction
-matters: a manual reading is still falsifiable by the P6 campaign, a silicon
-measurement *is* the campaign. The other ten are the row list of the M6
-FP-contract ADR's §4. A non-default `FCR.RM` is likewise **refused**, not
-ignored (D6) — its encoding is architectural (`cpu::FCR_RM_*`, ISA RM Table
-4-47), but whether this silicon honors it is still F1's measurement.
+**All seventeen fields are resolved** — the P6 campaign closed the last of
+them. Provenance splits two ways: four are manual-sourced (`madd_fused`,
+`conversion_scale`, `float_to_int_out_of_range`, `float_to_int_nan`), each
+citing the ISA Reference Manual page that states it and silicon-confirmed
+during the campaign; thirteen are silicon-sourced. Three fields
+(`utrunc_negative`, `fsr_flag_bits`, `snan_compare_signals`) carry a citation
+that says `FALSIFIED`, backing the ADR's two headline findings: in-range
+negatives wrap like the signed conversion, not the RM's `0x80000000`
+sentinel; and §4.3.11.4's "implementations raise no FSR flags" is false on
+this silicon, including its signaling-predicate corollary (`olt.s`/`ole.s`
+raise INVALID on quiet NaNs too). The distinction still matters even with
+nothing left `Unknown`: a manual reading was always falsifiable, and a
+silicon measurement is what falsified these
+(`settled_rows_declare_manual_or_silicon_provenance` pins the manual/silicon
+split, and the falsified set, so neither can drift). The full row list, each
+with its proving vector family, is the M6 FP-contract ADR's §4
+(`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`). A non-default
+`FCR.RM` is **implemented** for `add.s`/`sub.s`/`mul.s` (measured: all three
+directed modes match IEEE-754 directed rounding bit-for-bit) and **refused**
+everywhere else, per D6 — its encoding is architectural (`cpu::FCR_RM_*`, ISA
+RM Table 4-47), and the refusal for the unmeasured surface stays loud on
+purpose (ADR §6).
 
 The `FSR` flag *layout* is architectural too (`cpu::FSR_*`, Table 4-48), and it
 explains the P1 measurement: the `0x400` read back after that sweep is
@@ -216,11 +272,13 @@ executing nothing".
 **An `UNKNOWN:<field>` row is not a failure.** It is a question addressed to
 silicon, naming the policy field that closes it, and the set is *derived* — the
 harness catches the policy panic and reads the field name out of it, so it
-cannot drift from what the executors actually need. Today: **3886 of 5630 rows
-UNKNOWN (69.0%)**, and the test asserts the count is not zero, because zero
-before the campaign would mean the policy layer had quietly acquired defaults.
-Each corpus file's header breaks its own count down by the field that closes it,
-so P6 can triage one field at a time rather than face a single number.
+cannot drift from what the executors actually need. Before the campaign this
+corpus ran 3 886 of 5 630 rows UNKNOWN (69.0%); **after P6 the guard flipped
+direction**: the test now asserts the count is **zero**, because every policy
+field is measured and an `UNKNOWN` reappearing means one lost its measurement
+without the campaign being re-run — exactly as bad as a silent default would
+have been before. Each corpus file's header still breaks its own row count
+down by family, from when P6 needed to triage one field at a time.
 
 To regenerate after a generator or executor change:
 
@@ -232,7 +290,28 @@ UPDATE_FP_GOLDENS=1 cargo test -p lp-xt-emu --test fp_conformance
 tautology that passes forever, and it is already the repo's stated rule
 (`lpvm-native/src/xt_corpus.rs`).
 
-### `src/fp_capture.rs` — the campaign's diff tool
+### `tests/fp_silicon_replay.rs` — the campaign, replayed with no board
+
+```bash
+cargo test -p lp-xt-emu --test fp_silicon_replay
+```
+
+The other half of "no board, forever": where `fp_conformance.rs` checks the
+emulator against *committed predictions*, this checks the emulator against
+the *committed silicon transcripts* under `tests/fixtures/fp/captures/`
+(`tables.txt`, `helpers.txt`, `families.txt` — verbatim `[FPCONF]` output from
+the 2026-07-31 desk session). It re-derives the estimate-ROM boundary sweep,
+replays every helper probe, and re-runs the full 5 630-vector family diff —
+all against the same numbers the desk session actually produced, without a
+board attached. This is what makes "the emulator is trusted" a claim CI
+enforces rather than a claim that ages: any change that moves the emulator
+off measured silicon behavior fails this test immediately, on every commit.
+The campaign's negative control — a deliberately corrupted row (a result byte
+forced to `0xdeadbeef`) surfacing as exactly one `DIVERGE` and nothing else —
+lives as a fixture in `src/fp_capture.rs`'s own tests, proving the comparison
+can fail before trusting that it doesn't.
+
+### `src/fp_capture.rs` — the campaign's diff tool, and the re-run path
 
 ```bash
 just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50   # capture

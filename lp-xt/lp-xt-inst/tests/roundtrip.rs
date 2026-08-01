@@ -279,7 +279,8 @@ fn fp_registers() {
         }
     }
     for op in [
-        MovS, AbsS, NegS, Div0S, Recip0S, Sqrt0S, Rsqrt0S, Nexp01S, MkdadjS, AddexpS, AddexpmS,
+        MovS, AbsS, NegS, Div0S, Recip0S, Sqrt0S, Rsqrt0S, Nexp01S, MksadjS, MkdadjS, AddexpS,
+        AddexpmS,
     ] {
         for &x in &REGS {
             for &y in &REGS {

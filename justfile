@@ -629,10 +629,19 @@ clippy-fw-esp32s3:
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance test_button; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
+    # `float-f32` OFF. It is on by default, so every pass above builds the f32
+    # arms and none of them builds the gate-off configuration — the same
+    # invisible-rot shape as the harness loop, and the same fix. This is the
+    # only build in the repo where `#[cfg(not(feature = "float-f32"))]` on this
+    # crate is compiled at all, and it is what a future Xtensa board without an
+    # FPU (or a size-constrained S3 variant) would ship.
+    echo "clippy: float-f32 OFF (the gate-off configuration)"
+    cargo clippy --release --no-default-features \
+        --features esp32s3,server,test_xt_jit_corpus -- --no-deps -D warnings
 
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
 # `clippy-host` for the same reason as the S3: the crate is excluded there
@@ -855,10 +864,13 @@ fwtest-loopback-esp32s3 port="":
 #   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # everything
 #   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
 #   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX helpers         # divide-step probes
 #
 # `family` is an `lp-xt-fp-vectors` family name (rounding, nan_payload,
 # denormal, signed_zero, div_sqrt, convert), or `tables` for the estimate-table
-# sweep. `limit` caps each family; 0 runs all of it.
+# sweep, or `helpers` for the divide-step characterization grids (const.s and
+# the nexp01/mksadj/mkdadj/addexp/addexpm/maddn/divn probes). `limit` caps each
+# family or grid; 0 runs all of it.
 #
 # ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
 # predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
@@ -888,8 +900,8 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
     fi
     mode=families
     family="{{ family }}"
-    if [[ "$family" == "tables" ]]; then
-      mode=tables
+    if [[ "$family" == "tables" || "$family" == "helpers" ]]; then
+      mode="$family"
       family=""
     fi
     mkdir -p target/fp-capture
@@ -923,12 +935,14 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
     wait "$cap" 2>/dev/null || true
     echo "captured $(wc -l < "$out") lines to $out"
     # Only the family modes have predictions to diff against. The table sweep
-    # produces the estimate ROMs themselves — there is nothing to compare them
-    # to, which is the whole reason they have to be read off silicon.
+    # and the helper grids produce silicon-first data — there is nothing to
+    # compare them to, which is the whole reason they have to be read off
+    # silicon (the derived semantics are then held to the committed captures
+    # by boardless replay tests).
     if [[ "$mode" == "families" ]]; then
       just fp-diff "$out"
     else
-      echo "table sweep captured; P6 turns it into fp_policy::EstimateTables"
+      echo "$mode capture done; P6 turns it into fp_policy data + replay fixtures"
     fi
 
 # Diff an FP conformance capture against the committed host predictions.
@@ -942,6 +956,28 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
 fp-diff capture:
     FP_CAPTURE="{{ absolute_path(capture) }}" \
       cargo test -p lp-xt-emu --test fp_capture -- --nocapture --test-threads=1
+
+# Run the GPIO button diagnostic on a connected ESP32-S3: D9 (GPIO8) with an
+# internal pull-up, normally-open button to GND. Prints a `BUTTON gpio=...`
+# line per debounced press/release. Mirrors fw-esp32c6's
+# `fwtest-button-esp32c6`; unlike it, this harness is synchronous (the S3's
+# `fw_harness` entrypoint never starts the embassy runtime).
+#
+#   just fwtest-button-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-button-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_button
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
@@ -1311,6 +1347,12 @@ test-rust-core:
 # are `#![cfg(feature = "emu-xt")]` but their subject
 # (`lpvm_native::xt_corpus`) sits behind `xt-corpus` — with only one of the
 # two, the files compile to NOTHING and pass having run nothing.
+#
+# `float-f32` needs no mention: `emu` turns it on unconditionally (nothing on
+# the host is flash-constrained, so the firmware gate has no job here), which is
+# what compiles `xt_corpus::F32_CASES` and the f32 half of the golden test. If
+# `emu` ever stops implying it, this line grows a `,float-f32` — the failure
+# would otherwise be silent in exactly the way the note above describes.
 test-xt-host:
     cargo test -p lpvm-native --features emu-xt,xt-corpus
 

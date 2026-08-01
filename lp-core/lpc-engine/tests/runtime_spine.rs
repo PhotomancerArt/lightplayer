@@ -557,7 +557,7 @@ impl NodeRuntime for ProduceProbeNode {
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
         let pv = ctx
-            .resolve(self.query.clone())
+            .resolve(&self.query)
             .map_err(|e| NodeError::msg(format!("resolve: {}", e.message)))?;
         if let LpsValueF32::F32(v) = pv.as_value().expect("value") {
             self.last = Some(v);

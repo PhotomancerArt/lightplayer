@@ -43,6 +43,7 @@ pub mod emu;
 pub mod error;
 pub mod fp_capture;
 pub mod fp_policy;
+pub mod fp_rom;
 pub mod memory;
 pub mod trace;
 

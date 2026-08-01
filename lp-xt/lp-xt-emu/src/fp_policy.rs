@@ -19,9 +19,11 @@
 //! to a default, because a plausible default is indistinguishable from knowledge
 //! once it is in the code.
 //!
-//! At the end of M6 P3 almost every field is `Unknown`. **That is the correct
-//! state**, not an incomplete one: the unresolved list is precisely the row list
-//! of §4 of the FP-contract ADR, and P6 closes it from silicon.
+//! At the end of M6 P3 almost every field was `Unknown` — deliberately. The
+//! **P6 campaign closed all of them**: every field now carries a measurement
+//! citation, two of them recording where silicon *falsified* the ISA
+//! Reference Manual. The `Unknown` machinery stays, so any future field
+//! arrives loud instead of defaulted.
 //!
 //! # How the corpus copes
 //!
@@ -186,10 +188,11 @@ pub fn suppress_unresolved_panic_output() {
 /// Which NaN survives an operation with one or more NaN operands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NanRule {
-    /// The first NaN operand's bits pass through unchanged.
-    PropagateFirstOperand,
-    /// The second NaN operand's bits pass through unchanged.
-    PropagateSecondOperand,
+    /// The **last** NaN operand (in `fs`, `ft` order) passes through with the
+    /// quiet bit forced and the payload preserved. The measured rule.
+    LastOperandQuieted,
+    /// The first NaN operand, quieted.
+    FirstOperandQuieted,
     /// Any NaN operand is replaced by the default generated NaN.
     Canonicalize,
 }
@@ -223,6 +226,22 @@ pub enum TiesRule {
     AwayFromZero,
 }
 
+/// What `utrunc.s` does with a negative input.
+///
+/// The ISA RM claims a fixed `0x80000000` sentinel; silicon **falsified**
+/// that for in-range negatives (16 DIVERGE rows, family F6), so this is a
+/// rule rather than a value.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UtruncNegativeRule {
+    /// Truncate toward zero; a negative integer result is returned as its
+    /// two's-complement bits (saturating at `i32::MIN` below range), with
+    /// INVALID raised — except when it truncates to zero, which is merely
+    /// inexact. The measured behavior.
+    WrapLikeSignedSaturating,
+    /// The ISA RM's claim: a fixed sentinel for any negative input.
+    Sentinel(u32),
+}
+
 /// **Which operations set which `FSR` flag.**
 ///
 /// The *bit layout* is no longer part of this question: the ISA RM's Table 4-48
@@ -247,51 +266,40 @@ pub struct FsrFlagBits {
     pub inexact: u32,
 }
 
-/// The implementation-defined estimate tables behind `recip0.s`, `rsqrt0.s`,
-/// `sqrt0.s`, and `div0.s`.
+/// The implementation-defined estimate ROMs behind `recip0.s`, `rsqrt0.s`,
+/// `sqrt0.s`, and `div0.s` — **extracted from silicon** (D5).
 ///
-/// Deliberately a *table*, not a formula. These instructions read a lookup ROM;
-/// no document yields its contents, and a polynomial approximation that came
-/// close would pass casual tests while hiding the fact that the real table was
-/// never captured. P6 extracts them exhaustively (sweep the significand for a
-/// representative exponent, run-length encode, then confirm the exponent rule
-/// separates) and this becomes exact by construction.
-///
-/// The shape is fixed here so P6 only has to fill it: an index into the leading
-/// significand bits, plus an exponent rule, plus — for `rsqrt0.s` — a second
-/// table selected by exponent parity.
-#[derive(Clone, PartialEq, Eq, Debug)]
+/// The data and the bit-exact model live in [`crate::fp_rom`]; this policy
+/// row records the provenance and the measured shape. The extraction found
+/// only **three** underlying ROMs behind the four instructions: a 128-entry
+/// table shared by `recip0.s`/`div0.s` (7 index bits) and an odd/even pair of
+/// 64-entry tables shared by `rsqrt0.s`/`sqrt0.s` (6 index bits), each entry
+/// carrying 7 result bits. The model reproduces every run of every captured
+/// sweep — `tests/fp_silicon_replay.rs` re-derives it from the committed
+/// capture on every test run, with no board.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct EstimateTables {
-    /// Number of leading significand bits used as the table index. P6 confirms
-    /// this by sweeping rather than assuming it.
+    /// Index width of the wide (recip/div) ROM, confirmed by sweeping.
     pub index_bits: u8,
-    pub recip0: Vec<u32>,
-    pub sqrt0: Vec<u32>,
-    /// Indexed `[exponent_parity][significand]`.
-    pub rsqrt0_by_parity: [Vec<u32>; 2],
-    pub div0: Vec<u32>,
+    /// Where the committed capture lives, relative to `lp-xt-emu`.
+    pub capture: &'static str,
 }
 
 /// Semantics of the non-estimate members of the divide/sqrt helper family:
-/// `nexp01.s`, `mkdadj.s`, `addexp.s`, `addexpm.s`, `maddn.s`, `divn.s`.
+/// `nexp01.s`, `mksadj.s`, `mkdadj.s`, `addexp.s`, `addexpm.s`, `maddn.s`,
+/// `divn.s` — **measured on silicon**; no document covers them (the ISA RM's
+/// Table 4-46 omits the whole family) and the license rules keep binutils,
+/// GCC, and QEMU source off the table.
 ///
-/// P3 recorded these as open because the ISA Reference Manual was not available.
-/// It is available now, and **it does not cover them**: the manual's Table 4-46
-/// (§4.3.11, p. 67-68) enumerates the Floating-Point Coprocessor Option's
-/// instruction additions and none of `div0.s`, `divn.s`, `nexp01.s`,
-/// `mkdadj.s`, `maddn.s`, `recip0.s`, `rsqrt0.s`, `sqrt0.s`, or `const.s`
-/// appears in it — nor anywhere else in the document. They belong to a later
-/// extension of the FP option than the 2011 edition describes.
-///
-/// So the field stays open for a better reason than before: the manual read has
-/// happened and came back empty, `AGENTS.md`'s license rule keeps binutils, GCC,
-/// and QEMU off the table, and P6's measurement is the remaining route. Their
-/// *presence* on silicon is settled (M6 P1, all nine helpers executed).
+/// The implementations live in [`crate::fp_rom`] and
+/// `executor/float_math.rs`; this row records the provenance. The honest
+/// caveat: `divn.s` is modeled as the fused accumulate, which is exact on the
+/// divide/sqrt-sequence envelope (all 272 end-to-end sequence rows) but not
+/// across its full probe grid — the campaign record documents the
+/// off-envelope behavior it measured.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DivideStepSemantics {
-    /// Marker: this type is populated wholesale when the semantics are sourced.
-    /// Left opaque on purpose — inventing its shape now would be inventing the
-    /// answer's shape.
+    /// Where the measurements live.
     pub sourced_from: &'static str,
 }
 
@@ -328,12 +336,10 @@ pub struct FpPolicy {
     /// here. `float.md` §5 leaves this unspecified at the product level, which
     /// is exactly why the *target's* answer has to be recorded.
     pub float_to_int_nan: Unknown<u32>,
-    /// The unsigned integer `utrunc.s` produces for a negative input.
-    ///
-    /// A raw value rather than a rule, because the answer turns out not to be a
-    /// rule: the ISA RM specifies a fixed sentinel here, which is neither the
-    /// saturation an [`OutOfRangeRule`] would name nor a wrap.
-    pub utrunc_negative: Unknown<u32>,
+    /// What `utrunc.s` produces for a negative input. Began life as the ISA
+    /// RM's fixed sentinel; the campaign **falsified** that on silicon, so it
+    /// is a rule again — see [`UtruncNegativeRule`].
+    pub utrunc_negative: Unknown<UtruncNegativeRule>,
     /// How `round.s` breaks an exact tie.
     pub round_s_ties: Unknown<TiesRule>,
     /// The sixteen constants `const.s` can produce. Architecturally defined and
@@ -367,31 +373,71 @@ macro_rules! isa_rm {
     };
 }
 
+/// Citation stem for every field closed by the M6 P6 silicon campaign. One
+/// macro so the campaign rows are greppable, exactly like [`isa_rm!`].
+/// The board: ESP32-S3 chip rev v0.2, MAC `d8:3b:da:47:29:70`, desk session
+/// 2026-07-31; captures committed under `tests/fixtures/fp/captures/`.
+macro_rules! silicon {
+    ($what:literal) => {
+        concat!(
+            "M6 P6 desk session 2026-07-31 (ESP32-S3 d8:3b:da:47:29:70) — ",
+            $what
+        )
+    };
+}
+
 impl FpPolicy {
-    /// The policy after M6 P5: one row measured on silicon, six read out of the
-    /// ISA Reference Manual, ten still open for the P6 campaign.
+    /// The policy after the M6 P6 campaign: **every field is measured**, from
+    /// the ISA Reference Manual where it spoke (and silicon agreed), from
+    /// silicon alone everywhere else — including two rows where silicon
+    /// **falsified** the manual (`utrunc_negative`, `snan_compare_signals`).
     pub const fn m6() -> FpPolicy {
         FpPolicy {
-            nan_propagation: Unknown::unknown("nan_propagation", "vector family F2 (NaN payloads)"),
-            default_generated_nan: Unknown::unknown(
+            nan_propagation: Unknown::measured(
+                "nan_propagation",
+                "vector family F2 (NaN payloads)",
+                NanRule::LastOperandQuieted,
+                silicon!(
+                    "family F2: all 540 propagation rows show the LAST NaN \
+                     operand surviving with the quiet bit forced and the \
+                     payload preserved (270 RESOLVED rows + the qNaN rows \
+                     that agreed by construction)"
+                ),
+            ),
+            default_generated_nan: Unknown::measured(
                 "default_generated_nan",
                 "vector family F2 (hardware-generated NaNs)",
+                0x7FC0_0000,
+                silicon!(
+                    "families F2 (10 generated-NaN rows) and F4 (8 rows of \
+                     0 * inf): every hardware-generated NaN is 0x7fc00000, \
+                     with FSR INVALID"
+                ),
             ),
-            // Deliberately NOT closed from the manual. §4.3.11.2 (p. 69) says
-            // the ISA includes sub-normal "representations and processing
-            // rules", which is an architectural claim about the option and not
-            // a statement about what this implementation does at run time —
-            // flush-to-zero is precisely the thing a specific FPU deviates on,
-            // and `docs/design/float.md` files it as target-defined. Reading
-            // that one clause as a measurement would be the wrong-but-plausible
-            // answer M6 exists to avoid. F3 settles it on the board.
-            flush_input_denormals: Unknown::unknown(
+            // The RM's sub-normal clause was deliberately NOT read as an
+            // answer (it describes the option, not this implementation).
+            // Silicon answered: full IEEE subnormal arithmetic, no flushing
+            // anywhere.
+            flush_input_denormals: Unknown::measured(
                 "flush_input_denormals",
                 "vector family F3 (denormals, input half)",
+                false,
+                silicon!(
+                    "family F3: every one of 350 rows is consistent with full \
+                     IEEE subnormal arithmetic; the 80 rows where flushing \
+                     would change the answer all came back IEEE (e.g. \
+                     max-subnormal + max-subnormal = 0x00fffffe, a normal)"
+                ),
             ),
-            flush_output_denormals: Unknown::unknown(
+            flush_output_denormals: Unknown::measured(
                 "flush_output_denormals",
                 "vector family F3 (denormals, output half)",
+                false,
+                silicon!(
+                    "family F3, output half: subnormal results come back with \
+                     their full subnormal bit patterns, never as zero (32 \
+                     RESOLVED rows, all IEEE)"
+                ),
             ),
             // `MADD.S` (p. 406) states the product is added without an
             // intermediate round, and its Operation line annotates the multiply
@@ -434,24 +480,79 @@ impl FpPolicy {
                 0x7FFF_FFFF,
                 isa_rm!("TRUNC.S p. 548 and the other signed conversions: NaN returns 0x7fffffff"),
             ),
-            // The odd one out, and the reason this field is a value rather than
-            // a rule: a negative input does not saturate to zero.
+            // The campaign's headline falsification: the RM's fixed sentinel
+            // (UTRUNC.S p. 555, "negative numbers and -inf return
+            // 0x80000000") is only true below i32::MIN. In range, silicon
+            // wraps the signed truncation — the P5 prediction produced 16
+            // DIVERGE rows, every one on an in-range negative.
             utrunc_negative: Unknown::measured(
                 "utrunc_negative",
                 "vector family F6 (conversions, unsigned)",
-                0x8000_0000,
-                isa_rm!("UTRUNC.S p. 555: negative numbers and -inf return 0x80000000"),
+                UtruncNegativeRule::WrapLikeSignedSaturating,
+                silicon!(
+                    "family F6, 16 DIVERGE rows: utrunc.s(-1.5) = 0xffffffff, \
+                     utrunc.s(-1.9 * 2^15) = 0xffff0ccd, utrunc.s(-0.5) = 0 \
+                     (inexact only); the RM sentinel survives only below \
+                     i32::MIN. RM FALSIFIED for in-range negatives"
+                ),
             ),
-            round_s_ties: Unknown::unknown("round_s_ties", "vector family F6 (conversions, ties)"),
-            const_s_table: Unknown::unknown(
+            round_s_ties: Unknown::measured(
+                "round_s_ties",
+                "vector family F6 (conversions, ties)",
+                TiesRule::ToEven,
+                silicon!(
+                    "family F6: round.s(0.5) = 0, round.s(1.5) = 2, \
+                     round.s(2.5) = 2, and the negative mirrors — ties to even"
+                ),
+            ),
+            const_s_table: Unknown::measured(
                 "const_s_table",
-                "vector family F5 (divide/sqrt sequence inputs)",
+                "the helpers capture (const.s 0..=15)",
+                [
+                    0x0000_0000,
+                    0x3F80_0000,
+                    0x4000_0000,
+                    0x3F00_0000,
+                    0x0000_0000,
+                    0x3F80_0000,
+                    0x4000_0000,
+                    0x3F00_0000,
+                    0x0000_0000,
+                    0x3F80_0000,
+                    0x4000_0000,
+                    0x3F00_0000,
+                    0x0000_0000,
+                    0x3F80_0000,
+                    0x4000_0000,
+                    0x3F00_0000,
+                ],
+                silicon!(
+                    "helpers capture: const.s produces [0.0, 1.0, 2.0, 0.5] \
+                     selected by imm & 3, all sixteen selectors measured"
+                ),
             ),
-            fsr_flag_bits: Unknown::unknown(
+            fsr_flag_bits: Unknown::measured(
                 "fsr_flag_bits",
-                "the FSR column of every vector family (the layout is now \
-                 architectural — see cpu::FSR_*; what is open is which \
-                 operation raises which flag)",
+                "the FSR column of every vector family",
+                FsrFlagBits {
+                    invalid: crate::cpu::FSR_INVALID,
+                    div_by_zero: crate::cpu::FSR_DIV_BY_ZERO,
+                    overflow: crate::cpu::FSR_OVERFLOW,
+                    underflow: crate::cpu::FSR_UNDERFLOW,
+                    inexact: crate::cpu::FSR_INEXACT,
+                },
+                silicon!(
+                    "the FSR column of all 5630 family rows + 5328 helper \
+                     probes: INEXACT on rounded results, UNDERFLOW on \
+                     tiny-and-inexact, OVERFLOW with INEXACT, INVALID on \
+                     sNaN operands / NaN generation / invalid conversions / \
+                     olt.s+ole.s with any NaN; DIV_BY_ZERO from the \
+                     reciprocal estimates on zero. maddn.s and the exponent \
+                     helpers are flag-silent. The op-class mapping is \
+                     implemented in executor/float_math.rs and fp_rom.rs and \
+                     replayed against the captures. RM §4.3.11.4 (no flags \
+                     at all) FALSIFIED"
+                ),
             ),
             fsr_sticky: Unknown::measured(
                 "fsr_sticky",
@@ -461,38 +562,64 @@ impl FpPolicy {
                  0x400 after a 24-instruction FP sweep with no intervening write \
                  (p1-silicon-results.md)",
             ),
-            // §4.3.11.2 (p. 69) says the ISA includes IEEE754 signed zero,
-            // infinity, quiet NaN and sub-normal handling but **not** signaling
-            // NaNs or exceptions, and §4.3.11.4 (p. 71) adds that current
-            // implementations raise none. A bit pattern with the quiet bit clear
-            // is therefore just a NaN here; nothing signals on it.
+            // The RM (§4.3.11.2 p. 69) claims the ISA has no signaling-NaN
+            // support and §4.3.11.4 that implementations raise nothing.
+            // Silicon disagrees: an sNaN operand raises FSR INVALID on every
+            // compare (and every arithmetic op), and olt.s/ole.s raise it on
+            // quiet NaNs too — IEEE's signaling-predicate rule, working.
             snan_compare_signals: Unknown::measured(
                 "snan_compare_signals",
                 "vector family F2 (NaN payloads, compare half)",
-                false,
-                isa_rm!("§4.3.11.2 p. 69: the ISA has no IEEE754 signaling NaNs or exceptions"),
+                true,
+                silicon!(
+                    "family F2: every sNaN compare row reads FSR 0x800, and \
+                     olt.s/ole.s read it on qNaN rows as well (oeq.s and the \
+                     unordered forms stay silent). RM §4.3.11.2/4 FALSIFIED"
+                ),
             ),
-            // The RM fixes the field's *encoding* (Table 4-47, p. 69-70 — now
-            // in `cpu.rs` as `FCR_RM_*`) and names it for `FLOAT.S`/`UFLOAT.S`
-            // only. It never says which arithmetic instructions consult it, and
-            // §4.3.11.4 (p. 71) shows the document is willing to describe
-            // architectural machinery that current implementations do not
-            // provide. Whether add.s/sub.s/mul.s on *this* silicon round
-            // differently under RM != 0 is therefore still a measurement, and
-            // implementing three directed-rounding modes on the strength of an
-            // unnamed "various instructions" would be a guess with 1944 corpus
-            // rows riding on it.
-            fcr_rounding_honored: Unknown::unknown(
+            // The question D6 was written for. Answered: FCR.RM is real.
+            fcr_rounding_honored: Unknown::measured(
                 "fcr_rounding_honored",
                 "vector family F1 (rounding, all four FCR modes)",
+                true,
+                silicon!(
+                    "family F1: 556 of 648 operand groups produce \
+                     mode-dependent results, and all 1944 non-default-mode \
+                     rows match IEEE-754 directed rounding exactly. Directed \
+                     modes are implemented for add.s/sub.s/mul.s (the \
+                     measured surface) and refused elsewhere"
+                ),
             ),
-            estimates: Unknown::unknown(
+            estimates: Unknown::measured(
                 "estimates",
                 "the M6 P6 exhaustive estimate-table extraction",
+                EstimateTables {
+                    index_bits: 7,
+                    capture: "tests/fixtures/fp/captures/tables.txt",
+                },
+                silicon!(
+                    "60 RLE sweeps of the full 2^23 significand space over 15 \
+                     (sign, exponent) planes per op; three underlying ROMs \
+                     (recip/div shared 128-entry, rsqrt/sqrt odd+even \
+                     64-entry); fp_rom.rs reproduces every run of every \
+                     sweep — replayed boardlessly by fp_silicon_replay.rs"
+                ),
             ),
-            divide_step_helpers: Unknown::unknown(
+            divide_step_helpers: Unknown::measured(
                 "divide_step_helpers",
-                "the Xtensa ISA Reference Manual, or an M6 P6 measurement",
+                "the M6 P6 helper probe grids + end-to-end sequences",
+                DivideStepSemantics {
+                    sourced_from: "tests/fixtures/fp/captures/helpers.txt + the \
+                                   div/sqrt sequence rows of families.txt",
+                },
+                silicon!(
+                    "5328 probe points: nexp01/mksadj/mkdadj/addexp/addexpm \
+                     reproduce 144/144 each, maddn.s is bit-identical to \
+                     madd.s on all 1536 (and flag-silent); divn.s is modeled \
+                     as the fused accumulate — exact on the sequence \
+                     envelope, with off-envelope behavior recorded, not \
+                     modeled"
+                ),
             ),
         }
     }
@@ -554,14 +681,17 @@ mod tests {
 
     #[test]
     fn reading_an_unresolved_field_panics_with_a_useful_message() {
-        let p = FpPolicy::m6();
-        let err = std::panic::catch_unwind(|| *p.nan_propagation.get()).expect_err("must panic");
+        // No field of the shipped policy is unresolved anymore, so the panic
+        // machinery is exercised on a synthetic field — it still guards any
+        // future field that arrives without a measurement.
+        let u: Unknown<bool> = Unknown::unknown("synthetic_field", "a future campaign");
+        let err = std::panic::catch_unwind(|| *u.get()).expect_err("must panic");
         let msg = err
             .downcast_ref::<String>()
             .expect("the panic payload is the message");
-        assert_eq!(parse_unresolved(msg), Some("nan_propagation"));
+        assert_eq!(parse_unresolved(msg), Some("synthetic_field"));
         assert!(
-            msg.contains("vector family F2"),
+            msg.contains("a future campaign"),
             "the message names what resolves it: {msg}"
         );
     }
@@ -595,32 +725,24 @@ mod tests {
                 );
             }
         }
-        let resolved: Vec<_> = inv
+        let unresolved: Vec<_> = inv
             .iter()
-            .filter(|(_, _, c)| c.is_some())
+            .filter(|(_, _, c)| c.is_none())
             .map(|(n, ..)| *n)
             .collect();
-        assert_eq!(
-            resolved,
-            vec![
-                "madd_fused",
-                "conversion_scale",
-                "float_to_int_out_of_range",
-                "float_to_int_nan",
-                "utrunc_negative",
-                "fsr_sticky",
-                "snan_compare_signals",
-            ],
-            "the settled list is pinned so a field cannot acquire a value \
-             quietly; if this changed, the new entry needs a citation and an \
-             ADR row"
+        assert!(
+            unresolved.is_empty(),
+            "after the P6 campaign every field is measured; {unresolved:?} \
+             lost its citation"
         );
     }
 
     /// Every settled row must say *where* it came from, and the two provenances
-    /// have to stay distinguishable: a manual reading is falsifiable by the P6
-    /// campaign, a silicon measurement is the campaign. Collapsing them would
-    /// hide which claims the board has actually tested.
+    /// have to stay distinguishable: a manual reading is falsifiable by the
+    /// campaign, a silicon measurement *is* the campaign. After P6 the split
+    /// is pinned: four rows stand on the manual (each silicon-confirmed by
+    /// the families run), thirteen on silicon — including the two rows where
+    /// silicon falsified the manual.
     #[test]
     fn settled_rows_declare_manual_or_silicon_provenance() {
         let p = FpPolicy::m6();
@@ -636,8 +758,29 @@ mod tests {
                 panic!("{name}'s citation names neither the manual nor a desk session: {c}");
             }
         }
-        assert_eq!(from_silicon, vec!["fsr_sticky"]);
-        assert_eq!(from_manual.len(), 6, "manual-sourced rows: {from_manual:?}");
+        assert_eq!(
+            from_manual,
+            vec![
+                "madd_fused",
+                "conversion_scale",
+                "float_to_int_out_of_range",
+                "float_to_int_nan",
+            ],
+            "manual-sourced rows are pinned"
+        );
+        assert_eq!(from_silicon.len(), 13, "silicon rows: {from_silicon:?}");
+        // The falsified rows must say so, loudly and durably.
+        for name in ["utrunc_negative", "snan_compare_signals", "fsr_flag_bits"] {
+            let (_, _, cite) = p
+                .inventory()
+                .into_iter()
+                .find(|(n, ..)| *n == name)
+                .unwrap();
+            assert!(
+                cite.unwrap().contains("FALSIFIED"),
+                "{name} falsified the RM and its citation must record that"
+            );
+        }
         // A manual citation without a page number is not a citation.
         for (name, _, cite) in p.inventory() {
             if let Some(c) = cite

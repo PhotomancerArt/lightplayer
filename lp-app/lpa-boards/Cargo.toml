@@ -22,6 +22,12 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 schemars = { workspace = true, optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Deep-link plumbing for the catalog's detail selection only (replaceState —
+# fires no events). The components themselves stay DOM-free.
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["History", "Window"] }
+
 [dev-dependencies]
 lpc-hardware = { path = "../../lp-core/lpc-hardware" }
 

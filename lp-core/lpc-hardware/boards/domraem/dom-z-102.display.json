@@ -9,38 +9,42 @@
   "tier": "bronze",
   "capabilities": ["Ethernet", "Wi-Fi", "4 fused outputs", "30 A max", "5-24 V input", "DIN rail"],
   "blurb": "Ethernet + Wi-Fi controller in a DIN-rail case: four fused 7.5 A channels, screw terminals throughout, 5-24 V input. WROOM-32E inside.",
-  "support_note": "Runs when classic ESP32 (v3) firmware lands — in progress.",
   "purchase_urls": [
     { "label": "Amazon", "href": "https://www.amazon.com/dp/B0GH7LPNQV" }
   ],
+  "usb_bridge": "ch340k",
+  "notes": [
+    { "text": "The IO12 terminal drives the onboard relay (GPIO12) — it is not an LED data output." },
+    { "text": "The BOOT/RESET buttons are stacked: BOOT is the top button of the pair, RESET the bottom." }
+  ],
   "hw": {
-    "width": 150,
-    "module": { "x": 62, "y": 8, "w": 60, "h": 54, "label": "WROOM-32E", "antenna": true },
+    "width": 210,
+    "module": { "x": 118, "y": 8, "w": 62, "h": 50, "label": "WROOM-32E", "antenna": true },
     "buttons": [
-      { "x": 18, "y": 46, "label": "OPT" },
-      { "x": 18, "y": 62, "label": "RST" }
+      { "x": 20, "y": 30, "label": "BOOT" },
+      { "x": 20, "y": 46, "label": "RST" }
     ],
     "left": [
-      { "label": "GND", "role": "gnd" },
-      { "label": "GND", "role": "gnd" },
-      { "label": "V+", "role": "pwr5", "caps": [ { "text": "5-24V", "kind": "pwr" } ] },
-      { "label": "V+", "role": "pwr5" }
+      { "label": "GND", "role": "gnd", "pad_style": "screw" },
+      { "label": "GND", "role": "gnd", "pad_style": "screw" },
+      { "label": "V+", "role": "pwr5", "pad_style": "screw", "caps": [ { "text": "5-24V", "kind": "pwr" } ] },
+      { "label": "V+", "role": "pwr5", "pad_style": "screw" }
     ],
     "right": [
-      { "label": "IO13", "role": "rsvd", "gpio": 13 },
-      { "label": "GND", "role": "gnd" },
-      { "label": "IO18", "role": "io", "gpio": 18, "caps": [ { "text": "data", "kind": "note" } ] },
-      { "label": "IO16", "role": "io", "gpio": 16, "caps": [ { "text": "data", "kind": "note" } ] },
-      { "label": "IO14", "role": "io", "gpio": 14, "caps": [ { "text": "data", "kind": "note" } ] },
-      { "label": "IO2", "role": "io", "gpio": 2, "caps": [ { "text": "data", "kind": "note" } ] },
-      { "label": "GND", "role": "gnd" },
-      { "label": "GND", "role": "gnd" },
-      { "label": "GND", "role": "gnd" },
-      { "label": "GND", "role": "gnd" },
-      { "label": "V+", "role": "pwr5" },
-      { "label": "V+", "role": "pwr5" },
-      { "label": "V+", "role": "pwr5" },
-      { "label": "V+", "role": "pwr5" }
+      { "label": "IO12", "role": "rsvd", "gpio": 12, "pad_style": "screw", "caps": [ { "text": "relay", "kind": "note" } ] },
+      { "label": "GND", "role": "gnd", "pad_style": "screw" },
+      { "label": "IO18", "role": "io", "gpio": 18, "pad_style": "screw", "caps": [ { "text": "data", "kind": "note" } ] },
+      { "label": "IO16", "role": "io", "gpio": 16, "pad_style": "screw", "caps": [ { "text": "data", "kind": "note" } ] },
+      { "label": "IO14", "role": "io", "gpio": 14, "pad_style": "screw", "caps": [ { "text": "data", "kind": "note" } ] },
+      { "label": "IO2", "role": "io", "gpio": 2, "pad_style": "screw", "caps": [ { "text": "data", "kind": "note" } ] },
+      { "label": "GND", "role": "gnd", "pad_style": "screw" },
+      { "label": "GND", "role": "gnd", "pad_style": "screw" },
+      { "label": "GND", "role": "gnd", "pad_style": "screw" },
+      { "label": "GND", "role": "gnd", "pad_style": "screw" },
+      { "label": "V+", "role": "pwr5", "pad_style": "screw" },
+      { "label": "V+", "role": "pwr5", "pad_style": "screw" },
+      { "label": "V+", "role": "pwr5", "pad_style": "screw" },
+      { "label": "V+", "role": "pwr5", "pad_style": "screw" }
     ]
   }
 }

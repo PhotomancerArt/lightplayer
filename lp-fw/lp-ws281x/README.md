@@ -262,3 +262,15 @@ ESP32 technical reference manuals.
 **No GPL source was consulted** — in particular not WLED, which implements the
 same idea. See `AGENTS.md` and
 [`docs/adr/2026-07-28-license-provenance-discipline.md`](../docs/adr/2026-07-28-license-provenance-discipline.md).
+
+## Reconciliation against the experiment repo
+
+Reconciled against `2026-esp32s3-experiment@7bd5013` (the commit that landed
+this crate on that repo's main) on 2026-07-31. All of `src/` (except one
+provenance doc line in `lib.rs`), `tests/` including the hardware-derived
+golden vectors, and `Cargo.toml` are byte-identical. The only deliberate
+lp2025 divergences are documentation path references: the ancestor driver's
+monorepo path (`fw-esp32c6`, not the pre-split `fw-esp32`), the `led-lab-*`
+firmware references pointed at the experiment repo (those firmwares were not
+imported), and the dependency-path example. A future reconcile can diff
+against that commit and expect exactly this shape.

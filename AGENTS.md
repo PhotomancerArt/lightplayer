@@ -101,12 +101,19 @@ Do NOT disable the compiler. The compiler is the product.
 - **Default server/engine builds include the full compiler pipeline.** Optional
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
   test builds), not for *adding* the compiler.
-- **`float-f32`** (`lpvm-native`, `lps-builtins`) enables IEEE-754 f32 shader
-  math alongside Q16.16. Off by default: `FloatMode` is matched on a *runtime*
-  value, so LTO cannot drop the f32 arms, and the shipping ESP32-C6 runs
-  Fixed-mode shaders only. The one device configuration that turns it on is
-  `fw-esp32c6`'s `test_f32_softfloat` harness — a test build, never product
-  firmware. See `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+- **`float-f32`** (`lpvm-native`, `lps-builtins`, `lp-gfx-lpvm`) enables
+  IEEE-754 f32 shader math alongside Q16.16. Off so a **Fixed-only device image
+  links none of the f32 family**: `FloatMode` is matched on a *runtime* value,
+  so LTO cannot drop the f32 arms, and the shipping ESP32-C6 has no FPU and runs
+  Fixed-mode shaders only — its image size is byte-identical with the feature in
+  the tree, which is the check that proves the gate holds. **`fw-esp32s3` turns
+  it on in `default`** (the LX7 has a real FPU and executes f32 natively);
+  `fw-esp32c6`'s `test_f32_softfloat` is a soft-float *test* build, never
+  product firmware. A firmware crate's references must be **weak**
+  (`lpvm-native?/float-f32`) — the deps are optional there, and a strong
+  reference would enable the dependency itself. See
+  `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md` and
+  `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
 
 > **Gating the crate that *uses* a table does not gate the crate that *holds*
 > it.** `lps-builtin-ids` is linked by every firmware image and is not behind
@@ -208,16 +215,26 @@ is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
 targets; it needs a cross-compiled builtins image
 (`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
 
-**Xtensa floating point is a separate, in-flight campaign (M6).** `lp-xt-inst`
-encodes the FP subset and `lp-xt-emu` executes it behind an explicit policy layer
-where every corner IEEE-754 does not fix is either cited to the ISA Reference
-Manual or `Unknown` — and **reading an `Unknown` panics** rather than guessing.
+**Xtensa floating point is proven equal to real ESP32-S3 silicon (M6, G2
+passed 2026-08-01).** `lp-xt-inst` encodes the FP subset and `lp-xt-emu`
+executes it behind an explicit policy layer where every corner IEEE-754 does
+not fix is either measured (cited to the ISA Reference Manual, silicon-
+confirmed, or silicon alone) or `Unknown` — and **reading an `Unknown`
+panics** rather than guessing. All 17 policy fields are now measured; the
+behavior contract, corner by corner with its proving vector family, is
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`.
 `cargo test -p lp-xt-emu --test fp_conformance` replays the whole 5 630-vector
-corpus with no board attached; `just fwtest-xt-fp-esp32s3 <port>` runs the same
-vectors on a desk S3 and `just fp-diff <capture>` classifies the answers. The
-predictions were committed before any hardware ran, so **a device disagreement is
-a finding to triage, never a reason to edit a golden**. Do not resolve a policy
-field without a citation naming a manual page or a dated desk session.
+corpus with no board attached and asserts **zero** `UNKNOWN` rows;
+`cargo test -p lp-xt-emu --test fp_silicon_replay` replays the campaign's own
+silicon captures (ROM sweeps, helper probes, the full family diff) with no
+board attached either — that pair is what makes "the emulator is trusted"
+something CI enforces on every commit. `just fwtest-xt-fp-esp32s3 <port>` runs
+the same vectors on a desk S3 and `just fp-diff <capture>` classifies the
+answers, for the rare case the contract itself needs re-checking. The
+predictions were committed before any hardware ran, so **a device
+disagreement is a finding to triage, never a reason to edit a golden**. Do
+not resolve a policy field without a citation naming a manual page or a dated
+desk session.
 
 > **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
 > correct.** Two defects landed there in 2026-07 that were correct on rv32 only

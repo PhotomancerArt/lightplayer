@@ -26,6 +26,7 @@ void test_edge_out_read_error_write() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_out_read_error_write() == 0.0
 
 // These reads may or may not be allowed depending on GLSL version and shader stage:
@@ -49,6 +50,7 @@ float test_edge_out_read_error_indirect() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_out_read_error_indirect() ~= 0.0
 
 void test_edge_out_read_error_multiple_writes() {
@@ -62,6 +64,7 @@ void test_edge_out_read_error_multiple_writes() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_out_read_error_multiple_writes() == 0.0
 
 void test_edge_out_read_error_fragment_output() {
@@ -78,4 +81,5 @@ void test_edge_out_read_error_fragment_output() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_out_read_error_fragment_output() == 0.0

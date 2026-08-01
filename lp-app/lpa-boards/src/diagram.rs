@@ -235,6 +235,17 @@ pub fn BoardDiagram(
                     height: "{row.pad.h}",
                     rx: "1.4",
                 }
+                // Screw-terminal pins carry the same screw head the top-edge
+                // terminal blocks use, so "this is a screw terminal" reads
+                // identically everywhere.
+                if row.pad_style == crate::display_manifest::PadStyle::Screw {
+                    circle {
+                        class: "lpb-screw",
+                        cx: "{row.pad.center().0}",
+                        cy: "{row.pad.center().1}",
+                        r: "{row.pad.w * 0.34}",
+                    }
+                }
                 if let Some(label) = &row.label {
                     PinLabel { label: label.clone() }
                 }

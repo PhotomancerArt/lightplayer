@@ -3873,8 +3873,10 @@ dependencies = [
 name = "fw-esp32-common"
 version = "40.0.0"
 dependencies = [
+ "embassy-futures",
  "embassy-sync 0.8.0",
  "embassy-time",
+ "embedded-io-async 0.6.1",
  "fw-core",
  "hashbrown 0.15.5",
  "littlefs-rust",
@@ -3887,6 +3889,7 @@ dependencies = [
  "lpc-shared",
  "lpc-wire",
  "lpfs",
+ "ser-write-json",
  "smart-leds",
 ]
 
@@ -3933,7 +3936,6 @@ dependencies = [
  "lps-shared",
  "lpvm",
  "lpvm-native",
- "ser-write-json",
  "serde",
  "smart-leds",
  "unwinding",
@@ -3974,7 +3976,6 @@ dependencies = [
  "lps-shared",
  "lpvm",
  "lpvm-native",
- "ser-write-json",
 ]
 
 [[package]]
@@ -5613,6 +5614,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-board-editor"
+version = "40.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "lpa-boards",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "lpa-boards"
 version = "40.0.0"
 dependencies = [
@@ -5621,6 +5634,8 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -5766,6 +5781,7 @@ dependencies = [
  "js-sys",
  "log",
  "lpa-agent",
+ "lpa-board-editor",
  "lpa-boards",
  "lpa-client",
  "lpa-fs-opfs",

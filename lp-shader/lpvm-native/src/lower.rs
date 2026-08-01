@@ -1,5 +1,11 @@
 //! LPIR [`LpirOp`] → [`VInst`] lowering (M1 subset).
 //!
+//! **This module is the `FloatMode::Q32` half only.** A GLSL `float` here *is*
+//! an integer — Q16.16 in a GPR — and every "float" op below is integer
+//! arithmetic. Native IEEE f32 lowering is [`crate::lower_f32`], behind
+//! `float-f32`; `compile_module` picks between the two on the mode parameter.
+//! See the crate README's float-mode seam section.
+//!
 //! # Q32 op lowering policy
 //!
 //! For each Q32 LPIR op the backend chooses one of four strategies:
@@ -71,6 +77,72 @@ use crate::vinst::{
     VRegSlice, pack_src_op,
 };
 use lps_q32::q32_encode;
+
+/// True when this compile emits hardware FP instructions, and therefore owes
+/// the AR↔FR transfers at the four ABI boundaries.
+///
+/// Two implementations rather than one runtime call, so that a build without
+/// `float-f32` gets a **compile-time** `false` and every guarded branch below
+/// disappears. That is not tidiness: `FloatMode` is a runtime value, so a
+/// single implementation would keep the float lowering paths live in a
+/// Fixed-only device image, which is the leak the feature exists to prevent.
+#[cfg(feature = "float-f32")]
+#[inline]
+fn hardware_fpu(opts: &LowerOpts, abi: &ModuleAbi) -> bool {
+    crate::lower_f32::uses_hardware_fpu(abi.isa(), opts.float_mode)
+}
+
+/// See the sibling above — without the feature there is no FP emitter to lower
+/// for, and this folds every float branch in this module away.
+#[cfg(not(feature = "float-f32"))]
+#[inline]
+fn hardware_fpu(_opts: &LowerOpts, _abi: &ModuleAbi) -> bool {
+    false
+}
+
+/// One past the highest backend vreg reserved before lowering mints temps.
+///
+/// Hardware float reserves a shadow vreg per parameter slot (see
+/// [`crate::lower_f32::float_vreg`]); every other mode keeps the IR vreg count
+/// exactly as it was, which is what keeps Q32's vreg numbering — and therefore
+/// its filetest snapshots — byte-identical.
+#[cfg(feature = "float-f32")]
+#[inline]
+fn vreg_watermark(func: &IrFunction, hardware_fpu: bool) -> u16 {
+    crate::lower_f32::vreg_watermark(func, hardware_fpu)
+}
+
+#[cfg(not(feature = "float-f32"))]
+#[inline]
+fn vreg_watermark(func: &IrFunction, _hardware_fpu: bool) -> u16 {
+    func.vreg_types.len() as u16
+}
+
+/// Append already-lowered backend vregs to the pool, returning their slice.
+///
+/// The counterpart of [`push_vregs_slice`] for operands lowering has built
+/// itself — the transfer temps that carry float values across a call boundary,
+/// in particular, which have no LPIR vreg to map from. Those are its only
+/// callers, so it is gated with them.
+#[cfg(feature = "float-f32")]
+pub(crate) fn push_backend_vregs(
+    pool: &mut Vec<VReg>,
+    vregs: &[VReg],
+) -> Result<VRegSlice, LowerError> {
+    if vregs.len() > u8::MAX as usize {
+        return Err(LowerError::UnsupportedOp {
+            description: String::from("vreg slice too long for the native backend"),
+        });
+    }
+    let start = u16::try_from(pool.len()).map_err(|_| LowerError::UnsupportedOp {
+        description: String::from("vreg pool exhausted (u16)"),
+    })?;
+    pool.extend_from_slice(vregs);
+    Ok(VRegSlice {
+        start,
+        count: vregs.len() as u8,
+    })
+}
 
 #[inline]
 pub(crate) fn fa_vreg(v: lpir::VReg) -> VReg {
@@ -867,6 +939,20 @@ pub fn lower_lpir_op(
             if_true,
             if_false,
         } => {
+            // A select over float values is a float instruction, even though
+            // the op itself is type-agnostic in LPIR. The condition stays an
+            // integer 0/1 on both sides.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *dst) {
+                out.push(VInst::FSelect {
+                    dst: crate::lower_f32::float_vreg(func, *dst),
+                    cond: fa_vreg(*cond),
+                    if_true: crate::lower_f32::float_vreg(func, *if_true),
+                    if_false: crate::lower_f32::float_vreg(func, *if_false),
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Select {
                 dst: fa_vreg(*dst),
                 cond: fa_vreg(*cond),
@@ -877,6 +963,18 @@ pub fn lower_lpir_op(
             Ok(())
         }
         LpirOp::Copy { dst, src } => {
+            // `mov.s`, not an integer move: the value is in the float file and
+            // an integer `Mov` would name an address register for it.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *dst) {
+                out.push(VInst::FAluRR {
+                    op: crate::vinst::FAluRROp::Mov,
+                    dst: crate::lower_f32::float_vreg(func, *dst),
+                    src: crate::lower_f32::float_vreg(func, *src),
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Mov {
                 dst: fa_vreg(*dst),
                 src: fa_vreg(*src),
@@ -897,6 +995,19 @@ pub fn lower_lpir_op(
             let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
                 description: String::from("Load: offset does not fit i32"),
             })?;
+            // A memory access, not a call boundary: the value goes straight
+            // into the float file with no transfer. The address is an integer
+            // on both paths.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *dst) {
+                out.push(VInst::FLoad32 {
+                    dst: crate::lower_f32::float_vreg(func, *dst),
+                    base: fa_vreg(*base),
+                    offset: off,
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Load32 {
                 dst: fa_vreg(*dst),
                 base: fa_vreg(*base),
@@ -913,6 +1024,16 @@ pub fn lower_lpir_op(
             let off = i32::try_from(*offset).map_err(|_| LowerError::UnsupportedOp {
                 description: String::from("Store: offset does not fit i32"),
             })?;
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) && crate::lower_f32::is_float(func, *value) {
+                out.push(VInst::FStore32 {
+                    src: crate::lower_f32::float_vreg(func, *value),
+                    base: fa_vreg(*base),
+                    offset: off,
+                    src_op: po,
+                });
+                return Ok(());
+            }
             out.push(VInst::Store32 {
                 src: fa_vreg(*value),
                 base: fa_vreg(*base),
@@ -1034,6 +1155,20 @@ pub fn lower_lpir_op(
                 return Err(LowerError::UnsupportedOp {
                     description: String::from("Return: vreg_pool slice out of range"),
                 });
+            }
+            // Boundary four: a float return value travels in an address
+            // register, so it comes out of the float file first.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) {
+                let mut words = Vec::with_capacity(slice.len());
+                for v in slice {
+                    words.push(crate::lower_f32::word_operand(out, func, *v, temps, po));
+                }
+                out.push(VInst::Ret {
+                    vals: push_backend_vregs(vreg_pool, &words)?,
+                    src_op: po,
+                });
+                return Ok(());
             }
             out.push(VInst::Ret {
                 vals: push_vregs_slice(vreg_pool, slice)?,
@@ -1502,6 +1637,7 @@ pub fn lower_lpir_op(
                     op,
                     abi.isa(),
                     src_op,
+                    func,
                     symbols,
                     vreg_pool,
                     temps,
@@ -1567,6 +1703,39 @@ pub fn lower_lpir_op(
             let caller_passes_sret_ptr = callee_sret_ptr_in_lpir_args(ir, *callee);
             let caller_sret_vm_abi_swap =
                 caller_passes_sret_ptr && callee_sret_vm_abi_swap(ir, *callee);
+            // Boundaries two and three. Float arguments come out of the float
+            // file before the call and float results go back in after it, so
+            // the `Call`'s own operands are entirely integer-class — which is
+            // what leaves the sret/vmctx slot machinery and
+            // `lpir_call_arg_target` working unchanged.
+            #[cfg(feature = "float-f32")]
+            if hardware_fpu(opts, abi) {
+                let target = symbols.intern(name);
+                let mut arg_words = Vec::with_capacity(args_slice.len());
+                for a in args_slice {
+                    arg_words.push(crate::lower_f32::word_operand(out, func, *a, temps, po));
+                }
+                let mut ret_words = Vec::with_capacity(results_slice.len());
+                let mut ret_transfers = Vec::with_capacity(results_slice.len());
+                for r in results_slice {
+                    let (word, float_dst) = crate::lower_f32::word_result(func, *r, temps);
+                    ret_words.push(word);
+                    ret_transfers.push((word, float_dst));
+                }
+                out.push(VInst::Call {
+                    target,
+                    args: push_backend_vregs(vreg_pool, &arg_words)?,
+                    rets: push_backend_vregs(vreg_pool, &ret_words)?,
+                    callee_uses_sret,
+                    caller_passes_sret_ptr,
+                    caller_sret_vm_abi_swap,
+                    src_op: po,
+                });
+                for (word, float_dst) in ret_transfers {
+                    crate::lower_f32::push_return_transfer(out, word, float_dst, po);
+                }
+                return Ok(());
+            }
             out.push(VInst::Call {
                 target: symbols.intern(name),
                 args: push_vregs_slice(vreg_pool, args_slice)?,
@@ -2084,6 +2253,7 @@ pub fn lower_ops(
     abi: &ModuleAbi,
     opts: &LowerOpts,
 ) -> Result<LoweredFunction, LowerError> {
+    let hw_fpu = hardware_fpu(opts, abi);
     // Pre-size vectors to reduce allocation overhead during lowering.
     // Estimate: ~2 vinsts per LPIR op, vreg pool from IR plus headroom for temps.
     let mut ctx = LowerCtx {
@@ -2094,7 +2264,7 @@ pub fn lower_ops(
         out: Vec::with_capacity(func.body.len().saturating_mul(2)),
         vreg_pool: Vec::with_capacity(func.vreg_pool.len().saturating_add(64)),
         symbols: ModuleSymbols::default(),
-        temps: TempVRegs::new(func.vreg_types.len() as u16),
+        temps: TempVRegs::new(vreg_watermark(func, hw_fpu)),
         next_label: 0,
         loop_stack: Vec::new(),
         epilogue_label: 0,
@@ -2115,15 +2285,25 @@ pub fn lower_ops(
             src_op: SRC_OP_NONE,
         });
     }
+    // Boundary one: float parameters arrive in address registers and are moved
+    // into the float file once, here, before any body op reads them.
+    #[cfg(feature = "float-f32")]
+    if hw_fpu {
+        crate::lower_f32::push_entry_param_transfers(&mut ctx.out, func);
+    }
+    let prologue_len = ctx.out.len();
     let body_root = ctx.lower_range(0, func.body.len())?;
     ctx.out.push(VInst::Label(ctx.epilogue_label, SRC_OP_NONE));
-    // The entry FuelCheck sits before the body's regions; give it its own
-    // Linear region so the regalloc walk covers it (the walk only visits
-    // VInsts reachable through the region tree).
-    let root = if opts.fuel {
-        let entry_lin = ctx
-            .region_tree
-            .push(crate::region::Region::Linear { start: 0, end: 1 });
+    // The prologue (entry FuelCheck, float parameter transfers) sits before the
+    // body's regions; give it its own Linear region so the regalloc walk covers
+    // it — the walk only visits VInsts reachable through the region tree, and a
+    // parameter transfer it never saw would be dropped from the allocation
+    // silently.
+    let root = if prologue_len > 0 {
+        let entry_lin = ctx.region_tree.push(crate::region::Region::Linear {
+            start: 0,
+            end: prologue_len as u16,
+        });
         if body_root == REGION_ID_NONE {
             entry_lin
         } else {

@@ -69,6 +69,7 @@ cargo test -p lpvm-native --features xt-corpus,emu-xt
 just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # the whole corpus
 just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
 just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX helpers         # divide-step helpers + probe2
 ```
 
 The M6 hardware campaign's rig. Runs `lp-xt-fp-vectors`' 5 630-vector corpus on
@@ -177,6 +178,22 @@ sequencing against a mock and the same classifier against that capture:
 cargo test -p lp-ws281x
 ```
 
+### `test_button`
+
+```bash
+just fwtest-button-esp32s3 /dev/cu.usbmodemXXXX
+```
+
+GPIO button diagnostic mode: D9 (GPIO8) with an internal pull-up, normally-open
+button to GND. Prints a `BUTTON gpio=... seq=... kind=...` line per debounced
+press/release. Ported from fw-esp32c6's `test_button`, but synchronous instead
+of an embassy task — this chip's harness entrypoint never starts the embassy
+runtime, so the poll loop busy-waits between samples instead of awaiting
+`embassy_time::Timer`. Hardware verification (flash + jumper walk) happens at
+the milestone gate that first has a use for the button; this harness exists so
+the driver cannot rot uncompiled — see
+`docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md`.
+
 ## Output
 
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
@@ -204,6 +221,16 @@ under the registry lease that grants exclusive use of that GPIO.
 Timing is WS2812-class (GRB, 300 µs latch) on every channel. A strip wired in
 another colour order is the fixture node's `color_order`, above this boundary —
 the driver stays GRB, exactly like the C6's.
+
+## Input
+
+`src/hardware/button.rs` is a board-manifest-driven GPIO button driver, ported
+from `fw-esp32c6`'s `Esp32GpioButtonDriver` — same driver id
+(`esp32-gpio-button`), same manifest-driven endpoint enumeration
+(`GpioInput` capability + board-assigned label), same internal-pull-up wiring.
+The only chip-specific piece is the GPIO range check
+(`board::esp32s3::constants::MAX_GPIO`, 48 versus the C6's 30). On this
+board's manifest it exposes D0-D10.
 
 ## Building
 
