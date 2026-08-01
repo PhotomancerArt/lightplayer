@@ -757,10 +757,13 @@ fwtest-loopback-esp32s3 port="":
 #   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # everything
 #   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
 #   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX helpers         # divide-step probes
 #
 # `family` is an `lp-xt-fp-vectors` family name (rounding, nan_payload,
 # denormal, signed_zero, div_sqrt, convert), or `tables` for the estimate-table
-# sweep. `limit` caps each family; 0 runs all of it.
+# sweep, or `helpers` for the divide-step characterization grids (const.s and
+# the nexp01/mksadj/mkdadj/addexp/addexpm/maddn/divn probes). `limit` caps each
+# family or grid; 0 runs all of it.
 #
 # ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
 # predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
@@ -790,8 +793,8 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
     fi
     mode=families
     family="{{ family }}"
-    if [[ "$family" == "tables" ]]; then
-      mode=tables
+    if [[ "$family" == "tables" || "$family" == "helpers" ]]; then
+      mode="$family"
       family=""
     fi
     mkdir -p target/fp-capture
@@ -825,12 +828,14 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
     wait "$cap" 2>/dev/null || true
     echo "captured $(wc -l < "$out") lines to $out"
     # Only the family modes have predictions to diff against. The table sweep
-    # produces the estimate ROMs themselves — there is nothing to compare them
-    # to, which is the whole reason they have to be read off silicon.
+    # and the helper grids produce silicon-first data — there is nothing to
+    # compare them to, which is the whole reason they have to be read off
+    # silicon (the derived semantics are then held to the committed captures
+    # by boardless replay tests).
     if [[ "$mode" == "families" ]]; then
       just fp-diff "$out"
     else
-      echo "table sweep captured; P6 turns it into fp_policy::EstimateTables"
+      echo "$mode capture done; P6 turns it into fp_policy data + replay fixtures"
     fi
 
 # Diff an FP conformance capture against the committed host predictions.
