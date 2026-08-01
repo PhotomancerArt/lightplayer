@@ -171,12 +171,13 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         .node_id(&clock_use)
         .expect("clock runtime node");
 
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -208,7 +209,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
     let changes = registry.refresh_artifacts(
         &fs,
         &[FsEvent {
-            path: LpPathBuf::from("/project.json"),
+            path: LpPathBuf::from("/module.json"),
             kind: FsEventKind::Modify,
         }],
         Revision::new(2),
@@ -438,12 +439,13 @@ fn project_apply_remove_node_op_tears_down_runtime_node() {
 
 fn fixture_map2d_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -480,12 +482,13 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
 
 fn clock_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -512,12 +515,13 @@ fn clock_project_fs() -> LpFsMemory {
 
 fn shader_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"

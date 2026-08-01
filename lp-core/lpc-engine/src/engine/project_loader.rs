@@ -1,4 +1,4 @@
-//! Load authored `project.json` node-artifact trees into [`super::Engine`].
+//! Load authored module node-artifact trees into [`super::Engine`].
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -125,7 +125,7 @@ impl ProjectLoader {
         root: &dyn LpFs,
         services: EngineServices,
     ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
-        Self::load_project_artifact(root, services, ArtifactSpec::path("/project.json"))
+        Self::load_project_artifact(root, services, ArtifactSpec::path("/module.json"))
     }
 
     pub fn load_project_artifact(
@@ -173,7 +173,7 @@ impl ProjectLoader {
             NodeDefState::Loaded(NodeDef::Module(_)) => Ok(()),
             NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectParse {
                 file: path.as_str().to_string(),
-                error: format!("root artifact must be Project, got {:?}", other.kind()),
+                error: format!("root artifact must be Module, got {:?}", other.kind()),
             }),
             state => Err(project_load_error_for_root_state(path, state)),
         }
@@ -2055,12 +2055,13 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -2180,12 +2181,13 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -2277,12 +2279,13 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2456,12 +2459,13 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_bus() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2586,12 +2590,13 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "shader": {
       "def": {
@@ -2615,12 +2620,13 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2971,12 +2977,13 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -2997,7 +3004,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_project_json_returns_io_error() {
+    fn missing_project_json_refuses_via_the_manifest_gate() {
+        // D-A: no `project.json` container manifest = hard refuse before
+        // anything parses; the error names the manifest, not a deep Io path.
         let fs = LpFsMemory::new();
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3005,21 +3014,41 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("expected load error"),
         };
+        let text = err.to_string();
+        assert!(text.contains("project.json"), "{text}");
+        assert!(text.contains("manifest"), "{text}");
+    }
+
+    #[test]
+    fn missing_module_json_returns_io_error() {
+        let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = EngineServices::new(root_path);
+        let err = match ProjectLoader::load_from_root(&fs, services) {
+            Err(e) => e,
+            Ok(_) => panic!("expected load error"),
+        };
         assert!(
-            matches!(err, ProjectLoadError::Io { .. }),
-            "expected Io, got {err:?}"
+            matches!(
+                err,
+                ProjectLoadError::Io { .. } | ProjectLoadError::ProjectParse { .. }
+            ),
+            "expected Io/parse, got {err:?}"
         );
     }
 
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -3184,12 +3213,13 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3735,12 +3765,13 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3805,12 +3836,13 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -4098,13 +4130,13 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
-  "name": "basic",
   "nodes": {
     "output": {
       "ref": "./output.json"
@@ -4292,11 +4324,11 @@ mod tests {
             }
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
-        let project = format!(
-            "{{\n  \"kind\": \"Module\",\n  \"format\": 2,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
-        );
-        fs.write_file("/project.json".as_path(), project.as_bytes())
-            .expect("project.json");
+        let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
+        fs.write_file("/module.json".as_path(), module.as_bytes())
+            .expect("module.json");
         for (name, json) in nodes {
             fs.write_file(format!("/{name}.json").as_str().as_path(), json.as_bytes())
                 .unwrap_or_else(|_| panic!("{name}.json"));
@@ -4541,12 +4573,13 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"

@@ -1,19 +1,4 @@
 {
-  "kind": "Module",
-  "format": 2,
-  "name": "fiber-headband",
-  "nodes": {
-    "clock": {
-      "ref": "./clock.json"
-    },
-    "fixture": {
-      "ref": "./fixture.json"
-    },
-    "output": {
-      "ref": "./output.json"
-    },
-    "shader": {
-      "ref": "./shader.json"
-    }
-  }
+  "format": 3,
+  "name": "fiber-headband"
 }

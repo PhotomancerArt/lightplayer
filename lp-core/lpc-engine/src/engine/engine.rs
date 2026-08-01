@@ -366,16 +366,17 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        let project =
-            format!("{{ \"kind\": \"Module\", \"format\": 2, \"nodes\": {{ {node_lines} }} }}");
-        fs.write_file("/project.json".as_path(), project.as_bytes())
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .map_err(|e| e.to_string())?;
+        let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
+        fs.write_file("/module.json".as_path(), module.as_bytes())
             .map_err(|e| e.to_string())?;
 
         let ctx = ParseCtx {
             shapes: &self.slot_shapes,
         };
         registry
-            .load_root(&fs, "/project.json".as_path(), frame, &ctx)
+            .load_root(&fs, "/module.json".as_path(), frame, &ctx)
             .map_err(|e| format!("{e:?}"))?;
 
         for (index, (node_id, _)) in defs.iter().enumerate() {

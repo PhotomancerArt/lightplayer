@@ -19,10 +19,10 @@ pub use fixture::{
     FixtureSamplingConfig, FixtureState, FixtureStateView, MappingConfig, PathSpec,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
-pub use module::{ModuleDef, ModuleDefView, PROJECT_FORMAT_VERSION};
+pub use module::{ModuleDef, ModuleDefView};
 pub use node_def::{
-    ArtifactPathResolutionError, InvocationSite, ModuleFormatProbe, NodeArtifact, NodeDef,
-    NodeDefParseError, NodeDefWriteError, read_module_format_json, resolve_artifact_specifier,
+    ArtifactPathResolutionError, InvocationSite, NodeArtifact, NodeDef, NodeDefParseError,
+    NodeDefWriteError, resolve_artifact_specifier,
 };
 pub use output::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,

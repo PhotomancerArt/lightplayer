@@ -12,7 +12,8 @@ use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, ChannelName, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode,
     FixtureSamplingConfig, HwEndpointSpec, MapSlot, ModuleDef, NodeDef, NodeInvocation,
-    NodeInvocationSlot, OptionSlot, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
+    NodeInvocationSlot, OptionSlot, ProjectManifest, RenderOrder, RenderOrderSlot,
+    SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -193,7 +194,8 @@ impl ProjectBuilder {
         self.fixture(output_path, texture_path).add(self)
     }
 
-    /// Build completes - writes project.json and all node artifact files.
+    /// Build completes - writes the `project.json` container manifest, the
+    /// `module.json` root module, and all node artifact files.
     pub fn build(self) {
         let registry = slot_shape_registry();
         let mut nodes = VecMap::new();
@@ -206,15 +208,15 @@ impl ProjectBuilder {
                 )))),
             );
         }
-        let project = ModuleDef {
-            format: ModuleDef::current_format_slot(),
-            uid: OptionSlot::none(),
-            name: OptionSlot::some(ValueSlot::new(self.name.clone())),
+        let manifest = ProjectManifest::new_current(&self.name);
+        self.write_file_helper("/project.json", manifest.write_json().as_bytes())
+            .expect("Failed to write project.json");
+        let module = ModuleDef {
             nodes: MapSlot::new(nodes),
         };
-        let project_json = authored_node_json(&registry, &NodeDef::Module(project));
-        self.write_file_helper("/project.json", project_json.as_bytes())
-            .expect("Failed to write project.json");
+        let module_json = authored_node_json(&registry, &NodeDef::Module(module));
+        self.write_file_helper("/module.json", module_json.as_bytes())
+            .expect("Failed to write module.json");
     }
 
     fn register_node(&mut self, name: String, path: LpPathBuf) {
@@ -515,20 +517,23 @@ mod tests {
     use lpfs::LpFsMemory;
 
     #[test]
-    fn test_project_builder_creates_valid_project_json() {
+    fn test_project_builder_creates_valid_project_and_module_json() {
         let fs = Rc::new(RefCell::new(LpFsMemory::new()));
         let mut builder = ProjectBuilder::new(fs.clone());
         builder.texture_basic();
         builder.build();
 
-        let project_json_bytes = fs.borrow().read_file("/project.json".as_path()).unwrap();
-        let project_json_str = core::str::from_utf8(&project_json_bytes).unwrap();
+        let manifest_bytes = fs.borrow().read_file("/project.json".as_path()).unwrap();
+        let manifest =
+            ProjectManifest::read_json(core::str::from_utf8(&manifest_bytes).unwrap()).unwrap();
+        assert_eq!(manifest.name.as_deref(), Some("Test Project"));
 
-        let def = NodeDef::read_json(&slot_shape_registry(), project_json_str).unwrap();
+        let module_bytes = fs.borrow().read_file("/module.json".as_path()).unwrap();
+        let module_str = core::str::from_utf8(&module_bytes).unwrap();
+        let def = NodeDef::read_json(&slot_shape_registry(), module_str).unwrap();
         let NodeDef::Module(def) = def else {
-            panic!("expected project def");
+            panic!("expected module def");
         };
-        assert_eq!(def.name(), Some("Test Project"));
         assert!(def.nodes.entries.contains_key("texture"));
     }
 }

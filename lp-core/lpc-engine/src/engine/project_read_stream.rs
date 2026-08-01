@@ -826,7 +826,7 @@ mod tests {
             .mutate(
                 &fs,
                 lpc_model::MutationOp::PutSlotEdit {
-                    artifact: lpc_model::ArtifactLocation::file("/project.json"),
+                    artifact: lpc_model::ArtifactLocation::file("/module.json"),
                     edit: lpc_model::SlotEdit::ensure_present(
                         lpc_model::SlotPath::parse("nodes[clock]").expect("slot path"),
                     ),
@@ -1175,6 +1175,11 @@ mod tests {
         let mut engine = Engine::new(TreePath::parse("/t.show").expect("path"));
         let mut registry = ProjectRegistry::new();
         let mut fs = lpfs::LpFsMemory::new();
+        fs.write_file_mut(
+            lpfs::LpPath::new("/project.json"),
+            b"{\n  \"format\": 3\n}\n",
+        )
+        .expect("write container manifest");
         fs.write_file_mut(
             lpfs::LpPath::new("/clock.json"),
             br#"{ "kind": "Clock", "controls": { "rate": 1.0 } }"#,

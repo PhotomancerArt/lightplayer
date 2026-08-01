@@ -334,12 +334,13 @@ mod tests {
     #[test]
     fn fluid_node_loaded_from_project_produces_sampleable_visual_product() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -441,12 +442,13 @@ mod tests {
     #[test]
     fn fluid_node_consumes_compute_emitter_map_through_bus() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
