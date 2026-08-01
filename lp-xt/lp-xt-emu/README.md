@@ -119,6 +119,39 @@ out. Not modeled: classic's *word-only* data access to I-bus addresses (byte
 stores to SRAM0/I-bus fault EXCCAUSE=3 on hardware) — the emulator is more
 permissive there; the device-side writer honors the constraint.
 
+### Flash — where firmware actually executes from
+
+The code region above is **SRAM**, and on an ESP32 that is not where firmware
+lives. The application's `.text` executes from flash through the cache (XIP; a
+boot log shows `vaddr=0x4200_0020 map` segments); only code a JIT produces at
+runtime is in SRAM. So each profile also models two **read-only** flash
+windows and a small internal-SRAM region for a flash-resident image's
+`.data`/`.bss`:
+
+| | ESP32-S3 | classic ESP32 |
+| --- | --- | --- |
+| IROM (executable, `AliasRule::Identity`) | `0x4200_0000` | `0x400D_0000` |
+| DROM (data only) | `0x3C00_0000` | `0x3F40_0000` |
+| image `.data`/`.bss` (plain SRAM) | `0x3FCA_8000` | `0x3FFD_0000` |
+
+Guest stores into either flash window fault; the loader paths
+(`load_bytes`/`load_region`) write them anyway, because placing an image in
+flash is what a flasher does, not what the guest does. The **lengths** are the
+model's, not hardware's (256 KiB / 64 KiB / 32 KiB against 32 MB of real
+`irom_seg` on the S3) — regions are allocated per emulator, and one emulator is
+built per host call. The **bases** are hardware, sourced in `board.rs` from
+esp-hal's MIT/Apache-2.0 `ld/esp32{,s3}/memory.x` with in-repo corroboration,
+and labelled *documented/observed* rather than measured, unlike the SRAM
+numbers around them.
+
+Until 2026-08-01 the resident builtins image shared the SRAM code region with
+JIT'd shader code. That coupled the largest compilable shader to the size of
+the builtins — turning on the f32 builtin family left 931 bytes and took the
+`xtn.q32` filetest suite from 849/849 files to 522/849 — and it hid the fact
+that a shader→builtin call spans SRAM→flash, far outside `call8`'s ±512 KiB
+direct reach. `tests/call_range.rs` pins both halves of that now. See
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
+
 ### D-bus / I-bus dual mapping
 
 The runner firmware writes payloads via the D-bus view and *executes them at
@@ -139,10 +172,14 @@ globals, snapshot region, texture buffers — and reads results back out.
 
 The window is **data only**: it carries no `AliasRule`, so an instruction fetch
 from it faults (`EXC_INSTR_FETCH_ERROR`) exactly as jumping into a data region
-does. `SHARED_DBUS_BASE` (`0x3F40_0000`) is the base both board profiles leave
-free; `add_shared` **asserts** the range does not overlap any installed region,
-in either its D-bus range or its I-bus image, so the choice cannot rot silently
-as profiles change.
+does. `SHARED_DBUS_BASE` (`0x3000_0000`) is below the lowest address either
+chip's data bus decodes, so no future profile can grow into it; `add_shared`
+**asserts** the range does not overlap any installed region, in either its
+D-bus range or its I-bus image, so the choice cannot rot silently as profiles
+change. It did rot once, which is how we know: the base used to be
+`0x3F40_0000` on the weaker ground that no *profile* mapped it, and that
+address turned out to be classic's DROM base the moment flash was modeled. The
+assertion caught it.
 
 This address is **host-emulator fiction** — no ESP32 has a host-shared region,
 and the on-device JIT never needs one. See
