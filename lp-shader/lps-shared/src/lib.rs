@@ -27,7 +27,8 @@ pub mod value_path;
 pub use layout::{VMCTX_HEADER_SIZE, array_stride, round_up, type_alignment, type_size};
 pub use lps_value_f32::LpsValueF32;
 pub use lps_value_q32::{
-    LpsValueQ32, LpsValueQ32Error, lps_value_f32_to_q32, q32_to_lps_value_f32,
+    FloatLaneAbi, LpsValueQ32, LpsValueQ32Error, lanes_to_lps_value_f32, lps_value_f32_to_lanes,
+    lps_value_f32_to_q32, q32_to_lps_value_f32,
 };
 pub use sig::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, ParamQualifier};
 pub use texture_binding_validate::validate_texture_binding_specs_against_module;

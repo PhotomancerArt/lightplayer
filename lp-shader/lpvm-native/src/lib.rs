@@ -55,6 +55,12 @@ mod exec_addr;
 mod jit_symbol_sizes;
 pub mod link;
 pub mod lower;
+// Native-f32 lowering. Behind `float-f32` for the same reason the ISAs are
+// behind `isa-*`: `FloatMode` is matched on a *runtime* value, so LTO cannot
+// drop this on its own, and a Fixed-only device image must not pay for it
+// (f32 roadmap D2).
+#[cfg(feature = "float-f32")]
+pub mod lower_f32;
 pub mod lower_opts;
 pub mod native_options;
 pub mod opt;
