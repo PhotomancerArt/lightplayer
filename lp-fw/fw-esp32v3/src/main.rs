@@ -17,10 +17,14 @@
 //! yet *execute*. See the comment at its construction site in
 //! [`boot_firmware`]; that wiring is M3-P2.
 //!
+//! Output is real: `output::rmt` drives WS281x strips from the RMT
+//! peripheral, up to four at once — two RMT memory blocks per channel, so the
+//! chip's eight slots become four 128-word windows on slots 0/2/4/6, and the
+//! channel count comes from the board manifest's `/rmt/ws281xK` resources
+//! (M4-P1; ADR `2026-07-31-lp-ws281x-multi-channel-driver-adoption`).
+//!
 //! Absent on purpose:
 //!
-//! - **Output.** No WS281x driver is registered, so `HardwareSystem` resolves
-//!   no output endpoints and the output node reports a clean failure. M4.
 //! - **Crash recovery.** No `lp-recovery` RTC ledger, no RWDT, so the panic
 //!   handler below prints and resets rather than leaving a breadcrumb for the
 //!   next boot. The server loop's `lp_recovery::snapshot()` /
@@ -54,6 +58,8 @@ mod board;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 mod flash_storage;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+mod output;
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 mod serial;
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
@@ -63,7 +69,6 @@ use {
     core::cell::RefCell,
     flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
     fw_esp32_common::hardware::manifest_loader::load_hardware_manifest,
-    fw_esp32_common::output::provider::Esp32OutputProvider,
     fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
     fw_esp32_common::{boot, logger, lp_fs, transport},
@@ -73,6 +78,7 @@ use {
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
+    output::{Esp32OutputProvider, Esp32V3RmtWs281xDriver},
     serial::io_task,
 };
 
@@ -160,7 +166,7 @@ struct FirmwareApp {
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
-    let (sw_int, timg0, uart0, flash) = init_board();
+    let (sw_int, timg0, uart0, flash, rmt_peripheral) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     esp_println::println!("[INIT] fw-esp32v3 boot");
@@ -208,15 +214,39 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_manifest.board_name()
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
-    // No WS281x driver, no button, no radio: none is ported. `HardwareSystem`
-    // resolves the manifest's `/rmt/ws281xK` endpoints to nothing, so opening
-    // an output channel fails cleanly rather than rendering into a stub. M4
-    // registers the real driver here, the way fw-esp32s3 registers
-    // `Esp32S3RmtWs281xDriver`.
-    let hardware_system = Rc::new(HardwareSystem::new(Rc::clone(&hardware_registry)));
+    let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
+
+    // The RMT peripheral becomes the WS281x driver's, clock and all. The
+    // classic's RMT runs off APB and esp-hal's `validate_clock` for this chip
+    // accepts only the source frequency itself, so 80 MHz is not a preference
+    // — with the per-channel divider of 1 it gives the 12.5 ns tick
+    // `lp_ws281x::PulseCodes` assumes. A failure here is a clock-tree problem,
+    // and it costs the board its output rather than its boot, so it is logged
+    // and not fatal.
+    //
+    // How many outputs appear is decided in two places and nowhere else: the
+    // board manifest's `/rmt/ws281xK` resources (four on the DOM-Z-102), and
+    // `output::rmt::v3_rmt::BLOCKS_PER_CHANNEL` = 2, which turns the chip's
+    // eight RMT slots into four usable ones (0/2/4/6 — a two-block channel
+    // absorbs its neighbour's memory). Manifest channel K drives slot
+    // K * SLOT_STRIDE; absorbed slots are never configured.
+    match esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK) {
+        Ok(rmt) => {
+            hardware_system.add_ws281x_driver(Box::new(Esp32V3RmtWs281xDriver::new(
+                Rc::clone(&hardware_registry),
+                rmt,
+            )));
+        }
+        Err(error) => {
+            esp_println::println!("[ERROR] RMT init failed ({error:?}); no LED output this boot");
+        }
+    }
+    // No button and no radio driver: neither is ported, and `LpServer` takes
+    // both services as `Option`, so they are simply absent rather than stubbed.
+    let hardware_system = Rc::new(hardware_system);
 
     // The provider itself is chip-agnostic and comes from fw-esp32-common
-    // untouched.
+    // untouched; only the driver registered above is chip-side.
     let output_provider: Rc<RefCell<dyn OutputProvider>> =
         Rc::new(RefCell::new(Esp32OutputProvider::new(hardware_system)));
 

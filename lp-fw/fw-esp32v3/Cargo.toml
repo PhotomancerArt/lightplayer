@@ -70,9 +70,29 @@ server = [
     "dep:lpc-shared",
     "dep:lpc-wire",
     "dep:lpfs",
+    "dep:lp-ws281x",
     "dep:fw-core",
     "dep:ser-write-json",
 ]
+
+# Periodic WS281x telemetry over the serial link — OFF by default.
+#
+# Prints one `[WS281X]` line per configured channel every ~10 s from the
+# frame-write path: frames/complete/trips/skips/errors, refills vs the refills
+# an untruncated frame set would have needed, mean and max refill lag, and the
+# 9-bucket lag histogram. Those are the numbers M4-P3's capacity sweep exists
+# to collect (does 2 blocks/channel really carry four outputs? findings.md
+# §12's arithmetic is marginal), and there was no app-path pattern to mirror —
+# fw-esp32s3 reads the same counters only from its `test_loopback` harness.
+#
+# Off by default because the shipping image should not spend serial bandwidth
+# or code space on it; the whole module is `cfg`'d out and the call site
+# becomes an empty `#[inline(always)]` fn, so a release build pays nothing —
+# not even the timer read.
+#
+# Build:
+#   cargo build --profile release-esp32v3 --features ws281x_telemetry
+ws281x_telemetry = []
 
 # M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
 # heap deltas at each stage. Build:
@@ -140,6 +160,18 @@ fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
 
 # MessageRouter + the SerialIo trait, for `serial::io_task`.
 fw-core = { path = "../fw-core", default-features = false, optional = true }
+
+# The portable WS281x transmitter: pulse encoding, the ping-pong refill state
+# machine, guard-word flicker protection and the per-channel counters. Chip
+# knowledge stays in `src/output/rmt/v3_rmt.rs`, which implements this crate's
+# `RmtHw` (ADR 2026-07-31-lp-ws281x-multi-channel-driver-adoption: new chips
+# implement the trait, they do not grow a new one). `default-features = false`
+# drops the host-only `mock` backend, exactly as fw-esp32s3 does.
+#
+# Optional and gated behind `server`, like every other app-layer dependency
+# here: `src/output/` also needs `lpc-hardware`, `alloc` and the common
+# provider, none of which the bare hello / radio-probe entrypoints link.
+lp-ws281x = { path = "../lp-ws281x", default-features = false, optional = true }
 
 # Async runtime for `serial::io_task`. Mirrors fw-esp32s3's set.
 embassy-executor = { version = "0.10.0", optional = true }

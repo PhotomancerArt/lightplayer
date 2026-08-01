@@ -9,10 +9,12 @@ partitions, RAM ledger, CI) and M3-P1 (app layer) of the classic-ESP32
 bring-up roadmap
 (`~/.photomancer/planning/lp2025/2026-07-31-1444-classic-esp32-bringup/`).
 
-Still absent: on-device shader **execution** (M3-P2 — a shader compiles here
-and cannot yet run, see "JIT status" below), WS281x output (M4), the
-`lp-recovery` crash ledger (M7), and radio (measure-only, behind
-`radio_ram_probe`).
+WS281x output landed in M4-P1: up to four concurrent RMT channels, sourced
+from the board manifest — see "WS281x output" below.
+
+Still absent: the `lp-recovery` crash ledger (M7) and radio (measure-only,
+behind `radio_ram_probe`). See "JIT status" below for where on-device shader
+execution stands.
 
 ## Workspace shape
 
@@ -60,9 +62,12 @@ Other build shapes (all covered by `just clippy-fw-esp32v3`):
 | default | server app over UART0 |
 | `--no-default-features --features esp32` | M2-P1 boot-to-hello skeleton |
 | `--no-default-features --features esp32,radio_ram_probe` | M2-P3 radio RAM ledger |
+| `--features ws281x_telemetry` | app + periodic WS281x counter log (see below) |
 
-Measured 2026-07-31 with the app layer in: **1,675,120 B** image against the
-3 MB `factory` partition (53%), and the DRAM split below.
+Measured 2026-08-01 with the app layer and WS281x output in: **1,691,728 B**
+image against the 3 MB `factory` partition (54%, 1,454,000 B headroom), and
+the DRAM split below. The WS281x driver cost **+16,608 B** of image over the
+M3-P1 app-only build (1,675,120 B).
 
 ### Release profile
 
@@ -71,13 +76,83 @@ Builds under `[profile.release-esp32v3]` (`inherits = "release"`,
 `release-esp32s3` (cargo honours profiles only on the workspace root
 manifest). `"s"` rather than the repo's default `"z"` mirrors `fw-esp32s3`,
 whose "z" build missed a 30 µs cold-frame WS281x deadline on the *faster*
-LX7; this crate has no timing-critical driver yet, so revisit with real
-measurements when output lands (M4).
+LX7. As of M4 that reasoning applies here for real: the profile is part of
+the RMT timing contract. This chip's deadline is a roomier 80 µs (64-word
+halves), but the cold first frame is checked on silicon rather than assumed —
+M4-P4.
 
 `"z"` is not merely unvalidated here — it does not build. `esp-storage`'s
 build script hard-errors on the classic ESP32 below `opt-level` 2/3/s, which
 is why `just clippy-fw-esp32v3` passes `--profile release-esp32v3` where
 `clippy-fw-esp32s3` gets away with `--release`.
+
+## WS281x output
+
+`src/output/` — the same three-layer split `fw-esp32s3` uses:
+
+| Layer | File | Knows about |
+|---|---|---|
+| chip | `output/rmt/v3_rmt.rs` | RMT registers, RAM at `0x3FF5_6800`, the `INT_*` bit layout. Implements `lp_ws281x::RmtHw`. |
+| sequencing | `output/rmt/shared_driver.rs` | the one `Ws281xDriver` static, the IRAM interrupt trampoline, the optional telemetry tap |
+| seam | `output/rmt/esp32v3_rmt_ws281x_driver.rs` | `lpc-hardware` endpoints, leases, open-time pin binding |
+
+Ported from the experiment repo's hardware-validated classic backend
+(`2026-esp32s3-experiment`, `fw/led-lab-esp32/src/esp32_rmt.rs`). All
+sequencing stays in `lp-ws281x`, whose host suite (`cargo test -p lp-ws281x`)
+is the regression net; this crate adds no trait surface
+(ADR `2026-07-31-lp-ws281x-multi-channel-driver-adoption`).
+
+### Two blocks per channel, and where the four outputs come from
+
+`BLOCKS_PER_CHANNEL = 2` (a compile-time constant in `v3_rmt.rs`, not a
+config surface). The classic has eight RMT channels of 64 words each; a
+channel that takes two blocks **absorbs its neighbour's**, so exactly four
+slots — `0, 2, 4, 6` — own memory, with 128-word windows halving into
+64-word (80 µs) refill deadlines.
+
+That is not a taste call. The classic's *delivered* interrupt rate saturates
+around 48 k/s regardless of demand (experiment `findings.md` §12 — this is the
+root cause of the equal-start truncation defect, and staggering does not fix
+it). At one block per channel each busy output demands 25 k refills/s, so the
+chip runs out at **two**. Two blocks halves the demand to 12.5 k/s and should
+reach four — but 4 × 12.5 k = 50 k against a ~48 k ceiling is *marginal
+arithmetic, not a measurement*. Validating it on silicon is M4-P3.
+
+**Absorbed slots are skipped by construction.** Manifest channel `K`
+(`/rmt/ws281xK`) resolves to RMT slot `K * SLOT_STRIDE` via
+`v3_rmt::slot_for_index`, and the channel-creation loop only ever hands
+esp-hal a slot that owns memory. The experiment harness did *not* do this —
+it kept asking for channels 0,1,2,3 and got `MemoryBlockNotAvailable` for the
+odd ones, which is why its `BLOCKS_PER_CHANNEL=2` configuration never ran.
+
+Channel **count** comes from the board manifest and nowhere else: the
+DOM-Z-102 declares four `/rmt/ws281xK` resources, and the endpoints offered
+are its board-labelled GPIOs (IO18/IO16/IO14/IO2 → `ws281x:rmt:IO18` and so
+on). No GPIO number appears in driver logic; the pin arrives with the
+endpoint and is bound at `open` under a registry lease.
+
+### Telemetry (`--features ws281x_telemetry`, off by default)
+
+`lp-ws281x` keeps per-channel counters — guard trips, guard skips, TX errors,
+refill-lag sum/count/max and a 9-bucket lag histogram — and this feature
+prints them over the serial link, one line per configured channel roughly
+every 10 s, from the frame-write path (never from the ISR):
+
+```
+[WS281X] t_ms=… ch=0 half=64 frames=… complete=… trips=… skips=… errors=… \
+         refills=… wanted=… lag_avg=6.9 lag_max=21 over_half=0 hist=a:b:…:i
+```
+
+Read **`refills` against `wanted`** first — a refill that never arrives
+leaves no lag sample behind, so `lag_max` can look comfortable while a third
+of the frames truncate. `trips` is the direct truncation count. `wanted` is
+`frames × ceil(total_bits / half)`, i.e. what an untruncated frame set would
+have needed.
+
+Off by default so the shipping image spends nothing on it: the module is
+`cfg`'d out and the call site becomes an empty `#[inline(always)]` fn — not
+even the timer read survives. `just clippy-fw-esp32v3` lints the feature on,
+so it cannot rot.
 
 ## DRAM budget
 
@@ -86,14 +161,24 @@ esp-hal's `dram_seg` for this chip is `0x3FFB_0000..0x3FFE_0000` — **192 KB**
 arena) and `.stack` all come out of it. `.stack` gets the remainder, so the
 heap constant in `src/main.rs` is one side of a zero-sum split.
 
-Measured on the linked app image (2026-07-31, `HEAP_SIZE = 110 KB`):
+Measured on the linked app image (2026-08-01, `HEAP_SIZE = 110 KB`, WS281x
+output in):
 
-| Section | Bytes |
-|---|---|
-| `.data` | 15,212 |
-| `.bss` (incl. 112,640 B arena → ~21.6 KB static) | 134,256 |
-| `.stack` | 47,136 |
-| total | 196,604 of 196,608 |
+| Section | Bytes | Δ vs M3-P1 |
+|---|---|---|
+| `.data` | 18,924 | +3,712 |
+| `.bss` (incl. 112,640 B arena → ~21.6 KB static) | 134,280 | +24 |
+| `.stack` | 43,400 | **−3,736** |
+| total | 196,604 of 196,608 | — |
+
+⚠️ **The WS281x driver was paid for out of the stack**, because the split is
+zero-sum and `HEAP_SIZE` did not move: `.data` grew by 3,712 B (the shared
+`Ws281xDriver` static with its eight `ChannelState`s, plus driver constants)
+and `.stack` shrank by the same. 43,400 B is now well under fw-esp32s3's
+proven 52,896 B. If a deep call — the recursive GLSL parser, a windowed-ABI
+spill storm during an on-device compile *while frames are going out* —
+overflows, `HEAP_SIZE` in `src/main.rs` is the knob that gives the stack back,
+and M3's ledger says there was 18.8 k of heap headroom at render to spend.
 
 Free heap at idle, read off the device heartbeat: **103,916 B free /
 8,724 B used**. For scale, fw-esp32s3's first on-device GLSL compile OOM'd at
@@ -227,8 +312,5 @@ ago. Host-side work, tracked for M3-P2/P3, which need a project push.
   project auto-load (a project that crashes the boot keeps crashing it), and
   no watchdog backstop for a hung frame loop. The backend needs
   classic-specific RTC-fast-RAM and `SocResetReason` constants; M7.
-- **No output driver.** No WS281x driver is registered on the
-  `HardwareSystem`, so the manifest's four `/rmt/ws281xK` endpoints resolve to
-  nothing and the output node fails cleanly. M4.
 - **No radio in the app build.** Linked only behind `radio_ram_probe`, whose
   M2-P3 ledger measured 44,244 B of heap + ~390 KB flash for it.

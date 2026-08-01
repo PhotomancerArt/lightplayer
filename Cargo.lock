@@ -3997,6 +3997,7 @@ dependencies = [
  "littlefs-rust",
  "log",
  "lp-gfx-lpvm",
+ "lp-ws281x",
  "lpa-server",
  "lpc-hardware",
  "lpc-shared",

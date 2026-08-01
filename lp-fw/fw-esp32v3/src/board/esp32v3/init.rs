@@ -9,7 +9,11 @@
 //!   subsystem; this crate has no `lp-recovery` backend yet (see `Cargo.toml`),
 //!   and arming a watchdog with nothing feeding it would reset the board on a
 //!   timer. M7 adds both together, the way the S3 has them.
-//! - **No `RMT`.** WS281x output is M4.
+//! - **`RMT` is handed straight back.** Unlike the S3's `init_board`, this one
+//!   does not construct the `Rmt` driver: the clock rate it wants belongs to
+//!   `output::rmt::shared_driver::RMT_CLOCK`, and `main.rs` is where a failure
+//!   to init it turns into "no LED output this boot" rather than "no boot".
+//!   Same shape as fw-esp32s3, which also returns the raw peripheral.
 //!
 //! ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
 //! twice panics. It is the app path's **only** call to `esp_hal::init`.
@@ -24,7 +28,8 @@ use esp_hal::{Blocking, uart::ConfigError};
 ///
 /// Sets up the CPU clock and returns the runtime components the app layer
 /// needs: the software-interrupt control and timer group for the executor,
-/// UART0 for `serial::io_task`, and the FLASH peripheral for `flash_storage`.
+/// UART0 for `serial::io_task`, the FLASH peripheral for `flash_storage`, and
+/// the RMT peripheral for `output::rmt`.
 ///
 /// The UART is returned in [`Blocking`] mode; `io_task` converts it with
 /// `into_async()`. Constructing it here rather than there is deliberate — see
@@ -37,6 +42,7 @@ pub fn init_board() -> (
     TimerGroup<'static, impl TimerGroupInstance>,
     Result<Uart<'static, Blocking>, ConfigError>,
     esp_hal::peripherals::FLASH<'static>,
+    esp_hal::peripherals::RMT<'static>,
 ) {
     // `esp_hal::init` disables the RTC watchdog (RWDT) and both TIMG
     // watchdogs unconditionally (esp-hal 1.1.1 `lib.rs::init`). `CpuClock::max()`
@@ -46,6 +52,10 @@ pub fn init_board() -> (
     let peripherals = esp_hal::init(config);
 
     let flash = peripherals.FLASH;
+    // Handed on untouched: `main.rs` builds the `Rmt` driver at the WS281x
+    // clock rate and registers the driver, so an RMT failure costs the board
+    // its LED output rather than its boot.
+    let rmt = peripherals.RMT;
 
     // ⚠️ Load-bearing twice over.
     //
@@ -92,7 +102,7 @@ pub fn init_board() -> (
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    (sw_int, timg0, uart0, flash)
+    (sw_int, timg0, uart0, flash, rmt)
 }
 
 /// Start the Embassy runtime with the given timer and software interrupt.
