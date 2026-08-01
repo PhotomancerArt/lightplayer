@@ -63,6 +63,61 @@ Run the host oracle first:
 cargo test -p lpvm-native --features xt-corpus,emu-xt
 ```
 
+### `test_xt_fp_conformance`
+
+```bash
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # the whole corpus
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+```
+
+The M6 hardware campaign's rig. Runs `lp-xt-fp-vectors`' 5 630-vector corpus on
+this chip's FPU and prints `(result, FSR)` per vector as hex blocks; the recipe
+captures the transcript to `target/fp-capture/` and diffs it with `just fp-diff`.
+
+Three things about it are load-bearing:
+
+**The device regenerates its own inputs.** It links the *same* generator crate
+the host predicted with, so vector 4 137 is the same vector on both sides by
+construction — no transfer protocol and no reflash per batch. Both sides print
+the generator's fingerprint and the diff tool **aborts** on a mismatch, because
+a disagreement there means the two sides ran different vectors and every
+comparison after it is meaningless.
+
+**The harness decides nothing.** No `PASS`, no `FAIL`, no comparison. The
+predictions live in `lp-xt/lp-xt-emu/tests/fixtures/fp/` and were committed
+before any board ran (M6 D2); classification is the host's job. A device that
+graded itself would be the tautology the whole milestone is arranged to avoid —
+so, as with `test_xt_jit_corpus`, **a disagreement is a finding to triage and
+never a reason to edit a golden.**
+
+**A truncated capture is an error, not a partial pass.** Every family ends with
+a sentinel stating its row count, and the parse fails if the count and the rows
+disagree or the final `END-ALL` never arrives. That rejection is asserted by
+unit tests against deliberately damaged fixtures, not by having tried it once.
+
+The instructions themselves are `global_asm!` kernels — one per operation shape,
+plus one per `(conversion, scale)` pair since the scale is an instruction
+immediate — and every vector is a *call* into one of them. That is what keeps
+the kernel count near thirty instead of 5 630, and why the campaign needs no FP
+emitter. `LP_FP_MODE=tables` switches to the estimate-table sweep, which reads
+the implementation-defined lookup ROMs behind
+`recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s` back exhaustively and run-length
+encodes them.
+
+Run the host oracle first; it replays the whole corpus with no board attached:
+
+```bash
+cargo test -p lp-xt-emu --test fp_conformance
+```
+
+Measured on the desk S3 (MAC `D8:3B:DA:47:29:70`, chip rev v0.2), 2026-07-31:
+`CPENABLE` arrives as **`0x000000ff`** — every coprocessor enabled, not merely
+the FPU's bit 0 — under this boot chain. M6 P1 established that it arrives
+armed; this says how widely. The provenance is still unpinned (no write exists
+in esp-hal 1.1.1 or xtensa-lx-rt 0.22), so the harness arms bit 0 explicitly
+anyway and prints both sides.
+
 ### `test_backtrace_oracle`
 
 ```bash
@@ -122,6 +177,22 @@ sequencing against a mock and the same classifier against that capture:
 cargo test -p lp-ws281x
 ```
 
+### `test_button`
+
+```bash
+just fwtest-button-esp32s3 /dev/cu.usbmodemXXXX
+```
+
+GPIO button diagnostic mode: D9 (GPIO8) with an internal pull-up, normally-open
+button to GND. Prints a `BUTTON gpio=... seq=... kind=...` line per debounced
+press/release. Ported from fw-esp32c6's `test_button`, but synchronous instead
+of an embassy task — this chip's harness entrypoint never starts the embassy
+runtime, so the poll loop busy-waits between samples instead of awaiting
+`embassy_time::Timer`. Hardware verification (flash + jumper walk) happens at
+the milestone gate that first has a use for the button; this harness exists so
+the driver cannot rot uncompiled — see
+`docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md`.
+
 ## Output
 
 `src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
@@ -149,6 +220,16 @@ under the registry lease that grants exclusive use of that GPIO.
 Timing is WS2812-class (GRB, 300 µs latch) on every channel. A strip wired in
 another colour order is the fixture node's `color_order`, above this boundary —
 the driver stays GRB, exactly like the C6's.
+
+## Input
+
+`src/hardware/button.rs` is a board-manifest-driven GPIO button driver, ported
+from `fw-esp32c6`'s `Esp32GpioButtonDriver` — same driver id
+(`esp32-gpio-button`), same manifest-driven endpoint enumeration
+(`GpioInput` capability + board-assigned label), same internal-pull-up wiring.
+The only chip-specific piece is the GPIO range check
+(`board::esp32s3::constants::MAX_GPIO`, 48 versus the C6's 30). On this
+board's manifest it exposes D0-D10.
 
 ## Building
 

@@ -104,6 +104,18 @@ kinds the project's `project.json` actually uses.
   the device's own output — exactly the question capability reporting would
   answer.
 
+- **2026-07-31** — The S3 node-gates plan flipped fw-esp32s3 to all eight
+  gates, so both shipping firmwares now have IDENTICAL node-gate sets and the
+  "two boards genuinely differ in gates" trigger is (for now) defused on that
+  axis. Two sharpenings survive it: (a) the residual difference is **hardware
+  capability**, not gates — the S3 has button + WS281x drivers but no radio
+  transport, so a `node-radio` project on the S3 fails with "control radio
+  node has no radio service", which is a *visible node error* rather than a
+  silent placeholder but is still a symptom, not a capability statement;
+  (b) reporting remains deferred deliberately — a dedicated planning session
+  for this system was spawned the same day (Yona's call), so the design work
+  has a home. Status stays `carried`.
+
 **Exit criteria** — A device that omits a node kind's runtime says so on
 `ServerHello` (or an equivalent capability seam), and the studio visibly
 distinguishes "this node is disabled by this device" from "this node is

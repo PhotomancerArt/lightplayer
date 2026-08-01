@@ -67,6 +67,58 @@ impl HwManifest {
             .with_description("Virtual board profile for tests and emulation with GPIO resources, one shared WS281x/RMT resource, and one radio endpoint.")
     }
 
+    /// Virtual board with four WS281x channels, as the XIAO ESP32-S3 Plus has.
+    ///
+    /// [`Self::virtual_single_rmt_gpio_board`] declares one timing resource, so
+    /// a four-strip project running on it can only ever light one strip: the
+    /// other three outputs fail to open and stay failed. That is a fine board
+    /// for testing contention, and several tests rely on it for exactly that,
+    /// but it makes the emulator disagree with the hardware it stands in for —
+    /// on the desk S3 all four strips light.
+    ///
+    /// This board is the single-RMT one plus what the S3 has that it lacked:
+    /// three more timing resources, and the `D9`/`D8`/`D7` labels the four-strip
+    /// projects address. The GPIO numbers behind those three labels are the
+    /// S3's own. `D10` keeps GPIO 18 rather than the S3's GPIO 9, because the
+    /// virtual board has always put it there and nothing is gained by moving
+    /// it; this is a stand-in, not a model of the real pinout.
+    pub fn virtual_quad_rmt_gpio_board() -> Self {
+        let mut resources = Vec::new();
+        for pin in 0..=255 {
+            let display_label = match pin {
+                18 => alloc::format!("D10"),
+                8 => alloc::format!("D9"),
+                7 => alloc::format!("D8"),
+                44 => alloc::format!("D7"),
+                _ => alloc::format!("GPIO{pin}"),
+            };
+            resources.push(HwResource::new(
+                HwAddress::gpio(pin),
+                [HwCapability::GpioOutput, HwCapability::GpioInput],
+                display_label,
+            ));
+        }
+        for channel in 0..4 {
+            resources.push(HwResource::new(
+                HwAddress::rmt_ws281x(channel),
+                [HwCapability::Rmt, HwCapability::Ws281xOutput],
+                alloc::format!("RMT WS281x {channel}"),
+            ));
+        }
+        resources.push(HwResource::new(
+            HwAddress::radio(0),
+            [HwCapability::Radio],
+            "Virtual Radio 0",
+        ));
+        Self::new("virtual-quad-rmt", "Virtual Quad-RMT Board", resources)
+            .with_target(HardwareTarget::Rv32imacEmu)
+            .with_description(
+                "Virtual board profile for tests and emulation with GPIO resources, four \
+                 WS281x/RMT timing resources matching the XIAO ESP32-S3 Plus, and one radio \
+                 endpoint.",
+            )
+    }
+
     pub fn board_id(&self) -> &str {
         &self.board_id
     }

@@ -1,0 +1,131 @@
+---
+status: carried
+since: 2026-07-31
+logged: 2026-07-31
+area: lpc-engine dataflow resolver + lpc-hardware registry (per-frame costs)
+related:
+  - lp-core/lpc-engine/src/dataflow/resolver/
+  - lp-core/lpc-hardware/src/registry/
+  - lp-core/lpc-engine/src/nodes/fixture/fixture_node.rs
+  - lp-fw/fw-esp32-common/src/output/provider.rs
+---
+# Frame cost is per-frame resolution machinery, not the shader: ~8.4 ms/fixture flat on the S3
+
+**Shape** — Measured on the desk ESP32-S3 (2026-07-31, all eight node gates,
+quad-strips variants, 30-LED strips), then attributed with `lp-cli profile`
+(emulator, esp32-c6 cycle model):
+
+| Config | fps | tick |
+|---|---|---|
+| 4 fixtures + 4 outputs | 20 | 48 ms |
+| 1 fixture + 1 output | 50 | 19 ms |
+| 1 fixture, render_size 30×1 / 30×8 / 16×16 / **90×90** | 49–51 | **18–19 ms (unchanged)** |
+| 1 fixture, **10 vs 120 sample points** | 49–51 | **18 ms (unchanged)** |
+
+The per-fixture cost (~8.4 ms engine-side each) is **flat**: independent of
+render resolution (direct sampling never renders the full target) and of LED
+count. The emulator profile says where it goes:
+
+- **1-fixture workload**: `[jit] render` (the actual shader) = **1.1 %** of
+  self cycles. The frame is dominated by the dataflow resolver re-resolving
+  the binding graph from cold every frame — `Resolver::clear_frame_cache`
+  runs each tick, so each tick re-walks `resolve → resolve_binding_source →
+  resolve …` (19 KB deep stacks), with `SlotPath::parse` **per frame**,
+  `String::clone` (2.8 %), `QueryKey` alloc/eq/drop, `slot_lookup` (2.5 %),
+  and the allocator+memcpy pair at **~46 %** of self cycles combined.
+- **4-fixture workload** adds the second mechanism:
+  `HwRegistry::endpoint_status_for` = **45.8 %** of all cycles
+  (`VirtualWs281xDriver::endpoints`, `endpoint_for_spec`, `validate_spec`,
+  and ~5 % of `core::fmt` behind it) — per-frame re-enumeration of hardware
+  endpoints with per-endpoint status recomputation and string spec
+  formatting, scaling with output channels. (Profile uses the virtual
+  driver; the enumeration seam is shared engine/registry code, not
+  emulator-only.)
+- Blocking RMT sends: 1.3 ms/channel (measured on silicon) — 11 % of the
+  4-fixture frame. Real, but a rounding error next to the above.
+
+Verdicts this kills: the LED ledger's "sends are serialized" suspicion
+(P4, exonerated), and "the Xtensa JIT is slow" — codegen is ~1 % of the
+frame; per-clock comparison with the C6 is resolver-bound on both chips.
+
+Profiles: `profiles/2026-07-31T18-02-07--…-1fix--steady-render--s3-gate-perf-1fix/`
+and `…18-02-44--…quad-strips--steady-render--s3-gate-perf-4fix/` (report.txt).
+
+**Carrying cost** — Multi-fixture projects degrade linearly (~8.4 ms per
+fixture+output chain): 4 fixtures = 20 fps today; ~10 fixtures ≈ single-digit
+fps, regardless of how small the fixtures are. Authors cannot buy the cost
+down with lower resolution or fewer LEDs, which makes the scaling feel
+arbitrary from the outside.
+
+**Workarounds** — Fewer fixture+output chains (one fixture spanning strips);
+nothing else helps, by measurement.
+
+**Incident log**
+- **2026-07-31** — Filed from the S3 node-gates plan P4 with an initial
+  (wrong) "render/sampling dominates" attribution; corrected the same day at
+  the gate after Yona pushed back on 20 fps: resolution/LED sweeps showed the
+  cost is flat per fixture, and the emulator profile convicted per-frame
+  resolution machinery (dataflow resolver + endpoint status) instead. The
+  suspicious shapes: `clear_frame_cache` discarding all resolution work every
+  tick, and endpoint status recomputed per frame per channel.
+- **2026-07-31 (later)** — **Endpoint-status half closed** (PR #244,
+  plan `2026-07-31-2224-hw-endpoint-status-cache`, ADR
+  `2026-07-31-output-sink-retry-policy.md`). The 45.8% was not status lookup
+  but a **failed-open retry storm**: `ensure_channel_open` re-attempted any
+  handle-less sink every frame, and the emulator board declared one WS281x
+  channel and no `D9`/`D8`/`D7`, so three of quad-strips' four sinks could
+  never open and re-enumerated the whole board — 256 endpoints, each with a
+  formatted spec and a live status — sixty times a second, forever.
+
+  Fixed by *not asking*, not by caching: sinks park on a new
+  `HwRegistry::generation()` (bumped only on successful claim/release) and
+  wake when hardware ownership actually moves. No endpoint status is stored
+  anywhere, so reserved-pin and claim-conflict semantics cannot go stale. Also
+  collapsed the 3 enumerations per open attempt to 1, and stopped
+  `refresh_output_sink_configs` cloning every output def per tick.
+
+  Measured, frame-for-frame (8 frames both runs, `events.jsonl` B→E):
+  **steady frame 16.42M → 1.53M cycles, 10.7×**; total attributed 65.8M →
+  6.2M. `endpoint_status_for`, `VirtualWs281xDriver::endpoints`,
+  `endpoint_for_spec`, `validate_spec` and the `core::fmt` machinery are all
+  **absent from the top-20 self cycles**. Per-frame warn spam → 7 lines for
+  the whole run. Profiles:
+  `2026-07-31T22-42-28--…quad-strips--steady-render` (before) and
+  `…23-29-27` (after); `…23-33-40` is after the emulator board was given the
+  S3's four channels (steady frame 1.554M — the +1.3% is three more strips
+  actually being written).
+
+  **Desk-S3 re-measured 2026-08-01** (d8:3b:da:47:29:70, identified by MAC via
+  `espflash board-info`; branch firmware flashed, quad-strips pushed):
+  **20 fps, tick 48 ms — flat**, stable over 13 consecutive `[perf]` readings.
+  That is exactly the prediction: the S3 opens all four channels on frame one,
+  so it never paid this cost in steady state, and its flat ~8.4 ms/fixture is
+  the resolver.
+
+  Since an unchanged fps cannot itself prove the new image was running, the
+  parked-sink path was exercised on silicon instead: quad-strips with one
+  output re-pointed at `ws281x:rmt:NOT-A-PIN` produced **2 warnings and then
+  silence across ~1,250 frames** (the two being the designed settle — first
+  attempt, then one retry after the other three opens bumped the generation).
+  The old code logs one per frame, so this both proves the image and confirms
+  the fix on hardware. fps held at 20 with the dead output; tick 47 ms, the
+  1 ms being one fewer strip to write.
+
+  Not measured: the same misconfigured-output case on *pre-fix* firmware, which
+  would quantify what silicon saves there. The saving is a board enumeration
+  plus a serial line per frame; on the S3's ~40-resource manifest that is far
+  smaller than the emulator's 256, and it was not worth a second flash cycle to
+  put a number on.
+
+  **Still open: the resolver half** — the profile is now dominated by exactly
+  what this entry predicted would remain: memcpy 18.7%, allocator 12.8%+8.0%,
+  `QueryKey::eq` 5.7%, `EngineSession::resolve` 2.7%, `SlotPath::parse`. That
+  is the dataflow resolver re-resolving from cold each tick, owned by plan
+  `2026-07-31-2225-persist-dataflow-resolution`; `…23-33-40` is its baseline.
+
+**Exit criteria** — A profiled optimization pass that makes resolved bindings
+and endpoint status persist across frames (invalidate on tree/binding/
+hardware change, not per tick), after which frame cost is dominated by actual
+rendering work and the profile's top self-cycle entries are no longer
+allocator/memcpy/string machinery. Re-measure the same quad-strips matrix on
+the desk S3 as the oracle.
