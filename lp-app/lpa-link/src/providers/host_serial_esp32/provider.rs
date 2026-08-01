@@ -574,10 +574,13 @@ fn sanitize_endpoint_part(value: &str) -> String {
 }
 
 pub fn is_likely_esp32_serial_port(port_name: &str) -> bool {
+    // `usbserial` (not `tty.usbserial`) so the macOS `cu.*` twins and
+    // WCH-bridged boards (`cu.wchusbserial*`, classic ESP32 dev kits with a
+    // CH340) match too, not just the FTDI/CP210x `tty.usbserial*` form.
     port_name.contains("usbmodem")
         || port_name.contains("ttyUSB")
         || port_name.contains("ttyACM")
-        || port_name.contains("tty.usbserial")
+        || port_name.contains("usbserial")
 }
 
 /// Prefer macOS call-out (`/dev/cu.*`) devices over their `/dev/tty.*` twins.
