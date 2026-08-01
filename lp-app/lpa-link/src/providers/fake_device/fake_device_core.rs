@@ -262,11 +262,11 @@ impl FakeDeviceCore {
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
-        let hello = lpc_wire::ServerHello {
-            proto: lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION),
-            fw: lp.provenance.clone(),
-            device_uid: identity.as_ref().map(|identity| identity.uid.clone()),
-        };
+        let hello_identity = lp
+            .provenance
+            .clone()
+            .with_proto(lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION))
+            .with_device_uid(identity.as_ref().map(|identity| identity.uid.clone()));
         let start = HostRuntime::start_with_server(move || {
             let fs = LpFsMemory::new();
             for (relative, bytes) in &files {
@@ -286,7 +286,7 @@ impl FakeDeviceCore {
                     eprintln!("[fake-device] failed to stamp identity: {error}");
                 }
             }
-            let mut server = create_memory_server_with(fs, hello);
+            let mut server = create_memory_server_with(fs, hello_identity);
             if load_at_boot {
                 // the real-hardware shape: firmware auto-resumes its
                 // startup project before serving (fw-esp32c6 boot.rs)

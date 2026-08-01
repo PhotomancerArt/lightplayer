@@ -390,7 +390,7 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
     let DeviceState::Ready { hello } = session.wait_ready().await else {
         panic!("expected Ready before flashing");
     };
-    assert_eq!(hello.fw.commit, "fake-firmware");
+    assert_eq!(hello.build.commit, "fake-firmware");
     let (sink, events) = recording_sink();
 
     let outcome = session
@@ -406,7 +406,7 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
         panic!("expected Ready after flash, got {:?}", outcome.state);
     };
     assert_eq!(
-        hello.fw.commit, FAKE_IMAGE_IDENTITY,
+        hello.build.commit, FAKE_IMAGE_IDENTITY,
         "the rebuilt link's hello carries the flashed image's provenance"
     );
     assert_eq!(session.mode(), DeviceMode::AppProtocol);
