@@ -46,6 +46,7 @@ pub mod slot_views {
 pub mod artifact;
 pub mod feature;
 pub mod hardware_endpoint_spec;
+pub mod manifest;
 pub mod nodes;
 pub mod product;
 pub mod products;
@@ -98,6 +99,7 @@ pub use feature::{LpFeature, ManifestLimits};
 pub use hardware_endpoint_spec::{HardwareEndpointSpecError, HwEndpointSpec};
 pub use lpfs::fs_event::FsVersion;
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
+pub use manifest::{ManifestCore, ManifestTarget};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{

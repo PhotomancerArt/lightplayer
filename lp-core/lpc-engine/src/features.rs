@@ -24,7 +24,7 @@ enum FeatureOrigin {
 
 /// Wildcard-free classification: a new [`LpFeature`] variant is a compile
 /// error here until someone decides which side owns it.
-fn origin(feature: LpFeature) -> FeatureOrigin {
+const fn origin(feature: LpFeature) -> FeatureOrigin {
     match feature {
         LpFeature::NodeButton => FeatureOrigin::Engine(cfg!(feature = "node-button")),
         LpFeature::NodeClock => FeatureOrigin::Engine(cfg!(feature = "node-clock")),
@@ -53,6 +53,41 @@ pub fn supported_features() -> Vec<LpFeature> {
         .filter(|feature| matches!(origin(*feature), FeatureOrigin::Engine(true)))
         .collect()
 }
+
+/// One feature's contribution to [`ENGINE_FEATURE_FRAGMENT`]: its quoted,
+/// comma-terminated wire name when engine-owned and enabled, else empty.
+const fn engine_fragment(feature: LpFeature) -> &'static str {
+    match origin(feature) {
+        FeatureOrigin::Engine(true) => lpc_model::manifest::feature_fragment(true, feature),
+        FeatureOrigin::Engine(false) | FeatureOrigin::Embedder => "",
+    }
+}
+
+/// The engine-owned enabled features as a pre-quoted, comma-terminated JSON
+/// fragment for `lp_embed_manifest_core!`'s `features:` list. Derived from
+/// the same [`origin`] classification as [`supported_features`] — the two
+/// cannot drift (asserted by test as well).
+pub const ENGINE_FEATURE_FRAGMENT: &str = lpc_model::lp_const_concat!(
+    engine_fragment(LpFeature::ALL[0]),
+    engine_fragment(LpFeature::ALL[1]),
+    engine_fragment(LpFeature::ALL[2]),
+    engine_fragment(LpFeature::ALL[3]),
+    engine_fragment(LpFeature::ALL[4]),
+    engine_fragment(LpFeature::ALL[5]),
+    engine_fragment(LpFeature::ALL[6]),
+    engine_fragment(LpFeature::ALL[7]),
+    engine_fragment(LpFeature::ALL[8]),
+    engine_fragment(LpFeature::ALL[9]),
+    engine_fragment(LpFeature::ALL[10]),
+    engine_fragment(LpFeature::ALL[11]),
+    engine_fragment(LpFeature::ALL[12]),
+    engine_fragment(LpFeature::ALL[13]),
+    engine_fragment(LpFeature::ALL[14]),
+);
+
+// A new LpFeature variant grows ALL past this fragment list — fail the build
+// here until the list above covers it.
+const _: () = assert!(LpFeature::ALL.len() == 15);
 
 #[cfg(test)]
 mod tests {
@@ -89,6 +124,17 @@ mod tests {
                 LpFeature::NodeTexture,
             ]
         );
+    }
+
+    /// The const JSON fragment and the runtime list are projections of the
+    /// same `origin` classification — assert they agree byte-for-byte.
+    #[test]
+    fn engine_feature_fragment_matches_supported_features() {
+        let expected: alloc::string::String = supported_features()
+            .iter()
+            .map(|f| alloc::format!("\"{}\",", f.wire_name()))
+            .collect();
+        assert_eq!(ENGINE_FEATURE_FRAGMENT, expected);
     }
 
     /// Every gated node kind's feature is engine-owned, and the derivation

@@ -58,6 +58,32 @@
 ))]
 extern crate alloc;
 
+// The build's self-description, embedded as a scannable blob (extracted by
+// `lp-cli firmware show` and reported on ServerHello in M4). Feature truth
+// comes from the engine's own cfg! derivation; only embedder facts are named
+// here. `flashAppBytes` is parsed from partitions.csv by build.rs.
+#[cfg(feature = "server")]
+lpc_model::lp_embed_manifest_core! {
+    package: env!("CARGO_PKG_NAME"),
+    chip_family: "esp32",
+    chip: "esp32s3",
+    cargo_target: "xtensa-esp32s3-none-elf",
+    profile: env!("LP_BUILD_PROFILE"),
+    commit: env!("LP_BUILD_COMMIT"),
+    dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
+    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+    features: [
+        lpa_server::ENGINE_FEATURE_FRAGMENT,
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::SvcButton),
+        lpc_model::manifest::feature_fragment(
+            cfg!(feature = "float-f32"),
+            lpc_model::LpFeature::ShaderF32,
+        ),
+    ],
+    limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
+}
+
 mod board;
 #[cfg(not(fw_harness))]
 mod flash_storage;
