@@ -22,11 +22,13 @@ pub struct UiNodeHeader {
     /// Aggregate dirty-edit summary for this node's subtree (own slots plus
     /// descendant nodes), matching the per-field affordances.
     pub dirty: DirtySummary,
-    /// The node exists in the project but does nothing on the device
-    /// running it (its kind has no runtime in that firmware build). The
-    /// pane renders DIMMED — absent, not broken; the status words in the
-    /// popover say why.
-    pub dimmed: bool,
+    /// The node exists in the project but has NO RUNTIME on the device
+    /// running it (its kind is not in that firmware build). The pane
+    /// renders an empty state instead of a body: params, products and
+    /// slots all describe a runtime that is not there, and showing them
+    /// invites edits that cannot take effect. The status
+    /// ([`Self::status`], warning-toned) and [`Self::detail`] say why.
+    pub unsupported: bool,
 }
 
 impl UiNodeHeader {
@@ -41,7 +43,7 @@ impl UiNodeHeader {
             summary: None,
             detail: None,
             dirty: DirtySummary::clean(),
-            dimmed: false,
+            unsupported: false,
         }
     }
 
@@ -57,9 +59,9 @@ impl UiNodeHeader {
         self
     }
 
-    /// Mark the node as not-runnable-here (see [`Self::dimmed`]).
-    pub fn with_dimmed(mut self, dimmed: bool) -> Self {
-        self.dimmed = dimmed;
+    /// Mark the node as having no runtime here (see [`Self::unsupported`]).
+    pub fn with_unsupported(mut self, unsupported: bool) -> Self {
+        self.unsupported = unsupported;
         self
     }
 

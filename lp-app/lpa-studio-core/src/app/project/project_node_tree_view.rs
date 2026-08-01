@@ -94,9 +94,20 @@ pub enum ProjectNodeStatusTone {
     Warning,
     Error,
     /// The node's kind has no runtime on the device this project runs on
-    /// ("Not on this device"). Nothing is broken and nothing is running:
-    /// the treatment is DIMMED, never the error family and never violet
-    /// (violet is reserved for bound).
+    /// ("Not on this device").
+    ///
+    /// Wears the WARNING tone, not a quiet one: a node the device cannot
+    /// run usually means the project does not work here at all. A few
+    /// kinds are genuinely optional (a radio node on a board with no
+    /// radio), but the common case is a broken show, so this announces
+    /// itself like any other warning instead of whispering. It stays a
+    /// tone of its own — rather than plain `Warning` — because the panes
+    /// must also know to render the node EMPTY (see
+    /// [`Self::is_unsupported`]): there is no runtime here, so there are
+    /// no live params, products or slots to show.
+    ///
+    /// (Tried dimmed/neutral first; rejected at the M4 G1 gate — see
+    /// `docs/adr/2026-08-01-capability-reporting-on-hello.md`.)
     Disabled,
 }
 
@@ -104,22 +115,24 @@ impl ProjectNodeStatusTone {
     /// The `UiStatusKind` this tree tone corresponds to (tree statuses never
     /// carry an in-flight `Working` state).
     ///
-    /// `Disabled` rides `Neutral`: chrome-wise a not-on-this-device node is
-    /// quiet — it must not raise the tree's attention indicator like an
-    /// error, and its meaning lives in the status WORDS ("Not on this
-    /// device") plus the dimmed row, not in a new tone token.
+    /// `Disabled` rides `Warning`, so it collapses into the attention class
+    /// through the ordinary affordance merge and the tree row announces it
+    /// exactly like any other warning. The status WORDS ("Not on this
+    /// device") carry what kind of warning it is.
     pub fn ui_status_kind(self) -> UiStatusKind {
         match self {
-            Self::Neutral | Self::Disabled => UiStatusKind::Neutral,
+            Self::Neutral => UiStatusKind::Neutral,
             Self::Good => UiStatusKind::Good,
-            Self::Warning => UiStatusKind::Warning,
+            Self::Warning | Self::Disabled => UiStatusKind::Warning,
             Self::Error => UiStatusKind::Error,
         }
     }
 
-    /// Whether the surface should render dimmed (the node exists in the
-    /// project but does nothing on this device).
-    pub fn is_dimmed(self) -> bool {
+    /// Whether the node has no runtime on this device, so its pane renders
+    /// an empty state instead of a body. Params, products and slots all
+    /// describe a runtime that is not there; showing them invites edits
+    /// that cannot take effect.
+    pub fn is_unsupported(self) -> bool {
         matches!(self, Self::Disabled)
     }
 }
@@ -128,38 +141,40 @@ impl ProjectNodeStatusTone {
 mod tests {
     use super::*;
 
-    /// A not-on-this-device node is QUIET chrome, not an alarm: its
-    /// affordance stays `Info` (the same as a healthy node's), and only the
-    /// dimming and the status words distinguish it. Regression guard for
-    /// the whole tone decision — routing `Disabled` through any of the
-    /// attention-class kinds would make a build gap scream like a failure.
+    /// A not-on-this-device node ANNOUNCES itself: it wears the warning
+    /// tone and collapses into the attention class through the ordinary
+    /// affordance merge, exactly like a `Warn` node. Regression guard for
+    /// the G1 gate outcome — an earlier build routed it through `Neutral`,
+    /// which read as healthy silence and was rejected, because a node the
+    /// device cannot run usually means the project does not work here.
     #[test]
-    fn disabled_is_quiet_chrome_and_dimmed() {
+    fn unsupported_announces_itself_like_a_warning() {
         assert_eq!(
             ProjectNodeStatusTone::Disabled.ui_status_kind(),
-            UiStatusKind::Neutral
+            UiStatusKind::Warning
         );
-        assert!(ProjectNodeStatusTone::Disabled.is_dimmed());
+        assert!(ProjectNodeStatusTone::Disabled.is_unsupported());
 
         let clean = DirtySummary::clean();
         assert_eq!(
             UiAffordance::merged(ProjectNodeStatusTone::Disabled.ui_status_kind(), &clean),
-            UiAffordance::merged(ProjectNodeStatusTone::Good.ui_status_kind(), &clean),
-            "an unsupported node must not raise the tree indicator"
+            UiAffordance::merged(ProjectNodeStatusTone::Warning.ui_status_kind(), &clean),
+            "an unsupported node announces itself like any other warning"
         );
         assert_ne!(
             UiAffordance::merged(ProjectNodeStatusTone::Disabled.ui_status_kind(), &clean),
-            UiAffordance::merged(ProjectNodeStatusTone::Error.ui_status_kind(), &clean),
+            UiAffordance::merged(ProjectNodeStatusTone::Good.ui_status_kind(), &clean),
+            "it must never read as healthy silence (the G1 rejection)"
         );
 
-        // Every other tone keeps its own kind, and only Disabled dims.
+        // Only Disabled empties the pane; the plain warning tone does not.
         for tone in [
             ProjectNodeStatusTone::Neutral,
             ProjectNodeStatusTone::Good,
             ProjectNodeStatusTone::Warning,
             ProjectNodeStatusTone::Error,
         ] {
-            assert!(!tone.is_dimmed(), "{tone:?}");
+            assert!(!tone.is_unsupported(), "{tone:?}");
         }
     }
 }

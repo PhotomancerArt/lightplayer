@@ -53,18 +53,32 @@ pub(crate) fn playlist_node_view() -> UiNodeView {
 
 /// A node whose KIND has no runtime in the connected device's firmware:
 /// the placeholder reported `NodeRuntimeStatus::Unsupported`, which the
-/// controller mapped to the dimmed "Not on this device" family. Nothing is
-/// broken — no red, no violet, no error issues list.
+/// controller mapped to the warning-toned "Not on this device" family.
+///
+/// The tabs and config slots below are deliberately POPULATED: the pane
+/// must suppress them and render its empty state instead, and a fixture
+/// with nothing in it could not tell the difference.
 pub(crate) fn unsupported_node_view() -> UiNodeView {
     UiNodeView::new(
         UiNodeHeader::new("swirl", "Fluid", "/show/swirl")
-            .with_status(UiStatus::neutral("Not on this device"))
+            .with_status(UiStatus::warning("Not on this device"))
             .with_detail("node kind Fluid is not included in this firmware build")
-            .with_dimmed(true),
-        vec![UiNodeTab::main(vec![UiNodeSection::ConfigSlots(vec![
-            UiConfigSlot::value("viscosity", "Viscosity", UiSlotValue::f32(0.35))
-                .with_state(UiSlotFieldState::editable()),
-        ])])],
+            .with_unsupported(true),
+        vec![
+            UiNodeTab::main(vec![UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value("viscosity", "Viscosity", UiSlotValue::f32(0.35))
+                    .with_state(UiSlotFieldState::editable()),
+                UiConfigSlot::value("decay", "Decay", UiSlotValue::f32(0.9))
+                    .with_state(UiSlotFieldState::editable()),
+            ])]),
+            UiNodeTab::new(
+                "raw",
+                UiNodeTabBody::Text {
+                    title: "Slot extraction notes".to_string(),
+                    body: "state.output -> produced product".to_string(),
+                },
+            ),
+        ],
     )
     .with_node_id("fluid-swirl")
 }
