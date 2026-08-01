@@ -579,8 +579,22 @@ impl ControlNode for FixtureNode {
             );
         }
 
-        let mut power = if settings.power.is_limited() {
-            PowerPass::limited(self.power_scale_q16)
+        // The device-level safe clamp composes with the fixture's own budget
+        // scale by `min` — ceilings compose; neither can boost. It applies to
+        // EVERY fixture, budgeted or not: the project being clamped may
+        // predate the power feature entirely, and safe mode must dim it
+        // anyway.
+        let budget_scale = if settings.power.is_limited() {
+            self.power_scale_q16
+        } else {
+            power_limit::UNITY_SCALE_Q16
+        };
+        let effective_scale = budget_scale.min(
+            ctx.safe_output_clamp_q16()
+                .unwrap_or(power_limit::UNITY_SCALE_Q16),
+        );
+        let mut power = if effective_scale < power_limit::UNITY_SCALE_Q16 {
+            PowerPass::limited(effective_scale)
         } else {
             PowerPass::unlimited()
         };
@@ -1707,6 +1721,144 @@ mod tests {
         TextureRenderProduct::new(width, height, format, pixels).map_err(err_ctx("solid texture"))
     }
 
+    /// A ticked engine holding one directly-sampled two-lamp fixture fed by
+    /// [`FixtureExpectedSampleProducer`], with NO power budget — so anything
+    /// that scales its output came from somewhere else.
+    #[cfg(feature = "node-shader")]
+    fn direct_sampled_fixture_engine() -> (Engine, ProjectRegistry, lpc_model::NodeId) {
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let spine = test_placeholder_spine();
+
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").unwrap(),
+                lpc_model::NodeName::parse("shader").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                frame,
+            )
+            .unwrap();
+
+        let out_path = shader_output_path();
+        engine
+            .attach_runtime_node(
+                sh_id,
+                Box::new(FixtureExpectedSampleProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    expected_points: vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
+                    colors: vec![[1000, 2000, 3000, u16::MAX], [4000, 5000, 6000, u16::MAX]],
+                    expected_width: 4,
+                    expected_height: 4,
+                }),
+                frame,
+            )
+            .unwrap();
+
+        // Two lamps: center + right edge (the retired 2-ring construction's
+        // exact resolved positions).
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::Direct,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path,
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+
+        engine.add_demand_root(fix_id);
+        engine.tick(&registry, 10).unwrap();
+        (engine, registry, fix_id)
+    }
+
+    /// Render the two-lamp fixture's six unorm16 channels.
+    #[cfg(feature = "node-shader")]
+    fn render_fixture_samples(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        fix_id: lpc_model::NodeId,
+    ) -> Vec<u16> {
+        let extent = ControlExtent::new(1, 6);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        engine
+            .render_control_for_test(
+                registry,
+                ControlProduct::new(fix_id, 0, extent),
+                &request,
+                target,
+            )
+            .expect("control render");
+        samples
+    }
+
     fn bind_fixture_def_defaults(engine: &mut Engine, fix_id: lpc_model::NodeId, frame: Revision) {
         bind_fixture_def_slot(
             engine,
@@ -2449,129 +2601,43 @@ mod tests {
     #[test]
     #[cfg(feature = "node-shader")]
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
-        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
-        let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
-        let frame = Revision::new(1);
-        let root = engine.tree().root();
-        let spine = test_placeholder_spine();
+        let (mut engine, registry, fix_id) = direct_sampled_fixture_engine();
 
-        let sh_id = engine
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("sh").unwrap(),
-                lpc_model::NodeName::parse("shader").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine.clone(),
-                frame,
-            )
-            .unwrap();
+        assert_eq!(
+            render_fixture_samples(&mut engine, &registry, fix_id),
+            vec![1000u16, 2000, 3000, 4000, 5000, 6000]
+        );
+    }
 
-        let out_path = shader_output_path();
-        engine
-            .attach_runtime_node(
-                sh_id,
-                Box::new(FixtureExpectedSampleProducer {
-                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
-                    expected_points: vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
-                    colors: vec![[1000, 2000, 3000, u16::MAX], [4000, 5000, 6000, u16::MAX]],
-                    expected_width: 4,
-                    expected_height: 4,
-                }),
-                frame,
-            )
-            .unwrap();
+    /// The device-level safe clamp reaches the wire: a fixture with no power
+    /// budget of its own still emits scaled samples while the clamp is set,
+    /// and unscaled ones once it is cleared.
+    ///
+    /// This is the render-level proof for `Engine::set_safe_output_clamp`.
+    /// The clamp is what makes a boot-control safe-mode restart *dim* rather
+    /// than merely project-less, so "the setter stores a number" is not the
+    /// property worth pinning — "the samples come out smaller" is.
+    #[test]
+    #[cfg(feature = "node-shader")]
+    fn safe_output_clamp_scales_emitted_samples_and_clearing_restores_them() {
+        let (mut engine, registry, fix_id) = direct_sampled_fixture_engine();
 
-        // Two lamps: center + right edge (the retired 2-ring construction's
-        // exact resolved positions).
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
-            2.0,
+        // 128/255 of full, as the boot-control record's clamp bits express
+        // it: q16 = (128 << 16) / 255 = 32896, applied as (v * q16) >> 16.
+        engine.set_safe_output_clamp(Some(128));
+        assert_eq!(
+            render_fixture_samples(&mut engine, &registry, fix_id),
+            vec![501u16, 1003, 1505, 2007, 2509, 3011],
+            "a clamped fixture must emit scaled samples even with no power budget"
         );
 
-        let fix_id = engine
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("fx").unwrap(),
-                lpc_model::NodeName::parse("fixture").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine,
-                frame,
-            )
-            .unwrap();
-
-        engine
-            .attach_runtime_node(
-                fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    mapping,
-                    FixtureSamplingConfig::Direct,
-                    frame,
-                )),
-                frame,
-            )
-            .unwrap();
-        bind_fixture_def_defaults(&mut engine, fix_id, frame);
-        engine
-            .add_binding(
-                BindingDraft {
-                    source: BindingSource::ProducedSlot {
-                        node: sh_id,
-                        slot: out_path,
-                    },
-                    target: BindingTarget::ConsumedSlot {
-                        node: fix_id,
-                        slot: fixture_input_path(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: fix_id,
-                },
-                frame,
-            )
-            .unwrap();
-        engine
-            .add_binding(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(0.0)),
-                    target: BindingTarget::ConsumedSlot {
-                        node: fix_id,
-                        slot: default_demand_input_path(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: fix_id,
-                },
-                frame,
-            )
-            .unwrap();
-
-        engine.add_demand_root(fix_id);
-        engine.tick(&registry, 10).unwrap();
-
-        let extent = ControlExtent::new(1, 6);
-        let request = ControlRenderRequest::unorm16(extent);
-        let mut samples = vec![0u16; extent.sample_count() as usize];
-        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
-        engine
-            .render_control_for_test(
-                &registry,
-                ControlProduct::new(fix_id, 0, extent),
-                &request,
-                target,
-            )
-            .expect("control render");
-
-        assert_eq!(samples, vec![1000u16, 2000, 3000, 4000, 5000, 6000]);
+        // One-shot by design: the record is consumed at boot, so clearing the
+        // clamp has to restore full output without re-loading the project.
+        engine.set_safe_output_clamp(None);
+        assert_eq!(
+            render_fixture_samples(&mut engine, &registry, fix_id),
+            vec![1000u16, 2000, 3000, 4000, 5000, 6000]
+        );
     }
 
     #[test]

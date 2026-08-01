@@ -4,6 +4,7 @@ members = [
     "lp-base/lp-perf",
     "lp-base/lp-collection",
     "lp-base/lp-recovery",
+    "lp-base/lp-bootctl",
     "lp-base/lpfs",
     # lp-app workspace members
     "lp-core/lpc-history",
@@ -101,6 +102,7 @@ resolver = "2"
 default-members = [
     # lp-base workspace members
     "lp-base/lp-recovery",
+    "lp-base/lp-bootctl",
     "lp-base/lpfs",
     # lp-app workspace members
     "lp-core/lpc-history",
@@ -208,6 +210,7 @@ cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift", 
 regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "lightplayer", default-features = false, features = ["std"] }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
+lp-bootctl = { path = "lp-base/lp-bootctl", default-features = false }
 
 # Common dependencies
 

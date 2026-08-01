@@ -177,6 +177,8 @@ mod tests {
         assert_eq!(
             tabs[4].sections[0].affordances,
             vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::BackUpFilesystem,
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
@@ -252,10 +254,16 @@ mod tests {
             tab(&tabs, DeviceCardTab::Status).sections[0].affordances,
             vec![DeviceDetailAffordance::Roster(RosterAffordance::Reconnect)]
         );
-        // registered + offline → the danger zone is Forget, nothing else
+        // registered + offline → Troubleshoot (always offered, 2026-07-31)
+        // then Forget. Troubleshoot earns its place even here: an offline
+        // card is exactly a device that stopped answering, and the sheet's
+        // Reconnect and recovery steps are what you want.
         assert_eq!(
             tab(&tabs, DeviceCardTab::Danger).sections[0].affordances,
-            vec![DeviceDetailAffordance::ForgetDevice]
+            vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::ForgetDevice
+            ]
         );
         // a Neutral remembered card announces nothing
         assert!(tabs.iter().all(|tab| tab.badge.is_none()));

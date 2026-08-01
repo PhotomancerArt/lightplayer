@@ -78,10 +78,31 @@ The current implemented management operations are:
   manifest/images to the device.
 - `EraseDeviceFlash`: erase the whole device flash so the ESP32 returns to a
   blank, unprovisioned state.
+- `SetBootControl`: write the `lp-bootctl` sector — an instruction to the
+  device's NEXT boot, delivered through flash because a device that cannot
+  boot has no other channel.
+- `ReadRawFilesystem`: read the device's `lpfs` partition back to the host,
+  verbatim, as littlefs image bytes.
 
-Raw filesystem image erase/read/write are modeled as link-level operations but
-are future work. They should operate on direct device/LittleFS image bytes below
-the server, not on the server filesystem API used for normal project upload.
+`ReadRawFilesystem` takes no region. The partition is per board (the C6's
+`lpfs` is at `0x310000`, the S3's at `0x610000`), and which board this is only
+becomes knowable when the esptool SYNC handshake answers — a device that will
+not boot cannot be asked what it is, and that is precisely the case this
+operation exists for. Providers therefore resolve the region from the chip
+they detect, through `LinkFlashRegion::lpfs_for_chip`, and report both the
+region and the chip on the result so a backup's manifest can record them.
+An unrecognized chip is refused rather than guessed at: a wrong region
+produces a plausible-looking archive of the wrong bytes.
+
+`lpa-link` does not parse the image. Turning littlefs bytes into files is the
+concern of the layer that builds the archive (`lpa-studio-core`'s
+`app/device/filesystem_backup`); this crate moves bytes off a board.
+
+Raw filesystem WRITE (restore) is modeled as a link-level operation but is
+future work, and no provider advertises it — `LinkCapabilities` has a
+read-only `with_raw_filesystem_read()` alongside the paired
+`with_raw_filesystem()` exactly so the UI is never offered a write that every
+provider answers with `unsupported`.
 
 ## Server Connections
 

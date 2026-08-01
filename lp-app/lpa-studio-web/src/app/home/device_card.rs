@@ -24,12 +24,12 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp, CardVerb, ControllerId,
-    DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController, DeviceDetailAffordance, DeviceOp,
-    DeviceRichInput, HomeOp, LinkProviderKind, ProjectController, ProjectOp, RichObjectView,
-    RichSection, RosterAffordance, RosterCardState, RosterTreatment, SimDetailAffordance,
-    SimRichInput, UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind, device_card_tabs,
-    device_rich_object, sim_rich_object,
+    BootloaderEntryFlow, BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp,
+    CardVerb, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController,
+    DeviceDetailAffordance, DeviceOp, DeviceRichInput, HomeOp, LinkProviderKind, ProjectController,
+    ProjectOp, RecoveryInstructions, RichObjectView, RichSection, RosterAffordance,
+    RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard,
+    UiDeviceProjectChip, UiStatusKind, device_card_tabs, device_rich_object, sim_rich_object,
 };
 use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
@@ -59,6 +59,8 @@ pub(crate) enum DeviceCardSheet {
     /// Reconnect and recovery-flash escapes. Card-resident per D41
     /// (supersedes the contract-era "merged-outline popup" language).
     Troubleshoot,
+    /// The bootloader-entry ritual (M5): steps, waiting, confirmation.
+    BootloaderEntry(BootloaderEntryFlow),
 }
 
 /// What a rendered affordance row does. Sheet and tab rows carry a
@@ -124,6 +126,7 @@ fn sheet_to_web(sheet: &CardSheetState, card: &UiDeviceCard) -> DeviceCardSheet 
         CardSheetState::Confirm(verb) => DeviceCardSheet::Confirm(verb_to_action(verb, card)),
         CardSheetState::Name => DeviceCardSheet::Name,
         CardSheetState::Troubleshoot => DeviceCardSheet::Troubleshoot,
+        CardSheetState::BootloaderEntry(flow) => DeviceCardSheet::BootloaderEntry(flow.clone()),
     }
 }
 
@@ -155,6 +158,12 @@ fn close_sheet_action(card_key: &str) -> UiAction {
 /// `YYYY-MM-DD HH:MM LightPlayer`. A fixed story clock derives a
 /// deterministic UTC name (baselines never drift); live rendering uses
 /// the platform's local clock.
+/// The clamp's user-facing brightness, 0–100. 255 is "no reduction", so
+/// the wire's 26 renders as the ~10% the boot log promises.
+fn clamp_percent(clamp: u8) -> u32 {
+    (u32::from(clamp) * 100 + 127) / 255
+}
+
 fn default_setup_name(now_secs: Option<f64>) -> String {
     #[cfg(target_arch = "wasm32")]
     if now_secs.is_none() {
@@ -190,6 +199,99 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let year = yoe + era * 400 + i64::from(month <= 2);
     (year, month, day)
+}
+
+/// The Recovery-mode face: the state's two exit verbs, each with a
+/// one-line summary that lets the user self-select their case. Studio
+/// cannot tell the cases apart — a board in download mode sends no hello,
+/// so it cannot be linked to a registered device — which is why the copy
+/// disambiguates instead of a wizard.
+///
+/// Order: Install first (the common new-board arrival), the rescue verb
+/// second. Neither endangers the other case: a flash does not touch the
+/// project partition, and a boot-control record on a non-LightPlayer
+/// board is inert.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element {
+    rsx! {
+        div { class: "tw:mt-1 tw:grid tw:gap-3",
+            div { class: "tw:grid tw:gap-1",
+                div {
+                    CardSheetButton {
+                        label: "⚡ Install firmware",
+                        tone: SheetButtonTone::Primary,
+                        onclick: move |_| {
+                            on_action.call(UiAction::from_op(
+                                ControllerId::new(DeviceController::NODE_ID),
+                                DeviceOp::ProvisionFirmware { setup_name: None },
+                            ));
+                        },
+                    }
+                }
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
+                    "Put LightPlayer on this board. New boards and boards running "
+                    "other firmware start here. Projects on the board survive."
+                }
+            }
+            div { class: "tw:grid tw:gap-1",
+                div {
+                    CardSheetButton {
+                        label: "Start in safe mode",
+                        tone: SheetButtonTone::Quiet,
+                        onclick: {
+                            let action = boot_safe_once_action();
+                            move |_| on_action.call(action.clone())
+                        },
+                    }
+                }
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
+                    "Already runs LightPlayer, but its project stops it from "
+                    "starting? Start once with the LEDs dimmed so you can "
+                    "connect and fix the project."
+                }
+            }
+            div { class: "tw:grid tw:gap-1",
+                div {
+                    CardSheetButton {
+                        label: "Download a backup",
+                        tone: SheetButtonTone::Quiet,
+                        onclick: {
+                            let action = back_up_filesystem_action();
+                            move |_| on_action.call(action.clone())
+                        },
+                    }
+                }
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
+                    "About to try something drastic? Save everything on the "
+                    "board to a ZIP on your computer first. This works even "
+                    "though it will not start."
+                }
+            }
+            // Wayfinding, not another verb: everything else recovery-shaped
+            // (wipe, erase, and — once it lands — restore) lives in the
+            // danger zone, and a user on this face should not have to know
+            // that.
+            button {
+                // No underline: at this size a dotted underline through two
+                // wrapped lines reads as STRIKETHROUGH — struck-out "wipe,
+                // erase" is exactly the wrong signal. The arrow + hover
+                // carry the clickability.
+                class: "tw:cursor-pointer tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-xs tw:text-muted-foreground tw:hover:text-strong-foreground tw:hover:underline",
+                r#type: "button",
+                onclick: {
+                    let card_key = card_key.clone();
+                    move |_| {
+                        on_action.call(home_action(HomeOp::CardUi(CardUiOp::SelectTab {
+                            card: card_key.clone(),
+                            tab: DeviceCardTab::Danger,
+                        })));
+                    }
+                },
+                "More options — wipe, erase, or troubleshoot →"
+            }
+        }
+    }
 }
 
 /// The blank board's SETUP FORM (state-flow model §1-A): the Status tab
@@ -553,70 +655,81 @@ pub(crate) fn DeviceCard(
             }
             // Everything below the title bar shares one wrapper: a D41
             // sheet dims exactly this region, so the name above it stays
-            // readable (spike round 3: sheets spare the title bar). An
-            // open sheet floors the region's height — a short tab body
-            // must never clip the panel (the card is overflow-hidden);
-            // the drift sheet's three stacked verbs need the tall floor.
-            div { class: match (pane, active_sheet.as_ref(), card.ui.op.is_some()) {
-                    (true, _, _) => "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
-                    // an op overlay covers this region — floor it so the
-                    // progress bar + technical terminal have room to read
-                    (false, _, true) => "tw:relative tw:min-h-[240px]",
-                    // title + three instruction bullets + three stacked
-                    // buttons — the tallest sheet
-                    (false, Some(DeviceCardSheet::Troubleshoot), _) => "tw:relative tw:min-h-[370px]",
-                    // title + message + input + button row (the 210px
-                    // floor clipped it — walkthrough §4.10)
-                    (false, Some(DeviceCardSheet::Name), _) => "tw:relative tw:min-h-[260px]",
-                    (false, Some(_), _) => "tw:relative tw:min-h-[210px]",
-                    (false, None, _) => "tw:relative",
-                },
-                // the icon-tab row (below the title bar — spike anatomy;
-                // pane mode drops the Console tab, round 3.5)
-                div {
-                    class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
-                    role: "tablist",
-                    for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
-                        {tab_button(tab_view, active_tab, &card_key, on_action)}
+            // readable (spike round 3: sheets spare the title bar).
+            //
+            // GRID STACK, not an absolute overlay (2026-07-31). The tab
+            // content, the sheet, and the op overlay all occupy the same
+            // grid cell, so the region is as tall as the TALLEST of them —
+            // a sheet can grow the card. The previous scheme positioned
+            // overlays absolutely and compensated with a hand-maintained
+            // per-sheet min-height table, which produced a recurring class
+            // of clipping bugs (Name at 210px, the bootloader sheet, then
+            // the troubleshoot sheet leaving the user stuck with no
+            // scroll). Content-driven height deletes the class.
+            div { class: if pane { "ux-card-stack tw:min-h-0 tw:flex-1" } else { "ux-card-stack" },
+                div { class: if pane { "tw:relative tw:flex tw:min-h-0 tw:flex-col" } else { "tw:relative tw:flex tw:flex-col" },
+                    // the icon-tab row (below the title bar — spike anatomy;
+                    // pane mode drops the Console tab, round 3.5)
+                    div {
+                        class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
+                        role: "tablist",
+                        for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
+                            {tab_button(tab_view, active_tab, &card_key, on_action)}
+                        }
                     }
-                }
-                div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
-                    match active_tab {
-                        DeviceCardTab::Status => rsx! {
-                            {status_tab_body(&card, &tabs, chip_muted, on_action, &card_key, now_secs)}
-                        },
-                        DeviceCardTab::Console => rsx! {
-                            {console_tab_body(&card.console_tail)}
-                        },
-                        DeviceCardTab::Project if picker_mode => rsx! {
-                            {project_picker_body(&project_choices, on_action)}
-                        },
-                        _ => rsx! {
-                            {sections_tab_body(&tabs, active_tab, on_action, &card_key)}
-                        },
-                    }
-                }
-                if pane {
-                    // D42 pane mode (round 3.5): the console is a
-                    // permanent expanded bottom region — a normal console;
-                    // no tab, no strip.
-                    div { class: "ux-console-region",
-                        if card.console_tail.is_empty() {
-                            p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
-                                "No console output yet."
+                    // Safe-mode callout: above the tab body so it is visible
+                    // on EVERY tab — a clamped board looks broken (dim), and
+                    // the only exit is a power cycle the user must be told
+                    // about. Evidence: live heartbeat only (core clears it
+                    // the moment the link drops).
+                    if let Some(clamp) = card.safe_clamp {
+                        div { class: "ux-safe-mode-callout",
+                            p { class: "tw:m-0 tw:text-xs tw:font-semibold",
+                                "Safe mode — output limited to {clamp_percent(clamp)}%"
                             }
-                        } else {
-                            for entry in card.console_tail.iter() {
-                                div { class: console_line_class(entry.level), "{entry.message}" }
+                            p { class: "tw:m-0 tw:text-xs tw:leading-snug",
+                                "This boot is intentionally dimmed for recovery. Fix the project, then unplug the board and plug it back in to restore full brightness."
                             }
                         }
                     }
-                }
-                // D42's ambient strip: the console's latest line at the
-                // card's bottom edge; clicking jumps to the Console tab,
-                // and the strip HIDES while that tab is active.
-                if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
-                    {console_strip(&card.console_tail, &card_key, on_action)}
+                    div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
+                        match active_tab {
+                            DeviceCardTab::Status => rsx! {
+                                {status_tab_body(&card, &tabs, chip_muted, on_action, &card_key, now_secs)}
+                            },
+                            DeviceCardTab::Console => rsx! {
+                                {console_tab_body(&card.console_tail)}
+                            },
+                            DeviceCardTab::Project if picker_mode => rsx! {
+                                {project_picker_body(&project_choices, on_action)}
+                            },
+                            _ => rsx! {
+                                {sections_tab_body(&tabs, active_tab, on_action, &card_key)}
+                            },
+                        }
+                    }
+                    if pane {
+                        // D42 pane mode (round 3.5): the console is a
+                        // permanent expanded bottom region — a normal console;
+                        // no tab, no strip.
+                        div { class: "ux-console-region",
+                            if card.console_tail.is_empty() {
+                                p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
+                                    "No console output yet."
+                                }
+                            } else {
+                                for entry in card.console_tail.iter() {
+                                    div { class: console_line_class(entry.level), "{entry.message}" }
+                                }
+                            }
+                        }
+                    }
+                    // D42's ambient strip: the console's latest line at the
+                    // card's bottom edge; clicking jumps to the Console tab,
+                    // and the strip HIDES while that tab is active.
+                    if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
+                        {console_strip(&card.console_tail, &card_key, on_action)}
+                    }
                 }
                 if let Some(active_sheet) = active_sheet.as_ref() {
                     {device_card_sheet_view(active_sheet, &card, &card_key, on_action)}
@@ -822,6 +935,11 @@ fn status_tab_body(
             card.state,
             RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware
         );
+    // Recovery mode's Status tab carries the exit verbs DIRECTLY (bench
+    // feedback 2026-07-31): a user here has already done the hard part,
+    // and routing them through Troubleshoot — a sheet that mostly explains
+    // how to get INTO this state — was backwards.
+    let recovery_face = !card.sim && card.state == RosterCardState::RecoveryMode;
     rsx! {
         for section in health {
             for line in section.lines.iter() {
@@ -865,6 +983,8 @@ fn status_tab_body(
                 replaces: matches!(card.state, RosterCardState::OtherFirmware),
                 on_action,
             }
+        } else if recovery_face {
+            RecoveryFace { card_key: card_key.to_string(), on_action }
         } else {
             for section in health {
                 for row in section.affordances.iter() {
@@ -982,7 +1102,15 @@ fn device_card_sheet_view(
             NameDeviceSheet { card_key, on_action }
         },
         DeviceCardSheet::Troubleshoot => rsx! {
-            TroubleshootSheet { uid: card.uid.clone(), card_key, on_action }
+            TroubleshootSheet {
+                uid: card.uid.clone(),
+                card_key,
+                firmware_package: card.fw.as_ref().map(|fw| fw.package.clone()),
+                on_action,
+            }
+        },
+        DeviceCardSheet::BootloaderEntry(flow) => rsx! {
+            BootloaderEntrySheet { flow: flow.clone(), card_key, on_action }
         },
     }
 }
@@ -1007,10 +1135,17 @@ fn strip_confirmation(action: UiAction) -> UiAction {
 fn TroubleshootSheet(
     uid: Option<String>,
     card_key: String,
+    firmware_package: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let reconnect = reconnect_device_action(uid);
     let recovery_flash = flash_device_action(false);
+    let boot_safe_once = boot_safe_once_action();
+    // The firmware package names the chip it was built for ("fw-esp32c6"),
+    // which is the only chip source available before the user reaches
+    // bootloader mode — a device that will not boot cannot tell us its board.
+    // `None` yields generic steps that say they are generic.
+    let instructions = RecoveryInstructions::for_chip(firmware_package.as_deref());
     rsx! {
         CardSheet {
             on_dismiss: {
@@ -1021,7 +1156,25 @@ fn TroubleshootSheet(
             ul { class: "tw:m-0 tw:mb-3 tw:grid tw:list-disc tw:gap-1 tw:pl-4 tw:text-xs tw:leading-normal tw:text-muted-foreground",
                 li { "Check the USB cable — charge-only cables never carry data." }
                 li { "Unplug the device, plug it back in, then Reconnect." }
-                li { "Still stuck? Hold BOOT while plugging in, then flash the firmware." }
+                li {
+                    "If it was fine until you changed the project, the project may be "
+                    "stopping it from starting — start it once in safe mode."
+                }
+            }
+            div { class: "tw:mb-3 tw:rounded tw:border tw:border-line tw:p-2",
+                div { class: "tw:mb-1 tw:text-xs tw:font-medium",
+                    "Still stuck? Put {instructions.subject} into recovery mode:"
+                }
+                ol { class: "tw:m-0 tw:grid tw:list-decimal tw:gap-1 tw:pl-4 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                    for step in instructions.steps.iter() {
+                        li { "{step.text}" }
+                    }
+                }
+                if instructions.is_generic {
+                    div { class: "tw:mt-1 tw:text-xs tw:text-muted-foreground",
+                        "These are the usual ESP32 steps — this board may differ."
+                    }
+                }
             }
             div { class: "tw:grid tw:justify-end tw:gap-2",
                 CardSheetButton {
@@ -1036,6 +1189,17 @@ fn TroubleshootSheet(
                     },
                 }
                 CardSheetButton {
+                    label: "Start in safe mode",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: {
+                        let card_key = card_key.clone();
+                        move |_| {
+                            on_action.call(close_sheet_action(&card_key));
+                            on_action.call(boot_safe_once.clone());
+                        }
+                    },
+                }
+                CardSheetButton {
                     label: "Flash firmware…",
                     tone: SheetButtonTone::Quiet,
                     onclick: {
@@ -1045,6 +1209,106 @@ fn TroubleshootSheet(
                             on_action.call(recovery_flash.clone());
                         }
                     },
+                }
+                CardSheetButton {
+                    label: "Close",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| on_action.call(close_sheet_action(&card_key)),
+                }
+            }
+        }
+    }
+}
+
+/// The bootloader-entry sheet (M5): the ritual, and — the whole point —
+/// the confirmation that it worked.
+///
+/// Without feedback a failed attempt and a dead board look identical, so
+/// people repeat the wrong motion and conclude the device is bricked. The
+/// `Confirmed` arm is what makes the ritual learnable.
+///
+/// Advancing is re-opening the sheet with the next flow value, so the
+/// renderer holds no state of its own.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BootloaderEntrySheet(
+    flow: BootloaderEntryFlow,
+    card_key: String,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    // "I've done that" must PROBE, not merely change state. Advancing the
+    // sheet without asking the device would show a waiting spinner that
+    // never resolves — worse than nothing, because the user still cannot
+    // tell a failed attempt from a dead board. The probe reboots the
+    // device, and the button press is exactly the signal that a replug just
+    // happened, so this is the one honest place to run it.
+    let probe = |card_key: &str, flow: BootloaderEntryFlow| {
+        UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ProbeBootloaderMode {
+                card_key: card_key.to_string(),
+                flow,
+            },
+        )
+        .with_label("Check the device")
+    };
+    rsx! {
+        CardSheet {
+            on_dismiss: {
+                let card_key = card_key.clone();
+                move |_| on_action.call(close_sheet_action(&card_key))
+            },
+            match &flow {
+                BootloaderEntryFlow::Confirmed { chip_name } => {
+                    let subject = chip_name.clone().unwrap_or_else(|| "The device".to_string());
+                    rsx! {
+                        CardSheetTitle { text: "Recovery mode — ready" }
+                        p { class: "tw:m-0 tw:mb-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                            "{subject} is listening. You can flash firmware, back it up, or "
+                            "have it start once without its project."
+                        }
+                    }
+                }
+                _ => {
+                    let instructions = flow.instructions().expect("non-confirmed states carry steps");
+                    let waiting = flow.should_probe_on_arrival();
+                    rsx! {
+                        CardSheetTitle { text: "Put {instructions.subject} into recovery mode" }
+                        if matches!(flow, BootloaderEntryFlow::NotYet { .. }) {
+                            p { class: "tw:m-0 tw:mb-2 tw:text-xs tw:leading-normal tw:text-status-attention-foreground",
+                                "That attempt didn't land — the device answered as if it were "
+                                "running normally. Worth another go; the timing is fiddly."
+                            }
+                        }
+                        ol { class: "tw:m-0 tw:mb-3 tw:grid tw:list-decimal tw:gap-1 tw:pl-4 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                            for step in instructions.steps.iter() {
+                                li { "{step.text}" }
+                            }
+                        }
+                        if instructions.is_generic {
+                            p { class: "tw:m-0 tw:mb-3 tw:text-xs tw:text-muted-foreground",
+                                "These are the usual ESP32 steps — this board may differ."
+                            }
+                        }
+                        if waiting {
+                            p { class: "tw:m-0 tw:mb-3 tw:text-xs tw:leading-normal",
+                                "Waiting for the device to reappear…"
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "tw:grid tw:justify-end tw:gap-2",
+                if !flow.is_confirmed() && !flow.should_probe_on_arrival() {
+                    CardSheetButton {
+                        label: "I've done that",
+                        tone: SheetButtonTone::Primary,
+                        onclick: {
+                            let card_key = card_key.clone();
+                            let flow = flow.clone();
+                            move |_| on_action.call(probe(&card_key, flow.clone()))
+                        },
+                    }
                 }
                 CardSheetButton {
                     label: "Close",
@@ -1260,6 +1524,34 @@ pub(crate) fn connect_device_action() -> UiAction {
 /// confirmation renders as the D41 sheet); with nothing connected it
 /// opens the recovery chooser (link-only open, no app attach), after
 /// which the card's own state carries the flow.
+/// Write the boot-control record so the device's next restart skips its
+/// project. Non-destructive and one-shot — see `DeviceOp::BootSafeOnce`.
+pub(crate) fn boot_safe_once_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::BootSafeOnce,
+    )
+    .with_label("Start in safe mode")
+}
+
+/// Read the device's storage over the bootloader and download it as a ZIP.
+///
+/// No confirmation: nothing is written. It is deliberately the row people
+/// meet BEFORE the destructive verbs, because it is what makes them
+/// survivable — see `DeviceOp::BackUpFilesystem`.
+pub(crate) fn back_up_filesystem_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::BackUpFilesystem,
+    )
+    .with_label("Download a backup")
+    .with_summary(
+        "Save everything on this device to a ZIP on your computer — this \
+         works even if the board will not start.",
+    )
+    .with_icon("download")
+}
+
 pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
@@ -1497,16 +1789,28 @@ fn wire_card_affordance(
             .with_icon("edit");
             Some(CardRowAction::Sheet(CardSheetState::Name, display))
         }
-        // M6: the Not-responding card's affordance opens the
-        // troubleshooting sheet (display action is meta-only).
+        // Opens the troubleshooting sheet. The action here is meta-only —
+        // it supplies the row's label/summary/icon and is never dispatched;
+        // the sheet is the effect.
+        //
+        // `strip_confirmation` is load-bearing, not tidiness. This row
+        // borrowed ProvisionFirmware purely as a carrier, and inherited its
+        // DESTRUCTIVE confirmation with it — so opening a read-only help
+        // sheet asked "This will write LightPlayer firmware to the selected
+        // ESP32. Continue?" (reported from the bench 2026-07-31; latent
+        // since M6, and exposed once Troubleshoot became reachable from
+        // every state). A meta-only carrier must never inherit a gate for
+        // an effect it does not have.
         DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot) => {
-            let display = UiAction::from_op(
-                ControllerId::new(DeviceController::NODE_ID),
-                DeviceOp::ProvisionFirmware { setup_name: None },
-            )
-            .with_label(RosterAffordance::Troubleshoot.label())
-            .with_summary("Steps to try when the device is not responding.")
-            .with_icon("zap");
+            let display = strip_confirmation(
+                UiAction::from_op(
+                    ControllerId::new(DeviceController::NODE_ID),
+                    DeviceOp::ProvisionFirmware { setup_name: None },
+                )
+                .with_label(RosterAffordance::Troubleshoot.label())
+                .with_summary("Steps to try when the device is not responding.")
+                .with_icon("zap"),
+            );
             Some(CardRowAction::Sheet(CardSheetState::Troubleshoot, display))
         }
         // The unreadable card's wipe: destructive → the D41 confirm sheet
@@ -1534,6 +1838,11 @@ fn wire_card_affordance(
             CardSheetState::Confirm(CardVerb::Flash),
             strip_confirmation(flash_device_action_destructive()),
         )),
+        // Non-destructive, so it dispatches straight from the row — a
+        // confirm gate on "save a copy of your work" would be theatre.
+        DeviceDetailAffordance::BackUpFilesystem => {
+            Some(CardRowAction::from_action(back_up_filesystem_action()))
+        }
         DeviceDetailAffordance::EraseDevice => Some(CardRowAction::Sheet(
             CardSheetState::Confirm(CardVerb::Erase),
             strip_confirmation(erase_device_action(card.name.clone())),

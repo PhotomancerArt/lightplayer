@@ -381,6 +381,9 @@ pub struct ControlRenderContext<'a> {
     revision: Revision,
     graphics: Option<Arc<dyn LpGraphics>>,
     frame_time_seconds: f32,
+    /// Device-level safe-mode output ceiling, Q16. See
+    /// `Engine::set_safe_output_clamp` — device state, never project data.
+    safe_output_clamp_q16: Option<u32>,
     services: &'a mut dyn ControlRenderServices,
 }
 
@@ -390,6 +393,7 @@ impl<'a> ControlRenderContext<'a> {
         revision: Revision,
         graphics: Option<Arc<dyn LpGraphics>>,
         frame_time_seconds: f32,
+        safe_output_clamp_q16: Option<u32>,
         services: &'a mut dyn ControlRenderServices,
     ) -> Self {
         Self {
@@ -397,8 +401,14 @@ impl<'a> ControlRenderContext<'a> {
             revision,
             graphics,
             frame_time_seconds,
+            safe_output_clamp_q16,
             services,
         }
+    }
+
+    /// The device-level safe-mode ceiling, when one is armed (Q16).
+    pub fn safe_output_clamp_q16(&self) -> Option<u32> {
+        self.safe_output_clamp_q16
     }
 
     pub fn node_id(&self) -> NodeId {

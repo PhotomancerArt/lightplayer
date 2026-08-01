@@ -1,6 +1,7 @@
 //! The home gallery view model.
 
 use crate::UiIssue;
+use crate::app::device::UiDeviceBackup;
 
 use super::ui_device_card::UiDeviceCard;
 use super::ui_example_card::UiExampleCard;
@@ -26,6 +27,10 @@ pub struct UiHomeView {
     pub opening: Option<String>,
     /// A provider-selection or library problem to surface on the home page.
     pub issue: Option<UiIssue>,
+    /// A finished device filesystem backup waiting to be saved. The shell
+    /// downloads it when `seq` advances (see [`UiDeviceBackup`]); a
+    /// re-rendered stale DTO must never re-download a megabyte.
+    pub backup: Option<UiDeviceBackup>,
 }
 
 impl UiHomeView {

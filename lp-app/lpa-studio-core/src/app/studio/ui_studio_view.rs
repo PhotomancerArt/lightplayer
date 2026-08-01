@@ -259,6 +259,7 @@ mod tests {
             state,
             project: None,
             fw: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: CardUiState::default(),
@@ -273,6 +274,7 @@ mod tests {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         }))
     }
 
