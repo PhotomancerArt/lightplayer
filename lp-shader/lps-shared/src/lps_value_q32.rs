@@ -70,12 +70,63 @@ fn f32_to_q32_abi(x: f32) -> Q32 {
     Q32::from_fixed(q32_encode(x))
 }
 
+/// How one GLSL `float` lane is packed into its ABI word.
+///
+/// Both float modes lay aggregates out identically — the same std430 offsets,
+/// the same dense array lanes, the same word count per type. **Only the `float`
+/// lane's contents differ.** This enum is that one difference, so the traversal
+/// that walks structs, arrays, and matrices is shared instead of forked, and
+/// cannot drift between the two modes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FloatLaneAbi {
+    /// Q16.16 fixed point, via [`q32_encode`] (saturating) and [`Q32::to_f32`].
+    Q16_16,
+    /// The IEEE-754 binary32 **bit pattern**, as produced by
+    /// [`f32::to_bits`]. Used by every native-f32 backend: on a soft-float ABI
+    /// a `float` is literally this word in an integer register.
+    Ieee754Bits,
+}
+
+impl FloatLaneAbi {
+    fn encode(self, x: f32) -> Q32 {
+        match self {
+            FloatLaneAbi::Q16_16 => f32_to_q32_abi(x),
+            // The `Q32` newtype is being used here as "one raw ABI lane word",
+            // not as a Q16.16 number. That is the whole trick that lets the two
+            // modes share a traversal; nothing downstream interprets the word
+            // until [`FloatLaneAbi::decode`] reverses it.
+            FloatLaneAbi::Ieee754Bits => Q32::from_fixed(x.to_bits() as i32),
+        }
+    }
+
+    fn decode(self, q: Q32) -> f32 {
+        match self {
+            FloatLaneAbi::Q16_16 => q.to_f32(),
+            FloatLaneAbi::Ieee754Bits => f32::from_bits(q.to_fixed() as u32),
+        }
+    }
+}
+
 /// Convert [`LpsValueF32`] to [`LpsValueQ32`] using [`q32_encode`] for float components
 /// so host arguments match compiler constant emission and the historical `f64` path.
 pub fn lps_value_f32_to_q32(
     ty: &LpsType,
     v: &LpsValueF32,
 ) -> Result<LpsValueQ32, LpsValueQ32Error> {
+    lps_value_f32_to_lanes(ty, v, FloatLaneAbi::Q16_16)
+}
+
+/// [`lps_value_f32_to_q32`] with the float-lane encoding chosen explicitly.
+///
+/// With [`FloatLaneAbi::Ieee754Bits`] the result is **not** a Q16.16 value: each
+/// `F32` component carries a raw IEEE bit pattern in the [`Q32`] newtype. Pair
+/// it with [`lanes_to_lps_value_f32`] using the same `abi`.
+pub fn lps_value_f32_to_lanes(
+    ty: &LpsType,
+    v: &LpsValueF32,
+    abi: FloatLaneAbi,
+) -> Result<LpsValueQ32, LpsValueQ32Error> {
+    let f32_to_q32_abi = |x: f32| abi.encode(x);
     Ok(match (ty, v) {
         (LpsType::Texture2D, LpsValueF32::Texture2D(v)) => LpsValueQ32::Texture2D(*v),
         (LpsType::Texture2D, _) => {
@@ -173,7 +224,7 @@ pub fn lps_value_f32_to_q32(
             }
             let mut out = Vec::with_capacity(items.len());
             for it in items.iter() {
-                out.push(lps_value_f32_to_q32(element, it)?);
+                out.push(lps_value_f32_to_lanes(element, it, abi)?);
             }
             LpsValueQ32::Array(out.into_boxed_slice())
         }
@@ -195,7 +246,7 @@ pub fn lps_value_f32_to_q32(
                         "expected field `{key}`, got `{fname}`"
                     )));
                 }
-                out.push((fname.clone(), lps_value_f32_to_q32(&m.ty, fv)?));
+                out.push((fname.clone(), lps_value_f32_to_lanes(&m.ty, fv, abi)?));
             }
             LpsValueQ32::Struct {
                 name: name.clone(),
@@ -213,7 +264,18 @@ pub fn lps_value_f32_to_q32(
 
 /// Convert [`LpsValueQ32`] to [`LpsValueF32`] (`Q32` components become `f32` via [`Q32::to_f32`]).
 pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32, LpsValueQ32Error> {
+    lanes_to_lps_value_f32(ty, v, FloatLaneAbi::Q16_16)
+}
+
+/// [`q32_to_lps_value_f32`] with the float-lane encoding chosen explicitly —
+/// the inverse of [`lps_value_f32_to_lanes`] for the same `abi`.
+pub fn lanes_to_lps_value_f32(
+    ty: &LpsType,
+    v: LpsValueQ32,
+    abi: FloatLaneAbi,
+) -> Result<LpsValueF32, LpsValueQ32Error> {
     let bad = || LpsValueQ32Error::TypeMismatch(format!("return shape mismatch for type {ty:?}"));
+    let dec = |q: Q32| abi.decode(q);
 
     Ok(match (ty, v) {
         (LpsType::Texture2D, LpsValueQ32::Texture2D(v)) => LpsValueF32::Texture2D(v),
@@ -222,17 +284,17 @@ pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32,
                 "LpsType::Texture2D expects LpsValueQ32::Texture2D (opaque descriptor), not a uvec4 stand-in",
             )));
         }
-        (LpsType::Float, LpsValueQ32::F32(x)) => LpsValueF32::F32(x.to_f32()),
+        (LpsType::Float, LpsValueQ32::F32(x)) => LpsValueF32::F32(dec(x)),
         (LpsType::Int, LpsValueQ32::I32(x)) => LpsValueF32::I32(x),
         (LpsType::UInt, LpsValueQ32::U32(x)) => LpsValueF32::U32(x),
         (LpsType::Bool, LpsValueQ32::Bool(b)) => LpsValueF32::Bool(b),
 
-        (LpsType::Vec2, LpsValueQ32::Vec2(a)) => LpsValueF32::Vec2([a[0].to_f32(), a[1].to_f32()]),
+        (LpsType::Vec2, LpsValueQ32::Vec2(a)) => LpsValueF32::Vec2([dec(a[0]), dec(a[1])]),
         (LpsType::Vec3, LpsValueQ32::Vec3(a)) => {
-            LpsValueF32::Vec3([a[0].to_f32(), a[1].to_f32(), a[2].to_f32()])
+            LpsValueF32::Vec3([dec(a[0]), dec(a[1]), dec(a[2])])
         }
         (LpsType::Vec4, LpsValueQ32::Vec4(a)) => {
-            LpsValueF32::Vec4([a[0].to_f32(), a[1].to_f32(), a[2].to_f32(), a[3].to_f32()])
+            LpsValueF32::Vec4([dec(a[0]), dec(a[1]), dec(a[2]), dec(a[3])])
         }
 
         (LpsType::IVec2, LpsValueQ32::IVec2(a)) => LpsValueF32::IVec2(a),
@@ -248,38 +310,38 @@ pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32,
         (LpsType::BVec4, LpsValueQ32::BVec4(a)) => LpsValueF32::BVec4(a),
 
         (LpsType::Mat2, LpsValueQ32::Mat2x2(m)) => LpsValueF32::Mat2x2([
-            [m[0][0].to_f32(), m[0][1].to_f32()],
-            [m[1][0].to_f32(), m[1][1].to_f32()],
+            [dec(m[0][0]), dec(m[0][1])],
+            [dec(m[1][0]), dec(m[1][1])],
         ]),
         (LpsType::Mat3, LpsValueQ32::Mat3x3(m)) => LpsValueF32::Mat3x3([
-            [m[0][0].to_f32(), m[0][1].to_f32(), m[0][2].to_f32()],
-            [m[1][0].to_f32(), m[1][1].to_f32(), m[1][2].to_f32()],
-            [m[2][0].to_f32(), m[2][1].to_f32(), m[2][2].to_f32()],
+            [dec(m[0][0]), dec(m[0][1]), dec(m[0][2])],
+            [dec(m[1][0]), dec(m[1][1]), dec(m[1][2])],
+            [dec(m[2][0]), dec(m[2][1]), dec(m[2][2])],
         ]),
         (LpsType::Mat4, LpsValueQ32::Mat4x4(m)) => LpsValueF32::Mat4x4([
             [
-                m[0][0].to_f32(),
-                m[0][1].to_f32(),
-                m[0][2].to_f32(),
-                m[0][3].to_f32(),
+                dec(m[0][0]),
+                dec(m[0][1]),
+                dec(m[0][2]),
+                dec(m[0][3]),
             ],
             [
-                m[1][0].to_f32(),
-                m[1][1].to_f32(),
-                m[1][2].to_f32(),
-                m[1][3].to_f32(),
+                dec(m[1][0]),
+                dec(m[1][1]),
+                dec(m[1][2]),
+                dec(m[1][3]),
             ],
             [
-                m[2][0].to_f32(),
-                m[2][1].to_f32(),
-                m[2][2].to_f32(),
-                m[2][3].to_f32(),
+                dec(m[2][0]),
+                dec(m[2][1]),
+                dec(m[2][2]),
+                dec(m[2][3]),
             ],
             [
-                m[3][0].to_f32(),
-                m[3][1].to_f32(),
-                m[3][2].to_f32(),
-                m[3][3].to_f32(),
+                dec(m[3][0]),
+                dec(m[3][1]),
+                dec(m[3][2]),
+                dec(m[3][3]),
             ],
         ]),
 
@@ -289,7 +351,7 @@ pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32,
             }
             let mut elems = Vec::with_capacity(items.len());
             for g in Vec::from(items) {
-                elems.push(q32_to_lps_value_f32(element, g)?);
+                elems.push(lanes_to_lps_value_f32(element, g, abi)?);
             }
             LpsValueF32::Array(elems.into_boxed_slice())
         }
@@ -311,7 +373,7 @@ pub fn q32_to_lps_value_f32(ty: &LpsType, v: LpsValueQ32) -> Result<LpsValueF32,
                 if fname != &key {
                     return Err(bad());
                 }
-                fields.push((fname.clone(), q32_to_lps_value_f32(&m.ty, fv.clone())?));
+                fields.push((fname.clone(), lanes_to_lps_value_f32(&m.ty, fv.clone(), abi)?));
             }
             LpsValueF32::Struct {
                 name: vname.or(name.clone()),

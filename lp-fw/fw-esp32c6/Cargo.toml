@@ -48,6 +48,11 @@ test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wir
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
+# f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
+# crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,
+# and must not carry an f32 backend it never enters. Enabling it here and nowhere
+# else is what keeps `just fw-esp32c6-size-check` measuring an unchanged image.
+test_f32_softfloat = ["dep:lpvm-native", "dep:lpvm", "dep:lps-glsl", "dep:lpir", "dep:lps-shared", "lps-builtins", "lpc-shared", "lpvm-native/float-f32", "lps-builtins/float-f32"]
 test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
 
 [dependencies]
@@ -75,6 +80,12 @@ lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, 
 ], optional = true }
 lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, optional = true }
+# `test_f32_softfloat` only: the GLSL frontend and the LPVM engine/instance
+# traits, so the harness can go source → machine code → call without the
+# `LpsPxShader` render plumbing (it needs to call arbitrary functions, not
+# render a frame).
+lps-glsl = { path = "../../lp-shader/lps-glsl", default-features = false, optional = true }
+lpvm = { path = "../../lp-shader/lpvm", default-features = false, optional = true }
 libm = "0.2"
 # Graphics backend is selected automatically by target architecture
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.

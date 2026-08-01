@@ -124,6 +124,9 @@ holds the full context.
 | Emitter peephole for the Xtensa integer-div-by-zero guard (`Movi`+`BranchRr` → a single `BranchZ(Beqz)`; `MOVEQZ`/`MOVNEZ` fusion, both already encoded/decoded/emulated in `lp-xt-inst`/`lp-xt-emu`) | `2026-07-30-integer-division-never-traps` | Xtensa code-size or instruction-count pressure makes trimming the guard worth it |
 | C6 migration to `lp-ws281x` (`docs/debt/c6-on-legacy-ws281x-driver.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A second C6 channel is wanted, a `lp-ws281x` fix needs to reach the C6, or maintaining two drivers becomes its own tax |
 | `MAX_LEDS` silent truncation and duplication (`docs/debt/output-channel-led-cap-silent-truncation.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A long strip is authored and the cap bites with no diagnostic |
+| Float→int through the soft-float ABI (`__fixsfsi`/`__fixunssfsi` are skipped because the ABI leaves out-of-range and NaN undefined) | `2026-07-31-soft-float-via-compiler-builtins` | The C6 harness's probe data shows the ROM matching `compiler_builtins` at those edges |
+| Xtensa `F32Lowering` arm (`Unsupported` today — the S3 has an FPU, so soft float would be the wrong default) | `2026-07-31-soft-float-via-compiler-builtins` | The Xtensa FPU emulator and emitter land (roadmap M6/M7) |
+| Soft-float performance measurement on the C6 (nothing here says how slow Float mode is) | `2026-07-31-soft-float-via-compiler-builtins` | A perf surface exists to show it (roadmap D3) |
 
 ## Relationship To Shared Planning
 

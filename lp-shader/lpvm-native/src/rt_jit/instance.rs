@@ -1,16 +1,16 @@
 //! [`LpvmInstance`] for direct JIT calls (register args only; see `invoke_flat` limits).
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
     CallError, DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpvmBuffer, LpvmInstance,
-    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, decode_q32_return,
-    encode_global_write, encode_uniform_write, encode_uniform_write_q32,
-    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
+    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read,
+    decode_return_to_f32, encode_global_write, encode_uniform_write, encode_uniform_write_q32,
+    flat_words_from_f32_args, float_lane_abi, global_data_span, glsl_component_count,
     validate_compute_tick_sig,
 };
 
@@ -418,11 +418,7 @@ impl LpvmInstance for NativeJitInstance {
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         // Reset globals before each call to ensure fresh state
         self.reset_globals();
-        if self.module.inner.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeJitInstance::call requires FloatMode::Q32",
-            ))));
-        }
+        let lane_abi = float_lane_abi(self.module.inner.options.float_mode);
 
         let gfn = self
             .module
@@ -442,12 +438,6 @@ impl LpvmInstance for NativeJitInstance {
             }
         }
 
-        if gfn.return_type == LpsType::Void {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "void return is not represented as LpsValue; use a typed return",
-            ))));
-        }
-
         if gfn.parameters.len() != args.len() {
             return Err(NativeError::Call(CallError::Arity {
                 expected: gfn.parameters.len(),
@@ -455,7 +445,7 @@ impl LpvmInstance for NativeJitInstance {
             }));
         }
 
-        let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
+        let flat = flat_words_from_f32_args(&gfn.parameters, args, lane_abi)?;
         let entry_info = self
             .module
             .inner
@@ -472,9 +462,7 @@ impl LpvmInstance for NativeJitInstance {
         }
 
         let words = self.invoke_flat(name, &flat)?;
-        let gq = decode_q32_return(&gfn.return_type, &words)?;
-        q32_to_lps_value_f32(&gfn.return_type, gq)
-            .map_err(|e| NativeError::Call(CallError::TypeMismatch(e.to_string())))
+        Ok(decode_return_to_f32(&gfn.return_type, &words, lane_abi)?)
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
