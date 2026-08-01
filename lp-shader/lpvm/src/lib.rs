@@ -59,12 +59,12 @@ pub use compile_job::{
 pub use data_error::DataError;
 pub use debug::{FunctionDebugInfo, ModuleDebugInfo};
 pub use engine::{LpvmCompileParams, LpvmEngine};
-/// Re-exported so a consumer that only speaks to this trait can name the
-/// numeric mode without taking a direct `lpir` dependency.
-pub use lpir::FloatMode;
 pub use global_data::{GlobalDataSpan, decode_global_read, encode_global_write, global_data_span};
 pub use guest_trap::{GuestTrap, GuestTrapError};
 pub use instance::LpvmInstance;
+/// Re-exported so a consumer that only speaks to this trait can name the
+/// numeric mode without taking a direct `lpir` dependency.
+pub use lpir::FloatMode;
 pub use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 pub use lps_shared::lps_value_f32::LpsValueF32;
 pub use lps_shared::lps_value_q32::{LpsValueQ32, lps_value_f32_to_q32, q32_to_lps_value_f32};

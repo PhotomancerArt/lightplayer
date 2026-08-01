@@ -212,12 +212,11 @@ What is **not** retired, and is deliberately carried forward unchanged:
   `F32Lowering::SoftFloatCalls` exist because the seam was built to describe a
   target's float capability rather than to describe Xtensa.
 - **The product now has two numeric tiers that differ by *board*.** Which boards
-  offer Float mode, how a project expresses the choice, and what happens when a
-  project targets a board that cannot honour it, are capability-model questions
-  this roadmap deliberately deferred. Today the capability is **linked but not
-  reachable at runtime** on the S3: `NativeCompileOptions::default()` is Q32 and
-  M2's project-level `float_mode` slot is not yet plumbed to the device graphics
-  backend. The +65,680 B is currently paid for a path nothing can enter.
+  offer Float mode, and what happens when a project targets one that cannot
+  honour it, are capability-model questions this roadmap deliberately deferred.
+  How a project *expresses* the choice is answered: M2 put the slot on each
+  **shader node**, and the follow-up below carried it to the device backend, so
+  the S3's +65,680 B now buys a path a shader can enter.
 - **A new consumer crate must hand-edit `Cargo.toml`** to opt in, in the same
   way the multi-ISA seam requires. `lpvm-native/README.md`'s float-mode seam
   section is the reference.
@@ -248,11 +247,18 @@ What is **not** retired, and is deliberately carried forward unchanged:
 
 ## Follow-ups
 
-- **Plumb M2's `float_mode` slot to the device graphics backend**, so the linked
-  capability becomes reachable. Until then the S3 image carries a path it cannot
-  enter.
+- ~~**Plumb M2's `float_mode` slot to the device graphics backend**~~ — **done**,
+  see `2026-08-01-float-mode-reaches-the-device.md`. The slot is per shader
+  node, not per project; that ADR records the seam and what it refuses.
 - **The capability model**: which boards offer Float mode, and how a project
-  targeting an unsupporting board is handled.
+  targeting an unsupporting board is handled *before* it black-frames. The
+  compile-error backstop exists; the shader card's face should stop offering
+  Float on a board that cannot run it, which needs the firmware manifest.
+- **Native f32 on the wasm CPU preview tier.** The browser/host preview refuses
+  Float rather than compiling it, so a Float shader authored in Studio has no
+  CPU preview (the GPU tier previews it fine). The blocker is that `lpvm-wasm`'s
+  f32 emit path still resolves `@lpfn`/`@glsl` imports to Q32 builtin ids — the
+  same reason `wasm.f32` is not in `DEFAULT_TARGETS`.
 - **M8**: `xtn.f32` / `xtlpn.f32` filetest targets and corpus triage.
 
 ## Remains unverified
