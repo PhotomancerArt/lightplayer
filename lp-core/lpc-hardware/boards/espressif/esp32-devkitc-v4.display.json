@@ -9,7 +9,6 @@
   "tier": "bronze",
   "capabilities": ["Wi-Fi", "BT classic", "everywhere"],
   "blurb": "The classic WROOM-32 board. Millions exist; clones vary. The board classic-ESP32 support will target.",
-  "support_note": "Runs when classic ESP32 (v3) firmware lands — in progress.",
   "purchase_urls": [
     { "label": "Espressif", "href": "https://www.espressif.com/en/products/devkits/esp32-devkitc" },
     { "label": "AliExpress", "href": "https://www.aliexpress.com/w/wholesale-esp32-devkitc.html" }
