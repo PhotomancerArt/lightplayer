@@ -105,7 +105,7 @@ fn since_current_transfers_nothing() {
 #[test]
 fn full_pull_then_incremental_then_empty() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", b"{\"kind\":\"Project\"}");
+    write(&fs, "/project.json", b"{\"kind\":\"Module\"}");
     write(&fs, "/shader.glsl", b"void main() {}");
 
     // full pull (since = 0) enumerates everything
@@ -236,7 +236,7 @@ fn write_chunk_reassembles_and_validates_offsets() {
 #[test]
 fn hash_package_matches_direct_computation() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", b"{\"kind\":\"Project\"}");
+    write(&fs, "/project.json", b"{\"kind\":\"Module\"}");
     write(&fs, "/shader.glsl", b"void main() {}");
     write(&fs, "/.lp/meta.json", b"{\"origin\":\"x\"}"); // excluded from hash
 

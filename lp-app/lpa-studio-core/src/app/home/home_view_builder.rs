@@ -653,7 +653,7 @@ mod tests {
             .find(|card| card.slug == "2026-07-09-1421-scratch")
             .unwrap();
         assert_eq!(scratch.provenance, None);
-        assert_eq!(scratch.kind, "Project");
+        assert_eq!(scratch.kind, "Module");
     }
 
     #[test]

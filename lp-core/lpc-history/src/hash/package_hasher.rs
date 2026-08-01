@@ -103,7 +103,7 @@ mod tests {
         write(
             &fs,
             "/project.json",
-            b"{\"kind\":\"Project\",\"name\":\"kat\"}",
+            b"{\"kind\":\"Module\",\"name\":\"kat\"}",
         );
         write(&fs, "/shader.glsl", b"void main() {}\n");
         let (hash, _) = hash_package(&fs).unwrap();

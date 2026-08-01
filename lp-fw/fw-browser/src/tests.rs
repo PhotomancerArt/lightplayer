@@ -650,8 +650,8 @@ fn load_project_tolerates_library_artifacts() {
                 // canonical insertion: kind stays first (streaming codec)
                 let text = String::from_utf8(content).unwrap();
                 let patched = text.replacen(
-                    "\"kind\": \"Project\",",
-                    "\"kind\": \"Project\",\n  \"uid\": \"prj_0000000000000042\",",
+                    "\"kind\": \"Module\",",
+                    "\"kind\": \"Module\",\n  \"uid\": \"prj_0000000000000042\",",
                     1,
                 );
                 assert_ne!(patched, text, "kind anchor not found in manifest");
