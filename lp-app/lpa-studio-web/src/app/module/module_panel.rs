@@ -7,19 +7,22 @@
 //! group is a hairline-boxed subsection with its own heading, collapsible
 //! to a summary row; the root group is never collapsed (it *is* the panel).
 //!
-//! The panel's own header row carries the two module-level affordances:
+//! The two module-level affordances are **quiet chrome in the panel's
+//! upper right**, not chips in the content flow — the controls are the
+//! subject, and these are the settings that sit beside them:
 //!
 //! - **Reset panel** (`docs/design/panel.md` P2 clear at scope
-//!   granularity). Present only while something under this scope is held,
-//!   so an untouched panel shows no destructive control at all, and the
-//!   count says how much it would drop.
-//! - **Auto-save** (P11 — on by default, with a user toggle). It sits on
-//!   the module that owns the scope rather than in app settings, because
-//!   panel state is per project folder (`.lp/state.json`) and this is the
-//!   surface where it is produced.
+//!   granularity): the revert glyph alone, with the count as a small
+//!   superscript and the full sentence in its tooltip. Present only while
+//!   something under this scope is held, so an untouched panel shows no
+//!   destructive control at all.
+//! - **Auto-save** (P11 — on by default, with a user toggle): a small
+//!   switch. It sits on the module that owns the scope rather than in app
+//!   settings, because panel state is per project folder
+//!   (`.lp/state.json`) and this is the surface where it is produced.
 //!
-//! Placement is a G2 question: header row of the panel section (here) vs.
-//! the card header vs. a footer under the controls.
+//! A nested group's reset wears the same small-icon treatment, on the right
+//! of its heading row.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiPanelGroup};
@@ -62,10 +65,11 @@ pub fn ModulePanel(
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:px-4 tw:py-3",
-            // Module-level affordances. Reset only exists when there is
-            // something to clear; auto-save is always legible when shown.
+            // Module-level affordances, upper right: quiet chrome beside
+            // the controls, never competing with them. Reset only exists
+            // when there is something to clear.
             if held > 0 || auto_save.is_some() {
-                div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-3",
+                div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-1.5",
                     if held > 0 && let Some(handler) = on_panel {
                         PanelResetButton { scope: scope.clone(), held, on_panel: handler }
                     }
@@ -192,52 +196,74 @@ pub fn NestedPanelGroup(
     }
 }
 
-/// "Reset · N held" — the per-scope clear (P2). Amber, matching the state
-/// it removes; it appears only when there is a writer to remove.
+/// The per-scope clear (P2), as a small icon button: the revert glyph
+/// alone, amber to match the state it removes, with the count as a tiny
+/// superscript. It appears only when there is a writer to remove, so the
+/// glyph's mere presence is part of the state signal — and the tooltip
+/// carries the whole sentence, so the chrome does not have to.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PanelResetButton(scope: String, held: usize, on_panel: EventHandler<PanelGesture>) -> Element {
     let noun = if held == 1 { "control" } else { "controls" };
+    let label = format!(
+        "Reset {held} held {noun} in {scope} — panel writers are dropped and the project drives again"
+    );
     rsx! {
         button {
-            class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-status-attention-border tw:bg-status-attention-bg tw:px-1.5 tw:py-0.5 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-status-attention-foreground",
+            class: "tw:inline-flex tw:h-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-start tw:gap-px tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
             r#type: "button",
-            title: "Reset {held} held {noun} in {scope} — panel writers are dropped and the project drives again",
+            title: "{label}",
+            aria_label: "{label}",
             onclick: move |event| {
                 event.stop_propagation();
                 on_panel.call(PanelGesture::ClearScope { scope: scope.clone() });
             },
-            StudioIcon { name: StudioIconName::Revert, size: 10 }
-            "reset {held}"
+            StudioIcon { name: StudioIconName::Revert, size: 11 }
+            // The count, small enough to read as an annotation on the
+            // glyph rather than as a chip of its own.
+            span { class: "tw:font-mono tw:text-[0.5rem] tw:leading-none", "{held}" }
         }
     }
 }
 
 /// The P11 auto-save toggle: whether held values persist to
-/// `.lp/state.json` and come back on the next boot.
+/// `.lp/state.json` and come back on the next boot. A small switch —
+/// a track with a knob, the same language the panel's own toggle control
+/// speaks, at chrome size.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn AutoSaveToggle(
     auto_save: bool,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
 ) -> Element {
-    let class = if auto_save {
-        "tw:inline-flex tw:flex-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-raised tw:px-1.5 tw:py-0.5 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-muted-foreground"
+    let track_class = if auto_save {
+        "tw:relative tw:inline-flex tw:h-[11px] tw:w-[20px] tw:flex-none tw:items-center tw:rounded-full tw:border tw:border-border-strong tw:bg-card-raised"
     } else {
-        "tw:inline-flex tw:flex-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-muted tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-dim-foreground"
+        "tw:relative tw:inline-flex tw:h-[11px] tw:w-[20px] tw:flex-none tw:items-center tw:rounded-full tw:border tw:border-border-muted tw:bg-transparent"
+    };
+    let knob_class = if auto_save {
+        "tw:absolute tw:left-[9px] tw:h-[7px] tw:w-[7px] tw:rounded-full tw:bg-muted-foreground"
+    } else {
+        "tw:absolute tw:left-[1px] tw:h-[7px] tw:w-[7px] tw:rounded-full tw:bg-dim-foreground"
     };
     let title = if auto_save {
-        "Panel settings are saved and restored on boot (.lp/state.json)"
+        "Auto-save on — panel settings are saved and restored on boot (.lp/state.json)"
     } else {
-        "Panel settings are NOT saved — they are lost on restart"
+        "Auto-save off — panel settings are NOT saved, and are lost on restart"
+    };
+    let icon_class = if auto_save {
+        "tw:inline-flex tw:flex-none tw:text-subtle-foreground"
+    } else {
+        "tw:inline-flex tw:flex-none tw:text-dim-foreground"
     };
 
     rsx! {
         button {
-            class: "{class} tw:cursor-pointer",
+            class: "tw:inline-flex tw:h-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1",
             r#type: "button",
             role: "switch",
             aria_checked: "{auto_save}",
+            aria_label: "Auto-save panel settings",
             title: "{title}",
             onclick: move |event| {
                 event.stop_propagation();
@@ -245,8 +271,12 @@ fn AutoSaveToggle(
                     handler.call(PanelGesture::SetAutoSave(!auto_save));
                 }
             },
-            StudioIcon { name: StudioIconName::Save, size: 10 }
-            if auto_save { "auto-save" } else { "auto-save off" }
+            span { class: icon_class,
+                StudioIcon { name: StudioIconName::Save, size: 11 }
+            }
+            span { class: track_class,
+                span { class: knob_class }
+            }
         }
     }
 }
