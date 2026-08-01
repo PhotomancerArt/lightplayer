@@ -4002,6 +4002,7 @@ dependencies = [
  "lpc-shared",
  "lpc-wire",
  "lpfs",
+ "lpvm-native",
  "ser-write-json",
 ]
 
@@ -5619,6 +5620,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "hashbrown 0.15.5",
+ "libc",
  "log",
  "lp-emu-core",
  "lp-riscv-elf",

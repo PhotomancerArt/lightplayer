@@ -172,7 +172,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     match uart0 {
         Ok(uart) => {
             spawner.spawn(io_task(uart).unwrap());
-            esp_println::println!("[INIT] I/O task spawned (uart0 115200 8N1)");
+            esp_println::println!("[INIT] I/O task spawned (uart0 921600 8N1)");
         }
         Err(error) => {
             // The board keeps booting: `esp_println` writes UART0's FIFO
@@ -224,36 +224,35 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // for the hello (missing file → unstamped, `None`).
     let device_uid = lpa_server::device_identity::read_device_uid(base_fs.as_ref());
 
-    // ⚠️⚠️ M3-P2 READ THIS. `TargetLpvmGraphics` resolves to `lpvm-native`'s
-    // `NativeJitEngine` on Xtensa, so pushing a shader here runs the full
-    // GLSL → LPIR → Xtensa emitter path **on the board**. What it does NOT do
-    // on this chip is produce executable code:
+    // `TargetLpvmGraphics` resolves to `lpvm-native`'s `NativeJitEngine` on
+    // Xtensa: GLSL pushed here compiles to Xtensa machine code ON THE BOARD.
+    // On this chip the engine's link step takes the **placed** path
+    // (`lpvm-native` feature `xt-placed-code`, see Cargo.toml): the heap has
+    // no I-bus view, so every module is linked at a span of the fixed SRAM1
+    // code region and installed through the word-mirrored D-bus walk. The
+    // install below hands the engine that region; without it the first
+    // compile fails with a clean "arena not installed" error.
     //
-    //   * `rt_jit`'s default buffer is heap-backed and in-place, and this
-    //     chip's heap (SRAM2, `0x3FFB_0000..`) has no I-bus view at all —
-    //     fetching from it faults with EXCCAUSE=2. The S3's uniform
-    //     `+0x6F_0000` alias does not exist here.
-    //   * `lpvm_native::exec_addr`'s Xtensa arm knows this: a heap address
-    //     hits its fall-through `debug_assert!` (compiled out in this release
-    //     profile) and is returned as identity, which then faults on the first
-    //     call.
-    //
-    // The fix is the *placed* path — `lpvm_native::codemem_esp32` +
-    // `JitBuffer::Placed` + `link::link_jit_at` — which M1 landed and M3-P2
-    // wires in. P1 deliberately does NOT touch it, so on this build a shader
-    // COMPILES and then faults when the frame loop first calls it.
-    //
-    // Two facts P2 needs from here:
-    //   1. Nothing in this crate reserves `CodeRegion::ESP32_DEFAULT`
-    //      (`0x3FFE_8000 .. 0x3FFF_F000` D-bus). It does not need reserving
-    //      from the *linker* — esp-hal's `dram_seg` ends at `0x3FFE_0000` — but
-    //      it DOES overlap esp-hal's `dram2_seg` (`0x3FFE_7E30`, 98,768 B).
-    //      If anyone adds dram2_seg as a second `esp_alloc` region to buy heap
-    //      headroom, it must stop below `0x3FFE_8000` or the allocator and the
-    //      JIT will hand out the same bytes.
-    //   2. The frontend is passed, never defaulted: `LpGraphics::glsl_frontend`
-    //      has no default impl so every host states its choice, and the device
-    //      ships `LpsGlsl`.
+    // Region facts (measured; see `lpvm_native::codemem_esp32`):
+    //   * `CodeRegion::ESP32_DEFAULT` = D-bus `0x3FFE_8000..0x3FFF_F000`,
+    //     I-bus image `0x400A_1000..0x400B_8000` (92 KiB of JIT code).
+    //   * The linker cannot collide with it — esp-hal's `dram_seg` ends at
+    //     `0x3FFE_0000` — but it DOES overlap esp-hal's `dram2_seg`
+    //     (`0x3FFE_7E30`, 98,768 B). If anyone adds dram2_seg as a second
+    //     `esp_alloc` region to buy heap headroom, it must stop below
+    //     `0x3FFE_8000` or the allocator and the JIT will hand out the same
+    //     bytes.
+    //   * The frontend is passed, never defaulted: `LpGraphics::glsl_frontend`
+    //     has no default impl so every host states its choice, and the device
+    //     ships `LpsGlsl`.
+    lpvm_native::codemem_esp32::global::install(
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT,
+    );
+    esp_println::println!(
+        "[INIT] JIT code region: ibus {:#010x}..{:#010x} (92 KiB, placed)",
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.ibus_base(),
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.ibus_end(),
+    );
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
 

@@ -64,6 +64,7 @@ server = [
     "dep:esp-storage",
     "dep:littlefs-rust",
     "dep:lp-gfx-lpvm",
+    "dep:lpvm-native",
     "dep:lpa-server",
     "dep:lpc-hardware",
     "dep:lpc-shared",
@@ -177,16 +178,21 @@ lpa-server = { path = "../../lp-app/lpa-server", default-features = false, featu
 
 # The graphics backend. `lp-gfx-lpvm` selects the LPVM engine by
 # `target_arch`, so an `xtensa-esp32-none-elf` build takes `lpvm-native` with
-# `isa-xt` and nothing else — the same line the S3 carries, no ISA feature to
-# get wrong.
-#
-# ⚠️ P1 SCOPE: linking this makes a shader COMPILE on device; it does not make
-# one EXECUTE. The classic chip's heap has no I-bus view, so JIT code must be
-# installed into the fixed SRAM1 region (`lpvm_native::codemem_esp32`) rather
-# than executed in place. That wiring is M3-P2. Until it lands, pushing a
-# shader to this board takes the in-place path and faults. See the comment at
-# the `TargetLpvmGraphics::new` call site in `src/main.rs`.
+# `isa-xt` — the same line the S3 carries, no ISA feature to get wrong.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
+
+# Direct dependency, for TWO things the S3 does not need (M3-P2):
+# 1. The `xt-placed-code` feature — cargo feature unification applies it to
+#    the `lpvm-native` inside `lp-gfx-lpvm` too, flipping the JIT engine's
+#    link step onto the classic fixed-region placed path. Without it a
+#    compiled shader executes from heap, which has no I-bus view on this
+#    chip: EXCCAUSE=2 on the first render tick (observed on the DOM-Z-102).
+# 2. `codemem_esp32::global::install`, which boot calls to hand the engine
+#    its code region before the first compile.
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [
+    "isa-xt",
+    "xt-placed-code",
+], optional = true }
 
 # Hardware registry/manifest, the filesystem traits the server is handed, and
 # the `OutputProvider` trait object `main.rs` builds.
