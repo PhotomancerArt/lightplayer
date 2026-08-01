@@ -44,7 +44,7 @@ pub struct HostSerialEsp32Options {
     pub reset_after_open: bool,
     pub line_observer: Option<Arc<dyn SerialLineObserver>>,
     /// Path to the firmware package `manifest.json` (the artifact of
-    /// `just studio-firmware-package-esp32c6`). `FlashFirmware` fails with a
+    /// `lp-cli firmware package <id>`). `FlashFirmware` fails with a
     /// configuration error when unset; the host has no meaningful
     /// cwd-relative default, so the embedder locates the package.
     pub firmware_manifest_path: Option<String>,

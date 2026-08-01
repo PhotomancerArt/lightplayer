@@ -293,6 +293,9 @@ impl ProgressCallbacks for ProgressBridge<'_, '_> {
     }
 }
 
+/// The only `manifest.json` schemaVersion this build reads.
+const FIRMWARE_MANIFEST_SCHEMA_VERSION: u32 = 2;
+
 /// A firmware image resolved against the manifest directory.
 #[derive(Debug)]
 struct ResolvedImage {
@@ -318,6 +321,15 @@ fn load_manifest(
             manifest_path.display()
         ))
     })?;
+    if raw.schema_version != FIRMWARE_MANIFEST_SCHEMA_VERSION {
+        return Err(LinkError::other(format!(
+            "firmware manifest {} has schemaVersion {} — this build understands \
+             only {}; repackage with `lp-cli firmware package`",
+            manifest_path.display(),
+            raw.schema_version,
+            FIRMWARE_MANIFEST_SCHEMA_VERSION
+        )));
+    }
     if raw.images.is_empty() {
         return Err(LinkError::other(format!(
             "firmware manifest {} lists no images",
@@ -345,7 +357,7 @@ fn load_manifest(
     let manifest = LinkFirmwareManifest {
         firmware_id: raw.firmware_id,
         display_name: raw.display_name,
-        target_chip: raw.target.chip,
+        target_chip: raw.core.target.chip,
         image_count: raw.images.len() as u32,
         total_bytes,
         manifest_path: Some(manifest_path.display().to_string()),
@@ -362,16 +374,26 @@ fn parse_hex_u32(value: &str) -> Option<u32> {
     u32::from_str_radix(digits, 16).ok()
 }
 
-/// The subset of `manifest.json` (produced by `just
-/// studio-firmware-package-esp32c6`) this provider consumes.
+/// The subset of `manifest.json` (produced by `lp-cli firmware package`) this
+/// provider consumes. schemaVersion 2 only — alpha posture is version +
+/// refuse, so a v1 manifest is an error, never a fallback decode.
 #[derive(Deserialize)]
 struct RawManifest {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
     #[serde(rename = "firmwareId")]
     firmware_id: String,
     #[serde(rename = "displayName")]
     display_name: String,
-    target: RawTarget,
+    /// The manifest core extracted from the image; the chip identity lives
+    /// here because the *build* is what knows it.
+    core: RawCore,
     images: Vec<RawImage>,
+}
+
+#[derive(Deserialize)]
+struct RawCore {
+    target: RawTarget,
 }
 
 #[derive(Deserialize)]
@@ -392,15 +414,29 @@ mod tests {
     use super::*;
 
     const MANIFEST_JSON: &str = r#"{
-        "schemaVersion": 1,
-        "firmwareId": "lightplayer-esp32c6-server",
+        "schemaVersion": 2,
+        "firmwareId": "esp32c6-4mb",
         "displayName": "LightPlayer ESP32-C6 server firmware",
-        "target": { "family": "esp32", "chip": "esp32c6" },
-        "build": { "package": "fw-esp32c6" },
+        "generatedAt": "2026-08-01T12:00:00Z",
+        "core": {
+            "lpManifestCore": 1,
+            "package": "fw-esp32c6",
+            "profile": "release-esp32",
+            "commit": "abc123456789",
+            "dirty": false,
+            "target": {
+                "family": "esp32",
+                "chip": "esp32c6",
+                "cargoTarget": "riscv32imac-unknown-none-elf"
+            },
+            "features": ["node.shader", "gfx.lpvm"],
+            "limits": { "flashAppBytes": 3145728 },
+            "wireProto": 4
+        },
         "flash": { "format": "espflash-merged-image", "address": "0x0" },
         "images": [
             {
-                "path": "fw-esp32c6-server-merged.bin",
+                "path": "fw-esp32c6-merged.bin",
                 "address": "0x0",
                 "sizeBytes": 3022960,
                 "sha256": "abc"
@@ -416,16 +452,30 @@ mod tests {
         std::fs::write(&path, MANIFEST_JSON).unwrap();
 
         let (manifest, images) = load_manifest(path.to_str().unwrap()).unwrap();
-        assert_eq!(manifest.firmware_id, "lightplayer-esp32c6-server");
+        assert_eq!(manifest.firmware_id, "esp32c6-4mb");
         assert_eq!(manifest.target_chip, "esp32c6");
         assert_eq!(manifest.image_count, 1);
         assert_eq!(manifest.total_bytes, 3_022_960);
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].address, 0x0);
-        assert_eq!(
-            images[0].absolute_path,
-            dir.join("fw-esp32c6-server-merged.bin")
-        );
+        assert_eq!(images[0].absolute_path, dir.join("fw-esp32c6-merged.bin"));
+    }
+
+    /// Version + refuse: a v1 manifest is rejected with its version named,
+    /// not decoded on a best-effort basis.
+    #[test]
+    fn refuses_a_v1_manifest() {
+        let dir = std::env::temp_dir().join("lpa-link-manifest-v1-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("manifest.json");
+        std::fs::write(
+            &path,
+            MANIFEST_JSON.replace("\"schemaVersion\": 2", "\"schemaVersion\": 1"),
+        )
+        .unwrap();
+
+        let error = load_manifest(path.to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("schemaVersion 1"), "{error}");
     }
 
     #[test]
@@ -436,9 +486,10 @@ mod tests {
         std::fs::write(
             &path,
             r#"{
+                "schemaVersion": 2,
                 "firmwareId": "x",
                 "displayName": "x",
-                "target": { "chip": "esp32c6" },
+                "core": { "target": { "chip": "esp32c6" } },
                 "images": []
             }"#,
         )

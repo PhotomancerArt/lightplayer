@@ -2,8 +2,9 @@
 //!
 //! On any Running row, project drift owns the status circle; firmware
 //! drift is advisory — an amber chip, never the circle. The comparison is
-//! bundled-manifest commit (`build.sourceCommit` in Studio's packaged
-//! `firmware/esp32c6/manifest.json`) vs the device hello's
+//! bundled-manifest commit (`core.commit` in Studio's packaged
+//! `firmware/<build-id>/manifest.json`, schemaVersion 2 — the commit the
+//! image reports about *itself*) vs the device hello's
 //! [`FwProvenance::commit`], both short git commits produced the same way
 //! (`git rev-parse --short=12`).
 
@@ -13,10 +14,14 @@ use lpc_wire::FwProvenance;
 const UNKNOWN_COMMIT: &str = "unknown";
 
 /// Studio's bundled firmware image provenance, as chip-comparison
-/// evidence: `build.sourceCommit` / dirty flag from the packaged
-/// `firmware/esp32c6/manifest.json`. Callers assemble it wherever the
+/// evidence: `core.commit` / `core.dirty` from the packaged
+/// `firmware/<build-id>/manifest.json`. Callers assemble it wherever the
 /// manifest is on hand; absence of the manifest is honest evidence of
 /// absence (no chip).
+///
+/// Known gap: nothing in production fetches the manifest yet, so
+/// `bundled_fw` is only ever populated in stories
+/// (`docs/debt/bundled-firmware-chip-unplumbed.md`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BundledFirmware {
     pub commit: String,
