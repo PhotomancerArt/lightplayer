@@ -175,6 +175,13 @@ pub struct Capture {
     pub fingerprint: u32,
     /// The helper-grid fingerprint, printed by `helpers`-mode captures.
     pub helpers_fingerprint: Option<u32>,
+    /// The **second-round** helper-grid fingerprint, printed alongside the
+    /// first by `helpers`-mode captures. Separate rather than overloading
+    /// `helpers_fingerprint`: the two grids are different generators, a
+    /// capture can legitimately carry one, the other, or both, and silently
+    /// checking the wrong one would defeat the whole point of printing them
+    /// (M6 D3 — device and host must prove they used the same generator).
+    pub helpers2_fingerprint: Option<u32>,
     pub commit: Option<String>,
     pub cpenable_before: Option<u32>,
     pub cpenable_after: Option<u32>,
@@ -209,6 +216,7 @@ pub fn parse_capture(text: &str) -> Result<Capture, CaptureError> {
     let mut cap = Capture {
         fingerprint: 0,
         helpers_fingerprint: None,
+        helpers2_fingerprint: None,
         commit: None,
         cpenable_before: None,
         cpenable_after: None,
@@ -249,6 +257,8 @@ pub fn parse_capture(text: &str) -> Result<Capture, CaptureError> {
                 .and_then(parse_hex)
                 .ok_or_else(|| CaptureError::Malformed(format!("bad fingerprint {rest:?}")))?;
             have_fingerprint = true;
+        } else if head.starts_with("helpers2-fingerprint=") {
+            cap.helpers2_fingerprint = kv(rest, "helpers2-fingerprint=").and_then(parse_hex);
         } else if head.starts_with("helpers-fingerprint=") {
             cap.helpers_fingerprint = kv(rest, "helpers-fingerprint=").and_then(parse_hex);
         } else if head.starts_with("mode=") {
