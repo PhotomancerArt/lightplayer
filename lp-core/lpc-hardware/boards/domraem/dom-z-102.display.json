@@ -28,7 +28,7 @@
       { "label": "V+", "role": "pwr5" }
     ],
     "right": [
-      { "label": "IO13", "role": "io", "gpio": 13 },
+      { "label": "IO13", "role": "rsvd", "gpio": 13 },
       { "label": "GND", "role": "gnd" },
       { "label": "IO18", "role": "io", "gpio": 18, "caps": [ { "text": "data", "kind": "note" } ] },
       { "label": "IO16", "role": "io", "gpio": 16, "caps": [ { "text": "data", "kind": "note" } ] },
