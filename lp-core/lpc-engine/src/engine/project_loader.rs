@@ -111,12 +111,6 @@ pub(super) enum ProjectedNodeOwnership {
     PlaylistEntry { playlist: NodeId, entry: u32 },
 }
 
-impl ProjectedNodeOwnership {
-    fn suppress_visual_default_output(self) -> bool {
-        matches!(self, Self::PlaylistEntry { .. })
-    }
-}
-
 /// Loads the authored project artifact tree into a core engine-backed runtime.
 pub struct ProjectLoader;
 
@@ -347,9 +341,9 @@ impl ProjectLoader {
             {
                 let scope = match ownership {
                     ProjectedNodeOwnership::Root => None,
-                    ProjectedNodeOwnership::ProjectChild => parent.map(|owner| {
-                        crate::node::ScopeRef::Module { owner }
-                    }),
+                    ProjectedNodeOwnership::ProjectChild => {
+                        parent.map(|owner| crate::node::ScopeRef::Module { owner })
+                    }
                     ProjectedNodeOwnership::PlaylistEntry { playlist, entry } => {
                         Some(crate::node::ScopeRef::Sink {
                             owner: playlist,
@@ -1706,9 +1700,7 @@ fn register_default_bind(
         reason: format!("invalid default_bind slot `{name}`: {e}"),
     })?;
     let draft = if direction == SlotDirection::Produced {
-        if current.ownership.suppress_visual_default_output()
-            || binding_target(bindings, name).is_some()
-        {
+        if binding_target(bindings, name).is_some() {
             return Ok(());
         }
         let source = BindingSource::ProducedSlot {
@@ -2568,7 +2560,10 @@ mod tests {
         rt.tick(1000).expect("first tick");
         let first = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time"))),
+                QueryKey::Bus {
+                    scope: None,
+                    channel: ChannelName(String::from("time")),
+                },
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2595,7 +2590,10 @@ mod tests {
         rt.tick(1000).expect("second tick");
         let second = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time"))),
+                QueryKey::Bus {
+                    scope: None,
+                    channel: ChannelName(String::from("time")),
+                },
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2782,7 +2780,11 @@ mod tests {
     }
 
     #[test]
-    fn playlist_entry_children_do_not_get_default_visual_output_binding() {
+    fn playlist_entry_children_publish_into_their_sink_scope_only() {
+        // The old ownership-suppression rule is GONE: entry children
+        // default-publish `visual.out` like every producer — into their
+        // entry's sink scope, where writer-shadowing (R2/R5) keeps them
+        // invisible to any enclosing read by construction.
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
@@ -2796,7 +2798,8 @@ mod tests {
             .lookup_sibling(playlist, NodeName::parse("active").unwrap())
             .expect("active");
 
-        assert!(!rt.tree().bindings().any(|binding| {
+        // The binding exists…
+        assert!(rt.tree().bindings().any(|binding| {
             matches!(
                 (&binding.source, &binding.target),
                 (
@@ -2808,6 +2811,20 @@ mod tests {
                     && binding.priority == BindingPriority::default_fallback()
             )
         }));
+        // …its owner writes a SINK scope…
+        let active_scope = rt.tree().node_scope(active).expect("active scope");
+        assert!(active_scope.is_sink());
+        // …and a root-scoped read never selects it: the winning provider
+        // set for the root scope contains no entry-child publisher.
+        let root_scope = rt.tree().node_scope(root).expect("root scope");
+        let winners = rt.tree().providers_for_bus_read(
+            Some(root_scope),
+            &lpc_model::ChannelName(String::from("visual.out")),
+        );
+        assert!(
+            winners.iter().all(|(_, entry)| entry.owner != active),
+            "sink-scope publishers must be invisible to root-scope demand"
+        );
     }
 
     #[test]
@@ -4531,9 +4548,9 @@ mod tests {
             })
             .count();
         assert_eq!(
-            default_publishers, 1,
-            "only the playlist itself default-publishes visual.out; entry \
-             children are ownership-suppressed"
+            default_publishers, 3,
+            "the playlist plus each entry child default-publishes visual.out \
+             (entries into their own sink scopes)"
         );
     }
 

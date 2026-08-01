@@ -550,7 +550,10 @@ impl Engine {
         registry: &ProjectRegistry,
         channel: &str,
     ) -> Result<VisualProduct, SessionResolveError> {
-        let key = QueryKey::Bus(lpc_model::ChannelName(channel.to_string()));
+        let key = QueryKey::Bus {
+            scope: self.tree.node_scope(self.tree.root()),
+            channel: lpc_model::ChannelName(channel.to_string()),
+        };
         let fid = self.revision;
         let mut resolver_tmp = core::mem::replace(&mut self.resolver, Resolver::new());
         // A forced-fresh read, not an invalidation: the caller wants values
@@ -667,7 +670,14 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
         };
-        let result = session.resolve(&mut host, &QueryKey::Bus(channel.clone()));
+        let scope = host.tree.node_scope(host.tree.root());
+        let result = session.resolve(
+            &mut host,
+            &QueryKey::Bus {
+                scope,
+                channel: channel.clone(),
+            },
+        );
         self.resolver = resolver;
         result
     }
@@ -910,7 +920,7 @@ impl ResolveHost for EngineResolveHost<'_> {
             QueryKey::ConsumedSlotAccessor { node, accessor } => {
                 self.produce_consumed_slot_accessor(*node, accessor)
             }
-            QueryKey::Bus(_) => Err(SessionResolveError::other(
+            QueryKey::Bus { .. } => Err(SessionResolveError::other(
                 "engine host cannot satisfy bus query",
             )),
         }
@@ -938,12 +948,17 @@ impl ResolveHost for EngineResolveHost<'_> {
             .collect()
     }
 
+    fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        self.tree.node_scope(node)
+    }
+
     fn providers_for_bus(
         &self,
+        scope: Option<crate::node::ScopeRef>,
         channel: &lpc_model::ChannelName,
     ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
         self.tree
-            .providers_for_bus(channel)
+            .providers_for_bus_read(scope, channel)
             .into_iter()
             .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
             .collect()
@@ -2219,7 +2234,10 @@ mod tests {
         let out = path("outputs[0]");
 
         let (_, trace) = h
-            .resolve_with_trace(QueryKey::Bus(lpc_model::ChannelName(String::from("video"))))
+            .resolve_with_trace(QueryKey::Bus {
+                scope: None,
+                channel: lpc_model::ChannelName(String::from("video")),
+            })
             .expect("resolve with trace");
 
         assert!(trace_has_value_origin_path(

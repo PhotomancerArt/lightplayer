@@ -3,8 +3,8 @@
 //! reattach and broken defs, and models playlist-entry sink scopes as a
 //! property — never a probe filter.
 
-use lpc_engine::node::ScopeRef;
 use lpc_engine::engine::LoadedProjectRuntime;
+use lpc_engine::node::ScopeRef;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::{NodeUseLocation, SlotPath, TreePath, current_revision};
 use lpc_registry::ParseCtx;
@@ -66,8 +66,11 @@ fn project_fs() -> LpFsMemory {
         br#"{ "kind": "Shader", "source": { "path": "active.glsl" } }"#,
     )
     .expect("active.json");
-    fs.write_file("/idle.glsl".as_path(), b"vec4 render(vec2 p) { return vec4(1.0); }")
-        .expect("idle.glsl");
+    fs.write_file(
+        "/idle.glsl".as_path(),
+        b"vec4 render(vec2 p) { return vec4(1.0); }",
+    )
+    .expect("idle.glsl");
     fs.write_file(
         "/active.glsl".as_path(),
         b"vec4 render(vec2 p) { return vec4(0.5); }",
@@ -160,10 +163,13 @@ fn scope_is_queryable_after_load_with_sink_entries_modeled() {
             .scope_persist_path(*scope)
             .expect("sink scope persist path");
         assert!(
-            path.ends_with(&format!("/entries[{}]", match scope {
-                ScopeRef::Sink { entry, .. } => *entry,
-                ScopeRef::Module { .. } => unreachable!(),
-            })),
+            path.ends_with(&format!(
+                "/entries[{}]",
+                match scope {
+                    ScopeRef::Sink { entry, .. } => *entry,
+                    ScopeRef::Module { .. } => unreachable!(),
+                }
+            )),
             "sink scopes key by authored entry, got {path}"
         );
     }
@@ -202,6 +208,68 @@ fn load_and_trivial_apply_produce_identical_scope_tables() {
 
     let applied = scope_table(&engine);
     assert_eq!(applied, baseline, "load vs load+apply scope tables differ");
+}
+
+#[test]
+fn load_and_apply_produce_identical_bus_wiring() {
+    // Extends the scope-table differential to RESOLVED WIRING: for every
+    // (scope, channel) pair, the winning provider set must be identical
+    // through fresh load and through load + apply.
+    fn winner_table(engine: &lpc_engine::Engine) -> Vec<(String, String, Vec<String>)> {
+        let tree = engine.tree();
+        let mut rows = Vec::new();
+        for scope in tree.scopes() {
+            let scope_path = tree.scope_persist_path(scope).expect("scope path");
+            for (channel, _) in tree.scope_channels(scope) {
+                let winners = tree
+                    .providers_for_bus_read(Some(scope), &channel)
+                    .into_iter()
+                    .map(|(_, entry)| {
+                        tree.get(entry.owner)
+                            .map(|owner| owner.path.to_string())
+                            .unwrap_or_default()
+                    })
+                    .collect::<Vec<_>>();
+                rows.push((scope_path.clone(), channel.0.clone(), winners));
+            }
+        }
+        rows.sort();
+        rows
+    }
+
+    let fs = project_fs();
+    let baseline = winner_table(load(&fs).engine());
+    assert!(
+        !baseline.is_empty(),
+        "the wiring table must actually cover channels"
+    );
+
+    let fs = project_fs();
+    let rt = load(&fs);
+    let (mut engine, mut registry) = rt.into_parts();
+    fs.write_file(
+        "/clock.json".as_path(),
+        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+    )
+    .expect("rewrite clock");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/clock.json"),
+            kind: FsEventKind::Modify,
+        }],
+        current_revision(),
+        &ParseCtx { shapes: &shapes },
+    );
+    engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply");
+    assert_eq!(
+        winner_table(&engine),
+        baseline,
+        "load vs load+apply bus wiring differs"
+    );
 }
 
 #[test]

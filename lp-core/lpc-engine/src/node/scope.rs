@@ -16,7 +16,7 @@ use alloc::string::String;
 use lpc_model::{NodeId, TreePath};
 
 /// Identity of one bus scope.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ScopeRef {
     /// The scope a module node introduces around its project children.
     Module {

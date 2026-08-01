@@ -11,9 +11,9 @@ pub mod node_entry_state;
 mod node_error;
 mod node_runtime;
 pub mod node_tree;
-pub mod scope;
 mod render_node;
 mod runtime_state_shape;
+pub mod scope;
 pub mod sync;
 pub mod tree_error;
 
@@ -25,7 +25,6 @@ pub use contexts::{
 pub use control_node::ControlNode;
 pub use node_call::{NodeCall, NodeCallKey};
 pub use node_entry::RuntimeNodeEntry;
-pub use scope::ScopeRef;
 pub use node_entry_state::NodeEntryState;
 pub use node_error::NodeError;
 pub(crate) use node_error::err_ctx;
@@ -33,6 +32,7 @@ pub use node_runtime::{AssetRefreshResult, NodeRuntime, ProduceResult};
 pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
 pub use runtime_state_shape::RuntimeStateShape;
+pub use scope::ScopeRef;
 pub use sync::tree_deltas_since;
 pub use tree_error::TreeError;
 
