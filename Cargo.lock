@@ -3954,6 +3954,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
+ "lp-xt-fp-vectors",
  "lpa-server",
  "lpc-hardware",
  "lpc-shared",
@@ -5533,8 +5534,13 @@ name = "lp-xt-emu"
 version = "40.0.0"
 dependencies = [
  "lp-emu-core",
+ "lp-xt-fp-vectors",
  "lp-xt-inst",
 ]
+
+[[package]]
+name = "lp-xt-fp-vectors"
+version = "40.0.0"
 
 [[package]]
 name = "lp-xt-inst"

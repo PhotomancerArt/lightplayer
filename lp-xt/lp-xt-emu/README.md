@@ -9,16 +9,22 @@ repo, landed here per its `BACKPORT.md`.
 Scope is *core*: executors + memory + the window machinery, plus the
 `lp-emu-core` consumer surface (`LogLevel`-gated instruction ring log,
 `CycleModel`/`InstClass` instruction+cycle counters, `dump_state` /
-`format_debug_info`). FPU, peripherals, a *measured* Xtensa cycle model
+`format_debug_info`). Peripherals, a *measured* Xtensa cycle model
 (`CycleModel::InstructionCount` is the default), and full `InstLog` parity
 remain out of scope.
+
+The **FPU is in scope as of M6** and partially built — see
+[Floating point](#floating-point). **None of its numeric behavior is proven
+against silicon until the M6 P6 hardware campaign runs.** Do not trust an FP
+result out of this emulator before then.
 
 ## Architecture
 
 ```
 src/
   cpu.rs         CPU state: PC, 64 physical ARs, WindowBase, WindowStart, SAR,
-                 PS.CALLINC, and the live call-stack shadow.
+                 PS.CALLINC, the live call-stack shadow, and the FP coprocessor
+                 state (flat FR file, BR file, FCR/FSR, CPENABLE).
   memory.rs      Vec-backed regions + per-region D-bus/I-bus AliasRule.
   board.rs       BoardProfile: per-board memory maps (esp32s3 / esp32).
   trace.rs       `trait Tracer` (no-op default) + a basic text tracer.
@@ -26,6 +32,10 @@ src/
   emu.rs         Emulator: fetch/decode/execute loop + the windowed-ABI run API.
   executor/      one module per instruction group (the lp-riscv-emu split):
                  arith · imm · load_store · branch · jump · call · window · misc
+                 float       FP/Boolean/SR data movement + the CPENABLE gate
+                 float_math  everything that computes a float value (M6 P3)
+  fp_policy.rs   every behavior IEEE-754 does not fix, measured or Unknown.
+  fp_capture.rs  parse + diff a device conformance capture (M6 P5).
 ```
 
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
@@ -132,6 +142,123 @@ and the on-device JIT never needs one. See
 `docs/adr/2026-07-30-xtensa-host-shared-memory.md`, which also records why it is
 deliberately *not* the rv32 engine's `0x4000_0000` (that address is
 `SENTINEL_PC`).
+
+## Floating point
+
+Modeled since M6, in three pieces:
+
+- **State** (`cpu.rs`): the FR file `f0..f15` as **raw bits**, the BR file
+  `b0..b15`, `FCR`/`FSR`, and `CPENABLE`. The FR file is **flat** — it takes no
+  part in the `WindowBase` rotation, so the AR file's free preservation across a
+  windowed call has *no FR analogue*. A callee that wants an FR value to survive
+  `call8`/`entry` spills it itself. This is the asymmetry M7's frame layout has
+  to answer for.
+- **Data movement** (`executor/float.rs`): `rfr`/`wfr`, FP load/store including
+  the base-updating `p` forms, `mov.s`, `BR`/`CPENABLE`/`FCR`/`FSR` access, and
+  the Boolean branches and moves. Every coprocessor-0 instruction is gated on
+  `CPENABLE` bit 0 and raises **EXCCAUSE 32** when it is clear — `Cpu::new()`
+  leaves it clear on purpose, so firmware that forgets to arm the coprocessor
+  faults on the host rather than on a board.
+- **Numerics** (`executor/float_math.rs`) behind the policy layer in
+  `fp_policy.rs`.
+
+### The policy layer, and what `UNKNOWN` means
+
+Rust's `f32` is IEEE-754 binary32 under round-to-nearest-even, which is what the
+FPU does for nearly the whole input space — and for normal, finite, non-zero
+operands with a normal finite result, `add.s`/`sub.s`/`mul.s` here are
+bit-exact against host `f32` by construction (asserted over a 20 000-case
+randomized sweep). But Rust cannot express *which* NaN propagates, whether
+denormals flush, or a rounding mode.
+
+So each behavior IEEE does not fix is a named field on `FpPolicy`, and each is
+either **measured with a citation** or `Unknown`. **Reading an unresolved field
+panics**, naming the field and the vector family that closes it. That is
+deliberate: a plausible default is indistinguishable from knowledge once it is
+in the code, and an emulator that is 99% right and silently confident about the
+rest is the exact failure M6 exists to prevent.
+
+Seven of the seventeen fields are resolved, and the citation says how:
+**`fsr_sticky`** from the 2026-07-31 desk session, and six — `madd_fused`,
+`conversion_scale`, `float_to_int_out_of_range`, `float_to_int_nan`,
+`utrunc_negative`, `snan_compare_signals` — from the Xtensa ISA Reference
+Manual, each citing the instruction page that states it. The distinction
+matters: a manual reading is still falsifiable by the P6 campaign, a silicon
+measurement *is* the campaign. The other ten are the row list of the M6
+FP-contract ADR's §4. A non-default `FCR.RM` is likewise **refused**, not
+ignored (D6) — its encoding is architectural (`cpu::FCR_RM_*`, ISA RM Table
+4-47), but whether this silicon honors it is still F1's measurement.
+
+The `FSR` flag *layout* is architectural too (`cpu::FSR_*`, Table 4-48), and it
+explains the P1 measurement: the `0x400` read back after that sweep is
+`FSR_DIV_BY_ZERO`, and the sweep ran `div0.s` on a staged zero. What stays open
+is which operation raises which flag — where the manual is actually *falsified*,
+since §4.3.11.4 says current implementations raise none and this one did.
+
+`recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s` return implementation-defined lookup
+ROMs; they sit behind an empty table that P6 extracts exhaustively, so they
+become exact by construction. There is deliberately no polynomial placeholder.
+
+### `tests/fp_conformance.rs` — the replay, with no board
+
+```bash
+cargo test -p lp-xt-emu --test fp_conformance -- --nocapture
+```
+
+Runs every vector of [`lp-xt-fp-vectors`](../lp-xt-fp-vectors)' six families
+through the emulator and compares to the predictions committed under
+`tests/fixtures/fp/`. It needs no feature flag and no hardware: `lp-xt-emu` is in
+`default-members`, so plain `cargo test` (and therefore `just test-rust-core`,
+`just test`, and CI's Validate job) runs it. That is deliberate — a corpus wired
+behind a stale `--test` allowlist has twice in this repo "reported success by
+executing nothing".
+
+**An `UNKNOWN:<field>` row is not a failure.** It is a question addressed to
+silicon, naming the policy field that closes it, and the set is *derived* — the
+harness catches the policy panic and reads the field name out of it, so it
+cannot drift from what the executors actually need. Today: **3886 of 5630 rows
+UNKNOWN (69.0%)**, and the test asserts the count is not zero, because zero
+before the campaign would mean the policy layer had quietly acquired defaults.
+Each corpus file's header breaks its own count down by the field that closes it,
+so P6 can triage one field at a time rather than face a single number.
+
+To regenerate after a generator or executor change:
+
+```bash
+UPDATE_FP_GOLDENS=1 cargo test -p lp-xt-emu --test fp_conformance
+```
+
+**Never** regenerate a row from device output. That inverts the test into a
+tautology that passes forever, and it is already the repo's stated rule
+(`lpvm-native/src/xt_corpus.rs`).
+
+### `src/fp_capture.rs` — the campaign's diff tool
+
+```bash
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50   # capture
+just fp-diff target/fp-capture/fpconf-YYYYmmdd-HHMMSS.txt       # classify
+```
+
+Parses a capture from `fw-esp32s3`'s `test_xt_fp_conformance` harness and
+classifies every row **AGREE** / **DIVERGE** / **RESOLVED** / **SKIPPED**.
+Sans-IO, like the rest of `lp-xt/*`: it takes `&str` and returns values; the
+file reading lives in `tests/fp_capture.rs`, which also shares this module's
+corpus parser with `fp_conformance.rs` so a file one accepts and the other
+chokes on cannot exist.
+
+Two conditions **abort** rather than colour a row, and both are asserted against
+deliberately damaged fixtures rather than tried once:
+
+- a **fingerprint mismatch**, because the device regenerates its own inputs and
+  a disagreement means the two sides ran different vectors — every comparison
+  after it would compare unrelated things, and 5 630 divergences would look like
+  a discovery;
+- a **missing or short-counted sentinel**, because a serial capture that stops
+  early is otherwise indistinguishable from one that finished.
+
+A `DIVERGE` row does *not* fail the command. It is the campaign's product, to be
+triaged into an emulator bug, a harness bug, or documented silicon behavior —
+failing here would push the next person toward editing a golden to get green.
 
 ## Run API
 
