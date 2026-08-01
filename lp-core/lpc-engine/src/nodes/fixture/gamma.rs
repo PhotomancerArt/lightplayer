@@ -133,10 +133,12 @@ mod tests {
         }
     }
 
-    /// Regression for the 8-bit choke this table replaced: at fixture
-    /// brightness 38/255 (a real desk project), post-brightness values span
-    /// [0, ~9766] and the old u8 table collapsed every pixel to {0, 257} —
-    /// binary output. The 16-bit curve keeps hundreds of distinct levels.
+    /// Regression for the 8-bit choke this table replaced: dim content
+    /// spanning [0, ~9766] (15% of full scale — what a brightness-38 scale
+    /// fed the encode back when brightness sat before gamma) collapsed to
+    /// {0, 257} under the old u8 table — binary output. The 16-bit curve
+    /// keeps hundreds of distinct levels on the same span, which is what dim
+    /// *content* still gets today now that brightness lands after the encode.
     #[test]
     fn dim_brightness_keeps_many_levels() {
         let brightness_q16 = (38u32 << 16) / 255;

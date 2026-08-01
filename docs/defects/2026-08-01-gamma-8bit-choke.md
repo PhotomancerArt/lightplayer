@@ -49,6 +49,10 @@ so hand-edits are impossible.
 
 Ordering unchanged (load-bearing): brightness → gamma → power scale →
 color order. Power scale must come after gamma — see `power_limit`.
+*(Update 2026-08-01, same day: the brightness→gamma half of that chain was
+subsequently reordered on purpose — brightness is now a linear scale after
+gamma. See `docs/debt/brightness-applied-before-gamma.md` and
+`docs/design/brightness-gamma-dithering.md`. gamma→power stays load-bearing.)*
 
 **Deliberate output change** — any fixture with `gamma_correction=true`
 (the engine default when the project doesn't specify) renders differently
