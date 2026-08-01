@@ -2,7 +2,7 @@
 //!
 //! Corrects for the non-linear brightness response of LEDs so brightness
 //! appears linear to the human eye. The pipeline is unorm16 end to end
-//! (shader sample → brightness → gamma → power limit → `DisplayPipeline`),
+//! (shader sample → gamma → brightness → power limit → `DisplayPipeline`),
 //! so gamma must be u16 → u16: an 8-bit table here quantizes the whole
 //! pipeline down to 8 bits and the wire-side temporal dithering cannot
 //! recover what gamma already destroyed (see
