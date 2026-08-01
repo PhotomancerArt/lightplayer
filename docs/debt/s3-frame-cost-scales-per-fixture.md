@@ -95,12 +95,27 @@ nothing else helps, by measurement.
   S3's four channels (steady frame 1.554M — the +1.3% is three more strips
   actually being written).
 
-  **Desk-S3 fps not re-measured**: the S3 (d8:3b:da:47:29:70) was not attached
-  (only an esp32c6 and one unresponsive port; identified via
-  `espflash board-info`, not auto-picked). Expected ~flat regardless — the S3
-  opens all four channels on frame one and so never paid this cost in steady
-  state. What silicon gains is that a *misconfigured* output no longer costs a
-  board enumeration and a serial log line every frame it stays wrong.
+  **Desk-S3 re-measured 2026-08-01** (d8:3b:da:47:29:70, identified by MAC via
+  `espflash board-info`; branch firmware flashed, quad-strips pushed):
+  **20 fps, tick 48 ms — flat**, stable over 13 consecutive `[perf]` readings.
+  That is exactly the prediction: the S3 opens all four channels on frame one,
+  so it never paid this cost in steady state, and its flat ~8.4 ms/fixture is
+  the resolver.
+
+  Since an unchanged fps cannot itself prove the new image was running, the
+  parked-sink path was exercised on silicon instead: quad-strips with one
+  output re-pointed at `ws281x:rmt:NOT-A-PIN` produced **2 warnings and then
+  silence across ~1,250 frames** (the two being the designed settle — first
+  attempt, then one retry after the other three opens bumped the generation).
+  The old code logs one per frame, so this both proves the image and confirms
+  the fix on hardware. fps held at 20 with the dead output; tick 47 ms, the
+  1 ms being one fewer strip to write.
+
+  Not measured: the same misconfigured-output case on *pre-fix* firmware, which
+  would quantify what silicon saves there. The saving is a board enumeration
+  plus a serial line per frame; on the S3's ~40-resource manifest that is far
+  smaller than the emulator's 256, and it was not worth a second flash cycle to
+  put a number on.
 
   **Still open: the resolver half** — the profile is now dominated by exactly
   what this entry predicted would remain: memcpy 18.7%, allocator 12.8%+8.0%,
