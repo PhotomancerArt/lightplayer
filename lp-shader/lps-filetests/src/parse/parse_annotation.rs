@@ -278,10 +278,19 @@ mod tests {
             .map(|t| t.name())
             .collect();
         // Both exclusions bite: `interp.f32` and `wgpu.f32` are subtracted from
-        // the f32 family, leaving the compiled f32 target. This assertion used
-        // to expect nothing at all — `wasm.f32` is the "compiled f32 target
-        // registers" case the selector was written to anticipate.
-        assert_eq!(matched, vec!["wasm.f32".to_string()], "{matched:?}");
+        // the f32 family, leaving the compiled f32 targets. This assertion used
+        // to expect nothing at all — the compiled f32 targets are the case the
+        // selector was written to anticipate, and each new backend that gains an
+        // f32 mode joins the list here.
+        assert_eq!(
+            matched,
+            vec![
+                "wasm.f32".to_string(),
+                "rv32n.f32".to_string(),
+                "rv32lpn.f32".to_string()
+            ],
+            "{matched:?}"
+        );
     }
 
     #[test]

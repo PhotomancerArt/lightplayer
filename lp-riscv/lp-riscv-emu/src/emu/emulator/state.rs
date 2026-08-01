@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use super::super::executor::ExecutionResult;
+use super::super::fp_regs::FpRegs;
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
@@ -59,6 +60,11 @@ impl core::fmt::Debug for FrameOutcome {
 /// RISC-V 32-bit emulator state.
 pub struct Riscv32Emulator {
     pub(super) regs: [i32; 32],
+    /// RV32F architectural state: `f0`–`f31` plus `fcsr` (see [`FpRegs`]).
+    ///
+    /// Always present, not feature-gated: the emulator decodes RV32F
+    /// unconditionally, and 132 bytes of state is not worth a cfg.
+    pub(super) fp: FpRegs,
     pub(super) pc: u32,
     pub(super) memory: Memory,
     pub(super) instruction_count: u64,
@@ -103,6 +109,7 @@ impl Riscv32Emulator {
 
         Self {
             regs: [0; 32],
+            fp: FpRegs::new(),
             pc: 0,
             memory: Memory::with_default_addresses(code, ram),
             instruction_count: 0,
@@ -141,6 +148,7 @@ impl Riscv32Emulator {
 
         Self {
             regs: [0; 32],
+            fp: FpRegs::new(),
             pc: 0,
             memory,
             instruction_count: 0,
