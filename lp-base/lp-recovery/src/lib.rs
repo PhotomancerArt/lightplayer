@@ -60,8 +60,8 @@ pub use ledger::{GatedInfo, Ledger};
 pub use path_entry::{ENTRY_NAME_CAP, PathEntry};
 pub use recovery::{
     BootAssessment, EnterDenied, EnteredFrame, Recovery, RecoveryHandle, clear_tentative_crash,
-    enter, finalize_crash_and_reset, is_initialized, mark_boot_complete, record_recovered_crash,
-    set_global, snapshot, stage_crash,
+    commit_staged_crash, enter, finalize_crash_and_reset, is_initialized, mark_boot_complete,
+    record_recovered_crash, set_global, snapshot, stage_crash,
 };
 pub use recovery_level::RecoveryLevel;
 pub use recovery_region::{REGION_MAGIC, REGION_MAX_SIZE, REGION_VERSION, RecoveryRegion};
