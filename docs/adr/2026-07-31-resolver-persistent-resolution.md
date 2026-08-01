@@ -144,6 +144,26 @@ win is in fixed per-frame overhead, not in the per-chain scaling that made
 this a filed debt. That scaling is still owned by endpoint status. See
 `docs/debt/s3-frame-cost-scales-per-fixture.md`.
 
+### Flash cost
+
+The ESP32-C6 is the tight budget (3 MB app partition; see
+`docs/adr/2026-07-28-esp32c6-flash-budget.md`), so that is where the cost was
+measured — `just fw-esp32c6-size-check`, this branch against `origin/main`:
+
+| | Image | Headroom |
+|---|---|---|
+| Baseline | 2,863,296 B | 282,432 B |
+| After | 2,873,504 B | 272,224 B |
+| | **+10,208 B (+0.36%)** | −10,208 B |
+
+Ten kilobytes for the intern table, the route and structural caches, and the
+static-path memo. Headroom stays four times the 64 KB pre-merge gate.
+
+The self-checking invalidation guard costs **nothing** in shipped firmware:
+it is `#[cfg(debug_assertions)]`, and `release-esp32` inherits `release`.
+Confirmed on the linked ELF rather than by inference — the assertion's message
+string is absent from it, while other resolver strings are present.
+
 ### Revision stamps age
 
 A cached literal or def read keeps the revision it was first stamped with,

@@ -110,6 +110,10 @@ nothing else helps, by measurement.
   dearer than the real RMT driver's, so `endpoint_status_for`'s 46.7% share is
   inflated there. The emulator attributes cost well; it does not predict fps.
 
+  Flash cost on the C6 (the tight budget): **+10,208 B (+0.36%)**, headroom
+  282,432 → 272,224 B, still 4× the 64 KB CI gate. The debug-only invalidation
+  guard is absent from release firmware (verified on the linked ELF).
+
   **The filed shape is only partly fixed.** Per-additional-chain cost went
   ~9.7 ms → ~8.0 ms (−17%) — most of the win is fixed per-frame overhead, not
   the per-chain scaling this entry is named for. A 10-fixture project would
