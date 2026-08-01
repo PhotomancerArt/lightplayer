@@ -183,10 +183,7 @@ fn bracket(x: f32, y1: f32, y2: f32, dir: f32) -> Element {
     }
 }
 
-fn anatomy_overlay(
-    board: &BoardDisplayFile,
-    options: &DiagramOptions,
-) -> (DiagramMargin, Element) {
+fn anatomy_overlay(board: &BoardDisplayFile, options: &DiagramOptions) -> (DiagramMargin, Element) {
     let layout = BoardLayout::compute(board, options);
     let u = layout.u;
 

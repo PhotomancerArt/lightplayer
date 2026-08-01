@@ -144,11 +144,7 @@ pub fn OptGpioField(
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn CheckField(
-    label: &'static str,
-    value: bool,
-    on_change: EventHandler<bool>,
-) -> Element {
+pub fn CheckField(label: &'static str, value: bool, on_change: EventHandler<bool>) -> Element {
     rsx! {
         label { class: "lpb-ed-check",
             input {
