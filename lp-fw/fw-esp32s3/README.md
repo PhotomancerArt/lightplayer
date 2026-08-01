@@ -69,6 +69,7 @@ cargo test -p lpvm-native --features xt-corpus,emu-xt
 just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # the whole corpus
 just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
 just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX helpers         # divide-step helpers + probe2
 ```
 
 The M6 hardware campaign's rig. Runs `lp-xt-fp-vectors`' 5 630-vector corpus on
