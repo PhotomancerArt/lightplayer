@@ -624,6 +624,60 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
                 format!("FuelCheck i{}, L{}", vmctx.0, trap_label)
             }
         }
+
+        // Hardware float. Operands render as `i{n}` like every other vreg —
+        // the register *class* shows up in the physical register the trace
+        // prints alongside (`f3` vs `a3`, via `IsaTarget::reg_name`), which is
+        // the thing a reader debugging a class bug needs to see.
+        VInst::FAluRRR {
+            op,
+            dst,
+            src1,
+            src2,
+            ..
+        } => format!("i{} = {} i{}, i{}", dst.0, op.mnemonic(), src1.0, src2.0),
+        VInst::FAluRR { op, dst, src, .. } => {
+            format!("i{} = {} i{}", dst.0, op.mnemonic(), src.0)
+        }
+        VInst::Fcmp {
+            dst,
+            lhs,
+            rhs,
+            cond,
+            ..
+        } => format!(
+            "i{} = Fcmp {}, i{}, i{}",
+            dst.0,
+            cond.mnemonic(),
+            lhs.0,
+            rhs.0
+        ),
+        VInst::FSelect {
+            dst,
+            cond,
+            if_true,
+            if_false,
+            ..
+        } => format!(
+            "i{} = FSelect i{}, i{}, i{}",
+            dst.0, cond.0, if_true.0, if_false.0
+        ),
+        VInst::FLoad32 {
+            dst, base, offset, ..
+        } => format!("i{} = FLoad32 i{}, {}", dst.0, base.0, offset),
+        VInst::FStore32 {
+            src, base, offset, ..
+        } => format!("FStore32 i{}, i{}, {}", src.0, base.0, offset),
+        VInst::Wfr { dst, src, .. } => format!("i{} = Wfr i{}", dst.0, src.0),
+        VInst::Rfr { dst, src, .. } => format!("i{} = Rfr i{}", dst.0, src.0),
+        VInst::IToF {
+            dst, src, signed, ..
+        } => format!(
+            "i{} = {} i{}",
+            dst.0,
+            if *signed { "IToFS" } else { "IToFU" },
+            src.0
+        ),
     }
 }
 
