@@ -8,7 +8,7 @@ use super::node_create_op::{NodeCreateOp, UiAttachTarget};
 use super::node_naming::{node_kind_label, node_kind_slug};
 
 /// Picker order: the common authoring targets first, hardware-/niche kinds
-/// last. Stable — the picker never reorders. `Project` is excluded (it is
+/// last. Stable — the picker never reorders. `Module` is excluded (it is
 /// the artifact root; nested sub-projects are future work).
 const PICKER_KINDS: &[NodeKind] = &[
     NodeKind::Shader,
@@ -50,7 +50,7 @@ pub struct UiAddNodeMenuEntry {
     pub action: UiAction,
 }
 
-/// Build the picker for one attach site: every kind except `Project`, in
+/// Build the picker for one attach site: every kind except `Module`, in
 /// [`PICKER_KINDS`] order.
 pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
     UiAddNodeMenu {
@@ -83,10 +83,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn menu_offers_every_kind_except_project_in_stable_order() {
+    fn menu_offers_every_kind_except_module_in_stable_order() {
         let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
 
-        assert_eq!(menu.entries.len(), 10, "all kinds except Project");
+        assert_eq!(menu.entries.len(), 10, "all kinds except Module");
         assert!(menu.entries.iter().all(|e| e.kind != NodeKind::Module));
         assert_eq!(menu.entries[0].kind, NodeKind::Shader);
         assert_eq!(menu.entries[0].label, "Shader");

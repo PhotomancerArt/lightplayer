@@ -529,7 +529,7 @@ schema-check:
 format-bump:
     #!/usr/bin/env bash
     set -euo pipefail
-    const_file="lp-core/lpc-model/src/nodes/project/project_def.rs"
+    const_file="lp-core/lpc-model/src/nodes/module/module_def.rs"
     version=$(sed -n 's/^pub const PROJECT_FORMAT_VERSION: u32 = \([0-9][0-9]*\);.*$/\1/p' "$const_file")
     if [[ -z "$version" ]]; then
         echo "error: could not parse PROJECT_FORMAT_VERSION from $const_file" >&2

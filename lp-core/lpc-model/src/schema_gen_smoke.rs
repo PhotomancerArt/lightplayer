@@ -26,7 +26,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_project_def() {
+    fn schema_module_def() {
         assert_schema_compiles!(ModuleDef);
     }
 

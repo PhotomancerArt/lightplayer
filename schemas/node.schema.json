@@ -297,7 +297,7 @@
           "type": "integer"
         },
         "kind": {
-          "const": "Project"
+          "const": "Module"
         },
         "name": {
           "type": "string"

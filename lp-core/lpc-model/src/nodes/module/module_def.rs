@@ -87,7 +87,7 @@ mod tests {
     use alloc::string::ToString;
 
     #[test]
-    fn project_def_deserializes_named_nodes() {
+    fn module_def_deserializes_named_nodes() {
         let json = r#"{
             "kind": "Module",
             "format": 2,
@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn project_def_format_is_none_when_absent() {
+    fn module_def_format_is_none_when_absent() {
         let json = r#"{
             "kind": "Module",
             "nodes": {}
@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn project_def_writes_format_alongside_kind() {
+    fn module_def_writes_format_alongside_kind() {
         let def = crate::ModuleDef {
             format: crate::ModuleDef::current_format_slot(),
             ..crate::ModuleDef::default()
@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn project_def_rejects_legacy_artifact_field() {
+    fn module_def_rejects_legacy_artifact_field() {
         let json = r#"{
             "kind": "Module",
             "nodes": {
@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn project_def_rejects_inline_node_definition() {
+    fn module_def_rejects_inline_node_definition() {
         let json = r#"{
             "kind": "Module",
             "nodes": {
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn project_def_format_and_nodes_are_read_only_persisted_name_writable() {
+    fn module_def_format_and_nodes_are_read_only_persisted_name_writable() {
         use crate::{SlotPolicy, SlotShape, StaticSlotShape};
 
         let SlotShape::Record { fields, .. } = crate::ModuleDef::slot_shape() else {

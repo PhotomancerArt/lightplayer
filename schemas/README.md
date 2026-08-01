@@ -12,7 +12,7 @@ artifact format). Decision record:
 
 | Path | What it is |
 |---|---|
-| `project.schema.json` | JSON Schema (2020-12) for a `project.json` artifact root: `kind: "Project"` plus the required `"format": N` version key. |
+| `project.schema.json` | JSON Schema (2020-12) for a `project.json` artifact root: `kind: "Module"` plus the required `"format": N` version key. |
 | `node.schema.json` | JSON Schema for any node artifact file — a `oneOf` over every registered node kind, discriminated by the `kind` field. |
 | `hardware.schema.json` | JSON Schema for board hardware manifests (`lp-core/lpc-hardware/boards/**/*.json`, `/hardware.json` device override). |
 | `shapes/*.json` | Serialized `SlotShape` registry dumps — the exact structure the slot codec parses against, including on-disk enum encodings. One file per registered shape; `::` in shape names flattens to `.` in filenames. |
@@ -51,7 +51,7 @@ Two more guards keep the schemas honest:
 ## Format version and the bump procedure
 
 `project.json` carries `"format": N` (`PROJECT_FORMAT_VERSION` in
-`lp-core/lpc-model/src/nodes/project/project_def.rs`); loaders reject a
+`lp-core/lpc-model/src/nodes/module/module_def.rs`); loaders reject a
 missing or mismatched version before parsing. To make a breaking format
 change:
 

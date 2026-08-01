@@ -5356,7 +5356,7 @@ mod tests {
 
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].header.title, "Demo");
-        assert_eq!(nodes[0].header.kind, "Project");
+        assert_eq!(nodes[0].header.kind, "Module");
         assert_eq!(nodes[0].header.path, "/demo.module");
         assert_eq!(nodes[0].header.status.label, "Running");
         assert!(nodes[0].focused);

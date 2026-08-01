@@ -34,7 +34,7 @@ pub fn read_manifest(fs: &dyn LpFs) -> Result<ManifestFields, LibraryError> {
         kind: value
             .get("kind")
             .and_then(|v| v.as_str())
-            .unwrap_or("Project")
+            .unwrap_or("Module")
             .to_string(),
     })
 }
@@ -159,7 +159,7 @@ mod tests {
         set_name(&fs, "renamed").unwrap();
         let fields = read_manifest(&fs).unwrap();
         assert_eq!(fields.name.as_deref(), Some("renamed"));
-        assert_eq!(fields.kind, "Project");
+        assert_eq!(fields.kind, "Module");
         let value: serde_json::Value =
             serde_json::from_slice(&fs.read_file(MANIFEST_PATH.as_path()).unwrap()).unwrap();
         assert_eq!(value["nodes"]["custom-key"], 7);
