@@ -337,6 +337,39 @@ impl ProjectLoader {
                     project_node.def_location.clone(),
                 );
             }
+
+            // Structural scope (modules.md R1/R2), recomputed identically on
+            // BOTH entry points — fresh load and apply both run this spine
+            // pass, so an edited project can never wear different scopes
+            // than a reloaded one. Ownership already carries the answer:
+            // project children live in their parent module's scope; a
+            // playlist entry's child lives in that entry's sink scope.
+            {
+                let scope = match ownership {
+                    ProjectedNodeOwnership::Root => None,
+                    ProjectedNodeOwnership::ProjectChild => parent.map(|owner| {
+                        crate::node::ScopeRef::Module { owner }
+                    }),
+                    ProjectedNodeOwnership::PlaylistEntry { playlist, entry } => {
+                        Some(crate::node::ScopeRef::Sink {
+                            owner: playlist,
+                            entry,
+                        })
+                    }
+                };
+                // The root introduces the root scope even while its def is
+                // broken (R1: the engine always answers); other nodes
+                // introduce iff their def is known module-kinded — the
+                // failed-def kind fallback above must not mint scopes.
+                let introduces = matches!(ownership, ProjectedNodeOwnership::Root)
+                    || matches!(def_entry.state.kind(), Some(NodeKind::Module));
+                let entry = runtime
+                    .tree_mut()
+                    .get_mut(node_id)
+                    .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(node_id)))?;
+                entry.scope = scope;
+                entry.introduces_scope = introduces;
+            }
             if let Some(message) = state_error {
                 mark_node_load_error(
                     runtime,

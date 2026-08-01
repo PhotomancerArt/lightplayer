@@ -457,14 +457,14 @@ impl NodeRuntime for DummyShaderNode {
         Ok(ProduceResult::Produced)
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }
@@ -504,14 +504,14 @@ impl NodeRuntime for DummyFixtureNode {
         Ok(())
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }
@@ -540,14 +540,14 @@ impl NodeRuntime for DummyOutputNode {
         Ok(())
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }
@@ -591,14 +591,14 @@ impl NodeRuntime for DummySelectorNode {
         Ok(())
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }

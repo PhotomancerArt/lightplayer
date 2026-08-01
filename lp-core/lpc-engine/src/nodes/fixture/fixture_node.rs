@@ -381,14 +381,14 @@ impl NodeRuntime for FixtureNode {
         Ok(())
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         self.precomputed = None;
         self.direct_points = None;
@@ -1477,14 +1477,14 @@ mod tests {
             Ok(ProduceResult::Produced)
         }
 
-        fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+        fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
             Ok(())
         }
 
         fn handle_memory_pressure(
             &mut self,
             _level: PressureLevel,
-            _ctx: &mut MemPressureCtx<'_>,
+            _ctx: &mut MemPressureCtx,
         ) -> Result<(), NodeError> {
             Ok(())
         }
@@ -1560,14 +1560,14 @@ mod tests {
             Ok(ProduceResult::Produced)
         }
 
-        fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+        fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
             Ok(())
         }
 
         fn handle_memory_pressure(
             &mut self,
             _level: PressureLevel,
-            _ctx: &mut MemPressureCtx<'_>,
+            _ctx: &mut MemPressureCtx,
         ) -> Result<(), NodeError> {
             Ok(())
         }

@@ -11,6 +11,7 @@ pub mod node_entry_state;
 mod node_error;
 mod node_runtime;
 pub mod node_tree;
+pub mod scope;
 mod render_node;
 mod runtime_state_shape;
 pub mod sync;
@@ -24,6 +25,7 @@ pub use contexts::{
 pub use control_node::ControlNode;
 pub use node_call::{NodeCall, NodeCallKey};
 pub use node_entry::RuntimeNodeEntry;
+pub use scope::ScopeRef;
 pub use node_entry_state::NodeEntryState;
 pub use node_error::NodeError;
 pub(crate) use node_error::err_ctx;

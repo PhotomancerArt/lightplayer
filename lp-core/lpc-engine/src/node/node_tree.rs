@@ -306,6 +306,75 @@ impl<N> RuntimeNodeTree<N> {
         self.binding_index.channels()
     }
 
+    /// The bus scope `node` inhabits (modules.md R1). `None` for the root
+    /// module — no scope contains it — and for unknown nodes. Answered
+    /// from structural entry state, so it holds for `Pending`/`Failed`
+    /// nodes and across payload reattach.
+    pub fn scope_of(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        self.get(node).and_then(|entry| entry.scope)
+    }
+
+    /// The module scope `node` introduces around its project children,
+    /// when it is a module-kinded node (the root always introduces the
+    /// root scope). Playlist nodes introduce per-entry SINK scopes
+    /// instead — those surface through their children's [`Self::scope_of`].
+    pub fn scope_introduced_by(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        self.get(node)
+            .filter(|entry| entry.introduces_scope)
+            .map(|entry| crate::node::ScopeRef::Module { owner: entry.id })
+    }
+
+    /// Every scope in the tree: each introducer's module scope plus every
+    /// sink scope some node inhabits. Sorted and deduplicated so callers
+    /// get a stable listing.
+    pub fn scopes(&self) -> Vec<crate::node::ScopeRef> {
+        let mut scopes = Vec::new();
+        for entry in self.entries() {
+            if entry.introduces_scope {
+                scopes.push(crate::node::ScopeRef::Module { owner: entry.id });
+            }
+            if let Some(scope @ crate::node::ScopeRef::Sink { .. }) = entry.scope {
+                scopes.push(scope);
+            }
+        }
+        scopes.sort();
+        scopes.dedup();
+        scopes
+    }
+
+    /// The channels listed in `scope`: every bus channel named by a
+    /// binding whose owner inhabits it (R3 — a public slot's channel
+    /// exists in the slot's scope; R4 — a module node's own endpoints land
+    /// in its PARENT scope, which is the scope it inhabits). Listing only:
+    /// resolution semantics stay unscoped until the scoped-channel phase.
+    pub fn scope_channels(&self, scope: crate::node::ScopeRef) -> Vec<(ChannelName, lpc_model::Kind)> {
+        let mut channels: Vec<(ChannelName, lpc_model::Kind)> = Vec::new();
+        for binding in self.bindings() {
+            if self.scope_of(binding.owner) != Some(scope) {
+                continue;
+            }
+            let named = match (&binding.source, &binding.target) {
+                (crate::dataflow::binding::BindingSource::BusChannel(channel), _) => Some(channel),
+                (_, crate::dataflow::binding::BindingTarget::BusChannel(channel)) => Some(channel),
+                _ => None,
+            };
+            let Some(channel) = named else { continue };
+            if !channels.iter().any(|(existing, _)| existing == channel) {
+                channels.push((channel.clone(), binding.kind));
+            }
+        }
+        channels.sort_by(|(a, _), (b, _)| a.cmp(b));
+        channels
+    }
+
+    /// The stable persisted identity of `scope` (`<scope-path>` — see
+    /// [`crate::node::ScopeRef::persist_path`] for the stability
+    /// rationale). `None` when the owner is unknown.
+    pub fn scope_persist_path(&self, scope: crate::node::ScopeRef) -> Option<alloc::string::String> {
+        self.get(scope.owner())
+            .map(|entry| scope.persist_path(&entry.path))
+    }
+
     /// Resolve the binding for one consumed slot, if one exists.
     ///
     /// When multiple owners bind the same consumed slot, the owner closest to
