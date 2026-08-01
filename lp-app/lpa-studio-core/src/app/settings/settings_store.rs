@@ -14,7 +14,7 @@ use crate::app::settings::studio_settings::{
     DEFAULT_AGENT_MODEL, DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, StudioSettings,
 };
 use crate::app::settings::ui_settings_view::{
-    UiAgentSettingsView, UiModelOption, UiSettingsView, masked_key_preview,
+    UiAgentSettingsView, UiSettingsView, masked_key_preview,
 };
 
 /// Two overlays over the baked defaults, merged per-field with
@@ -527,6 +527,7 @@ fn normalized_settings(mut settings: StudioSettings) -> StudioSettings {
 mod tests {
     use super::*;
     use crate::app::settings::studio_settings::AgentSettings;
+    use crate::app::settings::ui_settings_view::UiModelOption;
 
     #[test]
     fn defaults_apply_with_no_layers() {
