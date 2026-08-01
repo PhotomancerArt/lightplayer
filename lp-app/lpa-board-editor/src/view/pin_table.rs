@@ -3,7 +3,7 @@
 //! chips, reorder within the rail.
 
 use dioxus::prelude::*;
-use lpa_boards::{CapKind, PinCap};
+use lpa_boards::{CapKind, PadStyle, PinCap};
 
 use crate::editor_core::editor_doc::{EditorDoc, RailTarget};
 use crate::view::form_widgets::{CapKindSelect, OptGpioField, RoleSelect};
@@ -13,6 +13,13 @@ use crate::view::form_widgets::{CapKindSelect, OptGpioField, RoleSelect};
 pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
     let rows = doc.read().rail_rows(target);
     let count = rows.len();
+    // Rails offer a whole-rail pad-style toggle (a DIN-rail terminal block
+    // is all screws or none); the band has no style choice.
+    let all_screw = count > 0
+        && rows
+            .iter()
+            .all(|row| row.pad_style == Some(PadStyle::Screw));
+    let show_bulk = target != RailTarget::Terminals && count > 0;
 
     rsx! {
         section { class: "lpb-ed-section",
@@ -23,6 +30,17 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
                     class: "lpb-ed-btn lpb-ed-btn--add",
                     onclick: move |_| doc.write().add_pin(target),
                     "+ pin"
+                }
+                if show_bulk {
+                    button {
+                        class: "lpb-ed-btn lpb-ed-btn--add",
+                        title: "set every pin in this rail",
+                        onclick: move |_| {
+                            let style = if all_screw { PadStyle::Pad } else { PadStyle::Screw };
+                            doc.write().set_rail_pad_style(target, style);
+                        },
+                        if all_screw { "all → pads" } else { "all → screws" }
+                    }
                 }
             }
             div { class: "lpb-ed-pins",
@@ -60,6 +78,30 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
                             on_change: move |role| {
                                 doc.write().edit_pin(target, index, |fields| *fields.role = role);
                             },
+                        }
+                        if let Some(style) = row.pad_style {
+                            select {
+                                class: "lpb-ed-select",
+                                title: "physical connector",
+                                onchange: move |event| {
+                                    let picked = if event.value() == "screw" {
+                                        PadStyle::Screw
+                                    } else {
+                                        PadStyle::Pad
+                                    };
+                                    doc.write().edit_pin(target, index, |fields| {
+                                        if let Some(pad_style) = fields.pad_style {
+                                            *pad_style = picked;
+                                        }
+                                    });
+                                },
+                                option { value: "pad", selected: style == PadStyle::Pad, "pad" }
+                                option {
+                                    value: "screw",
+                                    selected: style == PadStyle::Screw,
+                                    "screw"
+                                }
+                            }
                         }
                         OptGpioField {
                             value: row.gpio,

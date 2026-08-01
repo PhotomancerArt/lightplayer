@@ -289,6 +289,7 @@ mod tests {
                 label: "5".into(),
                 role: PinRole::Io,
                 gpio: Some(6),
+                pad_style: lpa_boards::PadStyle::Pad,
                 caps: vec![],
             });
         });
