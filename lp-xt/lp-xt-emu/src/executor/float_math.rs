@@ -785,10 +785,7 @@ mod tests {
                 (f32::NEG_INFINITY, 0x8000_0000),
             ] {
                 emu.cpu.set_f(1, v.to_bits());
-                exec(
-                    &mut emu,
-                    &Inst::FpToInt(op, Reg::new(3), FReg::new(1), 0),
-                );
+                exec(&mut emu, &Inst::FpToInt(op, Reg::new(3), FReg::new(1), 0));
                 assert_eq!(emu.cpu.a(3), want, "{op:?} of {v}");
             }
         }

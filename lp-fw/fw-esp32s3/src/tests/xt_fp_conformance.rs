@@ -91,7 +91,10 @@ const fn parse_u32(s: &str) -> u32 {
     let mut n = 0u32;
     while i < bytes.len() {
         let b = bytes[i];
-        assert!(b >= b'0' && b <= b'9', "LP_FP_LIMIT must be a decimal number");
+        assert!(
+            b >= b'0' && b <= b'9',
+            "LP_FP_LIMIT must be a decimal number"
+        );
         n = n * 10 + (b - b'0') as u32;
         i += 1;
     }
@@ -154,12 +157,7 @@ pub fn run_all() -> ! {
         }
     );
     for f in Family::ALL {
-        println!(
-            "{TAG} plan {} {} count={}",
-            f.label(),
-            f.name(),
-            count(f)
-        );
+        println!("{TAG} plan {} {} count={}", f.label(), f.name(), count(f));
     }
 
     match MODE {
@@ -323,7 +321,10 @@ fn run_tables() {
             sweep_one(name, exp, f);
         }
     }
-    println!("{TAG} END-ALL tables={tables} exponents={}", TABLE_EXPONENTS.len());
+    println!(
+        "{TAG} END-ALL tables={tables} exponents={}",
+        TABLE_EXPONENTS.len()
+    );
 }
 
 fn sweep_one(name: &str, exp: u32, f: unsafe extern "C" fn(u32) -> u32) {
@@ -469,7 +470,11 @@ mod heapless_line {
         pub fn hex8(&mut self, v: u32) {
             for shift in (0..8).rev() {
                 let nib = ((v >> (shift * 4)) & 0xF) as u8;
-                self.byte(if nib < 10 { b'0' + nib } else { b'a' + nib - 10 });
+                self.byte(if nib < 10 {
+                    b'0' + nib
+                } else {
+                    b'a' + nib - 10
+                });
             }
         }
 
@@ -681,31 +686,66 @@ mod kernels {
     }
 
     conversions!(
-        "trunc.s", TRUNC_S, fp_to_int,
-        lp_fp_trunc_s_0, lp_fp_trunc_s_1, lp_fp_trunc_s_4, lp_fp_trunc_s_15
+        "trunc.s",
+        TRUNC_S,
+        fp_to_int,
+        lp_fp_trunc_s_0,
+        lp_fp_trunc_s_1,
+        lp_fp_trunc_s_4,
+        lp_fp_trunc_s_15
     );
     conversions!(
-        "utrunc.s", UTRUNC_S, fp_to_int,
-        lp_fp_utrunc_s_0, lp_fp_utrunc_s_1, lp_fp_utrunc_s_4, lp_fp_utrunc_s_15
+        "utrunc.s",
+        UTRUNC_S,
+        fp_to_int,
+        lp_fp_utrunc_s_0,
+        lp_fp_utrunc_s_1,
+        lp_fp_utrunc_s_4,
+        lp_fp_utrunc_s_15
     );
     conversions!(
-        "round.s", ROUND_S, fp_to_int,
-        lp_fp_round_s_0, lp_fp_round_s_1, lp_fp_round_s_4, lp_fp_round_s_15
+        "round.s",
+        ROUND_S,
+        fp_to_int,
+        lp_fp_round_s_0,
+        lp_fp_round_s_1,
+        lp_fp_round_s_4,
+        lp_fp_round_s_15
     );
     conversions!(
-        "floor.s", FLOOR_S, fp_to_int,
-        lp_fp_floor_s_0, lp_fp_floor_s_1, lp_fp_floor_s_4, lp_fp_floor_s_15
+        "floor.s",
+        FLOOR_S,
+        fp_to_int,
+        lp_fp_floor_s_0,
+        lp_fp_floor_s_1,
+        lp_fp_floor_s_4,
+        lp_fp_floor_s_15
     );
     conversions!(
-        "ceil.s", CEIL_S, fp_to_int,
-        lp_fp_ceil_s_0, lp_fp_ceil_s_1, lp_fp_ceil_s_4, lp_fp_ceil_s_15
+        "ceil.s",
+        CEIL_S,
+        fp_to_int,
+        lp_fp_ceil_s_0,
+        lp_fp_ceil_s_1,
+        lp_fp_ceil_s_4,
+        lp_fp_ceil_s_15
     );
     conversions!(
-        "float.s", FLOAT_S, fp_from_int,
-        lp_fp_float_s_0, lp_fp_float_s_1, lp_fp_float_s_4, lp_fp_float_s_15
+        "float.s",
+        FLOAT_S,
+        fp_from_int,
+        lp_fp_float_s_0,
+        lp_fp_float_s_1,
+        lp_fp_float_s_4,
+        lp_fp_float_s_15
     );
     conversions!(
-        "ufloat.s", UFLOAT_S, fp_from_int,
-        lp_fp_ufloat_s_0, lp_fp_ufloat_s_1, lp_fp_ufloat_s_4, lp_fp_ufloat_s_15
+        "ufloat.s",
+        UFLOAT_S,
+        fp_from_int,
+        lp_fp_ufloat_s_0,
+        lp_fp_ufloat_s_1,
+        lp_fp_ufloat_s_4,
+        lp_fp_ufloat_s_15
     );
 }
