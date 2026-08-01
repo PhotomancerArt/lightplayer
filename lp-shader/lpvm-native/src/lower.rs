@@ -2177,10 +2177,7 @@ fn resolve_import_to_builtin(
     decl: &lpir::lpir_module::ImportDecl,
     mode: FloatMode,
 ) -> Option<BuiltinId> {
-    let bmode = match mode {
-        FloatMode::Q32 => BuiltinMode::Q32,
-        FloatMode::F32 => BuiltinMode::F32,
-    };
+    let bmode = builtin_mode(mode);
     match decl.module_name.as_str() {
         "glsl" => {
             let ac = decl.param_types.len();
@@ -2208,6 +2205,34 @@ fn resolve_import_to_builtin(
         }
         _ => None,
     }
+}
+
+/// [`FloatMode`] → the builtin-id resolver's mode.
+///
+/// **Pinned to Q32 when `float-f32` is off, and that is a flash decision.**
+/// `lps-builtin-ids` is a separate crate that every firmware image links, and
+/// its f32 name→id tables are reachable from exactly one place: this call. Ask
+/// for them on a *runtime* value and LTO has to keep all of them —
+/// **+3,904 B measured on the ESP32-C6 image**, for tables a Fixed-only device
+/// can never reach, because without `float-f32` a `FloatMode::F32` shader is a
+/// named lowering error long before it gets here.
+///
+/// This is the same shape as the `isa-*` gates, and it is worth knowing that the
+/// gate on `lpvm-native`'s own f32 code was *not* enough on its own: the id
+/// tables live in another crate and needed their own cut point.
+#[cfg(feature = "float-f32")]
+fn builtin_mode(mode: FloatMode) -> BuiltinMode {
+    match mode {
+        FloatMode::Q32 => BuiltinMode::Q32,
+        FloatMode::F32 => BuiltinMode::F32,
+    }
+}
+
+/// See the sibling above — without `float-f32` there is no f32 lowering to
+/// resolve imports for, so the f32 resolvers stay unreachable and drop out.
+#[cfg(not(feature = "float-f32"))]
+fn builtin_mode(_mode: FloatMode) -> BuiltinMode {
+    BuiltinMode::Q32
 }
 
 /// Strip the numeric suffix from LPFX import names (e.g., "lpfn_psrdnoise_34" → "lpfn_psrdnoise").
