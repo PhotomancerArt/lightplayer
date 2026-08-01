@@ -135,25 +135,43 @@ pub(crate) fn nested_dirty_children() -> Element {
 }
 
 #[story(
-    description = "D8 tier (c), idle: a Clock card whose three `controls.*` fields are Debug-role, so core lifts them FLAT into the Debug section (Running / Rate / Scrub offset seconds — no nested `Controls` group). Nothing is overridden yet, and the section STILL wears the hazard treatment: you know a control is session-only before you touch it. The persisted rows sit above under `Settings`; no card marking, no Clear."
+    description = "The live default: a Clock card whose three `controls.*` fields are Debug-role. The section is COLLAPSED — most of the time those controls are not wanted — but its header is always debug territory: hazard-striped, labelled DEBUG, reading \"session only\". Nothing is overridden, so there is no count, no Clear, and no card marking. The persisted rows sit above under `Settings`."
 )]
 pub(crate) fn debug_section_idle() -> Element {
     rsx! {
-        NodePane { view: clock_node_view(0), on_action: move |_| {} }
+        NodePane { view: clock_node_view(0, false), on_action: move |_| {} }
     }
 }
 
 #[story(
-    description = "D8 tiers (b)+(c), active: two Debug overrides are live on the Clock. The section deepens its stripes and reveals the per-node Clear (`NodeClearDebugOp`); the touched rows wear the hazard row tint with the inline Clear verb; the card header carries the `debug 2` marking. The header wash stays neutral on purpose — a debug override is NOT unsaved work (D7), so it never borrows the amber dirty treatment."
+    description = "Collapsed with two active overrides: the header reads \"2 active · session only\" and offers Clear WITHOUT expanding, and the card header carries the `debug 2` marking. The header box is the same height as the idle story's — the count and the Clear button are reserved space, so touching a control never reflows the card."
+)]
+pub(crate) fn debug_section_collapsed_active() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(2, false), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "Expanded with two active overrides: the flattened Debug rows (Running / Rate / Scrub offset seconds — no nested `Controls` group), the touched ones wearing the hazard row tint with the inline Clear verb. The header wash stays neutral on purpose — a debug override is NOT unsaved work (D7), so it never borrows the amber dirty treatment."
 )]
 pub(crate) fn debug_section_active() -> Element {
     rsx! {
-        NodePane { view: clock_node_view(2), on_action: move |_| {} }
+        NodePane { view: clock_node_view(2, true), on_action: move |_| {} }
     }
 }
 
 #[story(
-    description = "The hazard family beside its neighbours, for the G1 distinctness question: the idle and active Debug sections next to an amber-unsaved card. Debug = attention-orange + diagonal stripes; flat orange stays device health; amber stays unsaved."
+    description = "Expanded and idle: what the disclosure reveals before anything is touched — three transient controls, each already reading as debug territory. This is the clean-transient case D8c exists for."
+)]
+pub(crate) fn debug_section_expanded_idle() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(0, true), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "The hazard family beside its neighbours, for the G1 distinctness question: collapsed-idle, collapsed-active, and expanded-active Debug sections next to an amber-unsaved card. Debug = attention-orange + diagonal stripes; flat orange stays device health; amber stays unsaved. The three debug cards also show the no-reflow contract — every header strip is the same height."
 )]
 pub(crate) fn debug_section_vs_unsaved() -> Element {
     let mut unsaved = unsaved_dirty_node_view();
@@ -161,8 +179,9 @@ pub(crate) fn debug_section_vs_unsaved() -> Element {
 
     rsx! {
         div { class: "tw:grid tw:gap-4",
-            NodePane { view: clock_node_view(0), on_action: move |_| {} }
-            NodePane { view: clock_node_view(2), on_action: move |_| {} }
+            NodePane { view: clock_node_view(0, false), on_action: move |_| {} }
+            NodePane { view: clock_node_view(2, false), on_action: move |_| {} }
+            NodePane { view: clock_node_view(2, true), on_action: move |_| {} }
             NodePane { view: unsaved, on_action: move |_| {} }
         }
     }
