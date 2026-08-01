@@ -116,14 +116,12 @@ pub use app::studio::{
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
-pub use core::view::steps_view::UiStepState;
-pub use core::view::steps_view::UiStepView;
 pub use core::{
     ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
     ControllerContext, ControllerId, ControllerOp, PASSIVE_REFRESH_DEADLINE,
     PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction,
     UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView, UiProgress, UiStatus,
-    UiStepsView, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";
