@@ -31,6 +31,7 @@ fn main() {
         .collect::<Vec<_>>();
 
     validate_story_ids(&story_modules);
+    validate_default_story_id(&src_dir, &story_modules);
     fs::write(generated_path, generate_registry(&story_modules))
         .expect("write generated story registry");
 }
@@ -317,6 +318,46 @@ fn validate_story_ids(story_modules: &[StoryModule]) {
             duplicates.join("\n")
         );
     }
+}
+
+/// Fail the build when `DEFAULT_STORY_ID` names a story that no longer
+/// exists. A stale default renders an EMPTY storybook page — which the
+/// capture pipeline reports as "No story links were discovered", far from
+/// the actual cause. Caught the hard way when the step-stack device pane
+/// was deleted and took `studio/layout/studio-shell/simulator-idle` with
+/// it.
+fn validate_default_story_id(src_dir: &Path, story_modules: &[StoryModule]) {
+    let registry_path = src_dir.join("stories/story_registry.rs");
+    let source = fs::read_to_string(&registry_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", registry_path.display()));
+    let Some(default_id) = source
+        .split("pub const DEFAULT_STORY_ID: &str = \"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+    else {
+        panic!(
+            "could not read DEFAULT_STORY_ID from {}",
+            registry_path.display()
+        );
+    };
+    // Either a story id or a component-overview id (`<component>/overview`,
+    // synthesized by the story book rather than declared by a `#[story]`).
+    let exists = story_modules
+        .iter()
+        .flat_map(|module| &module.stories)
+        .any(|story| match story.id.rsplit_once('/') {
+            Some((component, _)) => {
+                story.id == default_id || default_id == format!("{component}/overview")
+            }
+            None => story.id == default_id,
+        });
+    assert!(
+        exists,
+        "DEFAULT_STORY_ID `{default_id}` in {} names no registered story — the storybook \n\
+         would render an empty page and capture would find zero stories. Point it at a \n\
+         story that exists.",
+        registry_path.display()
+    );
 }
 
 fn generate_registry(story_modules: &[StoryModule]) -> String {

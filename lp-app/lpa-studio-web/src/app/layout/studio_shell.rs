@@ -1,7 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{
-    DeviceController, SettingsCommand, UiAction, UiPaneView, UiStudioView, UiViewContent,
-};
+use lpa_studio_core::{SettingsCommand, UiAction, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::layout::{StudioSettingsPopover, VersionBadge};
 use crate::app::{HomeGallery, ProjectNodeWorkspace, ProjectOpeningFrame};
@@ -34,7 +32,7 @@ pub fn StudioShell(
         lens: _,
         open_project_uid: _,
         open_project_slug: _,
-        // rendered by the device pane (M5)
+        // the lens card renders the sync facts (D43)
         device_sync: _,
         lens_card,
         settings,
@@ -71,7 +69,7 @@ pub fn StudioShell(
         };
     }
 
-    let PaneGroups { main, device } = group_panes(panes);
+    let main = panes;
     let project_editor = project_editor_view(&main);
     let layout_class = if project_editor.is_some() {
         "tw:grid tw:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(300px,360px)] tw:gap-3.5 tw:max-[960px]:grid-cols-1"
@@ -80,8 +78,6 @@ pub fn StudioShell(
     } else {
         "tw:grid tw:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] tw:gap-3.5 tw:max-[880px]:grid-cols-1"
     };
-    let device_is_primary = main.is_empty();
-
     rsx! {
         main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
             header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
@@ -124,22 +120,17 @@ pub fn StudioShell(
                     if let Some(card) = lens_card {
                         // D43: the LENS session's card, grown — the same
                         // control panel the gallery shows, docked as the
-                        // editor's right-side pane. The old device pane
-                        // surface renders only while no lens session
-                        // exists (defensive: the editor implies a lens).
+                        // editor's ONLY device surface. It is present
+                        // whenever panes render (pinned in core by
+                        // `panes_never_render_without_a_lens_card`), and
+                        // an unplugged device fades it rather than
+                        // removing it. The retired step-stack device pane
+                        // that used to backstop this branch is gone.
                         crate::app::home::device_card::DeviceCard {
                             sim: card.sim,
                             pane: true,
                             card: *card,
                             now_secs,
-                            on_action,
-                        }
-                    } else if let Some(device) = device {
-                        PaneView {
-                            key: "{device.node_id}",
-                            view: device,
-                            primary: device_is_primary,
-                            running,
                             on_action,
                         }
                     }
@@ -174,24 +165,6 @@ fn ShellLogo(on_action: EventHandler<UiAction>) -> Element {
             "LightPlayer Studio"
         }
     }
-}
-
-struct PaneGroups {
-    main: Vec<UiPaneView>,
-    device: Option<UiPaneView>,
-}
-
-fn group_panes(panes: Vec<UiPaneView>) -> PaneGroups {
-    let mut main = Vec::new();
-    let mut device = None;
-    for pane in panes {
-        if pane.node_id.as_str() == DeviceController::NODE_ID {
-            device = Some(pane);
-        } else {
-            main.push(pane);
-        }
-    }
-    PaneGroups { main, device }
 }
 
 fn project_editor_view(panes: &[UiPaneView]) -> Option<lpa_studio_core::ProjectEditorView> {
