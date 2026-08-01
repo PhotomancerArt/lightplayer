@@ -74,6 +74,7 @@ fn devices() -> Vec<UiDeviceCard> {
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -90,6 +91,7 @@ fn devices() -> Vec<UiDeviceCard> {
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -199,6 +201,7 @@ fn connected_device_and_project_chip() -> Element {
         state: RosterCardState::ReadyToSetUp,
         project: None,
         fw: None,
+        safe_clamp: None,
         sim: false,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -340,6 +343,7 @@ fn sim_device_card(with_project: bool) -> UiDeviceCard {
             name: "2026-07-02-0930-porch-sign".to_string(),
         }),
         fw: None,
+        safe_clamp: None,
         sim: true,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -412,6 +416,26 @@ fn sim_running_only() -> Element {
 )]
 fn sim_and_live_device() -> Element {
     gallery(sim_and_live_device_home(), None)
+}
+
+#[story(
+    description = "Safe mode: the device booted with the recovery output clamp (dim on purpose). The card wears the warning callout on every tab — what happened, and that a replug is the exit — because a clamped board otherwise just looks broken."
+)]
+fn device_in_safe_mode() -> Element {
+    let mut device = devices().remove(0);
+    device.safe_clamp = Some(26);
+    gallery(
+        UiHomeView {
+            devices: vec![device],
+            projects: packages(),
+            examples: examples(),
+            library_available: true,
+            opening: None,
+            issue: None,
+            backup: None,
+        },
+        None,
+    )
 }
 
 #[story(

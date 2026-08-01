@@ -916,6 +916,10 @@ impl StudioController {
                 .map(|session| session.console_tail().iter().cloned().collect())
                 .unwrap_or_default(),
             op_in_flight: self.device_card_op.is_some(),
+            recovery: self
+                .pool
+                .device_session()
+                .and_then(|session| session.recovery_status().cloned()),
         };
         let sim = self
             .pool
