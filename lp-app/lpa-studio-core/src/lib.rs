@@ -45,7 +45,7 @@ pub use app::home::{
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiFixtureFace, UiModuleChild, UiModuleFace, UiNodeChild,
+    UiControlSampleFormat, UiFixtureFace, UiModuleFace, UiNodeChild,
     UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
     UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelGroup,
     UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings,
