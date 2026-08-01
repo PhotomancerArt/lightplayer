@@ -307,21 +307,31 @@ impl IsaTarget {
     /// Rust's `compiler_builtins`. See
     /// `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
     ///
-    /// The Xtensa arm is [`F32Lowering::Unsupported`] until the hardware-FPU
-    /// emitter lands (roadmap M7). It is deliberately *not*
-    /// [`F32Lowering::SoftFloatCalls`]: the S3 has a real FPU, and quietly
-    /// giving it the slow path would hide the missing backend behind working
-    /// output.
+    /// `Xtensa` names a part **with** the Floating-Point Coprocessor Option
+    /// (ESP32-S3 / LX7 — 26/26 FP instructions confirmed present on desk
+    /// silicon, M6-P1), so it answers [`F32Lowering::HardwareFpu`]: float ops
+    /// lower to single FP instructions on the flat 16-entry FR file, with the
+    /// operations that are *not* one instruction — divide, square root, the
+    /// saturating conversions, the transcendentals — routed to the same M5
+    /// builtins the soft-float path calls (M7 D4).
     ///
-    /// **Nothing answers [`F32Lowering::HardwareFpu`] yet**, which is what
-    /// makes it impossible for this crate to emit an F-extension instruction
-    /// for a part that would trap on it. `f32_lowering_never_claims_hardware`
-    /// in this module is the guard on that.
+    /// Without `float-f32` it answers [`F32Lowering::Unsupported`], because the
+    /// FP register tables and lowering are not linked. It is deliberately *not*
+    /// [`F32Lowering::SoftFloatCalls`] in that build: the S3 has a real FPU, and
+    /// quietly giving it the slow path would hide a misconfigured image behind
+    /// working output.
+    ///
+    /// The asymmetry with `Rv32imac` is the whole point of this hook. "rv32"
+    /// and "Xtensa" are not two dialects of one float story — one has no FPU at
+    /// all and one has a full coprocessor, and the answer has to be a named
+    /// property of the target rather than an assumption baked into lowering.
     pub fn f32_lowering(self) -> F32Lowering {
         match self {
             #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => F32Lowering::SoftFloatCalls,
-            #[cfg(feature = "isa-xt")]
+            #[cfg(all(feature = "isa-xt", feature = "float-f32"))]
+            IsaTarget::Xtensa => F32Lowering::HardwareFpu,
+            #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
             IsaTarget::Xtensa => F32Lowering::Unsupported,
         }
     }
@@ -795,21 +805,38 @@ mod tests {
         ]
     }
 
-    /// The float-capability seam's whole job: no target may claim a hardware
-    /// FPU while no emitter in this crate can encode one. A backend that gains
-    /// FP instructions flips its [`IsaTarget::f32_lowering`] arm and updates
-    /// this assertion in the same change — which is exactly the review moment
-    /// we want, because that is the change that can start emitting `fadd.s`.
+    /// The float-capability seam's whole job: **exactly one** target may claim
+    /// a hardware FPU, and only in a build that links the FP tables.
+    ///
+    /// M9 asserted that *nothing* answered `HardwareFpu`, because nothing could
+    /// encode an FP instruction. M7 makes Xtensa the one that does — the S3 has
+    /// the Floating-Point Coprocessor Option and M6-P1 confirmed all 26
+    /// instructions present on silicon. The assertion is kept, not deleted,
+    /// with the claim narrowed: any *other* target answering `HardwareFpu` is a
+    /// part that would take an illegal-instruction trap on the first `fadd.s`.
     #[test]
-    fn f32_lowering_never_claims_hardware() {
+    fn only_xtensa_with_float_f32_claims_a_hardware_fpu() {
         for isa in every_isa() {
-            assert_ne!(
-                isa.f32_lowering(),
-                F32Lowering::HardwareFpu,
-                "{isa:?} claims a hardware FPU, but no emitter here can encode \
-                 an FP instruction — and a part without the extension traps on one"
+            let claims_hardware = isa.f32_lowering() == F32Lowering::HardwareFpu;
+            let may_claim_hardware = cfg!(feature = "isa-xt")
+                && cfg!(feature = "float-f32")
+                && alloc::format!("{isa:?}") == "Xtensa";
+            assert_eq!(
+                claims_hardware, may_claim_hardware,
+                "{isa:?}: hardware-FPU claim does not match what this build can encode"
             );
         }
+    }
+
+    /// The gate, from the capability side: with `float-f32` off there is no FP
+    /// emitter and no FR pool linked, so the S3 must report `Unsupported`
+    /// rather than fall back to soft float. A silent fallback would compile,
+    /// run, produce right answers, and be ~30x slower than the part is capable
+    /// of, with nothing pointing at why.
+    #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
+    #[test]
+    fn xtensa_without_the_feature_is_unsupported_not_soft_float() {
+        assert_eq!(IsaTarget::Xtensa.f32_lowering(), F32Lowering::Unsupported);
     }
 
     /// The C6 is the reference rv32 part and has no F extension; soft calls are

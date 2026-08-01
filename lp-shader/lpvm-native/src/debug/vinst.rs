@@ -1408,7 +1408,10 @@ Ret i2
             let text = format(&vinsts, &pool, &syms);
             assert_eq!(text, line, "writer disagrees with parser");
             let (reparsed, _, _) = parse(&text).unwrap();
-            assert_eq!(reparsed, vinsts, "{line}: value changed across a round trip");
+            assert_eq!(
+                reparsed, vinsts,
+                "{line}: value changed across a round trip"
+            );
         }
     }
 
