@@ -169,7 +169,7 @@ impl Engine {
         }
         self.demand_roots.retain(|root| !ids.contains(root));
         self.tree.remove_subtree(node, frame)?;
-        self.resolver.clear_frame_cache();
+        self.resolver.invalidate_structure();
         Ok(())
     }
 
@@ -181,7 +181,7 @@ impl Engine {
     ) -> Result<(), EngineError> {
         self.cleanup_runtime_node(node, frame)?;
         self.attach_runtime_node(node, runtime, frame)?;
-        self.resolver.clear_frame_cache();
+        self.resolver.invalidate_structure();
         Ok(())
     }
 
@@ -241,7 +241,22 @@ impl Engine {
         draft: BindingDraft,
         revision: Revision,
     ) -> Result<BindingRef, BindingError> {
-        self.tree.add_binding(draft, revision)
+        let binding_ref = self.tree.add_binding(draft, revision)?;
+        // A new binding can win a slot that already resolved, so every
+        // cached decision about that slot is now wrong.
+        self.resolver.invalidate_structure();
+        Ok(binding_ref)
+    }
+
+    /// Drop every node-owned binding. The loader's binding phase re-registers
+    /// from defs afterwards; see [`crate::node::RuntimeNodeTree::clear_bindings`].
+    ///
+    /// Goes through the engine rather than the tree so that emptying the
+    /// binding graph invalidates resolution on its own, instead of depending
+    /// on a later `add_binding` happening to do it.
+    pub fn clear_bindings(&mut self, revision: Revision) {
+        self.tree.clear_bindings(revision);
+        self.resolver.invalidate_structure();
     }
 
     /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
@@ -415,7 +430,7 @@ impl Engine {
     }
 
     fn tick_nodes(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
-        self.resolver.clear_frame_cache();
+        self.resolver.begin_frame();
         self.frame_num = self.frame_num.next();
         self.revision = advance_revision();
         self.frame_time =
@@ -500,7 +515,10 @@ impl Engine {
         let key = QueryKey::Bus(lpc_model::ChannelName(channel.to_string()));
         let fid = self.revision;
         let mut resolver_tmp = core::mem::replace(&mut self.resolver, Resolver::new());
-        resolver_tmp.clear_frame_cache();
+        // A forced-fresh read, not an invalidation: the caller wants values
+        // re-resolved rather than whatever the last tick left behind. The
+        // graph has not changed, so structural knowledge must survive.
+        resolver_tmp.begin_frame();
         let mut session = EngineSession::new(
             fid,
             &mut resolver_tmp,
@@ -1844,7 +1862,7 @@ pub(crate) fn resolve_with_engine_host(
 ) -> Result<(Production, ResolveTrace), SessionResolveError> {
     let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
-    resolver_tmp.clear_frame_cache();
+    resolver_tmp.begin_frame();
     let mut session = EngineSession::new(fid, &mut resolver_tmp, ResolveTrace::new(log_level));
     let mut producers_ticked = VecSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
@@ -1878,7 +1896,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
 ) -> Result<(Production, Production), SessionResolveError> {
     let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
-    resolver_tmp.clear_frame_cache();
+    resolver_tmp.begin_frame();
     let mut session = EngineSession::new(
         fid,
         &mut resolver_tmp,

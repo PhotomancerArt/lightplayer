@@ -27,6 +27,6 @@ pub use resolve_session::{EngineSession, ResolveSession};
 pub use resolve_trace::{
     ResolveLogLevel, ResolveTrace, ResolveTraceError, ResolveTraceEvent, TraceGuard,
 };
-pub use resolver::Resolver;
+pub use resolver::{ResolveFrameCounters, Resolver};
 pub use resolver_cache::ResolverCache;
 pub use tick_resolver::{SessionHostResolver, TickResolver};
