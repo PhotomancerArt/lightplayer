@@ -144,8 +144,14 @@
   .tw\:left-1\/2 {
     left: calc(1/2 * 100%);
   }
+  .tw\:left-\[1px\] {
+    left: 1px;
+  }
   .tw\:left-\[2px\] {
     left: 2px;
+  }
+  .tw\:left-\[9px\] {
+    left: 9px;
   }
   .tw\:left-\[19px\] {
     left: 19px;
@@ -291,6 +297,9 @@
   .tw\:h-4 {
     height: calc(var(--tw-spacing) * 4);
   }
+  .tw\:h-5 {
+    height: calc(var(--tw-spacing) * 5);
+  }
   .tw\:h-6 {
     height: calc(var(--tw-spacing) * 6);
   }
@@ -317,6 +326,9 @@
   }
   .tw\:h-\[7px\] {
     height: 7px;
+  }
+  .tw\:h-\[11px\] {
+    height: 11px;
   }
   .tw\:h-\[15px\] {
     height: 15px;
@@ -513,8 +525,14 @@
   .tw\:w-\[6ch\] {
     width: 6ch;
   }
+  .tw\:w-\[7px\] {
+    width: 7px;
+  }
   .tw\:w-\[15px\] {
     width: 15px;
+  }
+  .tw\:w-\[20px\] {
+    width: 20px;
   }
   .tw\:w-\[34px\] {
     width: 34px;
@@ -1187,6 +1205,9 @@
   .tw\:bg-dim-foreground {
     background-color: var(--tw-color-dim-foreground);
   }
+  .tw\:bg-muted-foreground {
+    background-color: var(--tw-color-muted-foreground);
+  }
   .tw\:bg-panel-primary {
     background-color: var(--tw-color-panel-primary);
   }
@@ -1558,6 +1579,9 @@
   .tw\:text-xs {
     font-size: var(--tw-text-xs);
     line-height: var(--tw-leading, var(--tw-text-xs--line-height));
+  }
+  .tw\:text-\[0\.5rem\] {
+    font-size: 0.5rem;
   }
   .tw\:text-\[0\.6rem\] {
     font-size: 0.6rem;
