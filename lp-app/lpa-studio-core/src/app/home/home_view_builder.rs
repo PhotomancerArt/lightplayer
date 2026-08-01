@@ -109,6 +109,10 @@ pub struct HomeDeviceEvidence {
     /// the exact moment its op was showing "unplug the board and plug it
     /// back in" (bench, 2026-07-31). An op in flight pins the card.
     pub op_in_flight: bool,
+    /// The session's latest heartbeat-reported recovery status. Carries
+    /// the safe-mode output clamp the card must surface (with its exit:
+    /// a power cycle).
+    pub recovery: Option<lpc_wire::server::RecoveryStatus>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -342,6 +346,7 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         transport: String::new(),
         state,
         project: sim.project.clone(),
+        safe_clamp: None,
         fw: None,
         sim: true,
         console_tail: sim.console_tail.clone(),
@@ -422,6 +427,16 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         state,
         project,
         fw,
+        // Only a LIVE link's report counts: a stale clamp on a card whose
+        // session is gone would tell the user a replug is still needed
+        // after they already did it.
+        safe_clamp: match &live.link {
+            Some(DeviceState::Ready { .. }) => live
+                .recovery
+                .as_ref()
+                .and_then(|recovery| recovery.output_clamp),
+            _ => None,
+        },
         sim: false,
         console_tail: live.console_tail.clone(),
         ui: CardUiState::default(),
@@ -537,6 +552,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
     UiDeviceCard {
         uid: Some(device.uid.clone()),
         name: device.name.clone(),
+        safe_clamp: None,
         // recorded at last sight from the live session's connector class
         transport: device.transport.clone(),
         state,
@@ -653,6 +669,40 @@ mod tests {
             transport: Some("USB".to_string()),
             ..HomeDeviceEvidence::default()
         }
+    }
+
+    #[test]
+    fn a_live_heartbeat_clamp_reaches_the_card_and_a_dead_link_drops_it() {
+        let clamped_recovery = lpc_wire::server::RecoveryStatus {
+            level: lpc_wire::server::RecoveryLevelWire::Green,
+            reset_reason: "power-on".to_string(),
+            boot_count: 1,
+            safe_mode: false,
+            output_clamp: Some(26),
+            last_crash: None,
+            paths: Vec::new(),
+        };
+        let mut evidence = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+            }),
+            content: DeviceContent::Empty,
+        });
+        evidence.recovery = Some(clamped_recovery.clone());
+
+        let card = device_card_from_live_evidence(&evidence);
+        assert_eq!(
+            card.safe_clamp,
+            Some(26),
+            "a Ready link's reported clamp is the card's safe-mode evidence"
+        );
+
+        // A Gone link keeps the last heartbeat in memory but the card must
+        // not claim the (rebooted, unclamped) board is still in safe mode.
+        evidence.link = Some(DeviceState::Gone);
+        let card = device_card_from_live_evidence(&evidence);
+        assert_eq!(card.safe_clamp, None);
     }
 
     /// A pool carrying one device session's evidence and no sim.
@@ -803,6 +853,7 @@ mod tests {
                 state: offline.clone(),
                 project: None,
                 fw: None,
+                safe_clamp: None,
                 sim: false,
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
@@ -814,6 +865,7 @@ mod tests {
                 state: offline,
                 project: None,
                 fw: None,
+                safe_clamp: None,
                 sim: false,
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),

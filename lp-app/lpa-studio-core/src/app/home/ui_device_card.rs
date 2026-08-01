@@ -29,6 +29,11 @@ pub struct UiDeviceCard {
     /// evidence for the card's rich-object detail; `None` for remembered
     /// (offline) cards and pre-hello links.
     pub fw: Option<FwProvenance>,
+    /// Device-level safe-mode output ceiling (0–255) reported by the live
+    /// session's heartbeat. A power cycle is the only exit, so the card
+    /// must both flag the state AND say how to leave it. `None` when the
+    /// device reports no clamp (and always on offline/sim cards).
+    pub safe_clamp: Option<u8>,
     /// D36: this card is the live SIMULATOR session, wearing the same card
     /// grammar with the sim presentation (sim glyph, no connect ceremony,
     /// no rename, its own rich-object sections). The sim is not a device

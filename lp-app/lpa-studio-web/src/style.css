@@ -480,6 +480,20 @@ label:has(> input:not(:disabled)) {
     100% { left: 100%; }
 }
 
+/* Safe-mode callout: the device booted with the recovery output clamp.
+   Warning family (device condition), NOT the node language's unsaved
+   yellow; sits above the card's tab body so every tab shows it. */
+.ux-safe-mode-callout {
+    display: grid;
+    gap: 2px;
+    margin: 6px 8px 0;
+    padding: 6px 10px;
+    background: var(--studio-status-warning-bg);
+    border: 1px solid var(--studio-status-warning-border);
+    border-radius: 4px;
+    color: var(--studio-status-warning-text);
+}
+
 .ux-card-op-term {
     flex: 1;
     min-height: 0;

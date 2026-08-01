@@ -1605,6 +1605,9 @@
     --tw-tracking: var(--tw-tracking-wide);
     letter-spacing: var(--tw-tracking-wide);
   }
+  .tw\:\[overflow-wrap\:anywhere\] {
+    overflow-wrap: anywhere;
+  }
   .tw\:break-words {
     overflow-wrap: break-word;
   }
@@ -1822,6 +1825,10 @@
   .tw\:outline-none {
     --tw-outline-style: none;
     outline-style: none;
+  }
+  .tw\:select-all {
+    -webkit-user-select: all;
+    user-select: all;
   }
   .tw\:select-none {
     -webkit-user-select: none;
@@ -2216,6 +2223,11 @@
   .tw\:disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
+    }
+  }
+  .tw\:disabled\:text-dim-foreground {
+    &:disabled {
+      color: var(--tw-color-dim-foreground);
     }
   }
   .tw\:disabled\:opacity-40 {

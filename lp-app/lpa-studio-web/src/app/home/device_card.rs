@@ -158,6 +158,12 @@ fn close_sheet_action(card_key: &str) -> UiAction {
 /// `YYYY-MM-DD HH:MM LightPlayer`. A fixed story clock derives a
 /// deterministic UTC name (baselines never drift); live rendering uses
 /// the platform's local clock.
+/// The clamp's user-facing brightness, 0–100. 255 is "no reduction", so
+/// the wire's 26 renders as the ~10% the boot log promises.
+fn clamp_percent(clamp: u8) -> u32 {
+    (u32::from(clamp) * 100 + 127) / 255
+}
+
 fn default_setup_name(now_secs: Option<f64>) -> String {
     #[cfg(target_arch = "wasm32")]
     if now_secs.is_none() {
@@ -669,6 +675,21 @@ pub(crate) fn DeviceCard(
                         role: "tablist",
                         for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
                             {tab_button(tab_view, active_tab, &card_key, on_action)}
+                        }
+                    }
+                    // Safe-mode callout: above the tab body so it is visible
+                    // on EVERY tab — a clamped board looks broken (dim), and
+                    // the only exit is a power cycle the user must be told
+                    // about. Evidence: live heartbeat only (core clears it
+                    // the moment the link drops).
+                    if let Some(clamp) = card.safe_clamp {
+                        div { class: "ux-safe-mode-callout",
+                            p { class: "tw:m-0 tw:text-xs tw:font-semibold",
+                                "Safe mode — output limited to {clamp_percent(clamp)}%"
+                            }
+                            p { class: "tw:m-0 tw:text-xs tw:leading-snug",
+                                "This boot is intentionally dimmed for recovery. Fix the project, then unplug the board and plug it back in to restore full brightness."
+                            }
                         }
                     }
                     div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
