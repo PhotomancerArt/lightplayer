@@ -105,6 +105,13 @@ genuinely fits none of these, and define it here in one line.
 - **`unsynchronized-shared-artifact`** — two steps share a filesystem
   artifact, but the lock that would order them is scoped narrower than
   the artifact, so a reader observes a writer's intermediate state.
+- **`opt-in-degradation`** — an absent or unusable input is modelled as a
+  legal degraded *value* rather than an error, so the intended graceful
+  behaviour (skip, fall back, no-op) holds only for consumers that
+  explicitly interrogate it. Consumers that do not get the raw failure,
+  worded as the subject's fault and surfacing at first use rather than at
+  the point of substitution. The population of callers grows; the guard
+  does not.
 - **`model-conflation`** — a model represents two things the real system
   keeps separate as one resource, so they contend for something that on
   hardware they never share. Presents as a *capacity* failure in the units
@@ -182,6 +189,7 @@ sentence (arguments in, returns out; registers and stack).
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| opt-in-degradation | 2026-08-01 | [xt-builtins-image-strands-just-test](2026-08-01-xt-builtins-image-strands-just-test.md) | fixed | justfile (`ci-prereqs`/`test`) + build-builtins-xt.sh + lpvm-native tests |
 | precision-loss-at-a-seam | 2026-08-01 | [gamma-8bit-choke](2026-08-01-gamma-8bit-choke.md) | fixed | lpc-engine fixture node |
 | test-rig-lies-about-its-subject | 2026-08-01 | [xt-pipeline-rigs-declare-param-types-as-return-types](2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md) | fixed (f32 rig; Q32 rig outstanding) | lpvm-native tests + lpir::builder |
 | model-conflation | 2026-08-01 | [xt-f32-builtins-exhaust-the-emulator-code-region](2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md) | fixed | lp-xt-emu (board/memory) + lps-builtins-xt-app + lpvm-native/rt_emu |
