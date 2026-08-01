@@ -924,6 +924,32 @@ impl<'a> EmitContext<'a> {
                     self.push_u32(encode_sw(t0, rv, fuel_off), src_op);
                 }
             }
+            // Hardware float. `Rv32imac` names a part with **no F extension**,
+            // so these are not "not implemented yet" here — they are
+            // unreachable by construction: `IsaTarget::f32_lowering` answers
+            // `SoftFloatCalls` for this target, and that lowering emits only
+            // integer instructions. Reaching this arm means the float-capability
+            // seam was bypassed, and the hardware would take an
+            // illegal-instruction trap on the first frame if we guessed an
+            // encoding. An RV32F variant of `IsaTarget` supplies real arms here.
+            VInst::FAluRRR { .. }
+            | VInst::FAluRR { .. }
+            | VInst::Fcmp { .. }
+            | VInst::FSelect { .. }
+            | VInst::FLoad32 { .. }
+            | VInst::FStore32 { .. }
+            | VInst::Wfr { .. }
+            | VInst::Rfr { .. }
+            | VInst::IToF { .. } => {
+                // The message-less form on purpose. `emit_err!` with any
+                // message allocates a `String` through `format!` (**+512 B
+                // measured on the C6 image**), and adding `vinst.mnemonic()` to
+                // it drags the whole mnemonic table in on top (**a further
+                // +736 B**) — 1,248 B for an arm that is unreachable in a
+                // Fixed-only build. The file:line the macro captures is enough
+                // to find this comment.
+                return Err(crate::emit_err!());
+            }
         }
         Ok(())
     }

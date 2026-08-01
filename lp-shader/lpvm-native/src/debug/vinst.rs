@@ -16,8 +16,27 @@
 //!   Br @0                      // branch to label
 //!   BrIf i0, @1                // branch if i0 != 0
 //!   @0:                        // label definition
+//!
+//! Hardware float (the `F*` family):
+//!   i2 = FAdd i0, i1           // FAluRRR: FAdd / FSub / FMul
+//!   i2 = FAbs i0               // FAluRR:  FMov / FAbs / FNeg
+//!   i3 = Fcmp Lt, i0, i1       // IEEE compare, integer 0/1 result
+//!   i3 = FSelect i0, i1, i2    // cond, if_true, if_false
+//!   i1 = FLoad32 i0, 4         // base, offset (optional)
+//!   FStore32 i1, i0, 4         // src, base, offset
+//!   i1 = Wfr i0                // AR -> FR, bit-for-bit
+//!   i1 = Rfr i0                // FR -> AR, bit-for-bit
+//!   i1 = IToFS i0              // int -> float conversion (IToFS / IToFU)
+//!
+//! Every vreg is spelled `iN` regardless of register class. The class is not a
+//! property of the vreg's *name* — it is read off the instruction (see
+//! [`crate::regalloc::classes`]), and duplicating it in the text would create a
+//! second source of truth that could disagree with the first.
 
-use crate::vinst::{AluImmOp, AluOp, IcmpCond, ModuleSymbols, SRC_OP_NONE, VInst, VReg, VRegSlice};
+use crate::vinst::{
+    AluImmOp, AluOp, FAluOp, FAluRROp, FcmpCond, IcmpCond, ModuleSymbols, SRC_OP_NONE, VInst, VReg,
+    VRegSlice,
+};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
@@ -453,11 +472,154 @@ fn parse_def_instruction(
             })
         }
 
+        // ── Hardware float ───────────────────────────────────────────────────
+        _ if FAluOp::from_mnemonic(op).is_some() => {
+            let fop = FAluOp::from_mnemonic(op).unwrap();
+            let args = parse_two_regs(&args_str, op, line_num)?;
+            expect_one_dst(&dsts, op, line_num)?;
+            Ok(VInst::FAluRRR {
+                op: fop,
+                dst: dsts[0],
+                src1: args.0,
+                src2: args.1,
+                src_op: SRC_OP_NONE,
+            })
+        }
+
+        _ if FAluRROp::from_mnemonic(op).is_some() => {
+            let fop = FAluRROp::from_mnemonic(op).unwrap();
+            expect_one_dst(&dsts, op, line_num)?;
+            Ok(VInst::FAluRR {
+                op: fop,
+                dst: dsts[0],
+                src: parse_ireg(args_str.trim())?,
+                src_op: SRC_OP_NONE,
+            })
+        }
+
+        "Fcmp" => {
+            expect_one_dst(&dsts, op, line_num)?;
+            // Format: Lt, i0, i1
+            let parts: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
+            if parts.len() != 3 {
+                return Err(ParseError {
+                    line: line_num,
+                    message: "Fcmp needs 'Lt, i0, i1'".into(),
+                });
+            }
+            let cond = FcmpCond::from_mnemonic(parts[0]).ok_or_else(|| ParseError {
+                line: line_num,
+                message: format!("Unknown float cond: {}", parts[0]),
+            })?;
+            Ok(VInst::Fcmp {
+                dst: dsts[0],
+                lhs: parse_ireg(parts[1])?,
+                rhs: parse_ireg(parts[2])?,
+                cond,
+                src_op: SRC_OP_NONE,
+            })
+        }
+
+        "FSelect" => {
+            expect_one_dst(&dsts, op, line_num)?;
+            let args = parse_args(&args_str)?;
+            if args.len() != 3 {
+                return Err(ParseError {
+                    line: line_num,
+                    message: "FSelect needs 3 args".into(),
+                });
+            }
+            Ok(VInst::FSelect {
+                dst: dsts[0],
+                cond: args[0],
+                if_true: args[1],
+                if_false: args[2],
+                src_op: SRC_OP_NONE,
+            })
+        }
+
+        "FLoad32" => {
+            expect_one_dst(&dsts, op, line_num)?;
+            let (base, offset) = parse_base_offset(&args_str, line_num)?;
+            Ok(VInst::FLoad32 {
+                dst: dsts[0],
+                base,
+                offset,
+                src_op: SRC_OP_NONE,
+            })
+        }
+
+        "Wfr" | "Rfr" => {
+            expect_one_dst(&dsts, op, line_num)?;
+            let dst = dsts[0];
+            let src = parse_ireg(args_str.trim())?;
+            Ok(if op == "Wfr" {
+                VInst::Wfr {
+                    dst,
+                    src,
+                    src_op: SRC_OP_NONE,
+                }
+            } else {
+                VInst::Rfr {
+                    dst,
+                    src,
+                    src_op: SRC_OP_NONE,
+                }
+            })
+        }
+
+        "IToFS" | "IToFU" => {
+            expect_one_dst(&dsts, op, line_num)?;
+            Ok(VInst::IToF {
+                dst: dsts[0],
+                src: parse_ireg(args_str.trim())?,
+                signed: op == "IToFS",
+                src_op: SRC_OP_NONE,
+            })
+        }
+
         _ => Err(ParseError {
             line: line_num,
             message: format!("Unknown instruction: {op}"),
         }),
     }
+}
+
+fn expect_one_dst(dsts: &[VReg], op: &str, line_num: usize) -> Result<(), ParseError> {
+    if dsts.len() == 1 {
+        Ok(())
+    } else {
+        Err(ParseError {
+            line: line_num,
+            message: format!("{op} needs 1 dst"),
+        })
+    }
+}
+
+fn parse_two_regs(args_str: &str, op: &str, line_num: usize) -> Result<(VReg, VReg), ParseError> {
+    let parts: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
+    if parts.len() != 2 {
+        return Err(ParseError {
+            line: line_num,
+            message: format!("{op} needs 2 args"),
+        });
+    }
+    Ok((parse_ireg(parts[0])?, parse_ireg(parts[1])?))
+}
+
+/// `i0, 4` or bare `i0` (offset defaults to 0) — the shared load/store tail.
+fn parse_base_offset(args_str: &str, line_num: usize) -> Result<(VReg, i32), ParseError> {
+    let parts: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
+    let base = parse_ireg(parts[0])?;
+    let offset = if parts.len() > 1 {
+        parts[1].parse().map_err(|_| ParseError {
+            line: line_num,
+            message: format!("Invalid offset: {}", parts[1]),
+        })?
+    } else {
+        0
+    };
+    Ok((base, offset))
 }
 
 fn parse_nodef_instruction(
@@ -482,6 +644,27 @@ fn parse_nodef_instruction(
         let vals_slice = push_vregs(pool, &vals)?;
         return Ok(VInst::Ret {
             vals: vals_slice,
+            src_op: SRC_OP_NONE,
+        });
+    }
+
+    // FStore32 i1, i0, 4 — checked before Store32 so the prefix cannot shadow
+    // it (it does not today; `strip_prefix("Store32 ")` would not match
+    // "FStore32 ", but the ordering makes that independent of that fact).
+    if let Some(rest) = line.strip_prefix("FStore32 ") {
+        let parts: Vec<&str> = rest.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 2 {
+            return Err(ParseError {
+                line: line_num,
+                message: "FStore32 needs src, base[, offset]".into(),
+            });
+        }
+        let src = parse_ireg(parts[0])?;
+        let (base, offset) = parse_base_offset(&parts[1..].join(","), line_num)?;
+        return Ok(VInst::FStore32 {
+            src,
+            base,
+            offset,
             src_op: SRC_OP_NONE,
         });
     }
@@ -923,6 +1106,66 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
                 format!("FuelCheck {}, @{}", ireg(vmctx), trap_label)
             }
         }
+
+        // ── Hardware float ───────────────────────────────────────────────────
+        VInst::FAluRRR {
+            op,
+            dst,
+            src1,
+            src2,
+            ..
+        } => format!(
+            "{} = {} {}, {}",
+            ireg(dst),
+            op.mnemonic(),
+            ireg(src1),
+            ireg(src2)
+        ),
+        VInst::FAluRR { op, dst, src, .. } => {
+            format!("{} = {} {}", ireg(dst), op.mnemonic(), ireg(src))
+        }
+        VInst::Fcmp {
+            dst,
+            lhs,
+            rhs,
+            cond,
+            ..
+        } => format!(
+            "{} = Fcmp {}, {}, {}",
+            ireg(dst),
+            cond.mnemonic(),
+            ireg(lhs),
+            ireg(rhs)
+        ),
+        VInst::FSelect {
+            dst,
+            cond,
+            if_true,
+            if_false,
+            ..
+        } => format!(
+            "{} = FSelect {}, {}, {}",
+            ireg(dst),
+            ireg(cond),
+            ireg(if_true),
+            ireg(if_false)
+        ),
+        VInst::FLoad32 {
+            dst, base, offset, ..
+        } => format!("{} = FLoad32 {}, {}", ireg(dst), ireg(base), offset),
+        VInst::FStore32 {
+            src, base, offset, ..
+        } => format!("FStore32 {}, {}, {}", ireg(src), ireg(base), offset),
+        VInst::Wfr { dst, src, .. } => format!("{} = Wfr {}", ireg(dst), ireg(src)),
+        VInst::Rfr { dst, src, .. } => format!("{} = Rfr {}", ireg(dst), ireg(src)),
+        VInst::IToF {
+            dst, src, signed, ..
+        } => format!(
+            "{} = {} {}",
+            ireg(dst),
+            if *signed { "IToFS" } else { "IToFU" },
+            ireg(src)
+        ),
     }
 }
 
@@ -1125,5 +1368,78 @@ Ret i2
         let output = format(&vinsts, &pool, &syms);
         let (reparsed, _, _) = parse(&output).unwrap();
         assert_eq!(vinsts.len(), reparsed.len());
+    }
+
+    /// Every hardware-float variant survives writer → parser → writer
+    /// unchanged, and parses back to the *same* `VInst` value.
+    ///
+    /// Text round-trip is this phase's real oracle: nothing constructs these
+    /// variants until the f32 lowering lands, so a dropped field or a
+    /// transposed operand would otherwise sit undetected until it showed up as
+    /// a wrong pixel three phases later. Comparing the parsed values (not just
+    /// the strings) is what catches an operand swap — `Fcmp Lt, i1, i2` and
+    /// `Fcmp Lt, i2, i1` both round-trip textually.
+    #[test]
+    fn float_vinsts_round_trip_through_the_text_form() {
+        let lines = [
+            "i0 = FAdd i1, i2",
+            "i0 = FSub i1, i2",
+            "i0 = FMul i1, i2",
+            "i0 = FMov i1",
+            "i0 = FAbs i1",
+            "i0 = FNeg i1",
+            "i0 = Fcmp Eq, i1, i2",
+            "i0 = Fcmp Ne, i1, i2",
+            "i0 = Fcmp Lt, i1, i2",
+            "i0 = Fcmp Le, i1, i2",
+            "i0 = Fcmp Gt, i1, i2",
+            "i0 = Fcmp Ge, i1, i2",
+            "i0 = FSelect i1, i2, i3",
+            "i0 = FLoad32 i1, 12",
+            "FStore32 i0, i1, 12",
+            "i0 = Wfr i1",
+            "i0 = Rfr i1",
+            "i0 = IToFS i1",
+            "i0 = IToFU i1",
+        ];
+        for line in lines {
+            let (vinsts, syms, pool) = parse(line).unwrap_or_else(|e| panic!("{line}: {e:?}"));
+            assert_eq!(vinsts.len(), 1, "{line}");
+            let text = format(&vinsts, &pool, &syms);
+            assert_eq!(text, line, "writer disagrees with parser");
+            let (reparsed, _, _) = parse(&text).unwrap();
+            assert_eq!(
+                reparsed, vinsts,
+                "{line}: value changed across a round trip"
+            );
+        }
+    }
+
+    /// The float mnemonics must not be mistaken for their integer neighbours.
+    /// `FMov`/`FNeg` sit one letter away from `Mov`/`Neg`, and the parser
+    /// dispatches on a bare string.
+    #[test]
+    fn float_and_integer_mnemonics_do_not_alias() {
+        let (f, _, _) = parse("i0 = FNeg i1").unwrap();
+        let (i, _, _) = parse("i0 = Neg i1").unwrap();
+        assert!(matches!(f[0], VInst::FAluRR { .. }));
+        assert!(matches!(i[0], VInst::Neg { .. }));
+
+        let (fs, _, _) = parse("FStore32 i0, i1, 4").unwrap();
+        let (is, _, _) = parse("Store32 i0, i1, 4").unwrap();
+        assert!(matches!(fs[0], VInst::FStore32 { .. }));
+        assert!(matches!(is[0], VInst::Store32 { .. }));
+    }
+
+    #[test]
+    fn float_parse_errors_are_errors() {
+        for bad in [
+            "i0 = Fcmp Bogus, i1, i2",
+            "i0 = Fcmp i1, i2",
+            "i0 = FSelect i1, i2",
+            "i0 = FAdd i1",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} parsed but should not have");
+        }
     }
 }

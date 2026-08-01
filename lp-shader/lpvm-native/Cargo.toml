@@ -16,21 +16,27 @@ workspace = true
 # existed (LTO cannot drop it — `IsaTarget` is matched on a runtime value).
 # Adding a backend means adding a feature here AND opting the firmware crates
 # in; see README "Multi-ISA seam".
-default = ["isa-rv32", "isa-xt"]
+default = ["isa-rv32", "isa-xt", "float-f32"]
 # RISC-V 32-bit backend (ESP32-C6): `isa/rv32`, its emitter and encoder.
 isa-rv32 = ["dep:lp-riscv-inst"]
 # Xtensa backend (ESP32-S3 / classic ESP32): `isa/xt`, its emitter and the
 # per-opcode immediate table.
 isa-xt = ["dep:lp-xt-inst"]
-# Native-f32 (`FloatMode::F32`) lowering: `lower_f32`, and on a JIT-capable
-# target the soft-float symbol entries in the `rt_jit` builtin table.
+# Native-f32 (`FloatMode::F32`) lowering: `lower_f32`, the Xtensa float
+# register/ABI tables (`isa/xt/fpr`) and FP emitter, and on a JIT-capable target
+# the soft-float symbol entries in the `rt_jit` builtin table.
 #
-# Off by default, and for the same measured reason as the `isa-*` gates above:
-# `FloatMode` is matched on a runtime value, so LTO cannot drop the f32 arms on
-# its own. The shipping ESP32-C6 image runs Fixed-mode shaders only and must not
-# grow by an f32 backend it never enters (f32 roadmap D2). Pair it with
-# `lps-builtins/float-f32`, which gates the `__lp_lpir_*_f32` implementations
-# this lowering calls.
+# In `default` alongside the ISAs, and gated for exactly the same measured
+# reason: `FloatMode` is matched on a runtime value, so LTO cannot drop the f32
+# arms on its own, and a firmware crate that takes this crate with
+# `default-features = false` (all of them do) links none of it. The shipping
+# ESP32-C6 image runs Fixed-mode shaders only and must not grow by an f32
+# backend it never enters (f32 roadmap D2); its zero-byte delta is the check
+# that proves the gate holds. Pair it with `lps-builtins/float-f32`, which gates
+# the `__lp_lpir_*_f32` implementations this lowering calls — the firmware
+# crates name both (see `fw-esp32c6`'s `test_f32_softfloat`), because
+# `lps-builtins` is a target-specific dependency here and cannot be forwarded
+# from this feature on the host.
 float-f32 = []
 # Enable debug info generation (increases binary size, for development only)
 debug = []
