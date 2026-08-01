@@ -28,3 +28,22 @@ pub use wasm_exports::{
 
 #[cfg(test)]
 mod tests;
+
+// The build's self-description, embedded as a scannable blob in the shipped
+// .wasm (extracted by `lp-cli firmware show` and reported on ServerHello in
+// M4). Provenance mirrors runtime.rs's set_hello: no VCS facts in this build.
+lpc_model::lp_embed_manifest_core! {
+    package: env!("CARGO_PKG_NAME"),
+    chip_family: "browser",
+    chip: "wasm32",
+    cargo_target: "wasm32-unknown-unknown",
+    profile: if cfg!(debug_assertions) { "debug" } else { "release" },
+    commit: "unknown",
+    dirty: false,
+    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+    features: [
+        lpa_server::ENGINE_FEATURE_FRAGMENT,
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
+    ],
+    limits_json: "{}",
+}
