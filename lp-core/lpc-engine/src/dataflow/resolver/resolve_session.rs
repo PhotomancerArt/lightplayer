@@ -62,10 +62,13 @@ impl<'a> EngineSession<'a> {
         query: QueryKey,
     ) -> Result<Production, SessionResolveError> {
         if let Some(pv) = self.resolver.cache().get(&query) {
+            let pv = pv.clone();
+            self.resolver.counters_mut().cache_hits += 1;
             self.trace.record_cache_hit(&query);
-            return Ok(pv.clone());
+            return Ok(pv);
         }
 
+        self.resolver.counters_mut().uncached_resolves += 1;
         self.trace
             .try_push_active(&query)
             .map_err(SessionResolveError::from)?;
@@ -95,16 +98,33 @@ impl<'a> EngineSession<'a> {
             QueryKey::ConsumedSlotAccessor { node, accessor } => {
                 self.resolve_consumed_slot(host, *node, accessor.path(), query)
             }
-            QueryKey::ProducedSlot { .. } => {
-                self.trace.record_produce_start(query);
-                let r = host.produce(query, self);
-                match &r {
-                    Ok(_) => self.trace.record_produce_end(query),
-                    Err(_) => self.trace.record_resolve_error(query),
-                }
-                r
-            }
+            QueryKey::ProducedSlot { .. } => self.produce_through_host(host, query),
         }
+    }
+
+    /// Ask the host to produce `query`, counting how the answer was obtained.
+    ///
+    /// An authored-def answer is structural work (it re-reads a definition
+    /// that only a project change can alter); a producer answer is per-frame
+    /// work that must happen every frame.
+    fn produce_through_host<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        query: &QueryKey,
+    ) -> Result<Production, SessionResolveError> {
+        self.trace.record_produce_start(query);
+        let r = host.produce(query, self);
+        match &r {
+            Ok(production) => {
+                match production.source {
+                    ProductionSource::Default => self.resolver.counters_mut().def_produces += 1,
+                    _ => self.resolver.counters_mut().producer_produces += 1,
+                }
+                self.trace.record_produce_end(query);
+            }
+            Err(_) => self.trace.record_resolve_error(query),
+        }
+        r
     }
 
     fn resolve_bus(
@@ -113,6 +133,7 @@ impl<'a> EngineSession<'a> {
         channel: &ChannelName,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
+        self.resolver.counters_mut().binding_lookups += 1;
         let candidates = host.providers_for_bus(channel);
         let entry = select_highest_priority_bus_provider(channel, &candidates)?;
         self.trace.record_select_binding(query, entry.0);
@@ -126,6 +147,7 @@ impl<'a> EngineSession<'a> {
         slot: &SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
+        self.resolver.counters_mut().merge_policy_reads += 1;
         let policy = host.merge_policy_for_consumed_slot(node, slot);
         self.trace.record_select_merge_policy(query, policy);
         match policy {
@@ -142,17 +164,12 @@ impl<'a> EngineSession<'a> {
         slot: &SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
+        self.resolver.counters_mut().binding_lookups += 1;
         if let Some(entry) = host.binding_for_consumed_slot(node, slot) {
             self.trace.record_select_binding(query, entry.0);
             return self.resolve_binding_source(host, entry.0, &entry.1.source);
         }
-        self.trace.record_produce_start(query);
-        let r = host.produce(query, self);
-        match &r {
-            Ok(_) => self.trace.record_produce_end(query),
-            Err(_) => self.trace.record_resolve_error(query),
-        }
-        r
+        self.produce_through_host(host, query)
     }
 
     fn resolve_error_merge_consumed_slot(
@@ -162,6 +179,7 @@ impl<'a> EngineSession<'a> {
         slot: &SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
+        self.resolver.counters_mut().binding_lookups += 1;
         let entries = host.bindings_for_consumed_slot(node, slot);
         if entries.len() > 1 {
             return Err(SessionResolveError::other(format!(
@@ -178,6 +196,7 @@ impl<'a> EngineSession<'a> {
         slot: &SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
+        self.resolver.counters_mut().binding_lookups += 1;
         let entries = host.bindings_for_consumed_slot(node, slot);
         if entries.is_empty() {
             return self.resolve_latest_consumed_slot(host, node, slot, query);
@@ -207,6 +226,7 @@ impl<'a> EngineSession<'a> {
     ) -> Result<Production, SessionResolveError> {
         match source {
             BindingSource::Literal(spec) => {
+                self.resolver.counters_mut().literal_materializations += 1;
                 let product = materialize_literal_product(spec, self.revision);
                 Ok(Production::leaf(product, ProductionSource::Literal))
             }
@@ -246,6 +266,7 @@ impl<'a> EngineSession<'a> {
                 self.trace
                     .try_push_active(&bus_query)
                     .map_err(SessionResolveError::from)?;
+                self.resolver.counters_mut().binding_lookups += 1;
                 let mut providers = host.providers_for_bus(channel);
                 providers.sort_by_key(|(provider_ref, entry)| (entry.priority, *provider_ref));
                 for (provider_ref, provider) in providers.iter() {

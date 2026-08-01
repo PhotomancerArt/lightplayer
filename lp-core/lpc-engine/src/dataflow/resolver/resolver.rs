@@ -1,4 +1,27 @@
-//! Resolver — same-frame demand-resolution cache owner.
+//! Resolver — demand-resolution cache owner.
+//!
+//! # Invalidation contract
+//!
+//! The resolver distinguishes two kinds of "this is no longer valid", and
+//! every caller must pick the right one:
+//!
+//! - [`Resolver::begin_frame`] — a new frame starts. Values resolved *for the
+//!   previous frame* are stale, because producers tick again and time moves.
+//!   The shape of the graph has not changed.
+//! - [`Resolver::invalidate_structure`] — the graph itself changed: bindings,
+//!   tree topology, node definitions, or project state. Everything the
+//!   resolver knows is suspect, including which binding wins a slot.
+//!
+//! **Any future engine mutation that can change what a query resolves
+//! *through* — as opposed to what it resolves *to* this frame — must call
+//! [`Resolver::invalidate_structure`].** Getting this wrong does not fail
+//! loudly; it serves a stale answer. The known sites are enumerated in
+//! `docs/adr/2026-07-31-resolver-persistent-resolution.md`.
+//!
+//! Frame-scoped and structure-scoped invalidation are deliberately separate
+//! names rather than one `clear()`, so that persisting resolution across
+//! frames is a change of what each one *does*, not a hunt for which callers
+//! meant which.
 
 use crate::dataflow::resolver::resolve_error::ResolveError;
 use crate::dataflow::resolver::resolver_cache::ResolverCache;
@@ -7,16 +30,57 @@ use lpc_model::Revision;
 use lpc_model::WithRevision;
 use lps_shared::LpsValueF32;
 
-/// Owns the same-frame [`ResolverCache`] for engine demand resolution.
+/// Resolution work performed during one frame.
+///
+/// These exist to make "did the frame re-resolve the graph from cold?" a
+/// testable question rather than a profiling exercise: a steady-state frame
+/// over an unchanged graph should perform no structural work at all. They are
+/// always on — each is a single increment on a path that already allocates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResolveFrameCounters {
+    /// Binding-index lookups (`binding_for_consumed_slot`,
+    /// `bindings_for_consumed_slot`, `providers_for_bus`).
+    pub binding_lookups: u32,
+    /// Merge-policy reads, each of which introspects an authored node def.
+    pub merge_policy_reads: u32,
+    /// Productions answered from an authored def (`ProductionSource::Default`).
+    pub def_produces: u32,
+    /// Binding literals materialized into productions.
+    pub literal_materializations: u32,
+    /// Productions answered by ticking a producer node.
+    pub producer_produces: u32,
+    /// Queries answered from cache.
+    pub cache_hits: u32,
+    /// Queries that had to be resolved.
+    pub uncached_resolves: u32,
+}
+
+impl ResolveFrameCounters {
+    /// Work that only a structural change can invalidate.
+    ///
+    /// A steady-state frame over an unchanged graph should report zero here;
+    /// anything else means the frame re-derived the graph it already knew.
+    pub fn structural_work(&self) -> u32 {
+        self.binding_lookups + self.merge_policy_reads + self.def_produces
+    }
+}
+
+/// Owns the [`ResolverCache`] for engine demand resolution.
 #[derive(Clone, Debug, Default)]
 pub struct Resolver {
     cache: ResolverCache,
+    structure_epoch: u64,
+    frame_counters: ResolveFrameCounters,
+    last_frame_counters: ResolveFrameCounters,
 }
 
 impl Resolver {
     pub fn new() -> Self {
         Self {
             cache: ResolverCache::new(),
+            structure_epoch: 0,
+            frame_counters: ResolveFrameCounters::default(),
+            last_frame_counters: ResolveFrameCounters::default(),
         }
     }
 
@@ -28,8 +92,38 @@ impl Resolver {
         &mut self.cache
     }
 
-    pub fn clear_frame_cache(&mut self) {
+    /// Start a new frame: per-frame resolved values are discarded.
+    pub fn begin_frame(&mut self) {
+        self.last_frame_counters = self.frame_counters;
+        self.frame_counters = ResolveFrameCounters::default();
         self.cache.clear();
+    }
+
+    /// The graph changed shape: every cached decision and value is suspect.
+    pub fn invalidate_structure(&mut self) {
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        self.cache.clear();
+    }
+
+    /// How many times the graph has changed shape. Only equality across two
+    /// observations is meaningful; the absolute value is not.
+    pub fn structure_epoch(&self) -> u64 {
+        self.structure_epoch
+    }
+
+    /// Counters for the frame currently being resolved.
+    pub fn frame_counters(&self) -> &ResolveFrameCounters {
+        &self.frame_counters
+    }
+
+    /// Counters for the last frame that completed — readable after the tick
+    /// returns, which is when tests can look at them.
+    pub fn last_frame_counters(&self) -> &ResolveFrameCounters {
+        &self.last_frame_counters
+    }
+
+    pub(crate) fn counters_mut(&mut self) -> &mut ResolveFrameCounters {
+        &mut self.frame_counters
     }
 }
 
