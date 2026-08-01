@@ -44,6 +44,18 @@
 
 #![no_std]
 #![no_main]
+// The app image installs its own `#[alloc_error_handler]` so an allocation
+// failure reaches the RTC ledger as an `Oom` record carrying free/used, rather
+// than as a generic panic with no heap numbers. Same reason fw-esp32c6 takes
+// the feature; the esp toolchain is nightly-based, so it is available here too.
+#![cfg_attr(
+    all(feature = "server", not(feature = "radio_ram_probe")),
+    feature(alloc_error_handler)
+)]
+#![allow(
+    unstable_features,
+    reason = "alloc_error_handler required for custom OOM handler in no_std"
+)]
 
 // The server path is the whole LightPlayer stack. The hello and probe
 // entrypoints install the allocator but never name `alloc` themselves, and
@@ -150,6 +162,18 @@ const HEAP_SIZE: usize = 72 * 1024;
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     recovery::panic_path::stage_and_reset(info)
+}
+
+/// Allocation failure: record it as an `Oom` with the heap counters attached.
+///
+/// Rust's default handler panics, which the handler above would catch — but by
+/// then the request size is only a formatted string and the free/used numbers
+/// are gone. On a chip whose whole difficulty is a 110 KB arena, "how much was
+/// left" is the question, so it gets its own path.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[alloc_error_handler]
+fn on_alloc_error(layout: core::alloc::Layout) -> ! {
+    recovery::panic_path::stage_oom_and_reset(layout)
 }
 
 /// Abort-tier panic handler for the bare-hello and radio-probe images, which

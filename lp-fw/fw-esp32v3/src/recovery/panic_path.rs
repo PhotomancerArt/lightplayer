@@ -121,6 +121,81 @@ pub fn stage_and_reset(info: &core::panic::PanicInfo) -> ! {
     esp_hal::system::software_reset()
 }
 
+/// The `#[alloc_error_handler]` path: record the heap state, then reset.
+///
+/// Without this, an allocation failure reaches the ledger through Rust's
+/// default handler — which panics, so it arrives as [`lp_recovery::CrashCause::Panic`]
+/// with the stock `memory allocation of N bytes failed` message and **no heap
+/// numbers at all**. That is the difference between "a 12,864-byte `Vec` growth
+/// failed" and "a 12,864-byte `Vec` growth failed with 3 KB free", which are
+/// different bugs with different fixes.
+///
+/// The second thing it buys is a usable walk. Coming through the default
+/// handler the first eight frames are `panic_nounwind_fmt` →
+/// `__rdl_alloc_error_handler` → `handle_alloc_error` → `raw_vec::handle_error`
+/// — all machinery, and the chain broke before reaching the caller that
+/// actually asked for the memory (observed 2026-08-01). Capturing here starts
+/// the walk at the allocation site instead.
+pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
+    if PANICKING.swap(true, Ordering::AcqRel) {
+        // Recursive OOM — the allocator failed again while we were reporting
+        // the first failure. Nothing here allocates, so this should be
+        // unreachable; say so rather than looping.
+        esp_println::println!("\n[OOM] recursive allocation failure while reporting; resetting");
+        esp_hal::system::software_reset()
+    }
+
+    esp_hal::xtensa_lx::interrupt::disable();
+
+    // Both are plain reads of the allocator's counters — no allocation, which
+    // matters because we are here precisely because allocation is failing.
+    let free = esp_alloc::HEAP.free();
+    let used = esp_alloc::HEAP.used();
+
+    let mut frames = [0u32; MAX_FRAMES];
+    let count = capture_frames(&mut frames);
+
+    // Ledger first, exactly as in `stage_and_reset` — see the module docs.
+    let staged = lp_recovery::stage_crash(
+        lp_recovery::CrashCause::Oom,
+        &format_args!(
+            "alloc {} bytes failed (align {}) in {}",
+            layout.size(),
+            layout.align(),
+            lpc_shared::backtrace::oom_context().unwrap_or("<unset>"),
+        ),
+        None,
+        &frames[..count],
+        Some(lp_recovery::OomStats {
+            requested: layout.size() as u32,
+            align: layout.align() as u32,
+            free: free as u32,
+            used: used as u32,
+        }),
+    );
+    if staged {
+        lp_recovery::commit_staged_crash();
+    }
+
+    esp_println::println!("\n\n====================== OOM ======================");
+    esp_println::println!(
+        "allocation failed: requested={} align={} free={} used={} context={}",
+        layout.size(),
+        layout.align(),
+        free,
+        used,
+        lpc_shared::backtrace::oom_context().unwrap_or("<unset>"),
+    );
+    print_frames(&frames[..count]);
+    if !staged {
+        esp_println::println!("[RECOVERY] no ledger installed; this OOM will not be reported");
+    }
+
+    esp_println::println!("[RECOVERY] resetting");
+    lp_recovery::finalize_crash_and_reset();
+    esp_hal::system::software_reset()
+}
+
 /// Print captured PCs — or say plainly why there are none.
 ///
 /// The wording matters. "0 frames" from a target with no walker reads as "the
