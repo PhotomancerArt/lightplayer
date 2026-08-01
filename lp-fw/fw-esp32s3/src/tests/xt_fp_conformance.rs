@@ -477,6 +477,51 @@ fn run_helpers() {
         ops += 1;
         probes += n;
     }
+
+    // The second probe round: the divn exponent-plane maps and the
+    // mixed-sign NaN position grids (see lp_xt_fp_vectors::helpers::probe2).
+    use lp_xt_fp_vectors::helpers::probe2;
+    println!(
+        "{TAG} helpers2-fingerprint={:#010x} total={}",
+        probe2::fingerprint(),
+        probe2::total()
+    );
+    for op in probe2::Op2::ALL {
+        let total = probe2::count(op);
+        let n = if LIMIT == 0 { total } else { LIMIT.min(total) };
+        println!("{TAG} FAMILY {} label=H2 count={n} of={total}", op.name());
+        let kern: unsafe extern "C" fn(u32, u32, u32) -> u32 = match op.kernel() {
+            1 => kernels::lp_fp_probe_madd_s,
+            2 => kernels::lp_fp_probe_maddn_s,
+            _ => kernels::lp_fp_probe_divn_s,
+        };
+        let mut digest = 0x811C_9DC5u32;
+        let mut cells = 0usize;
+        let mut line = Line::empty();
+        for i in 0..n {
+            let (r, s, t) = probe2::probe(op, i);
+            if cells % PER_LINE == 0 {
+                line.start_helper(op.name(), i);
+            }
+            unsafe {
+                let _ = kernels::lp_fp_set_fsr(0);
+            }
+            let result = unsafe { kern(r, s, t) };
+            let fsr = unsafe { kernels::lp_fp_get_fsr() };
+            line.cell(result, fsr);
+            digest = mix(digest ^ i);
+            digest = mix(digest ^ result).wrapping_add(fsr);
+            cells += 1;
+            if cells % PER_LINE == 0 {
+                line.flush();
+            }
+        }
+        line.flush();
+        println!("{TAG} DIGEST {} {digest:#010x} rows={n}", op.name());
+        println!("{TAG} END family={} count={n}", op.name());
+        ops += 1;
+        probes += n;
+    }
     println!("{TAG} END-ALL helpers={ops} vectors={probes}");
 }
 

@@ -421,8 +421,8 @@ fn parse_hex(s: &str) -> Option<u32> {
 pub struct Predictions {
     pub family: String,
     pub fingerprint: u32,
-    /// `index -> (rendered operands, prediction)`.
-    pub rows: Vec<(u32, String, Prediction)>,
+    /// `index -> (rendered operands, result prediction, FSR prediction)`.
+    pub rows: Vec<(u32, String, Prediction, Prediction)>,
 }
 
 /// Parse a corpus file from `lp-xt-emu/tests/fixtures/fp/`.
@@ -444,10 +444,19 @@ pub fn parse_predictions(family: &str, text: &str) -> Result<Predictions, Captur
             .next()
             .and_then(|w| w.parse().ok())
             .ok_or_else(|| CaptureError::Malformed(format!("corpus row has no index: {line:?}")))?;
-        let result = rhs.split_whitespace().next().ok_or_else(|| {
+        let mut cols = rhs.split_whitespace();
+        let result = cols.next().ok_or_else(|| {
             CaptureError::Malformed(format!("corpus row has no result: {line:?}"))
         })?;
-        rows.push((index, lhs.trim().to_string(), Prediction::parse(result)?));
+        let fsr = cols.next().ok_or_else(|| {
+            CaptureError::Malformed(format!("corpus row has no fsr column: {line:?}"))
+        })?;
+        rows.push((
+            index,
+            lhs.trim().to_string(),
+            Prediction::parse(result)?,
+            Prediction::parse(fsr)?,
+        ));
     }
     Ok(Predictions {
         family: family.to_string(),
@@ -477,6 +486,8 @@ pub struct Row {
     pub verdict: Verdict,
     pub operands: String,
     pub predicted: Prediction,
+    /// The predicted FSR column.
+    pub predicted_fsr: Prediction,
     pub silicon: DeviceResult,
 }
 
@@ -522,7 +533,7 @@ pub fn diff(predictions: &Predictions, capture: &Capture) -> Result<FamilyReport
         resolved_by_field: BTreeMap::new(),
     };
 
-    for (index, operands, predicted) in &predictions.rows {
+    for (index, operands, predicted, predicted_fsr) in &predictions.rows {
         let Some(silicon) = device.get(index).copied() else {
             continue;
         };
@@ -537,9 +548,20 @@ pub fn diff(predictions: &Predictions, capture: &Capture) -> Result<FamilyReport
                 *report.resolved_by_field.entry(field.clone()).or_insert(0) += 1;
                 Verdict::Resolved
             }
-            (Prediction::Bits(want), DeviceResult::Value { bits, .. }) if *want == bits => {
-                report.agree += 1;
-                Verdict::Agree
+            (Prediction::Bits(want), DeviceResult::Value { bits, fsr }) if *want == bits => {
+                // The result matches; the FSR column decides the rest. An
+                // UNKNOWN FSR prediction (pre-campaign corpora) does not
+                // count against the row.
+                match predicted_fsr {
+                    Prediction::Bits(want_fsr) if *want_fsr != fsr => {
+                        report.diverge += 1;
+                        Verdict::Diverge
+                    }
+                    _ => {
+                        report.agree += 1;
+                        Verdict::Agree
+                    }
+                }
             }
             _ => {
                 report.diverge += 1;
@@ -552,6 +574,7 @@ pub fn diff(predictions: &Predictions, capture: &Capture) -> Result<FamilyReport
                 verdict,
                 operands: operands.clone(),
                 predicted: predicted.clone(),
+                predicted_fsr: predicted_fsr.clone(),
                 silicon,
             });
         }
@@ -576,9 +599,10 @@ impl fmt::Display for FamilyReport {
             };
             writeln!(
                 f,
-                "  DIVERGE {}  predicted={}  silicon={}",
+                "  DIVERGE {}  predicted={} fsr={}  silicon={}",
                 row.operands,
                 row.predicted.render(),
+                row.predicted_fsr.render(),
                 silicon
             )?;
         }
