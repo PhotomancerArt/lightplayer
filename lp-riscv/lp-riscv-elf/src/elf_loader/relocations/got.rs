@@ -65,26 +65,40 @@ impl GotTracker {
     }
 }
 
+/// True for the sections that hold global offset table slots.
+///
+/// `.got` and `.got.plt` are the psABI names; `-fdata-sections`-style
+/// splitting yields `.got.<symbol>` subsections, which are still GOT.
+fn is_got_section(section_name: &str) -> bool {
+    section_name == ".got" || section_name.starts_with(".got.")
+}
+
 /// Identify GOT entries from R_RISCV_32 relocations.
-/// GOT entries are initialized with R_RISCV_32 relocations that write symbol addresses.
+///
+/// A GOT entry is a **slot in a GOT section** initialized to a symbol's
+/// address, so that is what this asks: the relocation's *location*, not its
+/// symbol's spelling.
+///
+/// This used to key off the symbol name instead — any `R_RISCV_32` against a
+/// `__lp_`- or `_ZN`-prefixed symbol was declared a GOT entry. That is a guess
+/// about what a relocation means made from what it is called, and it is wrong
+/// for the most ordinary use of `R_RISCV_32` there is: a `.rodata` table of
+/// pointers into another object. rustc lowers a large `match` returning
+/// `&'static str` to exactly that (one relocation per arm against one merged
+/// string constant), so a big enough enum turned every arm into a bogus GOT
+/// entry — all sharing one key, since the tracker is keyed by symbol name, so
+/// they also overwrote each other down to a single surviving slot address.
+/// Nothing about those relocations was GOT-shaped; only their symbols' names
+/// were suggestive.
 pub fn identify_got_entries(relocations: &[super::phase1::RelocationInfo]) -> GotTracker {
     log::debug!("=== Identifying GOT entries ===");
 
     let mut tracker = GotTracker::new();
 
     for reloc in relocations {
-        // R_RISCV_32 relocations that initialize GOT entries
-        if reloc.r_type == 1 {
-            // R_RISCV_32
-            // Check if this looks like a GOT entry initialization
-            // GOT entries are typically at zero-initialized locations
-            // and target external symbols (starting with __lp_)
-            let is_got_entry =
-                reloc.symbol_name.starts_with("__lp_") || reloc.symbol_name.starts_with("_ZN");
-
-            if is_got_entry {
-                tracker.add_entry(reloc.symbol_name.clone(), reloc.address);
-            }
+        // R_RISCV_32 slots living in a GOT section initialize GOT entries.
+        if reloc.r_type == 1 && is_got_section(&reloc.section_name) {
+            tracker.add_entry(reloc.symbol_name.clone(), reloc.address);
         }
     }
 

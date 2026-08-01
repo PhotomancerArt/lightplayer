@@ -94,3 +94,80 @@ pub(crate) unsafe fn load_r16_texel_lane(base: *const u8, texel_byte_off: usize)
     // Same halfword load as one RGBA channel.
     load_u16_unorm_q32_lane(base, texel_byte_off)
 }
+
+// ---------------------------------------------------------------------------
+// Native-f32 variants.
+//
+// Only three things about sampling are float-shaped: the coordinate → index
+// math (in `sample_ref_f32`), the unorm → lane decode, and the blend. Wrap
+// modes, texel byte offsets, and the ABI decode are integer work and are shared
+// with the Q32 path above rather than duplicated.
+//
+// Note there is no f32 analogue of `sat_i64_to_q32_raw`: an f32 lane needs no
+// saturation, and clamping one would contradict `docs/design/float.md` §3.
+// ---------------------------------------------------------------------------
+
+/// Packed descriptor + normalized-coordinate arguments for 2D UNORM sampling in f32.
+#[cfg(feature = "float-f32")]
+#[derive(Clone, Copy)]
+pub struct Texture2dUnormSampleArgsF32 {
+    pub width: u32,
+    pub height: u32,
+    pub row_stride: u32,
+    pub u: f32,
+    pub v: f32,
+    pub filter_abi: u32,
+    pub wrap_x_abi: u32,
+    pub wrap_y_abi: u32,
+}
+
+/// Packed descriptor + coordinate arguments for 1D / height-one UNORM sampling in f32.
+#[cfg(feature = "float-f32")]
+#[derive(Clone, Copy)]
+pub struct Texture1dUnormSampleArgsF32 {
+    pub width: u32,
+    pub row_stride: u32,
+    pub u: f32,
+    pub filter_abi: u32,
+    pub wrap_x_abi: u32,
+}
+
+/// Linear interpolation on f32 lanes; `frac_toward_b` is the weight toward `b`.
+#[cfg(feature = "float-f32")]
+#[inline]
+pub(crate) fn f32_lerp(a: f32, b: f32, frac_toward_b: f32) -> f32 {
+    a + frac_toward_b * (b - a)
+}
+
+#[cfg(feature = "float-f32")]
+#[inline]
+fn load_u16_unorm_f32_lane(base: *const u8, byte_off: usize) -> f32 {
+    unsafe {
+        let raw = core::ptr::read_unaligned(base.add(byte_off).cast::<u16>());
+        crate::builtins::lpir::unorm_conv_f32::__lp_lpir_unorm16_to_f_f32(raw as i32)
+    }
+}
+
+/// Four RGBA16 channels starting at `texel_byte_off` bytes from `base`, as f32.
+///
+/// # Safety
+/// `base.add(texel_byte_off)` must be valid for an 8-byte unaligned read.
+#[cfg(feature = "float-f32")]
+pub(crate) unsafe fn load_rgba16_texel_f32(base: *const u8, texel_byte_off: usize) -> [f32; 4] {
+    [
+        load_u16_unorm_f32_lane(base, texel_byte_off),
+        load_u16_unorm_f32_lane(base, texel_byte_off + 2),
+        load_u16_unorm_f32_lane(base, texel_byte_off + 4),
+        load_u16_unorm_f32_lane(base, texel_byte_off + 6),
+    ]
+}
+
+/// Single R16 channel at `texel_byte_off`, as f32.
+///
+/// # Safety
+/// `base.add(texel_byte_off)` must be valid for a 2-byte unaligned read.
+#[cfg(feature = "float-f32")]
+#[inline]
+pub(crate) unsafe fn load_r16_texel_lane_f32(base: *const u8, texel_byte_off: usize) -> f32 {
+    load_u16_unorm_f32_lane(base, texel_byte_off)
+}

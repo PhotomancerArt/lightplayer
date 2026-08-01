@@ -37,5 +37,9 @@
     ]
   ],
   "brightness": 255,
-  "gamma_correction": false
+  "gamma_correction": false,
+  "power": {
+    "lamp_type": "ws2812b_5v",
+    "budget_ma": 0
+  }
 }

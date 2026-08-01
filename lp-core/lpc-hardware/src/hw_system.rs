@@ -33,7 +33,7 @@ impl HardwareSystem {
 
     pub fn with_virtual_drivers(registry: Rc<HwRegistry>) -> Self {
         let mut system = Self::new(Rc::clone(&registry));
-        system.add_ws281x_driver(Box::new(VirtualWs281xDriver::new(Rc::clone(&registry), 0)));
+        system.add_ws281x_driver(Box::new(VirtualWs281xDriver::new(Rc::clone(&registry))));
         system.add_button_driver(Box::new(VirtualButtonDriver::new(Rc::clone(&registry))));
         system.add_radio_driver(Box::new(VirtualRadioDriver::new(Rc::clone(&registry), 0)));
         system.add_radio_driver(Box::new(VirtualRadioDriver::new_with_spec(
@@ -396,6 +396,48 @@ mod tests {
             Err(HardwareEndpointError::EndpointUnavailable { .. })
                 | Err(HardwareEndpointError::Hardware { .. })
         ));
+    }
+
+    /// A board that declares four WS281x timing resources must be able to
+    /// drive four strips at once, exactly as the S3's RMT driver does. The
+    /// virtual driver used to pin `/rmt/ws281x0` at construction, so the second
+    /// open failed with "already claimed" and every host run of a four-channel
+    /// project silently lit one strip.
+    #[test]
+    fn virtual_ws281x_opens_one_output_per_declared_timing_resource() {
+        let registry = Rc::new(HwRegistry::new(crate::default_esp32s3_hardware_manifest()));
+        let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
+        let specs = ["D10", "D9", "D8", "D7"]
+            .map(|pin| HwEndpointSpec::parse(alloc::format!("ws281x:rmt:{pin}")).expect("spec"));
+
+        let outputs = specs
+            .iter()
+            .map(|spec| {
+                system
+                    .open_ws281x_by_spec(spec, Ws281xConfig::new(3))
+                    .unwrap_or_else(|error| panic!("{spec} should open: {error}"))
+            })
+            .collect::<Vec<_>>();
+
+        for channel in 0..4 {
+            assert!(
+                registry.is_claimed(&HwAddress::rmt_ws281x(channel)),
+                "/rmt/ws281x{channel} should back one of the four outputs"
+            );
+        }
+
+        // A fifth output has no timing resource left to claim.
+        let fifth = HwEndpointSpec::from_static("ws281x:rmt:D6");
+        assert!(matches!(
+            system.open_ws281x_by_spec(&fifth, Ws281xConfig::new(3)),
+            Err(HardwareEndpointError::Hardware { .. })
+        ));
+
+        drop(outputs);
+
+        for channel in 0..4 {
+            assert!(!registry.is_claimed(&HwAddress::rmt_ws281x(channel)));
+        }
     }
 
     fn test_manifest() -> HwManifest {

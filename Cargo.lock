@@ -5291,6 +5291,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
+ "lpa-boards",
  "lpa-client",
  "lpa-link",
  "lpa-server",
@@ -5532,8 +5533,13 @@ name = "lp-xt-emu"
 version = "40.0.0"
 dependencies = [
  "lp-emu-core",
+ "lp-xt-fp-vectors",
  "lp-xt-inst",
 ]
+
+[[package]]
+name = "lp-xt-fp-vectors"
+version = "40.0.0"
 
 [[package]]
 name = "lp-xt-inst"
@@ -5560,6 +5566,16 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "lpa-boards"
+version = "40.0.0"
+dependencies = [
+ "lpc-hardware",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5907,7 +5923,6 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lp-collection 1.0.0",
- "lps-q32",
 ]
 
 [[package]]
@@ -5926,6 +5941,7 @@ version = "40.0.0"
 name = "lps-builtins"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "log",
  "lpfn-impl-macro",
  "lps-builtin-ids",

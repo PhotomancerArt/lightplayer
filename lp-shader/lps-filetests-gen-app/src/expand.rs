@@ -12,6 +12,23 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Why `vec/bvec*` specifiers are refused.
+///
+/// The generators are written around arithmetic and ordering on numeric
+/// components. Instantiated for `bvec`, they emit nonsense: `true + false`,
+/// `max(bvec2(...), bvec2(...))`, and operand lists that collapse to the same
+/// literal once every non-zero value formats as `true`. The resulting files do
+/// not compile, and the ones that do assert nothing meaningful.
+///
+/// Note this is a restriction on *targets*, not on bvec formatting: the
+/// comparison generators (`fn-equal`, `fn-less-than`, …) still format `bvecN`
+/// expectation values, because `equal()` and friends return `bvecN`.
+pub const BVEC_UNSUPPORTED: &str = "bvec targets are not supported: the vec generators assume \
+     numeric components, so instantiating them for bvec produces invalid tests (boolean \
+     arithmetic, degenerate operands that all collapse to the same literal). bvec expectation \
+     values are still generated for the comparison categories, which return bvecN. Use \
+     vec/ivec/uvec targets, or hand-write the test under filetests/vec/bvecN/.";
+
 /// Expand one or more specifiers into concrete test specifications.
 pub fn expand_specifiers(specifiers: &[String]) -> Result<Vec<TestSpec>> {
     let filetests_dir = find_filetests_dir()?;
@@ -38,6 +55,14 @@ fn expand_single_specifier(specifier: &str, filetests_dir: &Path) -> Result<Vec<
 
     // Remove line number suffix if present (e.g., ":10")
     let specifier = specifier.split(':').next().unwrap_or(specifier);
+
+    // Refuse bvec targets up front. Without this the specifier falls through to
+    // the directory check, finds the real (hand-written) filetests/vec/bvecN
+    // directory, and reports something unhelpful about having nothing to
+    // generate -- when the real answer is that bvec is not a supported target.
+    if specifier.split('/').any(|part| part.starts_with("bvec")) {
+        bail!("{BVEC_UNSUPPORTED}");
+    }
 
     // Check if it's a .gen.glsl file path
     if specifier.ends_with(".gen") {
@@ -224,14 +249,16 @@ fn parse_dimension(s: &str) -> Option<Dimension> {
     }
 }
 
-/// Parse type and dimension from string like "vec4", "ivec3", "uvec2", "bvec4".
+/// Parse type and dimension from string like "vec4", "ivec3", "uvec2".
+///
+/// `bvec*` is deliberately rejected: see [`BVEC_UNSUPPORTED`].
 fn parse_type_and_dimension(s: &str) -> Result<(VecType, Dimension)> {
     let vec_type = if s.starts_with("ivec") {
         VecType::IVec
     } else if s.starts_with("uvec") {
         VecType::UVec
     } else if s.starts_with("bvec") {
-        VecType::BVec
+        bail!("{BVEC_UNSUPPORTED}");
     } else if s.starts_with("vec") {
         VecType::Vec
     } else {
@@ -304,7 +331,11 @@ fn generate_all_specs_for_type_and_dimension(
 }
 
 /// Find the filetests directory.
-fn find_filetests_dir() -> Result<PathBuf> {
+///
+/// Single source of truth for the corpus location: the generator resolves its
+/// output paths through this too, so expansion and writing can never disagree
+/// about which checkout they are operating on.
+pub fn find_filetests_dir() -> Result<PathBuf> {
     let candidates = vec![
         PathBuf::from("../../lps-filetests/filetests"),
         PathBuf::from("lps-filetests/filetests"),
@@ -426,6 +457,44 @@ mod tests {
         let specs = parse_specifier("vec").unwrap();
         // Should have 11 categories × 3 vector types × 3 dimensions = 99 specs
         assert_eq!(specs.len(), 99);
+    }
+
+    #[test]
+    fn parse_type_and_dimension_rejects_bvec() {
+        for target in ["bvec2", "bvec3", "bvec4"] {
+            let err = parse_type_and_dimension(target)
+                .expect_err("bvec is not a supported generator target");
+            assert!(
+                err.to_string().contains("bvec targets are not supported"),
+                "unexpected error for {target}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn expand_specifier_rejects_bvec_targets() {
+        // Every shape a user could reach a bvec target through must be a hard
+        // error, not a silent fall-through to the (real, hand-written) bvecN
+        // directory.
+        let filetests_dir = find_filetests_dir().expect("filetests dir");
+        for specifier in [
+            "vec/bvec2",
+            "vec/bvec3/op-add",
+            "vec/bvec4/fn-equal.gen.glsl",
+        ] {
+            let err = expand_single_specifier(specifier, &filetests_dir)
+                .expect_err("bvec is not a supported generator target");
+            let msg = err.to_string();
+            assert!(
+                msg.contains("bvec targets are not supported"),
+                "unexpected error for {specifier}: {msg}"
+            );
+            // The message has to explain *why*, not just refuse.
+            assert!(
+                msg.contains("invalid tests"),
+                "message lacks rationale: {msg}"
+            );
+        }
     }
 
     #[test]

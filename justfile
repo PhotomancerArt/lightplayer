@@ -13,7 +13,7 @@ fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp3
 
 # fw-esp32s3 builds on Espressif's Rust fork (see lp-fw/fw-esp32s3/rust-toolchain.toml)
 xt_s3_target := "xtensa-esp32s3-none-elf"
-fw_esp32s3_elf := "target/" + xt_s3_target + "/release/fw-esp32s3"
+fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 
 # The S3's 8 MB flash floor (docs/adr/2026-07-30-esp32s3-partition-floor.md).
 # This MUST be passed to every `espflash flash` for this chip and MUST match
@@ -628,7 +628,7 @@ build-fw-esp32s3 features="":
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    args=(build --release)
+    args=(build --profile release-esp32s3)
     if [[ -n "{{ features }}" ]]; then
       args+=(--features "{{ features }}")
     fi
@@ -703,7 +703,7 @@ fwtest-xt-jit-esp32s3 port="":
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_xt_jit_corpus
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
@@ -732,7 +732,7 @@ fwtest-backtrace-esp32s3 port="":
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release --features test_backtrace_oracle
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_backtrace_oracle
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
@@ -765,7 +765,7 @@ fwtest-loopback-esp32s3 port="":
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release --features test_loopback
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_loopback
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
@@ -1193,7 +1193,7 @@ test-glsl-filetests:
 # was measured at ~18 min for the pair on a 4-core runner). Local `check`
 # keeps the full meaning.
 [parallel]
-check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus
+check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
 check: check-lint schema-check
@@ -1208,6 +1208,14 @@ lint-serde-content:
 # per-directive @unsupported(wgpu.f32) markers were nearly lost).
 lint-torture-corpus:
     python3 lp-shader/scripts/gen-control-torture.py --check
+
+# Same story for the vec corpus (filetests/vec/**/*.gen.glsl): hand edits are
+# silently reverted by the next `--write`. Without this gate the generator had
+# drifted 2,700 lines of body indentation away from the checked-in files, and a
+# regeneration would have silently dropped the run[f32] channels that the M6 P2
+# triage hand-added to the float op-add/op-multiply large-numbers cases.
+lint-vec-corpus:
+    cargo run -p lps-filetests-gen-app -- --check
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:

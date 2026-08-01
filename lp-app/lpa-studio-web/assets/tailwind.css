@@ -180,9 +180,6 @@
   .tw\:-mx-1 {
     margin-inline: calc(var(--tw-spacing) * -1);
   }
-  .tw\:-mx-3 {
-    margin-inline: calc(var(--tw-spacing) * -3);
-  }
   .tw\:-mx-4 {
     margin-inline: calc(var(--tw-spacing) * -4);
   }
@@ -1157,12 +1154,6 @@
   .tw\:bg-card-subtle {
     background-color: var(--tw-color-card-subtle);
   }
-  .tw\:bg-card-subtle\/60 {
-    background-color: var(--tw-color-card-subtle);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--tw-color-card-subtle) 60%, transparent);
-    }
-  }
   .tw\:bg-dim-foreground {
     background-color: var(--tw-color-dim-foreground);
   }
@@ -1351,6 +1342,9 @@
   }
   .tw\:p-\[22px\] {
     padding: 22px;
+  }
+  .tw\:px-0 {
+    padding-inline: calc(var(--tw-spacing) * 0);
   }
   .tw\:px-1 {
     padding-inline: calc(var(--tw-spacing) * 1);

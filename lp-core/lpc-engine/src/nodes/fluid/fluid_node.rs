@@ -339,7 +339,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -446,7 +446,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
