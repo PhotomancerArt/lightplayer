@@ -59,4 +59,22 @@ pub trait RenderNode {
             "render node does not support direct sampling",
         ))
     }
+
+    /// Sample a visual product at caller-provided points into a caller-owned
+    /// **resident sample grid**: point `i` lands in row-major texel `i` of
+    /// `grid` and the texels stay on the GPU (no readback) — see
+    /// [`lp_gfx::LpShader::sample_to_grid`]. `grid` must be a render target
+    /// sized by [`lp_gfx::LpGraphics::sample_grid_dims`] for the point
+    /// count.
+    fn sample_visual_to_grid(
+        &mut self,
+        _product: VisualProduct,
+        _request: VisualSampleBufferRequest<'_>,
+        _grid: &mut TextureHandle,
+        _ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        Err(NodeError::msg(
+            "render node does not support resident grid sampling",
+        ))
+    }
 }

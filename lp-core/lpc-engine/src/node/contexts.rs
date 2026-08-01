@@ -429,6 +429,17 @@ impl<'a> ControlRenderContext<'a> {
     ) -> Result<(), NodeError> {
         self.services.sample_visual_into(product, request, target)
     }
+
+    /// Samples a visual product into a caller-owned resident grid target
+    /// (no readback — see [`crate::node::RenderNode::sample_visual_to_grid`]).
+    pub fn sample_visual_to_grid(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        grid: &mut TextureHandle,
+    ) -> Result<(), NodeError> {
+        self.services.sample_visual_to_grid(product, request, grid)
+    }
 }
 
 /// Services available while materializing a [`crate::products::control::ControlProduct`].
@@ -451,6 +462,13 @@ pub trait ControlRenderServices {
         product: VisualProduct,
         request: VisualSampleBufferRequest<'_>,
         target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError>;
+
+    fn sample_visual_to_grid(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        grid: &mut TextureHandle,
     ) -> Result<(), NodeError>;
 }
 

@@ -664,6 +664,45 @@ impl RenderNode for ShaderNode {
             Err(error) => Err(err_ctx("shader sample")(error)),
         }
     }
+
+    fn sample_visual_to_grid(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        grid: &mut TextureHandle,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        validate_shader_visual_product(self.node_id, product)?;
+
+        if !self.ensure_compiled(ctx)? {
+            log::warn!(
+                "[shader-node] resident grid falls back to black (node={:?}): {}",
+                self.node_id,
+                self.compilation_error
+                    .as_deref()
+                    .unwrap_or("shader not compiled")
+            );
+            ctx.graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+                .clear_texture(grid)
+                .map_err(err_ctx("clear grid target"))?;
+            return Ok(());
+        }
+        let uniforms = build_uniforms(
+            request.output_width,
+            request.output_height,
+            &self.visual_uniforms,
+        );
+        let shader = self
+            .shader
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
+        match shader.sample_to_grid(request.points, grid, &uniforms) {
+            Ok(()) => Ok(()),
+            Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_failure(&trap),
+            Err(error) => Err(err_ctx("shader grid sample")(error)),
+        }
+    }
 }
 
 /// Route an out-of-fuel trap to the node error path.

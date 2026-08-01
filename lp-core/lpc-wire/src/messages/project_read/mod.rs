@@ -27,12 +27,13 @@ pub use crate::budget::{
 };
 pub use node_read::{NodeReadQuery, NodeReadResult, NodeReadSelection};
 pub use probe::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, ProjectProbeRequest, ProjectProbeResult,
-    ProjectProbeResultHeader, RenderProductProbeRequest, RenderProductProbeResult,
-    RenderProductProbeResultHeader, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
-    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlColorPolicy,
+    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
+    ControlProductProbeResult, ControlProductProbeResultHeader, ProjectProbeRequest,
+    ProjectProbeResult, ProjectProbeResultHeader, RenderProductProbeRequest,
+    RenderProductProbeResult, RenderProductProbeResultHeader, WireBindingDirection,
+    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireEffectiveBinding,
 };
 pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,

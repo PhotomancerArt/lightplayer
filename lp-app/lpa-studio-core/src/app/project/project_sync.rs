@@ -7,12 +7,12 @@ use lpc_model::{
 };
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery,
-    NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
-    ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, WireBindingGraph,
-    WireChannelSampleFormat, WireTextureFormat,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlColorPolicy,
+    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
+    ControlProductProbeResult, NodeReadQuery, NodeReadSelection, ProjectProbeRequest,
+    ProjectProbeResult, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    RuntimeReadQuery, ShapeReadQuery, WireBindingGraph, WireChannelSampleFormat, WireTextureFormat,
 };
 
 use crate::{
@@ -419,6 +419,9 @@ impl ProjectSync {
                                 product: control,
                                 sample_format: WireChannelSampleFormat::U16,
                                 display_layout: self.display_layout_read_for(product),
+                                // D1/D2: previews show display color (raw ×
+                                // brightness), never wire bytes.
+                                color_policy: ControlColorPolicy::Display,
                             },
                         ));
                     }
@@ -1049,6 +1052,7 @@ mod tests {
                     product,
                     sample_format: WireChannelSampleFormat::U16,
                     display_layout: ControlDisplayLayoutRead::Always,
+                    color_policy: ControlColorPolicy::Display,
                 },
             )]
         );
@@ -1115,6 +1119,7 @@ mod tests {
                     display_layout: ControlDisplayLayoutRead::IfChanged {
                         known_revision: Some(Revision::new(12)),
                     },
+                    color_policy: ControlColorPolicy::Display,
                 },
             )]
         );

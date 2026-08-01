@@ -15,7 +15,10 @@ use lpc_model::{
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::{ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, NodeRuntimeStatus};
+use lpc_wire::{
+    ControlColorPolicy, ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead,
+    NodeRuntimeStatus,
+};
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
 use crate::dataflow::bus::Bus;
@@ -31,7 +34,9 @@ use crate::node::{
     VisualRenderServices,
 };
 use crate::node::{NodeEntryState, RuntimeNodeTree};
-use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
+use crate::products::control::{
+    ControlLayout, ControlPreviewSpec, ControlRenderRequest, ControlRenderTarget,
+};
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
     VisualSampleTarget,
@@ -467,6 +472,113 @@ impl Engine {
         registry: &ProjectRegistry,
         channel: &str,
     ) -> Result<VisualProduct, SessionResolveError> {
+        let production = self.resolve_bus_production_fresh(registry, channel)?;
+        let Some(leaf) = production.value_leaf() else {
+            return Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} did not resolve to a leaf value"
+            )));
+        };
+        match leaf.value() {
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => Ok(*product),
+            other => Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} does not carry a visual product (got {other:?})"
+            ))),
+        }
+    }
+
+    /// Resolve a bus channel to the control product handle it currently
+    /// carries.
+    ///
+    /// The control-channel sibling of [`Self::resolve_bus_visual_product`]
+    /// (which errors on control channels): fixture-preview surfaces call
+    /// this once after a project loads to discover the product behind a
+    /// control bus channel, then resolve per-tick preview state with
+    /// [`Self::resolve_fixture_preview`] and fill the resident grid with
+    /// [`Self::render_fixture_preview_grid`]. Product handles are
+    /// node-owned and stay stable across frames, so callers should cache
+    /// the result rather than re-resolving per frame.
+    pub fn resolve_bus_control_product(
+        &mut self,
+        registry: &ProjectRegistry,
+        channel: &str,
+    ) -> Result<ControlProduct, SessionResolveError> {
+        let production = self.resolve_bus_production_fresh(registry, channel)?;
+        let Some(leaf) = production.value_leaf() else {
+            return Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} did not resolve to a leaf value"
+            )));
+        };
+        match leaf.value() {
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Control(product)) => Ok(*product),
+            other => Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} does not carry a control product (got {other:?})"
+            ))),
+        }
+    }
+
+    /// Resolve everything a presenter needs to draw a fixture view this
+    /// tick, except the grid contents: the `ControlLamp2d` display layout,
+    /// the resident-grid point count, and the Display-policy color factor.
+    ///
+    /// `color_policy` is the viewer's request (D2). Only
+    /// [`ControlColorPolicy::Display`] — raw sampled color × brightness,
+    /// gamma and color order never applied (D1) — has a GPU-resident path;
+    /// `Wire` errors here explicitly (wire bytes come from the
+    /// control-product probe instead).
+    ///
+    /// Layouts change rarely: callers key grid-target and instance-list
+    /// reuse on `spec.layout.revision`, size the grid with
+    /// [`lp_gfx::LpGraphics::sample_grid_dims`]`(spec.point_count)`, and
+    /// fill it each tick with [`Self::render_fixture_preview_grid`]. Grid
+    /// texel `i` corresponds to `spec.layout.lamps[i]` (splat instances
+    /// fetch `grid_index = i`).
+    pub fn resolve_fixture_preview(
+        &mut self,
+        registry: &ProjectRegistry,
+        product: ControlProduct,
+        color_policy: ControlColorPolicy,
+    ) -> Result<ControlPreviewSpec, SessionResolveError> {
+        if color_policy == ControlColorPolicy::Wire {
+            return Err(SessionResolveError::other(
+                "wire color policy has no GPU-resident preview path; previews use Display \
+                 (wire bytes come from the control-product probe)",
+            ));
+        }
+        self.with_resolve_host(registry, |host| {
+            host.render_node_control_preview_spec(product)
+        })
+    }
+
+    /// Evaluate `product`'s fixture sample points GPU-resident into the
+    /// caller-owned `grid` render target for the current frame (no
+    /// readback).
+    ///
+    /// The fixture must have produced this frame (its normal tick). `grid`
+    /// must be an RGBA16 render target with exactly the dimensions
+    /// [`lp_gfx::LpGraphics::sample_grid_dims`] reports for the
+    /// [`ControlPreviewSpec::point_count`] resolved by
+    /// [`Self::resolve_fixture_preview`]; texel `i` receives the raw
+    /// sampled color of `layout.lamps[i]` (brightness is applied at draw
+    /// time via [`ControlPreviewSpec::color_scale`], never baked into the
+    /// grid).
+    pub fn render_fixture_preview_grid(
+        &mut self,
+        registry: &ProjectRegistry,
+        product: ControlProduct,
+        grid: &mut TextureHandle,
+    ) -> Result<(), SessionResolveError> {
+        self.with_resolve_host(registry, |host| {
+            host.render_node_control_preview_grid(product, grid)
+        })
+    }
+
+    /// Fresh (frame-cache-cleared) bus resolution shared by the bus product
+    /// resolvers.
+    fn resolve_bus_production_fresh(
+        &mut self,
+        registry: &ProjectRegistry,
+        channel: &str,
+    ) -> Result<Production, SessionResolveError> {
         let key = QueryKey::Bus(lpc_model::ChannelName(channel.to_string()));
         let fid = self.revision;
         let mut resolver_tmp = core::mem::replace(&mut self.resolver, Resolver::new());
@@ -495,18 +607,34 @@ impl Engine {
         };
         let result = session.resolve(&mut host, key);
         self.resolver = resolver_tmp;
-        let production = result?;
-        let Some(leaf) = production.value_leaf() else {
-            return Err(SessionResolveError::other(format!(
-                "bus channel {channel:?} did not resolve to a leaf value"
-            )));
+        result
+    }
+
+    /// Build the render-host adapter and run `f` against it (the shared
+    /// boilerplate behind the out-of-tick render entry points).
+    fn with_resolve_host<T>(
+        &mut self,
+        registry: &ProjectRegistry,
+        f: impl FnOnce(&mut EngineResolveHost<'_>) -> T,
+    ) -> T {
+        let mut producers_ticked = VecSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
+        let radio_service = self.services.radio_service();
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            registry,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
+            graphics: self.graphics.clone(),
+            time_provider,
+            button_service,
+            radio_service,
+            frame_time_seconds: time_s,
         };
-        match leaf.value() {
-            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => Ok(*product),
-            other => Err(SessionResolveError::other(format!(
-                "bus channel {channel:?} does not carry a visual product (got {other:?})"
-            ))),
-        }
+        f(&mut host)
     }
 
     #[cfg(test)]
@@ -1031,7 +1159,7 @@ impl EngineResolveHost<'_> {
         let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(render_node) = node_runtime.render_node() else {
-                return restore_node_after_failed_render(
+                return restore_node_after_failure(
                     self.tree,
                     node_id,
                     node_runtime,
@@ -1122,7 +1250,7 @@ impl EngineResolveHost<'_> {
         let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(render_node) = node_runtime.render_node() else {
-                return restore_node_after_failed_render_unit(
+                return restore_node_after_failure(
                     self.tree,
                     node_id,
                     node_runtime,
@@ -1213,7 +1341,7 @@ impl EngineResolveHost<'_> {
         let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(render_node) = node_runtime.render_node() else {
-                return restore_node_after_failed_render_unit(
+                return restore_node_after_failure(
                     self.tree,
                     node_id,
                     node_runtime,
@@ -1262,21 +1390,21 @@ impl EngineResolveHost<'_> {
         }
     }
 
-    fn render_node_control(
+    fn sample_node_visual_to_grid(
         &mut self,
-        product: ControlProduct,
-        request: &ControlRenderRequest,
-        target: ControlRenderTarget<'_>,
-    ) -> Result<ControlLayout, SessionResolveError> {
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        grid: &mut TextureHandle,
+    ) -> Result<(), SessionResolveError> {
         let node_id = product.node();
         let revision = current_revision();
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-                SessionResolveError::other(format!("control render: unknown node {node_id:?}"))
+                SessionResolveError::other(format!("sample visual grid: unknown node {node_id:?}"))
             })?;
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
-                call: NodeCallKey::new(node_id, NodeCall::Control { product }),
+                call: NodeCallKey::new(node_id, NodeCall::Visual { product }),
             };
             let stolen = core::mem::replace(
                 &mut entry.state,
@@ -1297,7 +1425,7 @@ impl EngineResolveHost<'_> {
                 other => {
                     entry.state = WithRevision::new(old_changed_at, other);
                     return Err(SessionResolveError::other(format!(
-                        "control render: node {node_id:?} not alive"
+                        "sample visual grid: node {node_id:?} not alive"
                     )));
                 }
             }
@@ -1305,40 +1433,41 @@ impl EngineResolveHost<'_> {
 
         let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
-            let Some(control_node) = node_runtime.control_node() else {
-                return restore_node_after_failed_control(
+            let Some(render_node) = node_runtime.render_node() else {
+                return restore_node_after_failure(
                     self.tree,
                     node_id,
                     node_runtime,
                     revision,
                     SessionResolveError::other(format!(
-                        "node {node_id:?} cannot render control product output {}: NodeRuntime::control_node() returned None",
+                        "node {node_id:?} cannot grid-sample visual product output {}: NodeRuntime::render_node() returned None",
                         product.output()
                     )),
                 );
             };
-            let mut ctx = ControlRenderContext::new(
+            let mut ctx = RenderContext::with_services(
                 node_id,
                 revision,
                 self.graphics.clone(),
+                self.time_provider.clone(),
                 self.frame_time_seconds,
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                control_node.render_control(product, request, target, &mut ctx)
+                render_node.sample_visual_to_grid(product, request, grid, &mut ctx)
             })
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-            SessionResolveError::other(format!("control render: unknown node {node_id:?}"))
+            SessionResolveError::other(format!("sample visual grid: unknown node {node_id:?}"))
         })?;
         let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
-            Ok(layout) => {
+            Ok(()) => {
                 set_entry_status_if_changed(entry, runtime_status, revision);
-                Ok(layout)
+                Ok(())
             }
             Err(e) => {
                 let message = e.to_string();
@@ -1348,10 +1477,21 @@ impl EngineResolveHost<'_> {
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
-                    "control render: {message}"
+                    "sample visual grid: {message}"
                 )))
             }
         }
+    }
+
+    fn render_node_control(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+    ) -> Result<ControlLayout, SessionResolveError> {
+        self.with_control_node(product, "control render", |control_node, ctx| {
+            control_node.render_control(product, request, target, ctx)
+        })
     }
 
     fn render_node_control_probe(
@@ -1361,13 +1501,57 @@ impl EngineResolveHost<'_> {
         target: ControlRenderTarget<'_>,
         display_layout: ControlDisplayLayoutRead,
     ) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
+        self.with_control_node(product, "control product probe", |control_node, ctx| {
+            let sample_layout = control_node.render_control(product, request, target, ctx)?;
+            let display_layout =
+                control_display_layout_result(control_node, product, display_layout, ctx)?;
+            Ok((sample_layout, display_layout))
+        })
+    }
+
+    fn render_node_control_preview_spec(
+        &mut self,
+        product: ControlProduct,
+    ) -> Result<ControlPreviewSpec, SessionResolveError> {
+        let spec =
+            self.with_control_node(product, "fixture preview resolve", |control_node, ctx| {
+                control_node.control_preview_spec(product, ctx)
+            })?;
+        spec.ok_or_else(|| {
+            SessionResolveError::other(format!(
+                "control product on node {:?} does not expose a resident fixture preview",
+                product.node()
+            ))
+        })
+    }
+
+    fn render_node_control_preview_grid(
+        &mut self,
+        product: ControlProduct,
+        grid: &mut TextureHandle,
+    ) -> Result<(), SessionResolveError> {
+        self.with_control_node(product, "fixture preview grid", |control_node, ctx| {
+            control_node.render_control_preview_grid(product, grid, ctx)
+        })
+    }
+
+    /// Run `f` against `product`'s owning [`crate::node::ControlNode`] with
+    /// the standard steal/execute/restore dance (executing marker, panic
+    /// frame, status updates). `label` prefixes error messages.
+    fn with_control_node<T>(
+        &mut self,
+        product: ControlProduct,
+        label: &str,
+        f: impl FnOnce(
+            &mut dyn crate::node::ControlNode,
+            &mut ControlRenderContext<'_>,
+        ) -> Result<T, NodeError>,
+    ) -> Result<T, SessionResolveError> {
         let node_id = product.node();
         let revision = current_revision();
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-                SessionResolveError::other(format!(
-                    "control product probe: unknown node {node_id:?}"
-                ))
+                SessionResolveError::other(format!("{label}: unknown node {node_id:?}"))
             })?;
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
@@ -1392,7 +1576,7 @@ impl EngineResolveHost<'_> {
                 other => {
                     entry.state = WithRevision::new(old_changed_at, other);
                     return Err(SessionResolveError::other(format!(
-                        "control product probe: node {node_id:?} not alive"
+                        "{label}: node {node_id:?} not alive"
                     )));
                 }
             }
@@ -1401,7 +1585,7 @@ impl EngineResolveHost<'_> {
         let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(control_node) = node_runtime.control_node() else {
-                return restore_node_after_failed_control_probe(
+                return restore_node_after_failure(
                     self.tree,
                     node_id,
                     node_runtime,
@@ -1420,24 +1604,20 @@ impl EngineResolveHost<'_> {
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                let sample_layout =
-                    control_node.render_control(product, request, target, &mut ctx)?;
-                let display_layout =
-                    control_display_layout_result(control_node, product, display_layout, &mut ctx)?;
-                Ok((sample_layout, display_layout))
+                f(control_node, &mut ctx)
             })
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-            SessionResolveError::other(format!("control product probe: unknown node {node_id:?}"))
+            SessionResolveError::other(format!("{label}: unknown node {node_id:?}"))
         })?;
         let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
-            Ok(probe) => {
+            Ok(value) => {
                 set_entry_status_if_changed(entry, runtime_status, revision);
-                Ok(probe)
+                Ok(value)
             }
             Err(e) => {
                 let message = e.to_string();
@@ -1446,9 +1626,7 @@ impl EngineResolveHost<'_> {
                     NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
-                Err(SessionResolveError::other(format!(
-                    "control product probe: {message}"
-                )))
+                Err(SessionResolveError::other(format!("{label}: {message}")))
             }
         }
     }
@@ -1587,6 +1765,16 @@ impl ControlRenderServices for EngineResolveHost<'_> {
         self.sample_node_visual_into(product, request, target)
             .map_err(|e| NodeError::msg(format!("sample visual: {e}")))
     }
+
+    fn sample_visual_to_grid(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        grid: &mut TextureHandle,
+    ) -> Result<(), NodeError> {
+        self.sample_node_visual_to_grid(product, request, grid)
+            .map_err(|e| NodeError::msg(format!("sample visual grid: {e}")))
+    }
 }
 
 impl VisualRenderServices for EngineResolveHost<'_> {
@@ -1620,13 +1808,15 @@ impl VisualRenderServices for EngineResolveHost<'_> {
     }
 }
 
-fn restore_node_after_failed_render(
+/// Put a stolen runtime back into the tree and propagate `err` (shared by
+/// every steal/execute/restore render path).
+fn restore_node_after_failure<T>(
     tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     node_id: NodeId,
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,
     err: SessionResolveError,
-) -> Result<TextureRenderProduct, SessionResolveError> {
+) -> Result<T, SessionResolveError> {
     if let Some(entry) = tree.get_mut(node_id) {
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
     }
@@ -1654,45 +1844,6 @@ fn set_entry_status_if_changed<N>(
 
 fn runtime_status_or_ok(node: &dyn NodeRuntime) -> NodeRuntimeStatus {
     node.runtime_status().unwrap_or(NodeRuntimeStatus::Ok)
-}
-
-fn restore_node_after_failed_render_unit(
-    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
-    node_id: NodeId,
-    node_runtime: Box<dyn NodeRuntime>,
-    revision: Revision,
-    err: SessionResolveError,
-) -> Result<(), SessionResolveError> {
-    if let Some(entry) = tree.get_mut(node_id) {
-        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
-    }
-    Err(err)
-}
-
-fn restore_node_after_failed_control(
-    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
-    node_id: NodeId,
-    node_runtime: Box<dyn NodeRuntime>,
-    revision: Revision,
-    err: SessionResolveError,
-) -> Result<ControlLayout, SessionResolveError> {
-    if let Some(entry) = tree.get_mut(node_id) {
-        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
-    }
-    Err(err)
-}
-
-fn restore_node_after_failed_control_probe(
-    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
-    node_id: NodeId,
-    node_runtime: Box<dyn NodeRuntime>,
-    revision: Revision,
-    err: SessionResolveError,
-) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
-    if let Some(entry) = tree.get_mut(node_id) {
-        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
-    }
-    Err(err)
 }
 
 fn consume_tree_node(

@@ -55,7 +55,7 @@ pub use compute_shader::LpComputeShader;
 pub use gfx_error::GfxError;
 pub use graphics::LpGraphics;
 pub use handle_allocator::{HandleAllocator, HandleBacking};
-pub use led_splat::{LedSplatInstance, LedSplatParams};
+pub use led_splat::{LedSplatInstance, LedSplatParams, LedSplatRasterParams, rasterize_led_splats};
 pub use lp_shader::{ShaderFuelTrap, ShaderFuelTrapEntry};
 pub use sample_out_handle::SampleOutHandle;
 pub use sample_points_handle::SamplePointsHandle;

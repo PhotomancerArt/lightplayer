@@ -38,6 +38,7 @@ const SPLAT_WGSL: &str = "
 struct SplatUniforms {
     view_proj: mat4x4<f32>,
     radius_scale: f32,
+    color_scale: f32,
 }
 
 @group(0) @binding(0) var grid_tex: texture_2d<f32>;
@@ -78,7 +79,9 @@ fn vs_main(
     var out: VsOut;
     out.position = splat.view_proj * vec4<f32>(center + offset, 1.0);
     out.local = corner;
-    out.color = textureLoad(grid_tex, texel, 0);
+    // Display-brightness uniform: scales the fetched RGB, never alpha.
+    let fetched = textureLoad(grid_tex, texel, 0);
+    out.color = vec4<f32>(fetched.rgb * splat.color_scale, fetched.a);
     return out;
 }
 
@@ -119,7 +122,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 /// `grid_index: u32`.
 const INSTANCE_STRIDE: u64 = 20;
 
-/// Byte size of the WGSL `SplatUniforms` struct (`mat4x4<f32>` + `f32`,
+/// Byte size of the WGSL `SplatUniforms` struct (`mat4x4<f32>` + 2 × `f32`,
 /// rounded up to the struct's 16-byte alignment).
 const UNIFORM_SIZE: u64 = 80;
 
@@ -374,6 +377,7 @@ pub(crate) fn splat_leds_gpu(
         }
     }
     uniform_bytes.extend_from_slice(&params.radius_scale.to_le_bytes());
+    uniform_bytes.extend_from_slice(&params.color_scale.to_le_bytes());
     uniform_bytes.resize(UNIFORM_SIZE as usize, 0);
     let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lp-gfx-wgpu led splat uniforms"),
@@ -528,6 +532,7 @@ mod tests {
         let params = LedSplatParams {
             view_proj: ortho_fit([0.0, 0.0], [1.0, 1.0]),
             radius_scale: 1.0,
+            color_scale: 1.0,
             clear_color: [0.0, 0.0, 0.0, 0.0],
         };
         graphics
@@ -560,6 +565,7 @@ mod tests {
         let params = LedSplatParams {
             view_proj: ortho_fit([0.0, 0.0], [1.0, 1.0]),
             radius_scale: 1.0,
+            color_scale: 1.0,
             clear_color: [0.0, 0.0, 0.0, 0.0],
         };
         let instance = LedSplatInstance {
@@ -596,6 +602,7 @@ mod tests {
         let params = LedSplatParams {
             view_proj: ortho_fit([0.0, 0.0], [1.0, 1.0]),
             radius_scale: 1.0,
+            color_scale: 1.0,
             clear_color: [0.1, 0.2, 0.3, 0.4],
         };
         graphics
@@ -630,6 +637,7 @@ mod tests {
             let params = LedSplatParams {
                 view_proj: ortho_fit([0.0, 0.0], [1.0, 1.0]),
                 radius_scale,
+                color_scale: 1.0,
                 clear_color: [0.0, 0.0, 0.0, 0.0],
             };
             graphics
@@ -657,6 +665,7 @@ mod tests {
         let params = LedSplatParams {
             view_proj: ortho_fit([0.0, 0.0], [1.0, 1.0]),
             radius_scale: 1.0,
+            color_scale: 1.0,
             clear_color: [0.0; 4],
         };
         match graphics.splat_leds(&grid, &instances, &params, &mut target) {
@@ -706,6 +715,7 @@ mod tests {
         let params = LedSplatParams {
             view_proj: ortho_fit([0.0, 0.0], [1.0, 1.0]),
             radius_scale: 1.0,
+            color_scale: 1.0,
             clear_color: [0.0; 4],
         };
         graphics
@@ -722,6 +732,124 @@ mod tests {
                 "lane {lane}: got {got}, want {want}"
             );
         }
+    }
+
+    #[test]
+    fn color_scale_multiplies_rgb_but_not_alpha() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let grid = grid_texture(&graphics, &[40000, 20000, 10000, 60000]);
+        let mut target = graphics.create_render_target(8, 8).expect("target");
+        let instances = [LedSplatInstance {
+            position: [0.5, 0.5, 0.0],
+            radius: 0.5,
+            grid_index: 0,
+        }];
+        let params = LedSplatParams {
+            view_proj: ortho_fit([0.0, 0.0], [1.0, 1.0]),
+            radius_scale: 1.0,
+            color_scale: 0.5,
+            clear_color: [0.0; 4],
+        };
+        graphics
+            .splat_leds(&grid, &instances, &params, &mut target)
+            .expect("splat");
+        let center = pixel(&read_channels(&graphics, &target), 8, 4, 4);
+        for (lane, (&got, want)) in center
+            .iter()
+            .zip([20000u16, 10000, 5000, 60000])
+            .enumerate()
+        {
+            assert!(
+                got.abs_diff(want) <= TOLERANCE,
+                "lane {lane}: got {got}, want {want}"
+            );
+        }
+    }
+
+    /// D2 tier parity: the CPU reference rasterizer
+    /// (`lp_gfx::rasterize_led_splats`) and the GPU op must produce the same
+    /// image for the same layout — overlaps, falloff edges, clear color,
+    /// radius and color scaling included — within the f16-accumulation
+    /// tolerance.
+    #[test]
+    fn cpu_rasterizer_matches_the_gpu_splat() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let grid_channels: [u16; 12] = [
+            50000, 10000, 5000, 65535, // warm red-ish
+            2000, 45000, 30000, 65535, // teal
+            20000, 20000, 60000, 40000, // blue, partial alpha
+        ];
+        let grid = grid_texture(&graphics, &grid_channels);
+        let instances = [
+            LedSplatInstance {
+                position: [0.3, 0.35, 0.0],
+                radius: 0.2,
+                grid_index: 0,
+            },
+            LedSplatInstance {
+                position: [0.45, 0.5, 0.0],
+                radius: 0.25,
+                grid_index: 1,
+            },
+            LedSplatInstance {
+                position: [0.7, 0.6, 1.5],
+                radius: 0.15,
+                grid_index: 2,
+            },
+        ];
+        let world_min = [0.0, 0.0];
+        let world_max = [1.0, 1.0];
+        let radius_scale = 1.25;
+        let color_scale = 0.75;
+        let clear_color = [0.02, 0.03, 0.04, 0.0];
+        let (width, height) = (48u32, 48u32);
+
+        let mut target = graphics
+            .create_render_target(width, height)
+            .expect("target");
+        let params = LedSplatParams {
+            view_proj: ortho_fit(world_min, world_max),
+            radius_scale,
+            color_scale,
+            clear_color,
+        };
+        graphics
+            .splat_leds(&grid, &instances, &params, &mut target)
+            .expect("splat");
+        let gpu = read_channels(&graphics, &target);
+
+        let cpu = lp_gfx::rasterize_led_splats(
+            &grid_channels,
+            &instances,
+            &lp_gfx::LedSplatRasterParams {
+                world_min,
+                world_max,
+                radius_scale,
+                color_scale,
+                clear_color,
+            },
+            width,
+            height,
+        )
+        .expect("cpu raster");
+
+        assert_eq!(gpu.len(), cpu.len());
+        for (index, (&g, &c)) in gpu.iter().zip(&cpu).enumerate() {
+            let diff = g.abs_diff(c);
+            assert!(
+                diff <= TOLERANCE,
+                "channel {index}: gpu {g} vs cpu {c} (diff {diff})"
+            );
+        }
+        // The comparison must be exercising real content, not two blank
+        // images: the CPU image must contain lit pixels above the clear.
+        assert!(cpu.iter().any(|&v| v > 20000), "cpu raster is blank");
     }
 
     fn test_graphics() -> Option<GpuGraphics> {
