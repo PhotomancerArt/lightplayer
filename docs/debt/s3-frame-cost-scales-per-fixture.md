@@ -68,6 +68,37 @@ nothing else helps, by measurement.
   resolution machinery (dataflow resolver + endpoint status) instead. The
   suspicious shapes: `clear_frame_cache` discarding all resolution work every
   tick, and endpoint status recomputed per frame per channel.
+- **2026-07-31** — **Resolver half addressed** (PR #243,
+  `docs/adr/2026-07-31-resolver-persistent-resolution.md`). Routes, binding
+  literals and authored-def reads now persist across frames and are dropped
+  on structural change instead of per tick. Measured on the 1-fixture
+  workload (`projects/test/quad-strips-1fix`, committed as the reproducible
+  oracle), steady render, esp32c6 cycle model:
+
+  | | Before | After |
+  |---|---|---|
+  | Total attributed cycles | 2,468,427 | 1,146,110 (−54%) |
+  | allocator + memcpy | 44.0% | 34.4% |
+  | `[jit] render` | 1.1% | 2.4% (same cycles) |
+
+  `QueryKey::eq`, `merge_policy_for_consumed_slot`,
+  `bindings_for_consumed_slot`, `slot_lookup` and `Vec<SlotPathSegment>::clone`
+  are gone from the top twenty.
+
+  The **4-fixture workload moved only −1.9%** (65,811,630 → 64,531,359),
+  because `HwRegistry::endpoint_status_for` is 46.7% of that profile and is
+  untouched by this work. The endpoint-status half is what now caps
+  multi-fixture fps.
+
+  Two smaller per-frame re-derivations surfaced while measuring, both the same
+  shape and neither addressed: the shader node re-reads its consumed-slot
+  *definitions* every frame through `format!`-built paths (now the largest
+  single allocation source in the 1-fixture profile), and a resolver cache hit
+  still clones a `ProductionSource` carrying a `SlotPath`.
+
+  ⚠️ Desk-S3 re-measurement is **still pending** — the board did not enumerate
+  for `espflash board-info` during the session (needs a physical replug). The
+  fps matrix in the table above has not been refreshed on silicon.
 
 **Exit criteria** — A profiled optimization pass that makes resolved bindings
 and endpoint status persist across frames (invalidate on tree/binding/
@@ -75,3 +106,12 @@ hardware change, not per tick), after which frame cost is dominated by actual
 rendering work and the profile's top self-cycle entries are no longer
 allocator/memcpy/string machinery. Re-measure the same quad-strips matrix on
 the desk S3 as the oracle.
+
+- [x] **Dataflow resolver** — done 2026-07-31, see the incident log above.
+- [ ] **`HwRegistry::endpoint_status_for`** — per-frame re-enumeration of
+      hardware endpoints with per-endpoint status recomputation and string
+      spec formatting. 46.7% of the 4-fixture profile; the remaining cap on
+      multi-fixture fps.
+- [ ] **Desk-S3 re-measurement** of the quad-strips matrix. Not done for the
+      resolver work (board unreachable); worth doing once both halves land,
+      rather than twice.
