@@ -14,6 +14,7 @@
   "purchase_urls": [
     { "label": "Seeed", "href": "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32S3-Plus-p-6361.html" }
   ],
+  "usb_bridge": "native-usb-jtag",
   "hw": {
     "width": 76,
     "module": { "x": 14, "y": 6, "w": 48, "h": 30, "label": "S3", "antenna": false },

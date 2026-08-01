@@ -339,6 +339,41 @@
           "type": "string"
         }
       ]
+    },
+    "UsbBridge": {
+      "description": "The USB-UART bridge (or native USB) a board's USB connector goes through.",
+      "oneOf": [
+        {
+          "const": "native-usb-jtag",
+          "description": "The SoC's own USB-Serial-JTAG peripheral (S3, C6). No bridge chip,\nno driver anywhere.",
+          "type": "string"
+        },
+        {
+          "const": "ch340g",
+          "description": "WCH CH340G — covered by Apple's built-in driver on modern macOS.",
+          "type": "string"
+        },
+        {
+          "const": "ch340c",
+          "description": "WCH CH340C — covered by Apple's built-in driver on modern macOS.",
+          "type": "string"
+        },
+        {
+          "const": "ch340k",
+          "description": "WCH CH340K — NOT covered by Apple's built-in driver (it matches only\n0x7523 and CH9102F); needs WCH's DriverKit extension on macOS.",
+          "type": "string"
+        },
+        {
+          "const": "ch9102f",
+          "description": "WCH CH9102F — covered by Apple's built-in driver on modern macOS.",
+          "type": "string"
+        },
+        {
+          "const": "cp2102",
+          "description": "Silicon Labs CP2102 — driverless on modern macOS.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$id": "https://lightplayer.dev/schemas/board-display.schema.json",
@@ -405,6 +440,17 @@
     },
     "tier": {
       "$ref": "#/$defs/SupportTier"
+    },
+    "usb_bridge": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UsbBridge"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The USB-UART bridge the board's USB connector goes through — drives\nper-OS driver warnings (plan decision D5). Set only when verified;\nomitted = unknown."
     }
   },
   "required": [

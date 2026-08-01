@@ -16,6 +16,7 @@ mod catalog;
 mod diagram;
 mod display_manifest;
 pub mod geometry;
+pub mod usb_bridge;
 
 pub use catalog::{DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id};
 #[cfg(feature = "diagram")]
@@ -25,3 +26,4 @@ pub use display_manifest::{
     DrawnRgb, DrawnTerminal, DrawnUsb, PinCap, PinRole, PurchaseUrl, SupportTier,
 };
 pub use geometry::{DiagramMode, DiagramOptions, PinSwatch, WiredConnection};
+pub use usb_bridge::{DriverGuidance, DriverNeedLevel, HostOs, UsbBridge};
