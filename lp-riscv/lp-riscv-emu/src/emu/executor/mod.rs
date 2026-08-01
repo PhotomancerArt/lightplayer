@@ -134,9 +134,7 @@ pub fn decode_execute<M: LoggingMode>(
         | float::OPCODE_MSUB
         | float::OPCODE_NMSUB
         | float::OPCODE_NMADD
-        | float::OPCODE_OP_FP => {
-            float::decode_execute_float::<M>(inst_word, pc, regs, _memory, fp)
-        }
+        | float::OPCODE_OP_FP => float::decode_execute_float::<M>(inst_word, pc, regs, _memory, fp),
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,

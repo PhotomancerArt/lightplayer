@@ -240,10 +240,10 @@ fn execute_fma_family<M: LoggingMode>(
     let c = fp.read_single(rs3);
 
     let (a, c) = match opcode {
-        OPCODE_MADD => (a, c),                     // ( a * b) + c
-        OPCODE_MSUB => (a, c ^ SIGN_BIT),          // ( a * b) - c
-        OPCODE_NMSUB => (a ^ SIGN_BIT, c),         // (-a * b) + c
-        _ => (a ^ SIGN_BIT, c ^ SIGN_BIT),         // (-a * b) - c   (OPCODE_NMADD)
+        OPCODE_MADD => (a, c),             // ( a * b) + c
+        OPCODE_MSUB => (a, c ^ SIGN_BIT),  // ( a * b) - c
+        OPCODE_NMSUB => (a ^ SIGN_BIT, c), // (-a * b) + c
+        _ => (a ^ SIGN_BIT, c ^ SIGN_BIT), // (-a * b) - c   (OPCODE_NMADD)
     };
 
     let (bits, flags) = f32_fma(a, b, c, rm);
@@ -316,9 +316,9 @@ fn execute_op_fp<M: LoggingMode>(
             let a = fp.read_single(rs1_field);
             let b = fp.read_single(rs2_field);
             let sign = match rm_field {
-                0b000 => b & SIGN_BIT,                       // FSGNJ.S
-                0b001 => !b & SIGN_BIT,                      // FSGNJN.S
-                0b010 => (a ^ b) & SIGN_BIT,                 // FSGNJX.S
+                0b000 => b & SIGN_BIT,       // FSGNJ.S
+                0b001 => !b & SIGN_BIT,      // FSGNJN.S
+                0b010 => (a ^ b) & SIGN_BIT, // FSGNJX.S
                 _ => {
                     return Err(invalid(
                         pc,
@@ -609,13 +609,7 @@ fn unpack(bits: u32) -> (bool, i32, u128) {
 /// Underflow follows the IEEE 754 default that §21.2 adopts: `UF` is raised
 /// when the result is tiny **after** rounding *and* inexact. A value that
 /// rounds up to the smallest normal is therefore not an underflow.
-fn round_pack(
-    sign: bool,
-    exp: i32,
-    sig: u128,
-    extra_sticky: bool,
-    rm: RoundingMode,
-) -> (u32, u8) {
+fn round_pack(sign: bool, exp: i32, sig: u128, extra_sticky: bool, rm: RoundingMode) -> (u32, u8) {
     let sign_bit = sign_bit_of(sign);
 
     if sig == 0 {
@@ -922,8 +916,7 @@ fn f32_fma(a: u32, b: u32, c: u32, rm: RoundingMode) -> (u32, u8) {
     // multiplicands are inf and zero, **even when the addend is a quiet NaN**.
     // IEEE 754-2008 §7.2 leaves that case implementation-defined; RISC-V pins
     // it, so the check goes ahead of the NaN check.
-    let product_invalid =
-        (is_inf(a) && is_zero(b)) || (is_zero(a) && is_inf(b));
+    let product_invalid = (is_inf(a) && is_zero(b)) || (is_zero(a) && is_inf(b));
     if product_invalid {
         return (CANONICAL_NAN, FFLAG_NV);
     }
@@ -1236,4 +1229,1174 @@ fn isqrt(n: u128) -> (u128, bool) {
         }
     }
     (root >> 1, remainder == 0)
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+    use alloc::vec;
+
+    use super::*;
+    use crate::emu::executor::{LoggingDisabled, decode_execute};
+    use crate::emu::fp_regs::FFLAGS_MASK;
+    use lp_emu_core::{DEFAULT_RAM_START, Memory};
+
+    const RNE: RoundingMode = RoundingMode::Rne;
+    const RTZ: RoundingMode = RoundingMode::Rtz;
+    const RDN: RoundingMode = RoundingMode::Rdn;
+    const RUP: RoundingMode = RoundingMode::Rup;
+    const RMM: RoundingMode = RoundingMode::Rmm;
+    const ALL_MODES: [RoundingMode; 5] = [RNE, RTZ, RDN, RUP, RMM];
+
+    const ONE: u32 = 0x3f80_0000;
+    const NEG_ONE: u32 = 0xbf80_0000;
+    const TWO: u32 = 0x4000_0000;
+    const THREE: u32 = 0x4040_0000;
+    const NINE: u32 = 0x4110_0000;
+    const NEG_ZERO: u32 = 0x8000_0000;
+    const NEG_INF: u32 = 0xff80_0000;
+    /// A quiet NaN carrying a payload, to prove payloads are not propagated.
+    const QNAN_PAYLOAD: u32 = 0x7fc0_1234;
+    /// A signaling NaN (quiet bit clear, nonzero significand).
+    const SNAN: u32 = 0x7f80_0001;
+    /// `2^-23`, one ulp of 1.0.
+    const ULP_OF_ONE: u32 = 0x3400_0000;
+    /// `2^-24`, exactly half an ulp of 1.0 — the tie case.
+    const HALF_ULP_OF_ONE: u32 = 0x3380_0000;
+    /// The smallest positive subnormal, `2^-149`.
+    const MIN_SUBNORMAL: u32 = 0x0000_0001;
+    /// The largest subnormal, `2^-126 - 2^-149`.
+    const MAX_SUBNORMAL: u32 = 0x007f_ffff;
+    /// The smallest positive normal, `2^-126`.
+    const MIN_NORMAL: u32 = 0x0080_0000;
+
+    // -- arithmetic ---------------------------------------------------------
+
+    /// Every `+ - * /` result agrees, bit for bit, with the host FPU's
+    /// correctly-rounded binary32. The host is a legitimate oracle for RNE:
+    /// IEEE 754 pins these four operations exactly, so any disagreement is a
+    /// bug in the soft-float path. NaN results are excluded — that is the one
+    /// place RISC-V deliberately differs from the host.
+    #[test]
+    fn arithmetic_matches_the_host_fpu_bit_for_bit() {
+        let values: [f32; 22] = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            0.5,
+            2.0,
+            3.0,
+            0.1,
+            0.2,
+            0.3,
+            1e-5,
+            1e5,
+            1e20,
+            1e-20,
+            1e38,
+            1e-38,
+            f32::MIN_POSITIVE,
+            16_777_216.0,
+            8_388_609.0,
+            123.456,
+            -987.654,
+            -7.5,
+        ];
+        let subnormals = [
+            f32::from_bits(MIN_SUBNORMAL),
+            f32::from_bits(0x0040_0000),
+            f32::from_bits(0x0000_ffff),
+        ];
+
+        for a in values.iter().chain(subnormals.iter()).copied() {
+            for b in values.iter().chain(subnormals.iter()).copied() {
+                let (ab, bb) = (a.to_bits(), b.to_bits());
+                let cases = [
+                    ("add", f32_add(ab, bb, RNE).0, a + b),
+                    ("sub", f32_add(ab, bb ^ SIGN_BIT, RNE).0, a - b),
+                    ("mul", f32_mul(ab, bb, RNE).0, a * b),
+                    ("div", f32_div(ab, bb, RNE).0, a / b),
+                ];
+                for (name, got, want) in cases {
+                    if want.is_nan() {
+                        // The host picks its own NaN sign and payload; RISC-V
+                        // pins the canonical NaN instead.
+                        assert_eq!(
+                            got, CANONICAL_NAN,
+                            "{name}({a}, {b}) should be the canonical NaN"
+                        );
+                        continue;
+                    }
+                    assert_eq!(
+                        got,
+                        want.to_bits(),
+                        "{name}({a}, {b}): got {got:#010x}, host {:#010x}",
+                        want.to_bits()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Exact halves and the `0.1 + 0.2` identity, asserted on bit patterns.
+    #[test]
+    fn exact_and_representative_sums_have_the_expected_bit_patterns() {
+        assert_eq!(f32_add(0x3f00_0000, 0x3f00_0000, RNE), (ONE, 0)); // 0.5 + 0.5
+        assert_eq!(f32_add(ONE, ONE, RNE), (TWO, 0));
+        assert_eq!(f32_mul(THREE, 0x40a0_0000, RNE), (0x4170_0000, 0)); // 3 * 5
+        assert_eq!(f32_add(THREE, 0x40a0_0000, RNE), (0x4100_0000, 0)); // 3 + 5
+        // 0.1f32 + 0.2f32 is inexact and must report NX.
+        let (bits, flags) = f32_add(0.1f32.to_bits(), 0.2f32.to_bits(), RNE);
+        assert_eq!(bits, (0.1f32 + 0.2f32).to_bits());
+        assert_eq!(flags, FFLAG_NX);
+    }
+
+    #[test]
+    fn adding_half_an_ulp_ties_to_even() {
+        // 1.0 + 2^-24 is exactly halfway between 1.0 and 1.0 + 2^-23.
+        // RNE breaks the tie toward the even significand, which is 1.0.
+        assert_eq!(f32_add(ONE, HALF_ULP_OF_ONE, RNE), (ONE, FFLAG_NX));
+        // From an odd significand, the same tie goes the other way.
+        assert_eq!(
+            f32_add(0x3f80_0001, HALF_ULP_OF_ONE, RNE),
+            (0x3f80_0002, FFLAG_NX)
+        );
+        // One whole ulp is exact.
+        assert_eq!(f32_add(ONE, ULP_OF_ONE, RNE), (0x3f80_0001, 0));
+    }
+
+    #[test]
+    fn subnormals_are_preserved_not_flushed() {
+        // §21.4: full IEEE subnormal arithmetic. Contrast with the
+        // target-defined FTZ latitude in docs/design/float.md §4, which is
+        // about the shader tier and not about this emulator.
+        assert_eq!(f32_add(MIN_SUBNORMAL, MIN_SUBNORMAL, RNE), (0x0000_0002, 0));
+        // Halving the smallest normal lands exactly on a subnormal: exact, so
+        // no underflow flag despite being tiny.
+        assert_eq!(f32_div(MIN_NORMAL, TWO, RNE), (0x0040_0000, 0));
+        // A subnormal operand keeps its full value in a product.
+        assert_eq!(f32_mul(MIN_SUBNORMAL, TWO, RNE), (0x0000_0002, 0));
+        // And the largest subnormal plus one ulp is exactly the smallest normal.
+        assert_eq!(f32_add(MAX_SUBNORMAL, MIN_SUBNORMAL, RNE), (MIN_NORMAL, 0));
+    }
+
+    #[test]
+    fn gradual_underflow_sets_uf_and_nx() {
+        // 2^-150 is exactly halfway between 0 and the smallest subnormal.
+        assert_eq!(
+            f32_div(MIN_SUBNORMAL, TWO, RNE),
+            (0, FFLAG_UF | FFLAG_NX),
+            "ties-to-even rounds down to zero"
+        );
+        assert_eq!(
+            f32_div(MIN_SUBNORMAL, TWO, RUP),
+            (MIN_SUBNORMAL, FFLAG_UF | FFLAG_NX)
+        );
+        assert_eq!(
+            f32_div(MIN_SUBNORMAL, TWO, RMM),
+            (MIN_SUBNORMAL, FFLAG_UF | FFLAG_NX)
+        );
+        assert_eq!(f32_div(MIN_SUBNORMAL, TWO, RTZ), (0, FFLAG_UF | FFLAG_NX));
+        // A negative tiny result under RDN rounds away from zero.
+        assert_eq!(
+            f32_div(MIN_SUBNORMAL | SIGN_BIT, TWO, RDN),
+            (MIN_SUBNORMAL | SIGN_BIT, FFLAG_UF | FFLAG_NX)
+        );
+    }
+
+    #[test]
+    fn tininess_is_detected_after_rounding() {
+        // largest_subnormal + 2^-150 is exactly halfway between the largest
+        // subnormal and the smallest normal. Ties-to-even reaches the normal,
+        // which is *not* tiny — so NX without UF. Truncating stays subnormal,
+        // which is tiny and inexact — NX *and* UF. The half-ulp addend is only
+        // expressible as an exact fused product.
+        let (a, b) = (MIN_SUBNORMAL, 0x3f00_0000); // 2^-149 * 0.5
+        assert_eq!(f32_fma(a, b, MAX_SUBNORMAL, RNE), (MIN_NORMAL, FFLAG_NX));
+        assert_eq!(
+            f32_fma(a, b, MAX_SUBNORMAL, RTZ),
+            (MAX_SUBNORMAL, FFLAG_UF | FFLAG_NX)
+        );
+    }
+
+    #[test]
+    fn overflow_saturates_per_rounding_mode() {
+        let expected = [
+            (RNE, POS_INF),
+            (RTZ, MAX_FINITE),
+            (RDN, MAX_FINITE),
+            (RUP, POS_INF),
+            (RMM, POS_INF),
+        ];
+        for (rm, want) in expected {
+            assert_eq!(
+                f32_add(MAX_FINITE, MAX_FINITE, rm),
+                (want, FFLAG_OF | FFLAG_NX),
+                "positive overflow under {rm:?}"
+            );
+        }
+        let expected_negative = [
+            (RNE, NEG_INF),
+            (RTZ, MAX_FINITE | SIGN_BIT),
+            (RDN, NEG_INF),
+            (RUP, MAX_FINITE | SIGN_BIT),
+            (RMM, NEG_INF),
+        ];
+        for (rm, want) in expected_negative {
+            assert_eq!(
+                f32_add(MAX_FINITE | SIGN_BIT, MAX_FINITE | SIGN_BIT, rm),
+                (want, FFLAG_OF | FFLAG_NX),
+                "negative overflow under {rm:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn divide_by_zero_sets_dz_not_nv() {
+        assert_eq!(f32_div(ONE, 0, RNE), (POS_INF, FFLAG_DZ));
+        assert_eq!(f32_div(NEG_ONE, 0, RNE), (NEG_INF, FFLAG_DZ));
+        assert_eq!(f32_div(ONE, NEG_ZERO, RNE), (NEG_INF, FFLAG_DZ));
+        assert_eq!(f32_div(NEG_ONE, NEG_ZERO, RNE), (POS_INF, FFLAG_DZ));
+        // 0/0 is invalid, not a divide by zero.
+        assert_eq!(f32_div(0, 0, RNE), (CANONICAL_NAN, FFLAG_NV));
+    }
+
+    // -- rounding modes -----------------------------------------------------
+
+    #[test]
+    fn every_rounding_mode_is_distinguished() {
+        // A positive inexact quotient: 1/3. Down = 0x3eaaaaaa, up = 0x3eaaaaab.
+        let positive = [
+            (RNE, 0x3eaa_aaab),
+            (RTZ, 0x3eaa_aaaa),
+            (RDN, 0x3eaa_aaaa),
+            (RUP, 0x3eaa_aaab),
+            (RMM, 0x3eaa_aaab),
+        ];
+        for (rm, want) in positive {
+            assert_eq!(
+                f32_div(ONE, THREE, rm),
+                (want, FFLAG_NX),
+                "1/3 under {rm:?}"
+            );
+        }
+        // The same magnitude, negated: RDN and RUP swap, RTZ still truncates.
+        let negative = [
+            (RNE, 0xbeaa_aaab),
+            (RTZ, 0xbeaa_aaaa),
+            (RDN, 0xbeaa_aaab),
+            (RUP, 0xbeaa_aaaa),
+            (RMM, 0xbeaa_aaab),
+        ];
+        for (rm, want) in negative {
+            assert_eq!(
+                f32_div(NEG_ONE, THREE, rm),
+                (want, FFLAG_NX),
+                "-1/3 under {rm:?}"
+            );
+        }
+        // An exact tie separates RNE (to even) from RMM (away from zero),
+        // which no non-tie case can.
+        let tie = [
+            (RNE, ONE),
+            (RTZ, ONE),
+            (RDN, ONE),
+            (RUP, 0x3f80_0001),
+            (RMM, 0x3f80_0001),
+        ];
+        for (rm, want) in tie {
+            assert_eq!(
+                f32_add(ONE, HALF_ULP_OF_ONE, rm),
+                (want, FFLAG_NX),
+                "1 + 2^-24 under {rm:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reserved_rounding_mode_encodings_are_rejected() {
+        for rm in [0b101u8, 0b110] {
+            assert_eq!(RoundingMode::resolve(rm, 0), None);
+        }
+        // DYN against an invalid frm.
+        for frm in [0b101u8, 0b110, 0b111] {
+            assert_eq!(RoundingMode::resolve(0b111, frm), None);
+        }
+    }
+
+    // -- NaN handling -------------------------------------------------------
+
+    #[test]
+    fn every_nan_producing_operation_yields_the_canonical_nan() {
+        // From non-NaN operands.
+        assert_eq!(f32_add(POS_INF, NEG_INF, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(
+            f32_add(POS_INF, POS_INF ^ SIGN_BIT, RNE),
+            (CANONICAL_NAN, FFLAG_NV)
+        );
+        assert_eq!(f32_mul(0, POS_INF, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_mul(NEG_ZERO, NEG_INF, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_div(0, 0, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_div(POS_INF, POS_INF, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_sqrt(NEG_ONE, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_sqrt(NEG_INF, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_fma(POS_INF, 0, ONE, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(
+            f32_fma(TWO, POS_INF, NEG_INF, RNE),
+            (CANONICAL_NAN, FFLAG_NV)
+        );
+    }
+
+    #[test]
+    fn nan_payloads_are_never_propagated() {
+        // §21.3: RISC-V returns the canonical NaN; it does not forward the
+        // operand's payload the way IEEE 754 recommends.
+        for (bits, _) in [
+            f32_add(ONE, QNAN_PAYLOAD, RNE),
+            f32_add(QNAN_PAYLOAD, ONE, RNE),
+            f32_mul(QNAN_PAYLOAD, TWO, RNE),
+            f32_div(QNAN_PAYLOAD, TWO, RNE),
+            f32_sqrt(QNAN_PAYLOAD, RNE),
+            f32_fma(QNAN_PAYLOAD, ONE, ONE, RNE),
+        ] {
+            assert_eq!(bits, CANONICAL_NAN);
+        }
+        // A quiet NaN operand alone does not set any flag.
+        assert_eq!(f32_add(ONE, QNAN_PAYLOAD, RNE).1, 0);
+        // Not even a *negative* quiet NaN keeps its sign.
+        assert_eq!(f32_add(ONE, QNAN_PAYLOAD | SIGN_BIT, RNE).0, CANONICAL_NAN);
+    }
+
+    #[test]
+    fn signaling_nan_operands_set_nv() {
+        assert_eq!(f32_add(ONE, SNAN, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_mul(SNAN, ONE, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_div(SNAN, ONE, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_sqrt(SNAN, RNE), (CANONICAL_NAN, FFLAG_NV));
+        assert_eq!(f32_fma(ONE, ONE, SNAN, RNE), (CANONICAL_NAN, FFLAG_NV));
+        // A negative signaling NaN is still signaling.
+        assert_eq!(
+            f32_add(ONE, SNAN | SIGN_BIT, RNE),
+            (CANONICAL_NAN, FFLAG_NV)
+        );
+    }
+
+    #[test]
+    fn infinities_pass_through_arithmetic() {
+        assert_eq!(f32_add(POS_INF, ONE, RNE), (POS_INF, 0));
+        assert_eq!(f32_add(NEG_INF, ONE, RNE), (NEG_INF, 0));
+        assert_eq!(f32_mul(POS_INF, NEG_ONE, RNE), (NEG_INF, 0));
+        assert_eq!(f32_div(ONE, POS_INF, RNE), (0, 0));
+        assert_eq!(f32_div(NEG_ONE, POS_INF, RNE), (NEG_ZERO, 0));
+        assert_eq!(f32_sqrt(POS_INF, RNE), (POS_INF, 0));
+    }
+
+    // -- zeros --------------------------------------------------------------
+
+    #[test]
+    fn zero_signs_follow_ieee_and_the_rounding_mode() {
+        // IEEE 754-2008 §6.3: exact cancellation is +0 except under RDN.
+        assert_eq!(f32_add(ONE, NEG_ONE, RNE), (0, 0));
+        assert_eq!(f32_add(ONE, NEG_ONE, RDN), (NEG_ZERO, 0));
+        assert_eq!(f32_add(0, NEG_ZERO, RNE), (0, 0));
+        assert_eq!(f32_add(0, NEG_ZERO, RDN), (NEG_ZERO, 0));
+        assert_eq!(f32_add(NEG_ZERO, NEG_ZERO, RNE), (NEG_ZERO, 0));
+        assert_eq!(f32_add(0, 0, RNE), (0, 0));
+        // Signed zero survives multiplication.
+        assert_eq!(f32_mul(NEG_ONE, 0, RNE), (NEG_ZERO, 0));
+        assert_eq!(f32_mul(NEG_ONE, NEG_ZERO, RNE), (0, 0));
+        // sqrt(-0) is -0 (IEEE 754 §5.4.1) — the one negative input that is
+        // not an invalid operation.
+        assert_eq!(f32_sqrt(NEG_ZERO, RNE), (NEG_ZERO, 0));
+        assert_eq!(f32_sqrt(0, RNE), (0, 0));
+    }
+
+    // -- FSQRT --------------------------------------------------------------
+
+    #[test]
+    fn sqrt_is_exact_on_perfect_squares() {
+        for (input, want) in [
+            (ONE, ONE),
+            (0x4080_0000, TWO),         // sqrt(4) = 2
+            (NINE, THREE),              // sqrt(9) = 3
+            (0x3e80_0000, 0x3f00_0000), // sqrt(0.25) = 0.5
+            (0x4b80_0000, 0x4580_0000), // sqrt(2^24) = 2^12
+        ] {
+            assert_eq!(f32_sqrt(input, RNE), (want, 0), "sqrt({input:#010x})");
+        }
+    }
+
+    #[test]
+    fn sqrt_is_correctly_rounded() {
+        for value in [
+            2.0f32, 3.0, 5.0, 10.0, 0.1, 0.3, 1e-20, 1e20, 1.5, 123.456, 1e-38,
+        ] {
+            let (bits, flags) = f32_sqrt(value.to_bits(), RNE);
+            assert_eq!(
+                bits,
+                reference_sqrt(value).to_bits(),
+                "sqrt({value}) got {bits:#010x}"
+            );
+            // None of these are perfect squares, so all are inexact.
+            assert_eq!(flags, FFLAG_NX, "sqrt({value}) flags");
+        }
+        // The classic constant, pinned by literal.
+        assert_eq!(f32_sqrt(TWO, RNE).0, 0x3fb5_04f3);
+    }
+
+    #[test]
+    fn sqrt_honours_the_rounding_mode() {
+        let down = f32_sqrt(TWO, RTZ).0;
+        let up = f32_sqrt(TWO, RUP).0;
+        assert_eq!(up, down + 1, "RTZ and RUP must straddle the exact root");
+        assert_eq!(f32_sqrt(TWO, RDN).0, down);
+        let nearest = f32_sqrt(TWO, RNE).0;
+        assert!(nearest == down || nearest == up);
+        // Perfect squares are unaffected by the mode.
+        for rm in ALL_MODES {
+            assert_eq!(f32_sqrt(NINE, rm), (THREE, 0), "sqrt(9) under {rm:?}");
+        }
+    }
+
+    // -- fused multiply-add -------------------------------------------------
+
+    #[test]
+    fn fma_differs_from_an_unfused_multiply_then_add() {
+        // a*b is just below the midpoint between 1.0 and 1.0 + 2^-23, so an
+        // unfused multiply rounds it to exactly 1.0 and the subsequent add
+        // cancels to zero. Fused, the product keeps its low bits and the sum
+        // is a small nonzero number — exactly representable, so no flags.
+        let a = 0x3f80_0001; // 1 + 2^-23
+        let b = 0x3f7f_ffff; // 1 - 2^-24
+        let c = NEG_ONE;
+
+        let unfused_product = f32_mul(a, b, RNE);
+        assert_eq!(unfused_product, (ONE, FFLAG_NX));
+        assert_eq!(f32_add(unfused_product.0, c, RNE), (0, 0));
+
+        assert_eq!(f32_fma(a, b, c, RNE), (0x337f_fffe, 0));
+    }
+
+    #[test]
+    fn fma_rounds_exactly_once() {
+        // 1*1 + 2^-24 is an exact tie, so the single rounding is observable:
+        // ties-to-even keeps 1.0 while round-up reaches the next float.
+        assert_eq!(f32_fma(ONE, ONE, HALF_ULP_OF_ONE, RNE), (ONE, FFLAG_NX));
+        assert_eq!(
+            f32_fma(ONE, ONE, HALF_ULP_OF_ONE, RUP),
+            (0x3f80_0001, FFLAG_NX)
+        );
+        // Exactly representable results agree with a straightforward f64
+        // evaluation, which does no rounding at all for these inputs.
+        for (a, b, c) in [
+            (1.5f32, 2.25f32, 0.75f32),
+            (-3.5, 7.25, 100.0),
+            (2.0, 4.0, -0.5),
+        ] {
+            let (bits, flags) = f32_fma(a.to_bits(), b.to_bits(), c.to_bits(), RNE);
+            let want = ((a as f64) * (b as f64) + (c as f64)) as f32;
+            assert_eq!(bits, want.to_bits(), "fma({a}, {b}, {c})");
+            assert_eq!(flags, 0, "fma({a}, {b}, {c}) is exact");
+        }
+    }
+
+    #[test]
+    fn fma_family_sign_conventions() {
+        // §21.6 spells the four out separately; FNMADD.S is -(a*b) - c, which
+        // is not the same as -(a*b + c) when the result is an exact zero.
+        let (a, b, c) = (TWO, THREE, NINE);
+        assert_eq!(f32_fma(a, b, c, RNE).0, 0x4170_0000); // FMADD:   6 + 9 = 15
+        assert_eq!(f32_fma(a, b, c ^ SIGN_BIT, RNE).0, 0xc040_0000); // FMSUB:  6 - 9 = -3
+        assert_eq!(f32_fma(a ^ SIGN_BIT, b, c, RNE).0, 0x4040_0000); // FNMSUB: -6 + 9 = 3
+        assert_eq!(f32_fma(a ^ SIGN_BIT, b, c ^ SIGN_BIT, RNE).0, 0xc170_0000); // FNMADD
+
+        // The observable difference: FNMADD.S(1, 1, -1) is -(1*1) - (-1) = +0,
+        // while -(1*1 + -1) would be -0.
+        assert_eq!(f32_fma(NEG_ONE, ONE, ONE, RNE), (0, 0));
+    }
+
+    #[test]
+    fn fma_signals_invalid_for_inf_times_zero_even_with_a_quiet_nan_addend() {
+        // §21.6 pins the case IEEE 754-2008 §7.2 leaves implementation-defined.
+        assert_eq!(
+            f32_fma(POS_INF, 0, QNAN_PAYLOAD, RNE),
+            (CANONICAL_NAN, FFLAG_NV)
+        );
+        assert_eq!(
+            f32_fma(NEG_ZERO, NEG_INF, QNAN_PAYLOAD, RNE),
+            (CANONICAL_NAN, FFLAG_NV)
+        );
+    }
+
+    #[test]
+    fn fma_handles_zero_and_infinite_operands() {
+        // Zero product plus a value is the value.
+        assert_eq!(f32_fma(0, TWO, THREE, RNE), (THREE, 0));
+        // (+0 * +1) + -0 cancels; the sign follows the rounding mode.
+        assert_eq!(f32_fma(0, ONE, NEG_ZERO, RNE), (0, 0));
+        assert_eq!(f32_fma(0, ONE, NEG_ZERO, RDN), (NEG_ZERO, 0));
+        // Infinite product with a finite addend.
+        assert_eq!(f32_fma(POS_INF, TWO, ONE, RNE), (POS_INF, 0));
+        // Finite product with an infinite addend.
+        assert_eq!(f32_fma(TWO, THREE, NEG_INF, RNE), (NEG_INF, 0));
+        // A nonzero product plus a zero addend is the rounded product.
+        assert_eq!(f32_fma(THREE, THREE, NEG_ZERO, RNE), (NINE, 0));
+    }
+
+    // -- FMIN / FMAX --------------------------------------------------------
+
+    #[test]
+    fn min_max_return_the_non_nan_operand() {
+        assert_eq!(f32_min_max(ONE, QNAN_PAYLOAD, false), (ONE, 0));
+        assert_eq!(f32_min_max(QNAN_PAYLOAD, ONE, false), (ONE, 0));
+        assert_eq!(f32_min_max(ONE, QNAN_PAYLOAD, true), (ONE, 0));
+        assert_eq!(f32_min_max(QNAN_PAYLOAD, ONE, true), (ONE, 0));
+    }
+
+    #[test]
+    fn min_max_of_two_nans_is_the_canonical_nan() {
+        assert_eq!(
+            f32_min_max(QNAN_PAYLOAD, 0x7fc0_5678, false),
+            (CANONICAL_NAN, 0)
+        );
+        assert_eq!(
+            f32_min_max(QNAN_PAYLOAD, 0x7fc0_5678, true),
+            (CANONICAL_NAN, 0)
+        );
+    }
+
+    #[test]
+    fn min_max_signaling_nan_sets_nv_even_with_a_numeric_result() {
+        assert_eq!(f32_min_max(SNAN, ONE, false), (ONE, FFLAG_NV));
+        assert_eq!(f32_min_max(ONE, SNAN, true), (ONE, FFLAG_NV));
+        assert_eq!(f32_min_max(SNAN, SNAN, false), (CANONICAL_NAN, FFLAG_NV));
+    }
+
+    #[test]
+    fn min_max_treat_negative_zero_as_less_than_positive_zero() {
+        // "For the purposes of these instructions only" (§21.6) — FLT.S still
+        // says the two zeros are equal, which the compare tests check.
+        assert_eq!(f32_min_max(NEG_ZERO, 0, false), (NEG_ZERO, 0));
+        assert_eq!(f32_min_max(0, NEG_ZERO, false), (NEG_ZERO, 0));
+        assert_eq!(f32_min_max(NEG_ZERO, 0, true), (0, 0));
+        assert_eq!(f32_min_max(0, NEG_ZERO, true), (0, 0));
+    }
+
+    #[test]
+    fn min_max_order_ordinary_values() {
+        assert_eq!(f32_min_max(ONE, TWO, false), (ONE, 0));
+        assert_eq!(f32_min_max(ONE, TWO, true), (TWO, 0));
+        assert_eq!(f32_min_max(NEG_ONE, ONE, false), (NEG_ONE, 0));
+        assert_eq!(f32_min_max(NEG_INF, POS_INF, false), (NEG_INF, 0));
+        assert_eq!(f32_min_max(NEG_INF, POS_INF, true), (POS_INF, 0));
+        assert_eq!(
+            f32_min_max(MIN_SUBNORMAL, MIN_NORMAL, false),
+            (MIN_SUBNORMAL, 0)
+        );
+    }
+
+    // -- comparisons --------------------------------------------------------
+
+    #[test]
+    fn feq_is_a_quiet_comparison() {
+        // §21.8: only a signaling NaN sets NV.
+        assert_eq!(f32_eq(QNAN_PAYLOAD, ONE), (false, 0));
+        assert_eq!(f32_eq(ONE, QNAN_PAYLOAD), (false, 0));
+        assert_eq!(f32_eq(QNAN_PAYLOAD, QNAN_PAYLOAD), (false, 0));
+        assert_eq!(f32_eq(SNAN, ONE), (false, FFLAG_NV));
+        assert_eq!(f32_eq(ONE, SNAN), (false, FFLAG_NV));
+    }
+
+    #[test]
+    fn flt_and_fle_are_signaling_comparisons() {
+        // §21.8: any NaN operand sets NV.
+        assert_eq!(f32_lt(QNAN_PAYLOAD, ONE), (false, FFLAG_NV));
+        assert_eq!(f32_le(QNAN_PAYLOAD, ONE), (false, FFLAG_NV));
+        assert_eq!(f32_lt(ONE, QNAN_PAYLOAD), (false, FFLAG_NV));
+        assert_eq!(f32_le(QNAN_PAYLOAD, QNAN_PAYLOAD), (false, FFLAG_NV));
+        assert_eq!(f32_lt(SNAN, ONE), (false, FFLAG_NV));
+    }
+
+    #[test]
+    fn comparisons_treat_the_two_zeros_as_equal() {
+        assert_eq!(f32_eq(NEG_ZERO, 0), (true, 0));
+        assert_eq!(f32_lt(NEG_ZERO, 0), (false, 0));
+        assert_eq!(f32_le(NEG_ZERO, 0), (true, 0));
+        assert_eq!(f32_le(0, NEG_ZERO), (true, 0));
+    }
+
+    #[test]
+    fn comparisons_order_ordinary_values() {
+        assert_eq!(f32_lt(ONE, TWO), (true, 0));
+        assert_eq!(f32_lt(TWO, ONE), (false, 0));
+        assert_eq!(f32_le(ONE, ONE), (true, 0));
+        assert_eq!(f32_eq(ONE, ONE), (true, 0));
+        assert_eq!(f32_lt(NEG_ONE, ONE), (true, 0));
+        assert_eq!(f32_lt(NEG_INF, NEG_ONE), (true, 0));
+        assert_eq!(f32_lt(ONE, POS_INF), (true, 0));
+    }
+
+    // -- sign injection -----------------------------------------------------
+
+    #[test]
+    fn sign_injection_is_bit_exact_and_never_canonicalizes() {
+        // Decoded through the executor, because the sign-injection logic lives
+        // in the OP-FP arm rather than in a helper.
+        let cases = [
+            // (funct3, rs1, rs2, expected)
+            (0b000u8, QNAN_PAYLOAD, NEG_ZERO, QNAN_PAYLOAD | SIGN_BIT),
+            (0b000, QNAN_PAYLOAD | SIGN_BIT, 0, QNAN_PAYLOAD),
+            (0b001, QNAN_PAYLOAD, 0, QNAN_PAYLOAD | SIGN_BIT),
+            (0b001, QNAN_PAYLOAD, NEG_ZERO, QNAN_PAYLOAD),
+            (0b010, NEG_ONE, NEG_ONE, ONE),
+            (0b010, NEG_ONE, ONE, NEG_ONE),
+            // A signaling NaN stays signaling: no quieting, no NV.
+            (0b000, SNAN | SIGN_BIT, 0, SNAN),
+        ];
+        for (funct3, a, b, want) in cases {
+            let mut h = Harness::new();
+            h.fp.write_single(1, a);
+            h.fp.write_single(2, b);
+            h.run(enc_op_fp(0b001_0000, 2, 1, funct3, 3));
+            assert_eq!(
+                h.fp.read_single(3),
+                want,
+                "sign injection funct3={funct3:03b}"
+            );
+            assert_eq!(h.fp.fflags(), 0, "sign injection must raise no flags");
+        }
+    }
+
+    // -- FCLASS -------------------------------------------------------------
+
+    #[test]
+    fn fclass_covers_all_ten_classes() {
+        // §21.9, in the spec's table order.
+        let cases = [
+            (NEG_INF, 1 << 0),
+            (NEG_ONE, 1 << 1),
+            (MIN_SUBNORMAL | SIGN_BIT, 1 << 2),
+            (NEG_ZERO, 1 << 3),
+            (0, 1 << 4),
+            (MIN_SUBNORMAL, 1 << 5),
+            (ONE, 1 << 6),
+            (POS_INF, 1 << 7),
+            (SNAN, 1 << 8),
+            (QNAN_PAYLOAD, 1 << 9),
+        ];
+        for (bits, want) in cases {
+            assert_eq!(f32_classify(bits), want, "FCLASS.S({bits:#010x})");
+            assert_eq!(f32_classify(bits).count_ones(), 1);
+        }
+        // A NaN classifies by quiet/signaling, not by sign.
+        assert_eq!(f32_classify(SNAN | SIGN_BIT), 1 << 8);
+        assert_eq!(f32_classify(QNAN_PAYLOAD | SIGN_BIT), 1 << 9);
+        // The boundaries between the subnormal and normal classes.
+        assert_eq!(f32_classify(MAX_SUBNORMAL), 1 << 5);
+        assert_eq!(f32_classify(MIN_NORMAL), 1 << 6);
+        assert_eq!(f32_classify(MAX_FINITE), 1 << 6);
+    }
+
+    // -- conversions --------------------------------------------------------
+
+    #[test]
+    fn fcvt_w_s_saturates_at_both_ends_and_for_nan() {
+        // §21.7's table of invalid-input behaviour. NaN goes to the *maximum*,
+        // which is neither what a Rust `as` cast does (0) nor what C promises.
+        assert_eq!(f32_to_i32(QNAN_PAYLOAD, true, RNE), (i32::MAX, FFLAG_NV));
+        assert_eq!(f32_to_i32(SNAN, true, RNE), (i32::MAX, FFLAG_NV));
+        assert_eq!(f32_to_i32(POS_INF, true, RNE), (i32::MAX, FFLAG_NV));
+        assert_eq!(f32_to_i32(NEG_INF, true, RNE), (i32::MIN, FFLAG_NV));
+        // 2^31 is one past the top.
+        assert_eq!(f32_to_i32(0x4f00_0000, true, RNE), (i32::MAX, FFLAG_NV));
+        // -2^31 is exactly representable and therefore valid.
+        assert_eq!(f32_to_i32(0xcf00_0000, true, RNE), (i32::MIN, 0));
+        // One float below -2^31 is out of range.
+        assert_eq!(f32_to_i32(0xcf00_0001, true, RNE), (i32::MIN, FFLAG_NV));
+        // The largest in-range float, 2^31 - 128.
+        assert_eq!(f32_to_i32(0x4eff_ffff, true, RNE), (2_147_483_520, 0));
+    }
+
+    #[test]
+    fn fcvt_wu_s_saturates_at_both_ends_and_for_nan() {
+        let umax = u32::MAX as i32;
+        assert_eq!(f32_to_i32(QNAN_PAYLOAD, false, RNE), (umax, FFLAG_NV));
+        assert_eq!(f32_to_i32(POS_INF, false, RNE), (umax, FFLAG_NV));
+        assert_eq!(f32_to_i32(NEG_INF, false, RNE), (0, FFLAG_NV));
+        assert_eq!(f32_to_i32(NEG_ONE, false, RNE), (0, FFLAG_NV));
+        // 2^32 is one past the top; 2^32 - 256 is the largest in-range float.
+        assert_eq!(f32_to_i32(0x4f80_0000, false, RNE), (umax, FFLAG_NV));
+        assert_eq!(
+            f32_to_i32(0x4f7f_ffff, false, RNE),
+            (4_294_967_040u32 as i32, 0)
+        );
+        // -0.0 converts to 0 without complaint.
+        assert_eq!(f32_to_i32(NEG_ZERO, false, RNE), (0, 0));
+    }
+
+    #[test]
+    fn fcvt_range_check_applies_to_the_rounded_result() {
+        // -0.5 truncates to 0, which is representable: valid, inexact.
+        assert_eq!(f32_to_i32(0xbf00_0000, false, RTZ), (0, FFLAG_NX));
+        // The same input rounded down is -1, which is not: invalid, and NV
+        // suppresses NX.
+        assert_eq!(f32_to_i32(0xbf00_0000, false, RDN), (0, FFLAG_NV));
+        // RNE takes -0.5 to zero (ties to even), also in range.
+        assert_eq!(f32_to_i32(0xbf00_0000, false, RNE), (0, FFLAG_NX));
+    }
+
+    #[test]
+    fn fcvt_to_integer_honours_every_rounding_mode() {
+        let one_and_a_half = 0x3fc0_0000u32;
+        let two_and_a_half = 0x4020_0000u32;
+        let minus_one_and_a_half = one_and_a_half | SIGN_BIT;
+        let expected = [
+            (RNE, 2, 2, -2),
+            (RTZ, 1, 2, -1),
+            (RDN, 1, 2, -2),
+            (RUP, 2, 3, -1),
+            (RMM, 2, 3, -2),
+        ];
+        for (rm, want_1_5, want_2_5, want_neg_1_5) in expected {
+            assert_eq!(
+                f32_to_i32(one_and_a_half, true, rm),
+                (want_1_5, FFLAG_NX),
+                "1.5 under {rm:?}"
+            );
+            assert_eq!(
+                f32_to_i32(two_and_a_half, true, rm),
+                (want_2_5, FFLAG_NX),
+                "2.5 under {rm:?}"
+            );
+            assert_eq!(
+                f32_to_i32(minus_one_and_a_half, true, rm),
+                (want_neg_1_5, FFLAG_NX),
+                "-1.5 under {rm:?}"
+            );
+        }
+        // Exact integers set no flag.
+        assert_eq!(f32_to_i32(THREE, true, RTZ), (3, 0));
+        assert_eq!(f32_to_i32(0, true, RNE), (0, 0));
+    }
+
+    #[test]
+    fn fcvt_from_integer_is_exact_below_two_to_the_24() {
+        assert_eq!(i32_to_f32(0, true, RNE), (0, 0));
+        assert_eq!(i32_to_f32(1, true, RNE), (ONE, 0));
+        assert_eq!(i32_to_f32(-1, true, RNE), (NEG_ONE, 0));
+        assert_eq!(i32_to_f32(123, true, RNE), (0x42f6_0000, 0));
+        assert_eq!(i32_to_f32(16_777_216, true, RNE), (0x4b80_0000, 0));
+        assert_eq!(i32_to_f32(i32::MIN, true, RNE), (0xcf00_0000, 0));
+    }
+
+    #[test]
+    fn fcvt_from_integer_rounds_above_two_to_the_24() {
+        // 2^24 + 1 is a tie between 2^24 and 2^24 + 2; RNE picks the even one.
+        assert_eq!(i32_to_f32(16_777_217, true, RNE), (0x4b80_0000, FFLAG_NX));
+        assert_eq!(i32_to_f32(16_777_217, true, RUP), (0x4b80_0001, FFLAG_NX));
+        assert_eq!(i32_to_f32(16_777_217, true, RTZ), (0x4b80_0000, FFLAG_NX));
+        // i32::MAX rounds up to 2^31 under RNE, down under RTZ.
+        assert_eq!(i32_to_f32(i32::MAX, true, RNE), (0x4f00_0000, FFLAG_NX));
+        assert_eq!(i32_to_f32(i32::MAX, true, RTZ), (0x4eff_ffff, FFLAG_NX));
+        // Unsigned reads the same register as a u32.
+        assert_eq!(i32_to_f32(-1, false, RNE), (0x4f80_0000, FFLAG_NX));
+        assert_eq!(i32_to_f32(-1, false, RTZ), (0x4f7f_ffff, FFLAG_NX));
+    }
+
+    #[test]
+    fn integer_and_float_conversions_round_trip() {
+        for value in [0i32, 1, -1, 42, -42, 65_536, -65_536, 8_388_607, -8_388_607] {
+            let (bits, _) = i32_to_f32(value, true, RNE);
+            assert_eq!(
+                f32_to_i32(bits, true, RTZ),
+                (value, 0),
+                "round trip {value}"
+            );
+        }
+    }
+
+    // -- decode / dispatch --------------------------------------------------
+
+    #[test]
+    fn flw_and_fsw_round_trip_a_raw_bit_pattern_through_memory() {
+        // A signaling NaN with a payload: loads and stores must not touch it.
+        let pattern = 0xff80_1234u32;
+        let mut h = Harness::new();
+        h.regs[1] = DEFAULT_RAM_START as i32;
+        h.fp.write_single(5, pattern);
+
+        h.run(enc_s(OPCODE_STORE_FP, 0b010, 1, 5, 8)); // FSW f5, 8(x1)
+        assert_eq!(
+            h.memory.read_word(DEFAULT_RAM_START + 8).unwrap() as u32,
+            pattern
+        );
+
+        h.run(enc_i(OPCODE_LOAD_FP, 6, 0b010, 1, 8)); // FLW f6, 8(x1)
+        assert_eq!(h.fp.read_single(6), pattern);
+        assert_eq!(h.fp.fflags(), 0);
+    }
+
+    #[test]
+    fn flw_and_fsw_accept_negative_offsets() {
+        let mut h = Harness::new();
+        h.regs[1] = (DEFAULT_RAM_START + 64) as i32;
+        h.fp.write_single(5, ONE);
+        h.run(enc_s(OPCODE_STORE_FP, 0b010, 1, 5, -16));
+        h.run(enc_i(OPCODE_LOAD_FP, 6, 0b010, 1, -16));
+        assert_eq!(h.fp.read_single(6), ONE);
+    }
+
+    #[test]
+    fn non_word_float_load_and_store_widths_are_illegal() {
+        // funct3 = 011 would be FLD/FSD, which RV32F does not implement.
+        let mut h = Harness::new();
+        assert!(h.try_run(enc_i(OPCODE_LOAD_FP, 1, 0b011, 0, 0)).is_err());
+        assert!(h.try_run(enc_s(OPCODE_STORE_FP, 0b011, 0, 1, 0)).is_err());
+    }
+
+    #[test]
+    fn op_fp_arithmetic_writes_the_destination_and_accrues_flags() {
+        let mut h = Harness::new();
+        h.fp.write_single(1, ONE);
+        h.fp.write_single(2, THREE);
+        h.run(enc_op_fp(0b000_1100, 2, 1, 0b000, 3)); // FDIV.S f3, f1, f2
+        assert_eq!(h.fp.read_single(3), 0x3eaa_aaab);
+        assert_eq!(h.fp.fflags(), FFLAG_NX);
+    }
+
+    #[test]
+    fn every_op_fp_arithmetic_encoding_dispatches() {
+        let cases = [
+            (0b000_0000u8, NINE),      // FADD.S 6 + 3 = 9
+            (0b000_0100, THREE),       // FSUB.S 6 - 3 = 3
+            (0b000_1000, 0x4190_0000), // FMUL.S 6 * 3 = 18
+            (0b000_1100, TWO),         // FDIV.S 6 / 3 = 2
+        ];
+        for (funct7, want) in cases {
+            let mut h = Harness::new();
+            h.fp.write_single(1, 0x40c0_0000); // 6.0
+            h.fp.write_single(2, THREE);
+            h.run(enc_op_fp(funct7, 2, 1, 0b000, 3));
+            assert_eq!(h.fp.read_single(3), want, "funct7={funct7:07b}");
+        }
+        // FSQRT.S takes a single source.
+        let mut h = Harness::new();
+        h.fp.write_single(1, NINE);
+        h.run(enc_op_fp(0b010_1100, 0, 1, 0b000, 2));
+        assert_eq!(h.fp.read_single(2), THREE);
+        // FMIN.S / FMAX.S.
+        let mut h = Harness::new();
+        h.fp.write_single(1, ONE);
+        h.fp.write_single(2, TWO);
+        h.run(enc_op_fp(0b001_0100, 2, 1, 0b000, 3));
+        h.run(enc_op_fp(0b001_0100, 2, 1, 0b001, 4));
+        assert_eq!(h.fp.read_single(3), ONE);
+        assert_eq!(h.fp.read_single(4), TWO);
+    }
+
+    #[test]
+    fn integer_conversion_encodings_dispatch() {
+        let mut h = Harness::new();
+        h.fp.write_single(1, 0xc0c0_0000); // -6.0
+        h.run(enc_op_fp(0b110_0000, 0b00000, 1, 0b001, 2)); // FCVT.W.S  (RTZ)
+        assert_eq!(h.regs[2], -6);
+        h.run(enc_op_fp(0b110_0000, 0b00001, 1, 0b001, 3)); // FCVT.WU.S (RTZ)
+        assert_eq!(h.regs[3], 0);
+        assert_eq!(h.fp.fflags(), FFLAG_NV);
+
+        let mut h = Harness::new();
+        h.regs[1] = -6;
+        h.run(enc_op_fp(0b110_1000, 0b00000, 1, 0b000, 2)); // FCVT.S.W
+        assert_eq!(h.fp.read_single(2), 0xc0c0_0000);
+        h.run(enc_op_fp(0b110_1000, 0b00001, 1, 0b000, 3)); // FCVT.S.WU
+        assert_eq!(h.fp.read_single(3), 0x4f80_0000); // 2^32 - 6, rounded to 2^32
+    }
+
+    #[test]
+    fn exception_flags_accrue_and_are_never_cleared_by_arithmetic() {
+        let mut h = Harness::new();
+        h.fp.write_single(1, ONE);
+        h.fp.write_single(2, THREE);
+        h.fp.write_single(3, 0);
+        h.fp.write_single(7, NEG_ONE);
+
+        // An inexact divide sets NX.
+        h.run(enc_op_fp(0b000_1100, 2, 1, 0b000, 4));
+        assert_eq!(h.fp.fflags(), FFLAG_NX);
+        // An exact add must not clear it.
+        h.run(enc_op_fp(0b000_0000, 1, 1, 0b000, 5)); // FADD.S f5, f1, f1
+        assert_eq!(h.fp.fflags(), FFLAG_NX);
+        // A divide by zero adds DZ on top.
+        h.run(enc_op_fp(0b000_1100, 3, 1, 0b000, 6));
+        assert_eq!(h.fp.fflags(), FFLAG_NX | FFLAG_DZ);
+        // And an invalid operation adds NV.
+        h.run(enc_op_fp(0b010_1100, 0, 7, 0b000, 8)); // FSQRT.S f8, f7  (f7 < 0)
+        assert_eq!(h.fp.fflags(), FFLAG_NX | FFLAG_DZ | FFLAG_NV);
+        // Nothing outside the five defined bits is ever set.
+        assert_eq!(h.fp.fflags() & !FFLAGS_MASK, 0);
+    }
+
+    #[test]
+    fn dynamic_rounding_mode_comes_from_frm() {
+        let mut h = Harness::new();
+        h.fp.write_single(1, ONE);
+        h.fp.write_single(2, THREE);
+        h.fp.set_frm(0b001); // RTZ
+        h.run(enc_op_fp(0b000_1100, 2, 1, 0b111, 3)); // FDIV.S with rm = DYN
+        assert_eq!(h.fp.read_single(3), 0x3eaa_aaaa);
+    }
+
+    #[test]
+    fn reserved_rounding_modes_raise_illegal_instruction() {
+        for rm in [0b101u8, 0b110] {
+            let mut h = Harness::new();
+            let err = h.try_run(enc_op_fp(0b000_0000, 2, 1, rm, 3)).unwrap_err();
+            assert!(matches!(err, EmulatorError::InvalidInstruction { .. }));
+        }
+        // DYN with frm holding an invalid value is equally illegal.
+        let mut h = Harness::new();
+        h.fp.set_frm(0b111);
+        let err = h
+            .try_run(enc_op_fp(0b000_0000, 2, 1, 0b111, 3))
+            .unwrap_err();
+        assert!(matches!(err, EmulatorError::InvalidInstruction { .. }));
+        // The fused multiply-add family checks the same field.
+        let mut h = Harness::new();
+        assert!(h.try_run(enc_r4(OPCODE_MADD, 3, 2, 1, 0b101, 4)).is_err());
+    }
+
+    #[test]
+    fn fmv_moves_raw_bits_in_both_directions() {
+        let pattern = 0xff80_1234u32; // a negative signaling NaN
+        let mut h = Harness::new();
+        h.regs[1] = pattern as i32;
+        h.run(enc_op_fp(0b111_1000, 0, 1, 0b000, 4)); // FMV.W.X f4, x1
+        assert_eq!(h.fp.read_single(4), pattern);
+        h.run(enc_op_fp(0b111_0000, 0, 4, 0b000, 2)); // FMV.X.W x2, f4
+        assert_eq!(h.regs[2] as u32, pattern);
+        assert_eq!(h.fp.fflags(), 0, "moves raise no flags");
+    }
+
+    #[test]
+    fn fclass_and_compares_write_the_integer_register() {
+        let mut h = Harness::new();
+        h.fp.write_single(1, NEG_INF);
+        h.fp.write_single(2, ONE);
+        h.run(enc_op_fp(0b111_0000, 0, 1, 0b001, 3)); // FCLASS.S x3, f1
+        assert_eq!(h.regs[3], 1);
+        h.run(enc_op_fp(0b101_0000, 2, 1, 0b001, 4)); // FLT.S x4, f1, f2
+        assert_eq!(h.regs[4], 1);
+        h.run(enc_op_fp(0b101_0000, 1, 2, 0b010, 5)); // FEQ.S x5, f2, f1
+        assert_eq!(h.regs[5], 0);
+        h.run(enc_op_fp(0b101_0000, 2, 2, 0b000, 6)); // FLE.S x6, f2, f2
+        assert_eq!(h.regs[6], 1);
+    }
+
+    #[test]
+    fn integer_destination_x0_is_never_written() {
+        let mut h = Harness::new();
+        h.fp.write_single(1, ONE);
+        h.run(enc_op_fp(0b111_0000, 0, 1, 0b000, 0)); // FMV.X.W x0, f1
+        assert_eq!(h.regs[0], 0);
+        h.run(enc_op_fp(0b101_0000, 1, 1, 0b010, 0)); // FEQ.S x0, f1, f1
+        assert_eq!(h.regs[0], 0);
+    }
+
+    #[test]
+    fn f0_is_an_ordinary_writable_register() {
+        // Unlike x0, no floating-point register is hardwired to zero (§21.1).
+        let mut h = Harness::new();
+        h.fp.write_single(1, ONE);
+        h.run(enc_op_fp(0b000_0000, 1, 1, 0b000, 0)); // FADD.S f0, f1, f1
+        assert_eq!(h.fp.read_single(0), TWO);
+    }
+
+    #[test]
+    fn fused_multiply_add_opcodes_decode_to_the_right_signs() {
+        let cases = [
+            (OPCODE_MADD, 0x4170_0000u32), //  6 + 9 = 15
+            (OPCODE_MSUB, 0xc040_0000),    //  6 - 9 = -3
+            (OPCODE_NMSUB, 0x4040_0000),   // -6 + 9 = 3
+            (OPCODE_NMADD, 0xc170_0000),   // -6 - 9 = -15
+        ];
+        for (opcode, want) in cases {
+            let mut h = Harness::new();
+            h.fp.write_single(1, TWO);
+            h.fp.write_single(2, THREE);
+            h.fp.write_single(3, NINE);
+            h.run(enc_r4(opcode, 3, 2, 1, 0b000, 4));
+            assert_eq!(h.fp.read_single(4), want, "opcode {opcode:#04x}");
+        }
+    }
+
+    #[test]
+    fn unrecognized_float_encodings_are_illegal_instructions() {
+        let mut h = Harness::new();
+        // An OP-FP funct7 RV32F does not define.
+        assert!(h.try_run(enc_op_fp(0b011_1111, 0, 0, 0b000, 0)).is_err());
+        // FSQRT.S with a nonzero rs2.
+        assert!(h.try_run(enc_op_fp(0b010_1100, 1, 0, 0b000, 0)).is_err());
+        // A compare with an undefined funct3.
+        assert!(h.try_run(enc_op_fp(0b101_0000, 0, 0, 0b100, 0)).is_err());
+        // A sign-injection variant that does not exist.
+        assert!(h.try_run(enc_op_fp(0b001_0000, 0, 0, 0b011, 0)).is_err());
+        // FMIN/FMAX with an undefined funct3.
+        assert!(h.try_run(enc_op_fp(0b001_0100, 0, 0, 0b010, 0)).is_err());
+        // FCVT selectors RV32F does not define (rs2 = 2 is an RV64 form).
+        assert!(
+            h.try_run(enc_op_fp(0b110_0000, 0b00010, 0, 0b000, 0))
+                .is_err()
+        );
+        assert!(
+            h.try_run(enc_op_fp(0b110_1000, 0b00010, 0, 0b000, 0))
+                .is_err()
+        );
+        // Double precision (fmt = 01) in the fused multiply-add family.
+        assert!(
+            h.try_run(enc_r4(OPCODE_MADD, 0, 0, 0, 0b000, 0) | (0b01 << 25))
+                .is_err()
+        );
+        // FMV.W.X with a nonzero rs2 field.
+        assert!(h.try_run(enc_op_fp(0b111_1000, 1, 0, 0b000, 0)).is_err());
+        // FMV.X.W / FCLASS.S with an undefined funct3.
+        assert!(h.try_run(enc_op_fp(0b111_0000, 0, 0, 0b010, 0)).is_err());
+    }
+
+    #[test]
+    fn a_float_program_runs_through_the_emulator() {
+        use crate::Riscv32Emulator;
+        use lp_emu_core::StepResult;
+
+        // FLW f1, 0(x1); FLW f2, 4(x1); FADD.S f3, f1, f2; FSW f3, 8(x1); EBREAK
+        let program = [
+            enc_i(OPCODE_LOAD_FP, 1, 0b010, 1, 0),
+            enc_i(OPCODE_LOAD_FP, 2, 0b010, 1, 4),
+            enc_op_fp(0b000_0000, 2, 1, 0b000, 3),
+            enc_s(OPCODE_STORE_FP, 0b010, 1, 3, 8),
+            lp_riscv_inst::encode::ebreak(),
+        ];
+        let mut code = alloc::vec::Vec::new();
+        for word in program {
+            code.extend_from_slice(&word.to_le_bytes());
+        }
+        let mut ram = vec![0u8; 1024];
+        ram[0..4].copy_from_slice(&0.1f32.to_bits().to_le_bytes());
+        ram[4..8].copy_from_slice(&0.2f32.to_bits().to_le_bytes());
+
+        let mut emu = Riscv32Emulator::new(code, ram);
+        emu.set_register(Gpr::new(1), DEFAULT_RAM_START as i32);
+        emu.set_pc(0);
+        loop {
+            match emu.step().expect("step") {
+                StepResult::Continue => {}
+                StepResult::Halted => break,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(
+            emu.memory().read_word(DEFAULT_RAM_START + 8).unwrap() as u32,
+            (0.1f32 + 0.2f32).to_bits()
+        );
+        assert_eq!(emu.get_fp_register(3), (0.1f32 + 0.2f32).to_bits());
+        assert_eq!(emu.fp_regs().fflags(), FFLAG_NX);
+    }
+
+    #[test]
+    fn all_rounding_modes_stay_wired_up() {
+        // A guard against silently dropping a mode from the tables above.
+        assert_eq!(ALL_MODES.len(), 5);
+        for rm in ALL_MODES {
+            assert_eq!(f32_add(ONE, ONE, rm), (TWO, 0), "exact add under {rm:?}");
+            assert_eq!(f32_mul(TWO, THREE, rm), (0x40c0_0000, 0));
+        }
+    }
+
+    // -- helpers ------------------------------------------------------------
+
+    /// A minimal decode-and-execute rig: integer registers, RAM, and FP state.
+    struct Harness {
+        regs: [i32; 32],
+        memory: Memory,
+        fp: FpRegs,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            Self {
+                regs: [0i32; 32],
+                memory: Memory::with_default_addresses(vec![], vec![0u8; 1024]),
+                fp: FpRegs::new(),
+            }
+        }
+
+        fn try_run(&mut self, inst_word: u32) -> Result<ExecutionResult, EmulatorError> {
+            decode_execute::<LoggingDisabled>(
+                inst_word,
+                0,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )
+        }
+
+        fn run(&mut self, inst_word: u32) -> ExecutionResult {
+            self.try_run(inst_word).expect("instruction should execute")
+        }
+    }
+
+    fn enc_i(opcode: u8, rd: u8, funct3: u8, rs1: u8, imm: i32) -> u32 {
+        (((imm as u32) & 0xfff) << 20)
+            | (u32::from(rs1) << 15)
+            | (u32::from(funct3) << 12)
+            | (u32::from(rd) << 7)
+            | u32::from(opcode)
+    }
+
+    fn enc_s(opcode: u8, funct3: u8, rs1: u8, rs2: u8, imm: i32) -> u32 {
+        let imm = imm as u32;
+        (((imm >> 5) & 0x7f) << 25)
+            | (u32::from(rs2) << 20)
+            | (u32::from(rs1) << 15)
+            | (u32::from(funct3) << 12)
+            | ((imm & 0x1f) << 7)
+            | u32::from(opcode)
+    }
+
+    fn enc_op_fp(funct7: u8, rs2: u8, rs1: u8, rm: u8, rd: u8) -> u32 {
+        (u32::from(funct7) << 25)
+            | (u32::from(rs2) << 20)
+            | (u32::from(rs1) << 15)
+            | (u32::from(rm) << 12)
+            | (u32::from(rd) << 7)
+            | u32::from(OPCODE_OP_FP)
+    }
+
+    fn enc_r4(opcode: u8, rs3: u8, rs2: u8, rs1: u8, rm: u8, rd: u8) -> u32 {
+        (u32::from(rs3) << 27)
+            | (u32::from(rs2) << 20)
+            | (u32::from(rs1) << 15)
+            | (u32::from(rm) << 12)
+            | (u32::from(rd) << 7)
+            | u32::from(opcode)
+    }
+
+    /// An independent square root, for the correctly-rounded check.
+    ///
+    /// Newton–Raphson in `f64` from a bit-twiddled seed, using only `core`
+    /// arithmetic (`f32::sqrt` lives in `std`, which this crate does not
+    /// require). Rounding the `f64` root to `f32` is safe: `f64` carries
+    /// 53 >= 2*24 + 2 bits, the classical width at which a narrowing double
+    /// rounding of a square root cannot differ from rounding the exact result.
+    fn reference_sqrt(x: f32) -> f32 {
+        let a = x as f64;
+        if a <= 0.0 {
+            return x;
+        }
+        let mut g = f64::from_bits((a.to_bits() + 0x3ff0_0000_0000_0000) >> 1);
+        for _ in 0..10 {
+            g = 0.5 * (g + a / g);
+        }
+        g as f32
+    }
 }
