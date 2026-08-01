@@ -130,7 +130,7 @@ mod tests {
         };
         let text = NodeDef::Module(def).write_json(&registry()).unwrap();
         assert!(
-            text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 2"),
+            text.starts_with("{\n  \"kind\": \"Module\",\n  \"format\": 2"),
             "{text}"
         );
     }

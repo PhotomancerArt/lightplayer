@@ -125,7 +125,7 @@ impl ProjectRegistry {
             .unwrap_or_else(|| LpPath::new("/"))
             .to_path_buf();
 
-        // Body parses as a node definition; `Project` cannot be created as a
+        // Body parses as a node definition; `Module` cannot be created as a
         // child node (nested sub-projects are future work).
         let text = core::str::from_utf8(body).map_err(|_| {
             reject(
@@ -142,7 +142,7 @@ impl ProjectRegistry {
         if matches!(def, NodeDef::Module(_)) {
             return Err(reject(
                 MutationRejectionReason::InvalidBody,
-                "kind Project cannot be created as a child node".into(),
+                "kind Module cannot be created as a child node".into(),
             ));
         }
 

@@ -170,7 +170,7 @@ async fn lpc_history_runs_over_the_store() {
     store
         .write_file(
             LpPath::new("/packages/x/project.json"),
-            b"{\"kind\":\"Project\"}",
+            b"{\"kind\":\"Module\"}",
         )
         .unwrap();
     store
