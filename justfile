@@ -24,6 +24,22 @@ fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 # size 0x400000". The same value is duplicated in
 # lp-fw/fw-esp32s3/.cargo/config.toml's runner, which cannot read this var.
 s3_flash_size := "8mb"
+
+# fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) also builds on Espressif's Rust
+# fork (see lp-fw/fw-esp32v3/rust-toolchain.toml), but unlike fw-esp32s3 it is
+# its OWN Cargo workspace, not a repo-root workspace member (see that crate's
+# README "Workspace shape") — so its target dir lives under the crate itself,
+# not the shared root `target/`.
+xt_v3_target := "xtensa-esp32-none-elf"
+fw_esp32v3_dir := "lp-fw/fw-esp32v3"
+fw_esp32v3_elf := fw_esp32v3_dir + "/target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
+
+# This crate's 4 MB flash size (docs/adr/2026-07-29-per-chip-fw-toolchains.md,
+# Q7 in the classic-ESP32 bring-up plan: C6-shaped table, not the S3's 8 MB
+# floor). Must match lp-fw/fw-esp32v3/partitions.csv and the runner in
+# lp-fw/fw-esp32v3/.cargo/config.toml, which cannot read this var — same
+# reasoning as s3_flash_size above.
+v3_flash_size := "4mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -611,6 +627,21 @@ clippy-fw-esp32s3:
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
 
+# Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
+# `clippy-host` for the same reason as the S3: this crate isn't even a
+# root-workspace member, so nothing else lints it. No `test_*` harness
+# features exist yet (P1 is boot-to-hello only) — add a loop like the S3's
+# above when a harness feature lands.
+clippy-fw-esp32v3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd {{ fw_esp32v3_dir }}
+    cargo clippy --release -- --no-deps -D warnings
+
 build-fw-esp32s3:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -620,19 +651,38 @@ build-fw-esp32s3:
     fi
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3
 
-# Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
-# or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
-# which is how CI arrives (the esp-rs/xtensa-toolchain action puts it there),
-# versus a local espup install, which leaves it under ~/.rustup.
-_xt-gcc-dir:
+# Build the classic ESP32 ("v3") firmware. Same Xtensa-fork story as the S3
+# (see build-fw-esp32s3 above), but this crate is its OWN Cargo workspace
+# (lp-fw/fw-esp32v3/Cargo.toml has `[workspace]`), so the build must run with
+# that directory as `cargo`'s root — it cannot be invoked from the repo root
+# the way fw-esp32s3 (a root-workspace member) can.
+build-fw-esp32v3:
     #!/usr/bin/env bash
     set -euo pipefail
-    if command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd {{ fw_esp32v3_dir }} && cargo build --profile release-esp32v3
+
+# Print the directory to prepend to PATH so the chip's xtensa-*-elf-gcc
+# resolves, or fail with the fix. Prints NOTHING when the toolchain is already
+# on PATH — which is how CI arrives (the esp-rs/xtensa-toolchain action puts
+# it there), versus a local espup install, which leaves it under ~/.rustup.
+#
+# `bin` names the specific gcc binary to probe for (all Xtensa chips share one
+# toolchain bundle, so any installed chip's binary proves the bundle exists,
+# but only checking the caller's own chip catches a bundle that is present but
+# missing that target — e.g. `buildtargets` scoped too narrowly in CI).
+_xt-gcc-dir bin="xtensa-esp32s3-elf-gcc":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v {{ bin }} >/dev/null 2>&1; then
       exit 0
     fi
     GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
-    if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
-      echo "error: xtensa-esp32s3-elf-gcc is not on PATH and was not found under" >&2
+    if [[ ! -x "$GCC_BIN/{{ bin }}" ]]; then
+      echo "error: {{ bin }} is not on PATH and was not found under" >&2
       echo "       ~/.rustup/toolchains/esp — run 'espup install' (or 'espup update'" >&2
       echo "       if it is stale). The Rust target spec links through it, not rust-lld." >&2
       exit 1
@@ -780,6 +830,22 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     # lp-fw/fw-esp32s3/partitions.csv (0x600000).
     just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
+
+# Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
+# partition. Same C6-shaped 4 MB table and budget posture as fw-esp32c6 (Q7 in
+# the classic-ESP32 bring-up plan) — unlike the S3, this chip has no 8 MB
+# floor to grow into, so this IS a hard budget gate, not just a trend.
+#
+# `chip` passed to `_fw-size-check` is the real espflash chip id ("esp32");
+# `name` is the crate's own "esp32v3" label, same split as fw-esp32c6's
+# name/chip both being "esp32c6" happens to hide (there the two coincide).
+fw-esp32v3-size-check margin="65536": build-fw-esp32v3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Keep `partition` in sync with the `factory` app partition in
+    # lp-fw/fw-esp32v3/partitions.csv (0x300000).
+    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} 3145728 {{ margin }} \
+        "See lp-fw/fw-esp32v3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
 # compare it against the app partition. Factored so the two chips cannot drift

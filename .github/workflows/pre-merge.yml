@@ -357,6 +357,81 @@ jobs:
       - name: Clippy esp32s3 firmware
         run: cd lp2025 && just clippy-fw-esp32s3
 
+  # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) — the second crate on the
+  # Xtensa fork, cloned from firmware-xtensa above. Same anti-rot rationale:
+  # nothing else in CI compiles this crate. Unlike fw-esp32s3 it is its OWN
+  # Cargo workspace (see lp-fw/fw-esp32v3/README.md "Workspace shape"), not a
+  # repo-root workspace member, so its rust-cache workspace path points at the
+  # crate directory instead of the repo root.
+  #
+  # Shares the broad `firmware` filter with firmware-xtensa and
+  # firmware-size, for the same reason both give: it is the link closure of
+  # the device image, and a narrow lp-fw/fw-esp32v3 filter would stop
+  # rebuilding on shared-crate changes most likely to break it (this crate has
+  # no lp2025-internal dependencies yet, but that is expected to change).
+  #
+  # Compile-only, like firmware-xtensa: hardware validation is manual.
+  firmware-esp32v3:
+    name: Firmware build (esp32v3)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firmware == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Install system deps (libudev for espflash)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Installs the Xtensa Rust fork as the `esp` toolchain plus its bundled
+      # GNU binutils, which the build needs on PATH — the Rust target spec
+      # links through xtensa-esp32-elf-gcc, not rust-lld.
+      #
+      # Pinned rather than floating, same reasoning and same pin as
+      # firmware-xtensa: the crate's rust-toolchain.toml says `channel = "esp"`,
+      # which locally tracks whatever espup installed; CI pins so a fork
+      # release cannot turn a green PR red on its own. Keep this version in
+      # sync with firmware-xtensa's.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32
+          default: true
+          ldproxy: false
+
+      # `lp2025/lp-fw/fw-esp32v3 -> target`, not `lp2025 -> target`: this
+      # crate is its own workspace with its own target dir under the crate,
+      # unlike fw-esp32s3 (a root-workspace member sharing the repo's target/).
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025/lp-fw/fw-esp32v3 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match the firmware-size and firmware-xtensa jobs.
+      # ~/.cargo/bin is restored by rust-cache above, so this is a no-op on a
+      # warm cache.
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked
+
+      # Builds the crate and checks the image against its 3 MB app partition.
+      - name: Check esp32v3 image size
+        run: cd lp2025 && just fw-esp32v3-size-check
+
+      # The lint gate for this crate. Nothing else in CI lints it (it is not
+      # even a root-workspace member, so `clippy-host` never sees it).
+      - name: Clippy esp32v3 firmware
+        run: cd lp2025 && just clippy-fw-esp32v3
+
   # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
   # and executing them on `lp-xt-emu`, linked against a cross-compiled builtins
   # image. Nothing else in CI runs Xtensa *code* — `firmware-xtensa` above only
