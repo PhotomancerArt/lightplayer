@@ -64,15 +64,29 @@ pub fn init_board() -> (
     //    the `[INIT]` lines `main.rs` prints on the way to spawning that task
     //    would otherwise be unreadable.
     //
-    // 115200 8N1 is `UartConfig::default()`. TX=GPIO1 / RX=GPIO3 are the
-    // classic devkit's UART0 bridge pins, and are the two GPIOs the DOM-Z-102
-    // board manifest reserves for exactly this reason.
+    // 921600 8N1 — `lpc_model::DEFAULT_SERIAL_BAUD_RATE`, the baud every
+    // lp-cli/Studio serial connect opens with. On the C6/S3 that constant is
+    // a fiction (native USB has no baud); this chip is the first where it
+    // hits a real wire, and the mismatch was found the hard way: the host
+    // opened 921600 against a 115200 firmware and heard NOTHING (CH340 drops
+    // framing-error bytes), which read as `NoSerialOutput`. The CH340K is
+    // comfortable at 921600, and the 8x line rate is the difference between
+    // ~1.4 s and ~175 ms for a 16 KiB ProjectRead. Console consequence:
+    // `espflash monitor` needs `--baud 921600` (the flash recipes in the
+    // README carry it); the ROM's own boot banner still goes out at 115200
+    // and will look garbled in such a monitor — that is cosmetic.
+    // TX=GPIO1 / RX=GPIO3 are the classic devkit's UART0 bridge pins, and
+    // are the two GPIOs the DOM-Z-102 board manifest reserves for exactly
+    // this reason.
     //
     // The error is returned rather than `expect`ed: a UART config failure
     // costs the board its host link, not its boot, and a board that boots far
     // enough to blink is more diagnosable than one that resets in a loop.
-    let uart0 = Uart::new(peripherals.UART0, UartConfig::default())
-        .map(|uart| uart.with_tx(peripherals.GPIO1).with_rx(peripherals.GPIO3));
+    let uart0 = Uart::new(
+        peripherals.UART0,
+        UartConfig::default().with_baudrate(921_600),
+    )
+    .map(|uart| uart.with_tx(peripherals.GPIO1).with_rx(peripherals.GPIO3));
 
     // Set up software interrupt and timer for the Embassy runtime.
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);

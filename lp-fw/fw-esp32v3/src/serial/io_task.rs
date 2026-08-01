@@ -75,14 +75,18 @@ static SERVER_WRITE_RESULT: Channel<
 
 /// Write timeout per chunk. A UART TX FIFO drains at line rate unconditionally,
 /// so this is not a host-liveness signal the way the S3's is — it is a
-/// backstop against a wedged peripheral, sized to be far above the ~6 ms a
-/// full chunk costs at 115200 baud.
+/// backstop against a wedged peripheral, sized to be far above the ~5.6 ms a
+/// full chunk costs at 921600 baud.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Chunk size for large writes, in *line time* rather than syscall overhead:
-/// 64 bytes is ~5.6 ms at 115200 baud, which is how often RX gets drained
-/// during a long write (see the module docs). UART0's 128-byte RX FIFO holds
-/// ~11 ms of incoming line, so this leaves a 2x margin against overflow.
+/// the invariant is "drain RX at least twice per RX-FIFO fill time". At
+/// 921600 baud (the link rate `board::esp32v3::init` programs) UART0's
+/// 128-byte RX FIFO holds ~1.4 ms of incoming line, and a 64-byte chunk
+/// costs ~0.7 ms to clock out — the same 2x overflow margin the original
+/// 115200 sizing had, it just drains 8x as often in wall time. The chunk
+/// deliberately does NOT grow with the baud: line time is what protects the
+/// FIFO, not bytes.
 const WRITE_CHUNK_SIZE: usize = 64;
 
 /// RX drain buffer. One FIFO's worth, so a single `read_buffered` empties a
