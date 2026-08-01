@@ -32,11 +32,7 @@ const DISPLAY_ONLY: &[(&str, &str)] = &[
 /// The mirror case: runtime manifests whose display sidecar is landing on a
 /// different in-flight branch, with the reason. Strict like DISPLAY_ONLY —
 /// once the sidecar merges, the entry must be removed.
-const RUNTIME_ONLY: &[(&str, &str)] = &[(
-    "domraem/dom-z-102",
-    "display sidecar + catalog entry authored on PR #231 (board catalog M2/M3); \
-     the runtime manifest lands first with the classic bring-up roadmap",
-)];
+const RUNTIME_ONLY: &[(&str, &str)] = &[];
 
 fn boards_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lp-core/lpc-hardware/boards")

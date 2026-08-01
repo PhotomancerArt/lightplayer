@@ -179,6 +179,12 @@ fn boot() -> ! {
         drop(peripherals);
         tests::backtrace_oracle::run_all();
     }
+
+    #[cfg(feature = "test_xt_fp_conformance")]
+    {
+        drop(peripherals);
+        tests::xt_fp_conformance::run_all();
+    }
 }
 
 /// Heap free/used for the heartbeat. A chip fact `fw-esp32-common` must not
