@@ -13,7 +13,17 @@ fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp3
 
 # fw-esp32s3 builds on Espressif's Rust fork (see lp-fw/fw-esp32s3/rust-toolchain.toml)
 xt_s3_target := "xtensa-esp32s3-none-elf"
-fw_esp32s3_elf := "target/" + xt_s3_target + "/release/fw-esp32s3"
+fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
+
+# The S3's 8 MB flash floor (docs/adr/2026-07-30-esp32s3-partition-floor.md).
+# This MUST be passed to every `espflash flash` for this chip and MUST match
+# partitions.csv: espflash writes a flash-size field into the image header and
+# defaults it to 4MB, and the bootloader validates the partition table against
+# that header — not against the physical chip. Omit it and a board with 16 MB
+# soldered on still boot-loops with "partition N invalid ... exceeds flash chip
+# size 0x400000". The same value is duplicated in
+# lp-fw/fw-esp32s3/.cargo/config.toml's runner, which cannot read this var.
+s3_flash_size := "8mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -587,25 +597,42 @@ clippy-fw-esp32s3:
       export PATH="$GCC_BIN:$PATH"
     fi
     cd lp-fw/fw-esp32s3
-    # The app path.
+    # The app path. `server` joined the defaults in M3 P5, so this one command
+    # now covers the whole app — entrypoint, transport, storage, output readout
+    # and the server-gated half of serial/io_task.rs — and the separate
+    # `--features server` pass it used to need is gone.
     cargo clippy --release -- --no-deps -D warnings
+    # The app path again with the serial frame readout bolted on. It is `cfg`'d
+    # out of the default build entirely, so linting the defaults leaves it
+    # completely uncovered — the same hole the harness loop below exists to
+    # close, for the same reason.
+    echo "clippy: --features frame-dump"
+    cargo clippy --release --features frame-dump -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
 
-build-fw-esp32s3:
+# `features` is a comma-separated list added to the defaults — for the app path
+# that means `frame-dump` and nothing else today. Harnesses have their own
+# recipes because they REPLACE the entrypoint; this argument only decorates it,
+# so the size check and the plain build share one recipe rather than forking.
+build-fw-esp32s3 features="":
     #!/usr/bin/env bash
     set -euo pipefail
     GCC_BIN="$(just _xt-gcc-dir)"
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release
+    args=(build --profile release-esp32s3)
+    if [[ -n "{{ features }}" ]]; then
+      args+=(--features "{{ features }}")
+    fi
+    cd lp-fw/fw-esp32s3 && cargo "${args[@]}"
 
 # Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
 # or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
@@ -633,7 +660,7 @@ _xt-gcc-dir:
 # usually are on the desk, and auto-detection picks the first match, not
 # necessarily the S3:
 #
-#   just flash-fw-esp32s3 /dev/cu.usbmodem1101
+#   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX
 #
 # The S3 speaks USB-Serial-JTAG, not a UART bridge, so it enumerates as
 # /dev/cu.usbmodem* and its port number CHANGES whenever the chip
@@ -642,10 +669,17 @@ _xt-gcc-dir:
 # does not land) until someone physically replugs it.
 
 # Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
-flash-fw-esp32s3 port="": build-fw-esp32s3
+#
+# The optional second argument is passed straight to `build-fw-esp32s3`. The
+# one that matters is `frame-dump`, which makes the board print every
+# transmitted frame — `scripts/m4-hardware-walk.sh` flashes with it because an
+# LED cannot be diffed against a host render:
+#
+#   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX frame-dump
+flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -659,7 +693,7 @@ flash-fw-esp32s3 port="": build-fw-esp32s3
 # established without the device. A failure here is a finding to triage, never
 # a reason to edit a golden.
 #
-#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodemXXXX
 
 # Run the Xtensa JIT corpus on a connected ESP32-S3 (PASS/FAIL per case).
 fwtest-xt-jit-esp32s3 port="":
@@ -669,13 +703,168 @@ fwtest-xt-jit-esp32s3 port="":
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_xt_jit_corpus
     cd - >/dev/null
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Prove the Xtensa windowed backtrace walk on silicon (PASS/FAIL per check).
+#
+# The oracle is a known-depth recursive call chain: every one of its `n` frames
+# returns to the same call site, so a correct walk contains a run of exactly `n`
+# identical PCs. `run == depth` is asserted at three depths, all past the point
+# where the register-window ring wraps and the frames stop being reachable
+# without a forced spill. Corrupt save-area chains must terminate at exact
+# counts, mirroring `cargo test -p lpc-shared`'s host-side synthetic stacks.
+#
+# Run the host tests first — a device result only means something against an
+# oracle that was established without the device.
+#
+#   cargo test -p lpc-shared
+#   just fwtest-backtrace-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-backtrace-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_backtrace_oracle
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Run the four-channel RMT loopback self-test on a connected ESP32-S3.
+#
+# No wires and no LED strips: each TX channel is routed into its own RX channel
+# through the GPIO matrix, so the harness measures its own waveform at 12.5 ns
+# resolution and asserts it numerically — decode, per-bit timing within ±25 ns,
+# cross-talk, latch, a 100-frame concurrent soak, and guard-word truncation on
+# one channel while the other three keep running.
+#
+# `E1:` lines cover the RMT RAM address probe, `E4:` the wire assertions; the
+# last line repeats the verdict forever. The `E4: MEASURE golden_*` block is
+# the re-derivation of `lp-fw/lp-ws281x/tests/golden/ws2812_grb_esp32s3.txt` —
+# a mismatch there is a finding to triage, never a reason to edit the golden.
+#
+# Run the host oracle first; it drives the same sequencing against a mock and
+# the same classifier against the committed capture:
+#
+#   cargo test -p lp-ws281x
+#   just fwtest-loopback-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-loopback-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_loopback
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Run the M6 FP conformance corpus on a connected ESP32-S3 and capture it.
+#
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # everything
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+#
+# `family` is an `lp-xt-fp-vectors` family name (rounding, nan_payload,
+# denormal, signed_zero, div_sqrt, convert), or `tables` for the estimate-table
+# sweep. `limit` caps each family; 0 runs all of it.
+#
+# ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
+# predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
+# `cargo test -p lp-xt-emu --test fp_conformance`, which needs no board. A
+# device disagreement is a finding to triage — never a reason to edit a golden.
+# Regenerating a prediction from device output turns the whole campaign into a
+# tautology that passes forever.
+#
+# CAPTURE MECHANISM (an operational finding, recorded here so it is not
+# rediscovered): `espflash flash --monitor` needs a pty, so a naive `| tee`
+# breaks it. `script -q <file> espflash …` supplies one and tees in a single
+# step. The harness never exits — it prints its sentinel and parks — so this
+# polls the capture for `END-ALL` and then interrupts espflash. A bare
+# `espflash monitor` NEVER attaches on the S3's USB-Serial-JTAG; that is a
+# different thing from a raw port open. See docs/debt/ if this ever needs a
+# second mechanism.
+#
+# `--flash-size {{ s3_flash_size }}` is not optional: omitting it boot-loops a
+# 16 MB board. If the port wedges (`ps` shows STAT `Us+` and `kill -9` does not
+# land), STOP and ask for a physical replug — do not thrash.
+fwtest-xt-fp-esp32s3 port="" family="" limit="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mode=families
+    family="{{ family }}"
+    if [[ "$family" == "tables" ]]; then
+      mode=tables
+      family=""
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/fpconf-$(date +%Y%m%d-%H%M%S).txt"
+    (cd lp-fw/fw-esp32s3 && \
+      LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
+      cargo build --profile release-esp32s3 --features test_xt_fp_conformance)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    # `</dev/null` is load-bearing: `script` hands its child the terminal, and a
+    # backgrounded espflash reading the same stdin as this shell eats keystrokes
+    # and gets an EOF for its port prompt. The harness never reads anything, so
+    # there is nothing to give it.
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32s3_elf }} </dev/null &
+    cap=$!
+    # Poll rather than wait: the harness parks forever after its sentinel, so
+    # there is nothing to wait FOR except the sentinel itself.
+    for _ in $(seq 1 600); do
+      if grep -q 'END-ALL' "$out" 2>/dev/null; then break; fi
+      if ! kill -0 "$cap" 2>/dev/null; then break; fi
+      sleep 1
+    done
+    # SIGINT first — that is what Ctrl-C sends, and espflash releases the port
+    # cleanly on it. Escalate only if it does not.
+    kill -INT "$cap" 2>/dev/null || true
+    sleep 2
+    kill -TERM "$cap" 2>/dev/null || true
+    wait "$cap" 2>/dev/null || true
+    echo "captured $(wc -l < "$out") lines to $out"
+    # Only the family modes have predictions to diff against. The table sweep
+    # produces the estimate ROMs themselves — there is nothing to compare them
+    # to, which is the whole reason they have to be read off silicon.
+    if [[ "$mode" == "families" ]]; then
+      just fp-diff "$out"
+    else
+      echo "table sweep captured; P6 turns it into fp_policy::EstimateTables"
+    fi
+
+# Diff an FP conformance capture against the committed host predictions.
+#
+# Classifies every row AGREE / DIVERGE / RESOLVED / SKIPPED and prints the full
+# divergence list. ABORTS on a fingerprint mismatch (the two sides generated
+# different inputs, so nothing after it means anything) and on a missing end
+# sentinel (a truncated capture is an error, not a partial pass).
+#
+#   just fp-diff target/fp-capture/fpconf-20260731-190000.txt
+fp-diff capture:
+    FP_CAPTURE="{{ absolute_path(capture) }}" \
+      cargo test -p lp-xt-emu --test fp_capture -- --nocapture --test-threads=1
 
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
@@ -688,22 +877,22 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
     # Keep `partition` in sync with the `factory` app partition in
     # lp-fw/fw-esp32c6/partitions.csv.
-    just _fw-size-check esp32c6 esp32c6 {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
+    just _fw-size-check esp32c6 esp32c6 4mb {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
         "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
 
-# Fail when the esp32s3 app image gets too close to its 3 MB partition.
-# Same cliff and the same reasoning as the C6 above — this crate is budgeted
-# for the identical 4 MB layout (lp-fw/fw-esp32s3/partitions.csv), and the S3
-# is the chip whose app-layer port is still ahead of it, so the number is worth
-# trending from the start rather than from the first overrun.
-
-# Fail when the esp32s3 app image gets too close to its 3 MB partition.
+# Fail when the esp32s3 app image gets too close to its 6 MB partition.
+#
+# Unlike the C6, this number is a TREND, not a budget gate. The S3 moved to an
+# 8 MB partition floor (docs/adr/2026-07-30-esp32s3-partition-floor.md), which
+# removed the pressure the C6 still lives under — the check exists so Xtensa
+# code density stays a tracked number, not so anyone has to fight for space.
+# Do not tighten the margin to manufacture pressure.
 fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
     # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32s3/partitions.csv.
-    just _fw-size-check esp32s3 esp32s3 {{ fw_esp32s3_elf }} 3145728 {{ margin }} \
+    # lp-fw/fw-esp32s3/partitions.csv (0x600000).
+    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
@@ -713,7 +902,7 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
 #
 # Callers build the ELF first; the build differs per chip (target, profile,
 # features, toolchain) but the measurement does not.
-_fw-size-check name chip elf partition margin doc:
+_fw-size-check name chip flash_size elf partition margin doc:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v espflash >/dev/null 2>&1; then
@@ -722,9 +911,19 @@ _fw-size-check name chip elf partition margin doc:
     fi
     # No --partition-table here on purpose: espflash errors out when the image
     # overruns the real table, and we want to report *how far* over it is.
+    #
+    # `--flash-size` is what keeps that true. Without it espflash falls back to
+    # a chip-dependent default table, and the ESP32-S3's is a 1 MB app
+    # partition — so an S3 image over 1 MB made this recipe die inside
+    # `save-image` with `image_too_big` against a partition nobody flashes,
+    # reporting nothing. It went unnoticed because the S3 image was 1,007,760 B
+    # at the time, 40 KB under that invisible cliff; the first shader build
+    # crossed it. Passing the real flash size also makes the measured image the
+    # same one the flash recipes produce, since the size lands in the image
+    # header.
     img="$(mktemp)"
     trap 'rm -f "${img}"' EXIT
-    espflash save-image --chip {{ chip }} {{ elf }} "${img}" >/dev/null
+    espflash save-image --chip {{ chip }} --flash-size {{ flash_size }} {{ elf }} "${img}" >/dev/null
     size="$(wc -c < "${img}" | tr -d ' ')"
     headroom=$(( {{ partition }} - size ))
     echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
@@ -883,11 +1082,14 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
     done
-    # test_espnow is the one harness built without default features: it wants
-    # the radio capability alone, not the server stack.
-    echo "==> fw-esp32c6 harness: test_espnow (--no-default-features)"
-    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
+    # Two harnesses build without default features: test_espnow wants the radio
+    # capability alone, and test_f32_softfloat wants the compiler alone (plus
+    # `float-f32`, which no other configuration in this crate turns on).
+    for feature in test_espnow test_f32_softfloat; do
+        echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
+        cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
+    done
 
 # Every lpc-engine node gate, one build per gate turned off.
 #
@@ -1087,7 +1289,7 @@ test-glsl-filetests:
 # was measured at ~18 min for the pair on a 4-core runner). Local `check`
 # keeps the full meaning.
 [parallel]
-check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus
+check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
 check: check-lint schema-check
@@ -1102,6 +1304,14 @@ lint-serde-content:
 # per-directive @unsupported(wgpu.f32) markers were nearly lost).
 lint-torture-corpus:
     python3 lp-shader/scripts/gen-control-torture.py --check
+
+# Same story for the vec corpus (filetests/vec/**/*.gen.glsl): hand edits are
+# silently reverted by the next `--write`. Without this gate the generator had
+# drifted 2,700 lines of body indentation away from the checked-in files, and a
+# regeneration would have silently dropped the run[f32] channels that the M6 P2
+# triage hand-added to the float op-add/op-multiply large-numbers cases.
+lint-vec-corpus:
+    cargo run -p lps-filetests-gen-app -- --check
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
@@ -1316,6 +1526,32 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 fwtest-espnow-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
+# Run firmware with test_f32_softfloat: IEEE f32 semantics on the C6's soft-float
+# path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
+# on-device in FloatMode::F32 and executed.
+#
+# The port is NOT auto-detected. Several ESP32 boards are usually attached and
+# picking the first one has flashed the wrong board before; pass the C6's port
+# explicitly, e.g. `just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodem1301`.
+fwtest-f32-softfloat-esp32c6 port="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+        port="${ESPFLASH_PORT:-}"
+    fi
+    if [[ -z "$port" ]]; then
+        echo "Pass the ESP32-C6 port explicitly (or set ESPFLASH_PORT):" >&2
+        echo "  just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodemXXXX" >&2
+        echo "Available:" >&2
+        ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null >&2 || true
+        exit 1
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
+        --features test_f32_softfloat,esp32c6 --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }}
+
 cargo-update:
     cargo update -p regalloc2 \
                  -p cranelift-codegen \
@@ -1349,6 +1585,39 @@ decode-backtrace *addrs:
         riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 $ADDRS
     else
         addr2line -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 -f -a $ADDRS
+    fi
+
+# Decode ESP32-S3 backtrace addresses.
+#
+# A separate recipe rather than a flag on the one above because the two chips
+# cannot be told apart from the addresses: both put flash text at 0x42xxxxxx,
+# so a shared recipe would silently symbolize S3 frames against the C6 image
+# and produce confident nonsense. The S3 panic path prints this recipe by name.
+#
+# Build first: just build-fw-esp32s3
+# Usage: just decode-backtrace-esp32s3 0x42010d2a ...
+#        pbpaste | just decode-backtrace-esp32s3
+decode-backtrace-esp32s3 *addrs:
+    #!/usr/bin/env bash
+    set -e
+    test -f {{ fw_esp32s3_elf }}
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace-esp32s3 0x420... or: pbpaste | just decode-backtrace-esp32s3"
+        exit 1
+    fi
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    if command -v xtensa-esp32s3-elf-addr2line >/dev/null 2>&1; then
+        xtensa-esp32s3-elf-addr2line -pfiaC -e {{ fw_esp32s3_elf }} $ADDRS
+    else
+        addr2line -e {{ fw_esp32s3_elf }} -f -a $ADDRS
     fi
 
 # ============================================================================

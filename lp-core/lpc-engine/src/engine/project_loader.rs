@@ -242,6 +242,11 @@ impl ProjectLoader {
                     reason: String::from("project tree references missing definition entry"),
                 }
             })?;
+            // A definition that failed to parse has no kind to report, so the
+            // node is projected as a container and matches none of the
+            // per-kind attach loops below — it is present in the tree but
+            // drives nothing. `mark_node_load_error` is what makes that
+            // visible; do not read this fallback as "it is a project".
             let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
             let state_error = def_entry
                 .state
@@ -333,7 +338,13 @@ impl ProjectLoader {
                 );
             }
             if let Some(message) = state_error {
-                mark_node_load_error(runtime, node_id, frame, message);
+                mark_node_load_error(
+                    runtime,
+                    node_id,
+                    frame,
+                    &def_location_label(&project_node.def_location),
+                    message,
+                );
             }
 
             projected_nodes.push(ProjectedNode {
@@ -783,7 +794,7 @@ impl ProjectLoader {
                     }
                     Err(error) => {
                         let message = error.to_string();
-                        mark_node_load_error(runtime, node.id, frame, message);
+                        mark_node_load_error(runtime, node.id, frame, &node_label(node), message);
                     }
                 }
             }
@@ -830,7 +841,21 @@ fn should_attach_projected_node(
     targets.is_none_or(|targets| targets.contains(&node.use_location))
 }
 
-fn mark_node_load_error(runtime: &mut Engine, node_id: NodeId, frame: Revision, message: String) {
+/// Record a per-node load failure without failing the project load.
+///
+/// A broken definition stays in inventory so Studio can show it, and the load
+/// deliberately continues — but a headless device has no Studio, and until this
+/// logged, a node with an unparseable file simply never appeared: no error, no
+/// output, nothing in 150 s of serial. The warning is what makes the drop
+/// observable on a device.
+fn mark_node_load_error(
+    runtime: &mut Engine,
+    node_id: NodeId,
+    frame: Revision,
+    label: &str,
+    message: String,
+) {
+    log::warn!("ProjectLoader: node {label} did not load: {message}");
     if let Some(entry) = runtime.tree_mut().get_mut(node_id) {
         entry.set_status(NodeRuntimeStatus::Error(message.clone()), frame);
         entry.set_state(NodeEntryState::Failed { reason: message }, frame);
@@ -2035,7 +2060,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -2112,6 +2137,30 @@ mod tests {
         assert_fixture_node_error(&rt, "unsupported map2d format 99");
     }
 
+    /// A node whose *definition file* will not parse must be reported, not
+    /// dropped.
+    ///
+    /// Such a node has no kind, so it is projected as a container and matches
+    /// none of the per-kind attach loops — it never runs, and the load still
+    /// succeeds. On the desk this looked like one of four LED strips simply
+    /// not existing: no error, no output, nothing in 150 s of serial. The
+    /// failed status here (and the warning `mark_node_load_error` logs beside
+    /// it) is the only trace such a node leaves.
+    #[test]
+    fn a_node_whose_definition_does_not_parse_is_marked_failed() {
+        let fs = char_project(&[(
+            "output",
+            // Endpoint specs are `capability:driver:config`; the config part
+            // is empty here, exactly as a mis-edited `outputN.json` had it.
+            r#"{ "kind": "Output", "endpoint": "ws281x:rmt:",
+                 "bindings": { "input": { "source": "bus:control.out" } } }"#,
+        )]);
+
+        let rt = load_project(&fs);
+
+        assert_node_for_def_error(&rt, "/output.json", "empty part");
+    }
+
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
         assert_node_for_def_error(rt, "/fixture.json", expected);
     }
@@ -2136,7 +2185,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -2233,7 +2282,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2412,7 +2461,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2542,7 +2591,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "def": {
@@ -2571,7 +2620,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2927,7 +2976,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -2970,7 +3019,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -3140,7 +3189,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3203,6 +3252,44 @@ mod tests {
         assert_eq!(
             *production.value_leaf().expect("value").value(),
             LpValue::F32(2.25)
+        );
+    }
+
+    /// The defaulting rule, end to end: `examples/fluid` predates the `power`
+    /// slot and authors none, yet its fixture must still come up limited. The
+    /// budget the node publishes is the one actually enforced, so asserting on
+    /// it also pins that the UI cannot report a percentage against a budget
+    /// nothing is applying.
+    #[test]
+    fn fixture_without_an_authored_power_slot_is_limited_at_the_default_budget() {
+        let fs = examples_fluid_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let root = rt.tree().root();
+        let fixture = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fixture").unwrap())
+            .expect("fixture node");
+
+        let budget = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fixture,
+                    slot: SlotPath::parse("power_budget_ma").expect("power_budget_ma"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve power budget")
+            .0;
+
+        assert_eq!(
+            *budget.value_leaf().expect("value").value(),
+            LpValue::U32(lpc_model::nodes::fixture::FixturePower::DEFAULT_BUDGET_MA),
+            "an unstated budget must fall back to the default guard, not to unlimited"
         );
     }
 
@@ -3653,7 +3740,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3723,7 +3810,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -4016,7 +4103,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "name": "basic",
   "nodes": {
     "output": {
@@ -4206,7 +4293,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let project = format!(
-            "{{\n  \"kind\": \"Project\",\n  \"format\": 1,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
+            "{{\n  \"kind\": \"Project\",\n  \"format\": 2,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
         );
         fs.write_file("/project.json".as_path(), project.as_bytes())
             .expect("project.json");
@@ -4459,7 +4546,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"

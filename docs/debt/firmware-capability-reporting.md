@@ -82,6 +82,27 @@ kinds the project's `project.json` actually uses.
 - **2026-07-30** — Filed alongside the node-runtime feature gates
   themselves (M2 of the S3 app-layer plan); no incidents yet, since nothing
   ships a gated-down build to anyone but the developer who configured it.
+- **2026-07-30** — First gated-down build ran on hardware (M3 P5, the ESP32-S3
+  app layer with all eight gates off and `NullGraphics`). Two observations that
+  sharpen this entry:
+
+  **"Silently inert" is not silent at the output boundary.** The `Output` node
+  is ungated, so it registers a sink and resolves its input every frame — and
+  every frame `LpServer::tick` warns
+  `node NodeId(3): resolve output input: produce: node NodeId(2) does not
+  produce slot "output"` (rate-limited to `persists (N consecutive frames)`).
+  So a gated-out producer *does* surface, but as a **per-frame runtime warning
+  naming a symptom**, not as a capability statement. Nothing says "this build
+  has no shader node"; it says a node did not produce a slot, which reads as a
+  project-authoring error rather than a build-configuration one. That is
+  arguably worse than silence, because it is a plausible wrong explanation.
+
+  **A whole class of node is unreachable by construction.** With every gate off
+  *and* a null graphics backend, no node kind can produce pixels at all, so the
+  output path cannot be exercised end-to-end. That was accepted deliberately
+  for M3, but it means "does this build actually work?" is unanswerable from
+  the device's own output — exactly the question capability reporting would
+  answer.
 
 **Exit criteria** — A device that omits a node kind's runtime says so on
 `ServerHello` (or an equivalent capability seam), and the studio visibly

@@ -1,5 +1,6 @@
 pub mod app;
 pub mod base;
+mod clipboard;
 pub mod core;
 pub mod exploration;
 #[cfg(target_arch = "wasm32")]
@@ -10,6 +11,7 @@ mod router;
 mod settings_io;
 #[cfg(feature = "stories")]
 mod stories;
+mod unsaved_gate;
 mod web_app;
 
 fn main() {

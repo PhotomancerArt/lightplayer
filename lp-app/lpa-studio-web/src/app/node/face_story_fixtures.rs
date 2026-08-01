@@ -361,6 +361,33 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
             UiSlotFieldState::editable(),
             UiSlotSourceState::Unset,
         ),
+        // Opted out (budget 0) — the only state with no readout now that an
+        // unstated budget falls back to the default guard.
+        power: None,
+    }
+}
+
+/// A fixture inside its declared budget: the readout is a setup number.
+pub(crate) fn fixture_face_within_budget() -> UiFixtureFace {
+    UiFixtureFace {
+        power: Some(lpa_studio_core::UiFixturePower {
+            estimated_draw_ma: 780,
+            budget_ma: 1000,
+            scale: 1.0,
+        }),
+        ..fixture_face()
+    }
+}
+
+/// A fixture actively shedding current to stay inside its budget.
+pub(crate) fn fixture_face_limiting() -> UiFixtureFace {
+    UiFixtureFace {
+        power: Some(lpa_studio_core::UiFixturePower {
+            estimated_draw_ma: 2400,
+            budget_ma: 1000,
+            scale: 0.41,
+        }),
+        ..fixture_face()
     }
 }
 
@@ -386,6 +413,7 @@ pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
             UiSlotFieldState::editable(),
             UiSlotSourceState::Unset,
         ),
+        power: None,
     }
 }
 
@@ -410,6 +438,13 @@ pub(crate) fn fixture_node_view() -> UiNodeView {
     let mut view = UiNodeView::new(header, vec![UiNodeTab::main(fixture_sections())])
         .with_node_id("fixture-halo");
     view.face = Some(UiNodeFace::Fixture(fixture_face()));
+    view
+}
+
+/// The same fixture card carrying a specific power state.
+pub(crate) fn fixture_node_view_with_face(face: UiFixtureFace) -> UiNodeView {
+    let mut view = fixture_node_view();
+    view.face = Some(UiNodeFace::Fixture(face));
     view
 }
 

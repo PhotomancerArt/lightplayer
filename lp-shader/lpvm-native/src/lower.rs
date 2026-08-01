@@ -12,25 +12,23 @@
 //!   Currently inlined: `Fneg` (via [`VInst::Neg`]), `Fabs`, `Fmin`,
 //!   `Fmax`, `FtoUnorm16`, `FtoUnorm8`, `Unorm16toF`, `Unorm8toF`.
 //!
-//! * **Dispatched on [`LowerOpts::q32`].** `Fadd`/`Fsub`/`Fmul`/`Fdiv`
-//!   choose between the conservative saturating helper (default) and a
-//!   faster non-saturating expansion based on the active [`Q32Options`].
-//!   Defaults match the saturating helper bit-for-bit. Wrapping/Reciprocal
-//!   modes match `lpvm-wasm`'s `emit/q32.rs` bit-for-bit so the browser
-//!   preview agrees with the device.
+//! * **Wrapping inline / reciprocal call.** `Fadd`/`Fsub`/`Fmul`/`Fdiv`
+//!   lower to the shader-speed expansion, which **wraps on overflow** — it
+//!   does not saturate. These expansions match `lpvm-wasm`'s `emit/q32.rs`
+//!   bit-for-bit so the browser preview agrees with the device.
 //!
-//!   * `Fadd`/`Fsub`: `Saturating` → [`BuiltinId::LpLpirFaddQ32`] /
-//!     [`BuiltinId::LpLpirFsubQ32`] sym_call. `Wrapping` → 1-VInst inline
-//!     [`AluOp::Add`] / [`AluOp::Sub`].
-//!   * `Fmul`: `Saturating` → [`BuiltinId::LpLpirFmulQ32`] sym_call.
-//!     `Wrapping` → 5-VInst `mul`/`mulh`/`srli`/`slli`/`or` sequence
-//!     computing `((a * b) >> 16)` mod 2^32.
-//!   * `Fdiv`: `Saturating` → [`BuiltinId::LpLpirFdivQ32`] sym_call.
-//!     `Reciprocal` → [`BuiltinId::LpLpirFdivRecipQ32`] sym_call (~0.01%
-//!     typical error; explicit divisor==0 saturation guard inside the
-//!     helper).
+//!   * `Fadd`/`Fsub`: 1-VInst inline [`AluOp::Add`] / [`AluOp::Sub`],
+//!     wrapping.
+//!   * `Fmul`: 5-VInst `mul`/`mulh`/`srli`/`slli`/`or` sequence computing
+//!     `((a * b) >> 16)` mod 2^32, wrapping.
+//!   * `Fdiv`: [`BuiltinId::LpLpirFdivRecipQ32`] sym_call — reciprocal
+//!     multiplication, ~0.01% typical error, with an explicit divisor==0
+//!     saturation guard inside the helper.
+//!   * `FdivConstF32`: inline `lhs * q32(1.0 / rhs)`, wrapping.
 //!
-//!   See `docs/plans-old/2026-04-18-q32-options-dispatch/00-design.md`.
+//!   This is the only Q32 arithmetic configuration the product ships. The
+//!   per-shader `Q32Options` mode selector that once chose saturating
+//!   alternatives here was removed with `GlslOpts`; see `docs/design/q32.md`.
 //!
 //! * **`sym_call` (defer for review).** Non-trivial semantics
 //!   (saturation, rounding modes, clamping, multi-word arithmetic) that
@@ -44,9 +42,10 @@
 //!
 //!   Currently call: `Fsqrt`.
 //!
-//! All Q32 helper functions remain in `lps-builtins` as the **reference
-//! implementation** of op semantics. Inline expansions must match the
-//! helper's behavior bit-for-bit on the i32 input domain.
+//! The Q32 helper functions that survive in `lps-builtins` are the
+//! **reference implementation** of the ops that still call them. Inline
+//! expansions must match `lpvm-wasm`'s corresponding expansion bit-for-bit
+//! on the i32 input domain.
 //!
 //! Zbb (`min`/`max`) is not enabled — ESP32-C6 silicon does not decode
 //! it. If/when a Zbb-bearing target is added, `Fmin`/`Fmax` can collapse
@@ -58,8 +57,8 @@ use alloc::vec::Vec;
 
 use lpir::{CalleeRef, FloatMode, IrFunction, LpirModule, LpirOp};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id,
+    BuiltinId, GlslParamKind, Mode as BuiltinMode, glsl_lpfn_builtin_id, glsl_math_builtin_id,
+    lpir_builtin_id, texture_builtin_id, vm_builtin_id,
 };
 
 use crate::LowerOpts;
@@ -71,19 +70,19 @@ use crate::vinst::{
     AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, TempVRegs, VInst, VReg,
     VRegSlice, pack_src_op,
 };
-use lps_q32::{
-    q32_encode,
-    q32_options::{AddSubMode, DivMode, MulMode},
-};
+use lps_q32::q32_encode;
 
 #[inline]
-fn fa_vreg(v: lpir::VReg) -> VReg {
+pub(crate) fn fa_vreg(v: lpir::VReg) -> VReg {
     VReg(v.0 as u16)
 }
 
 /// Map LPIR vregs into the shared operand pool without an intermediate Vec
 /// (one call per Call VInst; Q32 code is call-dense).
-fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice, LowerError> {
+pub(crate) fn push_vregs_slice(
+    pool: &mut Vec<VReg>,
+    ir: &[lpir::VReg],
+) -> Result<VRegSlice, LowerError> {
     if ir.len() > u8::MAX as usize {
         return Err(LowerError::UnsupportedOp {
             description: String::from("vreg slice too long for FA backend"),
@@ -252,6 +251,212 @@ fn emit_q32_fdiv_const_zero(
     });
 }
 
+/// Lower one of the four LPIR integer divide/remainder ops.
+///
+/// On an ISA whose native divide already implements the LPIR contract this is
+/// the bare instruction; on one whose divide traps it is
+/// [`emit_guarded_int_div`]. The choice is made by the named ISA property
+/// [`IsaTarget::integer_div_traps_on_zero`] rather than by matching on the ISA
+/// here, so a new backend declares its answer in one place and shared lowering
+/// stays honest about *why* it differs.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mirrors the LpirOp arm's own operands; bundling them would only \
+              move the positional risk into a tuple"
+)]
+fn lower_int_div(
+    out: &mut Vec<VInst>,
+    temps: &mut TempVRegs,
+    func: &IrFunction,
+    isa: IsaTarget,
+    op: AluOp,
+    dst: lpir::VReg,
+    lhs: lpir::VReg,
+    rhs: lpir::VReg,
+    src_op: u16,
+) {
+    let konst = const_divisor(func, rhs);
+    let (dst, lhs, rhs) = (fa_vreg(dst), fa_vreg(lhs), fa_vreg(rhs));
+
+    let guard = isa.integer_div_traps_on_zero() && !matches!(konst, Some(c) if c != 0);
+    if guard {
+        emit_guarded_int_div(out, temps, op, dst, lhs, rhs, src_op);
+    } else {
+        out.push(VInst::AluRRR {
+            op,
+            dst,
+            src1: lhs,
+            src2: rhs,
+            src_op,
+        });
+    }
+}
+
+/// The constant value of divisor `v`, when it has one.
+///
+/// A non-zero answer means the zero-divisor guard ([`emit_guarded_int_div`])
+/// can be skipped: the guard exists only to make a *zero* divisor
+/// well-defined, so a divisor that cannot be zero should pay nothing for it.
+///
+/// Most integer division in shader code is by a literal (`i / 3`, `x % 16`).
+///
+/// The rule is deliberately the most conservative one that still catches the
+/// literal case: `v` must be defined **exactly once** in the whole function
+/// body, by an [`LpirOp::IconstI32`] with a non-zero value. Single-definition
+/// is what makes it sound without any dominance or loop analysis: in a
+/// well-formed function the sole definition dominates every use, and the case
+/// `opt.rs`'s `fold_immediates` needs `compute_loop_def_sets` for (a constant
+/// killed by a later redefinition inside a loop) cannot arise when there is no
+/// later redefinition anywhere.
+/// [`LpirOp::Call`] is checked separately because it defines its `results`
+/// range without reporting a `def_vreg`.
+///
+/// Wrong here is expensive and quiet: an unsound answer reintroduces the very
+/// trap the guard removes, on inputs the corpus may not reach. When anything
+/// is unclear this returns `None` and the guard stays.
+fn const_divisor(func: &IrFunction, v: lpir::VReg) -> Option<i32> {
+    // A parameter arrives from the caller: never a known constant.
+    if v.0 < func.hidden_param_slots() + func.param_count as u32 {
+        return None;
+    }
+    let mut found: Option<i32> = None;
+    for op in func.body.iter() {
+        if let LpirOp::Call { results, .. } = op {
+            let start = results.start as usize;
+            if func.vreg_pool[start..start + results.count as usize].contains(&v) {
+                return None;
+            }
+        }
+        if op.def_vreg() != Some(v) {
+            continue;
+        }
+        match op {
+            // A second definition of any kind gives up: the value reaching
+            // this use is no longer knowable from a linear walk.
+            LpirOp::IconstI32 { value, .. } if found.is_none() => found = Some(*value),
+            _ => return None,
+        }
+    }
+    found
+}
+
+/// Emit an integer divide/remainder on an ISA whose native instruction
+/// **traps** on a zero divisor ([`IsaTarget::integer_div_traps_on_zero`]).
+///
+/// LPIR requires integer division and remainder to never trap and to follow
+/// RV32M semantics (`docs/design/lpir/02-core-ops.md`,
+/// `docs/adr/2026-07-30-integer-division-never-traps.md`):
+///
+/// | op | divisor `0` | `i32::MIN` / `-1` |
+/// |---|---|---|
+/// | `idiv_s` | `-1` | `i32::MIN` |
+/// | `idiv_u` | `0xFFFF_FFFF` | n/a |
+/// | `irem_s` | the dividend | `0` |
+/// | `irem_u` | the dividend | n/a |
+///
+/// Only the **zero divisor** column is guarded here. Xtensa — the one ISA that
+/// currently answers `true` — already produces the RV32M answers for
+/// `i32::MIN / -1` and `i32::MIN % -1`, so guarding that column too would be
+/// wasted instructions. Cranelift's equivalent
+/// (`lpvm-cranelift/src/emit/scalar.rs`) guards both because its `sdiv` traps
+/// on both; the guard set is per-ISA on purpose.
+///
+/// The expansion is branchless and needs no scratch *hardware* registers —
+/// every temporary is a fresh vreg, so register allocation owns the lifetimes
+/// and any `dst`/`src` aliasing:
+///
+/// ```text
+///     IcmpImm  is_zero, Eq, rhs, 0     ; is_zero ∈ {0, 1}
+///     Or       safe,    rhs, is_zero   ; rhs, or 1 when rhs == 0
+///     AluRRR   quot,    op,  lhs, safe ; cannot trap
+///     Neg      mask,    is_zero        ; 0 or -1 (all ones)
+///     ...                              ; op-specific fixup, below
+/// ```
+///
+/// `safe = rhs | is_zero` replaces a compare-and-select: `is_zero` is exactly
+/// `0` or `1`, so the `or` is a no-op on a non-zero divisor and yields `1` on a
+/// zero one. `x / 1 == x` and `x % 1 == 0` are both defined, so the divide is
+/// then unconditionally safe.
+///
+/// The fixup exploits the same mask:
+///
+/// * **divide** — `dst = quot | mask`. A zero divisor forces all ones (`-1`
+///   signed, `0xFFFF_FFFF` unsigned — the same bit pattern, so both signed and
+///   unsigned divide share this arm).
+/// * **remainder** — `dst = quot | (lhs & mask)`. `quot` is `lhs % 1 == 0`
+///   whenever the divisor was zero, so the `or` reduces to the dividend
+///   exactly then and to `quot` otherwise.
+fn emit_guarded_int_div(
+    out: &mut Vec<VInst>,
+    temps: &mut TempVRegs,
+    op: AluOp,
+    dst: VReg,
+    lhs: VReg,
+    rhs: VReg,
+    src_op: u16,
+) {
+    let is_zero = temps.mint();
+    let safe = temps.mint();
+    let quot = temps.mint();
+    let mask = temps.mint();
+
+    out.push(VInst::IcmpImm {
+        dst: is_zero,
+        src: rhs,
+        imm: 0,
+        cond: IcmpCond::Eq,
+        src_op,
+    });
+    out.push(VInst::AluRRR {
+        op: AluOp::Or,
+        dst: safe,
+        src1: rhs,
+        src2: is_zero,
+        src_op,
+    });
+    out.push(VInst::AluRRR {
+        op,
+        dst: quot,
+        src1: lhs,
+        src2: safe,
+        src_op,
+    });
+    out.push(VInst::Neg {
+        dst: mask,
+        src: is_zero,
+        src_op,
+    });
+    match op {
+        AluOp::DivS | AluOp::DivU => {
+            out.push(VInst::AluRRR {
+                op: AluOp::Or,
+                dst,
+                src1: quot,
+                src2: mask,
+                src_op,
+            });
+        }
+        // RemS / RemU — the zero-divisor result is the dividend.
+        _ => {
+            let kept = temps.mint();
+            out.push(VInst::AluRRR {
+                op: AluOp::And,
+                dst: kept,
+                src1: lhs,
+                src2: mask,
+                src_op,
+            });
+            out.push(VInst::AluRRR {
+                op: AluOp::Or,
+                dst,
+                src1: quot,
+                src2: kept,
+                src_op,
+            });
+        }
+    }
+}
+
 fn sym_call(
     out: &mut Vec<VInst>,
     symbols: &mut ModuleSymbols,
@@ -277,7 +482,7 @@ fn sym_call(
 pub fn lower_lpir_op(
     out: &mut Vec<VInst>,
     op: &LpirOp,
-    opts: &LowerOpts<'_>,
+    opts: &LowerOpts,
     src_op: Option<u32>,
     func: &IrFunction,
     ir: &LpirModule,
@@ -319,43 +524,59 @@ pub fn lower_lpir_op(
             Ok(())
         }
         LpirOp::IdivS { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::DivS,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::DivS,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::IdivU { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::DivU,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::DivU,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::IremS { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::RemS,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::RemS,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::IremU { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::RemU,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::RemU,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::Ineg { dst, src } => {
@@ -822,84 +1043,38 @@ pub fn lower_lpir_op(
         }
 
         LpirOp::Fadd { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => {
-            match opts.q32.add_sub {
-                AddSubMode::Saturating => sym_call(
-                    out,
-                    symbols,
-                    vreg_pool,
-                    BuiltinId::LpLpirFaddQ32.name(),
-                    &[*lhs, *rhs],
-                    &[*dst],
-                    src_op,
-                ),
-                AddSubMode::Wrapping => {
-                    out.push(VInst::AluRRR {
-                        op: AluOp::Add,
-                        dst: fa_vreg(*dst),
-                        src1: fa_vreg(*lhs),
-                        src2: fa_vreg(*rhs),
-                        src_op: po,
-                    });
-                    Ok(())
-                }
-            }
+            out.push(VInst::AluRRR {
+                op: AluOp::Add,
+                dst: fa_vreg(*dst),
+                src1: fa_vreg(*lhs),
+                src2: fa_vreg(*rhs),
+                src_op: po,
+            });
+            Ok(())
         }
         LpirOp::Fsub { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => {
-            match opts.q32.add_sub {
-                AddSubMode::Saturating => sym_call(
-                    out,
-                    symbols,
-                    vreg_pool,
-                    BuiltinId::LpLpirFsubQ32.name(),
-                    &[*lhs, *rhs],
-                    &[*dst],
-                    src_op,
-                ),
-                AddSubMode::Wrapping => {
-                    out.push(VInst::AluRRR {
-                        op: AluOp::Sub,
-                        dst: fa_vreg(*dst),
-                        src1: fa_vreg(*lhs),
-                        src2: fa_vreg(*rhs),
-                        src_op: po,
-                    });
-                    Ok(())
-                }
-            }
+            out.push(VInst::AluRRR {
+                op: AluOp::Sub,
+                dst: fa_vreg(*dst),
+                src1: fa_vreg(*lhs),
+                src2: fa_vreg(*rhs),
+                src_op: po,
+            });
+            Ok(())
         }
-        LpirOp::Fmul { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => match opts.q32.mul {
-            MulMode::Saturating => sym_call(
-                out,
-                symbols,
-                vreg_pool,
-                BuiltinId::LpLpirFmulQ32.name(),
-                &[*lhs, *rhs],
-                &[*dst],
-                src_op,
-            ),
-            MulMode::Wrapping => {
-                let a = fa_vreg(*lhs);
-                let b = fa_vreg(*rhs);
-                let dstv = fa_vreg(*dst);
-                emit_q32_fmul_wrap(out, temps, dstv, a, b, po);
-                Ok(())
-            }
-        },
-        LpirOp::Fdiv { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => {
-            let helper = match opts.q32.div {
-                DivMode::Saturating => BuiltinId::LpLpirFdivQ32,
-                DivMode::Reciprocal => BuiltinId::LpLpirFdivRecipQ32,
-            };
-            sym_call(
-                out,
-                symbols,
-                vreg_pool,
-                helper.name(),
-                &[*lhs, *rhs],
-                &[*dst],
-                src_op,
-            )
+        LpirOp::Fmul { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => {
+            emit_q32_fmul_wrap(out, temps, fa_vreg(*dst), fa_vreg(*lhs), fa_vreg(*rhs), po);
+            Ok(())
         }
+        LpirOp::Fdiv { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => sym_call(
+            out,
+            symbols,
+            vreg_pool,
+            BuiltinId::LpLpirFdivRecipQ32.name(),
+            &[*lhs, *rhs],
+            &[*dst],
+            src_op,
+        ),
         LpirOp::FdivConstF32 { dst, lhs, rhs } if opts.float_mode == FloatMode::Q32 => {
             if *rhs == 0.0 {
                 emit_q32_fdiv_const_zero(out, temps, fa_vreg(*dst), fa_vreg(*lhs), po);
@@ -1288,6 +1463,8 @@ pub fn lower_lpir_op(
             Ok(())
         }
 
+        // Every float arm above carries an `opts.float_mode == FloatMode::Q32`
+        // guard, so reaching this arm means the shader asked for native f32.
         LpirOp::Fadd { .. }
         | LpirOp::Fsub { .. }
         | LpirOp::Fmul { .. }
@@ -1317,9 +1494,34 @@ pub fn lower_lpir_op(
         | LpirOp::FtoUnorm16 { .. }
         | LpirOp::FtoUnorm8 { .. }
         | LpirOp::Unorm16toF { .. }
-        | LpirOp::Unorm8toF { .. } => Err(LowerError::UnsupportedOp {
-            description: String::from("float op requires Q32 mode (F32 not supported on rv32c)"),
-        }),
+        | LpirOp::Unorm8toF { .. } => {
+            #[cfg(feature = "float-f32")]
+            {
+                crate::lower_f32::lower_f32_op(
+                    out,
+                    op,
+                    abi.isa(),
+                    src_op,
+                    symbols,
+                    vreg_pool,
+                    temps,
+                )
+            }
+            // Without the feature the f32 lowering is not linked at all, which
+            // is the point of the gate (roadmap D2: `FloatMode` is matched on a
+            // runtime value, so LTO cannot drop it on its own). Name the feature
+            // — "unsupported op" alone sends people looking for a missing
+            // backend that is right there behind a flag.
+            #[cfg(not(feature = "float-f32"))]
+            {
+                let _ = (out, symbols, vreg_pool, temps);
+                Err(LowerError::UnsupportedOp {
+                    description: String::from(
+                        "float_mode=f32 needs the `float-f32` feature on lpvm-native",
+                    ),
+                })
+            }
+        }
 
         LpirOp::IfStart { .. }
         | LpirOp::Else
@@ -1344,10 +1546,11 @@ pub fn lower_lpir_op(
             args,
             results,
         } => {
-            let name =
-                resolve_callee_name(ir, *callee).ok_or_else(|| LowerError::UnsupportedOp {
+            let name = resolve_callee_name(ir, *callee, opts.float_mode).ok_or_else(|| {
+                LowerError::UnsupportedOp {
                     description: format!("Call: callee index out of range ({callee:?})"),
-                })?;
+                }
+            })?;
             let args_slice = func.pool_slice(*args);
             if args_slice.len() != args.count as usize {
                 return Err(LowerError::UnsupportedOp {
@@ -1414,7 +1617,7 @@ struct LowerCtx<'a> {
     func: &'a IrFunction,
     ir: &'a LpirModule,
     abi: &'a ModuleAbi,
-    lower_opts: &'a LowerOpts<'a>,
+    lower_opts: &'a LowerOpts,
     out: Vec<VInst>,
     vreg_pool: Vec<VReg>,
     symbols: ModuleSymbols,
@@ -1879,7 +2082,7 @@ pub fn lower_ops(
     func: &IrFunction,
     ir: &LpirModule,
     abi: &ModuleAbi,
-    opts: &LowerOpts<'_>,
+    opts: &LowerOpts,
 ) -> Result<LoweredFunction, LowerError> {
     // Pre-size vectors to reduce allocation overhead during lowering.
     // Estimate: ~2 vinsts per LPIR op, vreg pool from IR plus headroom for temps.
@@ -1952,10 +2155,10 @@ pub fn lower_ops(
 /// Resolve a callee to its symbol name, borrowed from the module (or
 /// `'static` for builtins) — no per-call-site String; interning copies only
 /// on first sight of a symbol.
-fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<&str> {
+fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef, mode: FloatMode) -> Option<&str> {
     if let Some(idx) = ir.callee_as_import(callee) {
         ir.imports.get(idx).map(|imp| {
-            if let Some(bid) = resolve_import_to_builtin(imp) {
+            if let Some(bid) = resolve_import_to_builtin(imp, mode) {
                 bid.name()
             } else {
                 imp.func_name.as_str()
@@ -1970,34 +2173,74 @@ fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<&str> {
 
 /// Map an LPIR import declaration to a BuiltinId to get the C ABI symbol name.
 /// Mirrors Cranelift's resolve_import in lpvm-cranelift/src/builtins.rs
-fn resolve_import_to_builtin(decl: &lpir::lpir_module::ImportDecl) -> Option<BuiltinId> {
+///
+/// **`mode` is load-bearing, not decoration.** Resolving an import without it
+/// was the wasm backend's B1 defect (M1 corpus findings §3): in f32 mode the
+/// Q32 ids came back, and a builtin taking a *pointer* has an `i32` signature
+/// in both modes, so the call linked and ran while reinterpreting f32 bit
+/// patterns as Q16.16. There is no type error to catch it — only wrong colors.
+/// `lps-builtin-ids`' resolvers never fall back across modes, so an unmapped
+/// name surfaces as a named "unknown builtin symbol" relocation failure.
+fn resolve_import_to_builtin(
+    decl: &lpir::lpir_module::ImportDecl,
+    mode: FloatMode,
+) -> Option<BuiltinId> {
+    let bmode = builtin_mode(mode);
     match decl.module_name.as_str() {
         "glsl" => {
             let ac = decl.param_types.len();
-            glsl_q32_math_builtin_id(&decl.func_name, ac)
+            glsl_math_builtin_id(&decl.func_name, ac, bmode)
         }
         "lpir" => {
             let ac = decl.param_types.len();
-            lpir_q32_builtin_id(&decl.func_name, ac)
+            lpir_builtin_id(&decl.func_name, ac, bmode)
         }
         "lpfn" => {
             // LPFX builtins are named like "lpfn_psrdnoise_34" - strip the suffix
             let base = lpfn_strip_suffix(&decl.func_name)?;
             // Get GLSL kinds from lpfn_glsl_params CSV or fall back to IR types
             let kinds = lpfn_glsl_kinds_from_decl(decl);
-            glsl_lpfn_q32_builtin_id(base, &kinds)
+            glsl_lpfn_builtin_id(base, &kinds, bmode)
         }
         "vm" => {
             let ac = decl.param_types.len();
-            vm_q32_builtin_id(&decl.func_name, ac)
+            vm_builtin_id(&decl.func_name, ac, bmode)
         }
         "texture" => {
             let base = texture_strip_suffix(&decl.func_name);
             let ac = decl.param_types.len();
-            texture_q32_builtin_id(base, ac)
+            texture_builtin_id(base, ac, bmode)
         }
         _ => None,
     }
+}
+
+/// [`FloatMode`] → the builtin-id resolver's mode.
+///
+/// **Pinned to Q32 when `float-f32` is off, and that is a flash decision.**
+/// `lps-builtin-ids` is a separate crate that every firmware image links, and
+/// its f32 name→id tables are reachable from exactly one place: this call. Ask
+/// for them on a *runtime* value and LTO has to keep all of them —
+/// **+3,904 B measured on the ESP32-C6 image**, for tables a Fixed-only device
+/// can never reach, because without `float-f32` a `FloatMode::F32` shader is a
+/// named lowering error long before it gets here.
+///
+/// This is the same shape as the `isa-*` gates, and it is worth knowing that the
+/// gate on `lpvm-native`'s own f32 code was *not* enough on its own: the id
+/// tables live in another crate and needed their own cut point.
+#[cfg(feature = "float-f32")]
+fn builtin_mode(mode: FloatMode) -> BuiltinMode {
+    match mode {
+        FloatMode::Q32 => BuiltinMode::Q32,
+        FloatMode::F32 => BuiltinMode::F32,
+    }
+}
+
+/// See the sibling above — without `float-f32` there is no f32 lowering to
+/// resolve imports for, so the f32 resolvers stay unreachable and drop out.
+#[cfg(not(feature = "float-f32"))]
+fn builtin_mode(_mode: FloatMode) -> BuiltinMode {
+    BuiltinMode::Q32
 }
 
 /// Strip the numeric suffix from LPFX import names (e.g., "lpfn_psrdnoise_34" → "lpfn_psrdnoise").
@@ -2119,41 +2362,6 @@ mod tests {
     use crate::vinst::{
         AluImmOp, IcmpCond, ModuleSymbols, TempVRegs, VReg as FaVReg, unpack_src_op,
     };
-    use lps_q32::q32_options::Q32Options;
-
-    fn call_lower_op_with_q32(
-        op: &LpirOp,
-        float_mode: FloatMode,
-        q32: &Q32Options,
-        src_op: Option<u32>,
-        f: &IrFunction,
-        ir: &LpirModule,
-        abi: &ModuleAbi,
-    ) -> Result<Vec<VInst>, LowerError> {
-        let opts = LowerOpts {
-            float_mode,
-            q32,
-            fuel: false,
-        };
-        let mut out = Vec::new();
-        let mut symbols = ModuleSymbols::default();
-        let mut pool = Vec::new();
-        let mut temps = TempVRegs::new(f.vreg_types.len() as u16);
-        super::lower_lpir_op(
-            &mut out,
-            op,
-            &opts,
-            src_op,
-            f,
-            ir,
-            abi,
-            &mut symbols,
-            &mut pool,
-            &mut temps,
-        )?;
-        Ok(out)
-    }
-
     fn call_lower_op(
         op: &LpirOp,
         float_mode: FloatMode,
@@ -2162,14 +2370,12 @@ mod tests {
         ir: &LpirModule,
         abi: &ModuleAbi,
     ) -> Result<Vec<VInst>, LowerError> {
-        let q32 = Q32Options::default();
-        call_lower_op_with_q32(op, float_mode, &q32, src_op, f, ir, abi)
+        call_lower_op_full(op, float_mode, src_op, f, ir, abi).map(|(out, _, _)| out)
     }
 
-    fn call_lower_op_full_q32(
+    fn call_lower_op_full(
         op: &LpirOp,
         float_mode: FloatMode,
-        q32: &Q32Options,
         src_op: Option<u32>,
         f: &IrFunction,
         ir: &LpirModule,
@@ -2177,7 +2383,6 @@ mod tests {
     ) -> Result<(Vec<VInst>, ModuleSymbols, Vec<FaVReg>), LowerError> {
         let opts = LowerOpts {
             float_mode,
-            q32,
             fuel: false,
         };
         let mut out = Vec::new();
@@ -2199,25 +2404,6 @@ mod tests {
         Ok((out, symbols, pool))
     }
 
-    fn call_lower_op_full(
-        op: &LpirOp,
-        float_mode: FloatMode,
-        src_op: Option<u32>,
-        f: &IrFunction,
-        ir: &LpirModule,
-        abi: &ModuleAbi,
-    ) -> Result<(Vec<VInst>, ModuleSymbols, Vec<FaVReg>), LowerError> {
-        let q32 = Q32Options::default();
-        call_lower_op_full_q32(op, float_mode, &q32, src_op, f, ir, abi)
-    }
-
-    fn q32_saturating() -> Q32Options {
-        Q32Options {
-            add_sub: lps_q32::q32_options::AddSubMode::Saturating,
-            mul: lps_q32::q32_options::MulMode::Saturating,
-            div: lps_q32::q32_options::DivMode::Saturating,
-        }
-    }
     use lpir::types::{SlotId, VRegRange};
     use lpir::{IrType, LpirModule, VReg as IrVReg};
     use lps_shared::LpsModuleSig;
@@ -2458,48 +2644,6 @@ mod tests {
     }
 
     #[test]
-    fn lower_q32_fadd_to_call() {
-        let op = LpirOp::Fadd {
-            dst: v(2),
-            lhs: v(0),
-            rhs: v(1),
-        };
-        let f = empty_func();
-        let (ir, abi) = empty_ir_abi();
-        let (v, symbols, pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &q32_saturating(),
-            Some(3),
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
-        assert_eq!(v.len(), 1, "single VInst (sym_call or trivial inline)");
-        match &v[0] {
-            VInst::Call {
-                target,
-                args,
-                rets,
-                callee_uses_sret,
-                caller_passes_sret_ptr,
-                caller_sret_vm_abi_swap,
-                src_op,
-            } => {
-                assert_eq!(symbols.name(*target), "__lp_lpir_fadd_q32");
-                assert_eq!(args.vregs(&pool), &[FaVReg(0), FaVReg(1)]);
-                assert_eq!(rets.vregs(&pool), &[FaVReg(2)]);
-                assert!(!callee_uses_sret);
-                assert!(!caller_passes_sret_ptr);
-                assert!(!caller_sret_vm_abi_swap);
-                assert_eq!(unpack_src_op(*src_op), Some(3));
-            }
-            other => panic!("expected Call, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn lower_q32_fdiv_to_call() {
         let op = LpirOp::Fdiv {
             dst: v(2),
@@ -2508,16 +2652,8 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &q32_saturating(),
-            Some(0),
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
+        let (v, symbols, pool) =
+            call_lower_op_full(&op, FloatMode::Q32, Some(0), &f, &ir, &abi).expect("ok");
         assert_eq!(v.len(), 1, "single VInst (sym_call or trivial inline)");
         match &v[0] {
             VInst::Call {
@@ -2529,7 +2665,7 @@ mod tests {
                 caller_sret_vm_abi_swap,
                 src_op,
             } => {
-                assert_eq!(symbols.name(*target), "__lp_lpir_fdiv_q32");
+                assert_eq!(symbols.name(*target), "__lp_lpir_fdiv_recip_q32");
                 assert_eq!(args.vregs(&pool), &[FaVReg(0), FaVReg(1)]);
                 assert_eq!(rets.vregs(&pool), &[FaVReg(2)]);
                 assert!(!callee_uses_sret);
@@ -2565,11 +2701,7 @@ mod tests {
         };
         let f = func_three_q32_vregs();
         let (ir, abi) = empty_ir_abi();
-        let q32 = Q32Options {
-            add_sub: lps_q32::q32_options::AddSubMode::Wrapping,
-            ..Default::default()
-        };
-        let v = call_lower_op_with_q32(&op, FloatMode::Q32, &q32, None, &f, &ir, &abi).expect("ok");
+        let v = call_lower_op(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok");
         assert_eq!(v.len(), 1);
         assert!(matches!(
             &v[0],
@@ -2584,25 +2716,6 @@ mod tests {
     }
 
     #[test]
-    fn fadd_q32_saturating_emits_sym_call() {
-        let op = LpirOp::Fadd {
-            dst: v(2),
-            lhs: v(0),
-            rhs: v(1),
-        };
-        let f = empty_func();
-        let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) =
-            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
-                .expect("ok");
-        assert_eq!(v.len(), 1);
-        let VInst::Call { target, .. } = &v[0] else {
-            panic!("expected sym_call");
-        };
-        assert_eq!(symbols.name(*target), BuiltinId::LpLpirFaddQ32.name());
-    }
-
-    #[test]
     fn fsub_q32_wrapping_emits_inline_sub() {
         let op = LpirOp::Fsub {
             dst: v(2),
@@ -2611,11 +2724,7 @@ mod tests {
         };
         let f = func_three_q32_vregs();
         let (ir, abi) = empty_ir_abi();
-        let q32 = Q32Options {
-            add_sub: lps_q32::q32_options::AddSubMode::Wrapping,
-            ..Default::default()
-        };
-        let v = call_lower_op_with_q32(&op, FloatMode::Q32, &q32, None, &f, &ir, &abi).expect("ok");
+        let v = call_lower_op(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok");
         assert_eq!(v.len(), 1);
         assert!(matches!(
             &v[0],
@@ -2630,25 +2739,6 @@ mod tests {
     }
 
     #[test]
-    fn fsub_q32_saturating_emits_sym_call() {
-        let op = LpirOp::Fsub {
-            dst: v(2),
-            lhs: v(0),
-            rhs: v(1),
-        };
-        let f = empty_func();
-        let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) =
-            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
-                .expect("ok");
-        assert_eq!(v.len(), 1);
-        let VInst::Call { target, .. } = &v[0] else {
-            panic!("expected sym_call");
-        };
-        assert_eq!(symbols.name(*target), BuiltinId::LpLpirFsubQ32.name());
-    }
-
-    #[test]
     fn fmul_q32_wrapping_emits_5_vinst_sequence() {
         let op = LpirOp::Fmul {
             dst: v(2),
@@ -2657,12 +2747,7 @@ mod tests {
         };
         let f = func_three_q32_vregs();
         let (ir, abi) = empty_ir_abi();
-        let q32 = Q32Options {
-            mul: lps_q32::q32_options::MulMode::Wrapping,
-            ..Default::default()
-        };
-        let out =
-            call_lower_op_with_q32(&op, FloatMode::Q32, &q32, None, &f, &ir, &abi).expect("ok");
+        let out = call_lower_op(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok");
         let kinds: Vec<&str> = out
             .iter()
             .map(|i| match i {
@@ -2693,25 +2778,6 @@ mod tests {
     }
 
     #[test]
-    fn fmul_q32_saturating_emits_sym_call() {
-        let op = LpirOp::Fmul {
-            dst: v(2),
-            lhs: v(0),
-            rhs: v(1),
-        };
-        let f = empty_func();
-        let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) =
-            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
-                .expect("ok");
-        assert_eq!(v.len(), 1);
-        let VInst::Call { target, .. } = &v[0] else {
-            panic!("expected sym_call");
-        };
-        assert_eq!(symbols.name(*target), BuiltinId::LpLpirFmulQ32.name());
-    }
-
-    #[test]
     fn fdiv_q32_reciprocal_emits_sym_call_to_recip_helper() {
         let op = LpirOp::Fdiv {
             dst: v(2),
@@ -2720,12 +2786,8 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let q32 = Q32Options {
-            div: lps_q32::q32_options::DivMode::Reciprocal,
-            ..Default::default()
-        };
         let (v, symbols, _pool) =
-            call_lower_op_full_q32(&op, FloatMode::Q32, &q32, None, &f, &ir, &abi).expect("ok");
+            call_lower_op_full(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok");
         assert_eq!(v.len(), 1);
         let VInst::Call { target, .. } = &v[0] else {
             panic!("expected sym_call");
@@ -2742,16 +2804,8 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, _symbols, _pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &Q32Options::default(),
-            None,
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
+        let (v, _symbols, _pool) =
+            call_lower_op_full(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok");
         assert_eq!(v.len(), 6);
         assert!(matches!(v[0], VInst::IConst32 { val: 32_768, .. }));
         assert!(matches!(v[1], VInst::AluRRR { op: AluOp::Mul, .. }));
@@ -2774,16 +2828,8 @@ mod tests {
         };
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) = call_lower_op_full_q32(
-            &op,
-            FloatMode::Q32,
-            &Q32Options::default(),
-            None,
-            &f,
-            &ir,
-            &abi,
-        )
-        .expect("ok");
+        let (v, symbols, _pool) =
+            call_lower_op_full(&op, FloatMode::Q32, None, &f, &ir, &abi).expect("ok");
         assert!(
             symbols.names.is_empty(),
             "zero const-div should not call a helper"
@@ -2808,25 +2854,6 @@ mod tests {
             }
         ));
         assert!(matches!(v[6], VInst::Select { .. }));
-    }
-
-    #[test]
-    fn fdiv_q32_saturating_emits_sym_call() {
-        let op = LpirOp::Fdiv {
-            dst: v(2),
-            lhs: v(0),
-            rhs: v(1),
-        };
-        let f = empty_func();
-        let (ir, abi) = empty_ir_abi();
-        let (v, symbols, _pool) =
-            call_lower_op_full_q32(&op, FloatMode::Q32, &q32_saturating(), None, &f, &ir, &abi)
-                .expect("ok");
-        assert_eq!(v.len(), 1);
-        let VInst::Call { target, .. } = &v[0] else {
-            panic!("expected sym_call");
-        };
-        assert_eq!(symbols.name(*target), BuiltinId::LpLpirFdivQ32.name());
     }
 
     #[test]
@@ -3352,8 +3379,41 @@ mod tests {
         }
     }
 
+    /// F32 mode leaves the Q32 arms and reaches the soft-float lowering; the
+    /// per-op shape is asserted in [`crate::lower_f32`]'s own tests. What is
+    /// worth pinning *here* is that the hand-off happens at all — the fallthrough
+    /// arm is easy to leave behind when a new float op is added.
+    #[cfg(feature = "float-f32")]
     #[test]
-    fn lower_f32_float_unsupported() {
+    fn lower_f32_hands_off_to_the_soft_float_path() {
+        let f = empty_func();
+        let (ir, abi) = empty_ir_abi();
+        for op in [
+            LpirOp::Fadd {
+                dst: v(0),
+                lhs: v(1),
+                rhs: v(2),
+            },
+            LpirOp::Fdiv {
+                dst: v(0),
+                lhs: v(1),
+                rhs: v(2),
+            },
+        ] {
+            let vinsts =
+                call_lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).expect("f32 lowers");
+            assert!(
+                vinsts.iter().any(|i| matches!(i, VInst::Call { .. })),
+                "expected a soft-float call for {op:?}, got {vinsts:?}"
+            );
+        }
+    }
+
+    /// With the gate off there is no f32 backend linked, and the error must say
+    /// so by name rather than looking like a missing feature of the compiler.
+    #[cfg(not(feature = "float-f32"))]
+    #[test]
+    fn lower_f32_without_the_feature_names_the_feature() {
         let op = LpirOp::Fadd {
             dst: v(0),
             lhs: v(1),
@@ -3362,23 +3422,11 @@ mod tests {
         let f = empty_func();
         let (ir, abi) = empty_ir_abi();
         let err = call_lower_op(&op, FloatMode::F32, None, &f, &ir, &abi).expect_err("F32 float");
-        match err {
-            LowerError::UnsupportedOp { description } => {
-                assert!(
-                    description.contains("Q32"),
-                    "expected Q32 hint in {description:?}"
-                );
-            }
-        }
-        let div = LpirOp::Fdiv {
-            dst: v(0),
-            lhs: v(1),
-            rhs: v(2),
-        };
-        assert!(matches!(
-            call_lower_op(&div, FloatMode::F32, None, &f, &ir, &abi),
-            Err(LowerError::UnsupportedOp { .. })
-        ));
+        let LowerError::UnsupportedOp { description } = err;
+        assert!(
+            description.contains("float-f32"),
+            "expected the feature name in {description:?}"
+        );
     }
 
     #[test]
@@ -3660,12 +3708,10 @@ mod tests {
         let sig = LpsModuleSig::default();
         let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &sig);
 
-        let q32 = Q32Options::default();
         // fuel: false — this test asserts the *body* region structure; with
         // fuel on the root becomes a Seq([entry FuelCheck, body]).
         let lower_opts = LowerOpts {
             float_mode: FloatMode::Q32,
-            q32: &q32,
             fuel: false,
         };
         let lowered = lower_ops(&func, &ir, &abi, &lower_opts).expect("lower ok");
@@ -3811,10 +3857,8 @@ mod tests {
         };
         let sig = LpsModuleSig::default();
         let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &sig);
-        let q32 = Q32Options::default();
         let lower_opts = LowerOpts {
             float_mode: FloatMode::Q32,
-            q32: &q32,
             fuel,
         };
         lower_ops(func, &ir, &abi, &lower_opts).expect("lower ok")

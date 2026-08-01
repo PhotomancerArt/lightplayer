@@ -1,0 +1,23 @@
+[package]
+name = "lpa-boards"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# JSON Schema derives for the board display sidecar types (host-side tooling).
+schema-gen = ["dep:schemars"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+lpc-hardware = { path = "../../lp-core/lpc-hardware" }
+
+[lints]
+workspace = true

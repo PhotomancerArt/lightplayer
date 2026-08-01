@@ -38,9 +38,10 @@ use crate::app::project::format_lp_value;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect,
-    UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
+    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
+    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue,
+    UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -112,6 +113,27 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         preview,
         brightness,
         mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
+        power: fixture_power(sections),
+    })
+}
+
+/// The fixture's power readout, present only when the fixture is limited.
+///
+/// Every value here is produced runtime state, including the budget: the node
+/// publishes the budget actually in force after an unstated one has fallen back
+/// to the default, so this never re-derives the defaulting rule and can never
+/// report a percentage against a budget nothing is enforcing.
+///
+/// A zero budget is a deliberate opt-out, and gets no readout.
+fn fixture_power(sections: &[UiNodeSection]) -> Option<UiFixturePower> {
+    let budget_ma = produced_u32(sections, "power_budget_ma")?;
+    if budget_ma == 0 {
+        return None;
+    }
+    Some(UiFixturePower {
+        estimated_draw_ma: produced_u32(sections, "estimated_draw_ma").unwrap_or(0),
+        budget_ma,
+        scale: produced_f32(sections, "power_scale").unwrap_or(1.0),
     })
 }
 
@@ -485,6 +507,20 @@ fn playlist_entry(
 
 /// A produced-value row's u32 reading, keyed by the produced slot's path.
 fn produced_u32(sections: &[UiNodeSection], key: &str) -> Option<u32> {
+    sections
+        .iter()
+        .find_map(|section| match section {
+            UiNodeSection::ProducedValues(values) => Some(values),
+            _ => None,
+        })?
+        .iter()
+        .find(|value| value.key == key)?
+        .value
+        .parse()
+        .ok()
+}
+
+fn produced_f32(sections: &[UiNodeSection], key: &str) -> Option<f32> {
     sections
         .iter()
         .find_map(|section| match section {

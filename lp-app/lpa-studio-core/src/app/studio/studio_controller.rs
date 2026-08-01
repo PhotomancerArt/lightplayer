@@ -23,12 +23,13 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeCreateOp, NodeRemoveOp, NodeRevertOp, PlaylistActivateOp,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot,
-    ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
-    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult,
-    UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
+    PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
+    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
+    ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
+    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
+    UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
+    UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -157,6 +158,10 @@ pub struct StudioController {
     /// The web shell installs a localStorage writer; an Electron shell
     /// would install its own sink. Layer *loads* never fire it.
     on_user_settings: Option<Box<dyn Fn(&str)>>,
+    /// Clipboard sink for node copy, installed by the shell (the web app
+    /// wires `clipboard::write_text`). Core never touches the clipboard:
+    /// it produces envelope text and hands it here.
+    on_copy_text: Option<Box<dyn Fn(&str)>>,
     /// The shader agent's per-node chat sessions (P5). Pure state plus
     /// injected platform facilities (spawner, provider factory); runs are
     /// spawned tasks reporting back through the actor's command queue.
@@ -216,6 +221,7 @@ impl StudioController {
             random: Rc::new(clock_fallback_random),
             settings: crate::app::settings::SettingsStore::default(),
             on_user_settings: None,
+            on_copy_text: None,
             agent: crate::AgentController::new(),
         }
     }
@@ -299,6 +305,11 @@ impl StudioController {
     /// ownership of the controller.
     pub fn set_on_user_settings(&mut self, hook: impl Fn(&str) + 'static) {
         self.on_user_settings = Some(Box::new(hook));
+    }
+
+    /// Install the clipboard sink node copy writes through.
+    pub fn set_on_copy_text(&mut self, hook: impl Fn(&str) + 'static) {
+        self.on_copy_text = Some(Box::new(hook));
     }
 
     /// Install the persisted user settings layer from its JSON document
@@ -710,6 +721,12 @@ impl StudioController {
             self.agent
                 .decorate_editor_view(editor, self.pool.lens(), &self.agent_view_context());
         }
+        // Hoist the project's edit state to the shell: the web edge arms the
+        // unload gate from here rather than walking the pane tree.
+        let dirty = match &project_pane.body {
+            UiViewContent::ProjectEditor(editor) => editor.dirty,
+            _ => crate::DirtySummary::clean(),
+        };
         let panes = vec![project_pane, self.bus_pane(), device_view];
         UiStudioView::new(panes, self.console_view())
             .with_lens(self.lens_runtime())
@@ -720,6 +737,7 @@ impl StudioController {
             .with_device_sync(self.device_sync().cloned())
             .with_lens_card(self.lens_device_card())
             .with_settings(self.settings.ui_view())
+            .with_dirty(dirty)
     }
 
     /// The settings-derived slice the agent view decoration needs:
@@ -1993,6 +2011,14 @@ impl StudioController {
                 let op = action.into_op::<NodeRemoveOp>()?;
                 return self.execute_node_remove_op(op).await;
             }
+            if action.op_as::<NodeCopyOp>().is_some() {
+                let op = action.into_op::<NodeCopyOp>()?;
+                return self.execute_node_copy_op(op).await;
+            }
+            if action.op_as::<NodePasteOp>().is_some() {
+                let op = action.into_op::<NodePasteOp>()?;
+                return self.execute_node_paste_op(op).await;
+            }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
         }
@@ -2420,6 +2446,14 @@ impl StudioController {
                     .map(|summary| summary.name)
                     .unwrap_or_default();
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!("Imported {imported}"))))
+            }
+            HomeOp::ImportJson { text } => {
+                let outcome = self.run_catalog_op(CatalogOp::ImportJson { text }).await?;
+                let imported = outcome
+                    .summary
+                    .map(|summary| summary.name)
+                    .unwrap_or_default();
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Pasted {imported}"))))
             }
             HomeOp::RenameDevice { uid, name } => {
                 let name = name.trim().to_string();
@@ -3112,6 +3146,36 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.remove_node(server, &op.node).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Copy a node to the clipboard. The envelope text goes out through the
+    /// injected sink — core never touches `navigator.clipboard`.
+    async fn execute_node_copy_op(&mut self, op: NodeCopyOp) -> UiResult {
+        let outcome = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.copy_node(server, &op.node).await
+        };
+        let (run, envelope) = outcome?;
+        if let Some(json) = envelope {
+            match self.on_copy_text.as_ref() {
+                Some(sink) => sink(&json),
+                // A host with no clipboard sink installed (tests, a future
+                // headless shell) still runs the read and reports it; the
+                // text simply has nowhere to go.
+                None => log::warn!("copy: no clipboard sink is installed"),
+            }
+        }
+        self.record_project_edit_run(Ok(run))
+    }
+
+    async fn execute_node_paste_op(&mut self, op: NodePasteOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .paste_node(server, &op.envelope, &op.attach)
+                .await
         };
         self.record_project_edit_run(run)
     }

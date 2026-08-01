@@ -52,6 +52,8 @@ pub(super) fn decode_execute_rtype<M: LoggingMode>(
         (0x7, 0x20) => execute_andn::<M>(rd, rs1, rs2, inst_word, pc, regs),
         (0x6, 0x20) => execute_orn::<M>(rd, rs1, rs2, inst_word, pc, regs),
         (0x4, 0x20) => execute_xnor::<M>(rd, rs1, rs2, inst_word, pc, regs),
+        // Zbb: zext.h — RV32 spells it `pack rd, rs1, x0`.
+        (0x4, 0x04) if rs2.num() == 0 => execute_zexth::<M>(rd, rs1, inst_word, pc, regs),
         // Zbb: Min/Max instructions
         (0x4, 0x05) => execute_min::<M>(rd, rs1, rs2, inst_word, pc, regs),
         (0x5, 0x05) => execute_minu::<M>(rd, rs1, rs2, inst_word, pc, regs),
@@ -75,6 +77,44 @@ pub(super) fn decode_execute_rtype<M: LoggingMode>(
             regs: *regs,
         }),
     }
+}
+
+#[inline(always)]
+fn execute_zexth<M: LoggingMode>(
+    rd: Gpr,
+    rs1: Gpr,
+    instruction_word: u32,
+    pc: u32,
+    regs: &mut [i32; 32],
+) -> Result<ExecutionResult, EmulatorError> {
+    let val1 = read_reg(regs, rs1);
+    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
+    let result = ((val1 as u32) & 0xffff) as i32; // Zero-extend halfword
+    if rd.num() != 0 {
+        regs[rd.num() as usize] = result;
+    }
+    let log = if M::ENABLED {
+        Some(InstLog::Arithmetic {
+            cycle: 0,
+            pc,
+            instruction: instruction_word,
+            rd,
+            rs1_val: val1,
+            rs2_val: None,
+            rd_old,
+            rd_new: result,
+        })
+    } else {
+        None
+    };
+    Ok(ExecutionResult {
+        new_pc: None,
+        should_halt: false,
+        syscall: false,
+        class: InstClass::Alu,
+        inst_size: 4,
+        log,
+    })
 }
 
 #[inline(always)]

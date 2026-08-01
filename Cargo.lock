@@ -3921,8 +3921,10 @@ dependencies = [
  "lpfs",
  "lpir",
  "lps-builtins",
+ "lps-glsl",
  "lps-q32",
  "lps-shared",
+ "lpvm",
  "lpvm-native",
  "ser-write-json",
  "serde",
@@ -3934,17 +3936,38 @@ dependencies = [
 name = "fw-esp32s3"
 version = "40.0.0"
 dependencies = [
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embedded-io-async 0.6.1",
+ "embedded-storage",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-println",
+ "esp-rtos",
+ "esp-storage",
+ "fw-core",
+ "fw-esp32-common",
+ "littlefs-rust",
  "log",
+ "lp-gfx-lpvm",
+ "lp-recovery",
+ "lp-ws281x",
+ "lp-xt-fp-vectors",
+ "lpa-server",
+ "lpc-hardware",
+ "lpc-shared",
+ "lpc-wire",
+ "lpfs",
  "lpir",
  "lps-builtins",
  "lps-shared",
  "lpvm",
  "lpvm-native",
+ "ser-write-json",
 ]
 
 [[package]]
@@ -5271,6 +5294,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
+ "lpa-boards",
  "lpa-client",
  "lpa-link",
  "lpa-server",
@@ -5495,6 +5519,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-ws281x"
+version = "0.1.0"
+
+[[package]]
 name = "lp-xt-elf"
 version = "40.0.0"
 dependencies = [
@@ -5508,8 +5536,13 @@ name = "lp-xt-emu"
 version = "40.0.0"
 dependencies = [
  "lp-emu-core",
+ "lp-xt-fp-vectors",
  "lp-xt-inst",
 ]
+
+[[package]]
+name = "lp-xt-fp-vectors"
+version = "40.0.0"
 
 [[package]]
 name = "lp-xt-inst"
@@ -5536,6 +5569,16 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "lpa-boards"
+version = "40.0.0"
+dependencies = [
+ "lpc-hardware",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5623,6 +5666,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
+ "lpa-client",
  "lpc-engine",
  "lpc-hardware",
  "lpc-history",
@@ -5632,6 +5676,7 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "lpfs",
+ "lpvm-native",
  "serde",
 ]
 
@@ -5881,7 +5926,6 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lp-collection 1.0.0",
- "lps-q32",
 ]
 
 [[package]]
@@ -5900,6 +5944,7 @@ version = "40.0.0"
 name = "lps-builtins"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "log",
  "lpfn-impl-macro",
  "lps-builtin-ids",
