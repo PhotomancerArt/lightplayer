@@ -60,6 +60,10 @@ pub enum CatalogOp {
         file_name: String,
         bytes: Vec<u8>,
     },
+    /// Install from a pasted `lp.package` share envelope.
+    ImportJson {
+        text: String,
+    },
     /// Seed-once: find by `SeededFrom` provenance or install the embedded
     /// example — atomic under the catalog lock (two fresh tabs racing the
     /// same example must produce ONE package).
@@ -264,6 +268,11 @@ pub fn apply_catalog_op(
         CatalogOp::ImportZip { file_name, bytes } => Some(
             super::package_zip::import_zip(store, &bytes, now).map_err(|error| {
                 LibraryHostError::Host(format!("could not import {file_name}: {error}"))
+            })?,
+        ),
+        CatalogOp::ImportJson { text } => Some(
+            super::package_zip::import_json(store, &text, now).map_err(|error| {
+                LibraryHostError::Host(format!("could not paste this project: {error}"))
             })?,
         ),
         CatalogOp::EnsureExampleSeeded { id } => Some(ensure_example_seeded(store, &id, now)?),

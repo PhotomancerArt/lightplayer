@@ -122,9 +122,11 @@ firmware tests.
 - **`lp-shader/`** GLSL compiler: frontend (via naga), LightPlayer IR, backends (native RV32 JIT,
   Cranelift, WASM), Q16.16 fixed-point math, and the filetest suite — see
   [`lp-shader/README.md`](lp-shader/README.md)
-- **`lp-fw/`** Firmware: ESP32-C6 (`fw-esp32`), emulator firmware (`fw-emu`), browser worker
+- **`lp-fw/`** Firmware: ESP32-C6 (`fw-esp32c6`), emulator firmware (`fw-emu`), browser worker
   (`fw-browser`), integration tests (`fw-tests`)
 - **`lp-gfx/`** GPU rendering layer (wgpu) used for Studio previews
+- **`lp-emu/`** Architecture-neutral emulator substrate (`lp-emu-core`) and host↔guest ABI
+  (`lp-emu-abi`) shared by the architecture emulators
 - **`lp-riscv/`** RISC-V 32-bit emulator, instruction encoding/decoding, and ELF tooling
 - **`lp-cli/`** Developer CLI (projects, dev server, hardware manifests, GPIO calibration); runs
   from a source checkout

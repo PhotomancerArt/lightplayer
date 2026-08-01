@@ -1,21 +1,59 @@
-//! Export-to-zip download for gallery cards.
+//! Export a library package to the clipboard or a download.
 //!
-//! Export hydrates a lock-free library snapshot through the host
-//! (read-only by design), encodes with the M3 zip codec, and hands the
-//! bytes to the browser as a download — no actor round-trip.
+//! Both forms hydrate a lock-free library snapshot through the host
+//! (read-only by design) and encode from the same file list — the M3 zip
+//! codec for the download, the `lp.package` share envelope for the
+//! clipboard (`docs/adr/2026-07-28-share-envelopes.md`). No actor
+//! round-trip either way.
+//!
+//! **These read the SAVED bytes.** The library snapshot is what is on
+//! disk; unsaved overlay edits are not in it. Callers reachable while a
+//! project is dirty (the editor's project popup) must save first — see
+//! `ProjectShareSection`. The gallery's own cards can only be dirty for
+//! the project currently open in the editor, and that card is not the
+//! export surface.
 
 use lpa_studio_core::UiPackageCard;
 
+/// What a package is being exported as.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ExportForm {
+    /// A `.zip` download.
+    Zip,
+    /// An `lp.package` envelope on the clipboard.
+    JsonToClipboard,
+}
+
+/// Identify a package for export. The card carries both fields already;
+/// the editor popup supplies them from the open project.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ExportTarget {
+    /// `prj_…` uid or slug — anything `LibraryStore::resolve_key` takes.
+    pub uid: String,
+    /// Human-facing slug, used for the download filename.
+    pub slug: String,
+}
+
+impl From<&UiPackageCard> for ExportTarget {
+    fn from(card: &UiPackageCard) -> Self {
+        Self {
+            uid: card.uid.clone(),
+            slug: card.slug.clone(),
+        }
+    }
+}
+
+/// Export a package. Best-effort: failures log and give up, matching the
+/// house style for browser-edge work.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn export_package_to_download(card: &UiPackageCard) {
+pub(crate) fn export_package_as(target: ExportTarget, form: ExportForm) {
+    use lpa_studio_core::PackageEnvelope;
     use lpa_studio_core::app::library::{LibraryStore, export_package};
 
     let Some(host) = crate::local_store::library_host() else {
         log::warn!("export: the local library is unavailable");
         return;
     };
-    let uid_key = card.uid.clone();
-    let slug = card.slug.clone();
     wasm_bindgen_futures::spawn_local(async move {
         let fs = match host.catalog_snapshot().await {
             Ok(fs) => fs,
@@ -25,29 +63,58 @@ pub(crate) fn export_package_to_download(card: &UiPackageCard) {
             }
         };
         let store = LibraryStore::read_only(fs);
-        let uid = match store.resolve_key(&uid_key) {
+        let uid = match store.resolve_key(&target.uid) {
             Ok(uid) => uid,
             Err(error) => {
-                log::warn!("export: cannot resolve {uid_key}: {error}");
+                log::warn!("export: cannot resolve {}: {error}", target.uid);
                 return;
             }
         };
-        let bytes = match store.open(uid).and_then(|handle| export_package(&handle)) {
-            Ok(bytes) => bytes,
+        let handle = match store.open(uid) {
+            Ok(handle) => handle,
             Err(error) => {
-                log::warn!("export of {slug} failed: {error}");
+                log::warn!("export of {} failed: {error}", target.slug);
                 return;
             }
         };
-        // the slug already carries its date stamp — no extra prefix
-        if let Err(error) = trigger_download(&format!("{slug}.zip"), &bytes) {
-            log::warn!("export download of {slug} failed: {error:?}");
+        match form {
+            ExportForm::Zip => {
+                let bytes = match export_package(&handle) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        log::warn!("export of {} failed: {error}", target.slug);
+                        return;
+                    }
+                };
+                // the slug already carries its date stamp — no extra prefix
+                if let Err(error) = trigger_download(&format!("{}.zip", target.slug), &bytes) {
+                    log::warn!("export download of {} failed: {error:?}", target.slug);
+                }
+            }
+            ExportForm::JsonToClipboard => {
+                let files = match handle.read_all_files() {
+                    Ok(files) => files,
+                    Err(error) => {
+                        log::warn!("export of {} failed: {error}", target.slug);
+                        return;
+                    }
+                };
+                match PackageEnvelope::encode(&target.slug, &files).to_json() {
+                    Ok(json) => crate::clipboard::write_text(&json),
+                    Err(error) => log::warn!("encoding {} failed: {error}", target.slug),
+                }
+            }
         }
     });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn export_package_to_download(_card: &UiPackageCard) {}
+pub(crate) fn export_package_as(_target: ExportTarget, _form: ExportForm) {}
+
+/// Download a package as a zip (the gallery card's affordance).
+pub(crate) fn export_package_to_download(card: &UiPackageCard) {
+    export_package_as(ExportTarget::from(card), ExportForm::Zip);
+}
 
 #[cfg(target_arch = "wasm32")]
 fn trigger_download(file_name: &str, bytes: &[u8]) -> Result<(), wasm_bindgen::JsValue> {

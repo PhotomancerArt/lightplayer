@@ -22,16 +22,16 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DirtySummary, ProjectEditorView, ProjectSyncPhase, UiAction, UiAffordance, UiConfigSlot,
-    UiMetric, UiPendingEdit, UiSlotRecord, UiStatus,
+    UiMetric, UiPendingEdit, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
 use crate::app::layout::{PaneChrome, StudioPane};
-use crate::app::node::{SlotRecordEditor, node_status_label_class};
-use crate::app::project::ProjectNodeTree;
+use crate::app::node::node_status_label_class;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
+use crate::app::project::{ProjectNodeTree, ProjectSettingsSection, ProjectShareSection};
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
 
 #[component]
@@ -72,6 +72,7 @@ pub fn ProjectPane(
     let project_name = view.project_name.clone();
     let pending_edits = view.pending_edits.clone();
     let root_slots = view.root_slots.clone();
+    let library_identity = view.library_identity.clone();
 
     rsx! {
         StudioPane {
@@ -91,6 +92,7 @@ pub fn ProjectPane(
                     stats,
                     pending_edits,
                     root_slots,
+                    library_identity,
                     on_action,
                     initially_open,
                 }
@@ -121,9 +123,11 @@ pub fn ProjectPane(
 
 /// The detail popup on the shared [`DetailPopover`] base — the save panel:
 /// project identity with the status word (its only home — headers no longer
-/// carry a status chip), the root's "Project settings" slot rows (P6 flat
-/// root: the workspace renders no root card, so `name` edits — and the
-/// read-only `format`/`nodes` rows — live here), the pending-edit state,
+/// carry a status chip), the root's "Project settings" identity rows (P6
+/// flat root: the workspace renders no root card, so the editable `name` —
+/// and the read-only `format`/`uid`/`nodes` rows — live here, as
+/// purpose-built controls rather than generic slot editors; see
+/// [`ProjectSettingsSection`]), the pending-edit state,
 /// overlay revision, the per-bucket [`DetailSection`]s (unsaved / live /
 /// failed) as titled change lists with per-entry revert (a populated bucket
 /// wears its affordance tint on the title; the count rides the title row's
@@ -141,6 +145,9 @@ fn ProjectDetailPopover(
     stats: Vec<UiMetric>,
     pending_edits: Vec<UiPendingEdit>,
     #[props(default)] root_slots: Vec<UiConfigSlot>,
+    /// The open project's library identity, when a package backs it.
+    #[props(default)]
+    library_identity: Option<(String, String)>,
     on_action: EventHandler<UiAction>,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
@@ -169,18 +176,21 @@ fn ProjectDetailPopover(
                 }
             }
             if !root_slots.is_empty() {
-                // The workspace root's own slot rows (flat root, Q5): full
-                // config rows — `name` edits dispatch from here, and the
-                // `format`/`nodes` rows render their read-only state. The
-                // wrapper cancels the section's horizontal padding so rows
-                // span the card like the node-pane sections they came from.
+                // The workspace root's own identity rows (flat root, Q5):
+                // purpose-built controls, NOT the generic slot editor —
+                // see `project_settings_section`.
                 DetailSection { title: "Project settings",
-                    div { class: "tw:-mx-3 tw:min-w-0",
-                        SlotRecordEditor {
-                            record: UiSlotRecord::new(root_slots),
-                            on_action,
-                        }
-                    }
+                    ProjectSettingsSection { root_slots, on_action }
+                }
+            }
+            // Share is its own section: settings are what the project IS,
+            // share is what you do with it. A project with no library
+            // package behind it (the storeless demo path, or a
+            // device-hosted project this library does not know) renders
+            // none — the affordances read the library snapshot.
+            if let Some((uid, slug)) = library_identity.clone() {
+                DetailSection { title: "Share",
+                    ProjectShareSection { uid, slug, unsaved: dirty.persisted }
                 }
             }
             DetailSection { title: "Pending edits",

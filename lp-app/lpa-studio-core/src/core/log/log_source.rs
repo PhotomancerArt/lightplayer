@@ -42,7 +42,7 @@ impl From<UiLogOrigin> for UiLogSource {
 }
 
 /// Renders the most specific label available: the detail when present (e.g.
-/// `fw-esp32`, `browser-serial`), otherwise the origin label. Consoles that
+/// `fw-esp32c6`, `browser-serial`), otherwise the origin label. Consoles that
 /// want both dimensions should render `origin` and `detail` separately.
 impl fmt::Display for UiLogSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -60,9 +60,9 @@ mod tests {
     #[test]
     fn display_prefers_detail_over_origin_label() {
         let bare = UiLogSource::new(UiLogOrigin::Server);
-        let detailed = UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32");
+        let detailed = UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32c6");
 
         assert_eq!(bare.to_string(), "server");
-        assert_eq!(detailed.to_string(), "fw-esp32");
+        assert_eq!(detailed.to_string(), "fw-esp32c6");
     }
 }

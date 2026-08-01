@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "sample_diameter": 2.0,
+  "objects": [
+    {
+      "name": "panel",
+      "shape": {
+        "grid": {
+          "origin": [100.0, 80.0],
+          "cols": 16,
+          "rows": 16,
+          "pitch": 26.0,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
+      }
+    }
+  ]
+}

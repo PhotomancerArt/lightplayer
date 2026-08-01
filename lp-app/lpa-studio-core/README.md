@@ -50,7 +50,9 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   `docs/adr/2026-07-16-preview-host.md`; the browser-facing half is gated
   to `wasm32 + browser-worker` like the server client io, while its
   request/status/scheduling vocabulary stays target-neutral and
-  unit-tested).
+  unit-tested), and `share` (the `lp.package` / `lp.node` clipboard
+  envelope formats — see `docs/adr/2026-07-28-share-envelopes.md`; pure
+  byte functions, with the clipboard itself living in the web edge).
 - A future `base/` layer can hold truly primitive app-core concepts if one
   emerges. It is intentionally not present until there is a clean need for it.
 

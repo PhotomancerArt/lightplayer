@@ -18,7 +18,10 @@ pub struct ChatCompletionsRequest<'a> {
     /// ignore it; the provider tolerates absent usage).
     pub stream_options: StreamOptions,
     /// The current parameter name (OpenAI deprecated `max_tokens`).
-    pub max_completion_tokens: u32,
+    /// `None` omits the field, which lets each server apply its own model
+    /// max — see the ceiling note on [`super::openai_compat_provider`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
     pub messages: Vec<WireMessage>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<WireTool<'a>>,
@@ -335,7 +338,7 @@ mod tests {
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            max_completion_tokens: 4096,
+            max_completion_tokens: Some(4096),
             messages: wire_messages("sys", &messages),
             tools: tools.iter().map(WireTool::from_def).collect(),
         };
@@ -369,13 +372,16 @@ mod tests {
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            max_completion_tokens: 1,
+            max_completion_tokens: None,
             messages: wire_messages("", &[ChatMessage::user_text("hi")]),
             tools: Vec::new(),
         };
         let got = serde_json::to_value(&req).expect("serialize");
         let obj = got.as_object().expect("obj");
         assert!(obj.get("tools").is_none());
+        // `None` omits the ceiling entirely rather than sending a null or a
+        // zero, either of which servers would treat as a real limit.
+        assert!(obj.get("max_completion_tokens").is_none());
         // No system message when the system prompt is empty.
         assert_eq!(got["messages"], json!([{"role": "user", "content": "hi"}]));
     }

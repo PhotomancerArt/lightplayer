@@ -5,7 +5,6 @@ use alloc::vec::Vec;
 use crate::abi::{FrameLayout, FuncAbi, PregSet};
 use crate::compile::NativeReloc;
 use crate::error::NativeError;
-use crate::isa::rv32::emit::emit_function;
 use crate::regalloc::{AllocOutput, AllocResult, allocate};
 use crate::vinst::VInst;
 
@@ -85,16 +84,18 @@ pub fn emit_lowered_with_alloc(
         caller_outgoing_stack_bytes,
     );
 
-    let emitted = emit_function(
-        &lowered.vinsts,
-        &lowered.vreg_pool,
-        &alloc_result.output,
-        frame,
-        &lowered.symbols,
-        func_abi.is_sret(),
-        collect_debug_lines,
-    )
-    .map_err(NativeError::RegAlloc)?;
+    let emitted = func_abi
+        .isa()
+        .emit_function(
+            &lowered.vinsts,
+            &lowered.vreg_pool,
+            &alloc_result.output,
+            frame,
+            &lowered.symbols,
+            func_abi.is_sret(),
+            collect_debug_lines,
+        )
+        .map_err(NativeError::RegAlloc)?;
 
     // Build EmittedCode with allocation output for debug rendering
     Ok(EmittedCode {
@@ -105,7 +106,7 @@ pub fn emit_lowered_with_alloc(
             .map(|r| NativeReloc {
                 offset: r.offset,
                 symbol: r.symbol,
-                r_type: crate::isa::rv32::link::R_RISCV_CALL_PLT,
+                r_type: func_abi.isa().call_reloc_type(),
             })
             .collect(),
         debug_lines: emitted.debug_lines,

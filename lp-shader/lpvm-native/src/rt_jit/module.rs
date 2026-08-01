@@ -86,6 +86,12 @@ impl LpvmModule for NativeJitModule {
         &self.inner.meta
     }
 
+    /// The JIT always compiles for [`IsaTarget::native`] — the machine it is
+    /// running on — so the target needs no field of its own here.
+    fn float_impl(&self) -> lpvm::FloatImpl {
+        IsaTarget::native().float_impl_for(self.inner.options.float_mode)
+    }
+
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         let align = 16usize;
         let total_size = self.inner.meta.vmctx_buffer_size();
@@ -149,13 +155,33 @@ pub(crate) fn build_entry_info(
                 ))
             })?;
         let func_abi = match isa {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(gfn, Some(ir_func)),
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(gfn, Some(ir_func)),
         };
         entries.insert(
             ir_func.name.clone(),
             NativeJitEntryInfo {
                 arg_count: ir_func.param_count as usize,
-                ret_count: ir_func.return_types.len(),
+                // NOT `ir_func.return_types.len()`. For an sret function that
+                // is **zero** — `FunctionBuilder::finish` asserts sret
+                // functions have empty `return_types`, because the results
+                // leave through the caller-provided pointer instead. The real
+                // count lives in the ABI, computed from the signature's return
+                // type, and is the same number the emitter builds the prologue
+                // from — so caller and callee cannot drift.
+                //
+                // Getting this wrong is not a cosmetic mismatch: `invoke_flat`
+                // sizes its sret buffer `ret_count.max(1)` and the callee
+                // writes `sret_word_count` words through the pointer, so a
+                // zero here means a 1-word buffer receiving 4 words. `rt_emu`
+                // has always sized from the return type (see
+                // `run_emulator_call`'s `struct_size`); this is the JIT
+                // catching up.
+                ret_count: func_abi
+                    .sret_word_count()
+                    .map_or_else(|| ir_func.return_types.len(), |w| w as usize),
                 is_sret: func_abi.is_sret(),
                 supports_render_texture: lpvm::validate_render_texture_sig_ir(ir_func).is_ok(),
                 supports_render_samples: lpvm::validate_render_samples_sig_ir(ir_func).is_ok(),

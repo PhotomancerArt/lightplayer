@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::abi::FrameLayout;
+use crate::abi::{FrameLayout, RegClass};
 use crate::isa::rv32::encode::*;
 use crate::isa::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
 use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
@@ -22,24 +22,8 @@ fn jal_offset_valid(imm: i32) -> bool {
     imm % 2 == 0 && imm >= -(1 << 20) && imm <= (1 << 20) - 2
 }
 
-/// Byte offset in `.text` where a relocation applies.
-#[derive(Clone, Debug)]
-pub struct NativeReloc {
-    pub offset: usize,
-    pub symbol: String,
-}
-
-/// Raw RV32 machine code for one function plus relocations and debug info
-/// (internal hand-off to [`crate::emit::EmittedCode`]).
-#[derive(Clone, Debug)]
-pub(crate) struct Rv32EmitOutput {
-    /// RISC-V machine code bytes.
-    pub code: Vec<u8>,
-    /// Relocations for auipc+jalr call pairs.
-    pub relocs: Vec<NativeReloc>,
-    /// Debug line table: (code_offset, optional_src_op).
-    pub debug_lines: Vec<(u32, Option<u32>)>,
-}
+pub(crate) use crate::isa::shared::IsaEmitOutput;
+pub use crate::isa::shared::NativeReloc;
 
 /// Emit context for building machine code.
 pub struct EmitContext<'a> {
@@ -138,6 +122,23 @@ impl<'a> EmitContext<'a> {
         )
     }
 
+    /// The GPR named by a register allocation.
+    ///
+    /// The single gate between the allocator's class-aware `Alloc` and this
+    /// emitter's bare GPR indices. A float-class allocation is rejected rather
+    /// than unwrapped: RV32F codegen is a later milestone, and emitting an
+    /// integer instruction against a hardware index that names a float register
+    /// would be silently wrong rather than merely unimplemented.
+    fn hw(preg: crate::abi::PackedPReg) -> Result<PReg, AllocError> {
+        match preg.class() {
+            RegClass::Int => Ok(preg.hw()),
+            RegClass::Float => Err(crate::emit_err!(
+                "allocation names float register f{} — rv32 has no float backend",
+                preg.hw()
+            )),
+        }
+    }
+
     /// Use a vreg: return its physical register, loading from spill if needed.
     fn use_vreg(
         &mut self,
@@ -150,7 +151,7 @@ impl<'a> EmitContext<'a> {
         let alloc = Self::operand_alloc(output, inst_idx, operand_idx);
 
         match alloc {
-            Alloc::Reg(preg) => Ok(preg),
+            Alloc::Reg(preg) => Self::hw(preg),
             Alloc::Stack(slot) => {
                 let offset = self
                     .frame
@@ -176,7 +177,7 @@ impl<'a> EmitContext<'a> {
         let alloc = Self::operand_alloc(output, inst_idx, operand_idx);
 
         match alloc {
-            Alloc::Reg(preg) => Ok(preg),
+            Alloc::Reg(preg) => Self::hw(preg),
             Alloc::Stack(_) => Ok(temp), // Caller must store after
             Alloc::None => Err(crate::emit_err!()),
         }
@@ -211,6 +212,7 @@ impl<'a> EmitContext<'a> {
             Edit::Move { from, to } => match (*from, *to) {
                 (Alloc::None, _) | (_, Alloc::None) => return Err(crate::emit_err!()),
                 (Alloc::Reg(src), Alloc::Reg(dst)) => {
+                    let (src, dst) = (Self::hw(src)?, Self::hw(dst)?);
                     if src != dst {
                         self.push_u32(encode_addi(dst as u32, src as u32, 0), src_op);
                     }
@@ -220,14 +222,20 @@ impl<'a> EmitContext<'a> {
                         .frame
                         .spill_offset_from_fp(slot as u32)
                         .ok_or(crate::emit_err!())?;
-                    self.push_u32(encode_lw(dst as u32, FP_REG as u32, offset), src_op);
+                    self.push_u32(
+                        encode_lw(Self::hw(dst)? as u32, FP_REG as u32, offset),
+                        src_op,
+                    );
                 }
                 (Alloc::Reg(src), Alloc::Stack(slot)) => {
                     let offset = self
                         .frame
                         .spill_offset_from_fp(slot as u32)
                         .ok_or(crate::emit_err!())?;
-                    self.push_u32(encode_sw(src as u32, FP_REG as u32, offset), src_op);
+                    self.push_u32(
+                        encode_sw(Self::hw(src)? as u32, FP_REG as u32, offset),
+                        src_op,
+                    );
                 }
                 (Alloc::Stack(s_from), Alloc::Stack(s_to)) => {
                     let o_from = self
@@ -245,7 +253,10 @@ impl<'a> EmitContext<'a> {
             },
             Edit::LoadIncomingArg { fp_offset, to } => match *to {
                 Alloc::Reg(dst) => {
-                    self.push_u32(encode_lw(dst as u32, FP_REG as u32, *fp_offset), src_op);
+                    self.push_u32(
+                        encode_lw(Self::hw(dst)? as u32, FP_REG as u32, *fp_offset),
+                        src_op,
+                    );
                 }
                 Alloc::Stack(slot) => {
                     let spill_off = self
@@ -769,7 +780,10 @@ impl<'a> EmitContext<'a> {
                     let stack_off = ((i - cap) * 4) as i32;
                     match alloc {
                         Alloc::Reg(src) => {
-                            self.push_u32(encode_sw(src as u32, SP_REG as u32, stack_off), src_op);
+                            self.push_u32(
+                                encode_sw(Self::hw(src)? as u32, SP_REG as u32, stack_off),
+                                src_op,
+                            );
                         }
                         Alloc::Stack(slot) => {
                             let spill_off = self
@@ -815,7 +829,7 @@ impl<'a> EmitContext<'a> {
                         match alloc {
                             Alloc::Reg(dst) => {
                                 self.push_u32(
-                                    encode_lw(dst as u32, FP_REG as u32, buf_off),
+                                    encode_lw(Self::hw(dst)? as u32, FP_REG as u32, buf_off),
                                     src_op,
                                 );
                             }
@@ -910,6 +924,32 @@ impl<'a> EmitContext<'a> {
                     self.push_u32(encode_sw(t0, rv, fuel_off), src_op);
                 }
             }
+            // Hardware float. `Rv32imac` names a part with **no F extension**,
+            // so these are not "not implemented yet" here — they are
+            // unreachable by construction: `IsaTarget::f32_lowering` answers
+            // `SoftFloatCalls` for this target, and that lowering emits only
+            // integer instructions. Reaching this arm means the float-capability
+            // seam was bypassed, and the hardware would take an
+            // illegal-instruction trap on the first frame if we guessed an
+            // encoding. An RV32F variant of `IsaTarget` supplies real arms here.
+            VInst::FAluRRR { .. }
+            | VInst::FAluRR { .. }
+            | VInst::Fcmp { .. }
+            | VInst::FSelect { .. }
+            | VInst::FLoad32 { .. }
+            | VInst::FStore32 { .. }
+            | VInst::Wfr { .. }
+            | VInst::Rfr { .. }
+            | VInst::IToF { .. } => {
+                // The message-less form on purpose. `emit_err!` with any
+                // message allocates a `String` through `format!` (**+512 B
+                // measured on the C6 image**), and adding `vinst.mnemonic()` to
+                // it drags the whole mnemonic table in on top (**a further
+                // +736 B**) — 1,248 B for an arm that is unreachable in a
+                // Fixed-only build. The file:line the macro captures is enough
+                // to find this comment.
+                return Err(crate::emit_err!());
+            }
         }
         Ok(())
     }
@@ -952,9 +992,9 @@ impl<'a> EmitContext<'a> {
     }
 
     /// Finish emission and return the emitted code.
-    pub(crate) fn finish(mut self) -> Result<Rv32EmitOutput, AllocError> {
+    pub(crate) fn finish(mut self) -> Result<IsaEmitOutput, AllocError> {
         self.resolve_branch_fixups()?;
-        Ok(Rv32EmitOutput {
+        Ok(IsaEmitOutput {
             code: self.code,
             relocs: self.relocs,
             debug_lines: self.debug_lines,
@@ -971,7 +1011,7 @@ pub(crate) fn emit_function(
     symbols: &ModuleSymbols,
     is_sret: bool,
     collect_debug_lines: bool,
-) -> Result<Rv32EmitOutput, AllocError> {
+) -> Result<IsaEmitOutput, AllocError> {
     log::debug!(
         "[native-fa] emit_function: starting with {} vinsts, {} edits",
         vinsts.len(),

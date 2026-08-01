@@ -169,9 +169,16 @@ fn apply_single_relocation(
                 ));
             }
 
-            // Write the absolute target address directly
+            // R_RISCV_32 is `S + A`. The addend is not decoration: it selects
+            // *which* object inside the target symbol is meant. A table of
+            // pointers into one merged constant — rustc's `&'static str` switch
+            // tables are exactly this shape, one relocation per element against
+            // a single string blob — carries the element offset entirely in the
+            // addend. Writing `S` alone collapses every entry onto the blob's
+            // base address.
+            let value = target_addr.wrapping_add(reloc.addend as u32);
             let reloc_bytes = &mut buffer_slice[offset..offset + 4];
-            reloc_bytes.copy_from_slice(&target_addr.to_le_bytes());
+            reloc_bytes.copy_from_slice(&value.to_le_bytes());
 
             // If this is a GOT entry, mark it as initialized
             if got_tracker.has_entry(&reloc.symbol_name) {
@@ -180,15 +187,17 @@ fn apply_single_relocation(
                     "  Applied R_RISCV_32 at 0x{:x}: ✓ GOT entry initialized: '{}' = 0x{:x}",
                     reloc.address,
                     reloc.symbol_name,
-                    target_addr
+                    value
                 );
             } else {
                 log::trace!(
-                    "  Applied R_RISCV_32 at 0x{:x}: Wrote 0x{:x} to offset 0x{:x} for '{}'",
+                    "  Applied R_RISCV_32 at 0x{:x}: Wrote 0x{:x} to offset 0x{:x} for '{}' (S=0x{:x} + A={})",
                     reloc.address,
-                    target_addr,
+                    value,
                     offset,
-                    reloc.symbol_name
+                    reloc.symbol_name,
+                    target_addr,
+                    reloc.addend
                 );
             }
         }

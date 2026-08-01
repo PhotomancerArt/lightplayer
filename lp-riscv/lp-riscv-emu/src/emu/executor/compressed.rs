@@ -9,8 +9,8 @@ use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{
     error::EmulatorError,
     logging::{InstLog, SystemKind},
-    memory::Memory,
 };
+use lp_emu_core::Memory;
 use lp_riscv_inst::Gpr;
 
 /// Decode and execute compressed instructions (16-bit, bits [1:0] != 0b11).
@@ -409,28 +409,9 @@ fn execute_c_lw<M: LoggingMode>(
     let address = base.wrapping_add(offset) as u32;
 
     let error_regs = *regs;
-    let value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
@@ -483,28 +464,9 @@ fn execute_c_sw<M: LoggingMode>(
     } else {
         0
     };
-    memory.write_word(address, value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let log = if M::ENABLED {
         Some(InstLog::Store {
@@ -1211,28 +1173,9 @@ fn execute_c_lwsp<M: LoggingMode>(
     let address = sp_val.wrapping_add(offset) as u32;
 
     let error_regs = *regs;
-    let value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
@@ -1437,28 +1380,9 @@ fn execute_c_swsp<M: LoggingMode>(
     } else {
         0
     };
-    memory.write_word(address, value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let log = if M::ENABLED {
         Some(InstLog::Store {
@@ -1564,8 +1488,8 @@ fn decode_cb_offset(inst: u16) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::emu::memory::Memory;
     use alloc::vec;
+    use lp_emu_core::Memory;
 
     use super::super::{InstClass, LoggingDisabled, LoggingEnabled};
 

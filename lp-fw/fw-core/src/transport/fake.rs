@@ -38,10 +38,7 @@ impl FakeTransport {
 
 impl ServerTransport for FakeTransport {
     async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
-        #[cfg(any(feature = "emu", feature = "esp32"))]
         log::debug!("FakeTransport: Would send message id={}", msg.id);
-        #[cfg(not(any(feature = "emu", feature = "esp32")))]
-        let _ = msg;
         Ok(())
     }
 

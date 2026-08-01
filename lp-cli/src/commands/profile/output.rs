@@ -4,7 +4,7 @@
 //! shape of the metadata struct passed in.
 
 use anyhow::Result;
-use lp_riscv_emu::profile::SessionMetadata;
+use lp_emu_core::profile::SessionMetadata;
 use std::path::Path;
 
 use super::mode::ProfileMode;
@@ -14,7 +14,7 @@ pub fn build_initial_metadata(
     project: String,
     workload: String,
     note: Option<String>,
-    symbols: Vec<lp_riscv_emu::profile::TraceSymbol>,
+    symbols: Vec<lp_emu_core::profile::TraceSymbol>,
     mode: ProfileMode,
     max_cycles: u64,
     cycle_model: String,

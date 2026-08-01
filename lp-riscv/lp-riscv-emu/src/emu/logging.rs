@@ -4,17 +4,6 @@ use core::fmt;
 
 use lp_riscv_inst::Gpr;
 
-/// Logging verbosity level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    /// No logging.
-    None,
-    /// Only log errors.
-    Errors,
-    /// Log each instruction execution.
-    Instructions,
-}
-
 /// System instruction kind for logging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemKind {

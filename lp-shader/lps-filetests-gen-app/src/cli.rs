@@ -13,6 +13,12 @@ pub struct Args {
     /// Write files to disk (default: dry-run, print to stdout)
     #[arg(long)]
     pub write: bool,
+
+    /// Verify the checked-in files match what this generator produces, and exit
+    /// nonzero on any drift. With no specifiers this checks the whole `vec`
+    /// corpus, which is what the `lint-vec-corpus` gate wants.
+    #[arg(long, conflicts_with = "write")]
+    pub check: bool,
 }
 
 pub fn parse_args() -> Args {

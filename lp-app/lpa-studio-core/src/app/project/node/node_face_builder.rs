@@ -9,7 +9,9 @@
 //! - **Shader**: preview = the produced visual product; controls = consumed
 //!   uniform slots whose authored `panel` flag is on (`ShaderSlotDef.panel`),
 //!   as knobs over the authored `min`/`max` editing
-//!   `consumed.<name>.default.some`; the code drawer reuses the inline GLSL
+//!   `consumed.<name>.default.some`, snapping to the uniform's step
+//!   ([`lpc_model::shader_panel_step`] — authored, else 1 for an i32/u32
+//!   shape); the code drawer reuses the inline GLSL
 //!   asset editor. The agent handle is decorated later by the studio
 //!   controller (`AgentController::decorate_editor_view`), exactly like the
 //!   sections path.
@@ -28,14 +30,18 @@
 //! - Every other kind returns `None` — the card keeps today's generic
 //!   sections.
 
-use lpc_model::{FixtureDef, PlaylistDef, ShaderDef};
+use lpc_model::{
+    FixtureDef, LpValue, PlaylistDef, ShaderDef, ShaderValueShapeRef, shader_panel_step,
+};
 
+use crate::app::project::format_lp_value;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect,
-    UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
+    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
+    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue,
+    UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -106,6 +112,28 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
     Some(UiFixtureFace {
         preview,
         brightness,
+        mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
+        power: fixture_power(sections),
+    })
+}
+
+/// The fixture's power readout, present only when the fixture is limited.
+///
+/// Every value here is produced runtime state, including the budget: the node
+/// publishes the budget actually in force after an unstated one has fallen back
+/// to the default, so this never re-derives the defaulting rule and can never
+/// report a percentage against a budget nothing is enforcing.
+///
+/// A zero budget is a deliberate opt-out, and gets no readout.
+fn fixture_power(sections: &[UiNodeSection]) -> Option<UiFixturePower> {
+    let budget_ma = produced_u32(sections, "power_budget_ma")?;
+    if budget_ma == 0 {
+        return None;
+    }
+    Some(UiFixturePower {
+        estimated_draw_ma: produced_u32(sections, "estimated_draw_ma").unwrap_or(0),
+        budget_ma,
+        scale: produced_f32(sections, "power_scale").unwrap_or(1.0),
     })
 }
 
@@ -144,17 +172,27 @@ fn config_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
 /// drawer reuses it verbatim (it is the SAME editor the sections view
 /// renders, minus the studio-level agent decoration).
 fn glsl_inline_editor(sections: &[UiNodeSection]) -> Option<UiAssetEditor> {
-    fn in_slots(slots: &[UiConfigSlot]) -> Option<UiAssetEditor> {
+    inline_editor_of_kind(sections, UiAssetEditorKind::Glsl)
+}
+
+/// First inline editor of `kind` anywhere in the asset/config slot rows
+/// (records searched recursively) — the face derives from section DTOs,
+/// never from controller state.
+fn inline_editor_of_kind(
+    sections: &[UiNodeSection],
+    kind: UiAssetEditorKind,
+) -> Option<UiAssetEditor> {
+    fn in_slots(slots: &[UiConfigSlot], kind: UiAssetEditorKind) -> Option<UiAssetEditor> {
         slots.iter().find_map(|slot| match &slot.body {
-            UiConfigSlotBody::Asset(asset) if asset.editor == UiAssetEditorKind::Glsl => {
-                asset.inline_editor.clone()
-            }
-            UiConfigSlotBody::Record(record) => in_slots(&record.fields),
+            UiConfigSlotBody::Asset(asset) if asset.editor == kind => asset.inline_editor.clone(),
+            UiConfigSlotBody::Record(record) => in_slots(&record.fields, kind),
             _ => None,
         })
     }
     sections.iter().find_map(|section| match section {
-        UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => in_slots(slots),
+        UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => {
+            in_slots(slots, kind)
+        }
         _ => None,
     })
 }
@@ -196,12 +234,19 @@ fn shader_uniform_control(
     }
 
     let default_row = uniform_field(fields, "default")?;
+    // Whole-number uniforms ("how many meteors") snap: the authored `step`
+    // when present, else 1 for an i32/u32-shaped uniform.
+    let step = shader_panel_step(
+        option_f32_field(fields, "step"),
+        &ShaderValueShapeRef::builtin(&string_field(fields, "value").unwrap_or_default()),
+    );
+    let min = option_f32_field(fields, "min").unwrap_or(0.0);
     let control = panel_control_from_row(
         default_row,
         UiPanelWidget::Knob {
-            min: option_f32_field(fields, "min").unwrap_or(0.0),
+            min,
             max: option_f32_field(fields, "max").unwrap_or(1.0),
-            step: None,
+            step,
         },
     )?;
 
@@ -214,6 +259,9 @@ fn shader_uniform_control(
         .map(|unit| crate::app::project::slot::slot_controller::ui_slot_unit(&unit));
 
     let mut control = UiPanelControl { label, ..control };
+    if let Some(step) = step {
+        snap_control_display(&mut control, min, step);
+    }
     if unit.is_some() {
         control.unit = unit;
     }
@@ -230,6 +278,25 @@ fn shader_uniform_control(
             .and_then(|row| bound_live_value(row));
     }
     Some(control)
+}
+
+/// Snap a stepped knob's readout onto the step grid, so a `count` uniform
+/// never *reads* `2.37` even when the stored default predates the step (the
+/// grid is a display rule here; the slot itself only changes when the knob
+/// is moved, and the knob's own gestures snap on the way out).
+///
+/// The grid is anchored at `min`, matching the widget's own quantization —
+/// the readout and the pointer must agree on which position they are at.
+fn snap_control_display(control: &mut UiPanelControl, min: f32, step: f32) {
+    let UiSlotValueKind::F32(value) = control.value.kind else {
+        return;
+    };
+    let snapped = min + ((value - min) / step).round() * step;
+    if snapped == value {
+        return;
+    }
+    control.value.kind = UiSlotValueKind::F32(snapped);
+    control.value.display = format_lp_value(&LpValue::F32(snapped));
 }
 
 /// A row's live bus reading (display-only), from the bound source endpoint
@@ -453,6 +520,20 @@ fn produced_u32(sections: &[UiNodeSection], key: &str) -> Option<u32> {
         .ok()
 }
 
+fn produced_f32(sections: &[UiNodeSection], key: &str) -> Option<f32> {
+    sections
+        .iter()
+        .find_map(|section| match section {
+            UiNodeSection::ProducedValues(values) => Some(values),
+            _ => None,
+        })?
+        .iter()
+        .find(|value| value.key == key)?
+        .value
+        .parse()
+        .ok()
+}
+
 /// The child's tree segment name, parsed from its address detail
 /// (`/main.show/playlist.playlist/idle.shader` → `idle`).
 fn child_tree_name(child: &UiNodeChild) -> Option<&str> {
@@ -599,6 +680,119 @@ mod tests {
             "knob edits the uniform default's interior slot"
         );
         assert!(face.agent.is_none(), "agent decoration is studio-level");
+    }
+
+    #[test]
+    fn integer_uniform_knobs_step_by_one_and_read_on_the_grid() {
+        // A `count` uniform ("how many meteors"): u32-shaped, 1..=4, with an
+        // off-grid stored default the panel must not repeat back.
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
+            UiNodeSection::ConfigSlots(vec![UiConfigSlot::record(
+                "consumed",
+                "Consumed",
+                vec![panel_uniform("count", "u32", 2.37, 1.0, 4.0, None)],
+            )]),
+        ];
+
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert_eq!(
+            face.controls[0].widget,
+            UiPanelWidget::Knob {
+                min: 1.0,
+                max: 4.0,
+                step: Some(1.0)
+            },
+            "an integer-shaped uniform snaps to whole numbers"
+        );
+        assert_eq!(
+            face.controls[0].value.kind,
+            UiSlotValueKind::F32(2.0),
+            "the off-grid stored default reads on the grid"
+        );
+        assert_eq!(face.controls[0].value.display, "2.0");
+    }
+
+    #[test]
+    fn authored_step_beats_the_shape_and_float_uniforms_stay_continuous() {
+        let sections = |uniform| {
+            vec![
+                UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
+                UiNodeSection::ConfigSlots(vec![UiConfigSlot::record(
+                    "consumed",
+                    "Consumed",
+                    vec![uniform],
+                )]),
+            ]
+        };
+        let step_of = |uniform| {
+            let Some(UiNodeFace::Shader(face)) = kind_face(
+                "shader",
+                &test_address(),
+                &sections(uniform),
+                &mut Vec::new(),
+            ) else {
+                panic!("expected a shader face");
+            };
+            let UiPanelWidget::Knob { step, .. } = face.controls[0].widget else {
+                panic!("expected a knob");
+            };
+            step
+        };
+
+        assert_eq!(
+            step_of(panel_uniform("count", "u32", 2.0, 1.0, 4.0, Some(2.0))),
+            Some(2.0),
+            "an authored step overrides the shape's implied 1"
+        );
+        assert_eq!(
+            step_of(panel_uniform("speed", "f32", 2.37, 0.0, 4.0, None)),
+            None,
+            "a plain f32 uniform keeps sliding continuously"
+        );
+    }
+
+    /// A panel-flagged uniform record row: value shape, default, range, and
+    /// an optional authored step.
+    fn panel_uniform(
+        name: &str,
+        shape: &str,
+        default: f32,
+        min: f32,
+        max: f32,
+        step: Option<f32>,
+    ) -> UiConfigSlot {
+        let prefix = format!("consumed[{name}]");
+        let mut fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("value"),
+            ),
+            UiConfigSlot::value(
+                format!("{prefix}.value"),
+                "Value",
+                UiSlotValue::string(shape),
+            ),
+            option_f32(&format!("{prefix}.default"), "Default", default),
+            option_f32(&format!("{prefix}.min"), "Min", min),
+            option_f32(&format!("{prefix}.max"), "Max", max),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string(name),
+            ),
+            UiConfigSlot::value(format!("{prefix}.panel"), "Panel", UiSlotValue::bool(true))
+                .with_optionality(UiSlotOptionality::included(true)),
+        ];
+        if let Some(step) = step {
+            fields.push(option_f32(&format!("{prefix}.step"), "Step", step));
+        }
+        UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
     }
 
     #[test]

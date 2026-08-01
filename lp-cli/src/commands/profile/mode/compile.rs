@@ -1,5 +1,5 @@
+use lp_emu_core::profile::{Gate, GateAction, PerfEvent, PerfEventKind};
 use lp_perf::EVENT_FRAME;
-use lp_riscv_emu::profile::{Gate, GateAction, PerfEvent, PerfEventKind};
 
 #[derive(Default)]
 pub struct CompileGate {
@@ -14,7 +14,7 @@ impl CompileGate {
 
 impl Gate for CompileGate {
     fn on_event(&mut self, evt: &PerfEvent) -> GateAction {
-        if evt.name == lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START {
+        if evt.name == lp_emu_core::profile::perf_event::EVENT_PROFILE_START {
             return GateAction::Enable;
         }
         if evt.name == EVENT_FRAME && evt.kind == PerfEventKind::Begin {
@@ -34,8 +34,8 @@ impl Gate for CompileGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lp_emu_core::profile::PerfEvent;
     use lp_perf::{EVENT_PROJECT_LOAD, EVENT_SHADER_COMPILE};
-    use lp_riscv_emu::profile::PerfEvent;
 
     fn frame_begin() -> PerfEvent {
         PerfEvent {
@@ -91,7 +91,7 @@ mod tests {
         let mut g = CompileGate::new();
         let evt = PerfEvent {
             cycle: 0,
-            name: lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START,
+            name: lp_emu_core::profile::perf_event::EVENT_PROFILE_START,
             kind: PerfEventKind::Instant,
         };
         assert_eq!(g.on_event(&evt), GateAction::Enable);

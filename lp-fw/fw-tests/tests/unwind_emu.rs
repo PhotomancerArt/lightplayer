@@ -4,9 +4,10 @@
 //! that catch_unwind successfully catches a panic. This validates the unwinding
 //! infrastructure (.eh_frame, personality, landing pads) without needing ESP32 hardware.
 
+use lp_emu_core::{LogLevel, TimeMode};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
-    LogLevel, Riscv32Emulator, TimeMode,
+    Riscv32Emulator,
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;

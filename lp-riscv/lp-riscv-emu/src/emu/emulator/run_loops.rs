@@ -5,28 +5,28 @@ extern crate alloc;
 use super::super::{
     error::EmulatorError,
     executor::{LoggingDisabled, LoggingEnabled, decode_execute},
-    logging::LogLevel,
-    memory::Memory,
 };
 use super::state::Riscv32Emulator;
-use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
-use lp_riscv_emu_shared::{
+use lp_emu_abi::{
     SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_JIT_MAP_LOAD,
     SYSCALL_JIT_MAP_UNLOAD, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_PERF_EVENT,
     SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS,
     SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
 };
+use lp_emu_core::LogLevel;
+use lp_emu_core::Memory;
+use lp_emu_core::{PanicInfo, StepResult, SyscallInfo};
 use lp_riscv_inst::Gpr;
 
 /// Default fuel for run() function
 const DEFAULT_FUEL: u64 = 100_000;
 
-/// Dispatches `SYSCALL_ALLOC_TRACE` through [`crate::profile::ProfileSession`] using disjoint
+/// Dispatches `SYSCALL_ALLOC_TRACE` through [`lp_emu_core::profile::ProfileSession`] using disjoint
 /// borrows (session vs. regs/memory) so the caller does not hit the overlapping `&mut self` issue.
 #[cfg(feature = "std")]
 fn dispatch_profile_alloc_syscall(
-    profile_session: &mut Option<crate::profile::ProfileSession>,
+    profile_session: &mut Option<lp_emu_core::profile::ProfileSession>,
     pc: u32,
     regs: &[i32; 32],
     cycle_count: u64,
@@ -34,25 +34,26 @@ fn dispatch_profile_alloc_syscall(
     memory: &Memory,
     syscall_id: u32,
     args: &[u32],
-) -> crate::profile::SyscallAction {
+) -> lp_emu_core::profile::SyscallAction {
     let Some(session) = profile_session.as_mut() else {
-        return crate::profile::SyscallAction::Pass;
+        return lp_emu_core::profile::SyscallAction::Pass;
     };
-    let mut ctx = crate::profile::EmuCtx {
+    let mut ctx = lp_emu_core::profile::EmuCtx {
         pc,
         regs,
         cycle_count,
         instruction_count,
         memory,
+        unwinder: super::backtrace::unwind_backtrace_rv32,
     };
     session.dispatch_syscall(&mut ctx, syscall_id, args)
 }
 
 /// Reads a `JitSymbolEntry` array from guest memory and forwards to
-/// [`crate::profile::ProfileSession::on_jit_map_load`].
+/// [`lp_emu_core::profile::ProfileSession::on_jit_map_load`].
 #[cfg(feature = "std")]
 fn dispatch_profile_jit_map_load(
-    profile_session: &mut Option<crate::profile::ProfileSession>,
+    profile_session: &mut Option<lp_emu_core::profile::ProfileSession>,
     cycle_count: u64,
     memory: &Memory,
     base: u32,
@@ -118,7 +119,7 @@ impl Riscv32Emulator {
     ) -> Result<StepResult, EmulatorError> {
         #[cfg(feature = "std")]
         {
-            use crate::profile::{HaltReason, SyscallAction};
+            use lp_emu_core::profile::{HaltReason, SyscallAction};
 
             let args_u32 = syscall_info.args.map(|a| a as u32);
             match dispatch_profile_alloc_syscall(
@@ -137,7 +138,7 @@ impl Riscv32Emulator {
                     return Ok(StepResult::Continue);
                 }
                 SyscallAction::Halt(HaltReason::Oom { size }) => {
-                    return Ok(StepResult::Oom(super::types::OomInfo { size, pc: self.pc }));
+                    return Ok(StepResult::Oom(lp_emu_core::OomInfo { size, pc: self.pc }));
                 }
                 SyscallAction::Halt(HaltReason::ProfileStop) => {
                     // Alloc trace syscall does not produce this; perf syscall (phase 5) will.
@@ -154,13 +155,13 @@ impl Riscv32Emulator {
 
 #[cfg(feature = "std")]
 impl Riscv32Emulator {
-    /// Guest `SYSCALL_PERF_EVENT` ECALL: parse ABI, dispatch to [`crate::profile::ProfileSession::on_perf_event`].
+    /// Guest `SYSCALL_PERF_EVENT` ECALL: parse ABI, dispatch to [`lp_emu_core::profile::ProfileSession::on_perf_event`].
     pub(super) fn handle_perf_event_syscall(
         &mut self,
         syscall_info: &SyscallInfo,
     ) -> Result<StepResult, EmulatorError> {
-        use crate::profile::perf_event::{MAX_EVENT_NAME_LEN, intern_known_name};
-        use crate::profile::{PerfEvent, PerfEventKind};
+        use lp_emu_core::profile::perf_event::{MAX_EVENT_NAME_LEN, intern_known_name};
+        use lp_emu_core::profile::{PerfEvent, PerfEventKind};
         use lp_riscv_inst::Gpr;
 
         let name_ptr = syscall_info.args[0] as u32;
@@ -260,36 +261,23 @@ impl Riscv32Emulator {
             }
 
             // Fetch instruction
-            let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
-                match &mut e {
-                    super::super::error::EmulatorError::InvalidMemoryAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    super::super::error::EmulatorError::UnalignedAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    _ => {}
-                }
-                e
-            })?;
+            let inst_word = self
+                .memory
+                .fetch_instruction(self.pc)
+                .map_err(|e| EmulatorError::from_memory_error(e, self.pc, self.regs))?;
 
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
 
             let pc = self.pc;
             // Execute using fast path (no logging)
-            let exec_result =
-                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            let exec_result = decode_execute::<LoggingDisabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?;
             self.after_execute(pc, &exec_result);
 
             let pc_increment = u32::from(exec_result.inst_size);
@@ -363,36 +351,23 @@ impl Riscv32Emulator {
             }
 
             // Fetch instruction
-            let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
-                match &mut e {
-                    super::super::error::EmulatorError::InvalidMemoryAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    super::super::error::EmulatorError::UnalignedAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    _ => {}
-                }
-                e
-            })?;
+            let inst_word = self
+                .memory
+                .fetch_instruction(self.pc)
+                .map_err(|e| EmulatorError::from_memory_error(e, self.pc, self.regs))?;
 
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
 
             let pc = self.pc;
             // Execute using logging path
-            let exec_result =
-                decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?;
+            let exec_result = decode_execute::<LoggingEnabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?;
             self.after_execute(pc, &exec_result);
 
             let pc_increment = u32::from(exec_result.inst_size);
@@ -912,9 +887,10 @@ impl Riscv32Emulator {
 #[cfg(all(test, feature = "std"))]
 mod jit_map_syscall_tests {
     use super::*;
-    use crate::profile::{Collector, FinishCtx, SessionMetadata};
-    use crate::{DEFAULT_RAM_START, Riscv32Emulator, SyscallInfo};
+    use crate::Riscv32Emulator;
     use alloc::boxed::Box;
+    use lp_emu_core::profile::{Collector, FinishCtx, SessionMetadata};
+    use lp_emu_core::{DEFAULT_RAM_START, SyscallInfo};
     use std::any::Any;
 
     struct NoopCollector;

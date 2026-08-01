@@ -115,6 +115,8 @@ pub struct CalibrateArgs {
 pub enum HardwareTargetArg {
     #[value(name = "esp32c6")]
     Esp32c6,
+    #[value(name = "esp32s3")]
+    Esp32s3,
     #[value(name = "rv32imac_emu")]
     Rv32imacEmu,
 }
@@ -123,15 +125,21 @@ impl From<HardwareTargetArg> for lpc_hardware::HardwareTarget {
     fn from(value: HardwareTargetArg) -> Self {
         match value {
             HardwareTargetArg::Esp32c6 => Self::Esp32c6,
+            HardwareTargetArg::Esp32s3 => Self::Esp32s3,
             HardwareTargetArg::Rv32imacEmu => Self::Rv32imacEmu,
         }
     }
 }
 
 impl HardwareTargetArg {
+    /// Every target, in menu order. `interactive_new_manifest` picks from this,
+    /// so a new variant reaches the interactive manager without a second edit.
+    pub const ALL: &'static [Self] = &[Self::Esp32c6, Self::Esp32s3, Self::Rv32imacEmu];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Esp32c6 => "esp32c6",
+            Self::Esp32s3 => "esp32s3",
             Self::Rv32imacEmu => "rv32imac_emu",
         }
     }

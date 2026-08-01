@@ -1,7 +1,7 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
 use lp_collection::VecMap;
-use lp_riscv_emu::{CycleModel, LogLevel};
+use lp_emu_core::{CycleModel, LogLevel};
 use lpir::{CompilerConfig, FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig, TextureBindingSpec};
 use lpvm::{
@@ -11,7 +11,7 @@ use lpvm::{
 use lpvm_cranelift::CompileOptions;
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
 use lpvm_native::{
-    NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine,
+    IsaTarget, NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine,
     NativeEmuInstance as FaEmuInstance, NativeEmuModule as FaEmuModule,
 };
 use lpvm_wasm::{
@@ -306,7 +306,15 @@ impl CompiledShader {
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(Self::Emu(engine, module))
             }
-            Backend::Rv32fa => {
+            // Both native backends are the SAME engine on different ISAs — see
+            // `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`. That is
+            // why they share `Self::NativeFa` and why adding Xtensa needed no
+            // other match arm in this file.
+            Backend::Rv32fa | Backend::Xtfa => {
+                let isa = match target.backend {
+                    Backend::Xtfa => IsaTarget::Xtensa,
+                    _ => IsaTarget::Rv32imac,
+                };
                 let alloc_trace = std::env::var("LPVM_ALLOC_TRACE").unwrap_or_default() == "1";
                 let native_opts = FaCompileOptions {
                     float_mode: fm,
@@ -315,7 +323,7 @@ impl CompiledShader {
                     config: compiler_config.clone(),
                     ..Default::default()
                 };
-                let engine = FaEmuEngine::new(native_opts);
+                let engine = FaEmuEngine::new_for_isa(native_opts, isa);
                 let module = engine
                     .compile(&ir, &meta)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;

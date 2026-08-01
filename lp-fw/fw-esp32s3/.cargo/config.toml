@@ -1,0 +1,36 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[target.xtensa-esp32s3-none-elf]
+# `--partition-table` is not optional: without it espflash silently substitutes
+# a default table whose factory partition is 1 MB, and the firmware will
+# outgrow that long before it outgrows the 6 MB this crate is budgeted. The
+# path is relative because the runner executes from the crate directory.
+#
+# `--flash-size` is not optional either, and fails louder: espflash writes a
+# flash-size field into the image header, defaulting it to 4MB, and the
+# bootloader validates the partition table against that header rather than the
+# physical chip. Omit it and even a 16 MB board boot-loops with
+# "partition N invalid ... exceeds flash chip size 0x400000". Keep this value
+# in sync with `s3_flash_size` in the workspace justfile and with
+# partitions.csv — see docs/adr/2026-07-30-esp32s3-partition-floor.md.
+runner = "espflash flash --chip esp32s3 --partition-table partitions.csv --flash-size 8mb --monitor --after hard-reset"
+rustflags = [
+  # The Xtensa target links through xtensa-esp32s3-elf-gcc (GNU ld), so linker
+  # scripts are passed with -Wl, unlike the C6's rust-lld path.
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+
+  # Abort-tier recovery (ADR 2026-07-29-per-chip-fw-toolchains): panic=abort +
+  # the lp-recovery RTC ledger. Deliberately NOT the C6's panic=unwind +
+  # `unwinding` + __eh_frame machinery, which the ADR says stays chip-local.
+  # That is why there is no force-unwind-tables / force-frame-pointers here.
+  "-C", "panic=abort",
+]
+
+[env]
+ESP_LOG = "info"
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem", "optimize_for_size"]

@@ -129,6 +129,9 @@ pub struct ParamDefRecord {
     pub default: Option<f32>,
     pub min: Option<f32>,
     pub max: Option<f32>,
+    /// Knob quantization: gestures snap to whole multiples of `step`
+    /// (1 = an integer knob). Absent = a continuous knob.
+    pub step: Option<f32>,
     /// Whether the record is flagged for the card's front panel (knob).
     pub panel: bool,
     /// Display unit suffix (e.g. "Hz"), when authored.
@@ -147,6 +150,7 @@ pub struct ParamUpsert {
     pub default: Option<f32>,
     pub min: Option<f32>,
     pub max: Option<f32>,
+    pub step: Option<f32>,
     pub unit: Option<String>,
     pub panel: Option<bool>,
 }

@@ -10,12 +10,7 @@ int test_floatbitstoint_zero() {
     return floatBitsToInt(0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_zero() == 0
 
 int test_floatbitstoint_one() {
@@ -23,12 +18,7 @@ int test_floatbitstoint_one() {
     return floatBitsToInt(1.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_one() == 1065353216
 
 int test_floatbitstoint_neg_one() {
@@ -36,12 +26,7 @@ int test_floatbitstoint_neg_one() {
     return floatBitsToInt(-1.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_neg_one() == -1082130432
 
 int test_floatbitstoint_inf() {
@@ -49,12 +34,7 @@ int test_floatbitstoint_inf() {
     return floatBitsToInt(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_inf() == 2139095040
 
 int test_floatbitstoint_neg_inf() {
@@ -62,12 +42,7 @@ int test_floatbitstoint_neg_inf() {
     return floatBitsToInt(-1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_neg_inf() == -8388608
 
 ivec2 test_floatbitstoint_vec2() {
@@ -75,12 +50,7 @@ ivec2 test_floatbitstoint_vec2() {
     return floatBitsToInt(vec2(1.0, -1.0));
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_vec2() == ivec2(1065353216, -1082130432)
 
 ivec3 test_floatbitstoint_vec3() {
@@ -88,12 +58,7 @@ ivec3 test_floatbitstoint_vec3() {
     return floatBitsToInt(vec3(0.0, 1.0, 2.0));
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_vec3() == ivec3(0, 1065353216, 1073741824)
 
 ivec4 test_floatbitstoint_vec4() {
@@ -102,12 +67,7 @@ ivec4 test_floatbitstoint_vec4() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_floatbitstoint_vec4() == ivec4(1065353216, 0, -1082130432, 2139095040)
 
 

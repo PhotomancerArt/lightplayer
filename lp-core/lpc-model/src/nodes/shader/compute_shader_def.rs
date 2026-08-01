@@ -6,8 +6,8 @@
 
 use alloc::string::String;
 
-use crate::nodes::shader::{GlslOpts, ShaderSlotDef};
-use crate::{AssetSlot, BindingDefs, MapSlot, Slotted};
+use crate::nodes::shader::{FloatMode, ShaderSlotDef};
+use crate::{AssetSlot, BindingDefs, MapSlot, Slotted, ValueSlot};
 
 /// Authored serial compute shader definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -16,8 +16,8 @@ pub struct ComputeShaderDef {
     pub source: AssetSlot,
     /// Authored slot bindings for compute shader consumed and produced slots.
     pub bindings: BindingDefs,
-    /// GLSL compilation options.
-    pub glsl_opts: GlslOpts,
+    /// Numeric mode this shader is authored and compiled in.
+    pub float_mode: ValueSlot<FloatMode>,
     /// Slots resolved by this compute shader.
     #[slot(name = "consumed")]
     pub consumed_slots: MapSlot<String, ShaderSlotDef>,
@@ -31,7 +31,7 @@ impl Default for ComputeShaderDef {
         Self {
             source: AssetSlot::path("main.glsl"),
             bindings: BindingDefs::default(),
-            glsl_opts: GlslOpts::default(),
+            float_mode: ValueSlot::default(),
             consumed_slots: MapSlot::default(),
             produced_slots: MapSlot::default(),
         }

@@ -112,7 +112,7 @@ mod tests {
 
 /// Compatibility tests for the ESP32 streaming serializer.
 ///
-/// `fw-esp32` writes outbound messages with `ser-write-json` so it can stream
+/// `fw-esp32c6` writes outbound messages with `ser-write-json` so it can stream
 /// directly to serial without allocating a full message string. These tests
 /// confirm those bytes remain normal JSON for the shared parser.
 #[cfg(all(test, feature = "ser-write-json"))]

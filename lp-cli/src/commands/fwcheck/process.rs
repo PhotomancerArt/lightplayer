@@ -25,9 +25,9 @@ pub fn run_status(mut command: Command, label: &str, verbose: bool) -> Result<()
     Ok(())
 }
 
-pub fn cargo_build_fw_esp32(root: &Path, features: &str, verbose: bool) -> Result<()> {
+pub fn cargo_build_fw_esp32c6(root: &Path, features: &str, verbose: bool) -> Result<()> {
     let mut command = Command::new("cargo");
-    command.current_dir(root.join("lp-fw/fw-esp32")).args([
+    command.current_dir(root.join("lp-fw/fw-esp32c6")).args([
         "build",
         "--features",
         features,
@@ -36,7 +36,7 @@ pub fn cargo_build_fw_esp32(root: &Path, features: &str, verbose: bool) -> Resul
         "--profile",
         "release-esp32",
     ]);
-    run_status(command, "cargo build fw-esp32", verbose)
+    run_status(command, "cargo build fw-esp32c6", verbose)
 }
 
 fn append_output(message: &mut String, label: &str, bytes: &[u8]) {

@@ -18,7 +18,6 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
     // Add test run and target directives
     content.push_str("// test run\n");
-    content.push_str("// @unimplemented(backend=wasm)\n");
     content.push_str("\n");
 
     // Add section comment
@@ -87,14 +86,14 @@ fn generate_test_mixed(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_mixed() {{\n\
-         // Function greaterThan() returns {} (component-wise comparison)\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return greaterThan(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_mixed() == {}\n",
+        "{} test_{}_greater_than_mixed() {{
+    // Function greaterThan() returns {} (component-wise comparison)
+    {} a = {};
+    {} b = {};
+    return greaterThan(a, b);
+}}
+
+// run: test_{}_greater_than_mixed() == {}\n",
         bvec_type_name,
         type_name,
         bvec_type_name,
@@ -133,13 +132,13 @@ fn generate_test_all_true(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_all_true() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return greaterThan(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_all_true() == {}\n",
+        "{} test_{}_greater_than_all_true() {{
+    {} a = {};
+    {} b = {};
+    return greaterThan(a, b);
+}}
+
+// run: test_{}_greater_than_all_true() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -177,13 +176,13 @@ fn generate_test_all_false(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_all_false() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return greaterThan(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_all_false() == {}\n",
+        "{} test_{}_greater_than_all_false() {{
+    {} a = {};
+    {} b = {};
+    return greaterThan(a, b);
+}}
+
+// run: test_{}_greater_than_all_false() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -221,13 +220,13 @@ fn generate_test_equal(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_equal() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return greaterThan(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_equal() == {}\n",
+        "{} test_{}_greater_than_equal() {{
+    {} a = {};
+    {} b = {};
+    return greaterThan(a, b);
+}}
+
+// run: test_{}_greater_than_equal() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -270,13 +269,13 @@ fn generate_test_negative(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_negative() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return greaterThan(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_negative() == {}\n",
+        "{} test_{}_greater_than_negative() {{
+    {} a = {};
+    {} b = {};
+    return greaterThan(a, b);
+}}
+
+// run: test_{}_greater_than_negative() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -323,13 +322,13 @@ fn generate_test_zero(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_zero() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return greaterThan(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_zero() == {}\n",
+        "{} test_{}_greater_than_zero() {{
+    {} a = {};
+    {} b = {};
+    return greaterThan(a, b);
+}}
+
+// run: test_{}_greater_than_zero() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -367,13 +366,13 @@ fn generate_test_variables(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_variables() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return greaterThan(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_variables() == {}\n",
+        "{} test_{}_greater_than_variables() {{
+    {} a = {};
+    {} b = {};
+    return greaterThan(a, b);
+}}
+
+// run: test_{}_greater_than_variables() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -411,11 +410,11 @@ fn generate_test_expressions(vec_type: VecType, dimension: Dimension) -> String 
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_greater_than_expressions() {{\n\
-         return greaterThan({}, {});\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_expressions() == {}\n",
+        "{} test_{}_greater_than_expressions() {{
+    return greaterThan({}, {});
+}}
+
+// run: test_{}_greater_than_expressions() == {}\n",
         bvec_type_name,
         type_name,
         a_constructor,
@@ -459,18 +458,18 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
     let c_constructor = format_vector_constructor(vec_type, dimension, &c_values);
 
     format!(
-        "{} test_{}_greater_than_in_expression() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         {} c = {};\n\
-         // Use equal() for component-wise comparison of {} values\n\
-         // greaterThan(a, b) = {}\n\
-         // greaterThan(b, c) = {}\n\
-         // equal(greaterThan(a, b), greaterThan(b, c)) = {}\n\
-         return equal(greaterThan(a, b), greaterThan(b, c));\n\
-         }}\n\
-         \n\
-         // run: test_{}_greater_than_in_expression() == {}\n",
+        "{} test_{}_greater_than_in_expression() {{
+    {} a = {};
+    {} b = {};
+    {} c = {};
+    // Use equal() for component-wise comparison of {} values
+    // greaterThan(a, b) = {}
+    // greaterThan(b, c) = {}
+    // equal(greaterThan(a, b), greaterThan(b, c)) = {}
+    return equal(greaterThan(a, b), greaterThan(b, c));
+}}
+
+// run: test_{}_greater_than_in_expression() == {}\n",
         bvec_type_name,
         type_name,
         type_name,

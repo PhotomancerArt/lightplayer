@@ -1,0 +1,192 @@
+{
+  "id": "espressif/esp32-c6-devkitc-1",
+  "target": "esp32c6",
+  "vendor": "espressif",
+  "product": "ESP32-C6-DevKitC-1",
+  "description": "Espressif ESP32-C6-DevKitC-1 board profile (v1.2 pin layout). Header silkscreen labels are the GPIO numbers themselves; TX/RX are GPIO16/17. Sourced from Espressif's board documentation, not yet hardware-calibrated.",
+  "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/esp32-c6-devkitc-1/index.html",
+  "board_label": [
+    {
+      "label": "TX",
+      "gpio": "/gpio/16",
+      "status": "assigned",
+      "note": "UART0 TXD per the v1.2 pin layout; not yet hardware-verified"
+    },
+    {
+      "label": "RX",
+      "gpio": "/gpio/17",
+      "status": "assigned",
+      "note": "UART0 RXD per the v1.2 pin layout; not yet hardware-verified"
+    },
+    {
+      "label": "RGB",
+      "gpio": "/gpio/8",
+      "status": "assigned",
+      "note": "onboard WS2812 per Espressif docs; also a boot-strap pin"
+    },
+    {
+      "label": "BOOT",
+      "gpio": "/gpio/9",
+      "status": "assigned",
+      "note": "BOOT button; boot-strap pin"
+    }
+  ],
+  "gpio": [
+    {
+      "address": "/gpio/0",
+      "display_label": "GPIO0",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO0"]
+    },
+    {
+      "address": "/gpio/1",
+      "display_label": "GPIO1",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO1"]
+    },
+    {
+      "address": "/gpio/2",
+      "display_label": "GPIO2",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO2"]
+    },
+    {
+      "address": "/gpio/3",
+      "display_label": "GPIO3",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO3"]
+    },
+    {
+      "address": "/gpio/4",
+      "display_label": "GPIO4",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO4"]
+    },
+    {
+      "address": "/gpio/5",
+      "display_label": "GPIO5",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO5"]
+    },
+    {
+      "address": "/gpio/6",
+      "display_label": "GPIO6",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO6"]
+    },
+    {
+      "address": "/gpio/7",
+      "display_label": "GPIO7",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO7"]
+    },
+    {
+      "address": "/gpio/8",
+      "display_label": "GPIO8",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO8"],
+      "location": "onboard WS2812 RGB LED; boot-strap pin"
+    },
+    {
+      "address": "/gpio/9",
+      "display_label": "GPIO9",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO9"],
+      "location": "BOOT button; boot-strap pin"
+    },
+    {
+      "address": "/gpio/10",
+      "display_label": "GPIO10",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO10"]
+    },
+    {
+      "address": "/gpio/11",
+      "display_label": "GPIO11",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO11"]
+    },
+    {
+      "address": "/gpio/12",
+      "display_label": "GPIO12",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO12"],
+      "reserved_reason": "USB-Serial-JTAG D- — driving it drops the link the board is flashed over"
+    },
+    {
+      "address": "/gpio/13",
+      "display_label": "GPIO13",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO13"],
+      "reserved_reason": "USB-Serial-JTAG D+ — driving it drops the link the board is flashed over"
+    },
+    {
+      "address": "/gpio/15",
+      "display_label": "GPIO15",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO15"]
+    },
+    {
+      "address": "/gpio/16",
+      "display_label": "TX",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO16", "GPIO16"],
+      "location": "UART0 TXD to the UART bridge"
+    },
+    {
+      "address": "/gpio/17",
+      "display_label": "RX",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO17", "GPIO17"],
+      "location": "UART0 RXD to the UART bridge"
+    },
+    {
+      "address": "/gpio/18",
+      "display_label": "GPIO18",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO18"]
+    },
+    {
+      "address": "/gpio/19",
+      "display_label": "GPIO19",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO19"]
+    },
+    {
+      "address": "/gpio/20",
+      "display_label": "GPIO20",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO20"]
+    },
+    {
+      "address": "/gpio/21",
+      "display_label": "GPIO21",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO21"]
+    },
+    {
+      "address": "/gpio/22",
+      "display_label": "GPIO22",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO22"]
+    },
+    {
+      "address": "/gpio/23",
+      "display_label": "GPIO23",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO23"]
+    }
+  ],
+  "resource": [
+    {
+      "address": "/rmt/ws281x0",
+      "display_label": "RMT WS281x 0",
+      "capabilities": ["rmt", "ws281x-output"]
+    },
+    {
+      "address": "/radio/0",
+      "display_label": "ESP-NOW Radio 0",
+      "capabilities": ["radio"]
+    }
+  ]
+}

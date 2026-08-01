@@ -447,7 +447,7 @@ mod tests {
 
     static DEVICE_FW: std::sync::LazyLock<FwProvenance> =
         std::sync::LazyLock::new(|| FwProvenance {
-            package: "fw-esp32".to_string(),
+            package: "fw-esp32c6".to_string(),
             commit: "abc123456789".to_string(),
             dirty: false,
             profile: "release-esp32".to_string(),

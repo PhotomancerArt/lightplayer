@@ -8,7 +8,12 @@ use crate::{MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
 /// files are versioned transitively through their project root. Loaders
 /// reject roots whose format is missing or does not match, so bump this when
 /// making a format-breaking change to authored artifacts.
-pub const PROJECT_FORMAT_VERSION: u32 = 1;
+///
+/// History:
+/// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/`div`
+///   Q32 mode slots) with a single `float_mode` slot. Artifacts at version `1`
+///   are refused, not migrated (alpha format posture: bump and refuse).
+pub const PROJECT_FORMAT_VERSION: u32 = 2;
 
 /// Authored root project node definition.
 ///
@@ -27,7 +32,16 @@ pub struct ProjectDef {
     /// Stable project identity (`prj_…`, base-62), minted by the library
     /// when a project enters it. Travels with the files: parity checks,
     /// history, and device associations key off it (PM roadmap M1/M3).
+    ///
+    /// Read-only through mutations: identity is minted by the library on
+    /// entry (and re-minted on import, so a shared copy never collides
+    /// with its source). Editing it in place would silently reassign a
+    /// project's history and device associations, so no surface may offer
+    /// it — the constraint lives here rather than in each view.
+    #[slot(policy = "read_only_persisted")]
     pub uid: OptionSlot<ValueSlot<String>>,
+    /// Human-readable project name — the one authored field of the root's
+    /// identity, and the Studio project pane's title.
     pub name: OptionSlot<ValueSlot<String>>,
     /// Named child node positions owned by this project.
     ///
@@ -76,7 +90,7 @@ mod tests {
     fn project_def_deserializes_named_nodes() {
         let json = r#"{
             "kind": "Project",
-            "format": 1,
+            "format": 2,
             "name": "basic",
             "nodes": {
                 "texture": { "ref": "./texture.json" },
@@ -116,7 +130,7 @@ mod tests {
         };
         let text = NodeDef::Project(def).write_json(&registry()).unwrap();
         assert!(
-            text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 1"),
+            text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 2"),
             "{text}"
         );
     }

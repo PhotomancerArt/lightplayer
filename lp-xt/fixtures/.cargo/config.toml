@@ -1,0 +1,8 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+# Keep fixture artifacts local to fixtures/ (the repo/global build-dir config
+# must not swallow them; the host test looks in fixtures/elf, see build.sh).
+target-dir = "target"
+
+[unstable]
+build-std = ["core", "alloc"]

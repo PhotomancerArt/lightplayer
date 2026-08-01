@@ -17,7 +17,9 @@ use lpa_studio_core::{
     UiSlotUnit, UiSlotValue, UiStatus,
 };
 
-use crate::app::node::node_story_fixtures::control_preview_product;
+use crate::app::node::node_story_fixtures::{
+    control_preview_product, map2d_control_preview_product,
+};
 
 /// Story-only slot address so panel fields render wired (dispatch goes to
 /// the story's no-op handler).
@@ -40,6 +42,25 @@ pub(crate) fn knob_control(
     state: UiSlotFieldState,
     source: UiSlotSourceState,
 ) -> UiPanelControl {
+    knob_control_stepped(label, value, min, max, None, state, source)
+}
+
+/// A knob quantized to `step` — what an integer uniform (`i32`/`u32`, or an
+/// authored `step`) derives to. `None` is the continuous knob.
+///
+/// The readout is snapped here exactly as `node_face_builder` snaps it, so
+/// a stepped control's value and widget agree in the story the same way they
+/// agree in the app.
+pub(crate) fn knob_control_stepped(
+    label: &str,
+    value: f32,
+    min: f32,
+    max: f32,
+    step: Option<f32>,
+    state: UiSlotFieldState,
+    source: UiSlotSourceState,
+) -> UiPanelControl {
+    let value = crate::app::node::panel::knob_snap(value, min, step);
     let slot_value = UiSlotValue::f32(value);
     let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
         .with_state(state.clone())
@@ -47,11 +68,7 @@ pub(crate) fn knob_control(
     UiPanelControl {
         label: label.to_string(),
         address: Some(story_slot_address(&format!("controls.{label}"))),
-        widget: UiPanelWidget::Knob {
-            min,
-            max,
-            step: None,
-        },
+        widget: UiPanelWidget::Knob { min, max, step },
         value: slot_value,
         live_value: None,
         unit: None,
@@ -338,11 +355,65 @@ pub(crate) fn shader_node_view(speed_bound: bool, agent_status: UiAgentStatus) -
 pub(crate) fn fixture_face() -> UiFixtureFace {
     UiFixtureFace {
         preview: control_preview_product("output"),
+        mapping_editor: None,
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),
             UiSlotSourceState::Unset,
         ),
+        // Opted out (budget 0) — the only state with no readout now that an
+        // unstated budget falls back to the default guard.
+        power: None,
+    }
+}
+
+/// A fixture inside its declared budget: the readout is a setup number.
+pub(crate) fn fixture_face_within_budget() -> UiFixtureFace {
+    UiFixtureFace {
+        power: Some(lpa_studio_core::UiFixturePower {
+            estimated_draw_ma: 780,
+            budget_ma: 1000,
+            scale: 1.0,
+        }),
+        ..fixture_face()
+    }
+}
+
+/// A fixture actively shedding current to stay inside its budget.
+pub(crate) fn fixture_face_limiting() -> UiFixtureFace {
+    UiFixtureFace {
+        power: Some(lpa_studio_core::UiFixturePower {
+            estimated_draw_ma: 2400,
+            budget_ma: 1000,
+            scale: 0.41,
+        }),
+        ..fixture_face()
+    }
+}
+
+/// The fyeah corpus doc trimmed to the letters fit for a storybook: the
+/// full sign spells something saltier than baseline PNGs should. Keeps the
+/// real import framing (canvas) and multi-path chain; the engineering
+/// corpus itself stays complete.
+pub(crate) fn fyeah_presentable_doc() -> lpc_mapping::Map2dDoc {
+    let mut doc = lpc_mapping::corpus::fyeah();
+    doc.objects
+        .retain(|object| !matches!(object.name.as_str(), "p2" | "p3" | "p4"));
+    doc
+}
+
+/// A fixture face whose lamp layout comes from a shared mapping-corpus
+/// document (16×16 fixture render target, like the real fyeah fixture).
+pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
+    UiFixtureFace {
+        preview: map2d_control_preview_product("output", doc, (16, 16)),
+        mapping_editor: None,
+        brightness: fader_control(
+            184.0,
+            UiSlotFieldState::editable(),
+            UiSlotSourceState::Unset,
+        ),
+        power: None,
     }
 }
 
@@ -367,6 +438,13 @@ pub(crate) fn fixture_node_view() -> UiNodeView {
     let mut view = UiNodeView::new(header, vec![UiNodeTab::main(fixture_sections())])
         .with_node_id("fixture-halo");
     view.face = Some(UiNodeFace::Fixture(fixture_face()));
+    view
+}
+
+/// The same fixture card carrying a specific power state.
+pub(crate) fn fixture_node_view_with_face(face: UiFixtureFace) -> UiNodeView {
+    let mut view = fixture_node_view();
+    view.face = Some(UiNodeFace::Fixture(face));
     view
 }
 
@@ -494,4 +572,26 @@ pub(crate) fn empty_playlist_node_view() -> UiNodeView {
         active: None,
     }));
     view
+}
+
+/// The M5 face-editor fixture: the mapping asset's inline-editor plumbing
+/// with the document body pre-resolved (no fetch round-trip in stories).
+pub(crate) fn map2d_fixture_face_editing(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
+    let mut face = map2d_fixture_face(doc);
+    face.mapping_editor = Some(UiAssetEditor {
+        artifact: ArtifactLocation::file("/fyeah.map2d.json"),
+        kind: UiAssetEditorKind::Map2d,
+        source: "fyeah.map2d.json".to_string(),
+        content: Some(UiAssetContent::from_bytes(
+            doc.to_json().as_bytes(),
+            false,
+            104,
+        )),
+        in_flight: false,
+        failure: None,
+        shader_error: None,
+        uniforms: Vec::new(),
+        agent: None,
+    });
+    face
 }

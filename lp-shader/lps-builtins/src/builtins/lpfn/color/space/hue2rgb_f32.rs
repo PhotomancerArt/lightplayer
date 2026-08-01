@@ -1,28 +1,74 @@
-//! Convert hue value to RGB color (float implementation - stub).
+//! Hue value to RGB color (native f32).
 //!
-//! This is a stub implementation that will be replaced with a proper float implementation later.
-//! For now, it calls the q32 version with conversion.
+//! Transliterated from the canonical GLSL
+//! `glsl/lpfn/color/space/hue2rgb.glsl` (normative — see
+//! `docs/adr/2026-07-08-glsl-canonical-builtins.md`).
+//!
+//! The hue2rgb formula (abs/arithmetic ramp per channel) is standard color
+//! space mathematics documented in graphics literature; the LightPlayer port
+//! was originally written with reference to LYGIA's hue2rgb.glsl
+//! (see docs/reports/2026-03-31-lpfx-license-audit.md).
+//!
+//! **Tolerance:** exact against the canonical f32 — three multiplies, three
+//! `abs`, and a clamp.
 
-use crate::builtins::lpfn::color::space::hue2rgb_q32::__lp_lpfn_hue2rgb_q32;
-use lps_q32::q32::Q32;
+use crate::f32_math::{abs, clamp};
 
-/// Convert hue value to RGB color (extern C wrapper for compiler).
-///
-/// Uses result pointer parameter to return vec3: writes all components to memory.
+/// Rust-facing form; `hsv2rgb` calls this directly.
+#[inline]
+pub(crate) fn hue2rgb(hue: f32) -> [f32; 3] {
+    let h6 = hue * 6.0;
+    let r = abs(h6 - 3.0) - 1.0;
+    let g = 2.0 - abs(h6 - 2.0);
+    let b = 2.0 - abs(h6 - 4.0);
+    [clamp(r, 0.0, 1.0), clamp(g, 0.0, 1.0), clamp(b, 0.0, 1.0)]
+}
+
+/// Hue to RGB (float version).
 ///
 /// # Arguments
-/// * `result_ptr` - Pointer to memory where vec3 result will be written (result pointer parameter)
-/// * `hue` - Hue value as f32
+/// * `result_ptr` - Pointer to memory where the vec3 result is written
+/// * `hue` - Hue in turns (0..1 wraps the colour wheel)
 #[lpfn_impl_macro::lpfn_impl(f32, "vec3 lpfn_hue2rgb(float hue)")]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes to caller-provided out-pointer"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_hue2rgb_f32(result_ptr: *mut f32, hue: f32) {
-    // Convert raw pointer to safe array reference at boundary
-    let result = unsafe { &mut *result_ptr.cast::<[f32; 3]>() };
-    // Stub: convert to q32, call q32 version, convert back
-    let hue_q32 = Q32::from_f32_wrapping(hue);
-    let mut result_q32 = [0i32; 3];
-    __lp_lpfn_hue2rgb_q32(result_q32.as_mut_ptr(), hue_q32.to_fixed());
-    result[0] = Q32::from_fixed(result_q32[0]).to_f32();
-    result[1] = Q32::from_fixed(result_q32[1]).to_f32();
-    result[2] = Q32::from_fixed(result_q32[2]).to_f32();
+    let rgb = hue2rgb(hue);
+    unsafe {
+        *result_ptr = rgb[0];
+        *result_ptr.add(1) = rgb[1];
+        *result_ptr.add(2) = rgb[2];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_primaries_land_where_they_should() {
+        assert_eq!(hue2rgb(0.0), [1.0, 0.0, 0.0]); // red
+        assert_eq!(hue2rgb(1.0 / 3.0), [0.0, 1.0, 0.0]); // green
+        assert_eq!(hue2rgb(2.0 / 3.0), [0.0, 0.0, 1.0]); // blue
+    }
+
+    #[test]
+    fn every_channel_stays_saturated_to_the_unit_interval() {
+        for i in -100..=200 {
+            let rgb = hue2rgb(i as f32 * 0.01);
+            for c in rgb {
+                assert!((0.0..=1.0).contains(&c), "channel {c}");
+            }
+        }
+    }
+
+    #[test]
+    fn writes_all_three_out_lanes() {
+        let mut out = [f32::NAN; 3];
+        __lp_lpfn_hue2rgb_f32(out.as_mut_ptr(), 0.5);
+        assert_eq!(out, hue2rgb(0.5));
+    }
 }

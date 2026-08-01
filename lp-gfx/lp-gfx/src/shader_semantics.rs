@@ -10,10 +10,11 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ShaderSemantics {
     /// Authoritative Q16.16 fixed-point semantics — the on-device product
-    /// tier, honoring [`crate::ShaderCompileOptions::q32_options`].
+    /// tier. Arithmetic wraps on overflow and divides by reciprocal
+    /// multiplication (`docs/design/q32.md`).
     #[default]
     Q32,
-    /// IEEE f32 GPU semantics — the preview/non-embedded tier. Q32 options do
-    /// not apply; conformance is judged against the f32 interpreter oracle.
+    /// IEEE f32 GPU semantics — the preview/non-embedded tier. Conformance is
+    /// judged against the f32 interpreter oracle.
     F32Gpu,
 }

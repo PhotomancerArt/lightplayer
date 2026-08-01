@@ -11,7 +11,6 @@ workspace = true
 
 [dependencies]
 lp-riscv-inst = { path = "../lp-riscv-inst" }
-lp-riscv-emu = { path = "../lp-riscv-emu", features = ["std"] }
 object = { version = "0.37.3", features = ["write"] }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
@@ -22,6 +21,8 @@ serde = { version = "1", features = ["derive"] }
 std = ["log/std"]  # This crate always requires std, but feature flag for consistency
 
 [dev-dependencies]
+lp-emu-core = { path = "../../lp-emu/lp-emu-core", features = ["std"] }
+lp-riscv-emu = { path = "../lp-riscv-emu", features = ["std"] }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 cranelift-frontend = { workspace = true }
 cranelift-module = { workspace = true }

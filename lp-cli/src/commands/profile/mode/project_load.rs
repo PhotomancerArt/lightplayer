@@ -1,5 +1,5 @@
+use lp_emu_core::profile::{Gate, GateAction, PerfEvent, PerfEventKind};
 use lp_perf::EVENT_PROJECT_LOAD;
-use lp_riscv_emu::profile::{Gate, GateAction, PerfEvent, PerfEventKind};
 
 #[derive(Default)]
 pub struct ProjectLoadGate {
@@ -38,8 +38,8 @@ impl Gate for ProjectLoadGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lp_emu_core::profile::{PerfEvent, PerfEventKind};
     use lp_perf::EVENT_FRAME;
-    use lp_riscv_emu::profile::{PerfEvent, PerfEventKind};
 
     fn event(name: &'static str, kind: PerfEventKind) -> PerfEvent {
         PerfEvent {
