@@ -24,6 +24,6 @@ pub mod module;
 pub mod xt_image;
 
 pub use engine::NativeEmuEngine;
-pub use image::GuestImage;
+pub use image::{GuestImage, ImageRegion};
 pub use instance::NativeEmuInstance;
 pub use module::NativeEmuModule;

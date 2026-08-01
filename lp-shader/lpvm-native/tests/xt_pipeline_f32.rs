@@ -172,12 +172,12 @@ fn run_f32(ir: &LpirModule, sig: &LpsModuleSig, entry_name: &str, args: &[u32]) 
 /// - the image has not been built at all — a gitignored cross-target artifact
 ///   (`scripts/build-builtins-xt.sh`, esp toolchain), the same contract
 ///   `xt_builtins_image.rs` uses;
-/// - it was built **without** `float-f32`, which is the default. The family is
-///   opt-in (`LP_XT_BUILTINS_F32=1`) because with it in, `.text` fills the
-///   emulator's 112 KiB code region to within ~931 bytes and compiled shader
-///   code no longer fits after it — see
-///   `docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
-///   Failing here instead would turn one blocked capability into a red suite.
+/// - it was built by an older checkout, before `float-f32` became the image's
+///   unconditional default. It is no longer opt-in: the capacity problem that
+///   kept it so was the emulator modeling flash-resident firmware as if it
+///   shared SRAM with the JIT, and the flash model closed it
+///   (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
+///   A stale artifact is still a rebuild rather than a red suite.
 fn builtins_image_with_f32() -> Option<Vec<u8>> {
     let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../lp-xt/fixtures/elf/lps-builtins-xt-app.elf");
@@ -194,8 +194,8 @@ fn builtins_image_with_f32() -> Option<Vec<u8>> {
     };
     if !has_f32 {
         eprintln!(
-            "SKIP: {} carries no native-f32 builtins — rebuild with \
-             LP_XT_BUILTINS_F32=1 scripts/build-builtins-xt.sh",
+            "SKIP: {} carries no native-f32 builtins (stale artifact) — \
+             rerun scripts/build-builtins-xt.sh",
             p.display()
         );
         return None;
@@ -209,13 +209,18 @@ fn builtins_image_with_f32() -> Option<Vec<u8>> {
 /// [`run_f32`] links only the module's own functions and loads the blob at the
 /// code region's base. That is enough for everything M7 P3 emits inline, but a
 /// `sym_call` into `__lp_lpir_*_f32` (M7 D4) needs the builtins image resident
-/// *and* its symbols in the relocation map — and the image already occupies the
-/// base of that region, so the shader has to move.
+/// *and* its symbols in the relocation map.
 ///
-/// The layout is `rt_emu::xt_image`'s: image `.text` first, shader code
-/// 4-aligned after it, below the image's data segments. It is hand-rolled here
-/// rather than calling `build_xt_image` because that sits behind the `emu`
-/// feature, and the other tests in this file run at *default* features.
+/// The layout is `rt_emu::xt_image`'s: the builtins image is **flash-resident**
+/// (`.text` in IROM, `.rodata` in DROM), so the shader keeps the SRAM code
+/// region to itself and starts at its base — exactly where [`run_f32`] puts it.
+/// The only thing this adds over that path is the image and its symbols. It is
+/// hand-rolled here rather than calling `build_xt_image` because that sits
+/// behind the `emu` feature, and the other tests in this file run at *default*
+/// features.
+///
+/// The call this exercises therefore crosses SRAM → flash, which is the point:
+/// on silicon it always did, and until 2026-08-01 the emulator could not tell.
 fn run_f32_with_builtins(
     ir: &LpirModule,
     sig: &LpsModuleSig,
@@ -232,22 +237,29 @@ fn run_f32_with_builtins(
     elf.load_into(&mut emu)
         .expect("image loads into emulator memory");
 
-    // Executable segments are addressed through the I-bus view and data
-    // segments through the D-bus one (lp-xt/lps-builtins-xt-app/link.ld), so
-    // the split is read off the image rather than hardcoded.
-    let ibus_base = emu.profile.code_ibus_base();
-    let alias = emu.profile.alias;
-    let mut text_end = ibus_base;
-    let mut data_start = u32::MAX;
+    // The image is firmware: every one of its segments must have landed in a
+    // flash window, never in the SRAM code region the shader is about to use.
+    // Assert that rather than assume it — a link.ld regression would otherwise
+    // show up as a mysterious wrong answer.
+    let p = emu.profile;
     for seg in elf.segments().expect("image segments decode") {
-        let end = seg.vaddr + seg.memsz;
-        if seg.vaddr >= ibus_base {
-            text_end = text_end.max(end);
-        } else {
-            data_start = data_start.min(alias.dbus_to_ibus(seg.vaddr));
-        }
+        assert!(
+            p.irom_offset(seg.vaddr).is_some()
+                || p.drom_offset(seg.vaddr).is_some()
+                || p.image_data_offset(seg.vaddr).is_some(),
+            "builtins segment at {:#010x} is outside the modeled flash/image \
+             regions — see lp-xt/lps-builtins-xt-app/link.ld",
+            seg.vaddr,
+        );
+        assert!(
+            p.code_region_offset(seg.vaddr).is_none(),
+            "builtins segment at {:#010x} is inside the SRAM code region, which \
+             belongs to JIT'd shader code",
+            seg.vaddr,
+        );
     }
-    let shader_base = text_end.next_multiple_of(4);
+    let shader_base = p.code_ibus_base();
+    let shader_limit = shader_base + p.code_region_len as u32;
 
     let opts = NativeCompileOptions {
         float_mode: FloatMode::F32,
@@ -284,8 +296,8 @@ fn run_f32_with_builtins(
         }
     }
     assert!(
-        shader_base + code.len() as u32 <= data_start,
-        "shader code overruns the builtins image's data segments"
+        shader_base + code.len() as u32 <= shader_limit,
+        "shader code overruns the SRAM code region"
     );
 
     for (fi, f) in funcs.iter().enumerate() {
@@ -1185,11 +1197,12 @@ fn unarmed_float_code_faults_with_a_coprocessor_trap() {
 /// This was `#[ignore]`d while that build failed outright in the esp Rust
 /// backend, which cannot select a float constant pool
 /// (`docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md`
-/// — still open upstream, worked around in our source). It now runs, but only
-/// against an image built with `LP_XT_BUILTINS_F32=1`: the family is still
-/// opt-in, on capacity grounds rather than compile grounds
+/// — still open upstream, worked around in our source), and then ran only
+/// against an opt-in image while the family did not *fit* alongside shader code
 /// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
-/// A skip is therefore the honest default — see [`builtins_image_with_f32`].
+/// Both are closed: the family is unconditional, and the call it makes crosses
+/// SRAM → flash exactly as it does on silicon. It still skips rather than fails
+/// when the cross-target artifact is absent — see [`builtins_image_with_f32`].
 ///
 /// `ffloor` is deliberately chosen over `fdiv`/`fsqrt`: it reaches no
 /// `div0.s`/`const.s` estimate helper, so it does not additionally depend on

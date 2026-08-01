@@ -214,6 +214,21 @@ impl BoardProfile {
         self.stack_dbus_base + self.stack_region_len as u32 - 16
     }
 
+    /// Offset of `vaddr` within the SRAM code region, named through **either**
+    /// view — its D-bus address or its executable I-bus alias.
+    ///
+    /// This region belongs to JIT-produced code. A resident image landing here
+    /// is the bug the flash model exists to prevent, so consumers check.
+    pub fn code_region_offset(&self, vaddr: u32) -> Option<usize> {
+        offset_in(vaddr, self.code_dbus_base, self.code_region_len).or_else(|| {
+            offset_in(
+                self.alias.ibus_to_dbus(vaddr),
+                self.code_dbus_base,
+                self.code_region_len,
+            )
+        })
+    }
+
     /// Whether `vaddr` falls in the modeled flash instruction window, and its
     /// offset there.
     pub fn irom_offset(&self, vaddr: u32) -> Option<usize> {
