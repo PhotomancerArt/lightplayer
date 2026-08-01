@@ -103,7 +103,10 @@ fn emit_partition_facts() {
         .find(|fields| fields.len() >= 5 && fields[1] == "app")
         .map(|fields| fields[4].to_string())
         .expect("partitions.csv has an app row");
-    println!("cargo:rustc-env=LP_FLASH_APP_BYTES={}", parse_partition_size(&size_field));
+    println!(
+        "cargo:rustc-env=LP_FLASH_APP_BYTES={}",
+        parse_partition_size(&size_field)
+    );
 }
 
 fn parse_partition_size(s: &str) -> u64 {
