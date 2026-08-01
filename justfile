@@ -916,6 +916,20 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     just _fw-size-check esp32c6 esp32c6 4mb {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
         "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
 
+# Drift checks: the manifest core embedded in a built firmware must match the
+# checked-in expected fixture (provenance fields stripped). The firmware
+# describes ITSELF — these checks prove the extraction path and catch feature
+# drift; they never re-state what a build contains. Build the target first
+# (the CI jobs run them right after their size checks, which build).
+fw-manifest-check-esp32c6:
+    node scripts/extract-fw-manifest.mjs {{ fw_esp32c6_elf }} --stable | diff -u lp-fw/fw-esp32c6/manifest-core.expected.json -
+
+fw-manifest-check-esp32s3:
+    node scripts/extract-fw-manifest.mjs {{ fw_esp32s3_elf }} --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -
+
+fw-manifest-check-emu: build-fw-emu
+    node scripts/extract-fw-manifest.mjs target/{{ rv32_target }}/release/fw-emu --stable | diff -u lp-fw/fw-emu/manifest-core.expected.json -
+
 # Fail when the esp32s3 app image gets too close to its 6 MB partition.
 #
 # Unlike the C6, this number is a TREND, not a budget gate. The S3 moved to an
