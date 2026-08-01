@@ -573,6 +573,9 @@
   .tw\:max-w-96 {
     max-width: calc(var(--tw-spacing) * 96);
   }
+  .tw\:max-w-\[36ch\] {
+    max-width: 36ch;
+  }
   .tw\:max-w-\[85\%\] {
     max-width: 85%;
   }
@@ -1400,6 +1403,9 @@
   .tw\:py-5 {
     padding-block: calc(var(--tw-spacing) * 5);
   }
+  .tw\:py-6 {
+    padding-block: calc(var(--tw-spacing) * 6);
+  }
   .tw\:py-8 {
     padding-block: calc(var(--tw-spacing) * 8);
   }
@@ -1761,6 +1767,9 @@
   }
   .tw\:opacity-50 {
     opacity: 50%;
+  }
+  .tw\:opacity-55 {
+    opacity: 55%;
   }
   .tw\:opacity-60 {
     opacity: 60%;

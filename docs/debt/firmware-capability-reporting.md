@@ -124,10 +124,11 @@ kinds the project's `project.json` actually uses.
   typed `LpFeature` list the server derives from `lpc_engine::
   supported_features()` and its own injected services — beside
   `hardware: { radio, button, boardId }`; `CorePlaceholderNode` reports
-  `NodeRuntimeStatus::Unsupported`, which the studio renders as "Not on this
-  device" (dimmed, not the error family) in the tree, node pane and popover,
-  and which the add-node picker uses to disable (never hide) kinds the
-  connected device lacks; the per-frame resolve warning now names the build
+  `NodeRuntimeStatus::Unsupported`, which the studio renders as a
+  warning-family "Not on this device" in the tree, node pane and popover —
+  the pane showing an EMPTY body, since there is no runtime whose state
+  could be displayed or edited — and which the add-node picker uses to
+  disable (never hide) kinds the connected device lacks; the per-frame resolve warning now names the build
   gap instead of "does not produce slot".
 
   **The schema-entanglement premise in "The real fix" above was STALE.**

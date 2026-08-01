@@ -106,10 +106,7 @@ fn ProjectNodeTreeItemView(
     let affordance = item.affordance();
     let children = item.children;
     let dirty = item.dirty;
-    // A node whose kind this device does not carry renders DIMMED: it
-    // exists in the project and does nothing here — not an error, not
-    // healthy silence.
-    let class = tree_item_row_class(focused, dirty, item.status.tone.is_dimmed());
+    let class = tree_item_row_class(focused, dirty);
     let title = tree_item_title(&item.kind, &item.status, dirty);
     let kind_icon = node_kind_icon(&item.kind);
     // Base left padding (matches the row's px-2) that the depth indent adds
@@ -174,22 +171,19 @@ fn ProjectNodeTreeItemView(
 ///   color-mixes the dirty color into the selection background so selection
 ///   adapts to (never erases) the edited treatment; on a clean focused row
 ///   the variable falls back to the selection color, mixing it with itself.
-fn tree_item_row_class(focused: bool, dirty: DirtySummary, dimmed: bool) -> String {
+fn tree_item_row_class(focused: bool, dirty: DirtySummary) -> String {
     const BASE: &str = "tw:grid tw:w-full tw:grid-cols-[18px_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:px-2 tw:py-1.5 tw:text-left";
-    // Ghosted, not colored: "not on this device" must read as absent,
-    // never as the error family (red) and never as bound (violet).
-    let dim = if dimmed { " tw:opacity-55" } else { "" };
     let dirty_var = tree_item_dirty_var_class(dirty);
     if focused {
         return format!(
-            "{BASE}{dim} {dirty_var} tw:border-selection-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
+            "{BASE} {dirty_var} tw:border-selection-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
         );
     }
     if dirty.is_clean() {
-        format!("{BASE}{dim} tw:border-transparent tw:bg-transparent tw:hover:bg-card-muted")
+        format!("{BASE} tw:border-transparent tw:bg-transparent tw:hover:bg-card-muted")
     } else {
         format!(
-            "{BASE}{dim} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)] tw:hover:bg-card-muted"
+            "{BASE} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)] tw:hover:bg-card-muted"
         )
     }
 }
@@ -247,7 +241,7 @@ mod tests {
 
     #[test]
     fn clean_row_keeps_the_plain_background_and_sets_no_dirty_variable() {
-        let class = tree_item_row_class(false, DirtySummary::clean(), false);
+        let class = tree_item_row_class(false, DirtySummary::clean());
         assert!(class.contains("tw:bg-transparent"));
         assert!(!class.contains("linear-gradient"));
         assert!(!class.contains("--studio-tree-dirty-bg:"));
@@ -255,7 +249,7 @@ mod tests {
 
     #[test]
     fn dirty_row_wears_the_node_header_tint_in_the_dominant_bucket_color() {
-        let unsaved = tree_item_row_class(false, dirty(2, 0, 0), false);
+        let unsaved = tree_item_row_class(false, dirty(2, 0, 0));
         assert!(unsaved.contains("tw:[--studio-tree-dirty-bg:var(--studio-status-warning-bg)]"));
         assert!(unsaved.contains(
             "tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)]"
@@ -264,18 +258,18 @@ mod tests {
         assert!(unsaved.contains("tw:bg-card-subtle"));
 
         assert!(
-            tree_item_row_class(false, dirty(0, 1, 0), false)
+            tree_item_row_class(false, dirty(0, 1, 0))
                 .contains("--studio-tree-dirty-bg:var(--studio-status-live-bg)")
         );
         assert!(
-            tree_item_row_class(false, dirty(1, 1, 1), false)
+            tree_item_row_class(false, dirty(1, 1, 1))
                 .contains("--studio-tree-dirty-bg:var(--studio-status-error-bg)")
         );
     }
 
     #[test]
     fn focused_dirty_row_mixes_the_dirty_color_into_the_selection_highlight() {
-        let class = tree_item_row_class(true, dirty(2, 0, 0), false);
+        let class = tree_item_row_class(true, dirty(2, 0, 0));
         assert!(class.contains("tw:border-selection-border"));
         assert!(class.contains("--studio-tree-dirty-bg:var(--studio-status-warning-bg)"));
         assert!(class.contains(
@@ -286,7 +280,7 @@ mod tests {
 
     #[test]
     fn focused_clean_row_falls_back_to_the_plain_selection_highlight() {
-        let class = tree_item_row_class(true, DirtySummary::clean(), false);
+        let class = tree_item_row_class(true, DirtySummary::clean());
         assert!(class.contains("tw:border-selection-border"));
         // No variable set: the color-mix falls back to the neutral selection color.
         assert!(!class.contains("--studio-tree-dirty-bg:var"));

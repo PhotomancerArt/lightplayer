@@ -104,17 +104,38 @@ producing node's status is `Unsupported`, the `ProduceResult::Unsupported`
 arm reports the build gap by name. Genuine wrong-slot diagnostics on real
 nodes are unchanged, word for word.
 
-### Studio: "Not on this device", dimmed — never red, never violet
+### Studio: "Not on this device" — warning family, and an EMPTY node body
 
 `Unsupported` maps to a new `ProjectNodeStatusTone::Disabled` carrying the
-label **"Not on this device"**. It projects onto `UiStatusKind::Neutral`,
-so the affordance merge keeps it at `Info` — silent chrome, no attention
-glyph — and the meaning is carried by the status WORDS plus a dimmed
-treatment on the tree row and the node pane. It is deliberately not the
-error family (nothing is broken) and deliberately not violet (reserved for
-bound). A new `UiStatusKind` variant was considered and rejected: it would
-have dragged `PaneTone`, `DetailSectionTint`, six exhaustive matches and a
-new CSS token family along for one status that renders in one place.
+label **"Not on this device"**, projected onto `UiStatusKind::Warning`. It
+therefore collapses into the attention class through the ordinary
+affordance merge and announces itself on the tree row exactly like any
+other warning. Never violet (reserved for bound), and no new
+`UiStatusKind`: a variant of its own would have dragged `PaneTone`,
+`DetailSectionTint`, six exhaustive matches and a new CSS token family
+along for one status.
+
+The node's pane renders **no body at all** — not its params, not its
+products, not its slots, and not its tab strip. In their place sits a
+warning-family empty state with the status headline and the engine's own
+reason. A node with no runtime has no live state, so rendering its body
+would show values that do not exist and invite edits that could not take
+effect. `ProjectNodeStatusTone::Disabled` stays a tone of its own (rather
+than plain `Warning`) precisely to carry that second bit:
+`is_unsupported()` is what the pane keys the empty state off.
+
+**This is the G1 gate outcome, and it reverses the first attempt.** The
+original build treated the status as quiet: `UiStatusKind::Neutral`, an
+`Info` affordance, and the node's normal body ghosted to ~55–60% opacity —
+reasoning that "nothing is broken, so nothing should shout". Rejected at
+the gate. Two things were wrong with it. The ghosted body still showed
+content, which read as a working node behind a scrim rather than a node
+that is not there; and the quiet tone understated the consequence, because
+a node kind the device cannot run **usually means the project does not work
+on that device at all**. A few kinds are genuinely optional (a radio node
+on a board with no radio) — that case now over-warns slightly, which is the
+right trade: the common case is a broken show, and a broken show must not
+look like healthy silence.
 
 The device card's Technical section reports capabilities **gaps-only** — a
 fully-capable device adds no lines at all, because listing what every board
@@ -176,8 +197,12 @@ never enters an RV32/Xtensa graph.
   the same truth, and no place for services, graphics or shader math.
 - **Injecting capabilities via `set_hello`** — the shape that would have
   shipped wrong lists from the two embedders that never call it.
-- **A new `UiStatusKind::Disabled` tone family** — honest, but a
-  design-system-wide cascade for one status; copy plus dimming carries it.
+- **A new `UiStatusKind::Disabled` tone family** — a design-system-wide
+  cascade (`PaneTone`, `DetailSectionTint`, six matches, new tokens) for
+  one status that renders in one place.
+- **Dimmed/neutral treatment with the node's body ghosted behind it** —
+  built, taken to G1, rejected: it read as healthy silence, and the ghosted
+  body still showed state that does not exist. See the studio section.
 - **Hiding unsupported kinds in the picker** — silent narrowing with no
   place to explain itself.
 - **Capability-based protocol negotiation** — permanently rejected while

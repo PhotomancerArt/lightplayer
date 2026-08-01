@@ -9,7 +9,7 @@ use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
     SlotRecordEditor,
 };
-use crate::base::{Platform, StudioIcon, node_kind_icon};
+use crate::base::{Platform, StudioIcon, StudioIconName, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -52,16 +52,14 @@ pub fn NodePane(
     // chips; the detail trigger is the whole announcement). RichObjectPane
     // pins that composition.
     let tone = affordance_pane_tone(view.header.affordance(), view.header.status.kind);
-    // "Not on this device": the whole pane ghosts. Absent, not broken —
-    // no error tone, no violet (that is bound), no green.
-    let surface_class = if view.header.dimmed {
-        format!(
-            "{} tw:opacity-60",
-            pane_surface_tint_class(dirty_tint, dirty)
-        )
-    } else {
-        pane_surface_tint_class(dirty_tint, dirty).to_string()
-    };
+    let surface_class = pane_surface_tint_class(dirty_tint, dirty);
+    // "Not on this device": there is no runtime here, so the pane shows
+    // NO body — params, products and slots would all describe something
+    // that does not exist, and editing them could not take effect. The
+    // header keeps its warning tone; the empty state carries the reason.
+    let unsupported = view.header.unsupported;
+    let unsupported_reason = view.header.detail.clone();
+    let unsupported_label = view.header.status.label.clone();
     let header = view.header.clone();
     let title = view.header.title.clone();
     let tabs = view.tabs.clone();
@@ -89,7 +87,7 @@ pub fn NodePane(
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
-            div { class: "{surface_class}",
+            div { class: surface_class,
                 RichObjectPane {
                     collapse: PaneCollapse {
                         collapsed: collapsed(),
@@ -119,7 +117,9 @@ pub fn NodePane(
                                 "{kind_label}"
                             }
                         }
-                        if tabs.len() > 1 {
+                        // No runtime here, no tabs: every tab is a view
+                        // onto state this build does not have.
+                        if !unsupported && tabs.len() > 1 {
                             NodeTabs {
                                 tabs: tabs.clone(),
                                 active_index,
@@ -135,53 +135,60 @@ pub fn NodePane(
                         }
                     },
                     body: rsx! {
-                        if !issues.is_empty() {
-                            ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
-                                for issue in issues.clone() {
-                                    li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
-                                }
-                            }
-                        }
-                        if let Some(face) = face.clone() {
-                            NodeFaceBody {
-                                face,
-                                node: face_node.clone(),
-                                card_ui: face_card_ui.clone(),
-                                sections: face_sections.clone(),
-                                detail_open_control: face_detail_open_control.clone(),
-                                platform: face_platform,
-                                add_node_menu: add_node_menu.clone(),
-                                pending_edits: pending_edits.clone(),
-                                dirty_tint,
-                                on_action,
+                        if unsupported {
+                            NodeUnsupportedBody {
+                                label: unsupported_label.clone(),
+                                reason: unsupported_reason.clone(),
                             }
                         } else {
-                            match active_body {
-                                Some(UiNodeTabBody::Sections(sections)) => rsx! {
-                                    div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
-                                        for (index, section) in sections.into_iter().enumerate() {
-                                            NodeSection {
-                                                section,
-                                                first: index == 0,
-                                                focus_action: focus_action.clone(),
-                                                on_action,
-                                                pending_edits: pending_edits.clone(),
-                                                dirty_tint,
+                            if !issues.is_empty() {
+                                ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
+                                    for issue in issues.clone() {
+                                        li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
+                                    }
+                                }
+                            }
+                            if let Some(face) = face.clone() {
+                                NodeFaceBody {
+                                    face,
+                                    node: face_node.clone(),
+                                    card_ui: face_card_ui.clone(),
+                                    sections: face_sections.clone(),
+                                    detail_open_control: face_detail_open_control.clone(),
+                                    platform: face_platform,
+                                    add_node_menu: add_node_menu.clone(),
+                                    pending_edits: pending_edits.clone(),
+                                    dirty_tint,
+                                    on_action,
+                                }
+                            } else {
+                                match active_body {
+                                    Some(UiNodeTabBody::Sections(sections)) => rsx! {
+                                        div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
+                                            for (index, section) in sections.into_iter().enumerate() {
+                                                NodeSection {
+                                                    section,
+                                                    first: index == 0,
+                                                    focus_action: focus_action.clone(),
+                                                    on_action,
+                                                    pending_edits: pending_edits.clone(),
+                                                    dirty_tint,
+                                                }
                                             }
                                         }
-                                    }
-                                },
-                                Some(UiNodeTabBody::Text { title, body }) => rsx! {
-                                    section { class: "tw:grid tw:min-w-0 tw:gap-2",
-                                        h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
-                                        pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
-                                            code { "{body}" }
+                                    },
+                                    Some(UiNodeTabBody::Text { title, body }) => rsx! {
+                                        section { class: "tw:grid tw:min-w-0 tw:gap-2",
+                                            h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
+                                            pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                                                code { "{body}" }
+                                            }
                                         }
-                                    }
-                                },
-                                None => rsx! {
-                                    p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
-                                },
+                                    },
+                                    None => rsx! {
+                                        p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
+                                    },
+                                }
                             }
                         }
                     },
@@ -205,6 +212,35 @@ pub fn NodePane(
 
 /// Selection indicator/toggle in the pane's primary-affordance slot, left of
 /// the node name (D3).
+/// The whole body of a node whose kind has no runtime on this device: the
+/// status headline and the engine's own reason, in the warning family.
+///
+/// This REPLACES the node's body rather than dimming it. A node with no
+/// runtime has no live params, products or slots — rendering them (even
+/// ghosted) shows state that does not exist and invites edits that cannot
+/// take effect. It usually also means the project does not work on this
+/// device at all, so it says so plainly instead of whispering.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeUnsupportedBody(label: String, reason: Option<String>) -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-1 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-3 tw:py-6 tw:text-center",
+            span { class: "tw:inline-flex tw:items-center tw:justify-center tw:text-status-warning-foreground",
+                StudioIcon {
+                    name: StudioIconName::StepAttention,
+                    size: 18,
+                }
+            }
+            p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-status-warning-foreground", "{label}" }
+            if let Some(reason) = reason {
+                p { class: "tw:m-0 tw:max-w-[36ch] tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                    "{reason}"
+                }
+            }
+        }
+    }
+}
+
 ///
 /// Selecting a node focuses it (probes ride the focused node), so body
 /// clicks stay inert and only this control dispatches the focus action —

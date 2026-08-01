@@ -262,7 +262,7 @@ pub(crate) fn add_node_picker_device_gaps() -> Element {
 }
 
 #[story(
-    description = "A project holding a node whose kind this device's firmware does not carry: the tree row is GHOSTED (dimmed), with the reason in its tooltip — distinct from a red failed row and from a healthy silent one. G1 questions 1-2."
+    description = "A project holding a node whose kind this device's firmware does not carry: the tree row announces itself with the ordinary warning affordance (no special dimming), the label reading 'Not on this device' and the engine's reason in the row tooltip. Loud on purpose — an unsupported node usually breaks the show on this device."
 )]
 pub(crate) fn unsupported_node_in_tree() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);

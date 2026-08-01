@@ -186,7 +186,7 @@ pub(crate) fn error_detail_popup() -> Element {
 }
 
 #[story(
-    description = "A node whose kind this device's firmware does not carry: the whole pane is ghosted (dimmed), the header stays quiet — no error wash, no attention glyph, and nothing violet (violet is bound). The words live in the detail popup. G1 question 1/2: is this clearly 'disabled by this device' and clearly not 'broken'?"
+    description = "A node whose kind this device's firmware does not carry. The pane body is EMPTY — the fixture has two config slots and a second tab, and neither renders: there is no runtime here, so there is no live state to show and no edit that could take effect. In their place, the warning-family empty state states the problem and the engine's own reason. The header wears the warning wash and the attention affordance, because a node the device cannot run usually means the project does not work here at all (G1: dimmed/neutral was tried first and rejected as too quiet)."
 )]
 pub(crate) fn unsupported_node() -> Element {
     rsx! {
@@ -195,7 +195,7 @@ pub(crate) fn unsupported_node() -> Element {
 }
 
 #[story(
-    description = "The detail popup on a not-on-this-device node: a NEUTRAL status pill reading 'Not on this device' plus the engine's own reason ('node kind Fluid is not included in this firmware build') — the cause, not the symptom the old resolve warning gave."
+    description = "The detail popup on a not-on-this-device node: the WARNING status pill reading 'Not on this device' plus the engine's own reason ('node kind Fluid is not included in this firmware build') — the cause, not the symptom the old 'does not produce slot' resolve warning gave."
 )]
 pub(crate) fn unsupported_detail_popup() -> Element {
     let view = unsupported_node_view();

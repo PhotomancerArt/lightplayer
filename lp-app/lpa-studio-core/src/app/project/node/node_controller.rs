@@ -236,7 +236,7 @@ impl NodeController {
         )
         .with_status(self.ui_status())
         .with_dirty(dirty)
-        .with_dimmed(self.status.tone.is_dimmed());
+        .with_unsupported(self.status.tone.is_unsupported());
         // Status detail (error/warning/failure text) rides the header so the
         // node detail popup can answer "why" — the compact status alone read
         // as an unexplained Error state (gate follow-up, 2026-07-15).
