@@ -3741,25 +3741,18 @@ label:has(> input:not(:disabled)) {
 
 /* Rotation follows the section grammar: the glyph previews the state the
    press leads to. */
+/* The chevron states the section's ACTUAL open/closed state and nothing
+   else — no hover-previews-the-other-state rotation here (G1 feedback:
+   confusing on this header); hover feedback is opacity only. */
 .lp-debug-section-chevron {
     display: inline-flex;
     flex: none;
     opacity: 0.75;
-    transition: transform 150ms ease, opacity 150ms ease;
+    transition: opacity 150ms ease;
 }
 
 .lp-debug-section-toggle:hover .lp-debug-section-chevron {
     opacity: 1;
-}
-
-/* Hover previews the other state, exactly as the collapsed drawer row and
-   the expanded rail do (`node_card_section.rs`). */
-.lp-debug-section-toggle:hover .lp-debug-section-chevron:not(.lp-debug-section-chevron--open) {
-    transform: rotate(90deg);
-}
-
-.lp-debug-section-toggle:hover .lp-debug-section-chevron--open {
-    transform: rotate(-90deg);
 }
 
 @media (prefers-reduced-motion: reduce) {
