@@ -653,7 +653,6 @@ impl MemPressureCtx {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lps_shared::LpsValueF32;
     use crate::dataflow::binding::{
         BindingDraft, BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
     };
@@ -666,6 +665,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
     use lpc_model::{Kind, LpValue, SlotPath, SlotShapeRegistry, Slotted, ValueSlot};
+    use lps_shared::LpsValueF32;
 
     #[derive(Default, Slotted)]
     struct TestRuntimeState {
@@ -710,6 +710,7 @@ mod tests {
 
         fn providers_for_bus(
             &self,
+            _scope: Option<crate::node::ScopeRef>,
             channel: &lpc_model::ChannelName,
         ) -> Vec<(BindingRef, BindingEntry)> {
             self.entries
@@ -748,9 +749,10 @@ mod tests {
 
         fn providers_for_bus(
             &self,
+            scope: Option<crate::node::ScopeRef>,
             channel: &lpc_model::ChannelName,
         ) -> Vec<(BindingRef, BindingEntry)> {
-            self.bindings.providers_for_bus(channel)
+            self.bindings.providers_for_bus(scope, channel)
         }
     }
 
@@ -812,7 +814,10 @@ mod tests {
             &slot_shapes,
         );
         let pv = ctx
-            .resolve(&QueryKey::Bus(channel.clone()))
+            .resolve(&QueryKey::Bus {
+                scope: None,
+                channel: channel.clone(),
+            })
             .expect("resolve bus");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(7.8)));
     }
@@ -945,10 +950,7 @@ mod tests {
             Ok(super::super::ProduceResult::Produced)
         }
 
-        fn destroy(
-            &mut self,
-            _ctx: &mut super::DestroyCtx,
-        ) -> Result<(), crate::node::NodeError> {
+        fn destroy(&mut self, _ctx: &mut super::DestroyCtx) -> Result<(), crate::node::NodeError> {
             Ok(())
         }
 
@@ -983,7 +985,10 @@ mod tests {
         let slot_shapes = SlotShapeRegistry::default();
 
         let mut node = QueryResolvingNode {
-            query: QueryKey::Bus(channel),
+            query: QueryKey::Bus {
+                scope: None,
+                channel: channel,
+            },
             resolved_value: None,
         };
 

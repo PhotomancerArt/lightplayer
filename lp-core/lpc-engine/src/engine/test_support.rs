@@ -273,7 +273,10 @@ impl EngineTestHarness {
     }
 
     pub(crate) fn resolve_bus(&mut self, channel: &str) -> Result<Production, SessionResolveError> {
-        self.resolve(QueryKey::Bus(channel_name(channel)))
+        self.resolve(QueryKey::Bus {
+            scope: None,
+            channel: channel_name(channel),
+        })
     }
 
     pub(crate) fn resolve(&mut self, query: QueryKey) -> Result<Production, SessionResolveError> {
@@ -403,7 +406,10 @@ pub(crate) fn trace_has_value_origin_path(
     shader: NodeId,
     output_path: &SlotPath,
 ) -> bool {
-    let bus_query = QueryKey::Bus(channel_name(bus_name));
+    let bus_query = QueryKey::Bus {
+        scope: None,
+        channel: channel_name(bus_name),
+    };
     let output_query = QueryKey::ProducedSlot {
         node: shader,
         slot: output_path.clone(),

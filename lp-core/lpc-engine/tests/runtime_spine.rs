@@ -60,7 +60,11 @@ fn runtime_spine_tick_context_resolve_bus_query() {
             Err(SessionResolveError::other("unexpected produce"))
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(
+            &self,
+            _scope: Option<lpc_engine::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
             if channel == &self.channel {
                 Vec::from([(BindingRef::new(self.binding.owner, 0), self.binding.clone())])
             } else {
@@ -75,7 +79,10 @@ fn runtime_spine_tick_context_resolve_bus_query() {
     };
     let slot_shapes = lpc_model::SlotShapeRegistry::default();
     let mut node = ProduceProbeNode {
-        query: QueryKey::Bus(channel),
+        query: QueryKey::Bus {
+            scope: None,
+            channel: channel,
+        },
         last: None,
     };
 
