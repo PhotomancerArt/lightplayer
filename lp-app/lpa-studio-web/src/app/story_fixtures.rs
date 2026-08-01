@@ -498,7 +498,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
     );
     let project = tree_item(
         1,
-        "/demo.project",
+        "/demo.module",
         "Demo",
         "Project",
         running.clone(),
@@ -506,7 +506,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
         vec![
             tree_item(
                 2,
-                "/demo.project/clock.clock",
+                "/demo.module/clock.clock",
                 "Clock",
                 "Clock",
                 running.clone(),
@@ -515,7 +515,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
             ),
             tree_item(
                 3,
-                "/demo.project/orbit.shader",
+                "/demo.module/orbit.shader",
                 "Orbit shader",
                 "Shader",
                 running.clone(),
@@ -524,7 +524,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
             ),
             tree_item(
                 4,
-                "/demo.project/palette.visual",
+                "/demo.module/palette.visual",
                 "Sunrise palette",
                 "Visual",
                 warning.clone(),
@@ -533,7 +533,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
             ),
             tree_item(
                 5,
-                "/demo.project/output.output",
+                "/demo.module/output.output",
                 "Output",
                 "Output",
                 running.clone(),
@@ -686,7 +686,7 @@ fn clock_node_child() -> UiNodeChild {
     node_child(
         "Clock",
         "Clock",
-        "/demo.project/clock.clock",
+        "/demo.module/clock.clock",
         UiStatus::good("Running"),
     )
     .with_sections(vec![
@@ -709,7 +709,7 @@ fn orbit_shader_child() -> UiNodeChild {
     node_child(
         "Orbit shader",
         "Shader",
-        "/demo.project/orbit.shader",
+        "/demo.module/orbit.shader",
         UiStatus::good("Running"),
     )
     .active("focused")
@@ -751,7 +751,7 @@ fn palette_node_child() -> UiNodeChild {
     node_child(
         "Sunrise palette",
         "Visual",
-        "/demo.project/palette.visual",
+        "/demo.module/palette.visual",
         UiStatus::warning("Warning"),
     )
     .with_sections(vec![
@@ -781,7 +781,7 @@ fn output_node_child() -> UiNodeChild {
     node_child(
         "Output",
         "Output",
-        "/demo.project/output.output",
+        "/demo.module/output.output",
         UiStatus::good("Running"),
     )
     .with_sections(vec![UiNodeSection::ConfigSlots(vec![

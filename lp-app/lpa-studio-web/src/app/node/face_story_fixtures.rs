@@ -491,7 +491,7 @@ pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
 /// The node-select action a strip entry dispatches (story mock — dispatch
 /// goes to the story's no-op handler).
 fn entry_select_action(name: &str) -> UiAction {
-    UiAction::from_op(ControllerId::new("story.project"), ProjectEditorOp::Focus)
+    UiAction::from_op(ControllerId::new("story.module"), ProjectEditorOp::Focus)
         .with_label(format!("Select {name}"))
 }
 

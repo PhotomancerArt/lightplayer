@@ -5734,7 +5734,7 @@ mod tests {
             .unwrap();
         let product = VisualProduct::new(NodeId::new(3), 0);
         let target = ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
-            ProjectNodeAddress::new(TreePath::parse("/demo.project/orbit.shader").unwrap()),
+            ProjectNodeAddress::new(TreePath::parse("/demo.module/orbit.shader").unwrap()),
             NodeId::new(3),
         ));
         let action = UiAction::from_op(target.node_id(), ProjectEditorOp::Focus);
@@ -5924,7 +5924,7 @@ mod tests {
 
     fn single_product_project_view(node_id: u32) -> ProjectView {
         let revision = Revision::new(1);
-        let path = TreePath::parse("/demo.project/orbit.shader").unwrap();
+        let path = TreePath::parse("/demo.module/orbit.shader").unwrap();
         let state_shape = SlotShapeId::new(700);
         let mut view = ProjectView::new();
         view.tree.insert(TreeEntryView::new(

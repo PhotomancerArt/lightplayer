@@ -179,7 +179,7 @@ mod tests {
     fn edit(path: &str, phase: UiPendingEditPhase) -> UiPendingEdit {
         UiPendingEdit {
             node_label: "Orbit".to_string(),
-            node_path: "/demo.project/orbit.shader".to_string(),
+            node_path: "/demo.module/orbit.shader".to_string(),
             slot_path_display: path.to_string(),
             kind: UiPendingEditKind::Added,
             old_value: None,

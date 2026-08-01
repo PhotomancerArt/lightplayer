@@ -14,7 +14,7 @@ fn site(label: &str, slot: Option<&str>, default_origin: bool) -> UiBusSiteView 
         slot: slot.map(str::to_string),
         default_origin,
         focus: Some(UiAction::from_op(
-            ControllerId::new("story.project"),
+            ControllerId::new("story.module"),
             ProjectEditorOp::Focus,
         )),
     }

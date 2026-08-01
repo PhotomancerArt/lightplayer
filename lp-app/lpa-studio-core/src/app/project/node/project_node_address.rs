@@ -53,17 +53,17 @@ mod tests {
 
     #[test]
     fn address_displays_canonical_tree_path() {
-        let address = ProjectNodeAddress::parse("/demo.project/orbit.shader").unwrap();
+        let address = ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap();
 
-        assert_eq!(address.to_string(), "/demo.project/orbit.shader");
+        assert_eq!(address.to_string(), "/demo.module/orbit.shader");
     }
 
     #[test]
     fn is_self_or_under_is_a_segment_wise_subtree_test() {
-        let root = ProjectNodeAddress::parse("/demo.project").unwrap();
-        let node = ProjectNodeAddress::parse("/demo.project/orbit.shader").unwrap();
-        let nested = ProjectNodeAddress::parse("/demo.project/orbit.shader/tail.vis").unwrap();
-        let sibling = ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap();
+        let root = ProjectNodeAddress::parse("/demo.module").unwrap();
+        let node = ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap();
+        let nested = ProjectNodeAddress::parse("/demo.module/orbit.shader/tail.vis").unwrap();
+        let sibling = ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap();
 
         assert!(node.is_self_or_under(&node), "a node is in its own subtree");
         assert!(node.is_self_or_under(&root));

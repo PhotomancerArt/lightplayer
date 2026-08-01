@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn entry_actions_dispatch_create_at_the_menu_site() {
         let playlist = UiAttachTarget::Playlist {
-            node: crate::ProjectNodeAddress::parse("/demo.project/loop.playlist").unwrap(),
+            node: crate::ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap(),
         };
         let menu = add_node_menu(&playlist);
         let entry = &menu.entries[0];

@@ -14,7 +14,7 @@ use crate::app::node::node_story_fixtures::config_row_states_fixture;
 
 fn story_slot_address(path: &str) -> ProjectSlotAddress {
     ProjectSlotAddress::new(
-        ProjectNodeAddress::parse("/demo.project/clock.clock").expect("valid story node address"),
+        ProjectNodeAddress::parse("/demo.module/clock.clock").expect("valid story node address"),
         ProjectSlotRoot::def(),
         SlotPath::parse(path).expect("valid story slot path"),
     )

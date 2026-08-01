@@ -5073,7 +5073,7 @@ mod tests {
     fn project_view_keeps_existing_focus_when_syncing() {
         let mut project = ProjectController::new();
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = node_address("/demo.project/orbit.shader");
+        let orbit = node_address("/demo.module/orbit.shader");
 
         clear_node_focus(&mut project.root_nodes);
         project.node_mut(&orbit).unwrap().state_mut().focused = true;
@@ -5082,7 +5082,7 @@ mod tests {
         assert!(project.node(&orbit).unwrap().state().focused);
         assert!(
             !project
-                .node(&node_address("/demo.project/clock.clock"))
+                .node(&node_address("/demo.module/clock.clock"))
                 .unwrap()
                 .state()
                 .focused
@@ -5091,7 +5091,7 @@ mod tests {
 
     #[test]
     fn node_update_preserves_local_state_and_refreshes_runtime_id() {
-        let address = node_address("/demo.project/orbit.shader");
+        let address = node_address("/demo.module/orbit.shader");
         let mut project = ProjectController::new();
         project
             .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
@@ -5124,15 +5124,15 @@ mod tests {
         let mut project = ProjectController::new();
         project
             .apply_project_view(&root_view(&[
-                (1, "/demo.project/a.shader"),
-                (2, "/demo.project/b.shader"),
+                (1, "/demo.module/a.shader"),
+                (2, "/demo.module/b.shader"),
             ]))
             .unwrap();
 
         project
             .apply_project_view(&root_view(&[
-                (3, "/demo.project/c.shader"),
-                (1, "/demo.project/a.shader"),
+                (3, "/demo.module/c.shader"),
+                (1, "/demo.module/a.shader"),
             ]))
             .unwrap();
 
@@ -5146,7 +5146,7 @@ mod tests {
         );
         assert!(
             project
-                .node(&node_address("/demo.project/b.shader"))
+                .node(&node_address("/demo.module/b.shader"))
                 .is_none()
         );
     }
@@ -5192,7 +5192,7 @@ mod tests {
                     event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
                         deltas: vec![lpc_wire::WireTreeDelta::Created {
                             id: NodeId::new(1),
-                            path: TreePath::parse("/demo.project").unwrap(),
+                            path: TreePath::parse("/demo.module").unwrap(),
                             parent: None,
                             child_kind: None,
                             children: Vec::new(),
@@ -5228,7 +5228,7 @@ mod tests {
         project.apply_project_view(&view).unwrap();
 
         let node = project
-            .node(&node_address("/demo.project/orbit.shader"))
+            .node(&node_address("/demo.module/orbit.shader"))
             .unwrap();
         assert_eq!(
             node.slots()
@@ -5242,7 +5242,7 @@ mod tests {
 
     #[test]
     fn slot_update_preserves_local_state() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let brightness = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -5274,7 +5274,7 @@ mod tests {
 
     #[test]
     fn record_to_scalar_shape_change_removes_stale_slot_children() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let root = ProjectSlotAddress::root(node.clone(), ProjectSlotRoot::def());
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_test_slots(&mut view, 1, Revision::new(2), false);
@@ -5293,7 +5293,7 @@ mod tests {
 
     #[test]
     fn map_entry_changes_reconcile_keyed_slot_children() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_map_slot(&mut view, 1, Revision::new(2), &["a", "b"]);
         let mut project = ProjectController::new();
@@ -5348,7 +5348,7 @@ mod tests {
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 2, Revision::new(4));
         project.apply_project_view(&view).unwrap();
-        let node = node_address("/demo.project");
+        let node = node_address("/demo.module");
         project.node_mut(&node).unwrap().state_mut().focused = true;
         project.node_mut(&node).unwrap().state_mut().collapsed = true;
 
@@ -5357,7 +5357,7 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].header.title, "Demo");
         assert_eq!(nodes[0].header.kind, "Project");
-        assert_eq!(nodes[0].header.path, "/demo.project");
+        assert_eq!(nodes[0].header.path, "/demo.module");
         assert_eq!(nodes[0].header.status.label, "Running");
         assert!(nodes[0].focused);
         assert!(nodes[0].collapsed);
@@ -5378,7 +5378,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Clock", "Orbit"]
         );
-        assert_eq!(nodes[0].children[0].detail, "/demo.project/clock.clock");
+        assert_eq!(nodes[0].children[0].detail, "/demo.module/clock.clock");
         assert!(!nodes[0].children[0].sections.is_empty());
     }
 
@@ -5388,7 +5388,7 @@ mod tests {
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 3, Revision::new(4));
         project.apply_project_view(&view).unwrap();
-        let child_address = node_address("/demo.project/orbit.shader");
+        let child_address = node_address("/demo.module/orbit.shader");
         project
             .node_mut(&child_address)
             .unwrap()
@@ -5442,7 +5442,7 @@ mod tests {
         assert_eq!(
             target,
             ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
-                node_address("/demo.project/orbit.shader"),
+                node_address("/demo.module/orbit.shader"),
                 NodeId::new(3),
             ))
         );
@@ -5477,7 +5477,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = "/demo.project/orbit.shader".to_string();
+        let orbit = "/demo.module/orbit.shader".to_string();
 
         dispatch_node_ui(
             &mut project,
@@ -5522,7 +5522,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = "/demo.project/orbit.shader".to_string();
+        let orbit = "/demo.module/orbit.shader".to_string();
 
         dispatch_node_ui(
             &mut project,
@@ -5569,7 +5569,7 @@ mod tests {
         dispatch_node_ui(
             &mut project,
             NodeUiOp::SetDraft {
-                node: "/demo.project/orbit.shader".to_string(),
+                node: "/demo.module/orbit.shader".to_string(),
                 draft: "stale draft".to_string(),
             },
         );
@@ -5590,7 +5590,7 @@ mod tests {
     fn nested_child_cards_wear_their_own_card_ui_overlay() {
         let mut project = ProjectController::new();
         project.apply_node_ui_op(NodeUiOp::SetDrawer {
-            node: "/demo.project/list.playlist/glow.shader".to_string(),
+            node: "/demo.module/list.playlist/glow.shader".to_string(),
             drawer: crate::NodeCardDrawer::Advanced,
             open: true,
         });
@@ -5600,12 +5600,12 @@ mod tests {
         let mut children = vec![crate::UiNodeChild::new(
             "List",
             "Playlist",
-            "/demo.project/list.playlist",
+            "/demo.module/list.playlist",
         )];
         children[0].children = vec![crate::UiNodeChild::new(
             "Glow",
             "Shader",
-            "/demo.project/list.playlist/glow.shader",
+            "/demo.module/list.playlist/glow.shader",
         )];
 
         project.overlay_child_card_ui(&mut children);
@@ -6147,7 +6147,7 @@ mod tests {
         );
 
         // An explicit opt-out still wins over the sim policy.
-        let address = node_address("/demo.project/orbit.shader");
+        let address = node_address("/demo.module/orbit.shader");
         project
             .node_mut(&address)
             .unwrap()
@@ -6220,7 +6220,7 @@ mod tests {
 
     fn orbit_def_address(path: &str) -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -6548,7 +6548,7 @@ mod tests {
         let mut view = ProjectView::new();
         let mut playlist = node_entry(
             1,
-            "/demo.project/list.playlist",
+            "/demo.module/list.playlist",
             None,
             NodeRuntimeStatus::Ok,
         );
@@ -6556,7 +6556,7 @@ mod tests {
         view.tree.insert(playlist);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/list.playlist/glow.shader",
+            "/demo.module/list.playlist/glow.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -6567,7 +6567,7 @@ mod tests {
         // The child picks up default focus (only shader in the tree) which
         // would subscribe ALL its products; pin it unsubscribed so the
         // assertion isolates the warming path.
-        let child = crate::ProjectNodeAddress::parse("/demo.project/list.playlist/glow.shader")
+        let child = crate::ProjectNodeAddress::parse("/demo.module/list.playlist/glow.shader")
             .expect("valid address");
         project
             .node_mut(&child)
@@ -6590,7 +6590,7 @@ mod tests {
 
     #[test]
     fn binding_removal_clears_bound_state_on_refresh() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let time = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -6616,7 +6616,7 @@ mod tests {
 
     #[test]
     fn focused_default_node_subscribes_product_preview_probes() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -6827,7 +6827,7 @@ mod tests {
 
     #[test]
     fn projected_ui_value_updates_while_slot_state_is_preserved() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let brightness = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -6915,18 +6915,18 @@ mod tests {
 
     fn tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/orbit.shader",
+            "/demo.module/orbit.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -6935,24 +6935,24 @@ mod tests {
 
     fn fixture_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3), NodeId::new(4)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/orbit.shader",
+            "/demo.module/orbit.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             4,
-            "/demo.project/pixels.fixture",
+            "/demo.module/pixels.fixture",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -6961,18 +6961,18 @@ mod tests {
 
     fn clock_output_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/dmx.output",
+            "/demo.module/dmx.output",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -6982,7 +6982,7 @@ mod tests {
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {
         let mut view = ProjectView::new();
         view.tree
-            .insert(node_entry(id, "/demo.project/orbit.shader", None, status));
+            .insert(node_entry(id, "/demo.module/orbit.shader", None, status));
         view
     }
 
@@ -7797,7 +7797,7 @@ mod tests {
 
     fn brightness_address() -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse("brightness").unwrap(),
         )
@@ -7805,7 +7805,7 @@ mod tests {
 
     fn rate_address() -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse("rate").unwrap(),
         )
@@ -8105,18 +8105,18 @@ mod tests {
         // pending; it lands with the next applied view that contains the
         // created node.
         let mut view = three_level_tree_view();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(4), NodeId::new(9)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             9,
-            "/demo.project/clock_2.clock",
+            "/demo.module/clock_2.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         project.apply_project_view(&view).unwrap();
         let created = project
-            .node(&node_address("/demo.project/clock_2.clock"))
+            .node(&node_address("/demo.module/clock_2.clock"))
             .expect("created node landed");
         assert!(created.state().focused, "the created node takes focus");
     }
@@ -8186,7 +8186,7 @@ mod tests {
         ]);
 
         let run = block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
         )
         .unwrap();
         // The scripted refresh carried no tree events, so the controllers
@@ -8257,7 +8257,7 @@ mod tests {
             mutation_response(5, vec![accepted(1), accepted(2)], 7),
         ]);
         block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
         )
         .unwrap();
         // Restore the controller tree (the scripted refresh carried no tree
@@ -8268,7 +8268,7 @@ mod tests {
 
         // Revert the NodeRemoved row exactly as the save panel would.
         let site = crate::ProjectSlotAddress::new(
-            node_address("/demo.project"),
+            node_address("/demo.module"),
             ProjectSlotRoot::def(),
             SlotPath::parse("nodes[clock]").unwrap(),
         );
@@ -8337,7 +8337,7 @@ mod tests {
             )]);
 
         let run = block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
         )
         .unwrap();
 
@@ -8360,7 +8360,7 @@ mod tests {
         // carries no playlist slot mirror), so no wire op is sent.
         let run = block_on_ready(project.remove_node(
             &mut client,
-            &node_address("/demo.project/group.playlist/leaf.shader"),
+            &node_address("/demo.module/group.playlist/leaf.shader"),
         ))
         .unwrap();
 
@@ -8389,7 +8389,7 @@ mod tests {
         let clock = view
             .nodes
             .iter()
-            .find(|node| node.node_id == "/demo.project/clock.clock")
+            .find(|node| node.node_id == "/demo.module/clock.clock")
             .expect("clock card");
         let delete = clock
             .header_actions
@@ -8728,7 +8728,7 @@ mod tests {
     fn set_value_outside_def_root_fails_client_side() {
         let (mut project, mut client, sent) = editable_project_with_scripted_client(Vec::new());
         let state_address = crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::state(),
             SlotPath::parse("output").unwrap(),
         );
@@ -8898,7 +8898,7 @@ mod tests {
 
     fn structural_address(path: &str) -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -9054,7 +9054,7 @@ mod tests {
         assert!(!project.dirty_summary().is_clean());
 
         let run = block_on_ready(
-            project.revert_node_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+            project.revert_node_edits(&mut client, &node_address("/demo.module/orbit.shader")),
         )
         .unwrap();
 
@@ -9109,7 +9109,7 @@ mod tests {
         );
 
         let run = block_on_ready(
-            project.revert_node_edits(&mut client, &node_address("/demo.project/other.clock")),
+            project.revert_node_edits(&mut client, &node_address("/demo.module/other.clock")),
         )
         .unwrap();
 
@@ -9158,7 +9158,7 @@ mod tests {
         assert_eq!(
             actions[0].action.op_as::<crate::NodeRevertOp>(),
             Some(&crate::NodeRevertOp {
-                node: node_address("/demo.project/orbit.shader"),
+                node: node_address("/demo.module/orbit.shader"),
             })
         );
     }
@@ -10503,7 +10503,7 @@ mod tests {
         project.apply_project_view(&view).unwrap();
         project.insert_pending_edit_for_test(
             crate::ProjectSlotAddress::new(
-                node_address("/demo.project/group.playlist/leaf.shader"),
+                node_address("/demo.module/group.playlist/leaf.shader"),
                 ProjectSlotRoot::def(),
                 SlotPath::parse("brightness").unwrap(),
             ),
@@ -10719,12 +10719,12 @@ mod tests {
     /// Root (1) → group (2) + clock sibling (4), group → leaf shader (3).
     fn three_level_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(4)];
         view.tree.insert(root);
         let mut group = node_entry(
             2,
-            "/demo.project/group.playlist",
+            "/demo.module/group.playlist",
             Some(1),
             NodeRuntimeStatus::Ok,
         );
@@ -10732,13 +10732,13 @@ mod tests {
         view.tree.insert(group);
         view.tree.insert(node_entry(
             3,
-            "/demo.project/group.playlist/leaf.shader",
+            "/demo.module/group.playlist/leaf.shader",
             Some(2),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             4,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
