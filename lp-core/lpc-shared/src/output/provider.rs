@@ -76,4 +76,25 @@ pub trait OutputProvider {
     /// # Returns
     /// Returns `Ok(())` on success, or `OutputError` if handle is invalid
     fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError>;
+
+    /// Change signal for endpoint availability.
+    ///
+    /// The value changes whenever an endpoint that refused to [`open`] might
+    /// now accept — that is, whenever hardware ownership moved. Callers
+    /// compare it for inequality only; nothing about ordering or magnitude is
+    /// promised.
+    ///
+    /// This exists so a caller holding a failed endpoint can wait instead of
+    /// asking: re-attempting an open costs a full enumeration of the board,
+    /// and a sink whose pin is simply not there would pay that on every frame
+    /// forever.
+    ///
+    /// The default answers "this hardware never changes", which is correct for
+    /// providers that own no registry: their failures are permanent until the
+    /// caller's own configuration changes.
+    ///
+    /// [`open`]: OutputProvider::open
+    fn hardware_generation(&self) -> u64 {
+        0
+    }
 }

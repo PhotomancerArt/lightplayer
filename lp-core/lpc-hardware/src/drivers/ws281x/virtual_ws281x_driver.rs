@@ -100,13 +100,26 @@ impl VirtualWs281xDriver {
         }
     }
 
+    /// The GPIO an endpoint id names, without building the endpoint list.
+    ///
+    /// Every entry in that list carries a freshly computed status — several
+    /// registry lookups each — and none of it is wanted here: the id already
+    /// determines the address. Walking the manifest directly answers the same
+    /// question for the cost of a spec string per candidate.
     fn gpio_for_endpoint(
         &self,
         endpoint_id: &HwEndpointId,
     ) -> Result<HwAddress, HardwareEndpointError> {
-        for endpoint in self.endpoints() {
-            if endpoint.id() == endpoint_id {
-                return Ok(endpoint.address().clone());
+        // A board with no timing resource offers no endpoints at all, so no id
+        // can belong to this driver.
+        if !self.timing_addresses.is_empty() {
+            for resource in self.registry.manifest().resources() {
+                if !resource.supports(HwCapability::GpioOutput) {
+                    continue;
+                }
+                if self.endpoint_id(&ws281x_rmt_spec(resource.display_label())) == *endpoint_id {
+                    return Ok(resource.address().clone());
+                }
             }
         }
 

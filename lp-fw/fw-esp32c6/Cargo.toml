@@ -24,7 +24,6 @@ server = [
     "lpa-server",
     "lpc-shared",
     "lpfs",
-    "ser-write-json",
 ]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs)
 radio = [
     "lpc-hardware",
@@ -116,7 +115,6 @@ lpc-model = { path = "../../lp-core/lpc-model", default-features = false, option
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
-ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 
