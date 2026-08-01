@@ -32,7 +32,7 @@ use alloc::sync::Arc;
 
 use esp_println::println;
 use lpir::FloatMode;
-use lpvm::{LpvmCompileParams, LpvmEngine, LpvmInstance, LpvmModule};
+use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_native::native_options::NativeCompileOptions;
 use lpvm_native::rt_jit::{BuiltinTable, NativeJitEngine};
 use lpvm_native::xt_corpus::CASES;
@@ -256,7 +256,12 @@ fn run_f32_cases(tally: &mut Tally) {
 /// emitted FP instructions, and a Q32 compile cannot say that.
 #[cfg(feature = "float-f32")]
 fn run_per_compile_float_mode(tally: &mut Tally) {
-    use lpvm::FloatImpl;
+    // Imported here rather than at module scope: this whole function is
+    // behind `float-f32`, and `just clippy-fw-esp32s3`'s gate-off pass makes a
+    // module-scope import an unused-import error. That pass exists for exactly
+    // this — the feature is in `default`, so nothing else compiles the
+    // off-arms.
+    use lpvm::{FloatImpl, LpvmCompileParams};
     use lpvm_native::xt_corpus::F32_CASES;
 
     println!("{TAG} --- per-compile float mode (Q32-constructed engine) ---");
