@@ -126,13 +126,15 @@ on-demand would be an inconsistency rather than a decision. Measured wall-clock
 if that changes: `xtn.f32` ≈ 15 s, `xtlpn.f32` ≈ 5 s, matching their Q32
 siblings almost exactly.
 
-Dispositions on registration: `xtn.f32` **850/850 files, no `@broken`**.
-`xtlpn.f32` 850/850 with **8 assertions `@broken`** across 6 files — a real
-config-masked codegen bug that needs the Lp frontend *and* Xtensa *and* f32
-together, recorded in
-`docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`. It is
-`@broken` and not `@unsupported` deliberately: the corpus should not read green
-while the compiler is wrong.
+Registering the pair paid for itself immediately. `xtn.f32` came up **850/850
+files, no `@broken`**; `xtlpn.f32` came up 850/850 with **8 assertions
+`@broken`** across 6 files — a real config-masked codegen bug that needed the Lp
+frontend *and* Xtensa *and* f32 together, which is why no configuration anyone
+ran before M8 could falsify it. It was `@broken` and not `@unsupported`
+deliberately: the corpus must not read green while the compiler is wrong.
+
+That bug is **fixed** (`docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`,
+closed), the annotations are gone, and both f32 targets are now clean.
 
 A bare `xtn` / `xtlpn` shorthand now selects **both** float modes, as `wasm`
 already did. Spell the mode out to get one.
