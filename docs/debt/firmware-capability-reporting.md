@@ -1,11 +1,13 @@
 ---
-status: carried
+status: retired
 since: 2026-07-30
 logged: 2026-07-30
 area: lpc-engine/nodes + lpc-wire
 related:
   [
     "../../lp-core/lpc-engine/Cargo.toml",
+    "../adr/2026-08-01-capability-reporting-on-hello.md",
+    "../adr/2026-08-01-firmware-manifest-architecture.md",
     "../adr/2026-07-14-wire-hello-versioning.md",
     "../adr/2026-07-05-artifact-format-version-and-schema-snapshots.md",
   ]
@@ -116,9 +118,24 @@ kinds the project's `project.json` actually uses.
   for this system was spawned the same day (Yona's call), so the design work
   has a home. Status stays `carried`.
 
-**Exit criteria** — A device that omits a node kind's runtime says so on
-`ServerHello` (or an equivalent capability seam), and the studio visibly
-distinguishes "this node is disabled by this device" from "this node is
-broken" for any project loaded against it. Landing that promotes this entry
-to `retired` and should cite whatever ADR settles the capability-list shape
-and its `format:N` bump.
+- **2026-08-01** — **Paid down and retired** (firmware-manifest roadmap M4;
+  `docs/adr/2026-08-01-capability-reporting-on-hello.md`). All three exit
+  criteria met: `ServerHello` (wire proto 5) carries `build.features` — the
+  typed `LpFeature` list the server derives from `lpc_engine::
+  supported_features()` and its own injected services — beside
+  `hardware: { radio, button, boardId }`; `CorePlaceholderNode` reports
+  `NodeRuntimeStatus::Unsupported`, which the studio renders as "Not on this
+  device" (dimmed, not the error family) in the tree, node pane and popover,
+  and which the add-node picker uses to disable (never hide) kinds the
+  connected device lacks; the per-frame resolve warning now names the build
+  gap instead of "does not produce slot".
+
+  **The schema-entanglement premise in "The real fix" above was STALE.**
+  Adding the `Unsupported` variant to `NodeRuntimeStatus` left `schemas/`
+  byte-identical (`just schema-check`): schema generation is
+  slot-shape-registry driven and runs `schemars::schema_for!` for exactly two
+  types, neither of which reaches `NodeRuntimeStatus` — its `JsonSchema`
+  derive is orphaned. No `format:N` bump was needed or taken; the wire proto
+  bump alone carried the change.
+
+**Exit criteria** — MET, see the 2026-08-01 entry.
