@@ -152,17 +152,32 @@ mod validate_render_texture_tests {
     use lpir::IrType;
     use lpir::builder::FunctionBuilder;
 
+    /// A function with `params` and a *declared* return list of `rets`, which
+    /// the body does not honour — the `rejects_wrong_return` cases below need
+    /// exactly that shape, since a render entry point is invalid precisely when
+    /// it declares any return type at all.
+    ///
+    /// `return_types` is stamped onto the finished [`lpir::IrFunction`] rather
+    /// than passed to [`FunctionBuilder::new`], because the builder now asserts
+    /// that `push_return`'s arity matches what was declared (see
+    /// `docs/defects/2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md`).
+    /// Building the mismatch through the builder would trip that assertion,
+    /// which is the assertion doing its job: the subject here is
+    /// `validate_*_sig_ir`, not the builder, so the malformed IR is constructed
+    /// directly.
     fn make_ir_fn_with_param_types(
         name: &str,
         params: &[IrType],
         rets: &[IrType],
     ) -> lpir::IrFunction {
-        let mut fb = FunctionBuilder::new(name, rets);
+        let mut fb = FunctionBuilder::new(name, &[]);
         for ty in params {
             let _ = fb.add_param(*ty);
         }
         fb.push_return(&[]);
-        fb.finish()
+        let mut f = fb.finish();
+        f.return_types = rets.to_vec();
+        f
     }
 
     #[test]

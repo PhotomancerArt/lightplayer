@@ -31,15 +31,15 @@ pub enum UxUpdate {
     },
 }
 
+/// Which pane a progressive activity update lands on.
+///
+/// The `StackSection` variant retired with the step-stack device pane —
+/// it was the only surface with addressable sub-sections, and its only
+/// producer narrated connect/flash progress into it. That narration lives
+/// on the device CARD now (state-flow model §2).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UxActivityTarget {
-    Pane {
-        node_id: ControllerId,
-    },
-    StackSection {
-        pane_node_id: ControllerId,
-        section_id: String,
-    },
+    Pane { node_id: ControllerId },
 }
 
 impl UxActivityTarget {
@@ -49,20 +49,9 @@ impl UxActivityTarget {
         }
     }
 
-    pub fn stack_section(
-        pane_node_id: impl Into<ControllerId>,
-        section_id: impl Into<String>,
-    ) -> Self {
-        Self::StackSection {
-            pane_node_id: pane_node_id.into(),
-            section_id: section_id.into(),
-        }
-    }
-
     pub fn pane_node_id(&self) -> &ControllerId {
         match self {
             Self::Pane { node_id } => node_id,
-            Self::StackSection { pane_node_id, .. } => pane_node_id,
         }
     }
 }

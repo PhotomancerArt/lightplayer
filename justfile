@@ -1035,11 +1035,30 @@ build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
 # build-host pass only duplicated that work (~12 min/run when CI ran
 # `build-ci` as its own phase).
 [parallel]
-ci-prereqs: build-rv32-builtins build-rv32-emu-guest-test-app
+ci-prereqs: build-rv32-builtins build-rv32-emu-guest-test-app build-xt-builtins
 
 # riscv32: builtins only (for filetests; no ESP32 firmware)
 build-rv32-builtins: install-rv32-target
     ./scripts/build-builtins.sh
+
+# Xtensa: the builtins base image `rt_emu`'s emu-xt engine links compiled shader
+# code against — `lp-xt/fixtures/elf/lps-builtins-xt-app.elf`, gitignored and
+# regenerable, embedded into the build by `lps-builtins-xt-image/build.rs`.
+#
+# `--if-toolchain` makes this a no-op where espup is not installed, which is the
+# only reason it can sit in `ci-prereqs` and `test` unconditionally. It is the
+# rv32 image's twin and needs the same treatment: absent, the embed is an empty
+# slice, and the tests that forget to check `is_available()` fail rather than
+# skip. A wiped build cache or a fresh worktree is enough to get there.
+#
+# Deliberately NOT a dependency of `test-xt-host`, the recipe that consumes it:
+# `test-xt-host` runs inside the `[parallel]` half of `test`, and when the image
+# genuinely changes this writes the very path `lps-builtins-xt-image/build.rs`
+# declares `rerun-if-changed` on — the shape of the rv32 race. It belongs on the
+# ordered gates instead. See
+# docs/defects/2026-08-01-xt-builtins-image-strands-just-test.md.
+build-xt-builtins:
+    ./scripts/build-builtins-xt.sh --if-toolchain
 
 [parallel]
 build: build-host build-rv32
@@ -1220,7 +1239,12 @@ clippy-glsl-fix:
 # Building the builtins *before* the parallel half leaves it with no writer:
 # 0.5s when fresh, and when stale it is work `test-filetests` would have done
 # anyway. See docs/defects/2026-07-29-builtins-elf-uplift-race.md.
-test: build-rv32-builtins _test-parallel
+#
+# `build-xt-builtins` is here for the second half of the same story: the Xtensa
+# image is the rv32 one's gitignored twin, and building it before the parallel
+# half both keeps `test-xt-host` meaningful after a cache wipe and leaves the
+# `[parallel]` half with no writer for it either.
+test: build-rv32-builtins build-xt-builtins _test-parallel
 
 [parallel]
 [private]
@@ -1237,8 +1261,11 @@ test-rust-core:
 #
 # Needs the Xtensa builtins image, a gitignored cross-target artifact. Without
 # it the tests SKIP with a loud note rather than failing, so this recipe is safe
-# on a machine with no esp toolchain — build the image with
-# `scripts/build-builtins-xt.sh` to make it mean something.
+# on a machine with no esp toolchain. `test` and `ci-prereqs` build the image
+# first (`build-xt-builtins`, a no-op without espup) so that on a machine which
+# HAS the toolchain the skip is never what you get by accident — invoking this
+# recipe on its own after a cache wipe still needs `scripts/build-builtins-xt.sh`
+# to make it mean something.
 # NO `--test` allowlist, deliberately. There used to be one, and it silently
 # excluded the two files added by #197 — they ran in neither CI nor `just
 # test`, and reported success by executing nothing.
