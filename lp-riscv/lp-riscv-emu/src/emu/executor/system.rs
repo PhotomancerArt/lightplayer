@@ -65,17 +65,7 @@ pub(super) fn decode_execute_system<M: LoggingMode>(
             0b010 | 0b110 => CsrOp::Set,
             _ => CsrOp::Clear,
         };
-        execute_csr::<M>(
-            rd,
-            csr,
-            op,
-            source,
-            source_is_zero,
-            inst_word,
-            pc,
-            regs,
-            fp,
-        )
+        execute_csr::<M>(rd, csr, op, source, source_is_zero, inst_word, pc, regs, fp)
     }
 }
 
@@ -294,14 +284,9 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ecall();
-        let result = decode_execute_system::<LoggingDisabled>(
-            inst_word,
-            0,
-            &mut regs,
-            &mut memory,
-            &mut fp,
-        )
-        .unwrap();
+        let result =
+            decode_execute_system::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory, &mut fp)
+                .unwrap();
 
         assert!(result.syscall);
         assert!(!result.should_halt);
@@ -315,14 +300,9 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ebreak();
-        let result = decode_execute_system::<LoggingDisabled>(
-            inst_word,
-            0,
-            &mut regs,
-            &mut memory,
-            &mut fp,
-        )
-        .unwrap();
+        let result =
+            decode_execute_system::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory, &mut fp)
+                .unwrap();
 
         assert!(!result.syscall);
         assert!(result.should_halt);
@@ -336,14 +316,9 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ecall();
-        let result = decode_execute_system::<LoggingEnabled>(
-            inst_word,
-            0,
-            &mut regs,
-            &mut memory,
-            &mut fp,
-        )
-        .unwrap();
+        let result =
+            decode_execute_system::<LoggingEnabled>(inst_word, 0, &mut regs, &mut memory, &mut fp)
+                .unwrap();
 
         assert!(result.syscall);
         assert!(result.log.is_some());

@@ -322,7 +322,10 @@ mod tests {
         assert_eq!(fp.frm(), 0b010);
         assert!(fp.write_csr(CSR_FFLAGS, FFLAG_DZ as u32));
         assert_eq!(fp.fflags(), FFLAG_DZ);
-        assert_eq!(fp.read_csr(CSR_FCSR), Some(u32::from((0b010 << 5) | FFLAG_DZ)));
+        assert_eq!(
+            fp.read_csr(CSR_FCSR),
+            Some(u32::from((0b010 << 5) | FFLAG_DZ))
+        );
     }
 
     #[test]
