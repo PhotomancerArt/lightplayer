@@ -108,7 +108,11 @@ fn link_blob(
     let mut order: Vec<usize> = (0..funcs.len()).collect();
     order.sort_by_key(|&i| i != entry_idx);
 
-    let mut code = if arm_fpu { arm_fpu_preamble() } else { Vec::new() };
+    let mut code = if arm_fpu {
+        arm_fpu_preamble()
+    } else {
+        Vec::new()
+    };
     let entry_off = code.len() as u32;
     let mut entries = VecMap::<String, usize>::new();
     let mut func_offsets = vec![0usize; funcs.len()];
@@ -217,10 +221,7 @@ fn run_float_binop(
     build(&mut fb, x, y, out);
     fb.push_return(&[out]);
     let ir = one_function_module(fb.finish());
-    let sig = one_function_sig(
-        vec![float_param("a"), float_param("b")],
-        LpsType::Float,
-    );
+    let sig = one_function_sig(vec![float_param("a"), float_param("b")], LpsType::Float);
     expect_ok(run_f32(&ir, &sig, "f", &[0, bits(a), bits(b)]))
 }
 
@@ -437,7 +438,11 @@ fn itof_signed_and_unsigned_through_the_pipeline() {
         let ir = one_function_module(fb.finish());
         let sig = one_function_sig(vec![int_param("x")], LpsType::Float);
         let got = expect_ok(run_f32(&ir, &sig, "f", &[0, arg]));
-        assert_eq!(f32::from_bits(got), want, "itof signed={signed} of {arg:#x}");
+        assert_eq!(
+            f32::from_bits(got),
+            want,
+            "itof signed={signed} of {arg:#x}"
+        );
     }
 }
 
@@ -789,13 +794,7 @@ fn float_recursion_at_depth_100_preserves_every_live_value() {
         imports: vec![],
         functions: VecMap::from([(FuncId(0), rec), (FuncId(1), f)]),
     };
-    let params = || {
-        vec![
-            int_param("n"),
-            float_param("a"),
-            float_param("b"),
-        ]
-    };
+    let params = || vec![int_param("n"), float_param("a"), float_param("b")];
     let sig = LpsModuleSig {
         functions: vec![
             LpsFnSig {
