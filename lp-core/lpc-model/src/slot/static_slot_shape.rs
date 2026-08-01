@@ -6,7 +6,7 @@
 
 use crate::{
     LpType, ModelEnumVariant, ModelStructMember, OrderedF32, ProductKind, SlotEnumEncoding,
-    SlotEnumOption, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotName, SlotPolicy, SlotSemantics,
+    SlotEnumOption, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotName, SlotRole, SlotSemantics,
     SlotShape, SlotShapeId, SlotValueShape, SlotVariantShape, ValueEditorHint,
 };
 use alloc::boxed::Box;
@@ -439,8 +439,8 @@ pub struct StaticSlotFieldShape {
     pub shape: &'static StaticSlotShapeDescriptor,
     #[serde(default, skip_serializing_if = "SlotSemantics::is_default")]
     pub semantics: SlotSemantics,
-    #[serde(default, skip_serializing_if = "SlotPolicy::is_default")]
-    pub policy: SlotPolicy,
+    #[serde(default, skip_serializing_if = "SlotRole::is_default")]
+    pub role: SlotRole,
     /// Declarative default binding endpoint (`bus:<channel>`); see
     /// [`crate::SlotFieldShape::default_bind`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -449,11 +449,11 @@ pub struct StaticSlotFieldShape {
 
 impl StaticSlotFieldShape {
     pub fn to_owned_field(self) -> SlotFieldShape {
-        let mut field = SlotFieldShape::with_semantics_and_policy(
+        let mut field = SlotFieldShape::with_semantics_and_role(
             self.name,
             self.shape.to_owned_shape(),
             self.semantics,
-            self.policy,
+            self.role,
         )
         .expect("valid static slot field name");
         field.default_bind = self.default_bind.map(ToString::to_string);
@@ -487,7 +487,7 @@ mod tests {
         name: "enabled",
         shape: &BOOL_SHAPE,
         semantics: SlotSemantics::new(SlotDirection::Local, SlotMerge::Latest),
-        policy: SlotPolicy::writable_persisted(),
+        role: SlotRole::Setting,
         default_bind: None,
     }];
     static RECORD_SHAPE: StaticSlotShapeDescriptor = StaticSlotShapeDescriptor::Record {

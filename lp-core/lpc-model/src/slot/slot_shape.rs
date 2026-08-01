@@ -1,4 +1,4 @@
-use crate::{LpType, SlotName, SlotNameError, SlotPolicy, SlotSemantics, SlotValueShape};
+use crate::{LpType, SlotName, SlotNameError, SlotRole, SlotSemantics, SlotValueShape};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -237,8 +237,8 @@ pub struct SlotFieldShape {
     pub shape: SlotShape,
     #[serde(default, skip_serializing_if = "SlotSemantics::is_default")]
     pub semantics: SlotSemantics,
-    #[serde(default, skip_serializing_if = "SlotPolicy::is_default")]
-    pub policy: SlotPolicy,
+    #[serde(default, skip_serializing_if = "SlotRole::is_default")]
+    pub role: SlotRole,
     /// Declarative default binding endpoint (`bus:<channel>`) materialized at
     /// load when no authored binding names this slot — a produced slot's
     /// default publishes, a consumed slot's default sources (ADR
@@ -252,12 +252,8 @@ impl SlotFieldShape {
         Self::with_semantics(name, shape, SlotSemantics::default())
     }
 
-    pub fn with_policy(
-        name: &str,
-        shape: SlotShape,
-        policy: SlotPolicy,
-    ) -> Result<Self, SlotNameError> {
-        Self::with_semantics_and_policy(name, shape, SlotSemantics::default(), policy)
+    pub fn with_role(name: &str, shape: SlotShape, role: SlotRole) -> Result<Self, SlotNameError> {
+        Self::with_semantics_and_role(name, shape, SlotSemantics::default(), role)
     }
 
     pub fn with_semantics(
@@ -265,22 +261,29 @@ impl SlotFieldShape {
         shape: SlotShape,
         semantics: SlotSemantics,
     ) -> Result<Self, SlotNameError> {
-        Self::with_semantics_and_policy(name, shape, semantics, SlotPolicy::default())
+        Self::with_semantics_and_role(name, shape, semantics, SlotRole::default())
     }
 
-    pub fn with_semantics_and_policy(
+    pub fn with_semantics_and_role(
         name: &str,
         shape: SlotShape,
         semantics: SlotSemantics,
-        policy: SlotPolicy,
+        role: SlotRole,
     ) -> Result<Self, SlotNameError> {
         Ok(Self {
             name: SlotName::parse(name)?,
             shape,
             semantics,
-            policy,
+            role,
             default_bind: None,
         })
+    }
+
+    /// Whether a client may request mutation of this field: the role allows
+    /// it and the field's own declared direction is not produced (D1 —
+    /// direction implies read-only regardless of role).
+    pub fn is_writable(&self) -> bool {
+        crate::slot::effective_writable(self.role, self.semantics.direction)
     }
 }
 
