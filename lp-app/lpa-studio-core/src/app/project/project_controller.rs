@@ -42,7 +42,7 @@ use lpc_wire::{
     WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 
-use super::node::node_naming::{file_stem, node_kind_slug, unique_node_name};
+use super::node::node_naming::{file_stem, node_kind_slug, sanitize_node_name, unique_node_name};
 use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu};
 use super::{
     NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
@@ -1572,6 +1572,7 @@ impl ProjectController {
         .with_project_name(self.project_name(project_id))
         .with_channel_choices(self.ui_channel_choices())
         .with_root_slots(root_slots)
+        .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
@@ -2782,52 +2783,10 @@ impl ProjectController {
         kind: NodeKind,
         attach: &UiAttachTarget,
     ) -> Result<ProjectEditRun, UiError> {
-        let handle_id = self.ready_handle_id()?;
         let name = self.unique_node_name_for(kind);
-        let (site, parent, expected_name) = match attach {
-            UiAttachTarget::ProjectRoot => {
-                let Some(root) = self.root_nodes.first() else {
-                    return Ok(ProjectEditRun::notice(UiNotice::warning(
-                        "Cannot add a node before the project tree has synced",
-                    )));
-                };
-                (
-                    NodeAttachSite::ProjectNodes { key: name.clone() },
-                    root.address().clone(),
-                    name.clone(),
-                )
-            }
-            UiAttachTarget::Playlist { node } => {
-                let Some(playlist) = self.node(node) else {
-                    return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                        "Cannot add to {node}: the playlist is not in the synced project"
-                    ))));
-                };
-                let Some(artifact) = self.def_artifacts.get(&playlist.target().node_id) else {
-                    return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                        "Cannot add to {node}: its definition artifact is unknown"
-                    ))));
-                };
-                // Next free entries key by the map's suggested-key rule
-                // (first free index, gap-filling). Keys with staged overlay
-                // edits (a pending entry removal) count as used: the base
-                // file still holds them until Save, so the server rejects a
-                // create there as TargetOccupied.
-                let staged = self.overlay_entry_keys(artifact);
-                let key = playlist_next_entry_key(playlist, &staged);
-                let path = SlotPath::parse(&format!("entries[{key}].node"))
-                    .expect("entries[<u32>].node is a valid slot path");
-                (
-                    NodeAttachSite::Slot {
-                        artifact: artifact.clone(),
-                        path,
-                    },
-                    node.clone(),
-                    // Created entries carry no authored name; the loader
-                    // mounts them under its `entry_<k>` fallback.
-                    format!("entry_{key}"),
-                )
-            }
+        let (site, parent, expected_name) = match self.resolve_attach_site(attach, &name)? {
+            Some(resolved) => resolved,
+            None => return Ok(ProjectEditRun::notice(attach_unavailable_notice(attach))),
         };
 
         // Starter bytes: the kind's starter template (bare default when the
@@ -2858,6 +2817,26 @@ impl ProjectController {
             site,
         );
 
+        self.run_create_request(server, request, parent, expected_name, name)
+            .await
+    }
+
+    /// Send one `CreateNode` and settle everything its ack implies: focus
+    /// the new node once its tree entry lands, refresh, re-read the
+    /// def-artifact map (so the new node is editable right away), and pull
+    /// the committed files into the library as a `Saved` event.
+    ///
+    /// Shared by `create_node` and `paste_node` — the two differ only in
+    /// where the bytes come from.
+    async fn run_create_request(
+        &mut self,
+        server: &mut StudioServerClient,
+        request: WireCreateNodeRequest,
+        parent: ProjectNodeAddress,
+        expected_name: String,
+        name: String,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
         let outcome = server.project_create_node(handle_id, request).await?;
         let mut logs = outcome.logs;
         match outcome.response {
@@ -2914,6 +2893,260 @@ impl ProjectController {
                 logs,
             }),
         }
+    }
+
+    /// Resolve a UI attach target into the wire site, the parent address
+    /// focus should resolve against, and the tree name the created node
+    /// will mount under.
+    ///
+    /// `Ok(None)` means the target is not resolvable yet (the tree has not
+    /// synced, the playlist is gone, its def artifact is unknown) — the
+    /// caller turns that into [`attach_unavailable_notice`].
+    fn resolve_attach_site(
+        &self,
+        attach: &UiAttachTarget,
+        name: &str,
+    ) -> Result<Option<(NodeAttachSite, ProjectNodeAddress, String)>, UiError> {
+        Ok(match attach {
+            UiAttachTarget::ProjectRoot => {
+                let Some(root) = self.root_nodes.first() else {
+                    return Ok(None);
+                };
+                Some((
+                    NodeAttachSite::ProjectNodes {
+                        key: name.to_string(),
+                    },
+                    root.address().clone(),
+                    name.to_string(),
+                ))
+            }
+            UiAttachTarget::Playlist { node } => {
+                let Some(playlist) = self.node(node) else {
+                    return Ok(None);
+                };
+                let Some(artifact) = self.def_artifacts.get(&playlist.target().node_id) else {
+                    return Ok(None);
+                };
+                // Next free entries key by the map's suggested-key rule
+                // (first free index, gap-filling). Keys with staged overlay
+                // edits (a pending entry removal) count as used: the base
+                // file still holds them until Save, so the server rejects a
+                // create there as TargetOccupied.
+                let staged = self.overlay_entry_keys(artifact);
+                let key = playlist_next_entry_key(playlist, &staged);
+                let path = SlotPath::parse(&format!("entries[{key}].node"))
+                    .expect("entries[<u32>].node is a valid slot path");
+                Some((
+                    NodeAttachSite::Slot {
+                        artifact: artifact.clone(),
+                        path,
+                    },
+                    node.clone(),
+                    // Created entries carry no authored name; the loader
+                    // mounts them under its `entry_<k>` fallback.
+                    format!("entry_{key}"),
+                ))
+            }
+        })
+    }
+
+    /// Resolve an asset `source` against a known def artifact — the
+    /// artifact-keyed twin of [`Self::resolve_node_asset_artifact`], for
+    /// callers holding the artifact rather than the node controller.
+    fn resolve_node_asset_artifact_from(
+        &self,
+        def_artifact: &ArtifactLocation,
+        source: &str,
+    ) -> Option<ArtifactLocation> {
+        let path = resolve_artifact_specifier(
+            def_artifact.file_path().as_path(),
+            &ArtifactSpec::path(source),
+        )
+        .ok()?;
+        Some(ArtifactLocation::file(path))
+    }
+
+    // --- Node sharing (copy / paste) ----------------------------------------
+
+    /// Copy the node at `address` as an `lp.node` envelope
+    /// ([`crate::NodeCopyOp`]).
+    ///
+    /// The def and asset bytes are not in the view DTOs, so this reads them
+    /// off the runtime filesystem over the existing `FsRead` path — which
+    /// means it copies the **saved** bytes, not unsaved overlay edits. The
+    /// popup row says so; silently copying stale content would be worse.
+    ///
+    /// Returns the envelope text for the caller to hand to the clipboard
+    /// (core never touches the clipboard — see
+    /// `docs/adr/2026-07-28-share-envelopes.md`).
+    pub async fn copy_node(
+        &mut self,
+        server: &mut StudioServerClient,
+        address: &ProjectNodeAddress,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        let Some(node) = self.node(address) else {
+            return Ok((
+                ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Cannot copy {address}: it is not in the synced project"
+                ))),
+                None,
+            ));
+        };
+        let label = node.label().to_string();
+        let Some(def_artifact) = self.def_artifacts.get(&node.target().node_id).cloned() else {
+            return Ok((
+                ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Cannot copy {label}: its definition artifact is unknown"
+                ))),
+                None,
+            ));
+        };
+
+        // Artifact locations are project-relative; `FsRequest::Read` is a
+        // server-root surface (same resolution as `asset_content`).
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot copy this node"
+                    .to_string(),
+            )
+        })?;
+        let mut logs = Vec::new();
+        let def_path = def_artifact.file_path();
+        let read = server
+            .fs_read(&root.join(def_path.as_str().trim_start_matches('/')))
+            .await?;
+        logs.extend(read.logs);
+        let def_bytes = read.data;
+
+        // Assets: the def's own sibling reference, resolved exactly the way
+        // the server resolves it (the same resolution the inline editor's
+        // Apply targets).
+        let mut assets = Vec::new();
+        // Parse through the MODEL's static registry, not the synced
+        // `slot_shapes`: the synced registry describes shapes for editing
+        // and carries no creatable factories, so it cannot read an authored
+        // node def back ("slot shape is not creatable"). Writing still goes
+        // through the synced registry, exactly as `create_node` does.
+        let asset_ref = core::str::from_utf8(&def_bytes)
+            .ok()
+            .and_then(|text| lpc_model::NodeDef::from_json_str(text).ok())
+            .as_ref()
+            .and_then(lpc_model::node_def_asset_ref);
+        if let Some(source) = asset_ref {
+            match self.resolve_node_asset_artifact_from(&def_artifact, &source) {
+                Some(artifact) => {
+                    let read = server
+                        .fs_read(&root.join(artifact.file_path().as_str().trim_start_matches('/')))
+                        .await?;
+                    logs.extend(read.logs);
+                    assets.push((source.clone(), read.data));
+                }
+                None => {
+                    log::warn!("copy {label}: cannot resolve asset {source}; copying def only");
+                }
+            }
+        }
+
+        let stem = file_stem(def_path.as_str()).to_string();
+        let envelope = crate::app::share::NodeEnvelope::encode(
+            &label,
+            &format!("./{stem}.json"),
+            &def_bytes,
+            &assets,
+        );
+        match envelope.to_json() {
+            Ok(json) => Ok((
+                ProjectEditRun {
+                    notices: UiNotices::new()
+                        .with_notice(UiNotice::info(format!("Copied {label}"))),
+                    logs,
+                },
+                Some(json),
+            )),
+            Err(error) => Ok((
+                ProjectEditRun {
+                    notices: UiNotices::new().with_notice(UiNotice::warning(format!(
+                        "Could not copy {label}: {error}"
+                    ))),
+                    logs,
+                },
+                None,
+            )),
+        }
+    }
+
+    /// Create a node from a pasted `lp.node` envelope
+    /// ([`crate::NodePasteOp`]).
+    ///
+    /// The envelope carries the SOURCE project's file names, which may
+    /// already be taken here, so the def and its asset are re-named with
+    /// the same rule `create_node` uses and the def's asset reference is
+    /// rewritten to follow — a renamed asset with an un-rewritten reference
+    /// would paste a node pointing at a file that is not there. Otherwise
+    /// this is an ordinary `CreateNode`.
+    pub async fn paste_node(
+        &mut self,
+        server: &mut StudioServerClient,
+        envelope: &str,
+        attach: &UiAttachTarget,
+    ) -> Result<ProjectEditRun, UiError> {
+        let envelope = match crate::app::share::NodeEnvelope::decode(envelope) {
+            Ok(envelope) => envelope,
+            Err(error) => {
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Cannot paste: {error}"
+                ))));
+            }
+        };
+
+        let name = self.unique_node_name_from(&envelope.label);
+        let (site, parent, expected_name) = match self.resolve_attach_site(attach, &name)? {
+            Some(resolved) => resolved,
+            None => return Ok(ProjectEditRun::notice(attach_unavailable_notice(attach))),
+        };
+
+        // Re-home the def's asset (at most one today — see
+        // `lpc_model::node_def_asset_ref`) onto the free name, and rewrite
+        // the reference to match.
+        let mut asset_paths = std::collections::BTreeMap::new();
+        let mut body = envelope
+            .body_text()
+            .ok_or_else(|| UiError::Project("the pasted node body is not text".to_string()))?
+            .as_bytes()
+            .to_vec();
+        if let Some((source_path, _)) = envelope.assets.iter().next() {
+            let target = format!("./{name}{}", asset_extension(source_path));
+            asset_paths.insert(source_path.clone(), target.clone());
+            let body_text = core::str::from_utf8(&body)
+                .map_err(|_| UiError::Project("the pasted node body is not text".to_string()))?;
+            match lpc_model::NodeDef::from_json_str(body_text) {
+                Ok(mut def) => {
+                    lpc_model::set_node_def_asset_ref(&mut def, &target);
+                    body = def
+                        .write_json(&self.slot_shapes)
+                        .map_err(|err| {
+                            UiError::Project(format!(
+                                "cannot serialize the pasted node definition: {err}"
+                            ))
+                        })?
+                        .into_bytes();
+                }
+                Err(error) => {
+                    return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                        "Cannot paste {}: its definition did not parse ({error})",
+                        envelope.label
+                    ))));
+                }
+            }
+        }
+
+        let mut request = envelope
+            .to_create_request(&format!("./{name}.json"), &asset_paths, site)
+            .map_err(|error| UiError::Project(format!("cannot paste this node: {error}")))?;
+        request.body = body;
+
+        self.run_create_request(server, request, parent, expected_name, name)
+            .await
     }
 
     /// Remove the node at `address` ([`crate::NodeRemoveOp`]): resolve the
@@ -3199,6 +3432,22 @@ impl ProjectController {
     /// bodies, resolved shader sources). The server's occupied-path checks
     /// remain authoritative; a race simply rejects and toasts.
     fn unique_node_name_for(&self, kind: NodeKind) -> String {
+        unique_node_name(node_kind_slug(kind), &self.taken_node_names())
+    }
+
+    /// A free node name based on `base` rather than a kind slug — the
+    /// paste path, which wants the copied node's own name where it can
+    /// have it (`orbit`, then `orbit_2`).
+    fn unique_node_name_from(&self, base: &str) -> String {
+        let slug = sanitize_node_name(base);
+        unique_node_name(&slug, &self.taken_node_names())
+    }
+
+    /// Every node name and artifact stem already spoken for: mounted
+    /// children, def artifacts, asset artifacts, and anything staged in the
+    /// overlay (the base file still holds a staged-removed name until Save,
+    /// so the server would reject a create there as `TargetOccupied`).
+    fn taken_node_names(&self) -> BTreeSet<String> {
         let mut taken: BTreeSet<String> = BTreeSet::new();
         if let Some(root) = self.root_nodes.first() {
             for child in root.children() {
@@ -3238,7 +3487,7 @@ impl ProjectController {
                 taken.insert(file_stem(artifact.file_path().as_str()).to_string());
             }
         }
-        unique_node_name(node_kind_slug(kind), &taken)
+        taken
     }
 
     /// Focus a freshly created node once its tree entry lands: called at the
@@ -3853,6 +4102,34 @@ impl ProjectController {
 pub struct ProjectEditRun {
     pub notices: UiNotices,
     pub logs: Vec<UiLogDraft>,
+}
+
+/// A pasted asset's extension, INCLUDING the dot (`""` when it has none).
+///
+/// Split the file NAME, never the whole path: `"./orbit"` has no
+/// extension, but naively splitting the path at its last `.` finds the
+/// leading `./` and yields `"/orbit"` — a pasted asset would land at
+/// `./name./orbit`.
+fn asset_extension(source_path: &str) -> String {
+    let file_name = source_path.rsplit('/').next().unwrap_or(source_path);
+    match file_name.rsplit_once('.') {
+        // A leading-dot name (`.hidden`) is not an extension either.
+        Some((stem, ext)) if !stem.is_empty() => format!(".{ext}"),
+        _ => String::new(),
+    }
+}
+
+/// Why an attach target could not be used, in the caller's words.
+fn attach_unavailable_notice(attach: &UiAttachTarget) -> UiNotice {
+    match attach {
+        UiAttachTarget::ProjectRoot => {
+            UiNotice::warning("Cannot add a node before the project tree has synced")
+        }
+        UiAttachTarget::Playlist { node } => UiNotice::warning(format!(
+            "Cannot add to {node}: the playlist is not in the synced project, or its \
+             definition artifact is unknown"
+        )),
+    }
 }
 
 impl ProjectEditRun {
@@ -4568,6 +4845,39 @@ fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
 
 fn no_library_error() -> UiError {
     UiError::MissingSession("no local library is attached".to_string())
+}
+
+#[cfg(test)]
+mod asset_extension_tests {
+    use super::asset_extension;
+
+    #[test]
+    fn ordinary_assets_keep_their_extension() {
+        assert_eq!(asset_extension("./orbit.glsl"), ".glsl");
+        assert_eq!(asset_extension("./logo.png"), ".png");
+        assert_eq!(asset_extension("nested/dir/pulse.glsl"), ".glsl");
+    }
+
+    #[test]
+    fn the_leading_dot_slash_is_not_an_extension() {
+        // The bug this guards: splitting the whole PATH at its last `.`
+        // finds the `./` prefix on an extensionless asset and yields
+        // "/orbit", so the paste would land at `./name./orbit`.
+        assert_eq!(asset_extension("./orbit"), "");
+        assert_eq!(asset_extension("./LICENSE"), "");
+        assert_eq!(asset_extension("orbit"), "");
+    }
+
+    #[test]
+    fn a_dotfile_has_no_extension() {
+        assert_eq!(asset_extension("./.gitignore"), "");
+        assert_eq!(asset_extension(".hidden"), "");
+    }
+
+    #[test]
+    fn only_the_last_extension_counts() {
+        assert_eq!(asset_extension("./orbit.tar.gz"), ".gz");
+    }
 }
 
 #[cfg(test)]

@@ -57,7 +57,8 @@ pub use hw_error::HwError;
 pub use hw_system::HardwareSystem;
 pub use lpc_model::HwEndpointSpec;
 pub use manifest::default_manifests::{
-    default_esp32c6_hardware_manifest, permissive_emu_hardware_manifest,
+    default_esp32c6_hardware_manifest, default_esp32s3_hardware_manifest,
+    permissive_emu_hardware_manifest,
 };
 pub use manifest::hw_manifest::HwManifest;
 pub use manifest::hw_manifest_file::{

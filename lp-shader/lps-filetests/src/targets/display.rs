@@ -1,8 +1,47 @@
 //! Target name formatting and CLI parsing.
 
-use super::{ALL_TARGETS, Backend, FloatMode, Frontend, Target};
+use super::{ALL_TARGETS, Backend, ExecMode, FloatMode, Frontend, Isa, Target};
 use std::collections::BTreeSet;
 use std::fmt;
+
+/// The axis-value spellings below are the **annotation vocabulary** as well as
+/// the display form: `@unsupported(backend=wasm)` matches [`Backend::Wasm`]
+/// because `Backend::Wasm` writes itself as `wasm`. Each `ALL` list is what
+/// `Axis::values` enumerates, and `target_axis`'s
+/// `every_registered_target_is_fully_namable` test fails if a variant reaches a
+/// registered target without appearing in its list.
+impl Backend {
+    /// Every backend, in [`super::ALL_TARGETS`] order.
+    pub const ALL: &'static [Backend] = &[
+        Backend::Rv32,
+        Backend::Rv32fa,
+        Backend::Xtfa,
+        Backend::Wasm,
+        Backend::Interp,
+        Backend::Wgpu,
+    ];
+}
+
+impl Frontend {
+    /// Every frontend.
+    pub const ALL: &'static [Frontend] = &[Frontend::Naga, Frontend::Lp];
+}
+
+impl FloatMode {
+    /// Every float mode.
+    pub const ALL: &'static [FloatMode] = &[FloatMode::Q32, FloatMode::F32];
+}
+
+impl Isa {
+    /// Every ISA.
+    pub const ALL: &'static [Isa] = &[Isa::Riscv32, Isa::Xtensa, Isa::Wasm32, Isa::Host];
+}
+
+impl ExecMode {
+    /// Every execution mode.
+    pub const ALL: &'static [ExecMode] =
+        &[ExecMode::Emulator, ExecMode::Interpreter, ExecMode::Gpu];
+}
 
 impl fmt::Display for Backend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -22,6 +61,36 @@ impl fmt::Display for FloatMode {
         match self {
             FloatMode::Q32 => write!(f, "q32"),
             FloatMode::F32 => write!(f, "f32"),
+        }
+    }
+}
+
+impl fmt::Display for Frontend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Frontend::Naga => write!(f, "naga"),
+            Frontend::Lp => write!(f, "lp"),
+        }
+    }
+}
+
+impl fmt::Display for Isa {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Isa::Riscv32 => write!(f, "riscv32"),
+            Isa::Xtensa => write!(f, "xtensa"),
+            Isa::Wasm32 => write!(f, "wasm32"),
+            Isa::Host => write!(f, "host"),
+        }
+    }
+}
+
+impl fmt::Display for ExecMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExecMode::Emulator => write!(f, "emulator"),
+            ExecMode::Interpreter => write!(f, "interpreter"),
+            ExecMode::Gpu => write!(f, "gpu"),
         }
     }
 }
@@ -215,12 +284,17 @@ mod tests {
         assert!(err.contains("xtlpn.q32"));
     }
 
+    /// A bare backend token selects **every** float mode that backend has, in
+    /// `ALL_TARGETS` order — so `wasm` is three targets once `wasm.f32` exists,
+    /// not two. Callers that mean one mode must spell it out.
     #[test]
     fn test_parse_target_filters_comma_and_shorthand() {
         let v = parse_target_filters("rv32n,wasm").expect("parse");
-        assert_eq!(v.len(), 2);
-        assert_eq!(v[0].name(), "rv32n.q32");
-        assert_eq!(v[1].name(), "wasm.q32");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(
+            names,
+            vec!["rv32n.q32", "rv32n.f32", "wasm.q32", "wasm.f32"]
+        );
     }
 
     #[test]
@@ -231,17 +305,53 @@ mod tests {
     }
 
     #[test]
+    fn test_target_name_wasm_f32() {
+        let t = Target::from_name("wasm.f32").expect("wasm.f32 registered");
+        assert_eq!(t.name(), "wasm.f32");
+        assert_eq!(t.float_mode, FloatMode::F32);
+        assert_eq!(t.backend, Backend::Wasm);
+        assert_eq!(t.isa, super::super::Isa::Wasm32);
+    }
+
+    /// The `wasm` shorthand now selects **both** float modes. A test run that
+    /// meant only the Q32 wasm target must say `wasm.q32`.
+    #[test]
+    fn test_parse_target_filters_wasm_shorthand_covers_both_modes() {
+        let v = parse_target_filters("wasm").expect("parse");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["wasm.q32", "wasm.f32"]);
+    }
+
+    /// Like `wasm`, the rv32 backend shorthands select every registered float
+    /// mode. A caller that meant the shipping fixed-point target must spell
+    /// `rv32n.q32` — the soft-float sibling is orders of magnitude slower.
+    #[test]
     fn test_parse_target_filters_rv32n_shorthand() {
         let v = parse_target_filters("rv32n").expect("parse");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "rv32n.q32");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["rv32n.q32", "rv32n.f32"]);
     }
 
     #[test]
     fn test_parse_target_filters_rv32lpn_shorthand() {
         let v = parse_target_filters("rv32lpn").expect("parse");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "rv32lpn.q32");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["rv32lpn.q32", "rv32lpn.f32"]);
+    }
+
+    /// The soft-float rv32 targets exist and name the same backend as their
+    /// Q32 siblings — only `float_mode` differs, which is what makes an
+    /// `@unimplemented(float_mode=f32)` predicate cover them.
+    #[test]
+    fn test_target_name_rv32_f32_pair() {
+        for (name, frontend) in [("rv32n.f32", Frontend::Naga), ("rv32lpn.f32", Frontend::Lp)] {
+            let t = Target::from_name(name).expect("registered");
+            assert_eq!(t.name(), name);
+            assert_eq!(t.float_mode, FloatMode::F32);
+            assert_eq!(t.backend, Backend::Rv32fa);
+            assert_eq!(t.frontend, frontend);
+            assert_eq!(t.isa, super::super::Isa::Riscv32);
+        }
     }
 
     #[test]

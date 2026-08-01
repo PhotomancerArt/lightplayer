@@ -105,6 +105,13 @@ genuinely fits none of these, and define it here in one line.
 - **`unsynchronized-shared-artifact`** — two steps share a filesystem
   artifact, but the lock that would order them is scoped narrower than
   the artifact, so a reader observes a writer's intermediate state.
+- **`invented-encoding`** — a binary format's numbering (an instruction
+  encoding, a relocation type) is inferred from the shape of its
+  neighbours instead of read from the spec, and the invented value
+  collides with, or is renamed from, a real one. Toolchain output is the
+  only falsifier, so the collision surfaces whenever a compiler first
+  emits the stolen form — which is usually at some optimization
+  threshold nothing in the suite crosses.
 
 ## Index
 
@@ -114,15 +121,28 @@ a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
 bookkeeping fact.
 
-Saying it out loud: **`config-masked-defect` took four entries on
-2026-07-30**, all in `lpvm-native`'s shared register allocator, all
-latent for the entire life of the rv32-only era, and all made
-observable within hours of the Xtensa corpus landing. The finding is not
-"the allocator had bugs" — it is that a single-configuration test suite
-cannot falsify configuration-dependent code, however large it is
-(31,587 rv32 cases did not). The mitigation is a second configuration
-that overlaps where the first is disjoint, which is what the Xtensa
-targets now are.
+Saying it out loud: **`config-masked-defect` took five entries on
+2026-07-30**, all in `lpvm-native`, all latent for the entire life of the
+rv32-only era, and all made observable within hours of the Xtensa corpus
+landing. The finding is not "the allocator had bugs" — it is that a
+single-configuration test suite cannot falsify configuration-dependent
+code, however large it is (31,587 rv32 cases did not). The mitigation is
+a second configuration that overlaps where the first is disjoint, which
+is what the Xtensa targets now are.
+
+Four of the five are in the shared register allocator. The fifth — the
+integer div-by-zero trap — is worth separating, because it says the class
+is not confined to `regalloc/`. That one is in *lowering*, and the
+incidental property it leaned on was not a register layout but a
+**hardware semantic**: RV32M defines `x / 0` and `x % 0`, so emitting the
+bare divide was correct on rv32 for free. Its falsifying test also already
+existed — the corpus has pinned that contract for as long as it has
+existed; what was missing was a backend to run it against, plus
+documentation that told the backend author the guard obligation was
+somebody else's. The generalizable rule: when a contract is satisfied for
+free on the reference target, that is exactly when it must be stated as an
+obligation behind a named capability hook, because nothing in the code
+will ever remind you it was a choice.
 
 Saying it out loud again, one axis over: **`split-source-of-truth` and
 `config-masked-defect` are describing the same 2026-07-30 defects from two
@@ -149,11 +169,17 @@ sentence (arguments in, returns out; registers and stack).
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| invented-encoding | 2026-07-31 | [zexth-encoding-steals-xori-128](2026-07-31-zexth-encoding-steals-xori-128.md) | fixed | lp-riscv-inst (encode/decode) + lp-riscv-emu (executor) |
+| invented-encoding | 2026-07-31 | [elf-loader-riscv-reloc-numbering](2026-07-31-elf-loader-riscv-reloc-numbering.md) | **open** | lp-riscv-elf (relocations) |
+| partial-knowledge-loss | 2026-07-31 | [elf-loader-drops-relocation-addends](2026-07-31-elf-loader-drops-relocation-addends.md) | fixed | lp-riscv-elf (relocations) |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-two-value-return-clobber](2026-07-30-xtensa-two-value-return-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-integer-div-by-zero-trap](2026-07-30-xtensa-integer-div-by-zero-trap.md) | fixed | lpvm-native lowering (lower.rs) |
+| config-masked-defect | 2026-07-31 | [opt-z-missed-rmt-drain-deadline](2026-07-31-opt-z-missed-rmt-drain-deadline.md) | fixed | workspace release profile / fw-esp32s3 |
+| backend-contract-divergence | 2026-07-30 | [q32-native-vs-wasmtime-last-bit](2026-07-30-q32-native-vs-wasmtime-last-bit.md) | **open** | lpvm-native / lpvm-wasm (Q32 execution) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
@@ -165,6 +191,7 @@ sentence (arguments in, returns out; registers and stack).
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
 | state-conflation | 2026-07-26 | [worker-poisoned-instance-reuse](2026-07-26-worker-poisoned-instance-reuse.md) | fixed | fw-browser + lpa-link/browser-worker |
+| state-conflation | 2026-07-28 | [playlist-entry-selection](2026-07-28-playlist-entry-selection.md) | fixed | lpa-studio-core/project (node face derivation) |
 | assumed-context | 2026-07-17 | [storage-slot-assumed](2026-07-17-storage-slot-assumed.md) | fixed | lpa-studio-core/places |
 | assumed-context | 2026-07-23 | [deploy-dialog-ignores-running-project](2026-07-23-deploy-dialog-ignores-running-project.md) | fixed | lpa-studio-core/device |
 | assumed-context | 2026-07-27 | [launch-json-pinned-port](2026-07-27-launch-json-pinned-port.md) | fixed | dev tooling (launch.json + dev-port.sh) |
@@ -176,11 +203,13 @@ sentence (arguments in, returns out; registers and stack).
 | stand-in-divergence | 2026-07-27 | [story-check-tolerance-ignores-amplitude](2026-07-27-story-check-tolerance-ignores-amplitude.md) | **open** | lpa-studio-web/scripts + CI |
 | nondeterministic-capture | 2026-07-28 | [overview-composite-capture-races](2026-07-28-overview-composite-capture-races.md) | fixed | lpa-studio-web story capture (overview composites) |
 | retired-surface-still-reachable | 2026-07-28 | [retired-device-pane-still-reachable](2026-07-28-retired-device-pane-still-reachable.md) | **open** | lpa-studio-core/home + studio_shell |
+| stale-measurement | 2026-07-30 | [deploy-compiles-previous-upload](2026-07-30-deploy-compiles-previous-upload.md) | **open** | lp-cli (upload observability) |
 | stale-measurement | 2026-07-26 | [popover-outline-stale-on-content-resize](2026-07-26-popover-outline-stale-on-content-resize.md) | fixed | lpa-studio-web/base/popover |
 | stale-measurement | 2026-07-27 | [code-editor-gutter-misaligned](2026-07-27-code-editor-gutter-misaligned.md) | fixed | lpa-studio-web/base/code_editor |
 | inline-emit-stack-imbalance | 2026-07-27 | [wasm-q32-fabs-stack-leak](2026-07-27-wasm-q32-fabs-stack-leak.md) | fixed | lpvm-wasm emit (+ lpvm-cranelift trunc) |
 | untested-path | 2026-07-27 | [cranelift-q32-floor-ceil](2026-07-27-cranelift-q32-floor-ceil.md) | fixed | lpvm-cranelift q32_emit (rv32c) |
 | silent-drop | 2026-07-28 | [flash-progress-never-reached-the-ui](2026-07-28-flash-progress-never-reached-the-ui.md) | fixed | lpa-studio-core (actor/controller) |
+| silent-drop | 2026-07-31 | [loader-silently-drops-unparseable-nodes](2026-07-31-loader-silently-drops-unparseable-nodes.md) | fixed | lpc-engine loader + flush + virtual ws281x |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 

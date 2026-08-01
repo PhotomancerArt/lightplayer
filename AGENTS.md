@@ -101,6 +101,19 @@ Do NOT disable the compiler. The compiler is the product.
 - **Default server/engine builds include the full compiler pipeline.** Optional
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
   test builds), not for *adding* the compiler.
+- **`float-f32`** (`lpvm-native`, `lps-builtins`) enables IEEE-754 f32 shader
+  math alongside Q16.16. Off by default: `FloatMode` is matched on a *runtime*
+  value, so LTO cannot drop the f32 arms, and the shipping ESP32-C6 runs
+  Fixed-mode shaders only. The one device configuration that turns it on is
+  `fw-esp32c6`'s `test_f32_softfloat` harness — a test build, never product
+  firmware. See `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+
+> **Gating the crate that *uses* a table does not gate the crate that *holds*
+> it.** `lps-builtin-ids` is linked by every firmware image and is not behind
+> `float-f32`; reaching its f32 name→id tables on a runtime value cost
+> **+3,904 B** on the C6 before the resolver was pinned to Q32 in feature-off
+> builds. Measure with `just fw-esp32c6-size-check` on both sides of a feature
+> gate, not just the side you added.
 
 ## Sans-IO core
 
@@ -194,6 +207,17 @@ an `isa-*` Cargo feature so firmware pays only for the one it runs. `rt_emu` is
 is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
 targets; it needs a cross-compiled builtins image
 (`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
+
+**Xtensa floating point is a separate, in-flight campaign (M6).** `lp-xt-inst`
+encodes the FP subset and `lp-xt-emu` executes it behind an explicit policy layer
+where every corner IEEE-754 does not fix is either cited to the ISA Reference
+Manual or `Unknown` — and **reading an `Unknown` panics** rather than guessing.
+`cargo test -p lp-xt-emu --test fp_conformance` replays the whole 5 630-vector
+corpus with no board attached; `just fwtest-xt-fp-esp32s3 <port>` runs the same
+vectors on a desk S3 and `just fp-diff <capture>` classifies the answers. The
+predictions were committed before any hardware ran, so **a device disagreement is
+a finding to triage, never a reason to edit a golden**. Do not resolve a policy
+field without a citation naming a manual page or a dated desk session.
 
 > **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
 > correct.** Two defects landed there in 2026-07 that were correct on rv32 only

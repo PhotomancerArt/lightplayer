@@ -22,6 +22,10 @@ pub enum PackageProvenance {
     SeededFrom { source: String },
     /// Imported from a zip archive; the archive's own uid, if it had one.
     ImportedZip { original_uid: Option<String> },
+    /// Pasted as an `lp.package` share envelope; the envelope's own uid, if
+    /// it had one. Same fresh-uid rule as [`Self::ImportedZip`] — shared
+    /// copies must not collide with their source.
+    ImportedJson { original_uid: Option<String> },
     /// Forked from another project's version.
     ForkedFrom {
         parent_project: String,

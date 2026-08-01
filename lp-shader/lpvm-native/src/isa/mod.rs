@@ -10,7 +10,7 @@ use alloc::string::String;
 use lpir::IrFunction;
 use object::Architecture;
 
-use crate::abi::FrameLayout;
+use crate::abi::{FrameLayout, PReg, RegClass};
 use crate::regalloc::{AllocError, AllocOutput};
 use crate::vinst::{AluImmOp, ModuleSymbols, VInst, VReg};
 
@@ -32,6 +32,10 @@ pub(crate) use shared::IsaEmitOutput;
 /// emitter currently produces only base RV32IM instructions. The A and C
 /// extensions appear in the target name because the firmware runtime uses
 /// them, not because we emit them.
+///
+/// Because the name is the *hardware*, an rv32 part that **does** have the F
+/// extension (ESP32-S31, ESP32-P4, any RV32IMAFC core) is a **new variant**,
+/// not a flag on this one. See [`IsaTarget::f32_lowering`].
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IsaTarget {
     #[cfg(feature = "isa-rv32")]
@@ -43,34 +47,94 @@ pub enum IsaTarget {
     Xtensa,
 }
 
+/// How a target performs IEEE-754 binary32 arithmetic in
+/// [`lpir::FloatMode::F32`].
+///
+/// This is the **float-capability seam**. It exists because "rv32" is not one
+/// float story: the ESP32-C6 and RP2350's Hazard3 are RV32IMAC with no F
+/// extension at all, while the ESP32-S31 and ESP32-P4 are RV32IMAFC with a
+/// per-core single-precision FPU. Emitting `fadd.s` for a C6 does not produce a
+/// wrong number — it takes an illegal-instruction trap on the first frame. So
+/// the choice has to be a *named property of the target*, checked in one place,
+/// rather than an assumption baked into shared lowering.
+///
+/// Note what makes this safe today: **no variant of [`IsaTarget`] answers
+/// [`F32Lowering::HardwareFpu`]**, so no code path in this crate can emit an
+/// FP-register instruction. The variant is not speculative padding — it is the
+/// thing a new `Rv32imafc` (or the Xtensa FPU backend, roadmap M7) flips, and
+/// having it here means that change is one arm of one match instead of a search
+/// for every place float lowering assumed soft calls.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum F32Lowering {
+    /// This target cannot execute f32 shaders at all; `FloatMode::F32` is a
+    /// compile error naming the target.
+    Unsupported,
+    /// Float ops lower to calls into the platform soft-float library. Values
+    /// live in **integer** registers ([`RegClass::Int`]) — the soft-float ABI
+    /// passes and returns a `float` in `a0`-class registers — so this path
+    /// needs no float register class, no float argument bank, and no new
+    /// emitter instructions.
+    SoftFloatCalls,
+    /// Float ops lower to native FP instructions operating on the float
+    /// register file ([`RegClass::Float`]).
+    HardwareFpu,
+}
+
 impl IsaTarget {
-    /// Pool-init order for the register allocator's LRU.
-    pub fn allocatable_pool_order(self) -> &'static [u8] {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::ALLOC_POOL,
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::ALLOC_POOL,
+    /// Pool-init order for the register allocator's LRU, for one register class.
+    ///
+    /// Every register hook on this type is a **per-class** query, because the
+    /// allocator runs one independent pool per [`RegClass`]: an integer vreg can
+    /// never satisfy a float constraint, and the same hardware encoding names
+    /// two different registers in the two classes.
+    ///
+    /// Neither backend has a float pool yet — hardware-FPU codegen is the
+    /// Xtensa f32 milestone and RV32F the rv32 one — so [`RegClass::Float`]
+    /// answers with an empty pool everywhere. An empty pool is not a silent
+    /// fallback: a float vreg reaching the allocator on such a target fails
+    /// with [`AllocError::OutOfRegisters`] rather than landing in a GPR.
+    ///
+    /// Note that a Q32 shader has no float vregs at all — a Q16.16 `float` is
+    /// an integer and lowers to integer instructions — so this is the honest
+    /// answer for the fixed-point path, not a placeholder for it.
+    pub fn allocatable_pool_order(self, class: RegClass) -> &'static [u8] {
+        match class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::ALLOC_POOL,
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::ALLOC_POOL,
+            },
+            RegClass::Float => &[],
         }
     }
 
-    /// True if `p` is in the allocatable register pool.
-    pub fn is_in_allocatable_pool(self, p: u8) -> bool {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::pool_contains(p),
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::pool_contains(p),
+    /// True if `p` is in the allocatable register pool of its own class.
+    pub fn is_in_allocatable_pool(self, p: PReg) -> bool {
+        match p.class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::pool_contains(p.hw),
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::pool_contains(p.hw),
+            },
+            RegClass::Float => false,
         }
     }
 
     /// Human-readable name for `p` (debug rendering only).
-    pub fn reg_name(self, p: u8) -> &'static str {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::reg_name(p),
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::reg_name(p),
+    pub fn reg_name(self, p: PReg) -> &'static str {
+        match p.class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::reg_name(p.hw),
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::reg_name(p.hw),
+            },
+            // No backend names float registers yet; the ISA-specific float
+            // tables arrive with their emitters. Rendering must not panic, so
+            // this stays a legible placeholder rather than an `unreachable!`.
+            RegClass::Float => "f?",
         }
     }
 
@@ -181,6 +245,63 @@ impl IsaTarget {
         }
     }
 
+    /// Whether this ISA's native integer divide/remainder **traps** when the
+    /// divisor is zero.
+    ///
+    /// LPIR requires integer division and remainder to never trap and to
+    /// follow RV32M semantics on the edge cases (`x / 0 == -1`, `x % 0 == x`) —
+    /// see `docs/design/lpir/02-core-ops.md` and
+    /// `docs/adr/2026-07-30-integer-division-never-traps.md`. RV32M defines
+    /// those results in hardware, so `Rv32imac` emits the bare instruction and
+    /// answers `false`.
+    ///
+    /// Xtensa's `QUOS`/`QUOU`/`REMS`/`REMU` raise `EXCCAUSE 6`
+    /// (`IntegerDivideByZero`) instead, so lowering must guard them
+    /// ([`crate::lower`]). Only the **zero divisor** needs guarding there:
+    /// Xtensa's divide already yields `i32::MIN` for `i32::MIN / -1` and `0`
+    /// for `i32::MIN % -1`, matching RV32M. Cranelift, by contrast, traps on
+    /// both and guards both — the guard set is per-ISA, which is why this is a
+    /// named property rather than an assumption baked into shared lowering.
+    pub fn integer_div_traps_on_zero(self) -> bool {
+        match self {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => false,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => true,
+        }
+    }
+
+    /// How this target implements `float` when the shader is compiled in
+    /// [`lpir::FloatMode::F32`] — the float-capability seam.
+    ///
+    /// `Rv32imac` names a part **without** the F extension (ESP32-C6, Hazard3),
+    /// so it answers [`F32Lowering::SoftFloatCalls`]: float ops become direct
+    /// calls to the platform soft-float symbols (`__addsf3`, `__mulsf3`, …).
+    /// Those symbols are present in every rv32 image we build — on the C6 the
+    /// linker resolves them to the chip's **ROM** `rvfplib` routines
+    /// (`esp32c6.rom.rvfp.ld`), and in the host emulator's builtins image to
+    /// Rust's `compiler_builtins`. See
+    /// `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+    ///
+    /// The Xtensa arm is [`F32Lowering::Unsupported`] until the hardware-FPU
+    /// emitter lands (roadmap M7). It is deliberately *not*
+    /// [`F32Lowering::SoftFloatCalls`]: the S3 has a real FPU, and quietly
+    /// giving it the slow path would hide the missing backend behind working
+    /// output.
+    ///
+    /// **Nothing answers [`F32Lowering::HardwareFpu`] yet**, which is what
+    /// makes it impossible for this crate to emit an F-extension instruction
+    /// for a part that would trap on it. `f32_lowering_never_claims_hardware`
+    /// in this module is the guard on that.
+    pub fn f32_lowering(self) -> F32Lowering {
+        match self {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => F32Lowering::SoftFloatCalls,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => F32Lowering::Unsupported,
+        }
+    }
+
     /// `object` crate Architecture for ELF emission.
     pub fn elf_architecture(self) -> Architecture {
         match self {
@@ -201,13 +322,22 @@ impl IsaTarget {
         }
     }
 
-    /// Caller-saved GPR indices within the allocatable pool (clobbered across calls).
-    pub fn caller_saved_pool_hw(self) -> &'static [u8] {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::CALLER_SAVED_POOL,
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::CALLER_SAVED_POOL,
+    /// Caller-saved register indices within `class`'s allocatable pool
+    /// (clobbered across calls).
+    ///
+    /// Per-class because a call clobbers each class's caller-saved bank
+    /// independently: on RV32F `ft0..ft11` are clobbered by exactly the same
+    /// call that clobbers `t0..t6`, and the allocator must evict from both.
+    /// Empty for [`RegClass::Float`] while the float pools are empty.
+    pub fn caller_saved_pool_hw(self, class: RegClass) -> &'static [u8] {
+        match class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::CALLER_SAVED_POOL,
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::CALLER_SAVED_POOL,
+            },
+            RegClass::Float => &[],
         }
     }
 
@@ -220,59 +350,90 @@ impl IsaTarget {
     /// happens and this is dead weight. On Xtensa the caller-view staging bank
     /// `a10..a15` **is** the caller-saved half of the pool, so it happens
     /// constantly. See `regalloc::walk::sequence_arg_moves`.
-    pub fn move_cycle_scratch_hw(self) -> u8 {
-        match self {
+    ///
+    /// Integer-class today. A float move cycle needs a float scratch, and that
+    /// register is named by whichever backend first has float argument
+    /// registers to shuffle; this hook grows a `class` parameter then rather
+    /// than answering with a GPR that cannot hold the value.
+    pub fn move_cycle_scratch(self) -> PReg {
+        PReg::int(match self {
             #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::SCRATCH,
             // a9, not a8: `CALL8` writes the mangled return address into a8, so
             // keeping the swap temp clear of it leaves no overlap to reason about.
             #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::SCRATCH2,
+        })
+    }
+
+    /// The `idx`-th scalar return register of `class`, for direct (non-sret)
+    /// returns.
+    ///
+    /// Per-class because the return bank is per-class in every float ABI that
+    /// matters: RV32F returns a float in `fa0`, not `a0`, so an f32-returning
+    /// call constrains its def to a different register file than an
+    /// i32-returning one. `None` for [`RegClass::Float`] until a backend has
+    /// one.
+    pub fn direct_ret_reg(self, class: RegClass, idx: usize) -> Option<PReg> {
+        match class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.get(idx).copied(),
+                // CALLER view: this hook names where a call's result lands
+                // (regalloc/walk.rs allocates call-def vregs here). Under the
+                // CALL8 rotation that is a10/a11, NOT the callee-view a2/a3 —
+                // the classic two-views trap; see isa/xt/gpr.rs.
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.get(idx).copied(),
+            }
+            .map(PReg::int),
+            RegClass::Float => None,
         }
     }
 
-    /// Hardware index for the `idx`-th scalar return register for direct (non-sret) returns.
-    pub fn direct_ret_reg_hw(self, idx: usize) -> Option<u8> {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.get(idx).copied(),
-            // CALLER view: this hook names where a call's result lands
-            // (regalloc/walk.rs allocates call-def vregs here). Under the
-            // CALL8 rotation that is a10/a11, NOT the callee-view a2/a3 —
-            // the classic two-views trap; see isa/xt/gpr.rs.
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.get(idx).copied(),
+    /// Count of direct return registers of `class` in the hardware ABI
+    /// (e.g. 2 for RV32 a0–a1).
+    pub fn direct_ret_reg_count(self, class: RegClass) -> usize {
+        match class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.len(),
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.len(),
+            },
+            RegClass::Float => 0,
         }
     }
 
-    /// Count of direct return registers in the hardware ABI (e.g. 2 for RV32 a0–a1).
-    pub fn direct_ret_reg_count(self) -> usize {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.len(),
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.len(),
+    /// The `idx`-th incoming call argument register of `class`.
+    ///
+    /// Per-class for the same reason as [`Self::direct_ret_reg`]: a hard-float
+    /// ABI passes float arguments in the float file, and the two banks are
+    /// indexed independently.
+    pub fn call_arg_reg(self, class: RegClass, idx: usize) -> Option<PReg> {
+        match class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.get(idx).copied(),
+                // CALLEE view (incoming parameters precolor here).
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.get(idx).copied(),
+            }
+            .map(PReg::int),
+            RegClass::Float => None,
         }
     }
 
-    /// Hardware index for the `idx`-th incoming call argument register.
-    pub fn call_arg_reg_hw(self, idx: usize) -> Option<u8> {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.get(idx).copied(),
-            // CALLEE view (incoming parameters precolor here).
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.get(idx).copied(),
-        }
-    }
-
-    /// Number of argument registers in the hardware calling convention.
-    pub fn call_arg_reg_count(self) -> usize {
-        match self {
-            #[cfg(feature = "isa-rv32")]
-            IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.len(),
-            #[cfg(feature = "isa-xt")]
-            IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.len(),
+    /// Number of argument registers of `class` in the hardware calling convention.
+    pub fn call_arg_reg_count(self, class: RegClass) -> usize {
+        match class {
+            RegClass::Int => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.len(),
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.len(),
+            },
+            RegClass::Float => 0,
         }
     }
 
@@ -309,16 +470,27 @@ impl IsaTarget {
         }
     }
 
-    /// Target hardware GPR for the `arg_index`-th LPIR [`VInst::Call`] operand
+    /// Target register for the `arg_index`-th LPIR [`VInst::Call`] operand
     /// (RV32 `a0`–`a7`), or `None` when the operand is stack-passed.
-    pub fn lpir_call_arg_target_hw(
+    ///
+    /// `class` is the class of the *operand*, and it selects the register bank:
+    /// a hard-float ABI stages a float argument in the float file. Answering
+    /// `None` for [`RegClass::Float`] is what makes an unimplemented float
+    /// argument fall into the stack-pass path's error rather than into a GPR;
+    /// the slot arithmetic below (the sret/vmctx shuffles) is class-independent
+    /// and is reused as-is when the float banks land.
+    pub fn lpir_call_arg_target(
         self,
+        class: RegClass,
         callee_uses_sret: bool,
         caller_passes_sret_ptr: bool,
         caller_sret_vm_abi_swap: bool,
         arg_index: usize,
-    ) -> Option<u8> {
-        match self {
+    ) -> Option<PReg> {
+        if class == RegClass::Float {
+            return None;
+        }
+        let hw = match self {
             #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => {
                 let slot = if !callee_uses_sret {
@@ -364,7 +536,8 @@ impl IsaTarget {
                 };
                 crate::isa::xt::gpr::OUT_ARG_REGS.get(slot).copied()
             }
-        }
+        };
+        hw.map(PReg::int)
     }
 
     /// The ISA of the CPU this crate is being compiled for.
@@ -524,6 +697,62 @@ impl IsaTarget {
                 }
                 out
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn every_isa() -> alloc::vec::Vec<IsaTarget> {
+        alloc::vec![
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa,
+        ]
+    }
+
+    /// The float-capability seam's whole job: no target may claim a hardware
+    /// FPU while no emitter in this crate can encode one. A backend that gains
+    /// FP instructions flips its [`IsaTarget::f32_lowering`] arm and updates
+    /// this assertion in the same change — which is exactly the review moment
+    /// we want, because that is the change that can start emitting `fadd.s`.
+    #[test]
+    fn f32_lowering_never_claims_hardware() {
+        for isa in every_isa() {
+            assert_ne!(
+                isa.f32_lowering(),
+                F32Lowering::HardwareFpu,
+                "{isa:?} claims a hardware FPU, but no emitter here can encode \
+                 an FP instruction — and a part without the extension traps on one"
+            );
+        }
+    }
+
+    /// The C6 is the reference rv32 part and has no F extension; soft calls are
+    /// the only correct answer for it.
+    #[cfg(feature = "isa-rv32")]
+    #[test]
+    fn rv32imac_is_soft_float() {
+        assert_eq!(
+            IsaTarget::Rv32imac.f32_lowering(),
+            F32Lowering::SoftFloatCalls
+        );
+    }
+
+    /// Soft float keeps every value integer-class, so the float pools stay
+    /// empty. A float vreg reaching the allocator would then fail loudly with
+    /// `OutOfRegisters` rather than quietly landing an f32 bit pattern in a GPR
+    /// that some later pass treats as an integer.
+    #[test]
+    fn no_target_has_a_float_register_pool() {
+        for isa in every_isa() {
+            assert!(isa.allocatable_pool_order(RegClass::Float).is_empty());
+            assert!(isa.caller_saved_pool_hw(RegClass::Float).is_empty());
+            assert_eq!(isa.direct_ret_reg_count(RegClass::Float), 0);
+            assert_eq!(isa.call_arg_reg_count(RegClass::Float), 0);
         }
     }
 }

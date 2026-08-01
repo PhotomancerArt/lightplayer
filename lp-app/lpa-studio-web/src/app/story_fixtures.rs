@@ -635,12 +635,16 @@ pub(crate) fn project_workspace_nodes() -> Vec<UiNodeView> {
 }
 
 /// The project root's own config rows for the project popup's settings
-/// section: `name` editable, `format`/`nodes` read-only (Q3 policy).
+/// section: `name` editable, `format`/`uid`/`nodes` read-only — matching
+/// the `read_only_persisted` policy each carries on `lpc_model::ProjectDef`
+/// (`uid` joined them 2026-07-28; it had been writable by default).
 pub(crate) fn project_root_slots() -> Vec<UiConfigSlot> {
     use lpa_studio_core::UiSlotFieldState;
     vec![
         UiConfigSlot::value("name", "Name", UiSlotValue::string("Demo")),
         UiConfigSlot::value("format", "Format", UiSlotValue::u32(1))
+            .with_state(UiSlotFieldState::readonly()),
+        UiConfigSlot::value("uid", "UID", UiSlotValue::string("prj_7k2mQx4vN8pL"))
             .with_state(UiSlotFieldState::readonly()),
         UiConfigSlot::record(
             "nodes",

@@ -1,0 +1,26 @@
+[package]
+name = "lp-ws281x"
+version = "0.1.0"
+# Explicit (not workspace-inherited) so the crate also resolves as a path
+# dependency from the excluded fw/ crates; values match [workspace.package].
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/PhotomancerArt/2026-esp32s3-experiment"
+description = "Portable no_std core of a multi-channel WS2811/WS2812 RMT LED driver: pulse encoding, ping-pong refill state machine, guard-word flicker protection."
+rust-version = "1.86"
+
+[features]
+default = ["mock"]
+# The host-test backend. Needs `alloc`; firmware depends on this crate with
+# `default-features = false`.
+mock = []
+# On-silicon test instrumentation: lets a hardware self-test harness suppress
+# threshold interrupts to prove the guard word fires on real silicon (plan
+# phase P3's truncation test). Adds nothing to the default build and must
+# never be enabled in production firmware.
+test_hooks = []
+
+[dependencies]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"

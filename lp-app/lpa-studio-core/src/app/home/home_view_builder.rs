@@ -457,6 +457,7 @@ fn provenance_line(store: &LibraryStore, meta: &PackageMeta) -> Option<String> {
             Some(format!("Remixed from {name}"))
         }
         PackageProvenance::ImportedZip { .. } => Some("Imported from zip".to_string()),
+        PackageProvenance::ImportedJson { .. } => Some("Pasted from JSON".to_string()),
         PackageProvenance::PulledFromDevice { device_name, .. } => {
             Some(format!("Pulled from {device_name}"))
         }

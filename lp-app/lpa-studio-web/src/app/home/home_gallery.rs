@@ -8,6 +8,7 @@ use crate::app::home::device_card::{
     ConnectDeviceCard, DeviceCard, connect_device_action, flash_device_action,
 };
 use crate::app::home::example_card::ExampleCard;
+use crate::app::home::gallery_paste::{install_paste_listener, paste_from_clipboard};
 use crate::app::home::package_card::{PackageCard, home_action};
 use crate::base::{StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
@@ -38,6 +39,11 @@ pub fn HomeGallery(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut drag_active = use_signal(|| 0_i32);
+    // Cmd-V anywhere on the gallery installs a pasted project envelope.
+    // The listener declines every paste that is not one — including
+    // pastes aimed at a text field — so ordinary typing is untouched
+    // (see `gallery_paste`).
+    let _paste_listener = use_hook(move || install_paste_listener(on_action));
     // only touch the browser's serial API when the caller didn't already
     // answer the grant question (stories always do — headless Chrome's
     // getPorts is crash-prone, and the probe is pointless there anyway)
@@ -187,6 +193,20 @@ pub fn HomeGallery(
                                 accept: ".zip",
                                 onchange: move |event| import_picked(event.files()),
                             }
+                            // Cmd-V anywhere on the page does this too (see
+                            // `gallery_paste`); the button covers the cases
+                            // where clipboard permission or focus does not
+                            // deliver the event.
+                            button {
+                                class: quiet_action_class(),
+                                r#type: "button",
+                                title: "Install a project from a JSON envelope on the clipboard.",
+                                onclick: move |_| paste_from_clipboard(on_action),
+                                span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                                    StudioIcon { name: StudioIconName::Copy, size: 14 }
+                                }
+                                span { "Paste" }
+                            }
                         }
                     }
                 }
@@ -196,7 +216,7 @@ pub fn HomeGallery(
                         // New makes a blank project; examples still seed a
                         // copy; imports arrive by button or drag
                         p { class: "tw:m-0 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:px-4 tw:py-5 tw:text-sm tw:text-muted-foreground",
-                            "No projects yet — create a new project, or open an example below (it becomes yours on the first save). You can also drop a project zip anywhere on this page."
+                            "No projects yet — create a new project, or open an example below (it becomes yours on the first save). You can also drop a project zip anywhere on this page, or paste a project JSON envelope."
                         }
                     } else {
                         div { class: card_grid_class(),
@@ -249,7 +269,7 @@ pub fn HomeGallery(
             if drag_active() > 0 {
                 div { class: "tw:pointer-events-none tw:absolute tw:inset-0 tw:z-10 tw:grid tw:place-items-center tw:rounded-md tw:border-2 tw:border-dashed tw:border-accent tw:bg-background/80",
                     p { class: "tw:m-0 tw:text-base tw:font-semibold tw:text-strong-foreground",
-                        "Drop a project zip to import it"
+                        "Drop a project zip, or paste a project JSON envelope"
                     }
                 }
             }

@@ -81,6 +81,18 @@ serde = { workspace = true, features = ["derive"] }
 # Concrete CPU graphics backend for tests and doc examples (the server takes
 # an injected `Arc<dyn LpGraphics>`; hosts construct the backend).
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
+# The client's request planner, so `tests/deploy_reload_source.rs` drives the
+# real deploy sequence (stop → write → load) instead of re-stating it. Only
+# the pure request builders are needed, so no host transports.
+lpa-client = { path = "../lpa-client", default-features = false }
+# A SECOND engine for `tests/shader_oracle_frame.rs`, and only for that.
+#
+# `TargetLpvmGraphics` on a host is wasmtime; firmware runs `lpvm-native`'s
+# codegen. Rendering the same project through both is what turns "the device
+# disagrees with the host" into "the *native codegen family* disagrees with
+# wasmtime" — a distinction no amount of staring at one number provides.
+# `emu` is the host-runnable rv32 arm of the same codegen the ESP32-S3 JITs.
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = ["emu"] }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, features = ["std"] }
 # Same forwarding as the main [dependencies] entry above — `cargo test
 # -p lpa-server` builds with lpa-server's own default features (std + all
