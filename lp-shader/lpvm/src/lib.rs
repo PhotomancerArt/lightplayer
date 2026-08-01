@@ -58,7 +58,10 @@ pub use compile_job::{
 };
 pub use data_error::DataError;
 pub use debug::{FunctionDebugInfo, ModuleDebugInfo};
-pub use engine::LpvmEngine;
+pub use engine::{LpvmCompileParams, LpvmEngine};
+/// Re-exported so a consumer that only speaks to this trait can name the
+/// numeric mode without taking a direct `lpir` dependency.
+pub use lpir::FloatMode;
 pub use global_data::{GlobalDataSpan, decode_global_read, encode_global_write, global_data_span};
 pub use guest_trap::{GuestTrap, GuestTrapError};
 pub use instance::LpvmInstance;

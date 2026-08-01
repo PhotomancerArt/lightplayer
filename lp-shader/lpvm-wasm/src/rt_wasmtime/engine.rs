@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::format;
 use std::sync::Arc;
 
-use lpir::{CompilerConfig, LpirModule};
+use lpir::LpirModule;
 use lps_builtins::ensure_builtins_referenced;
 use lps_shared::LpsModuleSig;
 use lpvm::{LpvmEngine, LpvmMemory};
@@ -133,14 +133,24 @@ impl LpvmEngine for WasmLpvmEngine {
         })
     }
 
-    fn compile_with_config(
+    /// Fixed at construction ([`WasmOptions::float_mode`]): the override below
+    /// takes the middle-end config per call but not the numeric mode, so this
+    /// claims only the mode it was built with. `TargetLpvmGraphics` builds it
+    /// from `WasmOptions::default()`, which is Q32 — so a Float shader
+    /// previewed on the host CPU tier gets a compile error naming the backend
+    /// rather than a quietly-Fixed render.
+    fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
+        mode == self.compile_options.float_mode
+    }
+
+    fn compile_with_params(
         &self,
         ir: &LpirModule,
         meta: &LpsModuleSig,
-        config: &CompilerConfig,
+        params: &lpvm::LpvmCompileParams,
     ) -> Result<Self::Module, Self::Error> {
         let mut opts = self.compile_options.clone();
-        opts.config = config.clone();
+        opts.config = params.config.clone();
         let artifact = compile_lpir(ir, meta, &opts)?;
         let bytes = artifact.wasm_module().bytes.clone();
         WasmLpvmModule::validate_shader(&self.engine, &bytes)?;

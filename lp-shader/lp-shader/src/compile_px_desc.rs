@@ -3,7 +3,7 @@
 use alloc::string::String;
 use lp_collection::VecMap;
 
-use lpir::CompilerConfig;
+use lpir::{CompilerConfig, FloatMode};
 use lps_shared::{TextureBindingSpec, TextureStorageFormat};
 
 pub type TextureBindingSpecs = VecMap<String, TextureBindingSpec>;
@@ -56,10 +56,20 @@ pub struct CompilePxDesc<'a> {
     pub compiler_config: CompilerConfig,
     pub textures: TextureBindingSpecs,
     pub frontend: ShaderFrontend,
+    /// Numeric mode this shader compiles in — the authored `float_mode` slot,
+    /// carried per compile because it lives per shader node.
+    ///
+    /// [`crate::LpsEngine`] passes it to the backend through
+    /// [`lpvm::LpvmCompileParams`]; an engine that cannot honour it says so
+    /// via [`lpvm::LpvmEngine::supports_float_mode`] and the caller errors.
+    /// See `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`.
+    pub float_mode: FloatMode,
 }
 
 impl<'a> CompilePxDesc<'a> {
-    /// Build a descriptor with no texture binding specs.
+    /// Build a descriptor with no texture binding specs, in the shipped
+    /// numeric mode ([`FloatMode::Q32`]). Set [`Self::float_mode`] after
+    /// construction to compile Float.
     #[must_use]
     pub fn new(
         glsl: &'a str,
@@ -73,7 +83,15 @@ impl<'a> CompilePxDesc<'a> {
             compiler_config,
             textures: TextureBindingSpecs::new(),
             frontend,
+            float_mode: FloatMode::Q32,
         }
+    }
+
+    /// Same descriptor, compiled in `float_mode`.
+    #[must_use]
+    pub fn with_float_mode(mut self, float_mode: FloatMode) -> Self {
+        self.float_mode = float_mode;
+        self
     }
 
     /// Adds or replaces the compile-time [`TextureBindingSpec`] for uniform `name`.

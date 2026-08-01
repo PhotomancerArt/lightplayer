@@ -95,6 +95,7 @@ impl<E: LpvmEngine> LpsEngine<E> {
             glsl,
             compiler_config,
             abi,
+            float_mode,
         } = desc;
 
         let lower_options = lps_glsl::CompileOptions {
@@ -107,9 +108,22 @@ impl<E: LpvmEngine> LpsEngine<E> {
 
         let tick_fn_index = validate_compute_tick_sig(&meta)?;
         validate_compute_abi(&meta, &abi)?;
+        if !self.engine.supports_float_mode(float_mode) {
+            return Err(LpsError::Validation(format!(
+                "compute shader requested float_mode={float_mode:?}, \
+                 which this LPVM engine does not compile"
+            )));
+        }
         let module = self
             .engine
-            .compile_with_config(&ir, &meta, &compiler_config)
+            .compile_with_params(
+                &ir,
+                &meta,
+                &lpvm::LpvmCompileParams {
+                    config: compiler_config,
+                    float_mode,
+                },
+            )
             .map_err(|e| LpsError::Compile(format!("{e}")))?;
         LpsComputeShader::new(module, meta, &ir, tick_fn_index)
     }
