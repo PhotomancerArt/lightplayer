@@ -348,7 +348,11 @@ mod tests {
             .unwrap();
         let before = registry.generation();
 
-        assert!(registry.claim_bundle(HwClaim::new("empty", vec![])).is_err());
+        assert!(
+            registry
+                .claim_bundle(HwClaim::new("empty", vec![]))
+                .is_err()
+        );
         assert!(
             registry
                 .claim_bundle(HwClaim::new("reserved", vec![HwAddress::gpio(12)]))
