@@ -37,6 +37,12 @@ vec4 test_declare_prototype_vector(vec4 a, vec4 b) {
     return add_vectors(a, b);
 }
 
+// Writes to value parameters are lost on the Lp+Xtensa+f32 combination only
+// (config-masked; xtn.f32, rv32lpn.f32 and xtlpn.q32 all pass). Marked broken
+// rather than unsupported on purpose: this is a compiler bug, written down and
+// awaiting a fix, not a capability this target lacks. Delete when fixed.
+// docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md
+// @broken(xtlpn.f32)
 // run: test_declare_prototype_vector(vec4(1.0), vec4(2.0)) ~= vec4(3.0)
 
 float test_declare_prototype_multiple();

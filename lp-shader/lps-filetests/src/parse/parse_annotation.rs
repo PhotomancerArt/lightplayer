@@ -287,7 +287,12 @@ mod tests {
             vec![
                 "wasm.f32".to_string(),
                 "rv32n.f32".to_string(),
-                "rv32lpn.f32".to_string()
+                "rv32lpn.f32".to_string(),
+                // M8 registered the hardware-FPU pair; the comment above
+                // anticipated exactly this — each new backend that gains an
+                // f32 mode joins the list here.
+                "xtn.f32".to_string(),
+                "xtlpn.f32".to_string()
             ],
             "{matched:?}"
         );
