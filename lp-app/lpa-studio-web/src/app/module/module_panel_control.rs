@@ -1,37 +1,69 @@
 //! One control on a module's panel, wearing its panel state.
 //!
-//! The three states `docs/design/panel.md` P-Q2 requires to be visibly
-//! distinct, rendered with the existing knob v2 / fader / toggle widgets so
-//! the panel and the node face speak one widget language:
+//! **A control is a widget, a label, and a value. Nothing else.** This is a
+//! control panel, not a spec sheet: the provenance captions that used to
+//! sit under every control ("control · Master speed", "held · was inherited
+//! · …", "authored default") are gone from the face and live in the
+//! control's detail popup instead, behind its label.
 //!
-//! | state | widget | label | caption |
-//! |---|---|---|---|
-//! | Read, at default | accent arc at the authored default | subtle | `default` + the value's origin |
-//! | Read, following | **violet** arc at the LIVE value | violet | `following …` (who is driving) |
-//! | Engaged (Latch) | **amber** arc + amber body ring | amber | `held` + the reset gesture |
+//! State is carried entirely by color and by the presence of the reset
+//! glyph — the three states `docs/design/panel.md` P-Q2 requires to be
+//! visibly distinct:
+//!
+//! | state | widget + label + value | reset glyph |
+//! |---|---|---|
+//! | Read, at default | accent arc at the authored default, subtle label | absent |
+//! | Read, following | **violet** arc at the LIVE value, violet label | absent |
+//! | Engaged (Latch) | **amber** arc + body ring, amber label | present |
 //!
 //! Amber (the `status-attention` family) is the spike's engaged proposal:
 //! it is the one warm family Studio already owns, it is not violet (bound
 //! means *wired*, engaged means *captured* — P6), not green (valid only),
 //! and not the blue live family (transient edits). A dedicated
-//! `status-engaged` token family is the eventual home; the gate question is
-//! whether amber reads as "captured" at a glance.
+//! `status-engaged` token family is the eventual home.
 //!
-//! **Reset** (P2 clear) is per control: the small revert glyph appears
-//! beside the label ONLY while engaged, because there is nothing to clear
-//! otherwise — the affordance's presence is itself part of the state
-//! signal. The per-module reset lives on the group header
-//! ([`super::ModulePanel`]).
+//! The **label is the detail trigger**, reusing the node face's
+//! [`SlotDetailButton`] machinery verbatim: the whole control is the
+//! popover's outline anchor, so opening merges the control's outline into
+//! the aspect card and reads as diving into it, and a live top-layer copy
+//! of the control paints over the anchor while the popup is open. Sections
+//! come from [`UiPanelControlView::detail_aspects`].
+//!
+//! **Reset** (P2 clear) stays on the face: the small revert glyph sits
+//! beside the label ONLY while engaged. It is a gesture, not a detail, so
+//! it must not cost a popup to reach.
+//!
+//! Values render in **tabular numerals inside a reserved slot**, because a
+//! panel whose row reflows while you drag a fader is not a control panel.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiPanelControlState, UiPanelControlView, UiPanelWidget, UiSlotValueKind,
+    UiAction, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelWidget,
+    UiSlotValueKind,
 };
 
-use crate::app::node::{HFaderField, KnobField, PanelEmit, SlotUnitSuffix, ToggleField};
-use crate::base::{StudioIcon, StudioIconName};
+use crate::app::node::{
+    HFaderField, KnobField, PanelEmit, SlotDetailButton, SlotUnitSuffix, ToggleField,
+};
+use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
 use super::PanelGesture;
+
+static NEXT_MODULE_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
+
+/// Bare text button for the label trigger; the state color rides the inner
+/// visual and the hover affordance is a dotted underline.
+const LABEL_TRIGGER_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:decoration-dotted tw:underline-offset-2 tw:hover:underline";
+
+/// A fader's fixed footprint. Without it the control's width tracks its
+/// value string and the whole row shifts mid-drag.
+const FADER_CLASS: &str = "tw:grid tw:w-[184px] tw:flex-none tw:gap-1";
+
+/// The value slot: tabular numerals in a reserved box, so 0.6 / 0.62 / 200
+/// all occupy the same width and nothing moves during a drag.
+const READOUT_CLASS: &str = "tw:inline-flex tw:min-w-[4.5ch] tw:flex-none tw:items-baseline tw:justify-center tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:tabular-nums";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -39,80 +71,145 @@ pub fn ModulePanelControl(
     /// The channel's control view: widget payload plus panel state.
     view: UiPanelControlView,
     /// The scope this control lives in — the other half of its identity
-    /// (panel.md P1) and what a reset gesture carries.
+    /// (panel.md P1), what a reset gesture carries, and what the detail
+    /// popup names.
     scope: String,
-    /// Play mode renders the same control at a roomier size and drops the
-    /// authoring-side captions to one line.
+    /// Play mode renders the same control at a roomier size.
     #[props(default = false)]
     play: bool,
     /// Panel gestures (reset). Absent = the control is display-only.
     #[props(default = None)]
     on_panel: Option<EventHandler<PanelGesture>>,
+    /// Open this control's detail popup on first render (stories).
+    #[props(default = false)]
+    detail_initially_open: bool,
     /// Widget value writes. The spike keeps knob drags on the existing
     /// slot-edit path; M4 routes them to `PanelWrite`.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let aspects = view.detail_aspects(&scope);
     let UiPanelControlView {
         channel,
         control,
         state,
-        source,
+        source: _,
     } = view;
     let engaged = state.engaged();
-    let following = matches!(state, UiPanelControlState::ReadFollowing);
     let label_class = panel_state_label_class(state);
-    let caption = control_caption(state, source.as_deref());
-    let reset_scope = scope.clone();
-    let reset_channel = channel.clone();
-
-    let label = rsx! {
-        span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1",
-            span { class: "tw:truncate tw:text-[0.66rem] tw:font-bold tw:uppercase tw:leading-none tw:tracking-[0.08em] {label_class}",
-                "{control.label}"
-            }
-            // Reset exists only where there is a writer to remove (P2).
-            if engaged && let Some(handler) = on_panel {
-                button {
-                    class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
-                    r#type: "button",
-                    title: "Reset {control.label} — drop the held value and follow the project again",
-                    aria_label: "Reset {control.label}",
-                    onclick: move |event| {
-                        event.stop_propagation();
-                        handler.call(PanelGesture::ClearControl {
-                            scope: reset_scope.clone(),
-                            channel: reset_channel.clone(),
-                        });
-                    },
-                    StudioIcon { name: StudioIconName::Revert, size: 10 }
-                }
-            }
-        }
-    };
-
     let readout_class = panel_state_readout_class(state);
-    let readout = rsx! {
-        span { class: "tw:inline-flex tw:items-baseline tw:gap-1 tw:font-mono tw:text-[0.7rem] {readout_class}",
-            span { "{shown_display(&control.value.display, control.live_value.as_deref(), state)}" }
-            SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
-        }
-    };
 
-    let caption_row = rsx! {
-        if let Some(caption) = caption.clone() {
-            span {
-                class: "tw:max-w-[17ch] tw:truncate tw:text-center tw:text-[0.6rem] tw:leading-none tw:text-dim-foreground",
-                title: "{caption}",
-                "{caption}"
-            }
-        }
-    };
+    // The whole control is the popover's outline anchor (P2c item 3).
+    let anchor_id = use_hook(|| {
+        let id = NEXT_MODULE_CONTROL_ID.fetch_add(1, Ordering::Relaxed);
+        format!("ux-module-control-{id}")
+    });
 
-    let column_class = if play {
+    let is_fader = matches!(control.widget, UiPanelWidget::Fader { .. });
+    let column_class = if is_fader {
+        FADER_CLASS
+    } else if play {
         "tw:flex tw:min-w-[76px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5"
     } else {
         "tw:flex tw:min-w-[64px] tw:flex-none tw:flex-col tw:items-center tw:gap-1"
+    };
+    let anchor_class = if is_fader {
+        "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1"
+    } else {
+        "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-1"
+    };
+
+    let reset_scope = scope.clone();
+    let reset_channel = channel.clone();
+    let reset_label = control.label.clone();
+    // Reset is a GESTURE, so it sits beside the label on the face rather
+    // than inside the popup — one click, always.
+    let reset = rsx! {
+        if engaged && let Some(handler) = on_panel {
+            button {
+                class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
+                r#type: "button",
+                title: "Reset {reset_label} — drop the held value and follow the project again",
+                aria_label: "Reset {reset_label}",
+                onclick: move |event| {
+                    event.stop_propagation();
+                    handler.call(PanelGesture::ClearControl {
+                        scope: reset_scope.clone(),
+                        channel: reset_channel.clone(),
+                    });
+                },
+                StudioIcon { name: StudioIconName::Revert, size: 10 }
+            }
+        }
+    };
+
+    let anchor_control = control.clone();
+    let anchor_label = label_visual(&control.label, label_class);
+
+    let label = rsx! {
+        span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1",
+            SlotDetailButton {
+                label: control.label.clone(),
+                aspects,
+                name_override: Some(control.label.clone()),
+                initially_open: detail_initially_open,
+                placement: PopoverPlacement::BottomMiddle,
+                anchor_id: Some(anchor_id.clone()),
+                anchor_visual: rsx! {
+                    div { class: anchor_class,
+                        ModulePanelControlBody {
+                            control: anchor_control,
+                            state,
+                            readout_class,
+                            label: anchor_label,
+                            on_action,
+                        }
+                    }
+                },
+                trigger: Some(label_visual(&control.label, label_class)),
+                trigger_class: LABEL_TRIGGER_CLASS.to_string(),
+                trigger_open_class: LABEL_TRIGGER_CLASS.to_string(),
+                on_action,
+            }
+            {reset}
+        }
+    };
+
+    rsx! {
+        div { id: "{anchor_id}", class: column_class,
+            ModulePanelControlBody {
+                control,
+                state,
+                readout_class,
+                label,
+                on_action,
+            }
+        }
+    }
+}
+
+/// The control itself — widget, label slot, value — with no popover wiring.
+/// Rendered on the face (label slot = the trigger button) and as the
+/// popup's top-layer anchor copy (label slot = a static copy).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ModulePanelControlBody(
+    control: UiPanelControl,
+    state: UiPanelControlState,
+    readout_class: &'static str,
+    /// The label element: the interactive trigger in flow, a static copy in
+    /// the top-layer visual.
+    label: Element,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let engaged = state.engaged();
+    let following = matches!(state, UiPanelControlState::ReadFollowing);
+
+    let readout = rsx! {
+        span { class: "{READOUT_CLASS} {readout_class}",
+            span { "{shown_display(&control.value.display, control.live_value.as_deref(), state)}" }
+            SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
+        }
     };
 
     match control.widget.clone() {
@@ -121,24 +218,21 @@ pub fn ModulePanelControl(
                 return mismatch(&control.label, &control.value.display);
             };
             rsx! {
-                div { class: column_class,
-                    KnobField {
-                        value,
-                        live_value: live_numeric(&control.live_value, following),
-                        min,
-                        max,
-                        step,
-                        state: control.state.clone(),
-                        bound: following,
-                        engaged,
-                        address: control.address.clone(),
-                        emit,
-                        on_action,
-                    }
-                    {label}
-                    {readout}
-                    {caption_row}
+                KnobField {
+                    value,
+                    live_value: live_numeric(&control.live_value, following),
+                    min,
+                    max,
+                    step,
+                    state: control.state.clone(),
+                    bound: following,
+                    engaged,
+                    address: control.address.clone(),
+                    emit,
+                    on_action,
                 }
+                {label}
+                {readout}
             }
         }
         UiPanelWidget::Fader { min, max, step } => {
@@ -146,27 +240,22 @@ pub fn ModulePanelControl(
                 return mismatch(&control.label, &control.value.display);
             };
             rsx! {
-                div { class: "tw:grid tw:min-w-0 tw:gap-1",
-                    div { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-2",
-                        {label}
-                        {readout}
-                    }
-                    HFaderField {
-                        value,
-                        live_value: live_numeric(&control.live_value, following),
-                        min,
-                        max,
-                        step,
-                        state: control.state.clone(),
-                        bound: following,
-                        engaged,
-                        address: control.address.clone(),
-                        emit,
-                        on_action,
-                    }
-                    if let Some(caption) = caption {
-                        span { class: "tw:text-[0.6rem] tw:leading-none tw:text-dim-foreground", "{caption}" }
-                    }
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                    {label}
+                    {readout}
+                }
+                HFaderField {
+                    value,
+                    live_value: live_numeric(&control.live_value, following),
+                    min,
+                    max,
+                    step,
+                    state: control.state.clone(),
+                    bound: following,
+                    engaged,
+                    address: control.address.clone(),
+                    emit,
+                    on_action,
                 }
             }
         }
@@ -175,22 +264,35 @@ pub fn ModulePanelControl(
                 return mismatch(&control.label, &control.value.display);
             };
             rsx! {
-                div { class: column_class,
-                    span { class: "tw:flex tw:h-[46px] tw:items-center",
-                        ToggleField {
-                            value,
-                            live_value: live_bool(&control.live_value, following),
-                            state: control.state.clone(),
-                            bound: following,
-                            engaged,
-                            address: control.address.clone(),
-                            on_action,
-                        }
+                span { class: "tw:flex tw:h-[46px] tw:items-center",
+                    ToggleField {
+                        value,
+                        live_value: live_bool(&control.live_value, following),
+                        state: control.state.clone(),
+                        bound: following,
+                        engaged,
+                        address: control.address.clone(),
+                        on_action,
                     }
-                    {label}
-                    {readout}
-                    {caption_row}
                 }
+                {label}
+                {readout}
+            }
+        }
+    }
+}
+
+/// The label visual shared by the trigger and its top-layer copy: the
+/// control name in the panel's label typography plus the small info glyph
+/// that stands for "this opens details", both in the state color.
+fn label_visual(label: &str, color_class: &'static str) -> Element {
+    rsx! {
+        span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1 {color_class}",
+            span { class: "tw:truncate tw:text-[0.66rem] tw:font-bold tw:uppercase tw:leading-none tw:tracking-[0.08em]",
+                "{label}"
+            }
+            span { class: "tw:inline-flex tw:flex-none tw:opacity-60",
+                StudioIcon { name: StudioIconName::InfoBare, size: 9 }
             }
         }
     }
@@ -225,19 +327,6 @@ fn shown_display(value: &str, live: Option<&str>, state: UiPanelControlState) ->
     }
 }
 
-/// The caption under the control: what state it is in and, in Read, whose
-/// value is on screen (P2 — the UI distinguishes inherited / authored /
-/// default).
-fn control_caption(state: UiPanelControlState, source: Option<&str>) -> Option<String> {
-    match (state, source) {
-        (UiPanelControlState::Engaged, Some(source)) => Some(format!("held · was {source}")),
-        (UiPanelControlState::Engaged, None) => Some("held".to_string()),
-        (_, Some(source)) => Some(source.to_string()),
-        (UiPanelControlState::ReadDefault, None) => Some("default".to_string()),
-        (UiPanelControlState::ReadFollowing, None) => Some("following".to_string()),
-    }
-}
-
 /// The live reading as a number for the widget geometry — only meaningful
 /// while the control is following something.
 fn live_numeric(live: &Option<String>, following: bool) -> Option<f32> {
@@ -256,18 +345,42 @@ fn mismatch(label: &str, display: &str) -> Element {
             span { class: "tw:text-[0.66rem] tw:font-bold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground",
                 "{label}"
             }
-            span { class: "tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground", "{display}" }
+            span { class: "tw:font-mono tw:text-[0.7rem] tw:tabular-nums tw:text-muted-foreground",
+                "{display}"
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::UiPanelControlState;
-
-    use super::{
-        control_caption, panel_state_label_class, panel_state_readout_class, shown_display,
+    use lpa_studio_core::{
+        UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelWidget, UiSlotAspectKind,
+        UiSlotFieldState, UiSlotValue,
     };
+
+    use super::{panel_state_label_class, panel_state_readout_class, shown_display};
+
+    fn view(state: UiPanelControlState, source: Option<&str>) -> UiPanelControlView {
+        UiPanelControlView::new(
+            "speed",
+            UiPanelControl {
+                label: "speed".to_string(),
+                address: None,
+                widget: UiPanelWidget::Knob {
+                    min: 0.0,
+                    max: 1.0,
+                    step: None,
+                },
+                value: UiSlotValue::f32(0.5),
+                live_value: None,
+                unit: None,
+                state: UiSlotFieldState::editable(),
+                aspects: Vec::new(),
+            },
+        )
+        .with_state(state, source)
+    }
 
     #[test]
     fn the_three_panel_states_wear_three_different_families() {
@@ -319,19 +432,32 @@ mod tests {
         );
     }
 
+    /// The captions left the face — so everything they said has to be in
+    /// the popup, or the information is simply gone.
     #[test]
-    fn captions_say_what_the_state_is_and_what_it_displaced() {
-        assert_eq!(
-            control_caption(UiPanelControlState::Engaged, Some("clock")),
-            Some("held · was clock".to_string())
+    fn provenance_moved_into_the_detail_popup() {
+        let held = view(UiPanelControlState::Engaged, Some("lfo · speed"));
+        let aspects = held.detail_aspects("/aurora.module");
+        assert_eq!(aspects[0].kind, UiSlotAspectKind::PanelState);
+        assert_eq!(aspects[0].title, "Held");
+        // What the held value displaced — the old "held · was …" caption.
+        assert!(
+            aspects[0]
+                .rows
+                .iter()
+                .any(|row| row.value.contains("lfo · speed"))
         );
-        assert_eq!(
-            control_caption(UiPanelControlState::ReadFollowing, Some("clock")),
-            Some("clock".to_string())
+        // The identity behind every reset gesture (P1).
+        assert!(
+            aspects[1]
+                .rows
+                .iter()
+                .any(|row| row.value == "/aurora.module")
         );
-        assert_eq!(
-            control_caption(UiPanelControlState::ReadDefault, None),
-            Some("default".to_string())
-        );
+
+        let following = view(UiPanelControlState::ReadFollowing, Some("lfo · hue"));
+        assert_eq!(following.detail_aspects("/x")[0].title, "Following");
+        let quiet = view(UiPanelControlState::ReadDefault, None);
+        assert_eq!(quiet.detail_aspects("/x")[0].title, "At default");
     }
 }
