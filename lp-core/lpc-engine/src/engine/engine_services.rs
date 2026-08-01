@@ -599,7 +599,11 @@ mod tests {
             services.update_output_sink_config(buffer_id, &config);
         }
 
-        assert_eq!(provider.open_calls(), 1, "no reopen for an unchanged config");
+        assert_eq!(
+            provider.open_calls(),
+            1,
+            "no reopen for an unchanged config"
+        );
         assert_eq!(
             provider
                 .inner()
@@ -803,7 +807,8 @@ mod tests {
         // The board has one RMT resource, so exactly one of these opens; drive
         // the flush until both have had their attempt.
         let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
-        let (open_sink, parked_sink, parked_endpoint) = if provider.inner().is_endpoint_open(&held) {
+        let (open_sink, parked_sink, parked_endpoint) = if provider.inner().is_endpoint_open(&held)
+        {
             (holder, waiter, waiting.clone())
         } else {
             (waiter, holder, held.clone())
