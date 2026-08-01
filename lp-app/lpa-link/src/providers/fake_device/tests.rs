@@ -140,7 +140,7 @@ async fn light_player_state_speaks_real_frames_through_the_real_transport() {
         FakeLightPlayerState::new()
             .with_project_files(vec![(
                 "project.json".to_string(),
-                br#"{"kind":"Project","uid":"prj_fakefakefakefak0","name":"Fake","nodes":{}}"#
+                br#"{"kind":"Module","uid":"prj_fakefakefakefak0","name":"Fake","nodes":{}}"#
                     .to_vec(),
             )])
             .with_identity(identity),

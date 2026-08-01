@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn project_def_deserializes_named_nodes() {
         let json = r#"{
-            "kind": "Project",
+            "kind": "Module",
             "format": 2,
             "name": "basic",
             "nodes": {
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn project_def_format_is_none_when_absent() {
         let json = r#"{
-            "kind": "Project",
+            "kind": "Module",
             "nodes": {}
         }"#;
         let def = NodeDef::read_json(&registry(), json).unwrap();
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn project_def_rejects_legacy_artifact_field() {
         let json = r#"{
-            "kind": "Project",
+            "kind": "Module",
             "nodes": {
                 "texture": { "artifact": "./texture.json" }
             }
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn project_def_rejects_inline_node_definition() {
         let json = r#"{
-            "kind": "Project",
+            "kind": "Module",
             "nodes": {
                 "clock": { "def": { "kind": "Clock" } }
             }

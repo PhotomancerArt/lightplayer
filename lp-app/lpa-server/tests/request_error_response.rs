@@ -34,7 +34,7 @@ fn failed_load_project_gets_error_response_and_later_requests_still_answer() {
         .base_fs_mut()
         .write_file(
             "/projects/bad/project.json".as_path(),
-            br#"{ "kind": "Project", "nodes": {} }"#,
+            br#"{ "kind": "Module", "nodes": {} }"#,
         )
         .expect("write bad manifest");
 

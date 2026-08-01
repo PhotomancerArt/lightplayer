@@ -446,7 +446,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"kind":"Project","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
+            br#"{"kind":"Module","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
         )
         .unwrap();
         fs.write_file(
@@ -564,7 +564,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"kind":"Project","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
+            br#"{"kind":"Module","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
         )
         .unwrap();
         fs.write_file(
@@ -2164,7 +2164,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
   }
 }"#;
     let project_json = r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
@@ -2244,7 +2244,7 @@ pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
         (
             "project.json",
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },

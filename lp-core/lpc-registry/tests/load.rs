@@ -24,7 +24,7 @@ fn load_root_discovers_root_external_and_asset_entries() {
         "/project.json",
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "shader": {
@@ -107,7 +107,7 @@ fn load_root_reports_parse_error_for_inline_child_def() {
         "/project.json",
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "shader": {
@@ -144,7 +144,7 @@ fn load_root_keeps_missing_referenced_def_as_error_entry() {
         "/project.json",
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "shader": {
@@ -177,7 +177,7 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
         "/project.json",
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "shader": {
@@ -222,7 +222,7 @@ fn load_root_accepts_current_project_format() {
         "/project.json",
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {}
 }
@@ -252,7 +252,7 @@ fn load_root_rejects_missing_project_format() {
         "/project.json",
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "nodes": {}
 }
 "#,
@@ -283,7 +283,7 @@ fn load_root_rejects_mismatched_project_format() {
         "/project.json",
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 999,
   "nodes": {}
 }

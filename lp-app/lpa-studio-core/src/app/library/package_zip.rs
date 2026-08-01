@@ -164,7 +164,7 @@ mod tests {
                 &[
                     (
                         "project.json".to_string(),
-                        br#"{"kind":"Project","name":"demo","nodes":{}}"#.to_vec(),
+                        br#"{"kind":"Module","name":"demo","nodes":{}}"#.to_vec(),
                     ),
                     ("shader.glsl".to_string(), b"void main() {}".to_vec()),
                     ("assets/map.bin".to_string(), vec![0u8, 159, 146, 150]),

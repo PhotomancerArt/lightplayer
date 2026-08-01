@@ -3449,7 +3449,7 @@ mod tests {
             &mut fs,
             "/project.json",
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" }
@@ -3490,7 +3490,7 @@ mod tests {
             &mut fs,
             "/project.json",
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" }
@@ -3527,7 +3527,7 @@ mod tests {
             &mut fs,
             "/project.json",
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
@@ -3569,7 +3569,7 @@ mod tests {
             &mut fs,
             "/project.json",
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "pixels": { "ref": "./fixture.json" }

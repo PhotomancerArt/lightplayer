@@ -65,7 +65,7 @@ fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
     let (registry, _) = load_inline_project(
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "a": {
@@ -112,7 +112,7 @@ fn missing_children_are_graph_nodes() {
     let (registry, _) = load_inline_project(
         r#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "missing": {

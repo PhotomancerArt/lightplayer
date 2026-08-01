@@ -246,7 +246,7 @@ impl LibraryStore {
                 // (`ProjectRegistry::check_root_format`); without it a
                 // Created package would be unloadable.
                 let minimal = serde_json::json!({
-                    "kind": "Project",
+                    "kind": "Module",
                     "format": lpc_model::PROJECT_FORMAT_VERSION,
                     "name": label,
                 });
@@ -550,7 +550,7 @@ mod tests {
         vec![
             (
                 "project.json".to_string(),
-                br#"{"kind":"Project","name":"demo","nodes":{"clock":{"ref":"./clock.json"}}}"#
+                br#"{"kind":"Module","name":"demo","nodes":{"clock":{"ref":"./clock.json"}}}"#
                     .to_vec(),
             ),
             ("clock.json".to_string(), br#"{"kind":"Clock"}"#.to_vec()),

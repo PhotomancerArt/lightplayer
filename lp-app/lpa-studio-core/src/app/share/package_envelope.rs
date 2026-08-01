@@ -115,7 +115,7 @@ mod tests {
             ("orbit.glsl".to_string(), b"void main() {}".to_vec()),
             (
                 "project.json".to_string(),
-                br#"{"kind":"Project"}"#.to_vec(),
+                br#"{"kind":"Module"}"#.to_vec(),
             ),
         ];
         let json = PackageEnvelope::encode("Demo", &files).to_json().unwrap();
@@ -132,7 +132,7 @@ mod tests {
         let files = vec![
             (
                 "project.json".to_string(),
-                br#"{"kind":"Project"}"#.to_vec(),
+                br#"{"kind":"Module"}"#.to_vec(),
             ),
             ("orbit.glsl".to_string(), b"void main() {}".to_vec()),
         ];
@@ -199,7 +199,7 @@ mod tests {
     fn the_source_uid_rides_along_for_provenance() {
         let files = vec![(
             "project.json".to_string(),
-            br#"{"kind":"Project","uid":"prj_abc123"}"#.to_vec(),
+            br#"{"kind":"Module","uid":"prj_abc123"}"#.to_vec(),
         )];
         let envelope = PackageEnvelope::encode("Demo", &files);
         assert_eq!(envelope.original_uid().as_deref(), Some("prj_abc123"));
@@ -209,7 +209,7 @@ mod tests {
             "Demo",
             &[(
                 "project.json".to_string(),
-                br#"{"kind":"Project"}"#.to_vec(),
+                br#"{"kind":"Module"}"#.to_vec(),
             )],
         );
         assert_eq!(anonymous.original_uid(), None);

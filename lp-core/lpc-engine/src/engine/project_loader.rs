@@ -2059,7 +2059,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "fixture": {
@@ -2184,7 +2184,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "playlist": {
@@ -2281,7 +2281,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {
@@ -2460,7 +2460,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {
@@ -2590,7 +2590,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "shader": {
@@ -2619,7 +2619,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "shader": {
@@ -2975,7 +2975,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "broken": {
@@ -3018,7 +3018,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "weird": {
@@ -3188,7 +3188,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "compute": {
@@ -3739,7 +3739,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "button": {
@@ -3809,7 +3809,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "button": {
@@ -4102,7 +4102,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "name": "basic",
   "nodes": {
@@ -4545,7 +4545,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "button": {

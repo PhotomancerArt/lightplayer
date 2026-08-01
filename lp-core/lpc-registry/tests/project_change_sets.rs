@@ -60,7 +60,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         "/project.json",
         br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2
 }
 "#,
@@ -79,7 +79,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         "/project.json",
         br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {
@@ -111,7 +111,7 @@ fn missing_referenced_def_recovers_when_file_is_created() {
         "/project.json",
         br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {
@@ -264,7 +264,7 @@ fn changing_project_child_ref_reports_node_use_definition_change() {
         "/project.json",
         br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "name": "fyeah-sign",
   "nodes": {

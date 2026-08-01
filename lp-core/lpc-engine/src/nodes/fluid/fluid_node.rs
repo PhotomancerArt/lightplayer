@@ -338,7 +338,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {
@@ -445,7 +445,7 @@ mod tests {
             "/project.json".as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {
