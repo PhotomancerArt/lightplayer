@@ -56,6 +56,7 @@ uvec4 test_uvec4_multiply_in_assignment() {
 // run: test_uvec4_multiply_in_assignment() == uvec4(12u, 21u, 8u, 18u)
 
 uvec4 test_uvec4_multiply_large_numbers() {
+    // Integer vectors use exact arithmetic.
     uvec4 a = uvec4(1000u, 2000u, 3000u, 4000u);
     uvec4 b = uvec4(3000u, 1000u, 2000u, 500u);
     return a * b;

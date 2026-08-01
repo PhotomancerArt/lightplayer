@@ -11,8 +11,9 @@ they are not replacements for on-device shader compilation.
 | Crate | Target | Purpose |
 |---|---|---|
 | [`fw-esp32c6`](./fw-esp32c6/) | ESP32-C6 bare metal (RISC-V) | Reference embedded firmware target. Runs `lp-server` on device, with every node kind and every driver. |
-| [`fw-esp32s3`](./fw-esp32s3/) | ESP32-S3 bare metal (Xtensa LX7) | Second chip. Runs `lp-server` on device and JITs GLSL to **Xtensa** machine code. Deliberately partial: shader + fixture nodes only, and output is a serial readout rather than RMT/ws281x. See its README for what is gated off and why. |
+| [`fw-esp32s3`](./fw-esp32s3/) | ESP32-S3 bare metal (Xtensa LX7) | Second chip. Runs `lp-server` on device, JITs GLSL to **Xtensa** machine code, and drives real WS281x strips on 4 concurrent RMT channels via `lp-ws281x`. Deliberately partial: shader + fixture nodes only. See its README for what is gated off and why. |
 | [`fw-esp32-common`](./fw-esp32-common/) | chip-generic lib | Chip-generic firmware layer shared by the per-SOC ESP32 crates — both `fw-esp32c6` and `fw-esp32s3` consume it. Builds under both the pinned nightly and the Espressif fork; no esp-* HAL deps. |
+| [`lp-ws281x`](./lp-ws281x/) | chip-agnostic `no_std` lib | Portable core of the multi-channel WS2811/WS2812 RMT driver — pulse encoding, ping-pong refill, guard-word flicker protection — behind the `RmtHw` trait a chip backend implements. Used by `fw-esp32s3` today; the C6 stays on its own legacy single-channel driver (see `docs/debt/`). |
 | [`fw-emu`](./fw-emu/) | RV32 bare-metal emulator | Firmware image used by emulator-oriented validation. |
 | [`fw-host`](./fw-host/) | Host OS | Local host runtime that can run an in-memory `LpServer` outside `lp-cli`. Useful for Studio, local services, and host deployments. |
 | [`fw-browser`](./fw-browser/) | `wasm32-unknown-unknown` browser/Web Worker | Browser runtime proof for Studio project simulation and browser-local testing. |

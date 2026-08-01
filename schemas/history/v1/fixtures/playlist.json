@@ -1,0 +1,34 @@
+{
+  "kind": "Playlist",
+  "bindings": {
+    "time": {
+      "source": "bus:time"
+    },
+    "trigger": {
+      "source": "bus:trigger"
+    }
+  },
+  "time": 0,
+  "idle_entry": 1,
+  "default_fade": 0.35,
+  "entries": {
+    "1": {
+      "name": "idle",
+      "fade_after": 0.12,
+      "node": {
+        "ref": "./idle.json"
+      }
+    },
+    "2": {
+      "name": "blast",
+      "trigger_ids": [
+        1
+      ],
+      "duration": 10,
+      "fade_after": 2,
+      "node": {
+        "ref": "./blast.json"
+      }
+    }
+  }
+}

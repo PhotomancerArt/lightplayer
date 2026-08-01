@@ -5,7 +5,8 @@ use crate::{Diagnostic, Span};
 
 use super::arena::{ExprId, ExprList, HirArena};
 use super::coerce::{
-    coerce_arithmetic_pair, coerce_comparison_pair, coerce_expr, vector_dominant_type,
+    coerce_arithmetic_pair, coerce_comparison_pair, coerce_expr, coerce_selection_pair,
+    vector_dominant_type,
 };
 use super::scalar::{scalar_base_type, scalar_lane_count};
 use super::types::BuiltinKind;
@@ -664,7 +665,10 @@ fn type_mix_builtin(
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
     let (x, y, a) = three_args(arena, span, args)?;
-    let (x, y, ty) = coerce_arithmetic_pair(arena, span, x, y)?;
+    // `mix` is the one non-logical builtin GLSL also declares over `genBType`
+    // (`mix(bvec, bvec, bvec)` = component-wise selection), so the operand pair
+    // is coerced without the arithmetic bool rejection.
+    let (x, y, ty) = coerce_selection_pair(arena, span, x, y)?;
     let a = if scalar_lane_count(arena.expr_ty(a)) == 1 {
         coerce_expr(arena, a, &LpsType::Float)?
     } else {

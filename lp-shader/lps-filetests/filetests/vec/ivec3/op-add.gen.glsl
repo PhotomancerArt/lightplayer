@@ -64,8 +64,7 @@ ivec3 test_ivec3_add_in_assignment() {
 // run: test_ivec3_add_in_assignment() == ivec3(15, 10, 10)
 
 ivec3 test_ivec3_add_large_numbers() {
-    // Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)
-    // Addition saturates to max for each component
+    // Integer vectors use exact arithmetic.
     ivec3 a = ivec3(100000, 50000, 25000);
     ivec3 b = ivec3(200000, 30000, 15000);
     return a + b;

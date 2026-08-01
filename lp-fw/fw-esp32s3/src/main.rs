@@ -146,16 +146,16 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 #[cfg(fw_harness)]
 #[esp_hal::main]
 fn boot() -> ! {
-    // `Config::default()` leaves this chip at **80 MHz**. The loopback harness
-    // must drain four RX transactions inside a 24-item (30 µs) capture window
-    // while four channels transmit, so it takes the fast clock; the other
-    // harnesses keep the default rather than have their measurements silently
-    // re-baselined by this line.
-    #[cfg(feature = "test_loopback")]
-    let config = esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max());
-    #[cfg(not(feature = "test_loopback"))]
-    let config = esp_hal::Config::default();
-    let peripherals = esp_hal::init(config);
+    // ⚠️ `CpuClock::max()` is required, not cosmetic. esp-hal's S3
+    // `CpuClock::default()` is **80 MHz** — only `max()` is 240 MHz — while
+    // `board::esp32s3::constants::CPU_HZ` (the divisor in
+    // `cycle_counter::cycles_to_us`) hardcodes 240 MHz. Booting the harness at
+    // the default would make every cycle→µs figure it prints understate real
+    // elapsed time by 3×. This matches the app path's `init_board`. The
+    // loopback harness additionally needs the fast clock to drain four RX
+    // transactions inside a 24-item (30 µs) capture window.
+    let peripherals =
+        esp_hal::init(esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max()));
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
 
     esp_println::println!("[INIT] fw-esp32s3 boot");

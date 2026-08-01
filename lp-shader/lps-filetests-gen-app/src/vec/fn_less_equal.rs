@@ -18,7 +18,6 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
     // Add test run and target directives
     content.push_str("// test run\n");
-    content.push_str("// @unimplemented(backend=wasm)\n");
     content.push_str("\n");
 
     // Add section comment
@@ -89,14 +88,14 @@ fn generate_test_mixed(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_mixed() {{\n\
-         // Function lessThanEqual() returns {} (component-wise comparison)\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_mixed() == {}\n",
+        "{} test_{}_less_equal_mixed() {{
+    // Function lessThanEqual() returns {} (component-wise comparison)
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_mixed() == {}\n",
         bvec_type_name,
         type_name,
         bvec_type_name,
@@ -135,13 +134,13 @@ fn generate_test_all_true(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_all_true() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_all_true() == {}\n",
+        "{} test_{}_less_equal_all_true() {{
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_all_true() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -179,13 +178,13 @@ fn generate_test_all_false(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_all_false() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_all_false() == {}\n",
+        "{} test_{}_less_equal_all_false() {{
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_all_false() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -217,13 +216,13 @@ fn generate_test_equal(vec_type: VecType, dimension: Dimension) -> String {
     let constructor = format_vector_constructor(vec_type, dimension, &values);
 
     format!(
-        "{} test_{}_less_equal_equal() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_equal() == {}\n",
+        "{} test_{}_less_equal_equal() {{
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_equal() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -261,13 +260,13 @@ fn generate_test_mixed_equal(vec_type: VecType, dimension: Dimension) -> String 
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_mixed_equal() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_mixed_equal() == {}\n",
+        "{} test_{}_less_equal_mixed_equal() {{
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_mixed_equal() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -310,13 +309,13 @@ fn generate_test_negative(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_negative() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_negative() == {}\n",
+        "{} test_{}_less_equal_negative() {{
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_negative() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -363,13 +362,13 @@ fn generate_test_zero(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_zero() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_zero() == {}\n",
+        "{} test_{}_less_equal_zero() {{
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_zero() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -400,13 +399,13 @@ fn generate_test_variables(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_variables() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return lessThanEqual(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_variables() == {}\n",
+        "{} test_{}_less_equal_variables() {{
+    {} a = {};
+    {} b = {};
+    return lessThanEqual(a, b);
+}}
+
+// run: test_{}_less_equal_variables() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -437,11 +436,11 @@ fn generate_test_expressions(vec_type: VecType, dimension: Dimension) -> String 
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_less_equal_expressions() {{\n\
-         return lessThanEqual({}, {});\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_expressions() == {}\n",
+        "{} test_{}_less_equal_expressions() {{
+    return lessThanEqual({}, {});
+}}
+
+// run: test_{}_less_equal_expressions() == {}\n",
         bvec_type_name,
         type_name,
         a_constructor,
@@ -457,14 +456,14 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
     // Special case for D4 uvec: return bool instead of bvec4 (following manual file)
     if matches!(vec_type, VecType::UVec) && matches!(dimension, Dimension::D4) {
         return format!(
-            "bool test_{type_name}_less_equal_in_expression() {{\n\
-    {type_name} a = uvec4(1u, 5u, 3u, 7u);\n\
-    {type_name} b = uvec4(2u, 3u, 4u, 5u);\n\
-    {type_name} c = uvec4(3u, 7u, 1u, 9u);\n\
-    return lessThanEqual(a, b) == lessThanEqual(b, c);\n\
-    // (true,false,true,false) == (true,true,false,true) = false\n\
-}}\n\
-\n\
+            "bool test_{type_name}_less_equal_in_expression() {{
+    {type_name} a = uvec4(1u, 5u, 3u, 7u);
+    {type_name} b = uvec4(2u, 3u, 4u, 5u);
+    {type_name} c = uvec4(3u, 7u, 1u, 9u);
+    return lessThanEqual(a, b) == lessThanEqual(b, c);
+    // (true,false,true,false) == (true,true,false,true) = false
+}}
+
 // run: test_{type_name}_less_equal_in_expression() == false\n"
         );
     }
@@ -502,18 +501,18 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
     let c_constructor = format_vector_constructor(vec_type, dimension, &c_values);
 
     format!(
-        "{} test_{}_less_equal_in_expression() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         {} c = {};\n\
-         // Use equal() for component-wise comparison of {} values\n\
-         // lessThanEqual(a, b) = {}\n\
-         // lessThanEqual(b, c) = {}\n\
-         // equal(lessThanEqual(a, b), lessThanEqual(b, c)) = {}\n\
-         return equal(lessThanEqual(a, b), lessThanEqual(b, c));\n\
-         }}\n\
-         \n\
-         // run: test_{}_less_equal_in_expression() == {}\n",
+        "{} test_{}_less_equal_in_expression() {{
+    {} a = {};
+    {} b = {};
+    {} c = {};
+    // Use equal() for component-wise comparison of {} values
+    // lessThanEqual(a, b) = {}
+    // lessThanEqual(b, c) = {}
+    // equal(lessThanEqual(a, b), lessThanEqual(b, c)) = {}
+    return equal(lessThanEqual(a, b), lessThanEqual(b, c));
+}}
+
+// run: test_{}_less_equal_in_expression() == {}\n",
         bvec_type_name,
         type_name,
         type_name,

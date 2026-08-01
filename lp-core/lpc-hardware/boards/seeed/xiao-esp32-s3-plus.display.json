@@ -1,0 +1,41 @@
+{
+  "board_id": "seeed/xiao-esp32-s3-plus",
+  "display_name": "XIAO ESP32-S3 Plus",
+  "manufacturer": "Seeed Studio",
+  "soc": "ESP32-S3",
+  "family": "esp32s3",
+  "flash": "16 MB",
+  "psram": "8 MB",
+  "price_usd": 9.9,
+  "tier": "silver",
+  "capabilities": ["Wi-Fi", "BLE 5", "thumb-sized", "camera header"],
+  "blurb": "Tiny S3 with real memory headroom. Calibrated profile in the repo; the castellated pads are deliberately unlisted.",
+  "support_note": "S3 support is new — tested as the S3 track matures.",
+  "purchase_urls": [
+    { "label": "Seeed", "href": "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32S3-Plus-p-6361.html" }
+  ],
+  "hw": {
+    "width": 76,
+    "module": { "x": 14, "y": 6, "w": 48, "h": 30, "label": "S3", "antenna": false },
+    "usb": [ { "x": 24, "label": "USB" } ],
+    "buttons": [ { "x": 64, "y": -14, "label": "B" } ],
+    "left": [
+      { "label": "D0", "role": "io", "gpio": 1, "caps": [ { "text": "ADC1_0", "kind": "adc" }, { "text": "Touch1", "kind": "touch" } ] },
+      { "label": "D1", "role": "io", "gpio": 2, "caps": [ { "text": "ADC1_1", "kind": "adc" }, { "text": "Touch2", "kind": "touch" } ] },
+      { "label": "D2", "role": "io", "gpio": 3, "caps": [ { "text": "ADC1_2", "kind": "adc" }, { "text": "Touch3", "kind": "touch" } ] },
+      { "label": "D3", "role": "io", "gpio": 4, "caps": [ { "text": "ADC1_3", "kind": "adc" }, { "text": "Touch4", "kind": "touch" } ] },
+      { "label": "D4", "role": "io", "gpio": 5, "caps": [ { "text": "ADC1_4", "kind": "adc" }, { "text": "Touch5", "kind": "touch" } ] },
+      { "label": "D5", "role": "io", "gpio": 6, "caps": [ { "text": "ADC1_5", "kind": "adc" }, { "text": "Touch6", "kind": "touch" } ] },
+      { "label": "D6", "role": "io", "gpio": 43, "caps": [ { "text": "U0_TXD", "kind": "uart" } ] }
+    ],
+    "right": [
+      { "label": "5V", "role": "pwr5" },
+      { "label": "GND", "role": "gnd" },
+      { "label": "3V3", "role": "pwr3" },
+      { "label": "D10", "role": "io", "gpio": 9, "caps": [ { "text": "ADC1_8", "kind": "adc" }, { "text": "Touch9", "kind": "touch" } ] },
+      { "label": "D9", "role": "io", "gpio": 8, "caps": [ { "text": "ADC1_7", "kind": "adc" }, { "text": "Touch8", "kind": "touch" } ] },
+      { "label": "D8", "role": "io", "gpio": 7, "caps": [ { "text": "ADC1_6", "kind": "adc" }, { "text": "Touch7", "kind": "touch" } ] },
+      { "label": "D7", "role": "io", "gpio": 44, "caps": [ { "text": "U0_RXD", "kind": "uart" } ] }
+    ]
+  }
+}

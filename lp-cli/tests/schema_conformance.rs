@@ -94,9 +94,11 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
 #[test]
 fn hardware_manifests_conform_to_checked_in_schema() -> Result<()> {
     let workspace = workspace_dir();
-    let validator = load_validator(&workspace, "schemas/hardware.schema.json")?;
+    let manifest_validator = load_validator(&workspace, "schemas/hardware.schema.json")?;
+    let display_validator = load_validator(&workspace, "schemas/board-display.schema.json")?;
 
     let mut failures = Vec::new();
+    let mut display_count = 0usize;
     for root in HARDWARE_ROOTS {
         let files = walk_json_files(&workspace, root)?;
         assert!(
@@ -108,10 +110,22 @@ fn hardware_manifests_conform_to_checked_in_schema() -> Result<()> {
             if SKIP_JSON.contains(&rel.as_str()) {
                 continue;
             }
-            validate_file(&validator, file, &rel, &mut failures)?;
+            // `<product>.display.json` sidecars are catalog metadata
+            // (lpa-boards) with their own schema.
+            if rel.ends_with(".display.json") {
+                display_count += 1;
+                validate_file(&display_validator, file, &rel, &mut failures)?;
+            } else {
+                validate_file(&manifest_validator, file, &rel, &mut failures)?;
+            }
         }
         println!("{root}: validated {} hardware manifests", files.len());
     }
+    // Vacuity guard for the sidecar branch too.
+    assert!(
+        display_count > 0,
+        "no display sidecars found under the hardware roots — walk is vacuous"
+    );
 
     if !failures.is_empty() {
         bail!(

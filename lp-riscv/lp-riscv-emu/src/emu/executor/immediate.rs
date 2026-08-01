@@ -60,15 +60,13 @@ pub(super) fn decode_execute_itype<M: LoggingMode>(
         }
         0x2 => execute_slti::<M>(rd, rs1, imm, inst_word, pc, regs),
         0x3 => execute_sltiu::<M>(rd, rs1, imm, inst_word, pc, regs),
-        0x4 => {
-            // XORI and ZEXTH
-            let funct12 = ((inst_word >> 20) & 0xfff) as u16;
-            if funct12 == 0x080 {
-                execute_zexth::<M>(rd, rs1, inst_word, pc, regs)
-            } else {
-                execute_xori::<M>(rd, rs1, imm, inst_word, pc, regs)
-            }
-        }
+        // XORI, for every immediate. `zext.h` lives in the OP space
+        // (`pack rd, rs, x0`); carving funct12 0x080 out of OP-IMM here
+        // silently reinterpreted `xori rd, rs1, 128` — LLVM's jump-table
+        // index bias — as a halfword zero-extend, which is a no-op for small
+        // values and so failed without a trace. See
+        // `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`.
+        0x4 => execute_xori::<M>(rd, rs1, imm, inst_word, pc, regs),
         0x5 => {
             // SRLI/SRAI and other funct3=0x5 instructions
             let funct6 = ((inst_word >> 26) & 0x3f) as u8;
@@ -977,44 +975,6 @@ fn execute_sexth<M: LoggingMode>(
     let val1 = read_reg(regs, rs1);
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     let result = ((val1 as u16) as i16) as i32; // Sign-extend halfword
-    if rd.num() != 0 {
-        regs[rd.num() as usize] = result;
-    }
-    let log = if M::ENABLED {
-        Some(InstLog::Arithmetic {
-            cycle: 0,
-            pc,
-            instruction: instruction_word,
-            rd,
-            rs1_val: val1,
-            rs2_val: None,
-            rd_old,
-            rd_new: result,
-        })
-    } else {
-        None
-    };
-    Ok(ExecutionResult {
-        new_pc: None,
-        should_halt: false,
-        syscall: false,
-        class: InstClass::Alu,
-        inst_size: 4,
-        log,
-    })
-}
-
-#[inline(always)]
-fn execute_zexth<M: LoggingMode>(
-    rd: Gpr,
-    rs1: Gpr,
-    instruction_word: u32,
-    pc: u32,
-    regs: &mut [i32; 32],
-) -> Result<ExecutionResult, EmulatorError> {
-    let val1 = read_reg(regs, rs1);
-    let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
-    let result = ((val1 as u32) & 0xffff) as i32; // Zero-extend halfword
     if rd.num() != 0 {
         regs[rd.num() as usize] = result;
     }

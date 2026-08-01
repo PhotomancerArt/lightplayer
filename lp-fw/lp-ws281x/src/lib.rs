@@ -64,7 +64,7 @@
 //! ## Provenance
 //!
 //! Original code. It descends from the author's own single-channel ESP32-C6
-//! driver in `lp2025` (`lp-fw/fw-esp32/src/output/rmt/`) — reworked here for
+//! driver in `lp2025` (`lp-fw/fw-esp32c6/src/output/rmt/`) — reworked here for
 //! multiple channels, arbitrary half sizes, configurable timing, and without
 //! that driver's start-of-frame guard race. No GPL source was consulted; see
 //! `AGENTS.md` and `docs/adr/2026-07-28-license-provenance-discipline.md`.
