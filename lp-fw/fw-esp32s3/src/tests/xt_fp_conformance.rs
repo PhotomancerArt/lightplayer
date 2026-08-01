@@ -425,6 +425,15 @@ impl Line {
 
     fn flush(&mut self) {
         if self.open {
+            // The marker is deliberately unparseable. A capture tool that
+            // truncates quietly is the exact failure this rig exists to catch,
+            // and the first version of this buffer did it: the table lines are
+            // 27 characters per run and eight of them overran a 200-byte
+            // buffer, dropping the tail of every line with no sign at all.
+            // Losing data must be louder than losing the line.
+            if self.buf.overflowed() {
+                println!("{TAG} FATAL line buffer overflowed — output is incomplete");
+            }
             println!("{TAG} {}", self.buf.as_str());
             self.open = false;
         }
@@ -435,11 +444,16 @@ impl Line {
 /// harness must be able to run before, and independently of, anything that
 /// allocates, and the only formatting it needs is fixed-width hex.
 mod heapless_line {
-    const CAP: usize = 200;
+    /// Sized for the widest line the harness emits — a table line is
+    /// `8 * (8 + 1 + 8 + 1 + 8 + 1)` plus a 16-byte prefix — with room to spare,
+    /// and [`Buf::overflowed`] behind it in case that arithmetic ever stops
+    /// being true.
+    const CAP: usize = 320;
 
     pub struct Buf {
         bytes: [u8; CAP],
         len: usize,
+        overflowed: bool,
     }
 
     impl Buf {
@@ -447,17 +461,26 @@ mod heapless_line {
             Buf {
                 bytes: [0; CAP],
                 len: 0,
+                overflowed: false,
             }
         }
 
         pub fn clear(&mut self) {
             self.len = 0;
+            self.overflowed = false;
+        }
+
+        /// Whether anything was dropped since the last [`Buf::clear`].
+        pub fn overflowed(&self) -> bool {
+            self.overflowed
         }
 
         pub fn byte(&mut self, b: u8) {
             if self.len < CAP {
                 self.bytes[self.len] = b;
                 self.len += 1;
+            } else {
+                self.overflowed = true;
             }
         }
 
