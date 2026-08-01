@@ -28,6 +28,26 @@ pub mod constants;
     )
 )]
 pub mod cycle_counter;
+// Arming coprocessor 0 before compiled float code runs. Unlike `cycle_counter`
+// this is NOT harness-only — the app path JITs shaders too, so both paths need
+// it, and that is why `asm_experimental_arch` is no longer scoped to
+// `fw_harness` in main.rs.
+//
+// Its two consumers are `init::init_board` (app path) and the JIT corpus
+// harness. Every *other* harness replaces the app entrypoint and never JITs, so
+// it compiles this and calls nothing — gated on that exact shape rather than on
+// `fw_harness`, so the dead-code allowance cannot hide real rot in the two
+// builds that do use it.
+#[cfg_attr(
+    all(fw_harness, not(feature = "test_xt_jit_corpus")),
+    allow(
+        dead_code,
+        reason = "harnesses other than the JIT corpus replace the app \
+                  entrypoint and run no compiled float code; they compile this \
+                  so it cannot rot"
+    )
+)]
+pub mod fpu;
 // The app entrypoint's sole source of the peripheral singleton. See the module
 // doc for the hazard that makes it the *only* one.
 #[cfg(not(fw_harness))]

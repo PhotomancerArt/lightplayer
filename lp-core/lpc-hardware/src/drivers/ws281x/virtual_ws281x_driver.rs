@@ -16,27 +16,58 @@ use crate::{
 /// Manifest-backed virtual WS281x driver for tests and emulation.
 ///
 /// The driver exposes WS281x endpoints for GPIO output resources when the
-/// manifest also contains the configured RMT/WS281x timing resource.
+/// manifest also declares at least one RMT/WS281x timing resource.
+///
+/// # Why the timing resource is chosen at `open`
+///
+/// Boards differ in how many WS281x channels they can drive at once — the
+/// virtual single-RMT board declares `/rmt/ws281x0` alone, the XIAO S3 Plus
+/// declares four — and the count is the manifest's to state, not this type's.
+/// Pinning one address at construction made every open contend for
+/// `/rmt/ws281x0`, so on a four-channel board the second output failed with
+/// "already claimed" no matter what the manifest said. The channel is now
+/// taken from the free list at open and released with the output, mirroring
+/// `Esp32S3RmtWs281xDriver`, so host runs and silicon agree on how many
+/// concurrent channels a board offers.
 pub struct VirtualWs281xDriver {
     registry: Rc<HwRegistry>,
     driver_id: String,
     display_label: String,
-    timing_address: HwAddress,
+    /// Every `/rmt/ws281xK` the manifest declares with WS281x timing
+    /// capability, in manifest order. Empty on a board with no such resource,
+    /// which offers no endpoints at all.
+    timing_addresses: Vec<HwAddress>,
 }
 
 impl VirtualWs281xDriver {
-    pub fn new(registry: Rc<HwRegistry>, rmt_channel: u8) -> Self {
-        let timing_address = HwAddress::rmt_ws281x(rmt_channel);
+    pub fn new(registry: Rc<HwRegistry>) -> Self {
+        let timing_addresses = registry
+            .manifest()
+            .resources()
+            .iter()
+            .filter(|resource| {
+                resource.supports(HwCapability::Rmt)
+                    && resource.supports(HwCapability::Ws281xOutput)
+            })
+            .map(|resource| resource.address().clone())
+            .collect();
         Self {
             registry,
-            driver_id: format!("virtual-ws281x-rmt{rmt_channel}"),
-            display_label: format!("Virtual WS281x RMT {rmt_channel}"),
-            timing_address,
+            driver_id: String::from("virtual-ws281x-rmt"),
+            display_label: String::from("Virtual WS281x RMT"),
+            timing_addresses,
         }
     }
 
     fn endpoint_id(&self, spec: &HwEndpointSpec) -> HwEndpointId {
         HwEndpointId::for_driver_spec(self.driver_id(), spec)
+    }
+
+    /// The first declared timing resource the registry still reports as free.
+    fn free_timing_address(&self) -> Option<&HwAddress> {
+        self.timing_addresses
+            .iter()
+            .find(|address| self.registry.endpoint_status_for(address).is_available())
     }
 
     fn endpoint_status(&self, gpio: &HwAddress) -> HwEndpointStatus {
@@ -45,7 +76,19 @@ impl VirtualWs281xDriver {
             return gpio_status;
         }
 
-        match self.registry.endpoint_status_for(&self.timing_address) {
+        if self.free_timing_address().is_some() {
+            return HwEndpointStatus::Available;
+        }
+
+        // Nothing is free: report why the last-numbered channel is blocked
+        // rather than a bare count, since with one declared channel that is
+        // the whole story and with several it still names a live claimant.
+        let Some(last) = self.timing_addresses.last() else {
+            return HwEndpointStatus::Unavailable {
+                reason: String::from("board declares no WS281x timing resource"),
+            };
+        };
+        match self.registry.endpoint_status_for(last) {
             HwEndpointStatus::Available => HwEndpointStatus::Available,
             HwEndpointStatus::Reserved { reason } => HwEndpointStatus::Unavailable {
                 reason: format!("WS281x timing resource is reserved: {reason}"),
@@ -57,13 +100,26 @@ impl VirtualWs281xDriver {
         }
     }
 
+    /// The GPIO an endpoint id names, without building the endpoint list.
+    ///
+    /// Every entry in that list carries a freshly computed status — several
+    /// registry lookups each — and none of it is wanted here: the id already
+    /// determines the address. Walking the manifest directly answers the same
+    /// question for the cost of a spec string per candidate.
     fn gpio_for_endpoint(
         &self,
         endpoint_id: &HwEndpointId,
     ) -> Result<HwAddress, HardwareEndpointError> {
-        for endpoint in self.endpoints() {
-            if endpoint.id() == endpoint_id {
-                return Ok(endpoint.address().clone());
+        // A board with no timing resource offers no endpoints at all, so no id
+        // can belong to this driver.
+        if !self.timing_addresses.is_empty() {
+            for resource in self.registry.manifest().resources() {
+                if !resource.supports(HwCapability::GpioOutput) {
+                    continue;
+                }
+                if self.endpoint_id(&ws281x_rmt_spec(resource.display_label())) == *endpoint_id {
+                    return Ok(resource.address().clone());
+                }
             }
         }
 
@@ -87,15 +143,7 @@ impl HwDriver for VirtualWs281xDriver {
 impl Ws281xDriver for VirtualWs281xDriver {
     fn endpoints(&self) -> Vec<HwEndpoint> {
         let mut endpoints = Vec::new();
-        let timing_supported = self
-            .registry
-            .ensure_capability(&self.timing_address, HwCapability::Rmt)
-            .is_ok()
-            && self
-                .registry
-                .ensure_capability(&self.timing_address, HwCapability::Ws281xOutput)
-                .is_ok();
-        if !timing_supported {
+        if self.timing_addresses.is_empty() {
             return endpoints;
         }
 
@@ -127,19 +175,33 @@ impl Ws281xDriver for VirtualWs281xDriver {
         let gpio = self.gpio_for_endpoint(endpoint_id)?;
         self.registry
             .ensure_capability(&gpio, HwCapability::GpioOutput)?;
-        self.registry
-            .ensure_capability(&self.timing_address, HwCapability::Rmt)?;
-        self.registry
-            .ensure_capability(&self.timing_address, HwCapability::Ws281xOutput)?;
-        let lease = self.registry.claim_bundle(HwClaim::new(
-            self.driver_id(),
-            vec![gpio, self.timing_address.clone()],
-        ))?;
-        Ok(Box::new(VirtualWs281xOutput::new(
-            Rc::clone(&self.registry),
-            lease,
-            config.byte_count(),
-        )))
+
+        // Try each declared timing resource in turn rather than picking one up
+        // front: `claim_bundle` is atomic, so a GPIO that is already in use
+        // fails on every candidate and its error — which names the contended
+        // address — is the one worth reporting.
+        let mut last_error = None;
+        for timing_address in &self.timing_addresses {
+            let claim = HwClaim::new(self.driver_id(), vec![gpio.clone(), timing_address.clone()]);
+            match self.registry.claim_bundle(claim) {
+                Ok(lease) => {
+                    return Ok(Box::new(VirtualWs281xOutput::new(
+                        Rc::clone(&self.registry),
+                        lease,
+                        config.byte_count(),
+                    )));
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+
+        Err(match last_error {
+            Some(error) => HardwareEndpointError::from(error),
+            None => HardwareEndpointError::EndpointUnavailable {
+                endpoint_id: endpoint_id.clone(),
+                reason: String::from("board declares no WS281x timing resource"),
+            },
+        })
     }
 }
 

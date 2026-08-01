@@ -36,6 +36,7 @@ pub(crate) struct EngineTestBuilder {
     shader_ticks: VecMap<String, Arc<AtomicU32>>,
     fixture_records: VecMap<String, RecordedValue>,
     output_records: VecMap<String, RecordedValue>,
+    selectors: VecMap<String, Arc<AtomicU32>>,
 }
 
 pub(crate) struct EngineTestHarness {
@@ -45,6 +46,7 @@ pub(crate) struct EngineTestHarness {
     shader_ticks: VecMap<String, Arc<AtomicU32>>,
     fixture_records: VecMap<String, RecordedValue>,
     output_records: VecMap<String, RecordedValue>,
+    selectors: VecMap<String, Arc<AtomicU32>>,
 }
 
 pub(crate) struct OutputSpec {
@@ -73,6 +75,7 @@ impl EngineTestBuilder {
             shader_ticks: VecMap::new(),
             fixture_records: VecMap::new(),
             output_records: VecMap::new(),
+            selectors: VecMap::new(),
         }
     }
 
@@ -97,6 +100,23 @@ impl EngineTestBuilder {
         let node = DummyOutputNode::new(default_demand_input_path(), record.clone());
         self.attach_node(label, "output", Box::new(node));
         self.output_records.insert(String::from(label), record);
+        self
+    }
+
+    /// A node that demands one of `targets` (label, slot) depending on the
+    /// returned selector — the playlist's switch mechanism. See
+    /// [`DummySelectorNode`].
+    pub(crate) fn selector(mut self, label: &str, targets: &[(&str, &str)]) -> Self {
+        let record = RecordedValue::new();
+        let selected = Arc::new(AtomicU32::new(0));
+        let resolved: Vec<(NodeId, SlotPath)> = targets
+            .iter()
+            .map(|(target, slot)| (self.node_id(target), path(slot)))
+            .collect();
+        let node = DummySelectorNode::new(resolved, Arc::clone(&selected), record.clone());
+        self.attach_node(label, "selector", Box::new(node));
+        self.output_records.insert(String::from(label), record);
+        self.selectors.insert(String::from(label), selected);
         self
     }
 
@@ -166,6 +186,7 @@ impl EngineTestBuilder {
             shader_ticks: self.shader_ticks,
             fixture_records: self.fixture_records,
             output_records: self.output_records,
+            selectors: self.selectors,
         }
     }
 
@@ -277,6 +298,15 @@ impl EngineTestHarness {
         )
     }
 
+    /// Point a selector node at a different target. Runtime state only — no
+    /// binding or tree change, exactly like a playlist entry switch.
+    pub(crate) fn select(&self, label: &str, index: u32) {
+        self.selectors
+            .get(label)
+            .expect("selector label")
+            .store(index, Ordering::Relaxed);
+    }
+
     pub(crate) fn tick(&mut self, delta_ms: u32) -> Result<(), super::EngineError> {
         self.engine.tick(&self.registry, delta_ms)
     }
@@ -351,6 +381,16 @@ pub(crate) fn produced_slot(label: &str, slot: &str) -> TestBindingSource {
 
 pub(crate) fn bus(channel: &str) -> TestBindingSource {
     TestBindingSource::Bus(channel_name(channel))
+}
+
+/// A standalone producer runtime for tests that swap a node's runtime out
+/// from under its consumers (`reattach_runtime_node`).
+pub(crate) fn dummy_shader_node(slot: SlotPath, value: f32) -> Box<dyn NodeRuntime> {
+    Box::new(DummyShaderNode::new(
+        slot,
+        LpsValueF32::F32(value),
+        Arc::new(AtomicU32::new(0)),
+    ))
 }
 
 pub(crate) fn path(path: &str) -> SlotPath {
@@ -455,7 +495,7 @@ impl DummyFixtureNode {
 impl NodeRuntime for DummyFixtureNode {
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
-            .resolve(QueryKey::ConsumedSlot {
+            .resolve(&QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
                 slot: self.slot.clone(),
             })
@@ -491,11 +531,62 @@ impl DummyOutputNode {
 impl NodeRuntime for DummyOutputNode {
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
-            .resolve(QueryKey::ConsumedSlot {
+            .resolve(&QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
                 slot: self.slot.clone(),
             })
             .map_err(|e| NodeError::msg(format!("output resolve failed: {}", e.message)))?;
+        self.record.record(&pv.as_value().expect("value"));
+        Ok(())
+    }
+
+    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+        Ok(())
+    }
+
+    fn handle_memory_pressure(
+        &mut self,
+        _level: PressureLevel,
+        _ctx: &mut MemPressureCtx<'_>,
+    ) -> Result<(), NodeError> {
+        Ok(())
+    }
+}
+
+/// Demands a *different* producer's slot depending on its own runtime state —
+/// the playlist's mechanism, without a playlist.
+///
+/// A playlist switch changes nothing structural: no binding moves, no node is
+/// added or removed. It just asks for a different child's output than it asked
+/// for last frame. Resolution caching must survive that, so the behaviour has
+/// a pin of its own that does not need the playlist node feature.
+pub(crate) struct DummySelectorNode {
+    targets: Vec<(NodeId, SlotPath)>,
+    selected: Arc<AtomicU32>,
+    record: RecordedValue,
+}
+
+impl DummySelectorNode {
+    fn new(
+        targets: Vec<(NodeId, SlotPath)>,
+        selected: Arc<AtomicU32>,
+        record: RecordedValue,
+    ) -> Self {
+        Self {
+            targets,
+            selected,
+            record,
+        }
+    }
+}
+
+impl NodeRuntime for DummySelectorNode {
+    fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let index = self.selected.load(Ordering::Relaxed) as usize % self.targets.len();
+        let (node, slot) = self.targets[index].clone();
+        let pv = ctx
+            .resolve(&QueryKey::ProducedSlot { node, slot })
+            .map_err(|e| NodeError::msg(format!("selector resolve failed: {}", e.message)))?;
         self.record.record(&pv.as_value().expect("value"));
         Ok(())
     }

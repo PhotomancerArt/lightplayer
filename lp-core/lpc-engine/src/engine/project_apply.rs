@@ -58,7 +58,10 @@ impl Engine {
         changes: &ProjectChangeSummary,
     ) -> Result<RuntimeApplyResult, ProjectLoadError> {
         if changes.is_empty() {
-            self.resolver_mut().clear_frame_cache();
+            // Conservative: an apply that summarized to "nothing changed"
+            // still ran against the registry, and a false negative here
+            // serves stale resolution rather than failing loudly.
+            self.resolver_mut().invalidate_structure();
             self.project_runtime_index_mut()
                 .rebuild_asset_consumers(&registry.inventory().tree);
             return Ok(RuntimeApplyResult::default());
@@ -216,10 +219,10 @@ impl Engine {
         // (dozens of entries) and by construction identical to a fresh load
         // (incremental binding apply, Option C).
         let projected_nodes = ProjectLoader::ensure_runtime_spine(registry, self, frame)?;
-        self.tree_mut().clear_bindings(frame);
+        self.clear_bindings(frame);
         ProjectLoader::register_projected_bindings(registry, self, &projected_nodes, frame)?;
 
-        self.resolver_mut().clear_frame_cache();
+        self.resolver_mut().invalidate_structure();
         Ok(result)
     }
 

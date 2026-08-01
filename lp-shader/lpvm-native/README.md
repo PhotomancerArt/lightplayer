@@ -90,11 +90,16 @@ allocated into the wrong class. That check is deliberately unconditional: a
 wrong-file allocation is not a crash or a bad address, it is a silent bit
 reinterpretation, and there is no cheaper place to catch it.
 
-**No backend has float registers yet.** `RegClass::Float` answers with an empty
-pool on both ISAs, and an empty pool is an `AllocError::OutOfRegisters`, never a
-fallback into the other file. Hardware-float codegen (Xtensa FPU, RV32F) fills
-these in; until then this is *shape without content*, and the Q32 path is
-provably unchanged by it.
+**Xtensa with `float-f32` is the one backend with float registers.** It offers
+15 of the LX7's 16 FRs (`f15` is emitter scratch), all caller-saved. Every other
+configuration answers with an **empty** pool, and an empty pool is an
+`AllocError::OutOfRegisters`, never a fallback into the other file.
+
+Note that **native f32 on rv32 does not change this**: the soft-float path (see
+[Float mode](#float-mode-and-the-float-capability-seam)) keeps every value in
+integer registers, because that is what the soft-float ABI does. So the empty
+float pool remains the right answer for both numeric modes on rv32, and on
+Xtensa built without the feature.
 
 Two subtleties worth keeping straight:
 
@@ -238,10 +243,15 @@ Without it, `lps_builtins_xt_image::is_available()` is false and Xtensa
 consumers skip with a loud note rather than failing — the workspace must build
 and test on a machine with no esp toolchain.
 
-Xtensa shader code shares the image's 112 KiB text region with ~84 KiB of
-builtins, leaving **~28 KiB**. Overflowing it is an explicit error naming the
-budget, never a silent write past the region; the fix would be
-`lp-xt/lps-builtins-xt-app/link.ld`'s split, not the host region size.
+The Xtensa builtins image is **flash-resident firmware**, exactly as on the
+device: `rt_emu/xt_image` places its `.text` in the emulator's modeled IROM
+window and its `.rodata` in DROM, and compiled shader code gets the **whole**
+SRAM code region — 128 KiB on the S3 — with nothing resident in front of it.
+Overflowing that is an explicit error naming the budget, never a silent write
+past the region, and the budget is now the shader's own size rather than
+whatever the builtins left over. (It was the latter until 2026-08-01; see
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`
+for why that was a modeling bug and not a capacity one.)
 
 `isa/xt/` and the `lp-xt-*` crates it builds on contain material derived from
 LLVM under Apache-2.0-WITH-LLVM-exception and carry per-file provenance
@@ -249,6 +259,149 @@ headers — see `docs/adr/2026-07-29-license-provenance-discipline.md` before
 touching them. `isa/xt/imm.rs` is such a file: its per-opcode immediate table
 is derived data, and **the encoder silently truncates**, so every immediate
 must be gated through `is_legal` before it reaches `lp_xt_inst::encode`.
+
+### Float mode and the float-capability seam
+
+The backend compiles a shader in one of two numeric modes
+(`NativeCompileOptions::float_mode`): **Q16.16 fixed point**, where a GLSL
+`float` is an integer and every float op is integer arithmetic, or **native
+f32**, IEEE-754 binary32. Q32 lowering lives in `lower.rs`; f32 lowering lives in
+`lower_f32.rs`, behind the `float-f32` feature.
+
+**"rv32" is not one float story**, and that is what the seam exists for. The
+ESP32-C6 and RP2350's Hazard3 are RV32IMAC with no F extension; the ESP32-S31 and
+ESP32-P4 are RV32IMAFC with a per-core FPU. So float capability is a named
+property of the target, `IsaTarget::f32_lowering`:
+
+| `F32Lowering`     | Meaning                                                              | Who answers it |
+| ----------------- | -------------------------------------------------------------------- | -------------- |
+| `SoftFloatCalls`  | Float ops call the platform soft-float library; values in **integer** registers | `Rv32imac`     |
+| `HardwareFpu`     | Float ops are FP instructions on the float register file              | `Xtensa`, with `float-f32` |
+| `Unsupported`     | `FloatMode::F32` is a compile error naming the target                 | `Xtensa`, without `float-f32` |
+
+**No rv32 target answers `HardwareFpu`.** That is the guarantee that matters
+here: no code path can hand a C6 an `fadd.s` it would trap on. An F-bearing rv32
+part (ESP32-S31, ESP32-P4) is a **new `IsaTarget` variant**, never a flag on
+`Rv32imac` — the variant names the hardware, per the type's own doc comment.
+
+Xtensa answers `Unsupported` rather than `SoftFloatCalls` when the feature is
+off, deliberately: the S3 *has* an FPU, and quietly giving it the slow path would
+hide a misconfigured image behind working output.
+
+**Soft float calls the platform ABI directly, with no wrapper.** `__addsf3`,
+`__ltsf2`, `__floatsisf` and friends are emitted as ordinary `Call` VInsts, the
+same mechanism Q32 uses for its helpers. The symbols already exist in every rv32
+image: on the C6 the linker resolves them to the chip's **ROM** `rvfplib`
+(`esp-rom-sys`'s `esp32c6.rom.rvfp.ld`), costing zero app flash, and in the host
+emulator's builtins image to Rust's `compiler_builtins`. See
+`docs/adr/2026-07-31-soft-float-via-compiler-builtins.md` for why there is no
+LightPlayer layer in between, what the comparison routines' return convention
+means for NaN, and why float→int is the one deliberate exception.
+
+Ops with no soft-float ABI symbol — `sqrt`, `floor`/`ceil`/`trunc`/`nearest`,
+`min`/`max`, the unorm lane conversions — call the native-f32 builtin family
+(`__lp_lpir_*_f32`, in `lps-builtins` behind its own `float-f32`). That is not a
+wrapper; it is the only implementation.
+
+#### Hardware float on Xtensa (M7)
+
+The ESP32-S3's LX7 has a real FPU — 16 float registers, `add.s`/`sub.s`/`mul.s`,
+`madd.s`, FSR flags, and **no** flush-to-zero (denormals are full IEEE). Its
+measured behaviour, including the implementation-defined estimate ROMs, is
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`. The architecture decision
+is `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`.
+
+**The ABI in one paragraph.** Floats live in **FRs inside a function** and cross
+**every** boundary — parameter, call argument, call return, function return — in
+**address registers, as raw IEEE bit patterns**. `wfr` (AR→FR) and `rfr` (FR→AR)
+are explicit `VInst`s that *lowering* emits at those points, so the convention is
+visible in a VInst dump. This was forced rather than chosen: the esp toolchain,
+which compiles `lps-builtins`, passes floats in `a2..a7` and returns them in
+`a2`. **No FR is callee-saved**, so there is no FP callee-save region and the
+frame is unchanged — `FRAME_TOP_RESERVED_BYTES` stays 32 and stays FP-free, and
+float spills sit at the frame's *bottom*, structurally distant from the
+window-overflow reservation at the top. 15 of the 16 FRs are allocatable; `f15`
+is emitter scratch, because a *spilled def* still needs a register to write to
+first.
+
+**Inlined** (one FP instruction each): `fadd` `fsub` `fmul`, `fabs` `fneg`
+`fmov`, the six compares and float select, `itof_s` `itof_u`, float load/store,
+and the `wfr`/`rfr` transfers. **Routed to an `__lp_lpir_*_f32` builtin** via
+`sym_call`: `fdiv` `fsqrt`, `ffloor` `fceil` `ftrunc` `fnearest`, `fmin` `fmax`,
+the saturating float→int conversions, the unorm lane conversions, and every
+transcendental and `lpfn`. The FPU's `recip0.s`/`rsqrt0.s`/`div0.s` estimate
+instructions could inline divide and square root; M7 does not use them, because
+their results are implementation-defined and the builtins are already correct.
+The sequences are characterised in the FP-contract ADR if that changes.
+
+> ⚠️ **`CPENABLE` is the host's job, and this crate does not do it.** Compiled
+> float code contains bare FP instructions and arms nothing. On a core whose
+> `CPENABLE` bit 0 is clear, the **first FP instruction takes `EXCCAUSE=32`**
+> (`Coprocessor0Disabled`). Enabling a coprocessor is a property of the
+> *execution context*, which the host owns — so a host embedding compiled float
+> code must arm it for the context that will run that code.
+>
+> `fw-esp32s3` does this in `board::esp32s3::fpu::arm()` at board init;
+> `rt_emu` does it via `Emulator::with_boot_cpenable`. Arm it with a
+> **read-modify-write**, not a blind store of `1`: the S3 boots with
+> `CPENABLE == 0xff` and a blind store disables coprocessors 1–7.
+>
+> `lp-xt-emu` leaves `CPENABLE` clear by default precisely so a host that
+> forgets faults on the desk instead of on a board —
+> `xt_pipeline_f32.rs::unarmed_float_code_faults_with_a_coprocessor_trap` is the
+> negative control.
+
+#### What `float-f32` gates, and the manifest edits a consumer owes
+
+It gates **modules**, not enum variants: `lower_f32.rs`, `isa/xt/emit_fp.rs`,
+and the Xtensa float register/ABI tables. `VInst`'s float variants stay
+unconditional — `cfg` on variants matched exhaustively across five helper
+functions and a 1129-line ser/de module costs more than it saves, and the size
+check measures the residual rather than anyone guessing at it.
+
+It exists for the measured reason the `isa-*` gates exist: **`FloatMode` is
+matched on a runtime value, so LTO cannot drop the f32 arms.** It is *in*
+`default`, so host builds and tests get it; every firmware crate takes
+`default-features = false`, so a firmware image links none of it unless it says
+so — the same shape as the ISA gates, and the same reason.
+
+**Adding a board that has hardware float means these manifest edits**, and the
+grep in [Multi-ISA seam](#multi-isa-seam) does not find them any more than it
+finds the target-cfg tables:
+
+1. `lp-fw/fw-<board>/Cargo.toml` — a `float-f32` feature whose references are
+   **weak** (`lpvm-native?/float-f32`, `lps-builtins?/float-f32`,
+   `lp-gfx-lpvm?/float-f32`). Weak matters: those deps are optional on firmware
+   crates, and a strong `dep/feat` reference *enables the dependency itself*,
+   dragging the whole JIT stack into builds that deliberately lack it.
+2. `lp-gfx/lp-gfx-lpvm/Cargo.toml` — the app path reaches `lpvm-native` and
+   `lps-builtins` **only** through this crate, so its `float-f32` passthrough is
+   what covers the app; naming the feature in the firmware crate alone covers
+   the harness build and nothing else.
+3. `lps-builtins` must get `float-f32` too, or the `__lp_lpir_*_f32` family the
+   routed ops call is simply absent and resolution fails.
+4. Add a **gate-off** lint pass. `float-f32` in `default` means every ordinary
+   build compiles the on-arms and none compiles the off-arms — see
+   `just clippy-fw-esp32s3`'s explicit `--no-default-features` pass, which
+   exists for exactly this reason.
+
+Then re-run **both** size checks. The ESP32-C6 delta must be **zero** — it names
+the feature nowhere and is the negative control that proves the gate holds. It
+was 2,874,560 B before and after M7 (P5). The S3 paid +65,680 B for hardware
+float, against 4.4 MB of headroom.
+
+The two device configurations that turn it on today: `fw-esp32c6`'s
+`test_f32_softfloat` harness (soft float, no FPU) and **`fw-esp32s3`, in
+`default`** (hardware FPU).
+
+**Import resolution is mode-aware, and must stay that way.** `@glsl::sin` in f32
+mode resolves to `LpGlslSinF32`, never to the Q32 twin. Getting this wrong does
+not produce a type error: a builtin taking a vector receives an `IrType::Pointer`
+whose signature is `i32` in *both* modes, so a Q32 builtin will happily
+reinterpret f32 bit patterns as Q16.16 and return plausible wrong colors. The
+wasm backend shipped that bug (M1 corpus findings §3); the resolvers in
+`lps-builtin-ids` never fall back across modes, so an unmapped name surfaces as a
+named "unknown builtin symbol" relocation failure instead.
 
 ### Fuel Metering
 
@@ -323,11 +476,21 @@ cargo test -p lpvm-native --features emu
 
 ## Features
 
-| Feature   | Description                                         |
-| --------- | --------------------------------------------------- |
-| `default` | Core `no_std` + alloc functionality                 |
-| `debug`   | Debug info generation (increases binary size)       |
-| `emu`     | Host emulation with `lp-riscv-emu` (requires `std`) |
+Every backend and numeric mode is a feature, and firmware pays only for what it
+names — see [Multi-ISA seam](#multi-isa-seam) and
+[Float mode](#float-mode-and-the-float-capability-seam) for the measured reasons
+(+26,448 B for an unused ISA; +65,680 B for hardware float).
+
+| Feature     | Description                                                                        |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `default`   | `isa-rv32`, `isa-xt`, `float-f32` — everything, for host builds and tests           |
+| `isa-rv32`  | RV32 backend (ESP32-C6): `isa/rv32`, emitter, encoder                               |
+| `isa-xt`    | Xtensa backend (ESP32-S3 / classic ESP32): `isa/xt`, emitter, immediate tables      |
+| `float-f32` | Native-f32 lowering, the Xtensa FP emitter and float register tables                |
+| `xt-corpus` | The Xtensa hardware-risk corpus, shared by the S3 JIT harness and the host goldens  |
+| `debug`     | Debug info generation (increases binary size)                                       |
+| `emu`       | Host emulation with `lp-riscv-emu` (requires `std`; implies `float-f32`)             |
+| `emu-xt`    | Additionally run Xtensa code in `lp-xt-emu` (additive on `emu`; needs the builtins image) |
 
 ## Validation
 

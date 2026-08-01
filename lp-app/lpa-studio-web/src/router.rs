@@ -86,6 +86,13 @@ pub(crate) enum StudioRoute {
     /// The standalone 2D mapping editor (project-free; edits
     /// `.map2d.json` documents with localStorage autosave).
     MappingEditor,
+    /// The public boards catalog (project-free, renders the checked-in
+    /// board display metadata). `board` deep-links one board's detail view
+    /// (`vendor/product`).
+    Boards { board: Option<String> },
+    /// The standalone board display-def editor (project-free; edits
+    /// `.display.json` sidecars with localStorage autosave).
+    BoardEditor,
 }
 
 #[cfg_attr(
@@ -119,6 +126,16 @@ impl StudioRoute {
                 _ => StudioRoute::Home,
             },
             Some("mapping") if segments.next().is_none() => StudioRoute::MappingEditor,
+            Some("boards") => {
+                let rest: Vec<&str> = segments.collect();
+                if rest == ["edit"] {
+                    StudioRoute::BoardEditor
+                } else {
+                    StudioRoute::Boards {
+                        board: (rest.len() == 2).then(|| rest.join("/")),
+                    }
+                }
+            }
             Some("stories") => {
                 let rest: Vec<&str> = segments.collect();
                 StudioRoute::Stories {
@@ -139,6 +156,9 @@ impl StudioRoute {
             StudioRoute::Stories { story_id: None } => "#/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("#/stories/{id}"),
             StudioRoute::MappingEditor => "#/mapping".to_string(),
+            StudioRoute::Boards { board: None } => "#/boards".to_string(),
+            StudioRoute::Boards { board: Some(board) } => format!("#/boards/{board}"),
+            StudioRoute::BoardEditor => "#/boards/edit".to_string(),
         }
     }
 
@@ -370,6 +390,11 @@ mod tests {
                 story_id: Some("base/detail-popover/open-sections".to_string()),
             },
             StudioRoute::MappingEditor,
+            StudioRoute::Boards { board: None },
+            StudioRoute::Boards {
+                board: Some("domraem/dom-z-102".to_string()),
+            },
+            StudioRoute::BoardEditor,
         ];
         for route in routes {
             assert_eq!(StudioRoute::parse(&route.hash()), route, "{route:?}");
@@ -402,6 +427,21 @@ mod tests {
             StudioRoute::Home
         );
         assert_eq!(StudioRoute::parse("#/project/prj_abc"), StudioRoute::Home);
+    }
+
+    #[test]
+    fn boards_edit_is_the_editor_not_a_board_id() {
+        assert_eq!(
+            StudioRoute::parse("#/boards/edit"),
+            StudioRoute::BoardEditor
+        );
+        // A two-segment id still reads as a board detail deep link.
+        assert_eq!(
+            StudioRoute::parse("#/boards/vendor/edit"),
+            StudioRoute::Boards {
+                board: Some("vendor/edit".to_string())
+            }
+        );
     }
 
     #[test]

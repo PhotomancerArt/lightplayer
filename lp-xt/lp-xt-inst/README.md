@@ -1,7 +1,7 @@
 # lp-xt-inst
 
 Xtensa (ESP32-S3, LX7) instruction model, encoder, decoder, and disassembler for
-the integer subset lightplayer's backend emits and its fixtures exercise. Mirrors
+the subset lightplayer's backend emits and its fixtures exercise. Mirrors
 `lp-riscv-inst`'s role: every other layer (emulator decode, emitter encode,
 disassembly in traces and tests) sits on this crate.
 
@@ -20,6 +20,25 @@ disassembly in traces and tests) sits on this crate.
   (`memw`/`extw`/`isync`/`rsync`/`esync`/`dsync`/`nop`/`ill`), and the narrow
   16-bit density forms (`add.n`/`addi.n`/`mov.n`/`movi.n`/`l32i.n`/`s32i.n`/
   `ret.n`/`retw.n`/`nop.n`/`ill.n`/`beqz.n`/`bnez.n`).
+- **Floating point** (`FReg` = `f0..f15`, a separate type from `Reg` — the FR
+  file is flat where the AR file is windowed, and mixing them up is the mistake
+  worth making impossible): arithmetic (`add.s`/`sub.s`/`mul.s`/`madd.s`/
+  `msub.s`/`maddn.s`/`divn.s`), unary and transfer (`mov.s`/`abs.s`/`neg.s`/
+  `const.s`/`rfr`/`wfr`), the divide/sqrt helper family (`div0.s`/`recip0.s`/
+  `sqrt0.s`/`rsqrt0.s`/`nexp01.s`/`mksadj.s`/`mkdadj.s`/`addexp.s`/
+  `addexpm.s`), compares
+  (`oeq.s`/`olt.s`/`ole.s`/`ueq.s`/`ult.s`/`ule.s`/`un.s`), conditional moves
+  (`moveqz.s`/`movnez.s`/`movltz.s`/`movgez.s`/`movf.s`/`movt.s`), conversions
+  (`round.s`/`trunc.s`/`floor.s`/`ceil.s`/`utrunc.s`/`float.s`/`ufloat.s`), and
+  load/store (`lsi`/`ssi`/`lsip`/`ssip`/`lsx`/`ssx`/`lsxp`/`ssxp`).
+- **Boolean registers** (`BReg` = `b0..b15`): `bt`/`bf` and `movt`/`movf`. FP
+  compares write here, not to an AR, so without them a compare result cannot be
+  read back at all.
+- **Special / user registers, narrowly**: `rsr`/`wsr`/`xsr` for `BR` and
+  `CPENABLE`, `rur`/`wur` for `FCR` and `FSR`. Deliberately not a general SR
+  model — see `src/sr.rs` for which four registers earn their place and why.
+  The normative FP subset table, with what is and is not silicon-verified, is
+  the module doc of `src/fp.rs`.
 - **Variable-length decode**: `decode(&[u8]) -> (Inst, len)`. Length (2 or 3 bytes)
   comes from the density rule on the first byte *before* opcode recognition, so an
   unsupported opcode still reports the right length to advance by.
@@ -29,30 +48,48 @@ disassembly in traces and tests) sits on this crate.
   `l32r`/branch/call targets resolved to absolute addresses.
 
 Out of scope (reported as `DecodeError::Unsupported`, never silently skipped):
-FPU (`*.s`), ESP32-S3 DSP (`ee.*`), system/privileged (`rsr`/`wsr`/`rsil`/TLB),
-atomics (`s32c1i`/`s32ri`/`l32ai`), boolean (`xorb`/`andb`), windowed spill
-(`l32e`/`s32e`), and loop instructions.
+ESP32-S3 DSP (`ee.*`), every special register outside the four named above
+(`rsil`/TLB/`PS`/`SAR`/…), atomics (`s32c1i`/`s32ri`/`l32ai`), the boolean
+*logic* ops (`xorb`/`andb`/`orb`/`all4`/`any8`/…), windowed spill
+(`l32e`/`s32e`), loop instructions, and double precision (not on this chip).
 
 ## Testing
 
 ```bash
 cargo test -p lp-xt-inst
-# Differential disassembler conformance rig over any Xtensa ELF, e.g. the
-# experiment repo's spike ELF (2026-esp32s3-experiment):
+# Differential disassembler conformance rig over any Xtensa ELF:
+lp-xt/fixtures/build.sh && lp-xt/fixtures/fp/build.sh
 cargo run -p lp-xt-inst --features objdiff --bin objdiff -- \
-    <path-to>/xtensa-esp32s3-none-elf/release/spike-esp32s3
+    lp-xt/fixtures/fp/obj/fp_subset.elf
 ```
 
 The `objdiff` rig disassembles the entire `.text` of an ELF with this crate and
 diffs it against `xtensa-esp32s3-elf-objdump -d`. Every instruction is either
 matched (mnemonic + operand values, resolving hex/decimal/target formatting) or
-placed on a printed, counted UNSUPPORTED allowlist. Over the spike ELF it reports
-**10969 / 10969 supported instructions matched, 0 mismatches** (329 unsupported,
-all genuinely out-of-scope). The objdump binary defaults to the espup toolchain
-path and can be overridden with `$XT_OBJDUMP` or a second CLI argument.
+placed on a printed, counted UNSUPPORTED allowlist. The objdump binary defaults
+to the espup toolchain path and can be overridden with `$XT_OBJDUMP` or a second
+CLI argument.
+
+Scores, all with **zero mismatches**:
+
+| ELF | matched | unsupported |
+|---|---|---|
+| `fixtures/fp/obj/fp_subset.elf` — the whole FP/Boolean/SR subset | 136 | 0 |
+| the 14 `fixtures/elf/*.elf` Rust corpus binaries, summed | 26,063 | 346 |
+| the experiment repo's spike ELF (2026-esp32s3-experiment) | 10,969 | 329 → see note |
+
+The corpus figure is the one to trend: adding FP/Boolean/SR decode moved it from
+**26,010 matched / 399 unsupported** to **26,063 / 346**, measured on the same
+fourteen ELFs. Those 53 instructions are not real FP code — the fixtures are
+integer-only by rule — they are literal-pool words that objdump disassembles as
+garbage `ule.s` / `moveqz.s` / `lsx`, which this crate now agrees with byte for
+byte instead of refusing. The spike figure predates the FP work and will move the
+same way when someone re-runs it.
 
 Golden vectors GV1–GV3b (from the spike, `FINDINGS.md`) are decode/encode unit
-tests in `tests/golden_vectors.rs`.
+tests in `tests/golden_vectors.rs`; the FP/Boolean/SR goldens are in
+`tests/fp_golden_vectors.rs`, derived by the procedure written down in
+`lp-xt/fixtures/fp/README.md`.
 
 ## Provenance
 

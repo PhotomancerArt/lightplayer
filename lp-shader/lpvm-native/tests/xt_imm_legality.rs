@@ -124,6 +124,11 @@ fn pinned_ranges_match_assembler_probes() {
             &[-524288, 0, 4, 524284],
             &[-524292, -2, 2, 524288],
         ),
+        (
+            ImmOp::FpLsiOffset,
+            &[0, 4, 1020],
+            &[-4, 1, 2, 1021, 1024, 4096],
+        ),
     ];
     for &(op, legal, illegal) in cases {
         for &v in legal {
@@ -333,6 +338,50 @@ fn fallbacks_are_the_documented_lowerings() {
     assert_eq!(fallback(ImmOp::SextBit), Fallback::OtherOpcode); // slli+srai
     assert_eq!(fallback(ImmOp::BranchB4Const), Fallback::ConstThenReg);
     assert_eq!(fallback(ImmOp::BranchB4Constu), Fallback::ConstThenReg);
+    assert_eq!(fallback(ImmOp::FpLsiOffset), Fallback::AddressScratch);
+}
+
+/// The float spill offset is the second silent-corruption hazard in the frame
+/// story, after the window-overflow one — and unlike that one it has no
+/// hardware alibi: `lp_xt_inst`'s encoder computes `lsi`/`ssi`'s field as
+/// `(offset / 4) & 0xff` with **no range check**.
+///
+/// A float spill slot at byte offset 1024 therefore encodes as field 0 and
+/// addresses `[base + 0]`: a valid address holding some other live value.
+/// Nothing downstream can tell that apart from a correct spill — no fault, no
+/// misalignment, just a wrong number. `is_legal(FpLsiOffset, …)` is the gate
+/// that has to catch it before the encoder sees it, so the aliasing is pinned
+/// here rather than assumed.
+#[test]
+fn out_of_range_float_spill_offsets_alias_and_must_be_rejected() {
+    use lp_xt_inst::fp::{FReg, FpLsiOp};
+
+    let f = FReg::new(1);
+    for (bad, aliases_to) in [(1024u32, 0u32), (1028, 4), (2044, 1020)] {
+        assert!(
+            !is_legal(ImmOp::FpLsiOffset, bad as i32),
+            "{bad} must be rejected before it reaches the encoder"
+        );
+        assert_eq!(
+            roundtrip(Inst::FpLsi(FpLsiOp::Ssi, f, r(1), bad)),
+            Inst::FpLsi(FpLsiOp::Ssi, f, r(1), aliases_to),
+            "ssi offset {bad} silently became {aliases_to}"
+        );
+    }
+    // Sub-word offsets floor rather than fault, the same way `l32i`'s do.
+    assert!(!is_legal(ImmOp::FpLsiOffset, 1021));
+    assert_eq!(
+        roundtrip(Inst::FpLsi(FpLsiOp::Lsi, f, r(1), 1021)),
+        Inst::FpLsi(FpLsiOp::Lsi, f, r(1), 1020)
+    );
+
+    // The whole legal range does round-trip exactly, so the gate is not
+    // over-tight either.
+    for off in (0..=1020u32).step_by(4) {
+        assert!(is_legal(ImmOp::FpLsiOffset, off as i32));
+        let inst = Inst::FpLsi(FpLsiOp::Lsi, f, r(2), off);
+        assert_eq!(roundtrip(inst), inst, "lsi offset {off}");
+    }
 }
 
 /// PC-relative bases are declared correctly for every displacement entry.

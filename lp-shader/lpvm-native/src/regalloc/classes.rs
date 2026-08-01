@@ -18,10 +18,23 @@
 //! decision instead of re-deriving it, which is why the allocator never has to
 //! know which float mode it is running under.
 //!
-//! Every instruction the backend emits today is integer, so every operand is
-//! [`RegClass::Int`] — including every `f32` in a Q32 shader, which is the
-//! correct answer and not a placeholder. The float arms arrive with the float
-//! VInsts.
+//! Every integer instruction the backend emits answers [`RegClass::Int`] for
+//! every operand — including every `f32` in a Q32 shader, which is the correct
+//! answer and not a placeholder. Only the hardware-float `VInst`s introduced by
+//! M7 (`FAluRRR`, `Wfr`, …) put anything in [`RegClass::Float`], and only some
+//! of *their* operands: the transfers and the comparison are deliberately
+//! mixed-class, because that is what the calling convention is made of.
+//!
+//! # `Call` is Int-only, on purpose
+//!
+//! There are no float arms for [`VInst::Call`] or [`VInst::Ret`], and that is a
+//! decision rather than an omission (M7 D1/D2). Float values travel across
+//! every call and return boundary in **address registers**, as raw IEEE bit
+//! patterns, because the toolchain that compiles the float builtins we call
+//! does exactly that. Lowering inserts explicit [`VInst::Rfr`]/[`VInst::Wfr`]
+//! transfers at those four boundaries, so by the time a `Call` is built its
+//! operands really are integers, and the ABI is legible in the VInst dump
+//! rather than implied by a table here.
 
 use alloc::vec::Vec;
 
@@ -33,14 +46,104 @@ use crate::vinst::{VInst, VReg};
 /// `def_idx` counts defs in [`VInst::for_each_def`] order. It is a parameter
 /// rather than an instruction-wide answer because a single call can return
 /// values of mixed class once float returns exist.
+#[cfg(feature = "float-f32")]
+pub fn def_class(inst: &VInst, def_idx: usize) -> RegClass {
+    let _ = def_idx;
+    match inst {
+        // The float file is where the value lands.
+        VInst::FAluRRR { .. }
+        | VInst::FAluRR { .. }
+        | VInst::FSelect { .. }
+        | VInst::FLoad32 { .. }
+        | VInst::IToF { .. }
+        // `Wfr` is the AR → FR half of the boundary transfer: its *result* is
+        // the float.
+        | VInst::Wfr { .. } => RegClass::Float,
+
+        // `Fcmp` yields an ordinary 0/1 integer, so its consumers (`BrIf`,
+        // `Select`, integer arithmetic) need no float awareness at all. On
+        // Xtensa the comparison writes a Boolean register and the emitter
+        // materializes the 0/1 into an AR inside the same sequence (M7 D5).
+        VInst::Fcmp { .. }
+        // `Rfr` is the FR → AR half: its result is the integer bit pattern.
+        | VInst::Rfr { .. } => RegClass::Int,
+
+        _ => RegClass::Int,
+    }
+}
+
+/// Register class the `use_idx`-th operand of `inst` must be supplied in.
+///
+/// `use_idx` counts uses in [`VInst::for_each_use`] order — the same order
+/// [`VInst::for_each_use`] visits them, which is why the mixed-class
+/// instructions below index on it rather than answering instruction-wide.
+#[cfg(feature = "float-f32")]
+pub fn use_class(inst: &VInst, use_idx: usize) -> RegClass {
+    match inst {
+        // Both operands come out of the float file.
+        VInst::FAluRRR { .. } | VInst::Fcmp { .. } => RegClass::Float,
+        VInst::FAluRR { .. } => RegClass::Float,
+
+        // `cond` is an integer 0/1 (typically an `Fcmp` or `Icmp` result); the
+        // two candidate values are floats. Use order is (cond, if_true,
+        // if_false).
+        VInst::FSelect { .. } => {
+            if use_idx == 0 {
+                RegClass::Int
+            } else {
+                RegClass::Float
+            }
+        }
+
+        // Addresses are always integers; only the loaded/stored value is float.
+        // Use order for `FStore32` is (src, base).
+        VInst::FLoad32 { .. } => RegClass::Int,
+        VInst::FStore32 { .. } => {
+            if use_idx == 0 {
+                RegClass::Float
+            } else {
+                RegClass::Int
+            }
+        }
+
+        // The boundary transfers, each reading the file the other one writes.
+        // Claiming the wrong one here is the exact silent bit-reinterpretation
+        // `verify::verify_operand_classes` was built to catch.
+        VInst::Wfr { .. } => RegClass::Int,
+        VInst::Rfr { .. } => RegClass::Float,
+
+        // Integer → float conversion reads an integer.
+        VInst::IToF { .. } => RegClass::Int,
+
+        _ => RegClass::Int,
+    }
+}
+
+/// Without `float-f32` there is no float lowering linked, so no float `VInst`
+/// can be constructed and the answer is [`RegClass::Int`] for every operand of
+/// every instruction — **as a constant, not as a match that happens to return
+/// one every time**.
+///
+/// That distinction is the whole reason these two functions are gated rather
+/// than left as one implementation. A constant lets the optimizer delete the
+/// call, then [`VRegClasses`]'s table, then the per-class pool machinery that
+/// consumes it. A match over `&VInst` does not: LLVM cannot prove the float
+/// arms are unreachable, so the class-aware allocator becomes live code in a
+/// Fixed-only image. **Measured: +496 B on the ESP32-C6 image** when these were
+/// left ungated.
+///
+/// This is the same shape as [`crate::lower::builtin_mode`]'s gate, and it is
+/// the second time on this roadmap that a *runtime-valued* query in a
+/// gated-feature's shared path defeated the gate. Any new "which class / which
+/// mode" query on this path needs the same treatment.
+#[cfg(not(feature = "float-f32"))]
 pub fn def_class(inst: &VInst, def_idx: usize) -> RegClass {
     let _ = (inst, def_idx);
     RegClass::Int
 }
 
-/// Register class the `use_idx`-th operand of `inst` must be supplied in.
-///
-/// `use_idx` counts uses in [`VInst::for_each_use`] order.
+/// See [`def_class`]'s note — same gate, same measured reason.
+#[cfg(not(feature = "float-f32"))]
 pub fn use_class(inst: &VInst, use_idx: usize) -> RegClass {
     let _ = (inst, use_idx);
     RegClass::Int
@@ -200,5 +303,233 @@ mod tests {
         let classes = VRegClasses::compute(&insts, &[], &abi_fixtures::void_func_abi());
         assert_eq!(def_class(&insts[1], 0), classes.of(VReg(1)));
         assert_eq!(use_class(&insts[1], 0), classes.of(VReg(0)));
+    }
+
+    // ── The float class map ──────────────────────────────────────────────────
+    //
+    // These are the phase's real assertions. Nothing constructs a float `VInst`
+    // yet, so a wrong entry here would be invisible until the emitter read a
+    // float out of an address register — silently, as a plausible wrong number.
+
+    use crate::vinst::{FAluOp, FAluRROp, FcmpCond};
+
+    const V: [VReg; 4] = [VReg(0), VReg(1), VReg(2), VReg(3)];
+
+    /// Assert the full operand-class signature of one instruction: the classes
+    /// of its defs, then of its uses, in `for_each_def` / `for_each_use` order.
+    fn assert_signature(inst: &VInst, defs: &[RegClass], uses: &[RegClass]) {
+        let mut n_defs = 0usize;
+        inst.for_each_def(&[], |_| n_defs += 1);
+        let mut n_uses = 0usize;
+        inst.for_each_use(&[], |_| n_uses += 1);
+        assert_eq!(n_defs, defs.len(), "{inst:?}: def count");
+        assert_eq!(n_uses, uses.len(), "{inst:?}: use count");
+        for (i, want) in defs.iter().enumerate() {
+            assert_eq!(def_class(inst, i), *want, "{inst:?}: def {i}");
+        }
+        for (i, want) in uses.iter().enumerate() {
+            assert_eq!(use_class(inst, i), *want, "{inst:?}: use {i}");
+        }
+    }
+
+    const F: RegClass = RegClass::Float;
+    const I: RegClass = RegClass::Int;
+
+    /// Arithmetic is float all the way through.
+    #[test]
+    fn float_arithmetic_is_float_in_every_operand() {
+        assert_signature(
+            &VInst::FAluRRR {
+                op: FAluOp::Add,
+                dst: V[0],
+                src1: V[1],
+                src2: V[2],
+                src_op: SRC_OP_NONE,
+            },
+            &[F],
+            &[F, F],
+        );
+        assert_signature(
+            &VInst::FAluRR {
+                op: FAluRROp::Abs,
+                dst: V[0],
+                src: V[1],
+                src_op: SRC_OP_NONE,
+            },
+            &[F],
+            &[F],
+        );
+    }
+
+    /// A compare reads floats and writes an **integer** 0/1. That asymmetry is
+    /// what lets `BrIf`, `Select` and integer arithmetic consume a float
+    /// comparison with no float awareness of their own.
+    #[test]
+    fn compare_reads_float_and_writes_int() {
+        assert_signature(
+            &VInst::Fcmp {
+                dst: V[0],
+                lhs: V[1],
+                rhs: V[2],
+                cond: FcmpCond::Lt,
+                src_op: SRC_OP_NONE,
+            },
+            &[I],
+            &[F, F],
+        );
+    }
+
+    /// `FSelect`'s condition is an integer and its two candidates are floats —
+    /// the one instruction where a use-index off-by-one swaps register files.
+    #[test]
+    fn fselect_mixes_an_int_condition_with_float_values() {
+        assert_signature(
+            &VInst::FSelect {
+                dst: V[0],
+                cond: V[1],
+                if_true: V[2],
+                if_false: V[3],
+                src_op: SRC_OP_NONE,
+            },
+            &[F],
+            &[I, F, F],
+        );
+    }
+
+    /// Addresses are integers; only the value crosses into the float file.
+    #[test]
+    fn float_memory_ops_keep_the_address_integer() {
+        assert_signature(
+            &VInst::FLoad32 {
+                dst: V[0],
+                base: V[1],
+                offset: 0,
+                src_op: SRC_OP_NONE,
+            },
+            &[F],
+            &[I],
+        );
+        assert_signature(
+            &VInst::FStore32 {
+                src: V[0],
+                base: V[1],
+                offset: 0,
+                src_op: SRC_OP_NONE,
+            },
+            &[],
+            &[F, I],
+        );
+    }
+
+    /// The boundary transfers, each reading one file and writing the other.
+    /// A `Wfr` whose source was claimed Float would be a silent
+    /// bit-reinterpretation: the allocator would hand it an FR, the emitter
+    /// would read an FR, and an address register holding an IEEE pattern would
+    /// never make it into the float file at all.
+    #[test]
+    fn transfers_cross_the_two_register_files() {
+        assert_signature(
+            &VInst::Wfr {
+                dst: V[0],
+                src: V[1],
+                src_op: SRC_OP_NONE,
+            },
+            &[F],
+            &[I],
+        );
+        assert_signature(
+            &VInst::Rfr {
+                dst: V[0],
+                src: V[1],
+                src_op: SRC_OP_NONE,
+            },
+            &[I],
+            &[F],
+        );
+    }
+
+    /// Conversion, not transfer: reads an integer *value*, writes a float.
+    #[test]
+    fn int_to_float_reads_an_integer() {
+        for signed in [true, false] {
+            assert_signature(
+                &VInst::IToF {
+                    dst: V[0],
+                    src: V[1],
+                    signed,
+                    src_op: SRC_OP_NONE,
+                },
+                &[F],
+                &[I],
+            );
+        }
+    }
+
+    /// `Call` and `Ret` have no float operands *by design* (M7 D1/D2): float
+    /// values cross those boundaries in address registers, and lowering emits
+    /// explicit `Rfr`/`Wfr` transfers to put them there. If this ever answers
+    /// Float, the calling convention changed and `lpir_call_arg_target`'s
+    /// float arm — which returns `None` — starts rejecting real code.
+    #[test]
+    fn calls_and_returns_carry_no_float_operands() {
+        use crate::vinst::{SymbolId, VRegSlice};
+        let pool = vec![VReg(0), VReg(1), VReg(2)];
+        let call = VInst::Call {
+            target: SymbolId(0),
+            args: VRegSlice { start: 0, count: 2 },
+            rets: VRegSlice { start: 2, count: 1 },
+            callee_uses_sret: false,
+            caller_passes_sret_ptr: false,
+            caller_sret_vm_abi_swap: false,
+            src_op: SRC_OP_NONE,
+        };
+        assert_eq!(def_class(&call, 0), I);
+        for i in 0..2 {
+            assert_eq!(use_class(&call, i), I);
+        }
+        let _ = &pool;
+
+        let ret = VInst::Ret {
+            vals: VRegSlice { start: 0, count: 2 },
+            src_op: SRC_OP_NONE,
+        };
+        for i in 0..2 {
+            assert_eq!(use_class(&ret, i), I);
+        }
+    }
+
+    /// Class derivation over a mixed stream: the float defs land in the table,
+    /// the integer ones stay implicit.
+    #[test]
+    fn a_mixed_function_records_only_its_float_vregs() {
+        let insts = vec![
+            VInst::IConst32 {
+                dst: VReg(0),
+                val: 0x3f80_0000u32 as i32,
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Wfr {
+                dst: VReg(1),
+                src: VReg(0),
+                src_op: SRC_OP_NONE,
+            },
+            VInst::FAluRRR {
+                op: FAluOp::Mul,
+                dst: VReg(2),
+                src1: VReg(1),
+                src2: VReg(1),
+                src_op: SRC_OP_NONE,
+            },
+            VInst::Rfr {
+                dst: VReg(3),
+                src: VReg(2),
+                src_op: SRC_OP_NONE,
+            },
+        ];
+        let classes = VRegClasses::compute(&insts, &[], &abi_fixtures::void_func_abi());
+        assert_eq!(classes.of(VReg(0)), I, "the raw bit pattern is an integer");
+        assert_eq!(classes.of(VReg(1)), F);
+        assert_eq!(classes.of(VReg(2)), F);
+        assert_eq!(classes.of(VReg(3)), I, "back out to an address register");
     }
 }

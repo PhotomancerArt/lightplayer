@@ -1,17 +1,16 @@
 //! [`LpvmInstance`] for direct JIT calls (register args only; see `invoke_flat` limits).
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
     CallError, DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpvmBuffer, LpvmInstance,
-    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, decode_q32_return,
-    encode_global_write, encode_uniform_write, encode_uniform_write_q32,
-    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
-    validate_compute_tick_sig,
+    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, decode_return_to_f32,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32, flat_words_from_f32_args,
+    float_lane_abi, global_data_span, glsl_component_count, validate_compute_tick_sig,
 };
 
 use crate::error::NativeError;
@@ -373,6 +372,90 @@ impl NativeJitInstance {
         }
         Ok(bytes)
     }
+
+    /// Invoke a function compiled in [`FloatMode::F32`], passing and returning
+    /// **raw IEEE-754 bit patterns**, one word per scalar component.
+    ///
+    /// The on-device mirror of
+    /// [`NativeEmuInstance::call_f32_words`](crate::rt_emu::NativeEmuInstance::call_f32_words),
+    /// deliberately identical in shape so the shared `xt_corpus` reaches the
+    /// emulator and the silicon through the same call. In F32 mode a word *is*
+    /// the value's bit pattern (M7 D1: floats cross every call boundary in
+    /// address registers), so there is nothing to convert in either direction.
+    ///
+    /// Separate from [`LpvmInstance::call_q32`] rather than a relaxed guard on
+    /// it, for the reason the emulator side gives: the two modes disagree about
+    /// what a word *means*, and a Q32 caller handed F32 words gets plausible
+    /// garbage (`1.0f32` reads as `1065353216` in Q16.16, roughly 16257.0). The
+    /// mode check is a hard error on both sides so a mismatch is a message and
+    /// not a wrong pixel.
+    ///
+    /// **`CPENABLE` must already be armed** for the calling context or the
+    /// first FP instruction takes `EXCCAUSE=32` — see
+    /// `fw-esp32s3`'s `board::esp32s3::fpu` (M7 D6). This crate documents the
+    /// requirement and does not implement it: enabling a coprocessor is a
+    /// property of the execution context, which the firmware owns.
+    pub fn call_f32_words(&mut self, name: &str, args: &[u32]) -> Result<Vec<u32>, NativeError> {
+        self.reset_globals();
+
+        if self.module.inner.options.float_mode != FloatMode::F32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeJitInstance::call_f32_words requires FloatMode::F32",
+            ))));
+        }
+
+        let gfn = self
+            .module
+            .inner
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .cloned()
+            .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
+
+        for p in &gfn.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(NativeError::Call(CallError::Unsupported(String::from(
+                    "out/inout parameters are not supported for direct calling.",
+                ))));
+            }
+        }
+
+        let entry_info = self
+            .module
+            .inner
+            .entry_info
+            .get(name)
+            .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
+        let param_count = entry_info.arg_count;
+
+        let expected_words: usize = gfn
+            .parameters
+            .iter()
+            .map(|p| glsl_component_count(&p.ty))
+            .sum();
+        if args.len() != expected_words {
+            return Err(NativeError::Call(CallError::Arity {
+                expected: expected_words,
+                got: args.len(),
+            }));
+        }
+        if args.len() != param_count {
+            return Err(NativeError::Call(CallError::Unsupported(format!(
+                "flattened argument count {} does not match IR param_count {}",
+                args.len(),
+                param_count
+            ))));
+        }
+
+        let flat: Vec<i32> = args.iter().map(|&w| w as i32).collect();
+        let words = self.invoke_flat(name, &flat)?;
+        if gfn.return_type == LpsType::Void {
+            return Ok(Vec::new());
+        }
+        Ok(words.into_iter().map(|w| w as u32).collect())
+    }
 }
 
 fn pack_regs_direct(words: &[i32]) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
@@ -418,11 +501,7 @@ impl LpvmInstance for NativeJitInstance {
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         // Reset globals before each call to ensure fresh state
         self.reset_globals();
-        if self.module.inner.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeJitInstance::call requires FloatMode::Q32",
-            ))));
-        }
+        let lane_abi = float_lane_abi(self.module.inner.options.float_mode);
 
         let gfn = self
             .module
@@ -442,12 +521,6 @@ impl LpvmInstance for NativeJitInstance {
             }
         }
 
-        if gfn.return_type == LpsType::Void {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "void return is not represented as LpsValue; use a typed return",
-            ))));
-        }
-
         if gfn.parameters.len() != args.len() {
             return Err(NativeError::Call(CallError::Arity {
                 expected: gfn.parameters.len(),
@@ -455,7 +528,7 @@ impl LpvmInstance for NativeJitInstance {
             }));
         }
 
-        let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
+        let flat = flat_words_from_f32_args(&gfn.parameters, args, lane_abi)?;
         let entry_info = self
             .module
             .inner
@@ -472,9 +545,7 @@ impl LpvmInstance for NativeJitInstance {
         }
 
         let words = self.invoke_flat(name, &flat)?;
-        let gq = decode_q32_return(&gfn.return_type, &words)?;
-        q32_to_lps_value_f32(&gfn.return_type, gq)
-            .map_err(|e| NativeError::Call(CallError::TypeMismatch(e.to_string())))
+        Ok(decode_return_to_f32(&gfn.return_type, &words, lane_abi)?)
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {

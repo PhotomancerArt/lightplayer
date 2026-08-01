@@ -1,10 +1,22 @@
 # ADR: Host-shared guest memory for the Xtensa emulator
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-08-01 — the address changed, the decision did not)
 - **Date:** 2026-07-30
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+
+> **Amendment, 2026-08-01.** `SHARED_DBUS_BASE` is now **`0x3000_0000`**, not
+> `0x3F40_0000`. This ADR's own reasoning predicted it: "the assertion, not the
+> address, is the decision that matters. A comment claiming an address is free
+> rots the moment a profile changes." Both profiles gained modeled flash windows
+> and `0x3F40_0000` turned out to *be* classic's DROM base (esp-hal
+> `ld/esp32/memory.x`, `drom_seg`). The `add_shared` assertion failed at the
+> moment of the mistake, exactly as designed. The replacement is chosen on
+> stronger ground than "no profile maps it": `0x3000_0000` is below the lowest
+> address either chip's data bus decodes, so no future profile can reach it.
+> Everything else below stands as written; read `0x3F40_0000` as the historical
+> value.
 
 ## Context
 

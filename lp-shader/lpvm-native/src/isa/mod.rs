@@ -10,6 +10,8 @@ use alloc::string::String;
 use lpir::IrFunction;
 use object::Architecture;
 
+use lpvm::FloatImpl;
+
 use crate::abi::{FrameLayout, PReg, RegClass};
 use crate::regalloc::{AllocError, AllocOutput};
 use crate::vinst::{AluImmOp, ModuleSymbols, VInst, VReg};
@@ -32,6 +34,10 @@ pub(crate) use shared::IsaEmitOutput;
 /// emitter currently produces only base RV32IM instructions. The A and C
 /// extensions appear in the target name because the firmware runtime uses
 /// them, not because we emit them.
+///
+/// Because the name is the *hardware*, an rv32 part that **does** have the F
+/// extension (ESP32-S31, ESP32-P4, any RV32IMAFC core) is a **new variant**,
+/// not a flag on this one. See [`IsaTarget::f32_lowering`].
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IsaTarget {
     #[cfg(feature = "isa-rv32")]
@@ -43,6 +49,39 @@ pub enum IsaTarget {
     Xtensa,
 }
 
+/// How a target performs IEEE-754 binary32 arithmetic in
+/// [`lpir::FloatMode::F32`].
+///
+/// This is the **float-capability seam**. It exists because "rv32" is not one
+/// float story: the ESP32-C6 and RP2350's Hazard3 are RV32IMAC with no F
+/// extension at all, while the ESP32-S31 and ESP32-P4 are RV32IMAFC with a
+/// per-core single-precision FPU. Emitting `fadd.s` for a C6 does not produce a
+/// wrong number — it takes an illegal-instruction trap on the first frame. So
+/// the choice has to be a *named property of the target*, checked in one place,
+/// rather than an assumption baked into shared lowering.
+///
+/// Note what makes this safe today: **no variant of [`IsaTarget`] answers
+/// [`F32Lowering::HardwareFpu`]**, so no code path in this crate can emit an
+/// FP-register instruction. The variant is not speculative padding — it is the
+/// thing a new `Rv32imafc` (or the Xtensa FPU backend, roadmap M7) flips, and
+/// having it here means that change is one arm of one match instead of a search
+/// for every place float lowering assumed soft calls.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum F32Lowering {
+    /// This target cannot execute f32 shaders at all; `FloatMode::F32` is a
+    /// compile error naming the target.
+    Unsupported,
+    /// Float ops lower to calls into the platform soft-float library. Values
+    /// live in **integer** registers ([`RegClass::Int`]) — the soft-float ABI
+    /// passes and returns a `float` in `a0`-class registers — so this path
+    /// needs no float register class, no float argument bank, and no new
+    /// emitter instructions.
+    SoftFloatCalls,
+    /// Float ops lower to native FP instructions operating on the float
+    /// register file ([`RegClass::Float`]).
+    HardwareFpu,
+}
+
 impl IsaTarget {
     /// Pool-init order for the register allocator's LRU, for one register class.
     ///
@@ -51,15 +90,18 @@ impl IsaTarget {
     /// never satisfy a float constraint, and the same hardware encoding names
     /// two different registers in the two classes.
     ///
-    /// Neither backend has a float pool yet — hardware-FPU codegen is the
-    /// Xtensa f32 milestone and RV32F the rv32 one — so [`RegClass::Float`]
-    /// answers with an empty pool everywhere. An empty pool is not a silent
-    /// fallback: a float vreg reaching the allocator on such a target fails
-    /// with [`AllocError::OutOfRegisters`] rather than landing in a GPR.
+    /// Only one backend has a float pool: Xtensa, and only when `float-f32` is
+    /// enabled. rv32's f32 path is soft float, which keeps every value in
+    /// integer registers (see [`F32Lowering::SoftFloatCalls`]), so an empty
+    /// float pool is the *correct* answer there rather than a missing feature.
+    ///
+    /// An empty pool is not a silent fallback: a float vreg reaching the
+    /// allocator on such a target fails with [`AllocError::OutOfRegisters`]
+    /// rather than landing in a GPR and being read back as an integer.
     ///
     /// Note that a Q32 shader has no float vregs at all — a Q16.16 `float` is
-    /// an integer and lowers to integer instructions — so this is the honest
-    /// answer for the fixed-point path, not a placeholder for it.
+    /// an integer and lowers to integer instructions — so the empty pool is
+    /// also the honest answer for the fixed-point path, not a placeholder.
     pub fn allocatable_pool_order(self, class: RegClass) -> &'static [u8] {
         match class {
             RegClass::Int => match self {
@@ -68,7 +110,14 @@ impl IsaTarget {
                 #[cfg(feature = "isa-xt")]
                 IsaTarget::Xtensa => crate::isa::xt::gpr::ALLOC_POOL,
             },
-            RegClass::Float => &[],
+            RegClass::Float => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => &[],
+                #[cfg(all(feature = "isa-xt", feature = "float-f32"))]
+                IsaTarget::Xtensa => crate::isa::xt::fpr::ALLOC_POOL,
+                #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
+                IsaTarget::Xtensa => &[],
+            },
         }
     }
 
@@ -81,7 +130,14 @@ impl IsaTarget {
                 #[cfg(feature = "isa-xt")]
                 IsaTarget::Xtensa => crate::isa::xt::gpr::pool_contains(p.hw),
             },
-            RegClass::Float => false,
+            RegClass::Float => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => false,
+                #[cfg(all(feature = "isa-xt", feature = "float-f32"))]
+                IsaTarget::Xtensa => crate::isa::xt::fpr::pool_contains(p.hw),
+                #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
+                IsaTarget::Xtensa => false,
+            },
         }
     }
 
@@ -94,10 +150,17 @@ impl IsaTarget {
                 #[cfg(feature = "isa-xt")]
                 IsaTarget::Xtensa => crate::isa::xt::gpr::reg_name(p.hw),
             },
-            // No backend names float registers yet; the ISA-specific float
-            // tables arrive with their emitters. Rendering must not panic, so
-            // this stays a legible placeholder rather than an `unreachable!`.
-            RegClass::Float => "f?",
+            RegClass::Float => match self {
+                // Soft float never allocates a float register, so there is no
+                // name to give. Rendering must not panic, so this stays a
+                // legible placeholder rather than an `unreachable!`.
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => "f?",
+                #[cfg(all(feature = "isa-xt", feature = "float-f32"))]
+                IsaTarget::Xtensa => crate::isa::xt::fpr::reg_name(p.hw),
+                #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
+                IsaTarget::Xtensa => "f?",
+            },
         }
     }
 
@@ -234,6 +297,73 @@ impl IsaTarget {
         }
     }
 
+    /// How this target implements `float` when the shader is compiled in
+    /// [`lpir::FloatMode::F32`] — the float-capability seam.
+    ///
+    /// `Rv32imac` names a part **without** the F extension (ESP32-C6, Hazard3),
+    /// so it answers [`F32Lowering::SoftFloatCalls`]: float ops become direct
+    /// calls to the platform soft-float symbols (`__addsf3`, `__mulsf3`, …).
+    /// Those symbols are present in every rv32 image we build — on the C6 the
+    /// linker resolves them to the chip's **ROM** `rvfplib` routines
+    /// (`esp32c6.rom.rvfp.ld`), and in the host emulator's builtins image to
+    /// Rust's `compiler_builtins`. See
+    /// `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+    ///
+    /// `Xtensa` names a part **with** the Floating-Point Coprocessor Option
+    /// (ESP32-S3 / LX7 — 26/26 FP instructions confirmed present on desk
+    /// silicon, M6-P1), so it answers [`F32Lowering::HardwareFpu`]: float ops
+    /// lower to single FP instructions on the flat 16-entry FR file, with the
+    /// operations that are *not* one instruction — divide, square root, the
+    /// saturating conversions, the transcendentals — routed to the same M5
+    /// builtins the soft-float path calls (M7 D4).
+    ///
+    /// Without `float-f32` it answers [`F32Lowering::Unsupported`], because the
+    /// FP register tables and lowering are not linked. It is deliberately *not*
+    /// [`F32Lowering::SoftFloatCalls`] in that build: the S3 has a real FPU, and
+    /// quietly giving it the slow path would hide a misconfigured image behind
+    /// working output.
+    ///
+    /// The asymmetry with `Rv32imac` is the whole point of this hook. "rv32"
+    /// and "Xtensa" are not two dialects of one float story — one has no FPU at
+    /// all and one has a full coprocessor, and the answer has to be a named
+    /// property of the target rather than an assumption baked into lowering.
+    pub fn f32_lowering(self) -> F32Lowering {
+        match self {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => F32Lowering::SoftFloatCalls,
+            #[cfg(all(feature = "isa-xt", feature = "float-f32"))]
+            IsaTarget::Xtensa => F32Lowering::HardwareFpu,
+            #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
+            IsaTarget::Xtensa => F32Lowering::Unsupported,
+        }
+    }
+
+    /// What a module compiled in `mode` for this target actually got, for
+    /// compile-stats disclosure (`LpvmModule::float_impl`, roadmap D3).
+    ///
+    /// The inverse direction of [`Self::f32_lowering`]: that one asks "how do
+    /// I lower this", this one asks "what do I tell the author I did". Kept
+    /// beside it so the two can never disagree — a target that starts emitting
+    /// hardware float changes one match arm and both answers follow.
+    ///
+    /// `Q32` is [`FloatImpl::Fixed`] on every target, and that is not a
+    /// placeholder: a Q16.16 `float` *is* an integer and lowers to integer
+    /// instructions, so "fixed" is the literal truth rather than a fallback.
+    pub fn float_impl_for(self, mode: lpir::FloatMode) -> FloatImpl {
+        match mode {
+            lpir::FloatMode::Q32 => FloatImpl::Fixed,
+            lpir::FloatMode::F32 => match self.f32_lowering() {
+                F32Lowering::HardwareFpu => FloatImpl::HardwareF32,
+                F32Lowering::SoftFloatCalls => FloatImpl::SoftF32,
+                // Unreachable by construction: an F32 module for a target that
+                // cannot lower float fails to compile, so no such module exists
+                // to report on. `Fixed` under-claims rather than over-claims,
+                // which is the right direction to be wrong in if it ever does.
+                F32Lowering::Unsupported => FloatImpl::Fixed,
+            },
+        }
+    }
+
     /// `object` crate Architecture for ELF emission.
     pub fn elf_architecture(self) -> Architecture {
         match self {
@@ -260,7 +390,17 @@ impl IsaTarget {
     /// Per-class because a call clobbers each class's caller-saved bank
     /// independently: on RV32F `ft0..ft11` are clobbered by exactly the same
     /// call that clobbers `t0..t6`, and the allocator must evict from both.
-    /// Empty for [`RegClass::Float`] while the float pools are empty.
+    ///
+    /// Xtensa's float answer is the **whole** float pool, which is not
+    /// conservatism — M6-P4's static probe of `xtensa-esp32s3-elf-gcc` found
+    /// that no FR survives a `call8`, and that toolchain compiles the
+    /// `lps-builtins` f32 family this backend calls. Under-reporting here does
+    /// not produce a crash: it leaves a live float in a register the callee
+    /// overwrites, so the value is wrong only for inputs that happen to
+    /// straddle a call.
+    ///
+    /// Empty for [`RegClass::Float`] on rv32, where soft float keeps every
+    /// value in the integer bank and the integer answer already covers it.
     pub fn caller_saved_pool_hw(self, class: RegClass) -> &'static [u8] {
         match class {
             RegClass::Int => match self {
@@ -269,7 +409,14 @@ impl IsaTarget {
                 #[cfg(feature = "isa-xt")]
                 IsaTarget::Xtensa => crate::isa::xt::gpr::CALLER_SAVED_POOL,
             },
-            RegClass::Float => &[],
+            RegClass::Float => match self {
+                #[cfg(feature = "isa-rv32")]
+                IsaTarget::Rv32imac => &[],
+                #[cfg(all(feature = "isa-xt", feature = "float-f32"))]
+                IsaTarget::Xtensa => crate::isa::xt::fpr::CALLER_SAVED_POOL,
+                #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
+                IsaTarget::Xtensa => &[],
+            },
         }
     }
 
@@ -283,10 +430,24 @@ impl IsaTarget {
     /// `a10..a15` **is** the caller-saved half of the pool, so it happens
     /// constantly. See `regalloc::walk::sequence_arg_moves`.
     ///
-    /// Integer-class today. A float move cycle needs a float scratch, and that
-    /// register is named by whichever backend first has float argument
-    /// registers to shuffle; this hook grows a `class` parameter then rather
-    /// than answering with a GPR that cannot hold the value.
+    /// **Integer-class permanently, on both float targets — decided, not
+    /// pending.** M4's version of this comment anticipated a `class` parameter
+    /// for a float move cycle; M7 establishes that it is not needed and this
+    /// hook does not grow one.
+    ///
+    /// A move cycle can only form among values staged in *argument* registers.
+    /// Neither float ABI in this crate puts a float there: Xtensa passes float
+    /// arguments in address registers as raw bit patterns (M7 D1) and rv32's
+    /// soft float never leaves the integer file at all. So a float vreg never
+    /// occupies an argument slot, never participates in an argument-move cycle,
+    /// and never needs a float scratch to break one. Adding the parameter
+    /// anyway would mean naming a float scratch register — and reserving one
+    /// costs a register for the life of the backend (M7 D8 declines to reserve
+    /// any).
+    ///
+    /// This changes only if a target arrives whose ABI passes floats in the
+    /// float file — RV32F's `fa0..fa7`, say. That target adds the parameter
+    /// *and* a scratch FR in the same change.
     pub fn move_cycle_scratch(self) -> PReg {
         PReg::int(match self {
             #[cfg(feature = "isa-rv32")]
@@ -304,8 +465,17 @@ impl IsaTarget {
     /// Per-class because the return bank is per-class in every float ABI that
     /// matters: RV32F returns a float in `fa0`, not `a0`, so an f32-returning
     /// call constrains its def to a different register file than an
-    /// i32-returning one. `None` for [`RegClass::Float`] until a backend has
-    /// one.
+    /// i32-returning one.
+    ///
+    /// **`None` for [`RegClass::Float`] on every target here, and that is
+    /// settled rather than pending** (M7 D3). Neither float ABI in this crate
+    /// returns a value in the float file: rv32's soft float returns a `float`
+    /// in `a0` by construction, and Xtensa returns the raw IEEE bit pattern in
+    /// an address register because the esp toolchain that compiles our float
+    /// builtins does (M6-P4's measured probe). Lowering therefore emits an
+    /// explicit [`crate::vinst::VInst::Wfr`] after a float-returning call, so
+    /// the call's own def really is integer-class and this hook is asked the
+    /// integer question.
     pub fn direct_ret_reg(self, class: RegClass, idx: usize) -> Option<PReg> {
         match class {
             RegClass::Int => match self {
@@ -325,6 +495,9 @@ impl IsaTarget {
 
     /// Count of direct return registers of `class` in the hardware ABI
     /// (e.g. 2 for RV32 a0–a1).
+    ///
+    /// Zero for [`RegClass::Float`] for the reason spelled out on
+    /// [`Self::direct_ret_reg`]: no float return bank exists on either target.
     pub fn direct_ret_reg_count(self, class: RegClass) -> usize {
         match class {
             RegClass::Int => match self {
@@ -342,6 +515,12 @@ impl IsaTarget {
     /// Per-class for the same reason as [`Self::direct_ret_reg`]: a hard-float
     /// ABI passes float arguments in the float file, and the two banks are
     /// indexed independently.
+    ///
+    /// **`None` for [`RegClass::Float`] by decision** (M7 D3) — the mirror of
+    /// [`Self::direct_ret_reg`]'s note. Float parameters arrive in address
+    /// registers and lowering emits a [`crate::vinst::VInst::Wfr`] at function
+    /// entry to move each into the float file, so the parameter vreg this hook
+    /// precolors is integer-class.
     pub fn call_arg_reg(self, class: RegClass, idx: usize) -> Option<PReg> {
         match class {
             RegClass::Int => match self {
@@ -357,6 +536,8 @@ impl IsaTarget {
     }
 
     /// Number of argument registers of `class` in the hardware calling convention.
+    ///
+    /// Zero for [`RegClass::Float`]; see [`Self::call_arg_reg`].
     pub fn call_arg_reg_count(self, class: RegClass) -> usize {
         match class {
             RegClass::Int => match self {
@@ -406,11 +587,17 @@ impl IsaTarget {
     /// (RV32 `a0`–`a7`), or `None` when the operand is stack-passed.
     ///
     /// `class` is the class of the *operand*, and it selects the register bank:
-    /// a hard-float ABI stages a float argument in the float file. Answering
-    /// `None` for [`RegClass::Float`] is what makes an unimplemented float
-    /// argument fall into the stack-pass path's error rather than into a GPR;
-    /// the slot arithmetic below (the sret/vmctx shuffles) is class-independent
-    /// and is reused as-is when the float banks land.
+    /// a hard-float ABI stages a float argument in the float file.
+    ///
+    /// **`None` for [`RegClass::Float`] permanently on both targets** (M7 D3),
+    /// not as a stub. Lowering emits a [`crate::vinst::VInst::Rfr`] before each
+    /// float call argument, so a `Call`'s `args` slice is entirely
+    /// integer-class by the time the allocator reads it and this early return
+    /// is unreachable in well-formed output. It stays as a hard floor: a float
+    /// vreg that somehow reached an argument slot must fail the stack-pass
+    /// path loudly rather than be staged into a GPR and passed as an integer.
+    /// The slot arithmetic below (the sret/vmctx shuffles) is class-independent
+    /// and would be reused as-is if a float argument bank ever landed.
     pub fn lpir_call_arg_target(
         self,
         class: RegClass,
@@ -629,6 +816,138 @@ impl IsaTarget {
                 }
                 out
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn every_isa() -> alloc::vec::Vec<IsaTarget> {
+        alloc::vec![
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa,
+        ]
+    }
+
+    /// The float-capability seam's whole job: **exactly one** target may claim
+    /// a hardware FPU, and only in a build that links the FP tables.
+    ///
+    /// M9 asserted that *nothing* answered `HardwareFpu`, because nothing could
+    /// encode an FP instruction. M7 makes Xtensa the one that does — the S3 has
+    /// the Floating-Point Coprocessor Option and M6-P1 confirmed all 26
+    /// instructions present on silicon. The assertion is kept, not deleted,
+    /// with the claim narrowed: any *other* target answering `HardwareFpu` is a
+    /// part that would take an illegal-instruction trap on the first `fadd.s`.
+    #[test]
+    fn only_xtensa_with_float_f32_claims_a_hardware_fpu() {
+        for isa in every_isa() {
+            let claims_hardware = isa.f32_lowering() == F32Lowering::HardwareFpu;
+            let may_claim_hardware = cfg!(feature = "isa-xt")
+                && cfg!(feature = "float-f32")
+                && alloc::format!("{isa:?}") == "Xtensa";
+            assert_eq!(
+                claims_hardware, may_claim_hardware,
+                "{isa:?}: hardware-FPU claim does not match what this build can encode"
+            );
+        }
+    }
+
+    /// The gate, from the capability side: with `float-f32` off there is no FP
+    /// emitter and no FR pool linked, so the S3 must report `Unsupported`
+    /// rather than fall back to soft float. A silent fallback would compile,
+    /// run, produce right answers, and be ~30x slower than the part is capable
+    /// of, with nothing pointing at why.
+    #[cfg(all(feature = "isa-xt", not(feature = "float-f32")))]
+    #[test]
+    fn xtensa_without_the_feature_is_unsupported_not_soft_float() {
+        assert_eq!(IsaTarget::Xtensa.f32_lowering(), F32Lowering::Unsupported);
+    }
+
+    /// The C6 is the reference rv32 part and has no F extension; soft calls are
+    /// the only correct answer for it.
+    #[cfg(feature = "isa-rv32")]
+    #[test]
+    fn rv32imac_is_soft_float() {
+        assert_eq!(
+            IsaTarget::Rv32imac.f32_lowering(),
+            F32Lowering::SoftFloatCalls
+        );
+    }
+
+    /// Soft float keeps every value integer-class, so rv32's float pool stays
+    /// empty. A float vreg reaching the allocator there fails loudly with
+    /// `OutOfRegisters` rather than quietly landing an f32 bit pattern in a GPR
+    /// that some later pass treats as an integer.
+    #[cfg(feature = "isa-rv32")]
+    #[test]
+    fn rv32_has_no_float_register_pool() {
+        let isa = IsaTarget::Rv32imac;
+        assert!(isa.allocatable_pool_order(RegClass::Float).is_empty());
+        assert!(isa.caller_saved_pool_hw(RegClass::Float).is_empty());
+        assert!(!isa.is_in_allocatable_pool(PReg::float(0)));
+    }
+
+    /// The float pool is the *feature's* observable footprint in the register
+    /// model: 15 of the 16 FRs when `float-f32` is on (`f15` is the emitter's
+    /// scratch — see `isa::xt::fpr`), nothing at all when it is off. The off
+    /// case is the gate's whole claim (M7 D9) — a leak here would mean a
+    /// Fixed-only image carries the float allocator.
+    #[cfg(feature = "isa-xt")]
+    #[test]
+    fn xtensa_float_pool_follows_the_feature() {
+        let isa = IsaTarget::Xtensa;
+        let pool = isa.allocatable_pool_order(RegClass::Float);
+        if cfg!(feature = "float-f32") {
+            assert_eq!(pool.len(), 15, "15 FRs allocatable, f15 is the scratch");
+            // Every FR is call-clobbered — the measured esp-toolchain ABI.
+            assert_eq!(isa.caller_saved_pool_hw(RegClass::Float), pool);
+            assert!(isa.is_in_allocatable_pool(PReg::float(14)));
+            assert!(
+                !isa.is_in_allocatable_pool(PReg::float(15)),
+                "the emitter scratch must never be handed to the allocator"
+            );
+            assert_eq!(isa.reg_name(PReg::float(3)), "f3");
+        } else {
+            assert!(pool.is_empty());
+            assert!(isa.caller_saved_pool_hw(RegClass::Float).is_empty());
+            assert!(!isa.is_in_allocatable_pool(PReg::float(0)));
+        }
+    }
+
+    /// The same hardware index in the two classes must not be confused: `f3`
+    /// and `a3` are different registers, and `reg_name` is what a spill trace
+    /// or an alloc dump shows a human debugging a wrong pixel.
+    #[cfg(all(feature = "isa-xt", feature = "float-f32"))]
+    #[test]
+    fn float_and_int_register_names_do_not_collide() {
+        let isa = IsaTarget::Xtensa;
+        for hw in 0..16u8 {
+            assert_ne!(isa.reg_name(PReg::int(hw)), isa.reg_name(PReg::float(hw)));
+        }
+    }
+
+    /// No target has a float **ABI** bank, and unlike the pool this is not
+    /// waiting on a feature — it is M7 D3. Float values cross every call
+    /// boundary in address registers on both float targets, so a float vreg
+    /// never occupies an argument or return slot. If one of these ever answers
+    /// non-zero, the `Rfr`/`Wfr` transfers lowering inserts have become
+    /// redundant and the calling convention changed.
+    #[test]
+    fn no_target_has_a_float_abi_bank() {
+        for isa in every_isa() {
+            assert_eq!(isa.direct_ret_reg_count(RegClass::Float), 0);
+            assert_eq!(isa.call_arg_reg_count(RegClass::Float), 0);
+            assert_eq!(isa.direct_ret_reg(RegClass::Float, 0), None);
+            assert_eq!(isa.call_arg_reg(RegClass::Float, 0), None);
+            assert_eq!(
+                isa.lpir_call_arg_target(RegClass::Float, false, false, false, 0),
+                None
+            );
+            assert_eq!(isa.move_cycle_scratch().class, RegClass::Int);
         }
     }
 }
