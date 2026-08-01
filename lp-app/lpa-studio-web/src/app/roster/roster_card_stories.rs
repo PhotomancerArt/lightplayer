@@ -17,12 +17,13 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use lpa_studio_core::LpFeature;
 use lpa_studio_core::{
     BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase, DegradedReason,
     DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel,
     UiLogOrigin, UiLogSource,
 };
-use lpc_wire::FwProvenance;
+use lpc_wire::{BuildFacts, HardwareFacts};
 
 use crate::app::home::device_card::DeviceCard;
 
@@ -289,6 +290,52 @@ fn settings_tab_running() -> Element {
             }
         }
     }])
+}
+
+#[story(
+    description = "G1 question 3 — the Settings tab's capability lines are GAPS-ONLY. Left: an all-capable device, whose Technical section says nothing extra (no noise where there is no news). Right: the same device on a build with no fluid/radio runtime and no radio wired — three added lines naming exactly what is missing."
+)]
+fn settings_tab_capability_gaps() -> Element {
+    let gapped: Vec<LpFeature> = all_capable_features()
+        .into_iter()
+        .filter(|feature| {
+            !matches!(
+                feature,
+                LpFeature::NodeFluid | LpFeature::NodeRadio | LpFeature::SvcRadioEspnow
+            )
+        })
+        .collect();
+    sheet(vec![
+        rsx! {
+            div { class: "tw:w-64",
+                DeviceCard {
+                    card: UiDeviceCard {
+                        ui: opened(DeviceCardTab::Settings, None),
+                        ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
+                    },
+                    now_secs: Some(STORY_NOW),
+                    on_action: |_| {},
+                }
+            }
+        },
+        rsx! {
+            div { class: "tw:w-64",
+                DeviceCard {
+                    card: UiDeviceCard {
+                        ui: opened(DeviceCardTab::Settings, None),
+                        ..device_card_with_capabilities(
+                            RosterCardState::RunningUpToDate,
+                            true,
+                            gapped,
+                            false,
+                        )
+                    },
+                    now_secs: Some(STORY_NOW),
+                    on_action: |_| {},
+                }
+            }
+        },
+    ])
 }
 
 #[story(
@@ -636,6 +683,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
             name: "porch-sign".to_string(),
         }),
         fw: None,
+        hardware: None,
         sim: false,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -660,6 +708,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
             name: "porch-sign".to_string(),
         }),
         fw: None,
+        hardware: None,
         sim: true,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -701,12 +750,46 @@ fn device_card_with_console(state: RosterCardState, with_project: bool) -> UiDev
 /// The same card carrying hello firmware provenance (live-link Technical
 /// evidence for the Settings tab and the chip comparison).
 fn device_card_with_fw(state: RosterCardState, with_project: bool) -> UiDeviceCard {
+    device_card_with_capabilities(state, with_project, all_capable_features(), true)
+}
+
+/// Everything a normal C6 build carries — the "no gaps" side of the
+/// gaps-only Technical presentation.
+fn all_capable_features() -> Vec<LpFeature> {
+    vec![
+        LpFeature::NodeButton,
+        LpFeature::NodeClock,
+        LpFeature::NodeFluid,
+        LpFeature::NodeFixture,
+        LpFeature::NodePlaylist,
+        LpFeature::NodeRadio,
+        LpFeature::NodeShader,
+        LpFeature::NodeTexture,
+        LpFeature::SvcButton,
+        LpFeature::SvcRadioEspnow,
+        LpFeature::GfxLpvm,
+    ]
+}
+
+/// The same card whose hello reported a specific build and hardware set.
+fn device_card_with_capabilities(
+    state: RosterCardState,
+    with_project: bool,
+    features: Vec<LpFeature>,
+    radio: bool,
+) -> UiDeviceCard {
     UiDeviceCard {
-        fw: Some(FwProvenance {
+        fw: Some(BuildFacts {
+            features,
             package: "fw-esp32c6".to_string(),
             commit: "def987654321".to_string(),
             dirty: false,
             profile: "release-esp32".to_string(),
+        }),
+        hardware: Some(HardwareFacts {
+            radio,
+            button: true,
+            board_id: None,
         }),
         ..device_card(state, with_project)
     }

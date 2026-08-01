@@ -51,6 +51,24 @@ pub(crate) fn playlist_node_view() -> UiNodeView {
     .with_children(children_fixture())
 }
 
+/// A node whose KIND has no runtime in the connected device's firmware:
+/// the placeholder reported `NodeRuntimeStatus::Unsupported`, which the
+/// controller mapped to the dimmed "Not on this device" family. Nothing is
+/// broken — no red, no violet, no error issues list.
+pub(crate) fn unsupported_node_view() -> UiNodeView {
+    UiNodeView::new(
+        UiNodeHeader::new("swirl", "Fluid", "/show/swirl")
+            .with_status(UiStatus::neutral("Not on this device"))
+            .with_detail("node kind Fluid is not included in this firmware build")
+            .with_dimmed(true),
+        vec![UiNodeTab::main(vec![UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value("viscosity", "Viscosity", UiSlotValue::f32(0.35))
+                .with_state(UiSlotFieldState::editable()),
+        ])])],
+    )
+    .with_node_id("fluid-swirl")
+}
+
 pub(crate) fn error_node_view() -> UiNodeView {
     let mut view = UiNodeView::new(
         UiNodeHeader::new("blast", "Shader", "/show/playlist/blast")

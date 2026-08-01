@@ -5,6 +5,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::node_story_fixtures::{
     error_node_view, failed_dirty_node_view, live_dirty_node_view, nested_dirty_node_view,
     node_delete_pane_action, playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
+    unsupported_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -171,6 +172,33 @@ pub(crate) fn nested_dirty_children() -> Element {
 )]
 pub(crate) fn error_detail_popup() -> Element {
     let view = error_node_view();
+
+    rsx! {
+        div { class: "tw:flex tw:min-h-[320px] tw:justify-end",
+            NodeDetailPopover {
+                header: view.header,
+                pending_edits: vec![],
+                on_action: move |_| {},
+                initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A node whose kind this device's firmware does not carry: the whole pane is ghosted (dimmed), the header stays quiet — no error wash, no attention glyph, and nothing violet (violet is bound). The words live in the detail popup. G1 question 1/2: is this clearly 'disabled by this device' and clearly not 'broken'?"
+)]
+pub(crate) fn unsupported_node() -> Element {
+    rsx! {
+        NodePane { view: unsupported_node_view() }
+    }
+}
+
+#[story(
+    description = "The detail popup on a not-on-this-device node: a NEUTRAL status pill reading 'Not on this device' plus the engine's own reason ('node kind Fluid is not included in this firmware build') — the cause, not the symptom the old resolve warning gave."
+)]
+pub(crate) fn unsupported_detail_popup() -> Element {
+    let view = unsupported_node_view();
 
     rsx! {
         div { class: "tw:flex tw:min-h-[320px] tw:justify-end",

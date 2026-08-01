@@ -21,7 +21,10 @@
 //! [`derive_roster_card_state`](super::derive_roster_card_state)), so the
 //! popover can never disagree with the circle.
 
-use lpc_wire::FwProvenance;
+use lpc_model::{LpFeature, NodeKind};
+use lpc_wire::{BuildFacts, HardwareFacts};
+
+use crate::app::project::node::node_naming::node_kind_label;
 
 use crate::app::rich_object::{RichChip, RichLine, RichObjectView, RichSection, RichWeight};
 use crate::core::status::UiStatusKind;
@@ -59,8 +62,11 @@ pub struct DeviceRichInput<'a> {
     pub transport: &'a str,
     /// The project the device holds (live) or last ran (offline).
     pub project_name: Option<&'a str>,
-    /// Running-firmware provenance from the hello (live links only).
-    pub fw: Option<&'a FwProvenance>,
+    /// Running-firmware build facts from the hello (live links only):
+    /// provenance plus the features compiled into the image.
+    pub fw: Option<&'a BuildFacts>,
+    /// What the unit has wired, from the same hello.
+    pub hardware: Option<&'a HardwareFacts>,
     /// Studio's bundled firmware image, when the packaged manifest is on
     /// hand — the advisory chip comparison's other half.
     pub bundled_fw: Option<&'a BundledFirmware>,
@@ -213,6 +219,7 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
             format!("{} @ {}{dirty} · {}", fw.package, fw.commit, fw.profile),
         ));
     }
+    lines.extend(capability_lines(input.fw, input.hardware));
     if lines.is_empty() {
         return None;
     }
@@ -237,6 +244,62 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
 /// Backup: what banking knows. Today that is the D8 connect-time bank of
 /// a diverged device copy; a download affordance lands with the flow that
 /// can serve it (no dead buttons).
+/// The device's capabilities as Technical lines — **gaps only**.
+///
+/// A fully-capable device says nothing extra: listing everything a normal
+/// board has would bury the one line that matters on the board that lacks
+/// something. So each line here reports an ABSENCE (or a backend that is
+/// not the norm), and a device with no gaps contributes no lines at all.
+fn capability_lines(build: Option<&BuildFacts>, hardware: Option<&HardwareFacts>) -> Vec<RichLine> {
+    let mut lines = Vec::new();
+    let Some(build) = build else {
+        return lines;
+    };
+
+    // Node kinds whose runtime this build does not carry. Ungated kinds
+    // (`for_node_kind` → None) are always present and never listed.
+    let missing: Vec<&'static str> = NodeKind::ALL
+        .iter()
+        .filter(|kind| {
+            LpFeature::for_node_kind(**kind)
+                .is_some_and(|feature| !build.features.contains(&feature))
+        })
+        .map(|kind| node_kind_label(*kind))
+        .collect();
+    if !missing.is_empty() {
+        lines.push(RichLine::new("no nodes", missing.join(" · ")));
+    }
+
+    // A graphics backend worth naming: the norm (the CPU shader backend)
+    // stays silent; "no shaders at all" and "GPU" do not.
+    if build.features.contains(&LpFeature::GfxNull) {
+        lines.push(RichLine::new(
+            "graphics",
+            "none — this build runs no shaders",
+        ));
+    } else if build.features.contains(&LpFeature::GfxWgpu) {
+        lines.push(RichLine::new("graphics", "GPU (wgpu)"));
+    }
+
+    if let Some(hardware) = hardware {
+        let mut absent = Vec::new();
+        if !hardware.radio {
+            absent.push("radio");
+        }
+        if !hardware.button {
+            absent.push("button");
+        }
+        if !absent.is_empty() {
+            lines.push(RichLine::new("no hardware", absent.join(" · ")));
+        }
+        if let Some(board_id) = &hardware.board_id {
+            lines.push(RichLine::new("board", board_id.clone()));
+        }
+    }
+
+    lines
+}
+
 fn backup_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetailAffordance>> {
     matches!(input.state, RosterCardState::EditedOnDevice { .. }).then(|| RichSection {
         title: "Backup".to_string(),
@@ -419,6 +482,72 @@ mod tests {
         assert_eq!(view.rollup().tone, UiStatusKind::Good);
     }
 
+    /// Gaps-only: a device that can do everything says nothing extra, so
+    /// the one line that matters on a lesser board is not buried.
+    #[test]
+    fn an_all_capable_device_adds_no_capability_lines() {
+        let view = device_rich_object(&input(&RosterCardState::RunningUpToDate));
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .unwrap();
+        let labels: Vec<&str> = technical
+            .lines
+            .iter()
+            .map(|line| line.label.as_str())
+            .collect();
+        assert_eq!(labels, vec!["uid", "transport", "firmware"]);
+    }
+
+    /// A build without the fluid/radio runtimes and a unit with no radio
+    /// wired: each absence gets exactly one line, naming what is missing.
+    #[test]
+    fn a_device_with_gaps_names_each_one() {
+        let gapped_build = BuildFacts {
+            features: DEVICE_FW
+                .features
+                .iter()
+                .copied()
+                .filter(|feature| {
+                    !matches!(
+                        feature,
+                        LpFeature::NodeFluid | LpFeature::NodeRadio | LpFeature::SvcRadioEspnow
+                    )
+                })
+                .collect(),
+            ..DEVICE_FW.clone()
+        };
+        let gapped_hw = HardwareFacts {
+            radio: false,
+            button: true,
+            board_id: None,
+        };
+        let state = RosterCardState::RunningUpToDate;
+        let mut input = input(&state);
+        input.fw = Some(&gapped_build);
+        input.hardware = Some(&gapped_hw);
+
+        let view = device_rich_object(&input);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .unwrap();
+        let lines: Vec<(&str, &str)> = technical
+            .lines
+            .iter()
+            .map(|line| (line.label.as_str(), line.value.as_str()))
+            .collect();
+        assert!(lines.contains(&("no nodes", "Fluid · Radio")), "{lines:?}");
+        assert!(lines.contains(&("no hardware", "radio")), "{lines:?}");
+        // The CPU shader backend is the norm and stays silent.
+        assert!(
+            !lines.iter().any(|(label, _)| *label == "graphics"),
+            "{lines:?}"
+        );
+    }
+
     #[test]
     fn working_states_carry_no_danger_zone_and_no_primary_affordance() {
         let state = RosterCardState::OperationInFlight {
@@ -440,17 +569,39 @@ mod tests {
             transport: "USB",
             project_name: Some("porch-sign"),
             fw: Some(&DEVICE_FW),
+            hardware: Some(&DEVICE_HW),
             bundled_fw: None,
             now_secs: NOW,
         }
     }
 
-    static DEVICE_FW: std::sync::LazyLock<FwProvenance> =
-        std::sync::LazyLock::new(|| FwProvenance {
-            package: "fw-esp32c6".to_string(),
-            commit: "abc123456789".to_string(),
-            dirty: false,
-            profile: "release-esp32".to_string(),
+    static DEVICE_FW: std::sync::LazyLock<BuildFacts> = std::sync::LazyLock::new(|| BuildFacts {
+        features: vec![
+            LpFeature::NodeButton,
+            LpFeature::NodeClock,
+            LpFeature::NodeFluid,
+            LpFeature::NodeFixture,
+            LpFeature::NodePlaylist,
+            LpFeature::NodeRadio,
+            LpFeature::NodeShader,
+            LpFeature::NodeTexture,
+            LpFeature::SvcButton,
+            LpFeature::SvcRadioEspnow,
+            LpFeature::GfxLpvm,
+        ],
+        package: "fw-esp32c6".to_string(),
+        commit: "abc123456789".to_string(),
+        dirty: false,
+        profile: "release-esp32".to_string(),
+    });
+
+    /// An all-capable unit: the gaps-only Technical lines add nothing here,
+    /// which is the point.
+    static DEVICE_HW: std::sync::LazyLock<HardwareFacts> =
+        std::sync::LazyLock::new(|| HardwareFacts {
+            radio: true,
+            button: true,
+            board_id: None,
         });
 
     fn titles(view: &RichObjectView<DeviceDetailAffordance>) -> Vec<&str> {

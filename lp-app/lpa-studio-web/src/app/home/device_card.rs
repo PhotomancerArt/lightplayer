@@ -308,6 +308,7 @@ pub(crate) fn DeviceCard(
             transport: &card.transport,
             project_name: card.project.as_ref().map(|chip| chip.name.as_str()),
             fw: card.fw.as_ref(),
+            hardware: card.hardware.as_ref(),
             bundled_fw: bundled_fw.as_ref(),
             now_secs: now,
         })

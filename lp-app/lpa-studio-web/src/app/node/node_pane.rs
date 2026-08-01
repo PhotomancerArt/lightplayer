@@ -52,7 +52,16 @@ pub fn NodePane(
     // chips; the detail trigger is the whole announcement). RichObjectPane
     // pins that composition.
     let tone = affordance_pane_tone(view.header.affordance(), view.header.status.kind);
-    let surface_class = pane_surface_tint_class(dirty_tint, dirty);
+    // "Not on this device": the whole pane ghosts. Absent, not broken —
+    // no error tone, no violet (that is bound), no green.
+    let surface_class = if view.header.dimmed {
+        format!(
+            "{} tw:opacity-60",
+            pane_surface_tint_class(dirty_tint, dirty)
+        )
+    } else {
+        pane_surface_tint_class(dirty_tint, dirty).to_string()
+    };
     let header = view.header.clone();
     let title = view.header.title.clone();
     let tabs = view.tabs.clone();
@@ -80,7 +89,7 @@ pub fn NodePane(
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
-            div { class: surface_class,
+            div { class: "{surface_class}",
                 RichObjectPane {
                     collapse: PaneCollapse {
                         collapsed: collapsed(),
