@@ -34,24 +34,28 @@
 //!   exhaustively so they become exact *by construction*. There is deliberately
 //!   no polynomial placeholder: an approximation that came close would pass
 //!   casual tests while hiding that the real table was never captured.
-//! - `nexp01.s`, `mkdadj.s`, `addexp.s`, `addexpm.s`, `maddn.s`, `divn.s` are
-//!   *architecturally* defined — but the Xtensa ISA Reference Manual is not
-//!   available in this working environment, and `AGENTS.md`'s license rule puts
-//!   binutils, GCC, and QEMU source off limits as a way to recover them. They
-//!   are therefore [`crate::fp_policy::DivideStepSemantics`], resolvable by a
-//!   manual read or by measurement, and they fail loudly meanwhile. This is a
-//!   documented deviation from the P3 phase plan, which expected them written
-//!   from the manual.
+//! - `nexp01.s`, `mkdadj.s`, `addexp.s`, `addexpm.s`, `maddn.s`, `divn.s` were
+//!   assumed to be *architecturally* defined. M6 P5 read the ISA Reference
+//!   Manual and found that they are not in it: its Table 4-46 (p. 67-68)
+//!   enumerates the Floating-Point Coprocessor Option's instructions and the
+//!   whole helper family is absent, as are the four estimates and `const.s`.
+//!   They stay [`crate::fp_policy::DivideStepSemantics`] — a P6 measurement, not
+//!   a document lookup — and they fail loudly meanwhile.
 //!
 //! # Rounding mode
 //!
 //! `docs/design/float.md` §2 makes round-to-nearest-even the only mode shader
-//! code ever runs under, and P1 measured `FCR = 0` at reset. So a non-zero `FCR`
-//! is **refused loudly** rather than silently ignored (D6); whether silicon even
-//! honors the field is [`crate::fp_policy::FpPolicy::fcr_rounding_honored`], and
-//! G2 decides whether to implement the other three modes.
+//! code ever runs under, and P1 measured `FCR = 0` at reset. So a non-default
+//! `FCR.RM` is **refused loudly** rather than silently ignored (D6); whether
+//! silicon even honors the field is
+//! [`crate::fp_policy::FpPolicy::fcr_rounding_honored`], and G2 decides whether
+//! to implement the other three modes. The field's *encoding* is architectural
+//! and lives in `cpu.rs` as `FCR_RM_*`.
 //!
-//! Semantics come from IEEE-754 and the Xtensa ISA Reference Manual; no QEMU,
+//! # Provenance
+//!
+//! Semantics come from IEEE-754 and from the Xtensa ISA Reference Manual, cited
+//! by section and page at each use. No manual text is reproduced, and no QEMU,
 //! binutils, or GCC source was read or adapted.
 
 use lp_xt_inst::{FpCmpOp, FpMovArOp, FpMovBrOp, FpRrOp, FpRrrOp, FpToIntOp, Inst, IntToFpOp};
@@ -215,9 +219,13 @@ impl Emulator {
     }
 
     /// `float.md` §2: round-to-nearest-even, always; shader code never touches
-    /// `FCR`. A non-zero `FCR` is refused rather than quietly ignored, because
-    /// silently pretending RNE is exactly how a rounding-mode bug reaches a
-    /// board (D6).
+    /// `FCR`. A non-default `FCR.RM` is refused rather than quietly ignored,
+    /// because silently pretending RNE is exactly how a rounding-mode bug
+    /// reaches a board (D6).
+    ///
+    /// The test is on the `RM` field (ISA RM Table 4-47, p. 69-70) and not on
+    /// the whole register: the other bits are exception *enables*, and refusing
+    /// a rounding change that never happened would be its own kind of wrong.
     ///
     /// Refusal is spelled as a read of `fcr_rounding_honored`, which is
     /// unresolved and therefore panics with the field's name. That is not a
@@ -228,9 +236,9 @@ impl Emulator {
     /// failure with no home.
     ///
     /// # Panics
-    /// If `FCR` is non-zero.
+    /// If `FCR.RM` is not [`crate::cpu::FCR_RM_NEAREST`].
     fn refuse_non_default_rounding(&self) {
-        if self.cpu.fcr != 0 {
+        if self.cpu.fcr_rounding_mode() != crate::cpu::FCR_RM_NEAREST {
             self.fp_policy.fcr_rounding_honored.get();
         }
     }
@@ -307,7 +315,9 @@ impl Emulator {
     ///
     /// `to_float` selects the direction: `float.s`/`ufloat.s` scale *down* after
     /// converting, `trunc.s` and friends scale *up* before. Which association is
-    /// which is `conversion_scale` and only consulted for `imm != 0` — M7 emits
+    /// which is `conversion_scale`, resolved from the ISA RM (`FLOAT.S` p. 346
+    /// scales the converted integer by 2^-t, `TRUNC.S` p. 548 scales the float
+    /// by 2^+t before converting). Only consulted for `imm != 0` — M7 emits
     /// `imm = 0`, where the question does not arise.
     fn apply_scale(&self, x: f32, imm: u8, to_float: bool) -> f32 {
         if imm == 0 {
@@ -318,24 +328,64 @@ impl Emulator {
             ScaleRule::Inverted => to_float,
         };
         let factor = f32::from_bits(((127i32 + i32::from(imm)) as u32) << 23);
+        // A single-precision multiply, matching the manual's `×s pows(2.0,±t)`.
+        // `2^-imm` is exact for imm <= 15, so the down direction is spelled as a
+        // divide by the same factor rather than a second constant.
         if up { x * factor } else { x / factor }
     }
 
+    /// `trunc.s` / `utrunc.s` / `round.s` / `floor.s` / `ceil.s`.
+    ///
+    /// The out-of-range and NaN answers are per-instruction facts stated on each
+    /// instruction's own manual page — `TRUNC.S` p. 548, `ROUND.S` p. 497,
+    /// `FLOOR.S` p. 347, `CEIL.S` p. 311, `UTRUNC.S` p. 555 — and the unsigned
+    /// form is not simply the signed one with different limits: it answers
+    /// `0xffff_ffff` for NaN and `0x8000_0000` for anything negative.
     fn fp_to_int(&self, op: FpToIntOp, bits: u32, imm: u8) -> u32 {
         let x = f32::from_bits(bits);
+        let unsigned = matches!(op, FpToIntOp::UtruncS);
+
         if x.is_nan() {
-            // `float.md` §5 leaves this unspecified at the product level, which
-            // is precisely why the *target's* answer has to be recorded.
-            return *self.fp_policy.float_to_int_nan.get();
+            // `float.md` §5 leaves this unspecified at the *product* level,
+            // which is precisely why the target's answer has to be recorded.
+            return if unsigned {
+                U32_SATURATE_MAX
+            } else {
+                *self.fp_policy.float_to_int_nan.get()
+            };
         }
         let x = self.apply_scale(x, imm, false);
+
+        if unsigned {
+            // Tested on the value, before rounding toward zero: the manual says
+            // "negative numbers", and -0.5 is a negative number even though it
+            // truncates to -0.0. -0.0 itself is not negative and converts to 0.
+            if x < 0.0 {
+                return *self.fp_policy.utrunc_negative.get();
+            }
+            let r = x.trunc();
+            // 0xffff_ffff is not representable in f32; the nearest above the
+            // largest in-range value is 2^32, so that is the real threshold.
+            if r >= 4_294_967_296.0 {
+                return out_of_range(
+                    r,
+                    *self.fp_policy.float_to_int_out_of_range.get(),
+                    0,
+                    U32_SATURATE_MAX,
+                );
+            }
+            return r as u32;
+        }
+
         let r = match op {
             FpToIntOp::TruncS | FpToIntOp::UtruncS => x.trunc(),
             FpToIntOp::FloorS => x.floor(),
             FpToIntOp::CeilS => x.ceil(),
             FpToIntOp::RoundS => {
                 // A tie is an exact halfway case; only then does the tie-break
-                // rule matter, and only then is the policy read.
+                // rule matter, and only then is the policy read. The manual says
+                // ROUND.S rounds "toward the nearest" without naming a tie rule,
+                // so this one stays open for silicon.
                 if (x - x.floor()) == 0.5 {
                     match *self.fp_policy.round_s_ties.get() {
                         TiesRule::ToEven => round_ties_even(x),
@@ -347,39 +397,29 @@ impl Emulator {
             }
         };
 
-        if matches!(op, FpToIntOp::UtruncS) {
-            if r < 0.0 {
-                return clamp_out_of_range(
-                    r,
-                    *self.fp_policy.utrunc_negative.get(),
-                    0.0,
-                    u32::MAX as f32,
-                );
-            }
-            if r >= 4_294_967_296.0 {
-                return clamp_out_of_range(
-                    r,
-                    *self.fp_policy.float_to_int_out_of_range.get(),
-                    0.0,
-                    u32::MAX as f32,
-                );
-            }
-            return r as u32;
-        }
-
-        // Signed. `i32::MAX` is not representable in f32 — the smallest f32
-        // above it is 2^31 exactly — so the upper test is `>= 2^31`.
+        // `i32::MAX` is not representable in f32 — the smallest f32 above it is
+        // 2^31 exactly — so the upper test is `>= 2^31`, and the saturation
+        // value is written as the integer constant rather than round-tripped
+        // through `i32::MAX as f32`, which lands on 2^31 and would answer
+        // 0x8000_0000 where the manual says 0x7fff_ffff.
         if r >= 2_147_483_648.0 || r < -2_147_483_648.0 {
-            return clamp_out_of_range(
+            return out_of_range(
                 r,
                 *self.fp_policy.float_to_int_out_of_range.get(),
-                i32::MIN as f32,
-                i32::MAX as f32,
-            ) as i32 as u32;
+                I32_SATURATE_MIN,
+                I32_SATURATE_MAX,
+            );
         }
         r as i32 as u32
     }
 }
+
+/// The signed conversions' negative-overflow answer (`32'h80000000`).
+const I32_SATURATE_MIN: u32 = 0x8000_0000;
+/// The signed conversions' positive-overflow and NaN answer (`32'h7fffffff`).
+const I32_SATURATE_MAX: u32 = 0x7FFF_FFFF;
+/// `utrunc.s`'s positive-overflow and NaN answer (`32'hffffffff`).
+const U32_SATURATE_MAX: u32 = 0xFFFF_FFFF;
 
 /// One of the non-estimate divide/sqrt helper steps, once its semantics exist.
 ///
@@ -424,16 +464,18 @@ fn round_ties_even(x: f32) -> f32 {
 
 /// Resolve a float→int conversion that cannot be represented.
 ///
-/// `Saturate` is what `docs/design/float.md` §3 makes the *product's*
-/// Guaranteed behavior; whether the instruction does it, or M7 owes a clamp
-/// after every conversion, is what P6 measures.
-fn clamp_out_of_range(r: f32, rule: OutOfRangeRule, min: f32, max: f32) -> u32 {
+/// `Saturate` is what the ISA RM states per instruction and what
+/// `docs/design/float.md` §3 makes the product's Guaranteed behavior. `Wrap`
+/// stays modeled because P6 can still falsify the manual on silicon, and an
+/// emulator that could not express the other answer would have no way to record
+/// the finding.
+fn out_of_range(r: f32, rule: OutOfRangeRule, min: u32, max: u32) -> u32 {
     match rule {
         OutOfRangeRule::Saturate => {
             if r.is_sign_negative() {
-                min as i64 as u32
+                min
             } else {
-                max as i64 as u32
+                max
             }
         }
         OutOfRangeRule::Wrap => {
@@ -627,15 +669,6 @@ mod tests {
                 [(1, inf), (2, inf), (0, 0)],
             ),
             (
-                "madd_fused",
-                Inst::FpRrr(FpRrrOp::MaddS, FReg::new(0), FReg::new(1), FReg::new(2)),
-                [
-                    (0, 1.0f32.to_bits()),
-                    (1, 3.0f32.to_bits()),
-                    (2, 5.0f32.to_bits()),
-                ],
-            ),
-            (
                 "const_s_table",
                 Inst::ConstS(FReg::new(0), 1),
                 [(0, 0), (1, 0), (2, 0)],
@@ -714,37 +747,125 @@ mod tests {
             assert_eq!(emu.cpu.a(3) as i32, want, "floor.s of {v}");
         }
 
-        // Out of range, infinite, and NaN are all questions for silicon.
-        for (name, v) in [
-            ("float_to_int_out_of_range", 1e30f32),
-            ("float_to_int_out_of_range", f32::INFINITY),
-            ("float_to_int_nan", f32::NAN),
-        ] {
-            let got = unresolved_field(move || {
-                let mut e = armed();
-                e.cpu.set_f(1, v.to_bits());
-                let mut t = NoopTracer;
-                let _ = e.execute(
-                    &Inst::FpToInt(FpToIntOp::TruncS, Reg::new(3), FReg::new(1), 0),
-                    0x4000_0100,
-                    &mut t,
-                );
-            });
-            assert_eq!(got.as_deref(), Some(name), "trunc.s of {v}");
-        }
-
-        // A non-zero scale immediate is a question too — M7 emits 0.
+        // A tie is still a question for silicon: the manual says ROUND.S rounds
+        // "toward the nearest" and never names the tie-break.
         let got = unresolved_field(|| {
             let mut e = armed();
-            e.cpu.set_a(2, 3);
+            e.cpu.set_f(1, 2.5f32.to_bits());
             let mut t = NoopTracer;
             let _ = e.execute(
-                &Inst::IntToFp(IntToFpOp::FloatS, FReg::new(0), Reg::new(2), 4),
+                &Inst::FpToInt(FpToIntOp::RoundS, Reg::new(3), FReg::new(1), 0),
                 0x4000_0100,
                 &mut t,
             );
         });
-        assert_eq!(got.as_deref(), Some("conversion_scale"));
+        assert_eq!(got.as_deref(), Some("round_s_ties"));
+    }
+
+    /// The out-of-range, infinite and NaN answers the ISA RM states per
+    /// instruction. The signed positive answer is the one a naive
+    /// `i32::MAX as f32` round-trip gets wrong — 2^31 is the nearest f32 and
+    /// converts back to 0x80000000 — so it is asserted explicitly.
+    #[test]
+    fn conversion_boundaries_follow_the_manuals_per_instruction_answers() {
+        use lp_xt_inst::FpToIntOp;
+        let mut emu = armed();
+        let signed = [
+            FpToIntOp::TruncS,
+            FpToIntOp::RoundS,
+            FpToIntOp::FloorS,
+            FpToIntOp::CeilS,
+        ];
+        for op in signed {
+            for (v, want) in [
+                (1e30f32, 0x7FFF_FFFFu32),
+                (f32::INFINITY, 0x7FFF_FFFF),
+                (f32::NAN, 0x7FFF_FFFF),
+                (-1e30, 0x8000_0000),
+                (f32::NEG_INFINITY, 0x8000_0000),
+            ] {
+                emu.cpu.set_f(1, v.to_bits());
+                exec(
+                    &mut emu,
+                    &Inst::FpToInt(op, Reg::new(3), FReg::new(1), 0),
+                );
+                assert_eq!(emu.cpu.a(3), want, "{op:?} of {v}");
+            }
+        }
+        // utrunc.s answers differently in every one of those places.
+        for (v, want) in [
+            (f32::NAN, 0xFFFF_FFFFu32),
+            (f32::INFINITY, 0xFFFF_FFFF),
+            (1e30, 0xFFFF_FFFF),
+            (-1.0, 0x8000_0000),
+            (-0.5, 0x8000_0000),
+            (f32::NEG_INFINITY, 0x8000_0000),
+            // -0.0 is not a negative *number*, so it converts normally.
+            (-0.0, 0),
+            (7.9, 7),
+        ] {
+            emu.cpu.set_f(1, v.to_bits());
+            exec(
+                &mut emu,
+                &Inst::FpToInt(FpToIntOp::UtruncS, Reg::new(3), FReg::new(1), 0),
+            );
+            assert_eq!(emu.cpu.a(3), want, "utrunc.s of {v}");
+        }
+    }
+
+    /// The scale immediate, both directions. `t` is the fractional-bit count:
+    /// `float.s` divides the converted integer by `2^t`, the float→int
+    /// conversions multiply by `2^t` first.
+    #[test]
+    fn the_scale_immediate_is_a_fractional_bit_count_in_both_directions() {
+        use lp_xt_inst::{FpToIntOp, IntToFpOp};
+        let mut emu = armed();
+
+        emu.cpu.set_a(2, 3);
+        exec(
+            &mut emu,
+            &Inst::IntToFp(IntToFpOp::FloatS, FReg::new(0), Reg::new(2), 4),
+        );
+        assert_eq!(emu.cpu.f(0), (3.0f32 / 16.0).to_bits(), "float.s 3, imm=4");
+
+        emu.cpu.set_f(1, 0.1875f32.to_bits()); // 3 / 16
+        exec(
+            &mut emu,
+            &Inst::FpToInt(FpToIntOp::TruncS, Reg::new(3), FReg::new(1), 4),
+        );
+        assert_eq!(emu.cpu.a(3), 3, "trunc.s 0.1875, imm=4");
+    }
+
+    /// `madd.s` rounds once, not twice — and the corpus needs a case where the
+    /// two answers actually differ, or the claim is untested.
+    #[test]
+    fn madd_is_fused_and_the_two_roundings_are_distinguishable() {
+        let mut emu = armed();
+        // (1 + 2^-12)^2 is exactly 1 + 2^-11 + 2^-24, a tie one bit past f32's
+        // significand: rounding it first lands on 1 + 2^-11, which the
+        // accumulator then cancels to zero. Keeping the exact product leaves
+        // 2^-24. So the two answers are 2^-24 and 0 — as far apart as a single
+        // rounding difference gets.
+        let x = f32::from_bits(0x3F80_0800); // 1 + 2^-12
+        let y = x;
+        let a = f32::from_bits(0xBF80_1000); // -(1 + 2^-11)
+        let fused = x.mul_add(y, a);
+        let unfused = (x * y) + a;
+        assert_eq!(fused.to_bits(), 0x3380_0000, "fused answer is 2^-24");
+        assert_eq!(unfused.to_bits(), 0, "unfused answer cancels to zero");
+        assert_ne!(
+            fused.to_bits(),
+            unfused.to_bits(),
+            "the case must distinguish one rounding from two"
+        );
+        emu.cpu.set_f(0, a.to_bits());
+        emu.cpu.set_f(1, x.to_bits());
+        emu.cpu.set_f(2, y.to_bits());
+        exec(
+            &mut emu,
+            &Inst::FpRrr(FpRrrOp::MaddS, FReg::new(0), FReg::new(1), FReg::new(2)),
+        );
+        assert_eq!(emu.cpu.f(0), fused.to_bits());
     }
 
     #[test]
