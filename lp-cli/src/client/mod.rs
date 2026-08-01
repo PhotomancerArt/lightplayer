@@ -11,6 +11,7 @@ pub use lpa_client::{
 // CLI-specific modules
 pub mod cli_connect;
 pub mod client_connect;
+pub mod esp32_probe;
 pub mod host_process;
 pub mod host_serial_esp32;
 pub mod serial_port;
