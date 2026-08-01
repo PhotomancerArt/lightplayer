@@ -5320,6 +5320,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-tungstenite",
