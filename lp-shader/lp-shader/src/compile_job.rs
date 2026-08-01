@@ -105,16 +105,16 @@ where
             ))
         } else {
             match desc.frontend {
-            ShaderFrontend::LpsGlsl => {
-                let options = lps_glsl::CompileOptions {
-                    texture_specs: desc.textures.clone(),
-                    texel_fetch_bounds: desc.compiler_config.texture.texel_fetch_bounds,
-                };
-                ShaderCompileState::Frontend(FrontendState::LpsGlsl(lps_glsl::CompileJob::new(
-                    desc.glsl, options,
-                )))
-            }
-            ShaderFrontend::Naga => ShaderCompileState::Frontend(FrontendState::Naga),
+                ShaderFrontend::LpsGlsl => {
+                    let options = lps_glsl::CompileOptions {
+                        texture_specs: desc.textures.clone(),
+                        texel_fetch_bounds: desc.compiler_config.texture.texel_fetch_bounds,
+                    };
+                    ShaderCompileState::Frontend(FrontendState::LpsGlsl(lps_glsl::CompileJob::new(
+                        desc.glsl, options,
+                    )))
+                }
+                ShaderFrontend::Naga => ShaderCompileState::Frontend(FrontendState::Naga),
             }
         };
         Self {
@@ -234,11 +234,10 @@ where
                         None
                     };
 
-                if let Some(job) = self.engine.start_compile_job(
-                    ir.clone(),
-                    meta.clone(),
-                    self.params.clone(),
-                ) {
+                if let Some(job) =
+                    self.engine
+                        .start_compile_job(ir.clone(), meta.clone(), self.params.clone())
+                {
                     self.state = ShaderCompileState::Backend {
                         ir,
                         meta,
@@ -249,10 +248,7 @@ where
                     };
                     ShaderCompileStepResult::Pending
                 } else {
-                    match self
-                        .engine
-                        .compile_with_params(&ir, &meta, &self.params)
-                    {
+                    match self.engine.compile_with_params(&ir, &meta, &self.params) {
                         Ok(module) => {
                             match LpsPxShader::new(
                                 module,
