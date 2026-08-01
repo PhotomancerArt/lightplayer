@@ -164,6 +164,10 @@ it is `#[cfg(debug_assertions)]`, and `release-esp32` inherits `release`.
 Confirmed on the linked ELF rather than by inference — the assertion's message
 string is absent from it, while other resolver strings are present.
 
+The spend and its (mostly absent) clawback lever are registered in the flash
+budget's running ledger — `docs/adr/2026-07-28-esp32c6-flash-budget.md` — which
+is where size work is directed when the gate trips.
+
 ### Revision stamps age
 
 A cached literal or def read keeps the revision it was first stamped with,
