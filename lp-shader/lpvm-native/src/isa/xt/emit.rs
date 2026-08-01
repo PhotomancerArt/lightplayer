@@ -1355,6 +1355,26 @@ impl<'a> EmitContext<'a> {
             } => {
                 self.emit_fuel_check(output, inst_idx, *decrement, *trap_label, src_op)?;
             }
+            // Hardware float. The FP emitter is roadmap M7 P3; until it lands,
+            // a float VInst reaching here means lowering produced instructions
+            // this emitter cannot encode, and the only safe answer is to refuse
+            // loudly. Erroring rather than skipping matters: a silently dropped
+            // FP instruction leaves the destination holding whatever was there
+            // before and renders a plausible wrong frame.
+            VInst::FAluRRR { .. }
+            | VInst::FAluRR { .. }
+            | VInst::Fcmp { .. }
+            | VInst::FSelect { .. }
+            | VInst::FLoad32 { .. }
+            | VInst::FStore32 { .. }
+            | VInst::Wfr { .. }
+            | VInst::Rfr { .. }
+            | VInst::IToF { .. } => {
+                return Err(crate::emit_err!(
+                    "xt emitter: no FP instruction encoding yet for {} (roadmap M7 P3)",
+                    vinst.mnemonic()
+                ));
+            }
         }
         Ok(())
     }

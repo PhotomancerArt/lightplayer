@@ -966,9 +966,7 @@ mod tests {
             &mut temps,
         )
         .expect_err("Xtensa has no f32 backend yet");
-        let LowerError::UnsupportedOp { description } = err else {
-            panic!("expected UnsupportedOp");
-        };
+        let LowerError::UnsupportedOp { description } = err;
         assert!(description.contains("Xtensa"), "{description}");
         assert!(out.is_empty(), "a refused op must emit nothing");
     }

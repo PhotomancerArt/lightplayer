@@ -8,6 +8,13 @@
 
 pub mod abi;
 pub mod emit;
+// The float register model. Gated at module granularity (M7 D9) so a
+// Fixed-only image links no float tables; the `VInst` float variants
+// themselves are unconditional, because `cfg` on enum variants matched
+// exhaustively across five helpers and the text ser/de costs more than the
+// residual it saves.
+#[cfg(feature = "float-f32")]
+pub mod fpr;
 pub mod gpr;
 pub mod imm;
 pub mod link;
