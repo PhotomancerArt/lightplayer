@@ -139,13 +139,13 @@
     --studio-status-debug-text: #f0b97a;
     --studio-status-debug-stripes: repeating-linear-gradient(
         135deg,
-        rgba(240, 185, 122, 0.1) 0 5px,
-        transparent 5px 11px
+        rgba(240, 185, 122, 0.03) 0 4px,
+        transparent 4px 14px
     );
     --studio-status-debug-stripes-strong: repeating-linear-gradient(
         135deg,
-        rgba(240, 185, 122, 0.2) 0 5px,
-        transparent 5px 11px
+        rgba(240, 185, 122, 0.07) 0 4px,
+        transparent 4px 14px
     );
     --studio-status-error-bg: #301b1d;
     --studio-status-error-border: #874b4b;
@@ -3693,7 +3693,7 @@ label:has(> input:not(:disabled)) {
 .lp-debug-section--active {
     background:
         var(--studio-status-debug-stripes-strong),
-        linear-gradient(90deg, var(--studio-status-debug-bg), transparent 60%);
+        linear-gradient(90deg, var(--studio-status-debug-bg), transparent 72%);
 }
 
 /* The section's own header strip: label on the left, Clear on the right. */
@@ -3763,7 +3763,7 @@ label:has(> input:not(:disabled)) {
     line-height: 1;
     color: var(--studio-status-debug-text);
     background:
-        var(--studio-status-debug-stripes-strong),
+        var(--studio-status-debug-stripes),
         var(--studio-status-debug-bg);
     border: 1px solid var(--studio-status-debug-border);
     border-radius: var(--studio-radius-pill);
@@ -3807,8 +3807,9 @@ label:has(> input:not(:disabled)) {
         linear-gradient(90deg, var(--studio-status-debug-bg), transparent 62%);
 }
 
-/* A touched Debug slot row: the same hazard language at row scale, in place
-   of the amber-unsaved tint a persisted edit wears. */
+/* A touched Debug slot row: a plain orange wash at row scale — the section
+   already supplies the stripes, so rows never re-stripe (stacking the two is
+   what made the first cut read many times too strong; G1 feedback). */
 .lp-debug-row {
     display: grid;
     min-width: 0;
@@ -3816,9 +3817,7 @@ label:has(> input:not(:disabled)) {
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
-    background:
-        var(--studio-status-debug-stripes-strong),
-        linear-gradient(270deg, var(--studio-status-debug-bg) 0%, var(--studio-status-debug-bg) 34%, transparent 100%);
+    background: linear-gradient(270deg, var(--studio-status-debug-bg) 0%, var(--studio-status-debug-bg) 34%, transparent 100%);
 }
 
 /* The row's inline Clear icon button. */
@@ -3872,7 +3871,7 @@ label:has(> input:not(:disabled)) {
 .lp-debug-icon-chrome {
     color: var(--studio-status-debug-text);
     background:
-        var(--studio-status-debug-stripes-strong),
+        var(--studio-status-debug-stripes),
         var(--studio-status-debug-bg);
     border-color: var(--studio-status-debug-border);
 }
