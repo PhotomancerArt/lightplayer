@@ -10,9 +10,7 @@
 //! M2 UX spike: the state below is carried by mock fixtures. The engine
 //! runtime that materializes real panel writers is M4's.
 
-use crate::{
-    UiPanelControl, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-};
+use crate::{UiPanelControl, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 
 /// The three visibly distinct states a panel control can be in
 /// (`docs/design/panel.md` P2; the three-state requirement is P-Q2).

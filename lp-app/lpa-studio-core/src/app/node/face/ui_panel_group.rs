@@ -24,11 +24,12 @@ pub struct UiPanelGroup {
     /// The scope's channels, in listing order.
     pub controls: Vec<UiPanelControlView>,
     /// Child modules' panels — presentation recursion (R8).
+    ///
+    /// Groups render as bordered clusters in a wrapping row and are
+    /// **always open**: wrapping is the density mechanism, not disclosure.
+    /// A panel you have to unfold before you can play it is not a control
+    /// panel, so there is deliberately no collapsed state here.
     pub groups: Vec<UiPanelGroup>,
-    /// Whether this group renders collapsed to its summary row. Nested
-    /// groups start collapsed on a busy panel; the root group is never
-    /// collapsed.
-    pub collapsed: bool,
 }
 
 impl UiPanelGroup {
@@ -39,7 +40,6 @@ impl UiPanelGroup {
             scope: scope.into(),
             controls: Vec::new(),
             groups: Vec::new(),
-            collapsed: false,
         }
     }
 
@@ -52,12 +52,6 @@ impl UiPanelGroup {
     /// Add nested child-module groups.
     pub fn with_groups(mut self, groups: Vec<UiPanelGroup>) -> Self {
         self.groups = groups;
-        self
-    }
-
-    /// Render this group collapsed to its summary row.
-    pub fn collapsed(mut self) -> Self {
-        self.collapsed = true;
         self
     }
 
@@ -107,13 +101,14 @@ impl UiPanelGroup {
                 UiSlotAspectRow::new("", "Every control in this group follows the project."),
             )
         } else {
-            let noun = if held == 1 { "control" } else { "controls" };
+            let clause = if held == 1 {
+                "1 control in this group is held by the panel.".to_string()
+            } else {
+                format!("{held} controls in this group are held by the panel.")
+            };
             UiSlotAspect::new(UiSlotAspectKind::PanelState, "Held")
                 .with_affordance(UiSlotAffordance::Edited)
-                .with_row(UiSlotAspectRow::new(
-                    "",
-                    format!("{held} {noun} in this group are held by the panel."),
-                ))
+                .with_row(UiSlotAspectRow::new("", clause))
         };
 
         vec![

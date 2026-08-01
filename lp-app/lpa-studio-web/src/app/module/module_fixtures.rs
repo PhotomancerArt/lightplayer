@@ -132,13 +132,27 @@ fn at_default(view: UiPanelControlView, source: &str) -> UiPanelControlView {
 /// channel names — they stay independent because they are different scopes
 /// (R8), which the scope path on the group heading spells out.
 fn plasma_panel(scope: &str, speed: UiPanelControlView) -> UiPanelGroup {
-    UiPanelGroup::new("plasma", scope).with_controls(vec![
+    // The group's LABEL carries the instance identity now that the scope
+    // path has moved into the heading's detail popup — two copies of one
+    // effect have to be tellable apart from the rule alone.
+    UiPanelGroup::new(instance_label(scope), scope).with_controls(vec![
         speed,
         at_default(
             knob(scope, "hue", "hue", 0.32, 0.0, 1.0, None),
             "authored default",
         ),
     ])
+}
+
+/// "plasma 1" from `/aurora.module/plasma_1.module` — the embedded node's
+/// own name, which is what distinguishes two instances on a rule.
+fn instance_label(scope: &str) -> String {
+    scope
+        .rsplit('/')
+        .next()
+        .and_then(|leaf| leaf.split('.').next())
+        .map(|name| name.replace('_', " "))
+        .unwrap_or_else(|| "module".to_string())
 }
 
 /// Either plasma instance's panel in its **Read** form: nothing touched,
@@ -743,13 +757,6 @@ impl PanelSpike {
                     face.auto_save = Some(*next);
                 }
             }
-            PanelGesture::ToggleGroup { scope } => {
-                visit_view_groups(&mut self.view, &mut |group| {
-                    if group.scope == *scope {
-                        group.collapsed = !group.collapsed;
-                    }
-                });
-            }
             PanelGesture::ClearControl { scope, channel } => {
                 self.restore(|group_scope, view| group_scope == scope && view.channel == *channel);
             }
@@ -954,17 +961,29 @@ mod tests {
     }
 
     #[test]
-    fn auto_save_and_group_disclosure_are_view_gestures() {
+    fn auto_save_is_a_view_gesture() {
         let mut spike = spike();
         assert_eq!(spike.face().auto_save, Some(true));
         spike.apply_gesture(&PanelGesture::SetAutoSave(false));
         assert_eq!(spike.face().auto_save, Some(false));
+    }
 
-        assert!(!spike.face().panel.groups[1].collapsed);
-        spike.apply_gesture(&PanelGesture::ToggleGroup {
-            scope: PLASMA_2_SCOPE.to_string(),
-        });
-        assert!(spike.face().panel.groups[1].collapsed);
+    /// Groups are bordered clusters in a wrapping row, never folded away —
+    /// so their labels have to carry the instance identity that the scope
+    /// path used to.
+    #[test]
+    fn side_by_side_groups_are_told_apart_by_their_labels() {
+        let panel = held_root_face().panel;
+        assert_eq!(panel.groups[0].label, "plasma 1");
+        assert_eq!(panel.groups[1].label, "plasma 2");
+        assert_ne!(panel.groups[0].label, panel.groups[1].label);
+        // And the path is still reachable — in the heading's popup.
+        let aspects = panel.groups[0].detail_aspects();
+        assert!(
+            aspects
+                .iter()
+                .any(|aspect| aspect.rows.iter().any(|row| row.value == PLASMA_1_SCOPE))
+        );
     }
 
     /// The G2 revision-1 claim: children are sibling cards under the module

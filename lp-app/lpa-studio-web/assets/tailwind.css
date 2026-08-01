@@ -339,6 +339,9 @@
   .tw\:h-\[46px\] {
     height: 46px;
   }
+  .tw\:h-\[420px\] {
+    height: 420px;
+  }
   .tw\:h-\[560px\] {
     height: 560px;
   }
@@ -543,11 +546,17 @@
   .tw\:w-\[128px\] {
     width: 128px;
   }
+  .tw\:w-\[184px\] {
+    width: 184px;
+  }
   .tw\:w-\[340px\] {
     width: 340px;
   }
   .tw\:w-\[375px\] {
     width: 375px;
+  }
+  .tw\:w-\[430px\] {
+    width: 430px;
   }
   .tw\:w-\[720px\] {
     width: 720px;
@@ -596,9 +605,6 @@
   }
   .tw\:max-w-96 {
     max-width: calc(var(--tw-spacing) * 96);
-  }
-  .tw\:max-w-\[17ch\] {
-    max-width: 17ch;
   }
   .tw\:max-w-\[85\%\] {
     max-width: 85%;
@@ -657,6 +663,9 @@
   .tw\:min-w-\[2ch\] {
     min-width: 2ch;
   }
+  .tw\:min-w-\[4\.5ch\] {
+    min-width: 4.5ch;
+  }
   .tw\:min-w-\[52px\] {
     min-width: 52px;
   }
@@ -672,6 +681,9 @@
   .tw\:flex-1 {
     flex: 1;
   }
+  .tw\:flex-auto {
+    flex: auto;
+  }
   .tw\:flex-none {
     flex: none;
   }
@@ -683,6 +695,12 @@
   }
   .tw\:shrink-0 {
     flex-shrink: 0;
+  }
+  .tw\:basis-\[220px\] {
+    flex-basis: 220px;
+  }
+  .tw\:basis-\[240px\] {
+    flex-basis: 240px;
   }
   .tw\:origin-left {
     transform-origin: left;
@@ -937,9 +955,6 @@
   }
   .tw\:gap-y-0\.5 {
     row-gap: calc(var(--tw-spacing) * 0.5);
-  }
-  .tw\:gap-y-1 {
-    row-gap: calc(var(--tw-spacing) * 1);
   }
   .tw\:gap-y-2 {
     row-gap: calc(var(--tw-spacing) * 2);
@@ -1496,11 +1511,17 @@
   .tw\:pr-1\.5 {
     padding-right: calc(var(--tw-spacing) * 1.5);
   }
+  .tw\:pr-8 {
+    padding-right: calc(var(--tw-spacing) * 8);
+  }
   .tw\:pr-24 {
     padding-right: calc(var(--tw-spacing) * 24);
   }
   .tw\:pb-1\.5 {
     padding-bottom: calc(var(--tw-spacing) * 1.5);
+  }
+  .tw\:pb-2 {
+    padding-bottom: calc(var(--tw-spacing) * 2);
   }
   .tw\:pb-3 {
     padding-bottom: calc(var(--tw-spacing) * 3);
@@ -1534,6 +1555,9 @@
   }
   .tw\:pl-24 {
     padding-left: calc(var(--tw-spacing) * 24);
+  }
+  .tw\:pl-48 {
+    padding-left: calc(var(--tw-spacing) * 48);
   }
   .tw\:pl-\[18px\] {
     padding-left: 18px;

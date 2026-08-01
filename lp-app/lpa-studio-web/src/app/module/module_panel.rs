@@ -4,8 +4,10 @@
 //! `docs/design/modules.md` R8. The recursion is presentation only —
 //! nothing is promoted, and two embedded instances of one effect present
 //! two independent groups because they are two different scopes. A nested
-//! group is a hairline-boxed subsection with its own heading, collapsible
-//! to a summary row; the root group is never collapsed (it *is* the panel).
+//! group is a **hairline rule with its name on it**, not a box: boxes stack
+//! into noise on a surface that recurses, and a control panel wants one
+//! flat field of controls with quiet dividers. The root group is never
+//! collapsed (it *is* the panel).
 //!
 //! The two module-level affordances are **quiet chrome in the panel's
 //! upper right**, not chips in the content flow — the controls are the
@@ -27,9 +29,13 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiPanelGroup};
 
-use crate::base::{StudioIcon, StudioIconName};
+use crate::app::node::SlotDetailButton;
+use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
 use super::{ModulePanelControl, PanelGesture};
+
+/// Bare text button for a nested group's name-as-detail-trigger.
+const GROUP_LABEL_TRIGGER_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:decoration-dotted tw:underline-offset-2 tw:hover:underline";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -43,6 +49,15 @@ pub fn ModulePanel(
     /// Roomier play-mode rendering: bigger gaps, no authoring chrome.
     #[props(default = false)]
     play: bool,
+    /// Pin this channel's control detail popup open on first render
+    /// (stories) — the popup is where every caption went, so it has to be
+    /// capturable.
+    #[props(default = None)]
+    detail_open_channel: Option<String>,
+    /// Pin this nested group's heading popup open on first render
+    /// (stories), keyed by scope.
+    #[props(default = None)]
+    detail_open_group: Option<String>,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
@@ -83,6 +98,7 @@ pub fn ModulePanel(
                     for control in panel.controls.clone() {
                         ModulePanelControl {
                             key: "{control.channel}",
+                            detail_initially_open: detail_open_channel.as_deref() == Some(control.channel.as_str()),
                             view: control,
                             scope: scope.clone(),
                             play,
@@ -92,13 +108,22 @@ pub fn ModulePanel(
                     }
                 }
             }
-            for group in panel.groups.clone() {
-                NestedPanelGroup {
-                    key: "{group.scope}",
-                    group,
-                    play,
-                    on_panel,
-                    on_action,
+            // Groups lay out as a wrapping ROW of bordered clusters — two
+            // effect boxes side by side when the width allows, stacking
+            // when it does not. That side-by-side reading is the "actual
+            // control panel" image: function groups on hardware.
+            if !panel.groups.is_empty() {
+                div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-start tw:gap-3",
+                    for group in panel.groups.clone() {
+                        NestedPanelGroup {
+                            key: "{group.scope}",
+                            detail_initially_open: detail_open_group.as_deref() == Some(group.scope.as_str()),
+                            group,
+                            play,
+                            on_panel,
+                            on_action,
+                        }
+                    }
                 }
             }
         }
@@ -107,69 +132,81 @@ pub fn ModulePanel(
 
 /// One embedded module's panel inside its host's panel (R8 recursion).
 ///
-/// Hairline-boxed rather than full-bleed: the box is what makes "these
-/// knobs belong to plasma_1, those to plasma_2" readable at a glance, which
-/// is the whole point of two side-by-side instances.
+/// A **light hairline box with its name embedded in the top border** —
+/// a real `<fieldset>`/`<legend>`, so the notch in the border is the
+/// browser's, not a stack of CSS tricks. That keeps the `— PLASMA 1 —`
+/// reading while making the group a bordered *cluster*: boxes of related
+/// controls sitting side by side is what a hardware control panel looks
+/// like, and [`ModulePanel`] lays the groups out in a wrapping flex row to
+/// get exactly that.
+///
+/// **No collapse.** Groups render always-open; wrapping is the density
+/// mechanism, not disclosure. A panel you have to unfold before you can
+/// play it is not a control panel.
+///
+/// The label is the detail trigger — the scope path and the control tally
+/// live behind it, in the same popup language the controls use — and the
+/// group's reset sits in the border area beside the name, where it reads as
+/// belonging to the box rather than to any control inside it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn NestedPanelGroup(
     group: UiPanelGroup,
     #[props(default = false)] play: bool,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
+    /// Open the group label's detail popup on first render (stories).
+    #[props(default = false)]
+    detail_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let held = group.engaged_total();
-    let summary = group.summary();
+    let aspects = group.detail_aspects();
     let scope = group.scope.clone();
-    let toggle_scope = group.scope.clone();
-    let collapsed = group.collapsed;
     let label = group.label.clone();
     let heading_class = if held > 0 {
-        "tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-status-attention-foreground"
+        "tw:truncate tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-status-attention-foreground"
     } else {
-        "tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-subtle-foreground"
+        "tw:truncate tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-subtle-foreground"
+    };
+    let control_gap = if play { "tw:gap-5" } else { "tw:gap-4" };
+    // A box is a cluster, not a column: it takes its share of the row and
+    // wraps whole rather than squeezing its controls.
+    let box_class = if play {
+        "tw:m-0 tw:min-w-0 tw:flex-auto tw:basis-[240px] tw:rounded-sm tw:border tw:border-border-muted tw:px-3 tw:pb-3"
+    } else {
+        "tw:m-0 tw:min-w-0 tw:flex-auto tw:basis-[220px] tw:rounded-sm tw:border tw:border-border-muted tw:px-3 tw:pb-2"
     };
 
     rsx! {
-        section { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-sm tw:border tw:border-border-muted tw:bg-card-subtle tw:px-3 tw:py-2",
-            // Wraps rather than squeezes: at phone width the summary and
-            // reset chip drop to a second line instead of crushing the
-            // group's name to one letter.
-            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-2 tw:gap-y-1",
-                button {
-                    class: "tw:group tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left",
-                    r#type: "button",
-                    aria_expanded: "{!collapsed}",
-                    title: if collapsed { "Expand {label}" } else { "Collapse {label}" },
-                    onclick: move |event| {
-                        event.stop_propagation();
-                        if let Some(handler) = on_panel {
-                            handler.call(PanelGesture::ToggleGroup { scope: toggle_scope.clone() });
+        fieldset { class: box_class,
+            // The legend rides IN the top border — the name and, beside it,
+            // the box's own reset.
+            legend { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:px-1.5",
+                SlotDetailButton {
+                    label: label.clone(),
+                    aspects,
+                    name_override: Some(label.clone()),
+                    initially_open: detail_initially_open,
+                    placement: PopoverPlacement::BottomMiddle,
+                    trigger: Some(rsx! {
+                        span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1",
+                            span { class: heading_class, "{label}" }
+                            span { class: "tw:inline-flex tw:flex-none tw:opacity-50",
+                                StudioIcon { name: StudioIconName::InfoBare, size: 9 }
+                            }
                         }
-                    },
-                    span { class: "tw:inline-flex tw:flex-none tw:text-subtle-foreground",
-                        StudioIcon {
-                            name: if collapsed { StudioIconName::Collapsed } else { StudioIconName::Expanded },
-                            size: 11,
-                        }
-                    }
-                    span { class: heading_class, "{group.label}" }
+                    }),
+                    trigger_class: GROUP_LABEL_TRIGGER_CLASS.to_string(),
+                    trigger_open_class: GROUP_LABEL_TRIGGER_CLASS.to_string(),
+                    on_action,
                 }
-                // The scope path: the identity half of every control below
-                // (panel.md P1), and what makes two instances distinct.
-                span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[0.6rem] tw:text-dim-foreground",
-                    "{group.scope}"
-                }
-                span { class: "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:gap-2",
-                    span { class: "tw:font-mono tw:text-[0.6rem] tw:text-dim-foreground", "{summary}" }
-                    if held > 0 && let Some(handler) = on_panel {
-                        PanelResetButton { scope: scope.clone(), held, on_panel: handler }
-                    }
+                if held > 0 && let Some(handler) = on_panel {
+                    PanelResetButton { scope: scope.clone(), held, on_panel: handler }
                 }
             }
-            if !collapsed {
+            div { class: "tw:grid tw:min-w-0 tw:gap-3",
                 if !group.controls.is_empty() {
-                    div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-start tw:gap-4",
+                    div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-start {control_gap}",
                         for control in group.controls.clone() {
                             ModulePanelControl {
                                 key: "{control.channel}",
@@ -182,13 +219,19 @@ pub fn NestedPanelGroup(
                         }
                     }
                 }
-                for nested in group.groups.clone() {
-                    NestedPanelGroup {
-                        key: "{nested.scope}",
-                        group: nested,
-                        play,
-                        on_panel,
-                        on_action,
+                // A group inside a group: the same box one level in, laid
+                // out in its own wrapping row.
+                if !group.groups.is_empty() {
+                    div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-start tw:gap-3",
+                        for nested in group.groups.clone() {
+                            NestedPanelGroup {
+                                key: "{nested.scope}",
+                                group: nested,
+                                play,
+                                on_panel,
+                                on_action,
+                            }
+                        }
                     }
                 }
             }
