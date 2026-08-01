@@ -105,6 +105,13 @@ genuinely fits none of these, and define it here in one line.
 - **`unsynchronized-shared-artifact`** — two steps share a filesystem
   artifact, but the lock that would order them is scoped narrower than
   the artifact, so a reader observes a writer's intermediate state.
+- **`model-conflation`** — a model represents two things the real system
+  keeps separate as one resource, so they contend for something that on
+  hardware they never share. Presents as a *capacity* failure in the units
+  of the conflated resource, which is why it invites resolutions that all
+  preserve the wrong model (make it bigger, split it, shrink what goes in
+  it). The diagnostic question is not "how do we make it fit" but "why are
+  these in the same place here when they are not on the device".
 - **`invented-encoding`** — a binary format's numbering (an instruction
   encoding, a relocation type) is inferred from the shape of its
   neighbours instead of read from the spec, and the invented value
@@ -169,6 +176,8 @@ sentence (arguments in, returns out; registers and stack).
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| model-conflation | 2026-08-01 | [xt-f32-builtins-exhaust-the-emulator-code-region](2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md) | fixed | lp-xt-emu (board/memory) + lps-builtins-xt-app + lpvm-native/rt_emu |
+| upstream-toolchain-limitation | 2026-08-01 | [xtensa-backend-cannot-select-float-constant-pool](2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md) | **open** (worked around) | lps-builtins + esp Rust toolchain |
 | invented-encoding | 2026-07-31 | [zexth-encoding-steals-xori-128](2026-07-31-zexth-encoding-steals-xori-128.md) | fixed | lp-riscv-inst (encode/decode) + lp-riscv-emu (executor) |
 | invented-encoding | 2026-07-31 | [elf-loader-riscv-reloc-numbering](2026-07-31-elf-loader-riscv-reloc-numbering.md) | **open** | lp-riscv-elf (relocations) |
 | partial-knowledge-loss | 2026-07-31 | [elf-loader-drops-relocation-addends](2026-07-31-elf-loader-drops-relocation-addends.md) | fixed | lp-riscv-elf (relocations) |
