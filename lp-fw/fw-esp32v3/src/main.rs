@@ -40,7 +40,15 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// being large enough to not immediately need revisiting. P3 of this
 /// roadmap is what actually measures free heap radio-off and radio-linked
 /// and may revise this number.
+#[cfg(not(feature = "radio_ram_probe"))]
 const HEAP_SIZE: usize = 100 * 1024;
+
+/// Probe heap: the radio stack's own DRAM statics (~10s of KB of `.bss`)
+/// come out of the same 192 KB `dram_seg` the arena does, so the arena must
+/// shrink for the image to link at all. 72 KB is the experiment repo's
+/// proven radio-coexistent size on this chip (led-lab-esp32 `test_stress`).
+#[cfg(feature = "radio_ram_probe")]
+const HEAP_SIZE: usize = 72 * 1024;
 
 /// Abort-tier panic handler. Print what panicked, then reset so the next
 /// boot starts clean — there is no ledger yet to stage a breadcrumb into
@@ -91,6 +99,52 @@ fn main() -> ! {
         "[INIT] chip=esp32 arch=xtensa heap_free={}",
         esp_alloc::HEAP.free()
     );
+
+    // M2-P3 RAM probe: bring the radio stack all the way up to an initialised
+    // STA controller — the deployment-shaped memory layout — printing the
+    // heap ledger at each stage. `[PROBE]` lines are the phase deliverable;
+    // the stage traces make a wedged boot attributable (experiment stress.rs
+    // precedent).
+    #[cfg(feature = "radio_ram_probe")]
+    {
+        esp_println::println!(
+            "[PROBE] stage=pre_rtos heap_size={HEAP_SIZE} heap_free={} heap_used={}",
+            esp_alloc::HEAP.free(),
+            esp_alloc::HEAP.used()
+        );
+        let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
+        let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(
+            peripherals.SW_INTERRUPT,
+        );
+        esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+        esp_println::println!(
+            "[PROBE] stage=rtos_started heap_free={} heap_used={}",
+            esp_alloc::HEAP.free(),
+            esp_alloc::HEAP.used()
+        );
+        let (mut controller, _interfaces) =
+            esp_radio::wifi::new(peripherals.WIFI, Default::default())
+                .expect("radio probe: wifi init");
+        esp_println::println!(
+            "[PROBE] stage=wifi_new heap_free={} heap_used={}",
+            esp_alloc::HEAP.free(),
+            esp_alloc::HEAP.used()
+        );
+        let station_config = esp_radio::wifi::sta::StationConfig::default();
+        controller
+            .set_config(&esp_radio::wifi::Config::Station(station_config))
+            .expect("radio probe: sta config");
+        esp_println::println!(
+            "[PROBE] stage=sta_started heap_free={} heap_used={}",
+            esp_alloc::HEAP.free(),
+            esp_alloc::HEAP.used()
+        );
+        // Keep the controller alive so the heartbeat below reports the
+        // steady-state radio-on ledger, not a post-drop one.
+        core::mem::forget(controller);
+        esp_println::println!("[PROBE] done — heartbeat shows steady-state radio-on heap");
+    }
+
     esp_println::println!("[INIT] ready");
 
     let delay = Delay::new();
