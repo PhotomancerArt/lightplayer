@@ -180,8 +180,21 @@ under-scoped. When a fix establishes an invariant, enumerate every place
 it applies before closing the entry; here that enumeration was one
 sentence (arguments in, returns out; registers and stack).
 
+**The 2026-08-01 entry moves the masking axis off the ISA.**
+`xtlpn-f32-loses-writes-to-value-parameters` is the same shape — shared code
+whose fast path was safe only for the configurations anyone ran — but what
+masked it was the **frontend**, not the register layout: Naga copies parameters
+into fresh locals, `lps-glsl` reuses the parameter's own vreg, and only the
+second shape can make a lowering shortcut read a stale copy. So the mitigation
+generalizes past "a second ISA": the falsifying configuration is the *product*
+of the axes a compile is parameterized by (frontend × ISA × float mode), and a
+target that exists in the matrix but not in the suite is a configuration nothing
+can falsify. It needed all three axes at once, and it was found within hours of
+the combination first being registered as a target.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| config-masked-defect | 2026-08-01 | [xtlpn-f32-loses-writes-to-value-parameters](2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md) | fixed | lpvm-native lowering (lower_f32.rs) |
 | test-rig-lies-about-its-subject | 2026-08-01 | [xt-pipeline-rigs-declare-param-types-as-return-types](2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md) | fixed (f32 rig; Q32 rig outstanding) | lpvm-native tests + lpir::builder |
 | model-conflation | 2026-08-01 | [xt-f32-builtins-exhaust-the-emulator-code-region](2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md) | fixed | lp-xt-emu (board/memory) + lps-builtins-xt-app + lpvm-native/rt_emu |
 | upstream-toolchain-limitation | 2026-08-01 | [xtensa-backend-cannot-select-float-constant-pool](2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md) | **open** (worked around) | lps-builtins + esp Rust toolchain |

@@ -107,6 +107,20 @@ no measured gain. Lowering emits the transfers (rather than regalloc or the
 emitter) so that the ABI is **visible in the VInst dump** and a filetest can read
 it.
 
+**A float parameter therefore has two vregs, and only one of them is ever
+current.** It arrives precolored to an AR, and a vreg has a single register
+class for life, so the body computes on a *shadow* vreg in the float file that
+the entry `wfr` fills. The invariant this ADR originally left unwritten is that
+**after that transfer the shadow is the parameter's only home**: LPIR is not SSA
+and a GLSL value parameter is a mutable local, so a body that assigns to its own
+parameter writes the shadow while the incoming AR keeps the caller's argument.
+Lowering read that stale AR at call-argument and return boundaries as a
+one-instruction saving until
+`docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md` — a
+function returning its modified parameter returned the argument untouched, on
+the `lps-glsl` frontend only, because Naga's copies parameters into fresh locals
+and never builds the shape.
+
 **The Float ABI hooks stay empty on purpose** (D3). Because floats never occupy
 an ABI argument *slot*, `call_arg_reg(Float, …)`, `direct_ret_reg(Float, …)`,
 `direct_ret_reg_count(Float)` and `lpir_call_arg_target(Float, …)` return
