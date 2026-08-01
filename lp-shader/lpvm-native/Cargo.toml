@@ -28,6 +28,13 @@ debug = []
 # harness and the host golden test so the two cannot drift. Needs `isa-xt` to
 # be meaningful; `no_std` and off by default so the app firmware never links it.
 xt-corpus = ["isa-xt"]
+# Classic-ESP32 (LX6) fixed-region JIT placement: `rt_jit` links every module
+# at a span reserved in `codemem_esp32::global`'s arena and installs it
+# through the word-mirrored D-bus walk, because the classic heap has no I-bus
+# view (see codemem_esp32 docs). Enabled ONLY by `fw-esp32v3`; the S3 keeps
+# the in-place heap path, and hosts never enable it. Compile-time per-chip
+# selection per the classic bring-up plan (M1/M3).
+xt-placed-code = ["isa-xt"]
 # Host: link with builtins ELF and run in lp-riscv-emu (pulls std).
 emu = [
     # The emulation path's reference target is rv32 (lp-riscv-emu); Xtensa is
