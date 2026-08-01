@@ -12,6 +12,26 @@ workspace = true
 default = []
 std = []
 
+# "This board has hardware float." Forwards `float-f32` to the native backend
+# and the builtins on the JIT-capable targets, so a firmware crate can express
+# the capability once instead of naming two crates it does not otherwise
+# depend on directly.
+#
+# It has to be a passthrough rather than feature unification doing the job on
+# its own: `fw-esp32s3` takes `lpvm-native`/`lps-builtins` as **optional**
+# harness dependencies, so naming their features there covers the harness build
+# and leaves the app path — which reaches them only through this crate —
+# untouched.
+#
+# Off by default, and the ESP32-C6 leaves it off: that board has no FPU, ships
+# Fixed-mode shaders, and its image must not grow by a backend it never enters
+# (f32 roadmap D2). Its zero-byte delta is the check that proves the gate holds.
+#
+# Enabling this links the f32 lowering and builtins; it does not *select* F32
+# mode. `NativeCompileOptions::default()` is still Q32, and which boards offer
+# Float mode is a product decision M7 does not make.
+float-f32 = ["lpvm-native/float-f32", "lps-builtins/float-f32"]
+
 [dependencies]
 lp-gfx = { path = "../lp-gfx", default-features = false }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
