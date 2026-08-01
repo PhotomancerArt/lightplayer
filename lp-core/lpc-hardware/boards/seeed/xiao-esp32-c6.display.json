@@ -12,6 +12,7 @@
   "purchase_urls": [
     { "label": "Seeed", "href": "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html" }
   ],
+  "usb_bridge": "native-usb-jtag",
   "hw": {
     "width": 76,
     "module": { "x": 14, "y": 6, "w": 48, "h": 30, "label": "C6", "antenna": false },

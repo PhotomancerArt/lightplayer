@@ -13,6 +13,7 @@
     { "label": "Espressif", "href": "https://www.espressif.com/en/products/devkits/esp32-c6-devkitc-1" },
     { "label": "DigiKey", "href": "https://www.digikey.com/en/products/detail/espressif-systems/ESP32-C6-DEVKITC-1-N8/17728861" }
   ],
+  "usb_bridge": "native-usb-jtag",
   "hw": {
     "width": 112,
     "module": { "x": 16, "y": 8, "w": 80, "h": 66, "label": "ESP32-C6", "antenna": true },

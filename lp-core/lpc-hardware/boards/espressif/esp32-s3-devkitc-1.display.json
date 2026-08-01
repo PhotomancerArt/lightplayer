@@ -15,6 +15,7 @@
     { "label": "Espressif", "href": "https://www.espressif.com/en/products/devkits/esp32-s3-devkitc-1" },
     { "label": "Adafruit", "href": "https://www.adafruit.com/product/5312" }
   ],
+  "usb_bridge": "native-usb-jtag",
   "hw": {
     "width": 120,
     "module": { "x": 18, "y": 8, "w": 84, "h": 74, "label": "ESP32-S3", "antenna": true },

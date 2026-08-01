@@ -10,6 +10,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::usb_bridge::UsbBridge;
+
 /// One board's display sidecar (`<vendor>/<product>.display.json`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -41,6 +43,11 @@ pub struct BoardDisplayFile {
     pub support_note: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub purchase_urls: Vec<PurchaseUrl>,
+    /// The USB-UART bridge the board's USB connector goes through — drives
+    /// per-OS driver warnings (plan decision D5). Set only when verified;
+    /// omitted = unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usb_bridge: Option<UsbBridge>,
     pub hw: BoardDrawing,
 }
 
@@ -327,6 +334,7 @@ mod tests {
             blurb: "A board.".into(),
             support_note: None,
             purchase_urls: vec![],
+            usb_bridge: None,
             hw: BoardDrawing {
                 width: 100.0,
                 module: DrawnModule {
