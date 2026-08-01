@@ -1586,6 +1586,7 @@ impl ProjectController {
         .with_root_slots(root_slots)
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
+        .with_debug_overrides(edits.debug_override_count())
         .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
         .with_add_node_menu(add_node_menu(&UiAttachTarget::ProjectRoot))
@@ -7060,6 +7061,16 @@ mod tests {
             .unwrap_or(&[])
     }
 
+    fn section_debug_slots(sections: &[UiNodeSection]) -> &[crate::UiConfigSlot] {
+        sections
+            .iter()
+            .find_map(|section| match section {
+                UiNodeSection::DebugSlots(items) => Some(items.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
     fn tree_view() -> ProjectView {
         let mut view = ProjectView::new();
         let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
@@ -8561,6 +8572,15 @@ mod tests {
             .unwrap_or_else(|| panic!("config slot {label} should exist"))
     }
 
+    /// A row of the node's **Debug** section (D3/D4) — the partition means a
+    /// `SlotRole::Debug` field is deliberately NOT in `config_slot`'s bucket.
+    fn debug_slot<'a>(nodes: &'a [crate::UiNodeView], label: &str) -> &'a crate::UiConfigSlot {
+        section_debug_slots(node_sections(&nodes[0]))
+            .iter()
+            .find(|slot| slot.label == label)
+            .unwrap_or_else(|| panic!("debug slot {label} should exist"))
+    }
+
     fn slot_display(slot: &crate::UiConfigSlot) -> &str {
         let UiConfigSlotBody::Value(value) = &slot.body else {
             panic!("expected value body");
@@ -8685,7 +8705,7 @@ mod tests {
         let nodes = project.ui_nodes();
         let slot = config_slot(&nodes, "Brightness");
         assert_eq!(slot.state.dirty, UiNodeDirtyState::Dirty);
-        assert!(!slot.state.live);
+        assert!(!slot.state.debug);
         assert_eq!(slot_display(slot), "0.9");
         assert_eq!(slot.address, Some(brightness_address()));
         assert_eq!(
@@ -10099,8 +10119,8 @@ mod tests {
         // The override is still LIVE on the project — it is simply not
         // save/dirty business; its verb is Clear.
         let nodes = project.ui_nodes();
-        let rate = config_slot(&nodes, "Rate");
-        assert!(rate.state.live);
+        let rate = debug_slot(&nodes, "Rate");
+        assert!(rate.state.debug);
         assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
     }
 
@@ -10229,10 +10249,10 @@ mod tests {
             "with the persisted edit written, only the debug override remains — and it is not dirty"
         );
         let nodes = project.ui_nodes();
-        let rate = config_slot(&nodes, "Rate");
+        let rate = debug_slot(&nodes, "Rate");
         assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
         assert!(
-            rate.state.live,
+            rate.state.debug,
             "the live override is still distinguishable"
         );
         assert_eq!(
@@ -10288,7 +10308,7 @@ mod tests {
             UiNodeDirtyState::Clean
         );
         assert_eq!(
-            config_slot(&nodes, "Rate").state.dirty,
+            debug_slot(&nodes, "Rate").state.dirty,
             UiNodeDirtyState::Clean
         );
     }
@@ -10756,9 +10776,9 @@ mod tests {
             })
         }
         sections.iter().find_map(|section| match section {
-            crate::UiNodeSection::AssetSlots(slots) | crate::UiNodeSection::ConfigSlots(slots) => {
-                in_slots(slots)
-            }
+            crate::UiNodeSection::AssetSlots(slots)
+            | crate::UiNodeSection::ConfigSlots(slots)
+            | crate::UiNodeSection::DebugSlots(slots) => in_slots(slots),
             _ => None,
         })
     }

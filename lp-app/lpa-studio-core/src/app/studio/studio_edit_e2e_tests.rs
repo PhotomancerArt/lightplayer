@@ -76,13 +76,34 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     assert!(!root_slot("nodes").state.editable);
     assert!(root_slot("name").state.editable);
 
+    // D3/D4 over the real wire: the clock's three `controls.*` Debug fields
+    // land FLAT in the node's Debug section — no "Controls" record row in
+    // the settings section, no nesting inside the Debug one — while the
+    // clock's persisted settings stay where they were.
+    let clock_sections = node_sections(&snapshot, "/edit_e2e.show/clock.clock");
+    let debug_labels = section_slot_labels(&clock_sections, |section| {
+        matches!(section, UiNodeSection::DebugSlots(_))
+    });
+    assert_eq!(
+        debug_labels,
+        vec!["Running", "Rate", "Scrub offset seconds"],
+        "every Debug field renders directly in the Debug section (D4 flattening)"
+    );
+    let settings_labels = section_slot_labels(&clock_sections, |section| {
+        matches!(section, UiNodeSection::ConfigSlots(_))
+    });
+    assert!(
+        !settings_labels.iter().any(|label| label == "Controls"),
+        "the Debug section replaces the old `controls` record row, never duplicates it: {settings_labels:?}"
+    );
+
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
-    assert!(rate.state.live, "clock rate is a debug (live) control");
+    assert!(rate.state.debug, "clock rate is a Debug control");
     let rate_address = rate.address.clone().expect("rate slot carries an address");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
-    assert!(!color_order.state.live, "color order is a persisted slot");
+    assert!(!color_order.state.debug, "color order is a persisted slot");
     let color_order_address = color_order
         .address
         .clone()
@@ -111,11 +132,11 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     );
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
-    assert!(rate.state.live);
+    assert!(rate.state.debug);
     assert_eq!(slot_value_display(rate), "2");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Dirty);
-    assert!(!color_order.state.live);
+    assert!(!color_order.state.debug);
     assert_eq!(slot_value_display(color_order), "rgb");
     assert_eq!(
         editor_dirty(&snapshot),
@@ -1714,7 +1735,7 @@ fn special_editor_values_round_trip_save_and_revert() {
 
     let render_size = find_slot(&snapshot, "render_size");
     assert_eq!(render_size.state.dirty, UiNodeDirtyState::Dirty);
-    assert!(!render_size.state.live, "render_size is a persisted slot");
+    assert!(!render_size.state.debug, "render_size is a persisted slot");
     let transform = find_slot(&snapshot, "transform");
     assert_eq!(transform.state.dirty, UiNodeDirtyState::Dirty);
     assert_eq!(editor_dirty(&snapshot), (2, 0));
@@ -2093,7 +2114,9 @@ pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
     }
     fn in_sections(sections: &[UiNodeSection]) -> Option<crate::UiAssetEditor> {
         sections.iter().find_map(|section| match section {
-            UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => in_slots(slots),
+            UiNodeSection::AssetSlots(slots)
+            | UiNodeSection::ConfigSlots(slots)
+            | UiNodeSection::DebugSlots(slots) => in_slots(slots),
             _ => None,
         })
     }
@@ -2396,6 +2419,40 @@ pub(crate) fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
     (editor.dirty.persisted, editor.dirty.failed)
 }
 
+/// The main-tab sections of one workspace card, by node address.
+pub(crate) fn node_sections(view: &UiStudioView, node_id: &str) -> Vec<UiNodeSection> {
+    let editor = project_editor(view);
+    let node = editor
+        .nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .unwrap_or_else(|| panic!("workspace card {node_id} should exist"));
+    match &node.tabs[0].body {
+        UiNodeTabBody::Sections(sections) => sections.clone(),
+        UiNodeTabBody::Text { .. } => panic!("expected node sections"),
+    }
+}
+
+/// Top-level row labels of the first section matching `pick` (empty when the
+/// node renders no such section).
+pub(crate) fn section_slot_labels(
+    sections: &[UiNodeSection],
+    pick: impl Fn(&UiNodeSection) -> bool,
+) -> Vec<String> {
+    sections
+        .iter()
+        .find(|section| pick(section))
+        .map(|section| match section {
+            UiNodeSection::ConfigSlots(slots)
+            | UiNodeSection::DebugSlots(slots)
+            | UiNodeSection::AssetSlots(slots) => {
+                slots.iter().map(|slot| slot.label.clone()).collect()
+            }
+            _ => Vec::new(),
+        })
+        .unwrap_or_default()
+}
+
 /// Find a config slot anywhere in the editor DTO tree by its address path.
 pub(crate) fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
     try_find_slot(view, path).unwrap_or_else(|| panic!("config slot with path {path} should exist"))
@@ -2428,9 +2485,9 @@ fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigS
 
     fn in_sections<'a>(sections: &'a [UiNodeSection], path: &str) -> Option<&'a UiConfigSlot> {
         sections.iter().find_map(|section| match section {
-            UiNodeSection::ConfigSlots(slots) | UiNodeSection::AssetSlots(slots) => {
-                in_slots(slots, path)
-            }
+            UiNodeSection::ConfigSlots(slots)
+            | UiNodeSection::AssetSlots(slots)
+            | UiNodeSection::DebugSlots(slots) => in_slots(slots, path),
             _ => None,
         })
     }

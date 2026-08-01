@@ -27,13 +27,17 @@ pub enum UiAffordance {
     /// Genuine in-flight activity (sync, save, provision, an edit awaiting
     /// its ack). Steady-state "running" is `Good` status and never Busy.
     Busy,
-    /// Live-only overrides in the subtree; blue, never written by Save.
+    /// **Debug** overrides are active on the surface (D8/D9): transient
+    /// diagnostics/authoring values with no durable value underneath.
     ///
-    /// [`Self::from_dirty`] no longer produces this: since D7 a Debug value
-    /// is not dirty, so it has no bucket in [`DirtySummary`]. The variant
-    /// stays as the vocabulary slot the debug treatment occupies (P3 re-homes
-    /// it onto the debug-override count and its global chip).
-    Live,
+    /// [`Self::from_dirty`] never produces this — since D7 a Debug value is
+    /// not dirty and has no bucket in [`DirtySummary`], so it must not tint a
+    /// header wash or announce as pending work. Its source is the separate
+    /// debug-override count ([`Self::from_debug_overrides`]), which the debug
+    /// section, the node-card marking, and the global "Debug active" chip
+    /// read. The web layer is the ONE place that turns this variant into
+    /// pixels (attention-orange + hazard stripes) — change the look there.
+    Debug,
     /// Unsaved persisted edits in the subtree; yellow edit glyph.
     Unsaved,
     /// Needs attention: the surface's own status is failing (error or
@@ -78,6 +82,15 @@ impl UiAffordance {
         }
     }
 
+    /// Project a debug-override count onto the affordance vocabulary — the
+    /// separate channel D8 needs, deliberately NOT folded into
+    /// [`Self::merged`]: a debug override is not pending work, so it never
+    /// masks (or is masked by) the dirty/status rollup. Surfaces that mark
+    /// debug territory ask for this explicitly.
+    pub fn from_debug_overrides(count: usize) -> Self {
+        if count > 0 { Self::Debug } else { Self::Info }
+    }
+
     /// Priority merge: the more important affordance wins.
     pub fn merge(self, other: Self) -> Self {
         self.max(other)
@@ -98,8 +111,8 @@ mod tests {
     #[test]
     fn enum_order_is_the_confirmed_priority() {
         assert!(UiAffordance::Error > UiAffordance::Unsaved);
-        assert!(UiAffordance::Unsaved > UiAffordance::Live);
-        assert!(UiAffordance::Live > UiAffordance::Busy);
+        assert!(UiAffordance::Unsaved > UiAffordance::Debug);
+        assert!(UiAffordance::Debug > UiAffordance::Busy);
         assert!(UiAffordance::Busy > UiAffordance::Info);
     }
 
@@ -144,6 +157,18 @@ mod tests {
             UiAffordance::Unsaved
         );
         assert_eq!(UiAffordance::from_dirty(&dirty(1, 1)), UiAffordance::Error);
+    }
+
+    #[test]
+    fn the_debug_channel_is_separate_from_the_dirty_rollup() {
+        // D8: the debug count has its own projection; it never enters
+        // `merged`, so a debug-only surface still reads Info there.
+        assert_eq!(UiAffordance::from_debug_overrides(0), UiAffordance::Info);
+        assert_eq!(UiAffordance::from_debug_overrides(3), UiAffordance::Debug);
+        assert_eq!(
+            UiAffordance::merged(UiStatusKind::Good, &DirtySummary::clean()),
+            UiAffordance::Info
+        );
     }
 
     #[test]

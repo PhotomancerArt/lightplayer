@@ -13,7 +13,10 @@
 //!
 //! Drawers used today: shader = `code` (the existing [`AssetEditor`]) +
 //! `advanced`; fixture/playlist = `advanced` only. The advanced drawer
-//! hosts today's generic slot-row sections unchanged.
+//! hosts today's generic slot-row sections unchanged — with ONE exception:
+//! the **Debug** section is lifted out and rendered permanently above the
+//! drawers. D8 tier (c) requires debug territory to be visible even when
+//! idle, and a section behind a closed lid is not visible.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -52,9 +55,14 @@ pub fn NodeCardDrawers(
     #[props(default)] dirty_tint: NodeDirtyTint,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let has_advanced = !sections.is_empty();
+    // The Debug section never hides behind the advanced lid (D8 tier c).
+    let (debug_sections, drawer_sections): (Vec<_>, Vec<_>) = sections
+        .into_iter()
+        .partition(|section| matches!(section, UiNodeSection::DebugSlots(_)));
+    let has_advanced = !drawer_sections.is_empty();
     let code_summary = code.as_ref().map(|editor| editor.source.clone());
     let code_node = node.clone();
+    let section_node = Some(node.clone());
     let advanced_node = node;
 
     rsx! {
@@ -72,6 +80,15 @@ pub fn NodeCardDrawers(
                 AssetEditor { editor, on_action, platform }
             }
         }
+        for section in debug_sections {
+            NodeSection {
+                section,
+                node: section_node.clone(),
+                on_action,
+                pending_edits: pending_edits.clone(),
+                dirty_tint,
+            }
+        }
         if has_advanced {
             NodeCardSection {
                 label: "advanced",
@@ -83,10 +100,11 @@ pub fn NodeCardDrawers(
                     NodeCardDrawer::Advanced,
                     !advanced_open,
                 ),
-                for (index, section) in sections.clone().into_iter().enumerate() {
+                for (index, section) in drawer_sections.clone().into_iter().enumerate() {
                     NodeSection {
                         section,
                         first: index == 0,
+                        node: section_node.clone(),
                         on_action,
                         pending_edits: pending_edits.clone(),
                         dirty_tint,

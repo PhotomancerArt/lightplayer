@@ -140,7 +140,7 @@ fn live() -> Element {
                     4.0,
                     UiSlotFieldState::editable()
                         .with_dirty(UiNodeDirtyState::Dirty)
-                        .with_live(true),
+                        .with_debug(true),
                     UiSlotSourceState::Unset,
                 ),
                 on_action: move |_| {},
@@ -157,7 +157,7 @@ fn label_states() -> Element {
     let dirty = UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty);
     let live = UiSlotFieldState::editable()
         .with_dirty(UiNodeDirtyState::Dirty)
-        .with_live(true);
+        .with_debug(true);
     let failed = UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error);
     rsx! {
         KnobStoryCard {

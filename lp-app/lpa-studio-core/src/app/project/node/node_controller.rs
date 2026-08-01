@@ -229,13 +229,21 @@ impl NodeController {
                 .iter()
                 .map(|child| child.dirty)
                 .sum::<DirtySummary>();
+        // Debug overrides aggregate over the same full child list on their
+        // own channel (D8 tier b) — never merged into `dirty` (D7).
+        let debug_overrides = self.own_slots_debug_overrides(edits)
+            + children
+                .iter()
+                .map(|child| child.debug_overrides)
+                .sum::<usize>();
         let mut header = UiNodeHeader::new(
             self.label.clone(),
             self.kind.clone(),
             self.address.to_string(),
         )
         .with_status(self.ui_status())
-        .with_dirty(dirty);
+        .with_dirty(dirty)
+        .with_debug_overrides(debug_overrides);
         // Status detail (error/warning/failure text) rides the header so the
         // node detail popup can answer "why" — the compact status alone read
         // as an unexplained Error state (gate follow-up, 2026-07-15).
@@ -516,6 +524,7 @@ impl NodeController {
         let mut produced_values = Vec::new();
         let mut config_slots = Vec::new();
         let mut asset_slots = Vec::new();
+        let mut debug_slots = Vec::new();
 
         for slot in &self.slots {
             match slot.address().root {
@@ -523,7 +532,12 @@ impl NodeController {
                     slot.collect_produced(&mut products, &mut produced_values);
                 }
                 ProjectSlotRoot::Def | ProjectSlotRoot::Other(_) => {
-                    slot.collect_config(edits, &mut config_slots, &mut asset_slots);
+                    slot.collect_config(
+                        edits,
+                        &mut config_slots,
+                        &mut asset_slots,
+                        &mut debug_slots,
+                    );
                 }
             }
         }
@@ -566,6 +580,14 @@ impl NodeController {
         if !config_slots.is_empty() {
             sections.push(UiNodeSection::ConfigSlots(config_slots));
         }
+        // The Debug section always comes last and is rendered as debug
+        // territory even when no override is active (D8 tier c) — the
+        // treatment says "transient" BEFORE the control is touched, which is
+        // what fixes clean-transient invisibility. It is still omitted when
+        // the node declares no Debug field at all.
+        if !debug_slots.is_empty() {
+            sections.push(UiNodeSection::DebugSlots(debug_slots));
+        }
         sections
     }
 
@@ -579,15 +601,26 @@ impl NodeController {
     ) -> Vec<UiConfigSlot> {
         let mut config_slots = Vec::new();
         let mut asset_slots = Vec::new();
+        // The flat root renders no node card, so it has no Debug section to
+        // route Debug rows into; they stay in the one flat list rather than
+        // vanishing. `ProjectDef` declares no Debug field today, so this is
+        // empty in practice.
+        let mut debug_slots = Vec::new();
         for slot in &self.slots {
             match slot.address().root {
                 ProjectSlotRoot::State => {}
                 ProjectSlotRoot::Def | ProjectSlotRoot::Other(_) => {
-                    slot.collect_config(edits, &mut config_slots, &mut asset_slots);
+                    slot.collect_config(
+                        edits,
+                        &mut config_slots,
+                        &mut asset_slots,
+                        &mut debug_slots,
+                    );
                 }
             }
         }
         config_slots.extend(asset_slots);
+        config_slots.extend(debug_slots);
         config_slots
     }
 
@@ -639,6 +672,14 @@ impl NodeController {
                         .iter()
                         .map(|nested| nested.dirty)
                         .sum::<DirtySummary>();
+                // Debug overrides roll up the same full list, on their own
+                // channel (D8 tier b): active, never dirty.
+                view.debug_overrides = child.own_slots_debug_overrides(edits)
+                    + view
+                        .children
+                        .iter()
+                        .map(|nested| nested.debug_overrides)
+                        .sum::<usize>();
                 view.face = child.kind_face(&view.sections, &mut view.children);
                 view.header_actions =
                     node_header_actions(&child.address, &view.dirty, remove_action(&child.address));
@@ -669,6 +710,18 @@ impl NodeController {
         edits: &SlotEditJoin<'_>,
     ) -> DirtySummary {
         edits.dirty_summary_for_node(&self.address)
+    }
+
+    /// Active Debug overrides addressed to this node (child nodes excluded)
+    /// — the node-card marking's input (D8 tier b), merged bottom-up by the
+    /// DTO walk exactly like [`Self::own_slots_dirty_summary`]. Kept a
+    /// separate channel from the dirty summary: a debug override is active,
+    /// not dirty (D7).
+    pub(in crate::app::project) fn own_slots_debug_overrides(
+        &self,
+        edits: &SlotEditJoin<'_>,
+    ) -> usize {
+        edits.debug_overrides_for_node(&self.address)
     }
 
     fn ui_status(&self) -> UiStatus {
@@ -704,7 +757,9 @@ impl NodeController {
         let resolve = |asset: &UiSlotAsset| asset_editor(self, asset);
         for section in sections {
             match section {
-                UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => {
+                UiNodeSection::AssetSlots(slots)
+                | UiNodeSection::ConfigSlots(slots)
+                | UiNodeSection::DebugSlots(slots) => {
                     embed_asset_editors_in_slots(slots, &resolve);
                 }
                 _ => {}

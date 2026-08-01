@@ -120,6 +120,75 @@ pub(crate) fn node_delete_pane_action() -> UiPaneAction {
     )
 }
 
+/// A Clock node card: one persisted **Settings** section plus the **Debug**
+/// section the D3/D4 partition produces. The clock's three `controls.*`
+/// fields are `SlotRole::Debug`, so core lifts them FLAT into
+/// `UiNodeSection::DebugSlots` — the card shows "Running / Rate / Scrub
+/// offset seconds" as top-level rows, never a nested "Controls" group.
+///
+/// `overrides` seeds how many of them carry an active override: `0` is the
+/// idle case (the section is still debug territory — D8 tier c), and a
+/// non-zero count also lights the card's header marking (tier b).
+pub(crate) fn clock_node_view(overrides: usize) -> UiNodeView {
+    let debug_row = |key: &str, label: &str, value: UiSlotValue, index: usize| {
+        let state = if index < overrides {
+            UiSlotFieldState::editable()
+                .with_debug(true)
+                .with_dirty(UiNodeDirtyState::Dirty)
+        } else {
+            UiSlotFieldState::editable().with_debug(true)
+        };
+        UiConfigSlot::value(key, label, value)
+            .with_address(clock_slot_address(&format!("controls.{key}")))
+            .with_state(state)
+    };
+
+    let mut view = UiNodeView::new(
+        UiNodeHeader::new("clock", "Clock", CLOCK_NODE)
+            .with_status(UiStatus::good("Running"))
+            .with_debug_overrides(overrides),
+        vec![UiNodeTab::main(vec![
+            UiNodeSection::ProducedValues(vec![UiProducedValue::new("Time", "12.480")]),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value(
+                    "epoch_offset_seconds",
+                    "Epoch offset seconds",
+                    UiSlotValue::f32(0.0).with_unit(UiSlotUnit::seconds()),
+                )
+                .with_address(clock_slot_address("epoch_offset_seconds")),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                debug_row("running", "Running", UiSlotValue::bool(true), 0),
+                debug_row("rate", "Rate", UiSlotValue::f32(2.0), 1),
+                debug_row(
+                    "scrub_offset_seconds",
+                    "Scrub offset seconds",
+                    UiSlotValue::f32(0.0).with_unit(UiSlotUnit::seconds()),
+                    2,
+                ),
+            ]),
+        ])],
+    )
+    .with_node_id(CLOCK_NODE);
+    view.action = Some(UiAction::from_op(
+        ControllerId::new("story.project"),
+        SlotEditOp::Revert {
+            address: clock_slot_address("epoch_offset_seconds"),
+        },
+    ));
+    view
+}
+
+const CLOCK_NODE: &str = "/fyeah_sign.show/clock.clock";
+
+fn clock_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse(CLOCK_NODE).expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
+
 /// Playlist node whose subtree carries unsaved (persisted) edits — drives the
 /// yellow pencil affordance, the header batch-revert action, and D7 tint
 /// variants.

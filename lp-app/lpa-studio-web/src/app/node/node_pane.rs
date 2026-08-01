@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
+    DirtySummary, UiAction, UiConfigSlot, UiNodeDirtyState, UiNodeSection, UiNodeTabBody,
+    UiNodeView, UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
 use crate::app::layout::{PaneCollapse, RichObjectPane};
+use crate::app::node::slot_edit_actions::node_clear_debug_action;
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
     SlotRecordEditor,
@@ -48,6 +50,9 @@ pub fn NodePane(
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
+    // The debug channel is separate from the dirty rollup (D7/D8): it marks
+    // the card, it never washes the header.
+    let debug_overrides = view.header.debug_overrides;
     // The rollup: the merged affordance tones the header (P6 — no count
     // chips; the detail trigger is the whole announcement). RichObjectPane
     // pins that composition.
@@ -75,6 +80,8 @@ pub fn NodePane(
     // node's address path — the header path carries it for panes and
     // nested child cards alike.
     let face_node = view.header.path.clone();
+    // The node address the Debug section's per-node Clear targets.
+    let section_node = Some(view.header.path.clone());
     let face_card_ui = view.card_ui.clone();
     let add_node_menu = view.add_node_menu.clone();
 
@@ -105,6 +112,7 @@ pub fn NodePane(
                     actions: header_actions,
                     on_action,
                     trailing: rsx! {
+                        NodeDebugMarker { count: debug_overrides }
                         if !kind_label.is_empty() {
                             span { class: "tw:self-center tw:whitespace-nowrap tw:pl-2 tw:pr-1 tw:text-[11px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-dim-foreground",
                                 "{kind_label}"
@@ -155,6 +163,7 @@ pub fn NodePane(
                                                 section,
                                                 first: index == 0,
                                                 focus_action: focus_action.clone(),
+                                                node: section_node.clone(),
                                                 on_action,
                                                 pending_edits: pending_edits.clone(),
                                                 dirty_tint,
@@ -250,6 +259,10 @@ pub fn NodeSection(
     #[props(default = false)] first: bool,
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The owning node's address path — the Debug section's per-node Clear
+    /// dispatches `NodeClearDebugOp` against it.
+    #[props(default = None)]
+    node: Option<String>,
     /// The editor-level pending-edit list, threaded through extracted child
     /// sections into their nested panes' detail popovers.
     #[props(default)]
@@ -269,11 +282,17 @@ pub fn NodeSection(
         },
         UiNodeSection::ConfigSlots(slots) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
+                div { class: "lp-settings-section-header",
+                    span { class: "lp-settings-section-label", "Settings" }
+                }
                 SlotRecordEditor {
                     record: UiSlotRecord::new(slots),
                     on_action,
                 }
             }
+        },
+        UiNodeSection::DebugSlots(slots) => rsx! {
+            DebugSlotsSection { slots, node, on_action }
         },
         UiNodeSection::AssetSlots(assets) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
@@ -293,6 +312,92 @@ pub fn NodeSection(
                 }
             }
         },
+    }
+}
+
+/// The node card's **Debug** section (D3/D4/D8 tier c): the node's
+/// `SlotRole::Debug` rows, flattened by core, under a hazard-striped surface
+/// that is worn **always** — an idle debug control announces "transient"
+/// before it is touched, which is the whole point (clean-transient
+/// invisibility). An active override deepens the stripes and reveals the
+/// per-node **Clear** (`NodeClearDebugOp`); nothing here ever says "Revert"
+/// or "Reset" (D7).
+///
+/// Every pixel of the treatment is the `.lp-debug-*` block in `style.css` —
+/// the semantic side is `UiNodeSection::DebugSlots` in core.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DebugSlotsSection(
+    slots: Vec<UiConfigSlot>,
+    /// The owning node's address path; `None` (or an unparsable story path)
+    /// renders the section without its Clear action.
+    #[props(default = None)]
+    node: Option<String>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let active = slots
+        .iter()
+        .filter(|slot| slot.state.dirty != UiNodeDirtyState::Clean)
+        .count();
+    let clear = node
+        .as_deref()
+        .filter(|_| active > 0)
+        .and_then(node_clear_debug_action);
+    let class = if active > 0 {
+        "lp-debug-section lp-debug-section--active"
+    } else {
+        "lp-debug-section"
+    };
+
+    rsx! {
+        section { class,
+            div { class: "lp-debug-section-header",
+                span { class: "lp-debug-section-label",
+                    "Debug"
+                    span { class: "lp-debug-section-note",
+                        if active > 0 { "{active} active · session only" } else { "session only" }
+                    }
+                }
+                if let Some(action) = clear {
+                    button {
+                        class: "lp-debug-button",
+                        r#type: "button",
+                        title: "Clear every debug override on this node",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            if let Some(handler) = on_action {
+                                handler.call(action.clone());
+                            }
+                        },
+                        "Clear"
+                    }
+                }
+            }
+            SlotRecordEditor {
+                record: UiSlotRecord::new(slots),
+                on_action,
+            }
+        }
+    }
+}
+
+/// The node card's debug marking (D8 tier b): a hazard pill in the header's
+/// trailing slot while the node's subtree carries an active override. Not a
+/// `PaneChrome` chip — the rich-object pane renders none by convention — and
+/// deliberately not the header wash, which stays the dirty/status rollup's
+/// (D7: a debug override is not pending work).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeDebugMarker(count: usize) -> Element {
+    if count == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            class: "lp-debug-marker",
+            title: "This node carries {count} active debug override(s) — session only, never saved",
+            "debug {count}"
+        }
     }
 }
 

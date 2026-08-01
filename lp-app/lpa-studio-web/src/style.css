@@ -126,6 +126,27 @@
     --studio-status-attention-bg: #291f14;
     --studio-status-attention-border: #795833;
     --studio-status-attention-text: #f0b97a;
+    /* Debug (D9): transient-by-nature diagnostics/authoring territory.
+       Borrows the attention family's orange so it reads as "not ordinary
+       config", then adds DIAGONAL HAZARD STRIPES as the distinguishing mark
+       — flat orange stays device/roster health, and stripes are what keep
+       the two apart at a glance. Never amber-unsaved, blue-live,
+       violet-bound, or green. This is the ONE place the debug look is
+       defined; the semantic variant lives in `lpa-studio-core`
+       (`UiAffordance::Debug`) and the web maps it here. */
+    --studio-status-debug-bg: #291f14;
+    --studio-status-debug-border: #795833;
+    --studio-status-debug-text: #f0b97a;
+    --studio-status-debug-stripes: repeating-linear-gradient(
+        135deg,
+        rgba(240, 185, 122, 0.1) 0 5px,
+        transparent 5px 11px
+    );
+    --studio-status-debug-stripes-strong: repeating-linear-gradient(
+        135deg,
+        rgba(240, 185, 122, 0.2) 0 5px,
+        transparent 5px 11px
+    );
     --studio-status-error-bg: #301b1d;
     --studio-status-error-border: #874b4b;
     --studio-status-error-text: #ffc7c7;
@@ -2389,6 +2410,14 @@ label:has(> input:not(:disabled)) {
     --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
 }
 
+.ux-popover-chrome-debug {
+    --ux-popover-border-color: var(--studio-status-debug-border);
+    --ux-popover-icon-color: var(--studio-status-debug-text);
+    --ux-popover-trigger-fill-top: var(--studio-status-debug-bg);
+    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
+    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+}
+
 .ux-popover-chrome-bound {
     --ux-popover-border-color: var(--studio-status-bound-border);
     --ux-popover-icon-color: var(--studio-status-bound-text);
@@ -3628,4 +3657,232 @@ label:has(> input:not(:disabled)) {
 .lpb-cat-buy:hover {
     color: var(--studio-color-text-strong);
     border-color: var(--studio-status-bound-border);
+}
+
+/* ---------------------------------------------------------------------------
+   Debug (hazard) treatment — D9.
+   ---------------------------------------------------------------------------
+   The SEMANTIC variant lives in `lpa-studio-core` (`UiAffordance::Debug`,
+   projected by `UiAffordance::from_debug_overrides`). The web layer maps that
+   one variant onto `PaneTone::Debug` / `IconMenuTone::Debug` /
+   `DetailSectionTint::Debug` in `src/app/affordance.rs`, and every pixel of
+   the look is defined HERE — change the treatment by editing this block, not
+   by touching core.
+
+   Grammar: attention-orange + diagonal hazard stripes. Three tiers (D8):
+   (a) `.lp-debug-global-chip` — the project header's "Debug active · N ·
+       Clear all";
+   (b) `.lp-debug-marker` — the node card's marking while it carries an
+       override;
+   (c) `.lp-debug-section` — the Debug section itself, striped ALWAYS, even
+       with no override active, so a control announces "transient" before it
+       is touched. `.lp-debug-section--active` deepens the stripes once an
+       override is live.
+   -------------------------------------------------------------------------- */
+
+.lp-debug-section {
+    display: grid;
+    min-width: 0;
+    background:
+        var(--studio-status-debug-stripes),
+        linear-gradient(90deg, var(--studio-status-debug-bg), transparent 78%);
+    border-top: 1px solid var(--studio-status-debug-border);
+    box-shadow: inset 3px 0 0 0 var(--studio-status-debug-border);
+}
+
+.lp-debug-section--active {
+    background:
+        var(--studio-status-debug-stripes-strong),
+        linear-gradient(90deg, var(--studio-status-debug-bg), transparent 60%);
+}
+
+/* The section's own header strip: label on the left, Clear on the right. */
+.lp-debug-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 10px 5px 12px;
+    border-bottom: 1px solid color-mix(in oklab, var(--studio-status-debug-border) 55%, transparent);
+}
+
+.lp-debug-section-label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    line-height: 1;
+    color: var(--studio-status-debug-text);
+    user-select: none;
+}
+
+.lp-debug-section-note {
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    color: var(--studio-color-text-dim);
+}
+
+/* Settings section header — the quiet counterpart, so the two sections read
+   as a pair (D4/D6: "Settings" above, "Debug" below). */
+.lp-settings-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px 5px 12px;
+    border-bottom: 1px solid var(--studio-color-border-muted);
+}
+
+.lp-settings-section-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    line-height: 1;
+    color: var(--studio-color-text-dim);
+    user-select: none;
+}
+
+/* Shared pill shape for the Clear buttons and the debug markers. */
+.lp-debug-button,
+.lp-debug-chip,
+.lp-debug-marker,
+.lp-debug-global-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    color: var(--studio-status-debug-text);
+    background:
+        var(--studio-status-debug-stripes-strong),
+        var(--studio-status-debug-bg);
+    border: 1px solid var(--studio-status-debug-border);
+    border-radius: var(--studio-radius-pill);
+    padding: 3px 9px;
+}
+
+.lp-debug-button,
+.lp-debug-global-chip {
+    appearance: none;
+    cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease;
+}
+
+.lp-debug-button:hover,
+.lp-debug-global-chip:hover {
+    border-color: var(--studio-status-debug-text);
+    color: var(--studio-color-text-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lp-debug-button,
+    .lp-debug-global-chip {
+        transition: none;
+    }
+}
+
+/* Node-card marking (tier b): sits in the card header's trailing slot, whose
+   items stretch full height — the pill centers itself instead. */
+.lp-debug-marker {
+    align-self: center;
+    flex: none;
+    margin-right: 4px;
+    font-size: 0.58rem;
+    padding: 2px 8px;
+}
+
+/* Pane header wash for `PaneTone::Debug`. */
+.lp-debug-pane-tint {
+    background:
+        var(--studio-status-debug-stripes),
+        linear-gradient(90deg, var(--studio-status-debug-bg), transparent 62%);
+}
+
+/* A touched Debug slot row: the same hazard language at row scale, in place
+   of the amber-unsaved tint a persisted edit wears. */
+.lp-debug-row {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(120px, 0.4fr) minmax(0, 1fr) 32px;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background:
+        var(--studio-status-debug-stripes-strong),
+        linear-gradient(270deg, var(--studio-status-debug-bg) 0%, var(--studio-status-debug-bg) 34%, transparent 100%);
+}
+
+/* The row's inline Clear icon button. */
+.lp-debug-row-button {
+    display: inline-flex;
+    height: 24px;
+    width: 24px;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    appearance: none;
+    cursor: pointer;
+    border-radius: var(--studio-radius-xs);
+    border: 1px solid var(--studio-status-debug-border);
+    background: var(--studio-status-debug-bg);
+    color: var(--studio-status-debug-text);
+    padding: 0;
+    transition: border-color 120ms ease;
+}
+
+.lp-debug-row-button:hover {
+    border-color: var(--studio-status-debug-text);
+}
+
+/* Tree-row / inline indicator foreground. */
+.lp-debug-indicator {
+    display: inline-flex;
+    height: 16px;
+    align-items: center;
+    justify-content: center;
+    color: var(--studio-status-debug-text);
+}
+
+/* Detail-popover section wash for `DetailSectionTint::Debug`. */
+.lp-debug-detail-section {
+    display: grid;
+    gap: 2px;
+    border-top: 1px solid var(--studio-color-border-muted);
+    padding: 6px 12px;
+    background:
+        var(--studio-status-debug-stripes),
+        linear-gradient(90deg, var(--studio-status-debug-bg) 0%, transparent 72%);
+}
+
+.lp-debug-detail-section:first-child {
+    border-top: 0;
+}
+
+/* Icon-button chrome for `IconMenuTone::Debug` (the geometry stays on the
+   shared Tailwind utilities; only the debug colors live here). */
+.lp-debug-icon-chrome {
+    color: var(--studio-status-debug-text);
+    background:
+        var(--studio-status-debug-stripes-strong),
+        var(--studio-status-debug-bg);
+    border-color: var(--studio-status-debug-border);
+}
+
+.lp-debug-icon-chrome:hover,
+.lp-debug-icon-chrome--hover {
+    border-color: var(--studio-status-debug-text);
+}
+
+/* Debug section-title text color (the "color on the TITLE" convention). */
+.lp-debug-title {
+    color: var(--studio-status-debug-text);
 }

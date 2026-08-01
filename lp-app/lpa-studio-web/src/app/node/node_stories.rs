@@ -3,8 +3,8 @@ use lpa_studio_core::{ControllerId, ProjectEditorOp, UiAction};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
-    error_node_view, failed_dirty_node_view, nested_dirty_node_view, node_delete_pane_action,
-    playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
+    clock_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
+    node_delete_pane_action, playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -131,6 +131,40 @@ pub(crate) fn nested_dirty_children() -> Element {
 
     rsx! {
         NodePane { view, on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "D8 tier (c), idle: a Clock card whose three `controls.*` fields are Debug-role, so core lifts them FLAT into the Debug section (Running / Rate / Scrub offset seconds — no nested `Controls` group). Nothing is overridden yet, and the section STILL wears the hazard treatment: you know a control is session-only before you touch it. The persisted rows sit above under `Settings`; no card marking, no Clear."
+)]
+pub(crate) fn debug_section_idle() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(0), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "D8 tiers (b)+(c), active: two Debug overrides are live on the Clock. The section deepens its stripes and reveals the per-node Clear (`NodeClearDebugOp`); the touched rows wear the hazard row tint with the inline Clear verb; the card header carries the `debug 2` marking. The header wash stays neutral on purpose — a debug override is NOT unsaved work (D7), so it never borrows the amber dirty treatment."
+)]
+pub(crate) fn debug_section_active() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(2), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "The hazard family beside its neighbours, for the G1 distinctness question: the idle and active Debug sections next to an amber-unsaved card. Debug = attention-orange + diagonal stripes; flat orange stays device health; amber stays unsaved."
+)]
+pub(crate) fn debug_section_vs_unsaved() -> Element {
+    let mut unsaved = unsaved_dirty_node_view();
+    unsaved.action = Some(story_focus_action());
+
+    rsx! {
+        div { class: "tw:grid tw:gap-4",
+            NodePane { view: clock_node_view(0), on_action: move |_| {} }
+            NodePane { view: clock_node_view(2), on_action: move |_| {} }
+            NodePane { view: unsaved, on_action: move |_| {} }
+        }
     }
 }
 
