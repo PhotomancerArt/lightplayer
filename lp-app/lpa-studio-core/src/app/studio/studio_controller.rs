@@ -4514,9 +4514,32 @@ impl StudioController {
         match self.attach_runtime(device_id, updates).await {
             Ok(mut attach_outcome) => {
                 outcome.notices.append(&mut attach_outcome.notices);
-                // Landed (I3): the flow ends; the card re-derives and its
-                // Status tab announces what's next.
-                self.device_card_op = None;
+                if spec.awaits_manual_replug && self.device_is_in_recovery_mode() {
+                    // Attached — but the board landed back in the BOOTLOADER.
+                    // A C6 over USB-Serial-JTAG re-enters download mode on
+                    // the post-write RTS reset (bench, 2026-07-31), so the
+                    // reattach "succeeds" into a recovery session and the
+                    // old clear-on-Ok dropped the user on the recovery card,
+                    // which advises installing the firmware they may have
+                    // JUST installed. For an op that only finishes when the
+                    // board really boots, this ending is the replug
+                    // instruction, same as the reattach-miss arm below.
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Info,
+                        UiLogOrigin::Studio,
+                        format!(
+                            "{} — the board stays in the bootloader until replugged",
+                            spec.degrade_subject
+                        ),
+                    ));
+                    *card_op.borrow_mut() = reattach_failure_op(&spec, "");
+                    outcome =
+                        outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
+                } else {
+                    // Landed (I3): the flow ends; the card re-derives and its
+                    // Status tab announces what's next.
+                    self.device_card_op = None;
+                }
             }
             // The device was never going to come back by itself. Stay in
             // the AwaitingDevice phase with the instruction that ends it,
