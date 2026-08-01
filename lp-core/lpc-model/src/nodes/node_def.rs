@@ -903,7 +903,7 @@ mod tests {
         let project = NodeDef::read_json(
             &registry,
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "nodes": {
     "texture": { "ref": "./texture.json" }
   }
@@ -992,11 +992,11 @@ mod tests {
         // Deliberately not PROJECT_FORMAT_VERSION: the probe reports whatever
         // the file says, and the gate compares — the probe must not know the
         // current version.
-        let probe = read_module_format_json(r#"{ "kind": "Project", "format": 1, "nodes": {} }"#)
+        let probe = read_module_format_json(r#"{ "kind": "Module", "format": 1, "nodes": {} }"#)
             .expect("probe");
         assert_eq!(probe, ModuleFormatProbe::Module { format: Some(1) });
 
-        let probe = read_module_format_json(r#"{ "kind": "Project", "nodes": {} }"#)
+        let probe = read_module_format_json(r#"{ "kind": "Module", "nodes": {} }"#)
             .expect("probe missing format");
         assert_eq!(probe, ModuleFormatProbe::Module { format: None });
 
@@ -1010,7 +1010,7 @@ mod tests {
     #[test]
     fn project_format_probe_skips_nested_format_keys() {
         let probe = read_module_format_json(
-            r#"{ "kind": "Project", "nodes": { "child": { "format": 7 } } }"#,
+            r#"{ "kind": "Module", "nodes": { "child": { "format": 7 } } }"#,
         )
         .expect("probe");
         assert_eq!(probe, ModuleFormatProbe::Module { format: None });
@@ -1018,11 +1018,11 @@ mod tests {
 
     #[test]
     fn project_format_probe_rejects_non_integer_format() {
-        let err = read_module_format_json(r#"{ "kind": "Project", "format": "one" }"#)
+        let err = read_module_format_json(r#"{ "kind": "Module", "format": "one" }"#)
             .expect_err("string format");
         assert!(err.to_string().contains("unsigned integer"), "{err}");
 
-        let err = read_module_format_json(r#"{ "kind": "Project", "format": -1 }"#)
+        let err = read_module_format_json(r#"{ "kind": "Module", "format": -1 }"#)
             .expect_err("negative format");
         assert!(err.to_string().contains("unsigned integer"), "{err}");
     }
@@ -1107,7 +1107,7 @@ mod tests {
     fn node_def_invocation_sites_cover_project_and_playlist() {
         let project = NodeDef::from_json_str(
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -1230,11 +1230,11 @@ mod tests {
     #[test]
     fn node_def_shell_change_tracks_child_ref_changes() {
         let before = NodeDef::from_json_str(
-            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./a.json" } } }"#,
+            r#"{ "kind": "Module", "nodes": { "a": { "ref": "./a.json" } } }"#,
         )
         .expect("before");
         let ref_changed = NodeDef::from_json_str(
-            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./b.json" } } }"#,
+            r#"{ "kind": "Module", "nodes": { "a": { "ref": "./b.json" } } }"#,
         )
         .expect("ref changed");
 

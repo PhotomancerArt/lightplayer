@@ -1,5 +1,5 @@
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "name": "Shader oracle",
   "nodes": {

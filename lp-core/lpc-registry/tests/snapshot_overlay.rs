@@ -16,7 +16,7 @@ fn snapshot_overlay_can_bootstrap_project_files() {
         LpPathBuf::from("/project.json"),
         br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {

@@ -212,7 +212,7 @@ mod tests {
         client
             .fs_write(
                 "/projects/bad/project.json".as_path(),
-                br#"{ "kind": "Project", "nodes": {} }"#.to_vec(),
+                br#"{ "kind": "Module", "nodes": {} }"#.to_vec(),
             )
             .await
             .unwrap();

@@ -131,7 +131,7 @@ mod tests {
     use lpfs::LpFsMemory;
 
     const MANIFEST: &[u8] = br#"{
-  "kind": "Project",
+  "kind": "Module",
   "name": "fluid",
   "nodes": { "clock": { "ref": "./clock.json" }, "custom-key": 7 }
 }"#;
@@ -173,7 +173,7 @@ mod tests {
         fs.write_file(
             MANIFEST_PATH.as_path(),
             br#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "name": "basic",
   "nodes": { "clock": { "ref": "./clock.json" } }
@@ -197,7 +197,7 @@ mod tests {
         let fs = LpFsMemory::new();
         fs.write_file(
             MANIFEST_PATH.as_path(),
-            br#"{"kind":"Project","uid":"garbage"}"#,
+            br#"{"kind":"Module","uid":"garbage"}"#,
         )
         .unwrap();
         assert!(ensure_uid(&fs, &[1u8; 16]).is_err());

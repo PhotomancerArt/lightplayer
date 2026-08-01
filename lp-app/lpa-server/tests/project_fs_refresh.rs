@@ -105,7 +105,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
             project_file(name, "project.json").as_path(),
             br#"
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": {

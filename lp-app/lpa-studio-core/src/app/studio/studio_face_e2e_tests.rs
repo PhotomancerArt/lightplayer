@@ -510,7 +510,7 @@ fn face_e2e_server() -> LpServer {
     );
 
     let project_json = r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
@@ -616,7 +616,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
     );
 
     let project_json = r#"{
-  "kind": "Project",
+  "kind": "Module",
   "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
