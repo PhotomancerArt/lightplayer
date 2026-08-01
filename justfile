@@ -612,7 +612,7 @@ clippy-fw-esp32s3:
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance test_button; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -865,6 +865,28 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
 fp-diff capture:
     FP_CAPTURE="{{ absolute_path(capture) }}" \
       cargo test -p lp-xt-emu --test fp_capture -- --nocapture --test-threads=1
+
+# Run the GPIO button diagnostic on a connected ESP32-S3: D9 (GPIO8) with an
+# internal pull-up, normally-open button to GND. Prints a `BUTTON gpio=...`
+# line per debounced press/release. Mirrors fw-esp32c6's
+# `fwtest-button-esp32c6`; unlike it, this harness is synchronous (the S3's
+# `fw_harness` entrypoint never starts the embassy runtime).
+#
+#   just fwtest-button-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-button-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_button
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
