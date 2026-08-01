@@ -13,6 +13,7 @@ extern crate alloc;
 
 pub mod dataflow;
 pub mod engine;
+pub mod features;
 pub mod node;
 pub mod nodes;
 pub mod product;
@@ -22,6 +23,7 @@ pub mod resources;
 pub mod shader_abi;
 
 pub use engine::error::Error;
+pub use features::supported_features;
 pub use engine::{
     ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices, FrameNum,
     FrameTime, OutputFlushError, ProjectLoadError, ProjectLoader, ProjectReadEventStreamError,
