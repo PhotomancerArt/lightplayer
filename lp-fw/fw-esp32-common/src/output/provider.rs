@@ -21,6 +21,27 @@ use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat,
 const FRAME_INTERVAL_US: u64 = 16_667;
 const MID_FRAME_US: u64 = 8_333;
 
+/// Channels reserved up front in [`Esp32OutputProvider::channels`].
+///
+/// A **reservation, not a limit** — `VecMap` still grows past it. It exists so
+/// that opening the Nth channel does not reallocate and memcpy the previous
+/// N-1 `ChannelState`s while they are live, which is a transient peak of twice
+/// the steady-state size on the one path that runs when the heap is already at
+/// its high-water mark.
+///
+/// 8 is the widest RMT TX slot count in the family (the classic's eight, before
+/// `BLOCKS_PER_CHANNEL` halves the usable count). At today's `ChannelState`
+/// size this reservation costs well under a kilobyte.
+///
+/// ⚠️ Historical note worth keeping: this used to matter enormously.
+/// `ChannelState` carried a 3,084-byte inline white-point LUT, so the same
+/// growth asked for 12,864 contiguous bytes and OOM'd the classic ESP32 with
+/// 11,228 free — `docs/defects/2026-08-01-classic-rmt-open-fault.md`. The LUT
+/// is gone; this guard remains because the growth pattern is what turned a
+/// tight heap into a hard fault, and it will do so again for whatever the next
+/// large per-channel field is.
+const RESERVED_CHANNELS: usize = 8;
+
 struct ChannelState {
     output: Box<dyn Ws281xOutput>,
     byte_count: u32,
@@ -38,7 +59,7 @@ impl Esp32OutputProvider {
     pub fn new(hardware_system: Rc<HardwareSystem>) -> Self {
         Self {
             hardware_system,
-            channels: RefCell::new(VecMap::new()),
+            channels: RefCell::new(VecMap::with_capacity(RESERVED_CHANNELS)),
             next_handle: RefCell::new(1),
         }
     }

@@ -37,6 +37,25 @@ use serial::SyscallSerialIo;
 use server_loop::run_server_loop;
 use time::SyscallTimeProvider;
 
+// The build's self-description, embedded as a scannable blob (extracted by
+// `lp-cli firmware show` and reported on ServerHello in M4). fw-emu reaches
+// lpc-engine directly, so the engine fragment comes from there.
+lpc_model::lp_embed_manifest_core! {
+    package: env!("CARGO_PKG_NAME"),
+    chip_family: "emu",
+    chip: "rv32imac",
+    cargo_target: "riscv32imac-unknown-none-elf",
+    profile: if cfg!(debug_assertions) { "debug" } else { "release" },
+    commit: "unknown",
+    dirty: false,
+    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+    features: [
+        lpc_engine::features::ENGINE_FEATURE_FRAGMENT,
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
+    ],
+    limits_json: "{}",
+}
+
 /// Main entry point for firmware emulator
 ///
 /// This function is called by `_code_entry` from `lp-riscv-emu-guest` after

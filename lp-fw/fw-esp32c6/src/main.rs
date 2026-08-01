@@ -23,6 +23,32 @@ use core::alloc::Layout;
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
+// The build's self-description, embedded as a scannable blob (extracted by
+// `lp-cli firmware show` and reported on ServerHello in M4). Feature truth
+// comes from the engine's own cfg! derivation; only embedder facts are named
+// here. `flashAppBytes` is parsed from partitions.csv by build.rs.
+#[cfg(feature = "server")]
+lpc_model::lp_embed_manifest_core! {
+    package: env!("CARGO_PKG_NAME"),
+    chip_family: "esp32",
+    chip: "esp32c6",
+    cargo_target: "riscv32imac-unknown-none-elf",
+    profile: env!("LP_BUILD_PROFILE"),
+    commit: env!("LP_BUILD_COMMIT"),
+    dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
+    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+    features: [
+        lpa_server::ENGINE_FEATURE_FRAGMENT,
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::SvcButton),
+        lpc_model::manifest::feature_fragment(
+            cfg!(feature = "radio"),
+            lpc_model::LpFeature::SvcRadioEspnow,
+        ),
+    ],
+    limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
+}
+
 const OOM_STATE_NORMAL: u8 = 0;
 const OOM_STATE_UNWINDING: u8 = 1;
 const OOM_STATE_RECURSIVE: u8 = 2;

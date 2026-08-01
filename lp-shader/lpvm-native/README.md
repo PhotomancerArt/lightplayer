@@ -187,6 +187,23 @@ assembly in `rt_jit::call`, `IsaTarget::native`'s answer); the backport adds a
 sibling `#[cfg(target_arch = "xtensa")]` arm next to it instead. The same two
 spellings are used in `lp-gfx-lpvm::target_backend` and `lpc-shared::backtrace`.
 
+**Per-chip JIT code placement** is a third axis, orthogonal to the ISA: it is
+about where the *bytes* live, not what is emitted. Two placements exist
+(`rt_jit::JitBuffer`):
+
+| Chip / target        | Placement    | Write→execute rule                                                     |
+| -------------------- | ------------ | ---------------------------------------------------------------------- |
+| host, ESP32-C6       | in place     | identity (`exec_addr`)                                                  |
+| ESP32-S3 (LX7)       | in place     | `+0x6F_0000` inside SRAM1's dual-mapped window (`exec_addr`)            |
+| classic ESP32 (LX6)  | **placed**   | none — heap has no I-bus view; code is installed into a fixed SRAM1 region through the word-mirrored D-bus walk (`codemem_esp32`), linked against its final address by `link::link_jit_at` |
+
+The classic path is `compile_module_jit_placed`: reserve a span in the
+`codemem_esp32::CodeArena` (real `TooLarge` capacity edge), link at the span's
+I-bus base, install via the descending mirrored word walk, sync. The region
+constants are pinned against `lp-xt-emu`'s `BoardProfile::esp32()` and the
+whole install-then-execute path runs on the host in
+`tests/xt_classic_profile.rs`.
+
 **3. Each backend is a Cargo feature, and firmware pays only for its own.**
 `isa-rv32` and `isa-xt` gate the modules, the `IsaTarget` variants, and every
 match arm. `default = ["isa-rv32", "isa-xt"]`, so host builds and tests get
