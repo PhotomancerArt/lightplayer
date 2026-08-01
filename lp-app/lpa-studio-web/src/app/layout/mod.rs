@@ -10,8 +10,6 @@ pub mod studio_settings_popover;
 #[cfg(feature = "stories")]
 pub(crate) mod studio_settings_popover_stories;
 pub mod studio_shell;
-#[cfg(feature = "stories")]
-pub(crate) mod studio_shell_stories;
 pub mod version_badge;
 #[cfg(feature = "stories")]
 pub(crate) mod version_badge_stories;
