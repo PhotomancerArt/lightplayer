@@ -14,6 +14,13 @@
 //   (isa/rv32/emit.rs:850).
 // - rv32lpn.q32: the LpsGlsl frontend resolves overloads by name and loses
 //   the second definition's parameters ("unknown name `v`").
+// - xtn.f32 / xtlpn.f32 (added M8): the same overload confusion surfaces in
+//   the Xtensa return path — "3 direct return words exceed RET_REGS (wider
+//   returns use sret)" at isa/xt/emit.rs. It is NOT a vec3-return bug: vec3
+//   returns work on xtn.f32 everywhere else in the corpus (verified against
+//   operators/postinc-vec3, array/index-nested, lpfn/lp_saturate and
+//   uniform/struct). The sret decision is simply made from the wrong
+//   overload's signature.
 // ============================================================================
 
 float pick(float x) {
@@ -37,6 +44,7 @@ float test_overload_scalar_vs_vector() {
 // @broken(float_mode=q32, backend!=wasm)
 // the same backend limits as the q32 row above, in the other float mode
 // @broken(float_mode=f32, backend=rv32n)
+// @broken(float_mode=f32, backend=xtn)
 // run: test_overload_scalar_vs_vector() ~= 22.0
 
 float combine(float a) {
@@ -57,4 +65,5 @@ float test_overload_arity_and_nested_call() {
 // @broken(float_mode=q32, backend!=wasm)
 // the same backend limits as the q32 row above, in the other float mode
 // @broken(float_mode=f32, backend=rv32n)
+// @broken(float_mode=f32, backend=xtn)
 // run: test_overload_arity_and_nested_call() ~= 8.0

@@ -577,6 +577,7 @@ fn model_chip_options(model: &UiAgentModelView) -> Vec<UiModelOption> {
             UiModelOption {
                 id: effective.clone(),
                 label: None,
+                detail: None,
             },
         );
     }
@@ -908,6 +909,7 @@ mod tests {
         let listed = UiModelOption {
             id: "claude-sonnet-5".into(),
             label: Some("Claude Sonnet 5".into()),
+            detail: None,
         };
         let mut model = UiAgentModelView {
             effective: Some("claude-sonnet-5".into()),

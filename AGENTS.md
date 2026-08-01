@@ -524,7 +524,8 @@ If pushes to a PR branch suddenly create **no CI runs at all**, check
 baseline PNG conflict with main is blocking the merge ref and GitHub silently
 skips `pull_request` runs. Merge `main`, resolving every conflicted PNG by
 taking **main's bytes** (if main's copy is stale, the next capture re-drifts
-and the bot fixes it), then push.
+and the bot fixes it), then push. A modify/delete conflict means main *retired*
+that baseline — take the deletion.
 
 For local interactive review, capture scratch PNGs — optionally filtered to a
 story-id substring so small subsets are cheap:

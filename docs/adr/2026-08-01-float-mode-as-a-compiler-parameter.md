@@ -271,6 +271,12 @@ Stated rather than implied away:
   viability for f32 is a flash-budget and LX6-probe question, not an SRAM one —
   the earlier "it cannot fit" conclusion was an artifact of the emulator memory
   model corrected in `2026-08-01-host-emulator-models-flash.md`.
-- **`divn.s` off the sequence envelope**, non-RNE rounding modes beyond
-  add/sub/mul, and acc-NaN payload priority — recorded gaps from M6-P6, accepted
-  at G2 as unreachable by emitted code.
+- **`divn.s` off the sequence envelope.** Measured 2026-08-01 by M6's second
+  probe round: the model reproduces 4 985/6 897 off-envelope probes (72.3%),
+  weakest at 41.7% in the class region. Unreachable by emitted code, so it does
+  not affect anything M7 ships — but it raises the bar on the inline
+  divide/sqrt follow-up above, which would need a re-fit of that model before
+  it could be attempted.
+- Non-RNE rounding modes beyond add/sub/mul — refused loudly, by decision.
+- *(Acc-NaN payload priority was on this list and is now closed — the
+  second probe round measured it exactly, 176/176.)*

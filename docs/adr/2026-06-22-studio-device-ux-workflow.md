@@ -1,6 +1,12 @@
 # ADR: Studio Device UX Workflow
 
-- **Status:** Accepted
+- **Status:** Superseded (2026-07-28) — the Device pane and its
+  `UiStackView`/`UiStackSection`/`UiStepState` primitives are deleted. D43
+  made the grown device CARD the editor's device surface and the gallery
+  roster the connect surface; see
+  `docs/defects/2026-07-28-retired-device-pane-still-reachable.md` and
+  [2026-07-05 Studio Pane Grammar](./2026-07-05-studio-pane-grammar.md).
+  The workflow reasoning below is kept as the historical record.
 - **Date:** 2026-06-22
 - **Deciders:** Photomancer
 - **Builds On:** [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md),

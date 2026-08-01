@@ -100,6 +100,12 @@ mat3 test_return_mat3_transpose() {
     return get_transposed(m);
 }
 
+// Writes to value parameters are lost on the Lp+Xtensa+f32 combination only
+// (config-masked; xtn.f32, rv32lpn.f32 and xtlpn.q32 all pass). Marked broken
+// rather than unsupported on purpose: this is a compiler bug, written down and
+// awaiting a fix, not a capability this target lacks. Delete when fixed.
+// docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md
+// @broken(xtlpn.f32)
 // run: test_return_mat3_transpose() ~= mat3(vec3(1.0, 4.0, 7.0), vec3(2.0, 5.0, 8.0), vec3(3.0, 6.0, 9.0))
 
 mat4 get_scaling_matrix(float scale) {
