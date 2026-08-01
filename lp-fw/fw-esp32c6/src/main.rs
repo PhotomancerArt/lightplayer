@@ -235,7 +235,13 @@ pub use fw_esp32_common::logger;
     feature = "test_json",
     feature = "test_fluid_demo",
 ))]
-mod output;
+// `pub` so the `lp-ws281x` backend in `output::rmt_v2` counts as a live root
+// while nothing constructs it yet: dead-code analysis works from reachability,
+// and a private module chain would make the whole not-yet-integrated subtree
+// unreachable — which is a warning to suppress rather than a fact worth
+// knowing. Revert to a private `mod` once the output provider calls it
+// (roadmap M5, P2).
+pub mod output;
 mod recovery;
 mod serial;
 #[cfg(not(fw_harness))]
