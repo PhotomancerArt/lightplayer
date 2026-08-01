@@ -19,13 +19,24 @@ use lpc_hardware::{HardwareBoardLabelStatus, HardwareManifestFile};
 const DISPLAY_ONLY: &[(&str, &str)] = &[
     (
         "espressif/esp32-devkitc-v4",
-        "classic ESP32 (v3) has no HardwareTarget yet",
+        "no devkit on the desk; classic target (HardwareTarget::Esp32) landed \
+         2026-07-31 — manifest when one needs calibrating",
     ),
     (
         "quinled/dig-uno",
-        "classic ESP32 (v3) has no HardwareTarget yet",
+        "no board on the desk to verify GPIOs against; classic target landed \
+         2026-07-31",
     ),
 ];
+
+/// The mirror case: runtime manifests whose display sidecar is landing on a
+/// different in-flight branch, with the reason. Strict like DISPLAY_ONLY —
+/// once the sidecar merges, the entry must be removed.
+const RUNTIME_ONLY: &[(&str, &str)] = &[(
+    "domraem/dom-z-102",
+    "display sidecar + catalog entry authored on PR #231 (board catalog M2/M3); \
+     the runtime manifest lands first with the classic bring-up roadmap",
+)];
 
 fn boards_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lp-core/lpc-hardware/boards")
@@ -81,10 +92,17 @@ fn manifest_pairs() -> BTreeMap<String, (Option<BoardDisplayFile>, Option<Hardwa
 #[test]
 fn every_board_has_both_files_or_a_recorded_reason() {
     for (board_id, (display, runtime)) in manifest_pairs() {
-        assert!(
-            display.is_some(),
-            "{board_id}: runtime manifest has no display sidecar — the catalog can't show it"
-        );
+        let runtime_only = RUNTIME_ONLY.iter().any(|(id, _)| *id == board_id);
+        match (&display, runtime_only) {
+            (None, false) => panic!(
+                "{board_id}: runtime manifest has no display sidecar and no RUNTIME_ONLY \
+                 reason — the catalog can't show it"
+            ),
+            (Some(_), true) => {
+                panic!("{board_id}: has a display sidecar — remove it from RUNTIME_ONLY")
+            }
+            _ => {}
+        }
         let allowlisted = DISPLAY_ONLY.iter().any(|(id, _)| *id == board_id);
         match (&runtime, allowlisted) {
             (None, false) => panic!(
@@ -105,7 +123,14 @@ fn embedded_catalog_matches_the_directory() {
         .iter()
         .map(|(id, _)| *id)
         .collect();
-    for board_id in pairs.keys() {
+    // The embedded catalog mirrors DISPLAY sidecars; runtime-only boards
+    // (RUNTIME_ONLY above) have nothing to embed yet.
+    let with_display: Vec<&String> = pairs
+        .iter()
+        .filter(|(_, (display, _))| display.is_some())
+        .map(|(id, _)| id)
+        .collect();
+    for board_id in &with_display {
         assert!(
             embedded.contains(&board_id.as_str()),
             "{board_id}: display sidecar exists on disk but is not embedded in lpa_boards::catalog"
@@ -113,7 +138,7 @@ fn embedded_catalog_matches_the_directory() {
     }
     assert_eq!(
         embedded.len(),
-        pairs.len(),
+        with_display.len(),
         "embedded catalog lists a board with no on-disk display sidecar"
     );
     // And the embedded bytes are the on-disk bytes (include_str! path typos).
