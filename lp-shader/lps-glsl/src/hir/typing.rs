@@ -3,8 +3,8 @@ pub(super) use super::builtin::{
 };
 pub(super) use super::coerce::{
     coerce_arithmetic_pair, coerce_comparison_pair, coerce_constructor_args, coerce_expr,
-    vector_dominant_type, zero_expr,
+    has_bool_lanes, vector_dominant_type, zero_expr,
 };
 pub(super) use super::place::access_lanes;
-pub(super) use super::scalar::{glsl_param_token, is_comparison, is_logical};
+pub(super) use super::scalar::{binary_op_token, glsl_param_token, is_comparison, is_logical};
 pub use super::scalar::{scalar_base_type, scalar_ir_types, scalar_lane_count};

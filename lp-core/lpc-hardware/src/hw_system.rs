@@ -33,7 +33,7 @@ impl HardwareSystem {
 
     pub fn with_virtual_drivers(registry: Rc<HwRegistry>) -> Self {
         let mut system = Self::new(Rc::clone(&registry));
-        system.add_ws281x_driver(Box::new(VirtualWs281xDriver::new(Rc::clone(&registry), 0)));
+        system.add_ws281x_driver(Box::new(VirtualWs281xDriver::new(Rc::clone(&registry))));
         system.add_button_driver(Box::new(VirtualButtonDriver::new(Rc::clone(&registry))));
         system.add_radio_driver(Box::new(VirtualRadioDriver::new(Rc::clone(&registry), 0)));
         system.add_radio_driver(Box::new(VirtualRadioDriver::new_with_spec(
@@ -97,10 +97,11 @@ impl HardwareSystem {
         address: &HwAddress,
         config: Ws281xConfig,
     ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
-        match endpoint_for_address(self.ws281x_endpoints(), address) {
-            EndpointAddressMatch::Available(endpoint) => self.open_ws281x(endpoint.id(), config),
-            EndpointAddressMatch::Unavailable(endpoint) => self.open_ws281x(endpoint.id(), config),
-            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+        match find_endpoint(&self.ws281x_drivers, |endpoint| {
+            endpoint.address() == address
+        }) {
+            Some((driver, endpoint_id)) => self.ws281x_drivers[driver].open(&endpoint_id, config),
+            None => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Ws281x,
                 endpoint_id: HwEndpointId::new(address.as_str()),
             }),
@@ -112,10 +113,9 @@ impl HardwareSystem {
         spec: &HwEndpointSpec,
         config: Ws281xConfig,
     ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
-        match endpoint_for_spec(self.ws281x_endpoints(), spec) {
-            EndpointAddressMatch::Available(endpoint) => self.open_ws281x(endpoint.id(), config),
-            EndpointAddressMatch::Unavailable(endpoint) => self.open_ws281x(endpoint.id(), config),
-            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+        match find_endpoint(&self.ws281x_drivers, |endpoint| endpoint.spec() == spec) {
+            Some((driver, endpoint_id)) => self.ws281x_drivers[driver].open(&endpoint_id, config),
+            None => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Ws281x,
                 endpoint_id: HwEndpointId::new(spec.as_str()),
             }),
@@ -147,10 +147,11 @@ impl HardwareSystem {
         address: &HwAddress,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
-        match endpoint_for_address(self.button_endpoints(), address) {
-            EndpointAddressMatch::Available(endpoint) => self.open_button(endpoint.id(), config),
-            EndpointAddressMatch::Unavailable(endpoint) => self.open_button(endpoint.id(), config),
-            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+        match find_endpoint(&self.button_drivers, |endpoint| {
+            endpoint.address() == address
+        }) {
+            Some((driver, endpoint_id)) => self.button_drivers[driver].open(&endpoint_id, config),
+            None => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Button,
                 endpoint_id: HwEndpointId::new(address.as_str()),
             }),
@@ -162,10 +163,9 @@ impl HardwareSystem {
         spec: &HwEndpointSpec,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
-        match endpoint_for_spec(self.button_endpoints(), spec) {
-            EndpointAddressMatch::Available(endpoint) => self.open_button(endpoint.id(), config),
-            EndpointAddressMatch::Unavailable(endpoint) => self.open_button(endpoint.id(), config),
-            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+        match find_endpoint(&self.button_drivers, |endpoint| endpoint.spec() == spec) {
+            Some((driver, endpoint_id)) => self.button_drivers[driver].open(&endpoint_id, config),
+            None => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Button,
                 endpoint_id: HwEndpointId::new(spec.as_str()),
             }),
@@ -197,10 +197,11 @@ impl HardwareSystem {
         address: &HwAddress,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
-        match endpoint_for_address(self.radio_endpoints(), address) {
-            EndpointAddressMatch::Available(endpoint) => self.open_radio(endpoint.id(), config),
-            EndpointAddressMatch::Unavailable(endpoint) => self.open_radio(endpoint.id(), config),
-            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+        match find_endpoint(&self.radio_drivers, |endpoint| {
+            endpoint.address() == address
+        }) {
+            Some((driver, endpoint_id)) => self.radio_drivers[driver].open(&endpoint_id, config),
+            None => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Radio,
                 endpoint_id: HwEndpointId::new(address.as_str()),
             }),
@@ -212,10 +213,9 @@ impl HardwareSystem {
         spec: &HwEndpointSpec,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
-        match endpoint_for_spec(self.radio_endpoints(), spec) {
-            EndpointAddressMatch::Available(endpoint) => self.open_radio(endpoint.id(), config),
-            EndpointAddressMatch::Unavailable(endpoint) => self.open_radio(endpoint.id(), config),
-            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+        match find_endpoint(&self.radio_drivers, |endpoint| endpoint.spec() == spec) {
+            Some((driver, endpoint_id)) => self.radio_drivers[driver].open(&endpoint_id, config),
+            None => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Radio,
                 endpoint_id: HwEndpointId::new(spec.as_str()),
             }),
@@ -256,48 +256,40 @@ where
     endpoints
 }
 
-enum EndpointAddressMatch {
-    Available(HwEndpoint),
-    Unavailable(HwEndpoint),
-    Missing,
-}
-
-fn endpoint_for_address(endpoints: Vec<HwEndpoint>, address: &HwAddress) -> EndpointAddressMatch {
-    let mut first_match = None;
-    for endpoint in endpoints {
-        if endpoint.address() != address {
-            continue;
-        }
-        if endpoint.is_available() {
-            return EndpointAddressMatch::Available(endpoint);
-        }
-        if first_match.is_none() {
-            first_match = Some(endpoint);
-        }
-    }
-    match first_match {
-        Some(endpoint) => EndpointAddressMatch::Unavailable(endpoint),
-        None => EndpointAddressMatch::Missing,
-    }
-}
-
-fn endpoint_for_spec(endpoints: Vec<HwEndpoint>, spec: &HwEndpointSpec) -> EndpointAddressMatch {
-    let mut first_match = None;
-    for endpoint in endpoints {
-        if endpoint.spec() != spec {
-            continue;
-        }
-        if endpoint.is_available() {
-            return EndpointAddressMatch::Available(endpoint);
-        }
-        if first_match.is_none() {
-            first_match = Some(endpoint);
+/// The driver offering the wanted endpoint, as an index into `drivers`, with
+/// that endpoint's id.
+///
+/// Prefers an available endpoint and otherwise reports the first match, so an
+/// endpoint that exists but is claimed still reaches its driver and fails with
+/// that driver's own account of why.
+///
+/// Enumerating a driver costs a formatted spec and a live status lookup *per
+/// endpoint it offers* — on a board declaring every GPIO, hundreds of them. So
+/// the walk stops at the first available match and the caller opens on the
+/// driver found here, rather than enumerating once to pick an endpoint and
+/// again to discover which driver owns it.
+fn find_endpoint<D>(
+    drivers: &[D],
+    matches: impl Fn(&HwEndpoint) -> bool,
+) -> Option<(usize, HwEndpointId)>
+where
+    D: EndpointDriver,
+{
+    let mut first_match: Option<(usize, HwEndpointId)> = None;
+    for (index, driver) in drivers.iter().enumerate() {
+        for endpoint in driver.endpoints() {
+            if !matches(&endpoint) {
+                continue;
+            }
+            if endpoint.is_available() {
+                return Some((index, endpoint.id().clone()));
+            }
+            if first_match.is_none() {
+                first_match = Some((index, endpoint.id().clone()));
+            }
         }
     }
-    match first_match {
-        Some(endpoint) => EndpointAddressMatch::Unavailable(endpoint),
-        None => EndpointAddressMatch::Missing,
-    }
+    first_match
 }
 
 #[cfg(test)]
@@ -396,6 +388,136 @@ mod tests {
             Err(HardwareEndpointError::EndpointUnavailable { .. })
                 | Err(HardwareEndpointError::Hardware { .. })
         ));
+    }
+
+    /// A board that declares four WS281x timing resources must be able to
+    /// drive four strips at once, exactly as the S3's RMT driver does. The
+    /// virtual driver used to pin `/rmt/ws281x0` at construction, so the second
+    /// open failed with "already claimed" and every host run of a four-channel
+    /// project silently lit one strip.
+    #[test]
+    fn virtual_ws281x_opens_one_output_per_declared_timing_resource() {
+        let registry = Rc::new(HwRegistry::new(crate::default_esp32s3_hardware_manifest()));
+        let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
+        let specs = ["D10", "D9", "D8", "D7"]
+            .map(|pin| HwEndpointSpec::parse(alloc::format!("ws281x:rmt:{pin}")).expect("spec"));
+
+        let outputs = specs
+            .iter()
+            .map(|spec| {
+                system
+                    .open_ws281x_by_spec(spec, Ws281xConfig::new(3))
+                    .unwrap_or_else(|error| panic!("{spec} should open: {error}"))
+            })
+            .collect::<Vec<_>>();
+
+        for channel in 0..4 {
+            assert!(
+                registry.is_claimed(&HwAddress::rmt_ws281x(channel)),
+                "/rmt/ws281x{channel} should back one of the four outputs"
+            );
+        }
+
+        // A fifth output has no timing resource left to claim.
+        let fifth = HwEndpointSpec::from_static("ws281x:rmt:D6");
+        assert!(matches!(
+            system.open_ws281x_by_spec(&fifth, Ws281xConfig::new(3)),
+            Err(HardwareEndpointError::Hardware { .. })
+        ));
+
+        drop(outputs);
+
+        for channel in 0..4 {
+            assert!(!registry.is_claimed(&HwAddress::rmt_ws281x(channel)));
+        }
+    }
+
+    /// Opening by spec must enumerate a driver once.
+    ///
+    /// It used to cost three passes — one to choose the endpoint, one to work
+    /// out which driver owned the id, and one inside the driver to recover the
+    /// GPIO — and each pass computes a live status for every endpoint the board
+    /// declares. That is the difference between a lookup and a survey.
+    #[test]
+    fn opening_by_spec_enumerates_the_driver_once() {
+        struct CountingWs281xDriver {
+            inner: VirtualWs281xDriver,
+            enumerations: core::cell::Cell<usize>,
+        }
+
+        impl crate::HwDriver for CountingWs281xDriver {
+            fn driver_id(&self) -> &str {
+                self.inner.driver_id()
+            }
+
+            fn display_label(&self) -> &str {
+                self.inner.display_label()
+            }
+        }
+
+        impl Ws281xDriver for CountingWs281xDriver {
+            fn endpoints(&self) -> Vec<HwEndpoint> {
+                self.enumerations.set(self.enumerations.get() + 1);
+                self.inner.endpoints()
+            }
+
+            fn open(
+                &self,
+                endpoint_id: &HwEndpointId,
+                config: Ws281xConfig,
+            ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
+                self.inner.open(endpoint_id, config)
+            }
+        }
+
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
+        let driver = Rc::new(CountingWs281xDriver {
+            inner: VirtualWs281xDriver::new(Rc::clone(&registry)),
+            enumerations: core::cell::Cell::new(0),
+        });
+
+        struct SharedDriver(Rc<CountingWs281xDriver>);
+
+        impl crate::HwDriver for SharedDriver {
+            fn driver_id(&self) -> &str {
+                self.0.driver_id()
+            }
+
+            fn display_label(&self) -> &str {
+                self.0.display_label()
+            }
+        }
+
+        impl Ws281xDriver for SharedDriver {
+            fn endpoints(&self) -> Vec<HwEndpoint> {
+                self.0.endpoints()
+            }
+
+            fn open(
+                &self,
+                endpoint_id: &HwEndpointId,
+                config: Ws281xConfig,
+            ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
+                self.0.open(endpoint_id, config)
+            }
+        }
+
+        let mut system = HardwareSystem::new(Rc::clone(&registry));
+        system.add_ws281x_driver(Box::new(SharedDriver(Rc::clone(&driver))));
+
+        let output = system
+            .open_ws281x_by_spec(
+                &HwEndpointSpec::from_static("ws281x:rmt:D10"),
+                Ws281xConfig::new(3),
+            )
+            .expect("D10 opens");
+
+        assert_eq!(
+            driver.enumerations.get(),
+            1,
+            "one open should survey the board once"
+        );
+        drop(output);
     }
 
     fn test_manifest() -> HwManifest {

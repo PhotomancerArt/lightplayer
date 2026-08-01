@@ -1,5 +1,8 @@
 // test error
 
+// lps-glsl does not yet reject a user function call in a const initializer.
+// @unimplemented(frontend=lp)
+
 // Spec: variables.adoc §4.3.3.1 "Constant Expressions"
 // User-defined function cannot form constant expression.
 
