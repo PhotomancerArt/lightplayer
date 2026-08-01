@@ -1,0 +1,37 @@
+{
+  "kind": "Project",
+  "format": 2,
+  "name": "Quad gamma v3",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "fixture1": {
+      "ref": "./fixture1.json"
+    },
+    "fixture2": {
+      "ref": "./fixture2.json"
+    },
+    "fixture3": {
+      "ref": "./fixture3.json"
+    },
+    "fixture4": {
+      "ref": "./fixture4.json"
+    },
+    "output1": {
+      "ref": "./output1.json"
+    },
+    "output2": {
+      "ref": "./output2.json"
+    },
+    "output3": {
+      "ref": "./output3.json"
+    },
+    "output4": {
+      "ref": "./output4.json"
+    }
+  }
+}
