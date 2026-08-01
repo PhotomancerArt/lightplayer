@@ -47,6 +47,9 @@ pub fn NodeCardDrawers(
     /// Whether the advanced drawer is expanded (core-owned state).
     #[props(default = false)]
     advanced_open: bool,
+    /// Whether the Debug section's rows are expanded (core-owned state).
+    #[props(default = false)]
+    debug_open: bool,
     /// Platform for the code editor's shortcut hints; stories pin it for
     /// deterministic captures.
     #[props(default = None)]
@@ -84,6 +87,7 @@ pub fn NodeCardDrawers(
             NodeSection {
                 section,
                 node: section_node.clone(),
+                debug_open,
                 on_action,
                 pending_edits: pending_edits.clone(),
                 dirty_tint,

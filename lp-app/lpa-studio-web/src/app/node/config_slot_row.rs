@@ -71,9 +71,16 @@ pub fn ConfigSlotRow(
     let aspects = slot.visible_aspects();
     let primary = primary_affordance(&aspects);
     let chrome = slot_edit_chrome(&slot.state);
+    // A Debug row must be the SAME BOX touched and untouched (G1 feedback:
+    // the Clear button appearing reflowed the card). Both states therefore
+    // carry the shared `lp-debug-row-floor` geometry, and the trailing verb
+    // is reserved below — only the colour differs.
     let row_class = match chrome {
-        Some(SlotEditChrome::Debug) if slot.state.invalid.is_none() => debug_row_class(),
-        _ => slot_row_class(primary, index),
+        Some(SlotEditChrome::Debug) if slot.state.invalid.is_none() => {
+            debug_row_class().to_string()
+        }
+        _ if slot.state.debug => format!("{} lp-debug-row-floor", slot_row_class(primary, index)),
+        _ => slot_row_class(primary, index).to_string(),
     };
     let indent = depth * 14;
     // Value edits on a present option row target the interior `some` slot;
@@ -186,6 +193,14 @@ pub fn ConfigSlotRow(
                     }
                     if let Some(revert) = row_revert {
                         SlotRowRevertButton { revert }
+                    } else if slot.state.debug {
+                        // Debug controls exist to be poked, so their rows
+                        // must not move when they are: the verb's footprint
+                        // is RESERVED, and the untouched row is the same box
+                        // as the touched one (G1 feedback — the Clear button
+                        // appearing reflowed the card). Persisted rows keep
+                        // today's appear-on-edit behaviour.
+                        span { class: "lp-debug-row-verb-reserve" }
                     }
                     if let Some(optionality) = presence {
                         // Option-ness as presence (P5 live default): the
@@ -489,7 +504,7 @@ fn slot_edit_chrome(state: &UiSlotFieldState) -> Option<SlotEditChrome> {
 /// treatments. Geometry and colors both live in `style.css` so the whole
 /// debug look stays in one block.
 fn debug_row_class() -> &'static str {
-    "lp-debug-row"
+    "lp-debug-row lp-debug-row-floor"
 }
 
 fn record_summary_class(expanded: bool) -> &'static str {
@@ -527,7 +542,22 @@ mod tests {
             chrome_revert_button_class(SlotEditChrome::Debug),
             "lp-debug-row-button"
         );
-        assert_eq!(debug_row_class(), "lp-debug-row");
+    }
+
+    #[test]
+    fn a_debug_row_is_the_same_box_touched_and_untouched() {
+        // G1 feedback: the inline Clear appearing must not reflow the card.
+        // Both debug row states name the shared geometry floor, and the
+        // untouched state reserves the verb's footprint (`row_class` and the
+        // `lp-debug-row-verb-reserve` span above) — so the two states differ
+        // in colour only. `.lp-debug-row-floor` and
+        // `.lp-debug-row-verb-reserve` carry the sizes, in `style.css`.
+        assert!(
+            debug_row_class().contains("lp-debug-row-floor"),
+            "the touched debug row must carry the shared floor: {}",
+            debug_row_class()
+        );
+        assert!(debug_row_class().contains("lp-debug-row"));
     }
 
     #[test]

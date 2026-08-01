@@ -3696,20 +3696,81 @@ label:has(> input:not(:disabled)) {
         linear-gradient(90deg, var(--studio-status-debug-bg), transparent 72%);
 }
 
-/* The section's own header strip: label on the left, Clear on the right. */
+/* The section's own header strip: the disclosure toggle (chevron + DEBUG +
+   note) on the left, Clear on the right. It is ALWAYS visible — collapsing
+   hides only the rows — and its height is FIXED so the count and the Clear
+   button appearing can never reflow the card (G1 feedback). The min-height
+   is sized to the tallest occupant (the Clear pill: 10px text + 2*3px pad +
+   2*1px border = 18px). */
 .lp-debug-section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 5px 10px 5px 12px;
+    min-height: 28px;
+    padding: 5px 10px 5px 8px;
+}
+
+/* The divider belongs between the header and the rows, so it appears only
+   once the disclosure is open. */
+.lp-debug-section--open .lp-debug-section-header {
     border-bottom: 1px solid color-mix(in oklab, var(--studio-status-debug-border) 55%, transparent);
+}
+
+/* The whole label cluster is the disclosure control (chevron + label + note),
+   so the hit target is generous without a separate affordance. */
+.lp-debug-section-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    height: 18px;
+    appearance: none;
+    cursor: pointer;
+    border: 0;
+    background: transparent;
+    padding: 0 4px;
+    border-radius: var(--studio-radius-xs);
+    color: inherit;
+    text-align: left;
+}
+
+.lp-debug-section-toggle:hover .lp-debug-section-label {
+    color: var(--studio-color-text-strong);
+}
+
+/* Rotation follows the section grammar: the glyph previews the state the
+   press leads to. */
+.lp-debug-section-chevron {
+    display: inline-flex;
+    flex: none;
+    opacity: 0.75;
+    transition: transform 150ms ease, opacity 150ms ease;
+}
+
+.lp-debug-section-toggle:hover .lp-debug-section-chevron {
+    opacity: 1;
+}
+
+/* Hover previews the other state, exactly as the collapsed drawer row and
+   the expanded rail do (`node_card_section.rs`). */
+.lp-debug-section-toggle:hover .lp-debug-section-chevron:not(.lp-debug-section-chevron--open) {
+    transform: rotate(90deg);
+}
+
+.lp-debug-section-toggle:hover .lp-debug-section-chevron--open {
+    transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lp-debug-section-chevron {
+        transition: none;
+    }
 }
 
 .lp-debug-section-label {
     display: inline-flex;
-    align-items: baseline;
-    gap: 7px;
+    align-items: center;
     font-size: 0.6rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -3720,19 +3781,28 @@ label:has(> input:not(:disabled)) {
 }
 
 .lp-debug-section-note {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 0.6rem;
     font-weight: 600;
     letter-spacing: 0.04em;
+    line-height: 1;
     text-transform: none;
     color: var(--studio-color-text-dim);
+    user-select: none;
 }
 
 /* Settings section header — the quiet counterpart, so the two sections read
-   as a pair (D4/D6: "Settings" above, "Debug" below). */
+   as a pair (D4/D6: "Settings" above, "Debug" below). Same fixed height as
+   the debug header so the two strips line up. */
 .lp-settings-section-header {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-height: 28px;
     padding: 5px 10px 5px 12px;
     border-bottom: 1px solid var(--studio-color-border-muted);
 }
@@ -3768,6 +3838,12 @@ label:has(> input:not(:disabled)) {
     border: 1px solid var(--studio-status-debug-border);
     border-radius: var(--studio-radius-pill);
     padding: 3px 9px;
+}
+
+/* Pinned to the header's reserved height so Clear appearing cannot grow the
+   strip (the header's min-height is sized to exactly this). */
+.lp-debug-button {
+    height: 18px;
 }
 
 .lp-debug-button,
@@ -3809,7 +3885,11 @@ label:has(> input:not(:disabled)) {
 
 /* A touched Debug slot row: a plain orange wash at row scale — the section
    already supplies the stripes, so rows never re-stripe (stacking the two is
-   what made the first cut read many times too strong; G1 feedback). */
+   what made the first cut read many times too strong; G1 feedback).
+
+   Geometry is deliberately IDENTICAL to `slot_row_class`'s (the class an
+   untouched row wears), and `min-height` pins the shared floor, so becoming
+   touched changes colour and nothing else. */
 .lp-debug-row {
     display: grid;
     min-width: 0;
@@ -3818,6 +3898,23 @@ label:has(> input:not(:disabled)) {
     gap: 8px;
     padding: 6px 8px;
     background: linear-gradient(270deg, var(--studio-status-debug-bg) 0%, var(--studio-status-debug-bg) 34%, transparent 100%);
+}
+
+/* The shared floor both debug row states carry — 32px detail button + 2*6px
+   row padding, i.e. the height the row already had. It exists so the two
+   states are provably the same box even if their content differs in height. */
+.lp-debug-row-floor {
+    min-height: 44px;
+}
+
+/* The untouched half of that contract: an empty box the exact size of the
+   inline Clear button, so the verb appearing neither grows the row nor
+   shifts the value editor sideways. */
+.lp-debug-row-verb-reserve {
+    display: inline-flex;
+    height: 24px;
+    width: 24px;
+    flex: none;
 }
 
 /* The row's inline Clear icon button. */

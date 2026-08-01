@@ -1,17 +1,18 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiConfigSlot, UiNodeDirtyState, UiNodeSection, UiNodeTabBody,
-    UiNodeView, UiPendingEdit, UiSlotRecord,
+    DirtySummary, NodeCardDrawer, NodeUiOp, UiAction, UiConfigSlot, UiNodeDirtyState,
+    UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
 use crate::app::layout::{PaneCollapse, RichObjectPane};
+use crate::app::node::face::node_ui_action;
 use crate::app::node::slot_edit_actions::node_clear_debug_action;
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
     SlotRecordEditor,
 };
-use crate::base::{Platform, StudioIcon, node_kind_icon};
+use crate::base::{Platform, StudioIcon, StudioIconName, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -80,8 +81,10 @@ pub fn NodePane(
     // node's address path — the header path carries it for panes and
     // nested child cards alike.
     let face_node = view.header.path.clone();
-    // The node address the Debug section's per-node Clear targets.
+    // The node address the Debug section's per-node Clear targets, and its
+    // core-owned disclosure bit (collapsed on a fresh card).
     let section_node = Some(view.header.path.clone());
+    let debug_open = view.card_ui.debug_open;
     let face_card_ui = view.card_ui.clone();
     let add_node_menu = view.add_node_menu.clone();
 
@@ -164,6 +167,7 @@ pub fn NodePane(
                                                 first: index == 0,
                                                 focus_action: focus_action.clone(),
                                                 node: section_node.clone(),
+                                                debug_open,
                                                 on_action,
                                                 pending_edits: pending_edits.clone(),
                                                 dirty_tint,
@@ -260,9 +264,14 @@ pub fn NodeSection(
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     /// The owning node's address path — the Debug section's per-node Clear
-    /// dispatches `NodeClearDebugOp` against it.
+    /// dispatches `NodeClearDebugOp` against it, and its disclosure toggle
+    /// keys `NodeCardUiState` on it.
     #[props(default = None)]
     node: Option<String>,
+    /// Core-owned disclosure state for the Debug section
+    /// (`NodeCardUiState::debug_open`); every other section ignores it.
+    #[props(default = false)]
+    debug_open: bool,
     /// The editor-level pending-edit list, threaded through extracted child
     /// sections into their nested panes' detail popovers.
     #[props(default)]
@@ -292,7 +301,7 @@ pub fn NodeSection(
             }
         },
         UiNodeSection::DebugSlots(slots) => rsx! {
-            DebugSlotsSection { slots, node, on_action }
+            DebugSlotsSection { slots, node, open: debug_open, on_action }
         },
         UiNodeSection::AssetSlots(assets) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
@@ -316,12 +325,28 @@ pub fn NodeSection(
 }
 
 /// The node card's **Debug** section (D3/D4/D8 tier c): the node's
-/// `SlotRole::Debug` rows, flattened by core, under a hazard-striped surface
-/// that is worn **always** — an idle debug control announces "transient"
-/// before it is touched, which is the whole point (clean-transient
-/// invisibility). An active override deepens the stripes and reveals the
-/// per-node **Clear** (`NodeClearDebugOp`); nothing here ever says "Revert"
-/// or "Reset" (D7).
+/// `SlotRole::Debug` rows, flattened by core, behind a **collapsed-by-default
+/// disclosure** whose HEADER is the debug territory — hazard-striped and
+/// labelled DEBUG whether or not anything is overridden, so a transient
+/// control announces itself before it is touched (clean-transient
+/// invisibility). Most of the time those controls are not wanted, so the rows
+/// open on demand (G1 feedback); unmissability rides the always-visible
+/// header, the card marker, and the global chip instead.
+///
+/// While collapsed the header still carries "N active · session only" and the
+/// per-node **Clear** ([`lpa_studio_core::NodeClearDebugOp`]) — clearing never
+/// requires expanding. Nothing here ever says "Revert" or "Reset" (D7).
+///
+/// Open state is CORE-OWNED, on the same path as the code/advanced drawers:
+/// `NodeCardUiState::debug_open`, keyed by the node's address, mutated with
+/// `NodeUiOp::SetDrawer { drawer: NodeCardDrawer::Debug, .. }` — so disclosure
+/// survives re-renders and is e2e-drivable. The chevron follows the section
+/// grammar's rotation (right = closed, down = open) even though the striped
+/// header replaces `NodeCardSection`'s rail/collapsed-row pair.
+///
+/// **No state transition here may change a height.** The header reserves the
+/// Clear button's box (`min-height` in the CSS), so the count/Clear appearing
+/// does not reflow the card.
 ///
 /// Every pixel of the treatment is the `.lp-debug-*` block in `style.css` —
 /// the semantic side is `UiNodeSection::DebugSlots` in core.
@@ -329,10 +354,15 @@ pub fn NodeSection(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn DebugSlotsSection(
     slots: Vec<UiConfigSlot>,
-    /// The owning node's address path; `None` (or an unparsable story path)
-    /// renders the section without its Clear action.
+    /// The owning node's address path — both the Clear target and the
+    /// disclosure's `NodeCardUiState` key. `None` (a caller with no address
+    /// to give) renders the header as a plain label: no Clear, and no
+    /// toggle, since there would be nowhere to store the bit.
     #[props(default = None)]
     node: Option<String>,
+    /// Core-owned disclosure state (`NodeCardUiState::debug_open`).
+    #[props(default = false)]
+    open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let active = slots
@@ -343,19 +373,57 @@ fn DebugSlotsSection(
         .as_deref()
         .filter(|_| active > 0)
         .and_then(node_clear_debug_action);
-    let class = if active > 0 {
-        "lp-debug-section lp-debug-section--active"
+    let mut class = String::from("lp-debug-section");
+    if active > 0 {
+        class.push_str(" lp-debug-section--active");
+    }
+    if open {
+        class.push_str(" lp-debug-section--open");
+    }
+    let toggle_node = node.clone();
+    let toggle_title = if open {
+        "Collapse debug controls"
     } else {
-        "lp-debug-section"
+        "Expand debug controls"
     };
 
     rsx! {
         section { class,
             div { class: "lp-debug-section-header",
-                span { class: "lp-debug-section-label",
-                    "Debug"
-                    span { class: "lp-debug-section-note",
-                        if active > 0 { "{active} active · session only" } else { "session only" }
+                if let Some(node) = toggle_node {
+                    button {
+                        class: "lp-debug-section-toggle",
+                        r#type: "button",
+                        aria_expanded: "{open}",
+                        aria_label: "{toggle_title}",
+                        title: "{toggle_title}",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            if let Some(handler) = on_action {
+                                handler.call(node_ui_action(NodeUiOp::SetDrawer {
+                                    node: node.clone(),
+                                    drawer: NodeCardDrawer::Debug,
+                                    open: !open,
+                                }));
+                            }
+                        },
+                        span { class: debug_chevron_class(open),
+                            StudioIcon {
+                                name: if open { StudioIconName::Expanded } else { StudioIconName::Collapsed },
+                                size: 12,
+                            }
+                        }
+                        span { class: "lp-debug-section-label", "Debug" }
+                        span { class: "lp-debug-section-note",
+                            if active > 0 { "{active} active · session only" } else { "session only" }
+                        }
+                    }
+                } else {
+                    span { class: "lp-debug-section-toggle",
+                        span { class: "lp-debug-section-label", "Debug" }
+                        span { class: "lp-debug-section-note",
+                            if active > 0 { "{active} active · session only" } else { "session only" }
+                        }
                     }
                 }
                 if let Some(action) = clear {
@@ -373,11 +441,23 @@ fn DebugSlotsSection(
                     }
                 }
             }
-            SlotRecordEditor {
-                record: UiSlotRecord::new(slots),
-                on_action,
+            if open {
+                SlotRecordEditor {
+                    record: UiSlotRecord::new(slots),
+                    on_action,
+                }
             }
         }
+    }
+}
+
+/// Chevron rotation for the Debug disclosure — the section grammar's
+/// convention: the glyph previews the state the press leads to.
+fn debug_chevron_class(open: bool) -> &'static str {
+    if open {
+        "lp-debug-section-chevron lp-debug-section-chevron--open"
+    } else {
+        "lp-debug-section-chevron"
     }
 }
 

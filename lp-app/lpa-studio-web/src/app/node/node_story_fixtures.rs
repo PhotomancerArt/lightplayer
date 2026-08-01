@@ -3,14 +3,14 @@
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
     ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ControllerId, DirtySummary,
-    NodeRemoveOp, NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, Revision,
-    SlotEditOp, SlotPath, UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot,
-    UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader,
-    UiNodeRemovePreflight, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPaneAction,
-    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProducedBinding, UiProducedBindings,
-    UiProducedProduct, UiProducedValue, UiProductPreview, UiProductTrackingState, UiSlotAsset,
-    UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
-    UiSlotUnit, UiSlotValue, UiStatus,
+    NodeCardUiState, NodeRemoveOp, NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress,
+    ProjectSlotRoot, Revision, SlotEditOp, SlotPath, UiAction, UiAssetEditorKind,
+    UiBindingEndpoint, UiConfigSlot, UiControlProductPreview, UiControlSampleFormat, UiNodeChild,
+    UiNodeDirtyState, UiNodeHeader, UiNodeRemovePreflight, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
+    UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
+    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -127,9 +127,13 @@ pub(crate) fn node_delete_pane_action() -> UiPaneAction {
 /// offset seconds" as top-level rows, never a nested "Controls" group.
 ///
 /// `overrides` seeds how many of them carry an active override: `0` is the
-/// idle case (the section is still debug territory — D8 tier c), and a
+/// idle case (the section header is still debug territory — D8 tier c), and a
 /// non-zero count also lights the card's header marking (tier b).
-pub(crate) fn clock_node_view(overrides: usize) -> UiNodeView {
+///
+/// `debug_open` seeds the core-owned disclosure (`NodeCardUiState::
+/// debug_open`). The live default is `false` — the rows are collapsed behind
+/// the always-visible striped header.
+pub(crate) fn clock_node_view(overrides: usize, debug_open: bool) -> UiNodeView {
     let debug_row = |key: &str, label: &str, value: UiSlotValue, index: usize| {
         let state = if index < overrides {
             UiSlotFieldState::editable()
@@ -138,9 +142,16 @@ pub(crate) fn clock_node_view(overrides: usize) -> UiNodeView {
         } else {
             UiSlotFieldState::editable().with_debug(true)
         };
-        UiConfigSlot::value(key, label, value)
+        let mut row = UiConfigSlot::value(key, label, value)
             .with_address(clock_slot_address(&format!("controls.{key}")))
-            .with_state(state)
+            .with_state(state);
+        if index < overrides {
+            // An active override owns its overlay entry, which is what puts
+            // the inline Clear verb on the row (untouched rows reserve its
+            // footprint instead, so the two are the same box).
+            row = row.with_edit_entry_address(clock_slot_address(&format!("controls.{key}")));
+        }
+        row
     };
 
     let mut view = UiNodeView::new(
@@ -170,6 +181,10 @@ pub(crate) fn clock_node_view(overrides: usize) -> UiNodeView {
         ])],
     )
     .with_node_id(CLOCK_NODE);
+    view.card_ui = NodeCardUiState {
+        debug_open,
+        ..NodeCardUiState::default()
+    };
     view.action = Some(UiAction::from_op(
         ControllerId::new("story.project"),
         SlotEditOp::Revert {
