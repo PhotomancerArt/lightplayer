@@ -1082,11 +1082,14 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
     done
-    # test_espnow is the one harness built without default features: it wants
-    # the radio capability alone, not the server stack.
-    echo "==> fw-esp32c6 harness: test_espnow (--no-default-features)"
-    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
+    # Two harnesses build without default features: test_espnow wants the radio
+    # capability alone, and test_f32_softfloat wants the compiler alone (plus
+    # `float-f32`, which no other configuration in this crate turns on).
+    for feature in test_espnow test_f32_softfloat; do
+        echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
+        cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
+    done
 
 # Every lpc-engine node gate, one build per gate turned off.
 #
@@ -1522,6 +1525,32 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 # Run firmware with test_espnow: 1Hz simulated button events over ESP-NOW
 fwtest-espnow-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware with test_f32_softfloat: IEEE f32 semantics on the C6's soft-float
+# path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
+# on-device in FloatMode::F32 and executed.
+#
+# The port is NOT auto-detected. Several ESP32 boards are usually attached and
+# picking the first one has flashed the wrong board before; pass the C6's port
+# explicitly, e.g. `just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodem1301`.
+fwtest-f32-softfloat-esp32c6 port="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+        port="${ESPFLASH_PORT:-}"
+    fi
+    if [[ -z "$port" ]]; then
+        echo "Pass the ESP32-C6 port explicitly (or set ESPFLASH_PORT):" >&2
+        echo "  just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodemXXXX" >&2
+        echo "Available:" >&2
+        ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null >&2 || true
+        exit 1
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
+        --features test_f32_softfloat,esp32c6 --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \
