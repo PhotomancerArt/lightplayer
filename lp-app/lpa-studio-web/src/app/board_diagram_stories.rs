@@ -10,8 +10,8 @@
 use dioxus::prelude::*;
 use lpa_boards::geometry::{BoardLayout, DiagramOptions};
 use lpa_boards::{
-    BoardDiagram, BoardDisplayFile, DiagramMargin, DiagramMode, PinSwatch, WiredConnection,
-    all_boards, board_by_id,
+    BoardDiagram, BoardDisplayFile, BoardsCatalogPage, DiagramMargin, DiagramMode, HostOs,
+    PinSwatch, WiredConnection, all_boards, board_by_id,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -348,6 +348,17 @@ pub(crate) fn swatch_confirmed() -> Element {
                 scale: 1.15,
                 swatches: confirmed,
             }
+        }
+    }
+}
+
+#[story(
+    description = "The #/boards catalog page: tier legend, sort + SoC filter controls, cards with renderer thumbnails — and the D5 driver warning on the CH340K board (rendered as on macOS)."
+)]
+pub(crate) fn catalog_page_macos() -> Element {
+    rsx! {
+        div { style: "max-width: 1080px;",
+            BoardsCatalogPage { os: HostOs::MacOs }
         }
     }
 }

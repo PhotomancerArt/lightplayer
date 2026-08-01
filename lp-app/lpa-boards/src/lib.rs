@@ -13,12 +13,16 @@
 
 mod catalog;
 #[cfg(feature = "diagram")]
+mod catalog_page;
+#[cfg(feature = "diagram")]
 mod diagram;
 mod display_manifest;
 pub mod geometry;
 pub mod usb_bridge;
 
 pub use catalog::{DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id};
+#[cfg(feature = "diagram")]
+pub use catalog_page::BoardsCatalogPage;
 #[cfg(feature = "diagram")]
 pub use diagram::{BoardDiagram, DiagramMargin};
 pub use display_manifest::{
