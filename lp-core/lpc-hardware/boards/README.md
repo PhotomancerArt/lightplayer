@@ -177,6 +177,42 @@ refuted against Espressif's primary GPIO reference while writing its profile.
 When a vendor page and a primary source disagree, the primary source wins and
 the refutation belongs in the profile's `note`.
 
+## Display sidecars (`*.display.json`)
+
+Each board may carry a catalog sidecar next to its runtime manifest:
+
+```text
+boards/
+  vendor/
+    product.json          # runtime manifest (this document) — compiled into firmware
+    product.display.json  # catalog/drawing metadata — app-side only
+```
+
+The sidecar holds everything the boards catalog, provisioning picker, and
+diagram renderer need that the runtime manifest must not carry (the runtime
+manifest is `include_str!`'d into firmware, where every byte of serde surface
+costs flash): display name, support tier, approximate price, purchase URLs,
+capability chips, and the drawing block (module outline, USB/buttons/terminals,
+per-pin roles and capability cells).
+
+The types, embedded catalog, and JSON schema
+(`schemas/board-display.schema.json`) live in `lp-app/lpa-boards`. The drift
+tests there (`lpa-boards/tests/manifest_drift.rs`) keep sidecar and runtime
+manifest consistent: silkscreen-label→GPIO mappings must agree with
+`board_label` entries (including calibration `not-found`), GPIOs the runtime
+manifest deliberately omits must not present as claimable pins, and
+runtime-reserved GPIOs may not display as plain io. A board may be
+display-only (no runtime manifest) only while its SoC has no
+`HardwareTarget`; those live on an explicit allowlist in the drift tests with
+the reason recorded.
+
+### Support tiers
+
+- **gold** — first-class: tested every release.
+- **silver** — supported: tested occasionally.
+- **bronze** — community-verified: should work. Boards whose firmware target
+  does not exist yet are at most bronze, with a `support_note` saying so.
+
 ## Validation
 
 Before committing a manifest change, run:

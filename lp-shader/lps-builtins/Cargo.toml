@@ -13,7 +13,20 @@ crate-type = ["lib"]
 [features]
 default = []
 std = ["log/std"]
-test = ["std"]
+test = ["std", "float-f32"]
+
+# The native-f32 builtin family (`builtins/**/*_f32.rs`) and everything that
+# reaches it. Off by default so a device image that only runs Fixed-mode shaders
+# links none of it (f32 roadmap D2).
+#
+# This gate is real: `FloatMode` is matched on a *runtime* value, so LTO cannot
+# drop the family on its own — the same reason `lpvm-native` gates its ISAs
+# (`isa/xt` measured +26,448 B on the ESP32-C6 before its gate existed).
+#
+# Note what it does NOT cover: `lps-builtin-ids` is a separate crate the
+# compiler always links, and its generated name/lookup tables grow with every
+# `BuiltinId` variant regardless of this feature.
+float-f32 = []
 
 [dependencies]
 lps-builtin-ids = { path = "../lps-builtin-ids" }
@@ -22,5 +35,7 @@ lpvm = { path = "../lpvm", default-features = false }
 lpfn-impl-macro = { path = "../lpfn-impl-macro" }
 lps-q32 = { path = "../lps-q32" }
 log = { workspace = true, default-features = false }
+# `core` has no floor/ceil/trunc/sqrt for f32; the device builds have no `std`.
+libm = "0.2"
 
 [dev-dependencies]

@@ -68,7 +68,7 @@ pub(crate) fn emit_module(
     debug_assert_eq!(export_names.len(), ir.functions.len());
     let augmented = imports::with_missing_helper_imports(ir, options.float_mode);
     let ir = augmented.as_ref().unwrap_or(ir);
-    let filtered = imports::build_filtered_imports(ir)?;
+    let filtered = imports::build_filtered_imports(ir, options.float_mode)?;
     let filtered_fn_count = filtered.decls.len() as u32;
 
     let mut types = TypeSection::new();
@@ -105,7 +105,7 @@ pub(crate) fn emit_module(
     let _ = next_type;
 
     let any_slots = ir.functions.values().any(|f| !f.slots.is_empty());
-    let needs_result_ptr_calls = imports::module_needs_result_ptr_calls(ir);
+    let needs_result_ptr_calls = imports::module_needs_result_ptr_calls(ir, options.float_mode);
     let needs_shadow_stack = any_slots || needs_result_ptr_calls;
     let mut import_section = ImportSection::new();
     // Fuel checks load/store the vmctx header in linear memory at every
@@ -115,7 +115,7 @@ pub(crate) fn emit_module(
         || render_entry.is_some()
         || options.fuel
         // Inline-lowered `__lp_get_fuel` loads the vmctx header directly.
-        || imports::module_inlines_get_fuel(ir);
+        || imports::module_inlines_get_fuel(ir, options.float_mode);
     let env_memory = if needs_memory {
         let spec = EnvMemorySpec::shader_import_limits();
         let min = spec.initial_pages as u64;
@@ -135,7 +135,7 @@ pub(crate) fn emit_module(
         None
     };
     for (decl, &ty_idx) in filtered.decls.iter().zip(import_fn_types.iter()) {
-        let wasm_name = imports::builtins_wasm_name(decl)?;
+        let wasm_name = imports::builtins_wasm_name(decl, options.float_mode)?;
         import_section.import("builtins", wasm_name, EntityType::Function(ty_idx));
     }
 

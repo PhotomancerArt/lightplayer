@@ -360,7 +360,11 @@ pub fn handle_pcrel_lo12_i(
                         },
                         auipc_pc
                     )
-                })?;
+                })?
+                // The pair must agree on the target. `handle_pcrel_hi20` encoded
+                // `S + A` into the auipc; recomputing the low half from `S`
+                // alone leaves the two halves describing different addresses.
+                .wrapping_add(hi20_reloc.addend as u32);
             // Check if this is GOT_HI20 or PCREL_HI20 without a GOT entry (need to convert lw to addi)
             // For function calls, we convert lw to addi to compute address directly instead of loading from memory
             let has_got_entry = ctx.got_tracker.has_entry(&hi20_reloc.symbol_name);
@@ -408,46 +412,6 @@ pub fn handle_pcrel_lo12_i(
                 "    Patched lw instruction: 0x{inst_word:08x} → 0x{patched:08x} (lo12=0x{lo12:x})"
             );
         }
-    }
-
-    Ok(())
-}
-
-/// Handle R_RISCV_32 (1): 32-bit absolute relocation (used for GOT entry initialization).
-#[allow(dead_code, reason = "Reserved for future GOT handling")]
-pub fn handle_abs32(
-    ctx: &mut RelocationContext,
-    reloc: &RelocationInfo,
-    got_tracker: &mut GotTracker,
-) -> Result<(), String> {
-    log::trace!("  Applying R_RISCV_32 at 0x{:x}", reloc.address);
-
-    let offset = reloc.offset as usize;
-    if offset + 4 > ctx.buffer.len() {
-        return Err(format!(
-            "R_RISCV_32 relocation at offset {offset} requires 4 bytes"
-        ));
-    }
-
-    // Write the absolute target address directly
-    let reloc_bytes = &mut ctx.buffer[offset..offset + 4];
-    reloc_bytes.copy_from_slice(&ctx.target_addr.to_le_bytes());
-
-    // If this is a GOT entry, mark it as initialized
-    if got_tracker.has_entry(&reloc.symbol_name) {
-        got_tracker.mark_initialized(&reloc.symbol_name);
-        log::debug!(
-            "    ✓ GOT entry initialized: '{}' = 0x{:x}",
-            reloc.symbol_name,
-            ctx.target_addr
-        );
-    } else {
-        log::debug!(
-            "    Wrote 0x{:x} to offset 0x{:x} for '{}'",
-            ctx.target_addr,
-            offset,
-            reloc.symbol_name
-        );
     }
 
     Ok(())

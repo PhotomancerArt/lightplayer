@@ -23,6 +23,66 @@
             }
           }
         }
+      },
+      {
+        "name": "estimated_draw_ma",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      },
+      {
+        "name": "power_scale",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "power_budget_ma",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
       }
     ],
     "meta": {}

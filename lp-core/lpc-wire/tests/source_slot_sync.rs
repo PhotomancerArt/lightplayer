@@ -139,9 +139,9 @@ fn real_source_defs_sync_as_slot_roots() {
             &output_data,
             OutputDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
-            "options.some.brightness",
+            "options.some.dithering_enabled",
         ),
-        LpValue::F32(0.12),
+        LpValue::Bool(false),
     );
 
     let fixture_sync = build_slot_full_sync(

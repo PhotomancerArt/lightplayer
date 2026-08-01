@@ -21,6 +21,10 @@ bool test_isnan_inf() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
+// @unsupported(rv32n.f32)
 // run: test_isnan_inf() == false
 
 bool test_isnan_neg_inf() {
@@ -35,6 +39,8 @@ bool test_isnan_neg_inf() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
+// @unsupported(rv32n.f32)
 // run: test_isnan_neg_inf() == false
 
 bool test_isinf_inf() {

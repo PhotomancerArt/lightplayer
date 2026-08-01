@@ -2476,6 +2476,10 @@ INTRINS = [
     Intrin("floor", "floor(v)", lambda v, i: float(math.floor(v))),
     Intrin("ceil", "ceil(v)", lambda v, i: float(math.ceil(v))),
     Intrin("trunc", "trunc(v)", lambda v, i: float(math.trunc(v))),
+    # `round` reaches @glsl::round as a direct import call (not via Fnearest,
+    # which f32 lowers natively). Both modes have a builtin for it now; note the
+    # two are *different operations* — GLSL `round` ties away from zero,
+    # `fnearest` ties to even — and this file exercises the import path.
     Intrin("round", "round(v)", lambda v, i: _round(v)),
     Intrin("fract", "fract(v)", lambda v, i: _fract(v)),
     Intrin("mod", "mod(v, 0.75)", lambda v, i: _mod(v, 0.75)),
@@ -2490,7 +2494,15 @@ INTRINS = [
         lambda v, i: _smoothstep(0.0, 1.0, v),
     ),
     # sqrt lowers to an imported builtin call on Q32 — covers the call path.
-    Intrin("sqrt", "sqrt(v)", lambda v, i: math.sqrt(v), voff=0.25, vstep=0.5),
+    # (The `Fsqrt` *op* lowers to a native f32.sqrt; this file deliberately
+    # exercises the import instead, which is why it needed an f32 builtin.)
+    Intrin(
+        "sqrt",
+        "sqrt(v)",
+        lambda v, i: math.sqrt(v),
+        voff=0.25,
+        vstep=0.5,
+    ),
     Intrin("length", "length(vec2(v, 0.0))", lambda v, i: abs(v)),
     Intrin(
         "dot",
