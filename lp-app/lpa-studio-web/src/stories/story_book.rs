@@ -20,9 +20,15 @@ pub fn StoryBook() -> Element {
     let story_groups = story_groups(&stories);
     let selected = selected_story_id.read().clone();
     let selected_viewport = *viewport.read();
+    // Never blank the page: an unknown route falls back to the default,
+    // and a STALE default (one whose story was deleted) falls back to the
+    // first registered story. The old `.expect` turned a stale default
+    // into an empty body — which reads to the capture pipeline as "no
+    // stories exist" rather than "the book is broken".
     let selection = story_selection(&selected, &story_groups)
         .or_else(|| story_selection(DEFAULT_STORY_ID, &story_groups))
-        .expect("default story descriptor is registered");
+        .or_else(|| first_story_selection(&story_groups))
+        .expect("at least one story is registered");
     let build_stamp = generated_at_utc();
     let story_summary = format!("{} states / sm md lg", stories.len());
     let page_title = selection.label();
@@ -337,6 +343,18 @@ fn story_groups(stories: &[StoryDescriptor]) -> Vec<StoryFamilyGroup> {
             .then_with(|| left.label.cmp(right.label))
     });
     groups
+}
+
+/// The first registered story, in book order — the last-resort selection
+/// so a stale [`DEFAULT_STORY_ID`] degrades to "wrong story" instead of
+/// "no page at all".
+fn first_story_selection(groups: &[StoryFamilyGroup]) -> Option<StorySelection> {
+    let first = groups
+        .iter()
+        .flat_map(|family| family.categories.iter())
+        .flat_map(|category| category.components.iter())
+        .find_map(|component| component.stories.first())?;
+    Some(StorySelection::Story(*first))
 }
 
 fn story_selection(selected_id: &str, groups: &[StoryFamilyGroup]) -> Option<StorySelection> {
