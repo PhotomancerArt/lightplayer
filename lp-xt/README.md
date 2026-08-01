@@ -17,6 +17,11 @@ instruction model, emulator, and ELF loading that the shader compiler's
   full-argument-list call path (`run_loaded_with_args`) that let a host engine
   run compiled shader code against a vmctx living in host memory — see
   `docs/adr/2026-07-30-xtensa-host-shared-memory.md`.
+- **`lp-xt-fp-vectors`** — the M6 FP conformance corpus generator: deterministic,
+  **float-free**, `no_std`, dependency-free, and fingerprinted, so the host and
+  the device generate byte-identical vectors instead of transferring them. Holds
+  inputs only; the emulator's predictions live in
+  `lp-xt-emu/tests/fixtures/fp/`, committed **before** any hardware run.
 - **`lp-xt-elf`** — linked-ELF loader + guest-syscall host for `lp-xt-emu`,
   plus a feature-gated relocatable-object engine (`R_XTENSA_32` /
   `R_XTENSA_SLOT0_OP`; the future isa/xt builtins-link path).
