@@ -179,6 +179,12 @@ public input is an *invitation*, not an error.
 Inputs need no counterpart: consumed inheritance (R5) already lets a host
 feed a module's inner consumers with zero authoring (see E6).
 
+> Status: implemented 2026-08-01 (engine C1–C3) — structural scopes,
+> scoped resolver keys with writer-shadowing, the module mirror runtime
+> (root included), automatic publish + authored exports, and the
+> engine-reported primary-visual role. See
+> `docs/adr/2026-08-01-scoped-bus-engine-architecture.md`.
+
 ### R8 — The panel: one concept, every node, derived from publicity
 
 The **panel** is a first-class per-node concept, not a feature of
