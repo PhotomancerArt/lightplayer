@@ -1,5 +1,5 @@
 use alloc::string::{String, ToString};
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use lp_collection::{VecMap, VecSet};
 
 use crate::{
@@ -12,10 +12,23 @@ use crate::{
 /// The registry validates capabilities against the [`HwManifest`], tracks active
 /// [`HardwareLease`]s, and reports endpoint status for drivers. It uses interior
 /// mutability so shared driver handles can coordinate claims in `no_std` code.
+///
+/// # Generation
+///
+/// [`HwRegistry::generation`] is the registry's change signal: it changes
+/// whenever a claim succeeds or a lease is released, which is exactly when an
+/// endpoint that could not be opened might now open (or the reverse). Consumers
+/// compare it for *inequality* only — that it currently counts upward is an
+/// implementation detail, not a promise.
+///
+/// Only ownership needs signalling. Reserved status comes from the manifest,
+/// which is immutable after construction, and capability support with it, so
+/// neither can change under a holder of this registry.
 #[derive(Debug)]
 pub struct HwRegistry {
     manifest: HwManifest,
     state: RefCell<HwRegistryState>,
+    generation: Cell<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,11 +52,30 @@ impl HwRegistry {
                 active_by_address: VecMap::new(),
                 addresses_by_lease: VecMap::new(),
             }),
+            // Starts nonzero so a consumer whose "last seen" value defaults to
+            // zero sees an initial change rather than mistaking a fresh
+            // registry for one it has already observed.
+            generation: Cell::new(1),
         }
     }
 
     pub fn manifest(&self) -> &HwManifest {
         &self.manifest
+    }
+
+    /// Change signal for hardware ownership; see the type-level docs.
+    pub fn generation(&self) -> u64 {
+        self.generation.get()
+    }
+
+    /// Bump after a claim or release actually changed ownership.
+    ///
+    /// Only successful mutations bump. A *failed* claim changes nothing
+    /// observable, and signalling it would let one permanently-failing open
+    /// retrigger every parked consumer on every attempt — the retry storm this
+    /// signal exists to end.
+    fn bump_generation(&self) {
+        self.generation.set(self.generation.get().wrapping_add(1));
     }
 
     pub fn claim_bundle(&self, claim: HwClaim) -> Result<HardwareLease, HwError> {
@@ -64,6 +96,8 @@ impl HwRegistry {
             addresses.insert(address.clone());
         }
         state.addresses_by_lease.insert(lease_id, addresses);
+        drop(state);
+        self.bump_generation();
 
         Ok(HardwareLease::new(
             lease_id,
@@ -85,6 +119,8 @@ impl HwRegistry {
         for address in addresses {
             state.active_by_address.remove(&address);
         }
+        drop(state);
+        self.bump_generation();
         Ok(())
     }
 
@@ -253,6 +289,98 @@ mod tests {
         let result = registry.claim_bundle(HwClaim::new("output", vec![HwAddress::gpio(12)]));
 
         assert!(matches!(result, Err(HwError::ReservedResource { .. })));
+    }
+
+    /// Reads must not look like changes: the generation is what parks a
+    /// consumer that could not open an endpoint, so a registry nobody has
+    /// mutated must keep answering with the same value no matter how often it
+    /// is interrogated.
+    #[test]
+    fn reads_do_not_change_the_generation() {
+        let registry = registry();
+        let before = registry.generation();
+
+        registry.endpoint_status_for(&HwAddress::gpio(18));
+        registry.endpoint_status_for(&HwAddress::gpio(999));
+        registry.is_claimed(&HwAddress::gpio(18));
+        registry.claimant_for(&HwAddress::gpio(18));
+        registry
+            .ensure_capability(&HwAddress::gpio(18), HwCapability::GpioOutput)
+            .unwrap();
+
+        assert_eq!(registry.generation(), before);
+    }
+
+    #[test]
+    fn successful_claim_and_release_each_change_the_generation() {
+        let registry = registry();
+        let fresh = registry.generation();
+
+        let lease = registry
+            .claim_bundle(HwClaim::new("output", vec![HwAddress::gpio(18)]))
+            .unwrap();
+        let claimed = registry.generation();
+        assert_ne!(claimed, fresh, "claim should signal a change");
+
+        registry.release(&lease).unwrap();
+        let released = registry.generation();
+        assert_ne!(released, claimed, "release should signal a change");
+        assert_ne!(released, fresh);
+    }
+
+    /// A failed claim changes nothing, so it must signal nothing. If it did,
+    /// a permanently unopenable endpoint would unpark every other waiting
+    /// consumer on each attempt and the per-frame retry storm would return.
+    #[test]
+    fn failed_claims_and_releases_leave_the_generation_alone() {
+        let manifest = HwManifest::new(
+            "board",
+            "Board",
+            [
+                HwResource::new(HwAddress::gpio(18), [HwCapability::GpioOutput], "D6"),
+                HwResource::new(HwAddress::gpio(12), [HwCapability::GpioOutput], "GPIO12")
+                    .reserved("crashes during GPIO scan"),
+            ],
+        );
+        let registry = HwRegistry::new(manifest);
+        let held = registry
+            .claim_bundle(HwClaim::new("holder", vec![HwAddress::gpio(18)]))
+            .unwrap();
+        let before = registry.generation();
+
+        assert!(registry.claim_bundle(HwClaim::new("empty", vec![])).is_err());
+        assert!(
+            registry
+                .claim_bundle(HwClaim::new("reserved", vec![HwAddress::gpio(12)]))
+                .is_err()
+        );
+        assert!(
+            registry
+                .claim_bundle(HwClaim::new("taken", vec![HwAddress::gpio(18)]))
+                .is_err()
+        );
+        assert!(
+            registry
+                .claim_bundle(HwClaim::new(
+                    "dupe",
+                    vec![HwAddress::gpio(12), HwAddress::gpio(12)],
+                ))
+                .is_err()
+        );
+        assert!(
+            registry
+                .claim_bundle(HwClaim::new("unknown", vec![HwAddress::gpio(200)]))
+                .is_err()
+        );
+
+        assert_eq!(registry.generation(), before);
+
+        // A lease released twice: the second call finds no lease and must not
+        // signal either.
+        registry.release(&held).unwrap();
+        let after_release = registry.generation();
+        assert!(registry.release(&held).is_err());
+        assert_eq!(registry.generation(), after_release);
     }
 
     #[test]
