@@ -3928,8 +3928,10 @@ dependencies = [
  "lpfs",
  "lpir",
  "lps-builtins",
+ "lps-glsl",
  "lps-q32",
  "lps-shared",
+ "lpvm",
  "lpvm-native",
  "ser-write-json",
  "serde",
@@ -3961,6 +3963,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
+ "lp-xt-fp-vectors",
  "lpa-server",
  "lpc-hardware",
  "lpc-shared",
@@ -5572,8 +5575,13 @@ name = "lp-xt-emu"
 version = "40.0.0"
 dependencies = [
  "lp-emu-core",
+ "lp-xt-fp-vectors",
  "lp-xt-inst",
 ]
+
+[[package]]
+name = "lp-xt-fp-vectors"
+version = "40.0.0"
 
 [[package]]
 name = "lp-xt-inst"
@@ -5606,6 +5614,7 @@ dependencies = [
 name = "lpa-boards"
 version = "40.0.0"
 dependencies = [
+ "dioxus",
  "lpc-hardware",
  "schemars",
  "serde",
@@ -5755,6 +5764,7 @@ dependencies = [
  "js-sys",
  "log",
  "lpa-agent",
+ "lpa-boards",
  "lpa-client",
  "lpa-fs-opfs",
  "lpa-link",

@@ -79,6 +79,7 @@ members = [
     "lp-riscv/lp-riscv-emu-guest-test-app",
     "lp-xt/lp-xt-inst",
     "lp-xt/lp-xt-emu",
+    "lp-xt/lp-xt-fp-vectors",
     "lp-xt/lp-xt-elf",
     "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
@@ -149,6 +150,7 @@ default-members = [
     "lp-riscv/lp-riscv-elf",
     "lp-xt/lp-xt-inst",
     "lp-xt/lp-xt-emu",
+    "lp-xt/lp-xt-fp-vectors",
     "lp-xt/lp-xt-elf",
     "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
@@ -156,7 +158,7 @@ default-members = [
 ]
 [workspace.package]
 version = "40.0.0"
-authors = ["The Wasmtime Project Developers"]
+authors = ["Photomancer"]
 edition = "2024"
 license = "AGPL-3.0-or-later"
 rust-version = "1.90.0"

@@ -28,6 +28,7 @@ float test_declare_shared_float() {
 // wasm.f32: shader does not compile on any target (frontend gap) — same cause
 // as the @unsupported entries above, not an f32-specific failure.
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_float() ~= 42.0
 
 int test_declare_shared_int() {
@@ -41,6 +42,7 @@ int test_declare_shared_int() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_int() == 123
 
 uint test_declare_shared_uint() {
@@ -54,6 +56,7 @@ uint test_declare_shared_uint() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_uint() == 256
 
 bool test_declare_shared_bool() {
@@ -67,6 +70,7 @@ bool test_declare_shared_bool() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_bool() == true
 
 vec2 test_declare_shared_vec2() {
@@ -80,6 +84,7 @@ vec2 test_declare_shared_vec2() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_vec2() ~= vec2(10.0, 20.0)
 
 vec3 test_declare_shared_vec3() {
@@ -93,6 +98,7 @@ vec3 test_declare_shared_vec3() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_declare_shared_vec4() {
@@ -106,6 +112,7 @@ vec4 test_declare_shared_vec4() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_vec4() ~= vec4(1.0, 0.5, 0.0, 1.0)
 
 mat2 test_declare_shared_mat2() {
@@ -119,6 +126,7 @@ mat2 test_declare_shared_mat2() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 float test_declare_shared_array() {
@@ -136,4 +144,5 @@ float test_declare_shared_array() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
+// @unsupported(rv32lpn.f32)
 // run: test_declare_shared_array() ~= 6.0
