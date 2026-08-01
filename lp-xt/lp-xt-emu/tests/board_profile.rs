@@ -174,8 +174,16 @@ fn both_profiles_install_disjoint_flash_and_sram_regions() {
         let emu = Emulator::with_profile(p);
 
         // Flash is readable and, for the instruction window, fetchable.
-        assert!(emu.mem.read_u32(p.irom_base).is_ok(), "{}: IROM read", p.name);
-        assert!(emu.mem.read_u32(p.drom_base).is_ok(), "{}: DROM read", p.name);
+        assert!(
+            emu.mem.read_u32(p.irom_base).is_ok(),
+            "{}: IROM read",
+            p.name
+        );
+        assert!(
+            emu.mem.read_u32(p.drom_base).is_ok(),
+            "{}: DROM read",
+            p.name
+        );
         let mut out = [0u8; 3];
         assert!(
             emu.mem.fetch(p.irom_base, &mut out).is_ok(),
@@ -198,7 +206,10 @@ fn both_profiles_install_disjoint_flash_and_sram_regions() {
         );
         assert_eq!(emu.mem.read_u32(p.image_data_base).unwrap(), 0x1234);
         assert_eq!(
-            emu.mem.fetch(p.image_data_base, &mut out).unwrap_err().cause,
+            emu.mem
+                .fetch(p.image_data_base, &mut out)
+                .unwrap_err()
+                .cause,
             EXC_INSTR_FETCH_ERROR,
             "{}: image DRAM is not executable",
             p.name
