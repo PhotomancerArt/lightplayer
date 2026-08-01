@@ -11,9 +11,15 @@ related:
 ---
 # Frame cost is per-frame resolution machinery, not the shader: ~8.4 ms/fixture flat on the S3
 
+> **2026-08-01 status:** both mechanisms named below are fixed (PRs #243,
+> #244). The per-chain cost they were blamed for moved only 9.7 → 8.0 ms, so
+> the linear degradation this entry exists for **remains open** and is now
+> unattributed. See the 2026-08-01 incident-log entry.
+
 **Shape** — Measured on the desk ESP32-S3 (2026-07-31, all eight node gates,
 quad-strips variants, 30-LED strips), then attributed with `lp-cli profile`
-(emulator, esp32-c6 cycle model):
+(emulator, esp32-c6 cycle model). The table below is the ORIGINAL measurement;
+see the 2026-08-01 incident-log entry for the post-resolver numbers:
 
 | Config | fps | tick |
 |---|---|---|
@@ -51,11 +57,13 @@ frame; per-clock comparison with the C6 is resolver-bound on both chips.
 Profiles: `profiles/2026-07-31T18-02-07--…-1fix--steady-render--s3-gate-perf-1fix/`
 and `…18-02-44--…quad-strips--steady-render--s3-gate-perf-4fix/` (report.txt).
 
-**Carrying cost** — Multi-fixture projects degrade linearly (~8.4 ms per
-fixture+output chain): 4 fixtures = 20 fps today; ~10 fixtures ≈ single-digit
-fps, regardless of how small the fixtures are. Authors cannot buy the cost
-down with lower resolution or fewer LEDs, which makes the scaling feel
-arbitrary from the outside.
+**Carrying cost** — Multi-fixture projects degrade linearly. As filed:
+~8.4 ms per fixture+output chain, 4 fixtures = 20 fps, ~10 fixtures ≈
+single-digit fps. **After both fixes (2026-08-01): ~8.0 ms per chain, 4
+fixtures = 25 fps, ~10 fixtures ≈ 12 fps.** The linear term is essentially
+unchanged; what improved was fixed per-frame overhead. Authors still cannot
+buy the cost down with lower resolution or fewer LEDs, which is what makes
+the scaling feel arbitrary from the outside.
 
 **Workarounds** — Fewer fixture+output chains (one fixture spanning strips);
 nothing else helps, by measurement.
@@ -122,6 +130,94 @@ nothing else helps, by measurement.
   `QueryKey::eq` 5.7%, `EngineSession::resolve` 2.7%, `SlotPath::parse`. That
   is the dataflow resolver re-resolving from cold each tick, owned by plan
   `2026-07-31-2225-persist-dataflow-resolution`; `…23-33-40` is its baseline.
+- **2026-07-31** — **Resolver half addressed** (PR #243,
+  `docs/adr/2026-07-31-resolver-persistent-resolution.md`). Routes, binding
+  literals and authored-def reads now persist across frames and are dropped
+  on structural change instead of per tick. Measured on the 1-fixture
+  workload (`projects/test/quad-strips-1fix`, committed as the reproducible
+  oracle), steady render, esp32c6 cycle model:
+
+  | | Before | After |
+  |---|---|---|
+  | Total attributed cycles | 2,468,427 | 1,146,110 (−54%) |
+  | allocator + memcpy | 44.0% | 34.4% |
+  | `[jit] render` | 1.1% | 2.4% (same cycles) |
+
+  `QueryKey::eq`, `merge_policy_for_consumed_slot`,
+  `bindings_for_consumed_slot`, `slot_lookup` and `Vec<SlotPathSegment>::clone`
+  are gone from the top twenty.
+
+  The **4-fixture workload moved only −1.9%** (65,811,630 → 64,531,359),
+  because `HwRegistry::endpoint_status_for` is 46.7% of that profile and is
+  untouched by this work. The endpoint-status half is what now caps
+  multi-fixture fps.
+
+  Two smaller per-frame re-derivations surfaced while measuring, both the same
+  shape and neither addressed: the shader node re-reads its consumed-slot
+  *definitions* every frame through `format!`-built paths (now the largest
+  single allocation source in the 1-fixture profile), and a resolver cache hit
+  still clones a `ProductionSource` carrying a `SlotPath`.
+
+  **Desk-S3 re-measured 2026-08-01** (same board `d8:3b:da:47:29:70`, same
+  projects):
+
+  | Config | Before | After | |
+  |---|---|---|---|
+  | 4 fixtures | 20 fps / 48 ms | **25 fps / 37.5 ms** | +25% fps |
+  | 1 fixture | 50 fps / 19 ms | **67 fps / 13.5 ms** | +34% fps |
+
+  Hardware beat the emulator's prediction for 4 fixtures (+25% vs +2%): the
+  profile uses the **virtual** WS281x driver, whose endpoint enumeration is
+  dearer than the real RMT driver's, so `endpoint_status_for`'s 46.7% share is
+  inflated there. The emulator attributes cost well; it does not predict fps.
+
+  Flash cost on the C6 (the tight budget): **+10,208 B (+0.36%)**, headroom
+  282,432 → 272,224 B, still 4× the 64 KB CI gate. The debug-only invalidation
+  guard is absent from release firmware (verified on the linked ELF).
+
+  **The filed shape is only partly fixed.** Per-additional-chain cost went
+  ~9.7 ms → ~8.0 ms (−17%) — most of the win is fixed per-frame overhead, not
+  the per-chain scaling this entry is named for. A 10-fixture project would
+  still be in the low teens. Endpoint status owns that scaling.
+
+- **2026-08-01** — **Both halves on one image, measured together.** Emulator
+  (`quad-strips`, steady render): **65,811,630 → 3,011,467 cycles, 21.9×**, and
+  `[jit] render` is now the largest engine entry (3.6%). Desk S3
+  (d8:3b:da:47:29:70, both fixes flashed, project confirmed from the device
+  heartbeat as `/projects/Quad strips`):
+
+  | Project | Original | Resolver only | Both halves |
+  |---|---|---|---|
+  | 4 fixtures | 20 fps / 48 ms | 25 fps / 37.5 ms | **25 fps / 37 ms** |
+  | 1 fixture | 50 fps / 19 ms | 67 fps / 13.5 ms | **68 fps / 13 ms** |
+
+  The endpoint-status half contributes **nothing on silicon**, exactly as its
+  own ADR predicted: the S3 opens all four channels on frame one and never
+  entered the retry storm. The 21.9× is real but is an artifact of the
+  emulator's virtual board declaring one WS281x channel — worth remembering
+  before quoting emulator ratios as device wins.
+
+  **⚠️ The shape this entry is named for is NOT fixed.** Decomposing the two
+  measurements into fixed overhead plus per-chain cost:
+
+  | | per fixture+output chain | fixed per-frame |
+  |---|---|---|
+  | Original | 9.7 ms | 9.3 ms |
+  | Both halves | **8.0 ms** | 5.0 ms |
+
+  Per-chain cost fell only **−17%**; the fixed overhead nearly halved. That is
+  why 1 fixture improved 36% and 4 fixtures only 25%. Projected 10 fixtures:
+  **9 fps → 12 fps** — still unusable, still linear. Authors still cannot buy
+  the cost down with resolution or LED count.
+
+  So both *named mechanisms* are fixed and the carrying cost below is not.
+  Whatever owns the remaining ~8 ms per chain has not been attributed: the
+  1-fixture profile's top entries are memcpy and the allocator (30% combined),
+  with measured candidates being the shader node's per-frame re-read of its
+  consumed-slot definitions via `format!`-built paths, per-hit
+  `ProductionSource` clones, `FixtureNode::render_control`, and the 1.3 ms/
+  channel blocking RMT send. **This entry stays open on that basis** — a third
+  attribution pass on the 8 ms, not a third guess.
 
 **Exit criteria** — A profiled optimization pass that makes resolved bindings
 and endpoint status persist across frames (invalidate on tree/binding/
@@ -129,3 +225,17 @@ hardware change, not per tick), after which frame cost is dominated by actual
 rendering work and the profile's top self-cycle entries are no longer
 allocator/memcpy/string machinery. Re-measure the same quad-strips matrix on
 the desk S3 as the oracle.
+
+- [x] **Dataflow resolver** — done 2026-07-31, see the incident log above.
+- [x] **`HwRegistry::endpoint_status_for`** — done 2026-07-31 (PR #244): a
+      failed-open retry storm, fixed by parking sinks on
+      `HwRegistry::generation()` rather than by caching status. Emulator-only
+      in steady state; the S3 never paid it.
+- [x] **Desk-S3 re-measurement** — done 2026-08-01, separately and jointly.
+      Both halves on one image: 25 fps at 4 fixtures, 68 fps at 1.
+- [ ] **The linear term itself** — the two named mechanisms are fixed and
+      per-chain cost still sits at ~8.0 ms (was ~9.7). This entry stays open
+      on that number, not on either mechanism. Next step is attribution of
+      that 8 ms, not another guess; `projects/test/quad-strips-1fix` vs
+      `quad-strips` under `lp-cli profile` is the differential that isolates
+      it.

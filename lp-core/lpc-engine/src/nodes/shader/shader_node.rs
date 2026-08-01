@@ -476,7 +476,7 @@ pub(super) fn read_authored_value<T: lpc_model::FromLpValue>(
 /// defs) — the runtime key set is then left as loaded.
 fn try_read_authored_consumed_keys(ctx: &mut TickContext<'_>) -> Option<Vec<String>> {
     let production = ctx
-        .resolve(QueryKey::ConsumedSlot {
+        .resolve(&QueryKey::ConsumedSlot {
             node: ctx.node_id(),
             slot: SlotPath::parse("consumed").expect("static path"),
         })
@@ -502,7 +502,7 @@ fn try_read_authored_value<T: lpc_model::FromLpValue>(
     let slot = SlotPath::parse(path).map_err(|e| {
         NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
     })?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot,
     }) {
@@ -769,7 +769,7 @@ fn resolve_or_default_input(
 ) -> Result<LpsValueF32, NodeError> {
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid visual consumed slot {name:?}: {e}")))?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {
