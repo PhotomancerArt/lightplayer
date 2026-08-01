@@ -298,18 +298,22 @@ impl Memory {
             writable,
         };
         for (view, lo, hi) in region.address_views() {
-            self.assert_free((lo, hi), &format!("new region's {view}"));
+            self.assert_free((lo, hi), "new region's", view);
         }
         self.regions.push(region);
     }
 
     /// Assert `[lo, hi]` overlaps no installed region, in either view.
-    fn assert_free(&self, (lo, hi): (u32, u32), what: &str) {
+    ///
+    /// `what`/`new_view` only name the range in the panic message, so they stay
+    /// `&str`: this runs on every region add, and an emulator is built per host
+    /// call. Nothing is formatted unless the assertion actually fires.
+    fn assert_free(&self, (lo, hi): (u32, u32), what: &str, new_view: &str) {
         for r in &self.regions {
             for (view, r_lo, r_hi) in r.address_views() {
                 assert!(
                     hi < r_lo || lo > r_hi,
-                    "{what} {lo:#x}..={hi:#x} overlaps the {view} \
+                    "{what} {new_view} {lo:#x}..={hi:#x} overlaps the {view} \
                      {r_lo:#x}..={r_hi:#x} of an installed region"
                 );
             }
@@ -358,7 +362,7 @@ impl Memory {
         assert!(len > 0, "shared backing is empty");
         let lo = dbus_start;
         let hi = dbus_start.wrapping_add(len as u32 - 1);
-        self.assert_free((lo, hi), "shared region");
+        self.assert_free((lo, hi), "shared region", "");
         self.shared = Some(SharedRegion {
             dbus_start,
             len,
@@ -433,19 +437,13 @@ impl Memory {
     /// a `PT_LOAD` segment). Fallible for the same reason
     /// [`try_load_bytes`](Self::try_load_bytes) is.
     pub fn try_zero(&mut self, addr: u32, len: u32) -> Result<(), u32> {
-        for i in 0..len {
-            let a = addr.wrapping_add(i);
-            match &mut self.shared {
-                Some(s) if s.index(a).is_some() => {
-                    let idx = s.index(a).expect("checked above");
-                    let mut v = s.backing.lock().expect("shared backing lock");
-                    v[idx] = 0;
-                }
-                _ => {
-                    let (ri, idx) = self.resolve(a, Access::Data).ok_or(a)?;
-                    self.regions[ri].data[idx] = 0;
-                }
-            }
+        const CHUNK: usize = 4096;
+        let zeros = [0u8; CHUNK];
+        let mut done = 0u32;
+        while done < len {
+            let n = ((len - done) as usize).min(CHUNK);
+            self.try_load_bytes(addr.wrapping_add(done), &zeros[..n])?;
+            done += n as u32;
         }
         Ok(())
     }

@@ -188,8 +188,14 @@ fn guest_stores_into_flash_fault() {
     let p = BoardProfile::esp32s3();
     let mut emu = Emulator::with_profile(p);
 
-    assert!(emu.mem.write_u32(p.irom_base, 0xDEAD).is_err(), "IROM store");
-    assert!(emu.mem.write_u32(p.drom_base, 0xDEAD).is_err(), "DROM store");
+    assert!(
+        emu.mem.write_u32(p.irom_base, 0xDEAD).is_err(),
+        "IROM store"
+    );
+    assert!(
+        emu.mem.write_u32(p.drom_base, 0xDEAD).is_err(),
+        "DROM store"
+    );
 
     // Loads work in both windows; a fetch works only in the instruction one.
     emu.mem.load_bytes(p.drom_base, &0xC0DEu32.to_le_bytes());
