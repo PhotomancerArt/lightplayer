@@ -36,12 +36,6 @@ float test_param_in_modify_local() {
     return modify_and_return(5.0);
 }
 
-// Writes to value parameters are lost on the Lp+Xtensa+f32 combination only
-// (config-masked; xtn.f32, rv32lpn.f32 and xtlpn.q32 all pass). Marked broken
-// rather than unsupported on purpose: this is a compiler bug, written down and
-// awaiting a fix, not a capability this target lacks. Delete when fixed.
-// docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md
-// @broken(xtlpn.f32)
 // run: test_param_in_modify_local() ~= 6.0
 
 vec2 add_vectors_in(in vec2 a, in vec2 b) {
@@ -100,10 +94,4 @@ vec3 test_param_in_modify_components() {
     return process_vector_in(vec3(1.0, 2.0, 3.0));
 }
 
-// Writes to value parameters are lost on the Lp+Xtensa+f32 combination only
-// (config-masked; xtn.f32, rv32lpn.f32 and xtlpn.q32 all pass). Marked broken
-// rather than unsupported on purpose: this is a compiler bug, written down and
-// awaiting a fix, not a capability this target lacks. Delete when fixed.
-// docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md
-// @broken(xtlpn.f32)
 // run: test_param_in_modify_components() ~= vec3(2.0, 3.0, 2.5)
