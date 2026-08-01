@@ -540,7 +540,11 @@ function parseAddress(address) {
 function reportFailure(target, error, onEvent = null) {
   const message = `${errorMessage(error)}${error?.stack ? `\n${error.stack}` : ""}`;
   emitEvent(onEvent, { kind: "log", message });
-  console.error(`[${target}] ${message}`, error);
+  // String-only, deliberately: the console forwarder ships arguments to the
+  // Rust log bridge, which expects strings — a raw Error object arrives as
+  // `{}` and the whole entry dies with "invalid type: map, expected a
+  // string" (bench, 2026-07-31). The message already carries the stack.
+  console.error(`[${target}] ${message}`);
 }
 
 function errorMessage(error) {
