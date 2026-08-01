@@ -5573,6 +5573,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-board-editor"
+version = "40.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "lpa-boards",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "lpa-boards"
 version = "40.0.0"
 dependencies = [
@@ -5727,6 +5739,7 @@ dependencies = [
  "js-sys",
  "log",
  "lpa-agent",
+ "lpa-board-editor",
  "lpa-boards",
  "lpa-client",
  "lpa-fs-opfs",

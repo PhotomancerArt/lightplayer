@@ -11,7 +11,7 @@
 //! Ported from the approved UX spike (`spikes/hardware-boards/index.html`,
 //! rev 5, PR #222). Deviations from the spike are called out inline.
 
-use crate::display_manifest::{BoardDisplayFile, CapKind, PinCap, PinRole};
+use crate::display_manifest::{BoardDisplayFile, CapKind, PadStyle, PinCap, PinRole};
 
 /// Cell height as a fraction of `u`.
 pub const CELL_HEIGHT_U: f32 = 0.78;
@@ -212,6 +212,10 @@ pub struct RailRow {
     /// Row centerline.
     pub y: f32,
     pub pad: Rect,
+    /// Screw-terminal pads are square (side = pad width) with a screw head;
+    /// header pads are the flatter default. The rect above already reflects
+    /// the style — renderers only branch on it for the screw circle.
+    pub pad_style: PadStyle,
     pub label: Option<RowLabel>,
     pub cells: Vec<CellLayout>,
 }
@@ -320,11 +324,17 @@ impl BoardLayout {
                 } else {
                     board_w - 1.0 - pad_w
                 };
+                // Screw terminals draw as squares (side = pad width) so the
+                // screw head reads at every scale; header pads stay flat.
+                let this_pad_h = match pin.pad_style {
+                    PadStyle::Screw => pad_w,
+                    PadStyle::Pad => pad_h,
+                };
                 let pad = Rect {
                     x: px,
-                    y: y - pad_h / 2.0,
+                    y: y - this_pad_h / 2.0,
                     w: pad_w,
-                    h: pad_h,
+                    h: this_pad_h,
                 };
                 let label = opts.labels.then(|| {
                     let (text, kind) = match opts.mode {
@@ -358,6 +368,7 @@ impl BoardLayout {
                     role: pin.role,
                     y,
                     pad,
+                    pad_style: pin.pad_style,
                     label,
                     cells,
                 });
@@ -655,6 +666,26 @@ mod tests {
             assert!((layout.pad_w - PAD_WIDTH_U * u).abs() < 1e-4);
             assert!((layout.font - FONT_SIZE_U * u).abs() < 1e-4);
             assert!((layout.gap - CELL_GAP_U * u).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn screw_pads_are_square_and_header_pads_flat() {
+        // The DOM-Z-102's rails are all screw terminals: square pads (side =
+        // pad width) so the screw head reads. The C6 devkit keeps the flat
+        // header pads.
+        let dom = board_by_id("domraem/dom-z-102").expect("dom-z-102 in catalog");
+        let layout = BoardLayout::compute(dom, &DiagramOptions::default());
+        assert!(layout.rail_rows().count() > 0);
+        for row in layout.rail_rows() {
+            assert_eq!(row.pad_style, PadStyle::Screw);
+            assert!((row.pad.h - layout.pad_w).abs() < 1e-4);
+            assert!((row.pad.w - layout.pad_w).abs() < 1e-4);
+        }
+        let header = BoardLayout::compute(c6(), &DiagramOptions::default());
+        for row in header.rail_rows() {
+            assert_eq!(row.pad_style, PadStyle::Pad);
+            assert!((row.pad.h - header.pad_h).abs() < 1e-4);
         }
     }
 

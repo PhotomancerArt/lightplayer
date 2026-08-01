@@ -29,6 +29,7 @@ lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false, op
 # Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
 lpa-mapping-editor = { path = "../lpa-mapping-editor" }
 # Board catalog data + the BoardDiagram row-engine renderer.
+lpa-board-editor = { path = "../lpa-board-editor" }
 lpa-boards = { path = "../lpa-boards", features = ["diagram"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
