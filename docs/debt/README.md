@@ -53,7 +53,7 @@ stay in place when retired; the log is the history).
 
 | Entry | Status | Since | Area | Cost in one line |
 | --- | --- | --- | --- | --- |
-| [per-frame-optimisations-are-unpriced-in-ram](per-frame-optimisations-are-unpriced-in-ram.md) | carried | 2026-08-01 | lpc-engine dataflow + the classic ESP32 image | every "compute once, keep it" win ships with a cycle number and no byte number; #243 cost the classic 8,276 B (~90 LEDs) and a day of hardware bisecting to find |
+| [per-frame-optimisations-are-unpriced-in-ram](per-frame-optimisations-are-unpriced-in-ram.md) | carried | 2026-08-01 | lpc-engine dataflow + the classic ESP32 image | every "compute once, keep it" win ships with a cycle number and no byte number; #243 cost the classic ~8.3 KB (~90 LEDs) and a day of hardware bisecting to find |
 | [c6-scan-truncation-accepted](c6-scan-truncation-accepted.md) | carried | 2026-08-01 | fw-esp32c6 ws281x default config | 2ch default truncates ~28% of frames during WiFi scans (editing-time only); reopens on OPC/E1.31 streaming |
 | [brightness-applied-before-gamma](brightness-applied-before-gamma.md) | carried | 2026-08-01 | lpc-engine fixture node (value pipeline) | dim gamma-on fixtures collapse to ~1 wire code (30× resolution loss at brightness 38); projects work around it by shipping gamma off |
 | [lps-probe-perf-test-load-sensitive](lps-probe-perf-test-load-sensitive.md) | carried | 2026-08-01 | lps-probe/tests | spurious full-gate reds whenever a dev server or sibling session runs; ~20% wall-clock headroom |
