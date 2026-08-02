@@ -165,8 +165,51 @@ fn fatal_reset_or_hang() -> ! {
 }
 
 fn is_esp_sync_reentrant_lock_panic(info: &PanicInfo) -> bool {
-    info.location()
+    // The location check silently stopped matching when the flash-budget
+    // rustflags (`location-detail=none`) reduced every location to
+    // `<redacted>:0:0` — observed live on the first soft-limit bench: the
+    // reentrant-lock panic cascaded through the unwinder during an OOM,
+    // the recovery ledger never staged, and the board boot-looped instead
+    // of quarantining. Match the panic MESSAGE too, alloc-free (this path
+    // runs while the heap may be exhausted).
+    if info
+        .location()
         .is_some_and(|loc| loc.file().contains("esp-sync/src/lib.rs"))
+    {
+        return true;
+    }
+    struct Contains {
+        needle: &'static [u8],
+        matched: usize,
+        found: bool,
+    }
+    impl core::fmt::Write for Contains {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            for &byte in s.as_bytes() {
+                if self.found {
+                    return Ok(());
+                }
+                self.matched = if byte == self.needle[self.matched] {
+                    self.matched + 1
+                } else if byte == self.needle[0] {
+                    1
+                } else {
+                    0
+                };
+                if self.matched == self.needle.len() {
+                    self.found = true;
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut scan = Contains {
+        needle: b"lock is not reentrant",
+        matched: 0,
+        found: false,
+    };
+    let _ = core::fmt::write(&mut scan, format_args!("{}", info.message()));
+    scan.found
 }
 
 fn print_panic_frames() {
