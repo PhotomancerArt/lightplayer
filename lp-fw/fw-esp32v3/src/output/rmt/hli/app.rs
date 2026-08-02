@@ -30,14 +30,14 @@ use esp_hal::peripherals::RMT;
 use esp_hal::rmt::Rmt;
 use lp_ws281x::{ChannelTiming, ColorOrder, PulseCodes, StartError, TimingError};
 use lp_ws281x_hli::{
-    configure_channel, start_frame_state, HliChannel, HliConfigError, HliPort, HLI_CHANNELS,
+    HLI_CHANNELS, HliChannel, HliConfigError, HliPort, configure_channel, start_frame_state,
 };
 
+use crate::output::rmt::hli::vector::{HLI_BANK, route_rmt_to_level4};
 use crate::output::rmt::v3_rmt::{
-    int_err_bit, int_thr_bit, int_tx_end_bit, BLOCK_WORDS, RAM_BASE, SLOT_STRIDE, TX_BLOCKS,
-    TX_CHANNELS, V3Rmt,
+    BLOCK_WORDS, RAM_BASE, SLOT_STRIDE, TX_BLOCKS, TX_CHANNELS, V3Rmt, int_err_bit, int_thr_bit,
+    int_tx_end_bit,
 };
-use crate::output::rmt::hli::vector::{route_rmt_to_level4, HLI_BANK};
 
 // Same values as the level-3 path — the comparison must not vary them.
 pub use crate::output::rmt::shared_driver::FRAME_TIMEOUT;
@@ -230,8 +230,8 @@ impl HliAppDriver {
         // `UnsafeCell`): single thread-side task, channel inactive — the
         // vector is not reading this buffer.
         let staging = unsafe { &mut *self.staging[index].get() };
-        let order = ColorOrder::from_u8(self.order[index].load(Relaxed) as u8)
-            .unwrap_or(ColorOrder::Grb);
+        let order =
+            ColorOrder::from_u8(self.order[index].load(Relaxed) as u8).unwrap_or(ColorOrder::Grb);
         let pixels = frame.len() / 3;
         staging.clear();
         staging.reserve(pixels * 3);
