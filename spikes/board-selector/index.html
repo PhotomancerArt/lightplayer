@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Board selector — setup panel spike</title>
+<title>Board selector — setup panel spike (converged: tiles)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio-ish palette (device-card-panel spike lineage) ------- */
@@ -23,7 +23,6 @@
     --attn: #f0913b;       --attn-bg: rgba(240,145,59,.09);
     --error: #ef5350;      --error-bg: rgba(239,83,80,.09);
     --neutral: #8a8f98;    --neutral-bg: rgba(138,143,152,.06);
-    --sim: #a78bfa;        --sim-bg: rgba(167,139,250,.08);
 
     --board-fill: #1a1d22; --board-edge: #3a3f48;
     --pad: #4a5260; --module: #232830; --module-edge: #4a5260;
@@ -59,7 +58,7 @@
 
   .gallery { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
 
-  /* ---- the device-card frame every concept sits inside ------------ */
+  /* ---- the device-card frame -------------------------------------- */
   .dcard {
     width: 288px; border-radius: 10px; overflow: hidden;
     background: var(--card);
@@ -79,23 +78,17 @@
                         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dcard header .transport { font: 10.5px var(--mono); color: var(--dim); }
   .dcard .body { padding: 14px 14px 16px; display: grid; gap: 14px; }
-  .state-line { color: var(--attn); font-size: 12px; font-weight: 700; margin: 0; }
+
+  /* Headline does the chip's work: "Set up ESP32-C6 device". */
+  .headline { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--strong); }
+  .headline .chip { color: var(--attn); }
+  .sub { margin: 2px 0 0; font-size: 11.5px; color: var(--muted); }
 
   .sect-label {
-    display: flex; align-items: baseline; gap: 8px;
-    font-size: 10.5px; font-weight: 700; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--dim);
+    font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 8px;
   }
-  .chipline {
-    display: inline-flex; align-items: center; gap: 5px;
-    font: 10.5px var(--mono); color: var(--muted);
-    border: 1px solid var(--border); border-radius: 999px;
-    padding: 1px 8px; text-transform: none; letter-spacing: 0;
-  }
-  .chipline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
-  .chipline.unknown .dot { background: var(--neutral); }
 
-  /* ---- board art --------------------------------------------------- */
+  /* ---- board art ---------------------------------------------------- */
   .art { display: block; }
   .art rect.pcb { fill: var(--board-fill); stroke: var(--board-edge); stroke-width: 1; rx: 3; }
   .art rect.mod { fill: var(--module); stroke: var(--module-edge); stroke-width: 1; rx: 2; }
@@ -104,7 +97,38 @@
   .art.generic rect.pcb { stroke-dasharray: 3 3; fill: transparent; }
   .art.generic text { fill: var(--dim); font: 700 10px var(--mono); }
 
-  /* ---- name + CTA shared ------------------------------------------- */
+  /* ---- tiles (the winner) ------------------------------------------- */
+  .b-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .b-tile {
+    display: grid; gap: 6px; justify-items: center; align-content: start;
+    background: none; border: 1px solid transparent; border-radius: 8px;
+    padding: 10px 4px 8px; cursor: pointer; color: var(--text);
+    position: relative;
+  }
+  .b-tile:hover { border-color: var(--border-strong); }
+  .b-tile.sel { border-color: var(--good); }
+  /* The implicit default (nothing picked yet): a quiet outline saying
+     "this is what a plain Install does", NOT a green choice. */
+  .b-tile.implicit { border-color: var(--border); border-style: dashed; }
+  .b-tile .artbox { height: 46px; display: flex; align-items: center; }
+  .b-tile.sel::after {
+    content: "✓"; position: absolute; top: 4px; right: 6px;
+    color: var(--good); font-size: 10px; font-weight: 700;
+  }
+  .b-tile .cap { font-size: 10.5px; color: var(--muted); text-align: center; line-height: 1.25; }
+  .b-tile.sel .cap { color: var(--strong); }
+  .b-tile .idtag {
+    font: 9px var(--mono); color: var(--good); letter-spacing: .04em;
+  }
+  .b-more {
+    display: grid; place-items: center;
+    border: 1px dashed var(--border); border-radius: 8px;
+    background: none; color: var(--dim); font-size: 11px; cursor: pointer;
+    min-height: 74px;
+  }
+  .b-more:hover { color: var(--muted); border-color: var(--border-strong); }
+
+  /* ---- name + CTA ---------------------------------------------------- */
   .fld input {
     width: 100%;
     background: var(--terminal); color: var(--strong);
@@ -121,110 +145,26 @@
   }
   .cta:hover { background: var(--good-bg); }
 
-  /* =============== concept A: current production ==================== */
-  .a-row {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    border: 1px solid var(--border); border-radius: 6px;
-    padding: 4px 8px; background: none; color: var(--text);
-    text-align: left; cursor: pointer; font-size: 13px;
+  /* ---- rejected strip ------------------------------------------------ */
+  .rejected { display: flex; gap: 14px; flex-wrap: wrap; }
+  .rejected .r {
+    width: 200px; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; color: var(--dim); font-size: 11px;
   }
-  .a-row.sel { border-color: var(--good); background: var(--terminal); }
-  .a-row .thumb { width: 44px; flex: none; display: flex; justify-content: center; }
-  .a-row .l1 { display: block; font-size: 13px; color: var(--strong); }
-  .a-row .l2 { display: block; font-size: 10px; color: var(--dim); }
-  .a-row .l2 .tag { color: var(--good); }
-  .a-generic { border-style: dashed; }
-  .a-stack { display: grid; gap: 4px; }
-
-  /* =============== concept B: tiles ================================= */
-  .b-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-  .b-tile {
-    display: grid; gap: 6px; justify-items: center;
-    background: none; border: 1px solid transparent; border-radius: 8px;
-    padding: 10px 4px 8px; cursor: pointer; color: var(--text);
-    position: relative;
-  }
-  .b-tile:hover { border-color: var(--border-strong); }
-  .b-tile.sel { border-color: var(--good); }
-  .b-tile.sel::after {
-    content: "✓"; position: absolute; top: 4px; right: 6px;
-    color: var(--good); font-size: 10px; font-weight: 700;
-  }
-  .b-tile .cap { font-size: 10.5px; color: var(--muted); text-align: center; line-height: 1.25; }
-  .b-tile.sel .cap { color: var(--strong); }
-
-  /* =============== concept C: quiet list ============================ */
-  .c-list { display: grid; }
-  .c-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 2px; background: none; border: 0; cursor: pointer;
-    border-bottom: 1px solid var(--border); color: var(--text); text-align: left;
-  }
-  .c-row:last-child { border-bottom: 0; }
-  .c-row .thumb { width: 40px; flex: none; display: flex; justify-content: center; }
-  .c-row .stack { flex: 1; min-width: 0; }
-  .c-row .l1 { display: block; font-size: 13px; color: var(--text); }
-  .c-row.sel .l1 { color: var(--strong); font-weight: 600; }
-  .c-row .l2 { display: block; font: 10px var(--mono); color: var(--dim); }
-  .c-row .radio {
-    width: 14px; height: 14px; flex: none; border-radius: 50%;
-    border: 1.5px solid var(--border-strong); position: relative;
-  }
-  .c-row.sel .radio { border-color: var(--good); }
-  .c-row.sel .radio::after {
-    content: ""; position: absolute; inset: 2.5px;
-    border-radius: 50%; background: var(--good);
-  }
-
-  /* =============== concept D: collapsed select ====================== */
-  .d-summary {
-    display: flex; align-items: center; gap: 10px; width: 100%;
-    background: var(--terminal); border: 1px solid var(--border);
-    border-radius: 7px; padding: 7px 10px; cursor: pointer; color: var(--text);
-    text-align: left;
-  }
-  .d-summary:hover { border-color: var(--border-strong); }
-  .d-summary .thumb { width: 40px; flex: none; display: flex; justify-content: center; }
-  .d-summary .stack { flex: 1; min-width: 0; }
-  .d-summary .l1 { display: block; font-size: 13px; color: var(--strong); }
-  .d-summary .l2 { display: block; font: 10px var(--mono); color: var(--dim); }
-  .d-summary .chev { color: var(--dim); font-size: 11px; transition: transform .15s; }
-  .d-open .d-summary .chev { transform: rotate(180deg); }
-  .d-menu { display: none; margin-top: 6px; border: 1px solid var(--border);
-            border-radius: 7px; overflow: hidden; }
-  .d-open .d-menu { display: block; }
-  .d-menu .c-row { padding: 7px 10px; }
-
-  /* =============== concept E: detected-first hero =================== */
-  .e-hero {
-    display: flex; gap: 12px; align-items: center;
-    padding: 10px 2px 12px;
-  }
-  .e-hero .thumb { flex: none; }
-  .e-hero .stack { flex: 1; min-width: 0; }
-  .e-hero .l1 { font-size: 14px; font-weight: 600; color: var(--strong); }
-  .e-hero .l2 { font: 10.5px var(--mono); color: var(--dim); margin-top: 2px; }
-  .e-hero .change {
-    background: none; border: 0; color: var(--muted); font-size: 11px;
-    cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
-    padding: 0; align-self: flex-start;
-  }
-  .e-hero .change:hover { color: var(--strong); }
-  .e-alts { display: none; }
-  .e-open .e-alts { display: block; border-top: 1px solid var(--border); padding-top: 4px; }
+  .rejected .r b { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 3px; }
 </style>
 </head>
 <body>
 
-<h1>Board selector — setup panel spike</h1>
+<h1>Board selector — converged: tiles</h1>
 <p class="hint">
-  The provisioning form's board choice, workshopped as a component. Thesis:
-  we usually KNOW the chip (boot banner), so the selector should feel like
-  confirming a good default, not filling in a form — quiet chrome (no grey
-  fills, no tag noise), chip-not-board language, an image for every choice
-  including Generic, and a calmer panel rhythm. Click boards in any concept;
-  the exploration strip drives chip evidence, the served-board set, and the
-  default-name formula everywhere at once.
+  Gate round 1 picked concept 2 (tiles): we can't know which board they have,
+  tiles read as hardware, and the grid wraps as the served set grows.
+  Decisions applied: NO default selection (generic install unless the user
+  picks — except when identity is CERTAIN, e.g. a distinctive USB vid:pid,
+  demonstrated by the identity toggle); headline does the chip's work
+  ("Set up ESP32-C6 device" replaces "Ready to set up" + "BOARD"); names are
+  sortable-date-first and adopt the board slug on pick.
 </p>
 
 <div class="controls">
@@ -233,75 +173,61 @@
     <button data-chip="esp32s3" aria-pressed="false">esp32s3</button>
     <button data-chip="unknown" aria-pressed="false">unknown</button>
   </span>
+  <span class="group"><b>identity</b>
+    <button data-ident="chip" aria-pressed="true">chip only</button>
+    <button data-ident="exact" aria-pressed="false">exact (vid:pid)</button>
+  </span>
   <span class="group"><b>served boards</b>
     <button data-served="today" aria-pressed="true">today (2×C6)</button>
     <button data-served="future" aria-pressed="false">future (5, multi-chip)</button>
   </span>
-  <span class="group"><b>name formula</b>
-    <button data-name="chip-date" aria-pressed="true">chip · date</button>
-    <button data-name="date-lp" aria-pressed="false">date LightPlayer</button>
-  </span>
 </div>
 
-<h2>1 · Current production (baseline)</h2>
-<p class="note">Faithful repro of what PR #277 ships: bordered rows, grey
-selected fill, "matches detected chip" tags, "BOARD detected:" label, dashed
-text-only generic, the walk-away line. Kept comparable so "leave it" is a
-real option.</p>
-<div class="gallery"><div class="dcard" id="concept-a"></div></div>
+<h2>The setup panel</h2>
+<p class="note">Click tiles to pick/unpick (a second click deselects — back to
+generic). The name field derives <span style="font-family:var(--mono)">
+YYYY-MM-DD - chip</span> until a board is picked, then adopts the board slug;
+edit it once and it stops deriving. "+N more" folds the non-matching boards.</p>
+<div class="gallery"><div class="dcard" id="main"></div></div>
 
-<h2>2 · Tiles</h2>
-<p class="note">Image-forward tile grid — the board IS the picture. Selection
-is an outline + check, no fill. Generic gets its own silhouette tile. Reads
-like choosing hardware, scales to a future multi-board world as a grid.</p>
-<div class="gallery"><div class="dcard" id="concept-b"></div></div>
-
-<h2>3 · Quiet list</h2>
-<p class="note">No boxes at all: hairline-separated rows with a radio dot.
-The calmest treatment; selection reads from the dot + text weight. Closest to
-the current structure with every piece of chrome removed.</p>
-<div class="gallery"><div class="dcard" id="concept-c"></div></div>
-
-<h2>4 · Collapsed select</h2>
-<p class="note">The choice presents as ONE row showing the current pick
-(best match pre-selected when the chip is known); tapping expands an inline
-menu. Most compact — the happy path never opens it. The panel reads
-name-first.</p>
-<div class="gallery"><div class="dcard" id="concept-d"></div></div>
-
-<h2>5 · Detected-first hero</h2>
-<p class="note">Leans hardest into "we already know": the matched board renders
-as a small hero (bigger art, chip line under it) with a quiet
-"use a different board" escape. When the chip is unknown it degrades to the
-quiet list.</p>
-<div class="gallery"><div class="dcard" id="concept-e"></div></div>
+<h2>Rejected this round</h2>
+<div class="rejected">
+  <div class="r"><b>1 · Current production</b>grey selection fills, tag noise,
+    board/chip confusion, walk-away copy — the notes this spike exists to fix.</div>
+  <div class="r"><b>3 · Quiet list</b>calm but text-first; the board image is
+    the most recognizable thing we have.</div>
+  <div class="r"><b>4 · Collapsed select</b>compact, but hides the options and
+    implies a confident default — round 1 decided we don't default without
+    certain identity.</div>
+  <div class="r"><b>5 · Detected-first hero</b>overclaims: chip evidence names
+    the family, not the board.</div>
+</div>
 
 <script>
-/* ---- data ----------------------------------------------------------- */
 const BOARDS = [
-  { id: "espressif/esp32-c6-devkitc-1", name: "ESP32-C6-DevKitC-1", chip: "esp32c6", soc: "ESP32-C6", kind: "devkit" },
-  { id: "seeed/xiao-esp32-c6",          name: "XIAO ESP32-C6",      chip: "esp32c6", soc: "ESP32-C6", kind: "xiao" },
-  { id: "espressif/esp32-s3-devkitc-1", name: "ESP32-S3-DevKitC-1", chip: "esp32s3", soc: "ESP32-S3", kind: "devkit", future: true },
-  { id: "seeed/xiao-esp32-s3-plus",     name: "XIAO ESP32-S3 Plus", chip: "esp32s3", soc: "ESP32-S3", kind: "xiao",   future: true },
-  { id: "domraem/dom-z-102",            name: "WLED LAN 4-Channel", chip: "esp32",   soc: "ESP32",    kind: "din",    future: true },
+  { id: "espressif/esp32-c6-devkitc-1", slug: "esp32-c6-devkitc-1", name: "ESP32-C6-DevKitC-1", chip: "esp32c6", kind: "devkit" },
+  { id: "seeed/xiao-esp32-c6",          slug: "xiao-esp32-c6",      name: "XIAO ESP32-C6",      chip: "esp32c6", kind: "xiao" },
+  { id: "espressif/esp32-s3-devkitc-1", slug: "esp32-s3-devkitc-1", name: "ESP32-S3-DevKitC-1", chip: "esp32s3", kind: "devkit", future: true },
+  { id: "seeed/xiao-esp32-s3-plus",     slug: "xiao-esp32-s3-plus", name: "XIAO ESP32-S3 Plus", chip: "esp32s3", kind: "xiao",   future: true },
+  { id: "domraem/dom-z-102",            slug: "dom-z-102",          name: "WLED LAN 4-Channel", chip: "esp32",   kind: "din",    future: true },
 ];
 const CHIP_LABEL = { esp32c6: "ESP32-C6", esp32s3: "ESP32-S3", esp32: "ESP32" };
+const DATE = "2026-08-02";
 
-const PRESET = "espressif/esp32-c6-devkitc-1";
-const state = { chip: "esp32c6", served: "today", nameFormula: "chip-date",
-                sel: { a: PRESET, b: PRESET, c: PRESET, d: PRESET, e: PRESET },
-                open: { d: false, e: false } };
+/* sel: board id = picked; null = no pick (generic install). The Generic
+   tile and "picked nothing" are deliberately the same state. */
+const state = { chip: "esp32c6", ident: "chip", served: "today",
+                sel: null, explicit: false, showAll: false,
+                nameEdited: false, nameValue: "" };
 
-function served() {
-  return BOARDS.filter(b => state.served === "future" || !b.future);
-}
-function matching() {
-  return served().filter(b => b.chip === state.chip);
-}
-function bestMatch() { return matching()[0] || null; }
-function chipKnown() { return state.chip !== "unknown"; }
+const served = () => BOARDS.filter(b => state.served === "future" || !b.future);
+const matching = () => served().filter(b => b.chip === state.chip);
+const chipKnown = () => state.chip !== "unknown";
+/* "Exact" identity: only real when the port's vid:pid singles out ONE board.
+   Demo maps it to the XIAO (as if its bridge/vid:pid were distinctive). */
+const exactBoard = () =>
+  state.ident === "exact" && chipKnown() ? matching()[1] || matching()[0] || null : null;
 
-/* ---- board art ------------------------------------------------------- */
 function art(kind, w) {
   const s = w / 44;
   if (kind === "generic") {
@@ -335,169 +261,102 @@ function art(kind, w) {
     </svg>`;
 }
 
-/* ---- shared panel pieces --------------------------------------------- */
-function chipLine() {
-  return chipKnown()
-    ? `<span class="chipline"><span class="dot"></span>chip: ${CHIP_LABEL[state.chip]}</span>`
-    : `<span class="chipline unknown"><span class="dot"></span>chip not detected yet</span>`;
-}
 function defaultName() {
-  const date = "Aug 2";
-  if (state.nameFormula === "chip-date" && chipKnown())
-    return `${state.chip} · ${date}`;
-  if (state.nameFormula === "chip-date") return `lightplayer · ${date}`;
-  return "2026-08-02 09:40 LightPlayer";
-}
-function nameField() {
-  return `<div class="fld">
-    <div class="sect-label" style="margin-bottom:6px">Device name</div>
-    <input value="${defaultName()}">
-  </div>`;
-}
-function cta() { return `<button class="cta">⚡ Install firmware</button>`; }
-function cardShell(id, inner) {
-  return `<header><span class="glyph">⌁</span><span class="name">Connected device</span>
-      <span class="transport">USB</span></header>
-    <div class="body"><p class="state-line">Ready to set up</p>${inner}</div>`;
-}
-function pick(concept, id) { state.sel[concept] = id; render(); }
-
-/* ---- concept A: current production ----------------------------------- */
-function renderA() {
-  const lead = chipKnown() ? matching() : served();
-  const rows = lead.map(b => `
-    <button class="a-row ${state.sel.a === b.id ? "sel" : ""}" onclick="pick('a','${b.id}')">
-      <span class="thumb">${art(b.kind, 34)}</span>
-      <span><span class="l1">${b.name}</span>
-      <span class="l2">${b.soc}${chipKnown() ? ' <span class="tag">· matches detected chip</span>' : ""}</span></span>
-    </button>`).join("");
-  return cardShell("a", `
-    <div style="display:grid;gap:8px">
-      <div>
-        <div class="sect-label" style="margin-bottom:4px">Board
-          <span style="font-weight:400;text-transform:none;letter-spacing:0">detected: ${chipKnown() ? state.chip : "—"}</span></div>
-        <div class="a-stack">${rows}
-          <button class="a-row a-generic ${state.sel.a === null ? "sel" : ""}" onclick="pick('a',null)">
-            <span class="l1" style="flex:none">Generic board</span>
-            <span class="l2">keep the firmware's default pin map</span>
-          </button>
-        </div>
-      </div>
-      ${nameField()}${cta()}
-      <p style="margin:0;font-size:11px;color:var(--dim)">About a minute. Progress shows here — you can walk away.</p>
-    </div>`);
+  const picked = served().find(b => b.id === state.sel);
+  if (picked) return `${DATE} - ${picked.slug}`;
+  if (chipKnown()) return `${DATE} - ${state.chip}`;
+  return `${DATE} - lightplayer`;
 }
 
-/* ---- concept B: tiles -------------------------------------------------- */
-function renderB() {
-  const lead = chipKnown() ? matching() : served();
-  const tiles = lead.map(b => `
-    <button class="b-tile ${state.sel.b === b.id ? "sel" : ""}" onclick="pick('b','${b.id}')">
-      ${art(b.kind, 40)}<span class="cap">${b.name}</span>
-    </button>`).join("");
-  return cardShell("b", `
-    <div>
-      <div class="sect-label" style="margin-bottom:8px">Board ${chipLine()}</div>
-      <div class="b-grid">${tiles}
-        <button class="b-tile ${state.sel.b === null ? "sel" : ""}" onclick="pick('b',null)">
-          ${art("generic", 40)}<span class="cap">Generic</span>
-        </button>
-      </div>
-    </div>
-    ${nameField()}${cta()}`);
-}
-
-/* ---- concept C: quiet list --------------------------------------------- */
-function cRow(concept, b) {
-  return `<button class="c-row ${state.sel[concept] === (b ? b.id : null) ? "sel" : ""}"
-      onclick="pick('${concept}',${b ? `'${b.id}'` : "null"})">
-    <span class="thumb">${art(b ? b.kind : "generic", 30)}</span>
-    <span class="stack"><span class="l1">${b ? b.name : "Generic board"}</span>
-      <span class="l2">${b ? b.soc : "firmware default pin map"}</span></span>
-    <span class="radio"></span>
+function tile(b, idTagged) {
+  return `<button class="b-tile ${state.sel === b.id ? "sel" : ""}" onclick="pickBoard('${b.id}')">
+    <span class="artbox">${art(b.kind, 40)}</span><span class="cap">${b.name}</span>
+    ${idTagged ? '<span class="idtag">identified</span>' : ""}
   </button>`;
 }
-function renderC() {
-  const lead = chipKnown() ? matching() : served();
-  return cardShell("c", `
-    <div>
-      <div class="sect-label" style="margin-bottom:2px">Board ${chipLine()}</div>
-      <div class="c-list">${lead.map(b => cRow("c", b)).join("")}${cRow("c", null)}</div>
-    </div>
-    ${nameField()}${cta()}`);
-}
 
-/* ---- concept D: collapsed select ---------------------------------------- */
-function renderD() {
-  if (state.sel.d === undefined) state.sel.d = null;
-  const current = served().find(b => b.id === state.sel.d)
-    || (chipKnown() ? bestMatch() : null);
-  const lead = chipKnown() ? matching() : served();
-  return cardShell("d", `
-    <div class="${state.open.d ? "d-open" : ""}">
-      <div class="sect-label" style="margin-bottom:6px">Board ${chipLine()}</div>
-      <button class="d-summary" onclick="state.open.d = !state.open.d; render()">
-        <span class="thumb">${art(current ? current.kind : "generic", 30)}</span>
-        <span class="stack"><span class="l1">${current ? current.name : "Generic board"}</span>
-          <span class="l2">${current ? current.soc : "firmware default pin map"}</span></span>
-        <span class="chev">▾</span>
-      </button>
-      <div class="d-menu">${lead.map(b => cRow("d", b)).join("")}${cRow("d", null)}</div>
-    </div>
-    ${nameField()}${cta()}`);
-}
-
-/* ---- concept E: detected-first hero ------------------------------------- */
-function renderE() {
-  const hero = served().find(b => b.id === state.sel.e)
-    || (chipKnown() ? bestMatch() : null);
-  const lead = chipKnown() ? matching() : served();
-  const heroBlock = hero ? `
-    <div class="e-hero">
-      <span class="thumb">${art(hero.kind, 56)}</span>
-      <span class="stack"><div class="l1">${hero.name}</div>
-        <div class="l2">${hero.soc} · detected</div>
-        <button class="change" onclick="state.open.e = !state.open.e; render()">
-          ${state.open.e ? "hide other boards" : "use a different board"}</button></span>
-    </div>` : "";
-  const altList = `<div class="e-alts" style="${hero ? "" : "display:block;border:0;padding:0"}">
-    <div class="c-list">${lead.map(b => cRow("e", b)).join("")}${cRow("e", null)}</div></div>`;
-  return cardShell("e", `
-    <div class="${state.open.e ? "e-open" : ""}">
-      <div class="sect-label" style="margin-bottom:2px">Board ${chipLine()}</div>
-      ${heroBlock}${altList}
-    </div>
-    ${nameField()}${cta()}`);
-}
-
-/* ---- render + controls --------------------------------------------------- */
 function render() {
-  document.getElementById("concept-a").innerHTML = renderA();
-  document.getElementById("concept-b").innerHTML = renderB();
-  document.getElementById("concept-c").innerHTML = renderC();
-  document.getElementById("concept-d").innerHTML = renderD();
-  document.getElementById("concept-e").innerHTML = renderE();
+  const exact = exactBoard();
+  const lead = chipKnown() ? matching() : served();
+  const rest = chipKnown() ? served().filter(b => b.chip !== state.chip) : [];
+  const shown = state.showAll ? lead.concat(rest) : lead;
+  const headline = chipKnown()
+    ? `Set up <span class="chip">${CHIP_LABEL[state.chip]}</span> device`
+    : "Set up this device";
+  const sub = exact
+    ? `${exact.name} identified from its USB id`
+    : "Select your board — or install generic and choose later";
+  const nameValue = state.nameEdited ? state.nameValue : defaultName();
+
+  document.getElementById("main").innerHTML = `
+    <header><span class="glyph">⌁</span><span class="name">Connected device</span>
+      <span class="transport">USB</span></header>
+    <div class="body">
+      <div>
+        <p class="headline">${headline}</p>
+        <p class="sub">${sub}</p>
+      </div>
+      <div>
+        <div class="b-grid">
+          ${shown.map(b => tile(b, exact && exact.id === b.id)).join("")}
+          <button class="b-tile ${state.sel === null ? (state.explicit ? "sel" : "implicit") : ""}"
+              onclick="pickBoard(null)">
+            <span class="artbox">${art("generic", 40)}</span><span class="cap">Generic</span>
+          </button>
+          ${rest.length && !state.showAll
+            ? `<button class="b-more" onclick="state.showAll = true; render()">+${rest.length} more</button>`
+            : ""}
+        </div>
+      </div>
+      <div class="fld">
+        <div class="sect-label">Device name</div>
+        <input value="${nameValue}"
+          oninput="state.nameEdited = true; state.nameValue = this.value">
+      </div>
+      <button class="cta">⚡ Install firmware</button>
+    </div>`;
 }
+
+function pickBoard(id) {
+  // A second click on the picked board deselects it (back to generic).
+  state.sel = id !== null && state.sel === id ? null : id;
+  state.explicit = true;
+  render();
+}
+
+/* Certain identity is the ONE case that pre-selects (round-1 decision). */
+function resetSelection() {
+  const exact = exactBoard();
+  state.sel = exact ? exact.id : null;
+  state.explicit = !!exact;
+  state.nameEdited = false;
+}
+
 document.querySelectorAll(".controls button").forEach(button => {
   button.addEventListener("click", () => {
-    const { chip, served: servedMode, name } = button.dataset;
-    if (chip) {
-      state.chip = chip;
-      // Reset every concept to its honest default for the new evidence:
-      // best match pre-selected when the chip is known, generic otherwise.
-      const preset = chip === "unknown" ? null
-        : (BOARDS.find(b => b.chip === chip && (state.served === "future" || !b.future)) || {id: null}).id;
-      for (const key of Object.keys(state.sel)) state.sel[key] = preset;
-      state.open.d = false; state.open.e = false;
-    }
-    if (servedMode) state.served = servedMode;
-    if (name) state.nameFormula = name;
-    const group = chip ? "chip" : servedMode ? "served" : "name";
+    const { chip, ident, served: servedMode } = button.dataset;
+    if (chip) { state.chip = chip; state.showAll = false; }
+    if (ident) state.ident = ident;
+    if (servedMode) { state.served = servedMode; state.showAll = false; }
+    if (chip || ident) resetSelection();
+    const group = chip ? "chip" : ident ? "ident" : "served";
     document.querySelectorAll(`.controls button[data-${group}]`)
       .forEach(peer => peer.setAttribute("aria-pressed", peer === button ? "true" : "false"));
     render();
   });
 });
+/* Capture/deep-link support: ?chip=esp32s3&ident=exact&served=future&pick=seeed/xiao-esp32-c6 */
+const params = new URLSearchParams(location.search);
+for (const key of ["chip", "ident", "served"]) {
+  const value = params.get(key);
+  if (!value) continue;
+  state[key] = value;
+  document.querySelectorAll(`.controls button[data-${key}]`)
+    .forEach(button => button.setAttribute("aria-pressed",
+      button.dataset[key] === value ? "true" : "false"));
+}
+resetSelection();
+if (params.get("pick")) { state.sel = params.get("pick"); state.explicit = true; }
 render();
 </script>
 </body>
