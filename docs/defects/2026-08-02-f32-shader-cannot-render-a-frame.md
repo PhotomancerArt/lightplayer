@@ -104,6 +104,21 @@ Float decode: both f32 tests fail with every channel at 0 (the "renders black"
 signature), both Q32 controls still pass. `lp-shader`'s synth unit tests pin the
 same contract at the IR level, including that Q32 gains no op.
 
+**Verified on the board that found it** — same ESP32-S3 (rev v0.2, MAC
+`d8:3b:da:47:29:70`), same `quad-strips-v3` project, `float_mode` flipped
+between `float` and `fixed`:
+
+| build | compile | frames |
+|---|---|---|
+| `float` | `float=hardware-f32`, 502 inst / 2,008 B, 52 ms | **fps=29, tick=32ms** |
+| `fixed` (control) | `float=fixed`, 508 inst / 2,032 B, 48 ms | fps=29, tick=32ms |
+
+The f32 build renders; the Q32 build is not slower. One residual per-project
+`tick error` remains in **both** modes and is unrelated: `quad-strips-v3`
+names classic-ESP32 output endpoints (`ws281x:rmt:IO18` and friends) the S3
+does not have. It was always there — the shader error simply fired first and
+masked it.
+
 **Lesson** — *proving a capability through the door you built for testing does
 not prove it through the door the product uses.* The f32 roadmap was unusually
 disciplined about measurement — predictions-first, silicon everywhere, no
