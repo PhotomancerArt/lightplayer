@@ -333,9 +333,17 @@ this chip has.
 > | shader | never compiled | compiled, `[JIT] used=2032 fails=0` |
 >
 > Power-on boot, `bootCount=1`, `safeMode=false`, 14.3 fps, 201 s soak with
-> zero OOM or crash lines and the heap flat to within 4 B. `used=110,588` is
-> what makes the failure on the old arena inevitable: it needed more than the
-> 112,640 B arena could hold once anything else was resident.
+> zero OOM or crash lines and the heap flat to within 4 B.
+>
+> **The decisive figure is the transient, not the steady state.** While this
+> project loads — bringing up four WS281x RMT channels for 240 LEDs — peak
+> `[MEM] used` reaches **113,968 B**, which exceeds the *entire* 112,640 B
+> arena that preceded this change. (The `[MEM]` line carrying it is stamped
+> `[JIT] used=2032`, confirming it belongs to this project rather than to a
+> larger shader compiling alongside.) That is not evidence the old heap was
+> merely tight: a heap that never had 113,968 B could not have served this
+> load under any allocator, independent of fragmentation, region layout or
+> free-list shape. The steady state settles back to `used=110,588`.
 >
 > ⚠️ **The `quad60-v3 → 7,384 B free` row in the table above is therefore
 > stale** — it is not currently reproducible on `main`, in the same direction
@@ -371,16 +379,24 @@ this chip has.
 > `tests/xt_classic_codemem_corpus.rs` predicts for this shader — the host
 > instrument reproducing the device a third time.
 >
-> The decisive number is the peak: **`[MEM] used` reached 113,968 B during the
-> compile, which exceeds the entire 112,640 B arena that preceded this change.**
-> That is not an argument that the old heap was tight; it is proof it could not
-> have done this at all. Zero OOM or crash lines throughout.
+> **Independently reproduced** on a second flash by the session working PR
+> #285: `/projects/Basic` auto-loaded and ran, compiling in 183 ms with
+> `[JIT] used=6516` and `[MEM] free=110,764 used=67,412`. Two sessions, two
+> boards states, the same result — and `[JIT] used=6516` matching the corpus
+> prediction to the byte on both.
 >
-> ⚠️ Scope of the claim: what is measured is that the *shader compiles*. The
-> deploy did not report the project as running afterwards — a separate,
-> already-filed defect where `lp-cli upload` acks a project that never
-> activates — so this is not a claim that `examples/basic` runs end to end at
-> 241 LEDs. The compile is the step that used to OOM, and it no longer does.
+> ⚠️ Scope of the claim, twice narrowed. First: in this session's run the
+> deploy did not report the project as running afterwards (the separate
+> `lp-cli upload` acks-but-never-activates defect), so *this session* measured
+> only that the shader compiles; the #285 session's run is what shows it also
+> **runs**. Second, and a correction to an earlier draft of this ADR: the
+> 113,968 B peak recorded below belongs to the **240-LED project's load**, not
+> to this compile — the `[MEM]` line carrying it is stamped `[JIT] used=2032`,
+> which is `quad-strips`-sized code, not this shader's 6,516 B. A clean
+> single-project compile of `examples/basic` settles at `used=67,412`, which
+> would have fit the old arena; what is established here is that the shader
+> **now compiles where the ADR recorded it OOMing**, not that its own peak
+> exceeds 112,640 B.
 
 That qualifier is the correction. Every row in the table above is a
 *steady-state* number, read once the shader is resident, and steady state is
