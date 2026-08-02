@@ -473,7 +473,7 @@
       "type": "string"
     },
     "family": {
-      "description": "The chip this board carries, in **espflash spelling**: \"esp32\",\n\"esp32c6\", \"esp32s3\". Kept a plain string so display data never gates\non firmware target enums, but the vocabulary is not free-form — it is\nthe same identity a build def's `chip.name` states, and the\nboard↔build join ([`crate::compatible_builds`]) matches on it\nexactly. It doubles as the catalog's SoC filter key.",
+      "description": "The chip this board carries, in **espflash spelling**: \"esp32\",\n\"esp32c6\", \"esp32s3\". Kept a plain string so display data never gates\non firmware target enums, but the vocabulary is not free-form — it is\nthe same identity a build def's `chip.name` states, and the\nboard↔build join (`compatible_builds`) matches on it exactly. It\ndoubles as the catalog's SoC filter key.",
       "type": "string"
     },
     "firmware_allow": {
