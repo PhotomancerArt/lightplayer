@@ -168,6 +168,41 @@ Off by default so the shipping image spends nothing on it: the module is
 even the timer read survives. `just clippy-fw-esp32v3` lints the feature on,
 so it cannot rot.
 
+### Frame dump (`--features frame-dump`, off by default)
+
+The other tap on the same write path, answering a different question: not
+"did the refills keep up?" but "were the pixels *right*?". A `frame-dump`
+build prints one full hex dump per channel after open or resize, then a
+checksum-and-lit-count summary about once a second:
+
+```
+[OUT] open endpoint=… bytes=192 leds=64 (frame-dump build)
+[OUT] dump frame=1 leds=64 shown=64 crc=0x55772254 rgb=324a0208…
+[OUT] frame=60 leds=64 crc=0x55772254 lit=64 first=(50,74,2) (8,55,106) …
+```
+
+Those line shapes are a **byte-for-byte port of `fw-esp32s3`'s**, deliberately:
+`scripts/m4-hardware-walk.sh` and `lp-app/lpa-server/tests/shader_oracle_frame.rs`
+parse both chips' transcripts with no per-chip branch, and the walk's whole
+claim is that the two hex strings are equal. Change a format string here and
+you must change it in all three places.
+
+This is the M7 FINAL-gate instrument — "a shader compiles on-device into the
+fixed SRAM1 code region and renders bit-exactly vs the host oracle". Run it
+once the board is free:
+
+```bash
+just ci-prereqs                              # the oracle's rv32 engine needs this
+scripts/m4-hardware-walk.sh --chip esp32     # or: ... --chip esp32 /dev/cu.wchusbserialNNNN
+```
+
+The walk flashes with `frame-dump`, pushes `examples/shader-oracle` (retargeted
+from the XIAO's `D10` pad to this board's `IO18` — an endpoint picks a wire, not
+a colour), reflashes to watch the device compile and render it, and diffs the
+device's `rgb=` against the host's. Off by default for the same reason the
+telemetry is: hex-formatting frames costs render time and floods the 921600-baud
+UART0 the transport is also using. `just clippy-fw-esp32v3` lints it on.
+
 ## DRAM budget
 
 esp-hal's `dram_seg` for this chip is `0x3FFB_0000..0x3FFE_0000` — **192 KB**
