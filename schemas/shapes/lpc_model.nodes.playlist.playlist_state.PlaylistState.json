@@ -4,10 +4,6 @@
       {
         "default_bind": "bus:visual.out",
         "name": "output",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -26,10 +22,6 @@
       },
       {
         "name": "entry_time",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -46,10 +38,6 @@
       },
       {
         "name": "entry_progress",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -66,10 +54,6 @@
       },
       {
         "name": "active_entry",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },

@@ -168,15 +168,28 @@ pub fn WorkspaceAddNodeButton(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn AddNodeMenuRow(entry: UiAddNodeMenuEntry, on_action: EventHandler<UiAction>) -> Element {
     let icon = node_kind_icon(&entry.icon);
-    let title = entry.action.meta().summary.clone();
+    // A kind the connected device cannot run stays in the list, DISABLED,
+    // annotated with why — hiding it would teach a false catalog.
+    let unavailable = entry.unavailable.clone();
+    let title = match &unavailable {
+        Some(reason) => format!("{reason} — {}", entry.action.meta().summary),
+        None => entry.action.meta().summary.clone(),
+    };
+    let class = match unavailable {
+        Some(_) => format!("{} tw:opacity-55", menu_item_action_class()),
+        None => menu_item_action_class().to_string(),
+    };
+    let annotation = entry.unavailable.clone();
     let action = entry.action.clone();
+    let disabled = annotation.is_some();
     let close = try_consume_context::<PopoverCloseHandle>();
 
     rsx! {
         button {
-            class: menu_item_action_class(),
+            class: "{class}",
             r#type: "button",
             title: "{title}",
+            disabled,
             onclick: move |event| {
                 event.stop_propagation();
                 on_action.call(action.clone());
@@ -188,6 +201,11 @@ fn AddNodeMenuRow(entry: UiAddNodeMenuEntry, on_action: EventHandler<UiAction>) 
                 StudioIcon { name: icon, size: 14 }
             }
             span { "{entry.label}" }
+            if let Some(annotation) = annotation {
+                span { class: "tw:ml-auto tw:pl-3 tw:whitespace-nowrap tw:text-[11px] tw:text-dim-foreground",
+                    "{annotation}"
+                }
+            }
         }
     }
 }

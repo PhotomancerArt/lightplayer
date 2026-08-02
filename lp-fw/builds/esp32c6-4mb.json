@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "id": "esp32c6-4mb",
+  "displayName": "LightPlayer ESP32-C6 server firmware",
+  "package": "fw-esp32c6",
+  "cargoTarget": "riscv32imac-unknown-none-elf",
+  "profile": "release-esp32",
+  "cargoFeatures": ["esp32c6", "server"],
+  "flashSizeMb": 4,
+  "partitionsCsv": "lp-fw/fw-esp32c6/partitions.csv",
+  "chip": {
+    "family": "esp32",
+    "name": "esp32c6"
+  }
+}

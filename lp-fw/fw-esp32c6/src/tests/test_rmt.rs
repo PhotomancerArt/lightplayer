@@ -8,7 +8,6 @@ extern crate alloc;
 use alloc::rc::Rc;
 use core::cell::RefCell;
 use esp_hal::rmt::Rmt;
-use esp_hal::time::Rate;
 use log::info;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
@@ -40,7 +39,8 @@ pub async fn run_rmt_test(_: embassy_executor::Spawner) -> ! {
     info!("RMT test mode starting...");
 
     // Configure RMT (we already have rmt_peripheral from init_board)
-    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).expect("Failed to initialize RMT");
+    let rmt = Rmt::new(rmt_peripheral, crate::output::rmt::shared_driver::RMT_CLOCK)
+        .expect("Failed to initialize RMT");
 
     // Use GPIO18 (pin 10 on board) for LED output (hardcoded for testing)
     let pin = gpio18;

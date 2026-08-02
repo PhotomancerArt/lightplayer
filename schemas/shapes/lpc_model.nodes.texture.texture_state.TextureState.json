@@ -3,6 +3,9 @@
     "fields": [
       {
         "name": "width",
+        "semantics": {
+          "direction": "produced"
+        },
         "shape": {
           "value": {
             "shape": {
@@ -16,6 +19,9 @@
       },
       {
         "name": "height",
+        "semantics": {
+          "direction": "produced"
+        },
         "shape": {
           "value": {
             "shape": {
@@ -29,6 +35,9 @@
       },
       {
         "name": "format",
+        "semantics": {
+          "direction": "produced"
+        },
         "shape": {
           "value": {
             "shape": {

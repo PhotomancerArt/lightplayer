@@ -314,7 +314,18 @@ impl Engine {
                 node: id,
                 message: format!("runtime state shape registration: {e}"),
             })?;
+        // The runtime is the authority on its own status from the moment it
+        // attaches, not only after some later change: a placeholder
+        // standing in for a gated-out node kind must report `Unsupported`
+        // on the FIRST tree delta the client sees, or the node arrives
+        // looking like a healthy `Created` one. Runtimes that report
+        // nothing (`runtime_status() == None`, the trait default) leave the
+        // entry's status exactly as it was.
+        let attached_status = runtime.runtime_status();
         let entry = self.tree.get_mut(id).ok_or(EngineError::UnknownNode(id))?;
+        if let Some(status) = attached_status {
+            set_entry_status_if_changed(entry, status, frame);
+        }
         entry.set_state(NodeEntryState::Alive(runtime), frame);
         Ok(())
     }
@@ -905,9 +916,21 @@ impl EngineResolveHost<'_> {
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
-            Ok(ProduceResult::Unsupported) => Err(SessionResolveError::other(format!(
-                "produce: node {node_id:?} does not produce slot {slot:?}"
-            ))),
+            // A gated-out kind produces nothing, so EVERY such node lands
+            // here — and "does not produce slot" reads as an authoring
+            // mistake when the real cause is the build. The node's own
+            // status already names that cause; use it, and leave genuine
+            // wrong-slot diagnostics on real nodes untouched.
+            Ok(ProduceResult::Unsupported) => {
+                let message = match &runtime_status {
+                    NodeRuntimeStatus::Unsupported(cause) => format!(
+                        "produce: {cause} (node {node_id:?} is a placeholder for slot {slot:?})"
+                    ),
+                    _ => format!("produce: node {node_id:?} does not produce slot {slot:?}"),
+                };
+                set_entry_status_if_changed(entry, runtime_status, revision);
+                Err(SessionResolveError::other(message))
+            }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(

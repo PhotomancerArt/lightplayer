@@ -14,7 +14,6 @@ use core::cell::RefCell;
 
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::rmt::Rmt;
-use esp_hal::time::Rate;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use lpc_shared::{DisplayPipeline, DisplayPipelineOptions};
@@ -68,7 +67,8 @@ pub async fn run_fluid_demo(_: embassy_executor::Spawner) -> ! {
     );
 
     // RMT + LedChannel on gpio18 (matches `examples/basic` strip output).
-    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).expect("Failed to initialize RMT");
+    let rmt = Rmt::new(rmt_peripheral, crate::output::rmt::shared_driver::RMT_CLOCK)
+        .expect("Failed to initialize RMT");
     let mut led_channel = LedChannel::new(rmt, gpio18, LAMP_COUNT)
         .expect("Failed to initialize LED channel on gpio18");
 

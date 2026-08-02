@@ -164,8 +164,11 @@ module, so normal connect/reset/read debugging exercises the same Web Serial
 lifecycle code that Studio uses.
 
 ESP32-C6 firmware assets are generated under
-`target/studio-web-assets/firmware/esp32c6/` and served from
-`firmware/esp32c6/manifest.json` in the generated site. Browser serial
+`target/studio-web-assets/firmware/esp32c6-4mb/` and served from
+`firmware/esp32c6-4mb/manifest.json` in the generated site — the directory is
+named after the build def (`lp-fw/builds/esp32c6-4mb.json`), and the manifest
+is schemaVersion 2 (extracted manifest core under `core`, plus distribution
+facts). Browser serial
 provisioning imports a pinned browser ESM `esptool-js` module from
 `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` by default; deployments can
 override the `BrowserSerialEsp32Options` path if they want to serve that module

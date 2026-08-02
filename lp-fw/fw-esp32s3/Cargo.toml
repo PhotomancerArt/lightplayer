@@ -63,10 +63,9 @@ frame-dump = []
 # `just fw-esp32c6-size-check`.
 #
 # Note what this does *not* do: it links the capability, it does not select the
-# mode. Compiled shaders on the app path are still Q32 until the project-level
-# `float_mode` slot (M2) is plumbed through to the device graphics backend,
-# which is later work. `CPENABLE` is armed regardless — see
-# `board::esp32s3::fpu`.
+# mode. A shader compiles in F32 on this board when its authored `float_mode`
+# slot says Float; every other shader is still Q32, and both kinds can run in
+# one project. `CPENABLE` is armed regardless — see `board::esp32s3::fpu`.
 float-f32 = [
     "lpvm-native?/float-f32",
     "lps-builtins?/float-f32",

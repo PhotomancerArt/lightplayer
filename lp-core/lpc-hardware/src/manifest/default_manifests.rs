@@ -12,7 +12,7 @@ const DOM_Z_102_JSON: &str = include_str!("../../boards/domraem/dom-z-102.json")
 pub fn default_esp32c6_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
         .and_then(|manifest| manifest.to_manifest())
-        .expect("checked-in seeed/xiao-esp32-c6 hardware manifest must parse")
+        .expect("checked-in seeed/xiao-esp32-c6 board manifest must parse")
 }
 
 /// Compiled-in board profile for `fw-esp32s3`.
@@ -40,7 +40,7 @@ pub fn default_esp32c6_hardware_manifest() -> HwManifest {
 pub fn default_esp32s3_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_S3_PLUS_JSON)
         .and_then(|manifest| manifest.to_manifest())
-        .expect("checked-in seeed/xiao-esp32-s3-plus hardware manifest must parse")
+        .expect("checked-in seeed/xiao-esp32-s3-plus board manifest must parse")
 }
 
 /// Compiled-in board profile for `fw-esp32v3` (classic ESP32, LX6).
@@ -63,7 +63,7 @@ pub fn default_esp32v3_hardware_manifest() -> HwManifest {
 /// and no reserved GPIOs so projects like fyeah-sign load without hardware errors.
 pub fn permissive_emu_hardware_manifest() -> HwManifest {
     let file = HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
-        .expect("checked-in seeed/xiao-esp32-c6 hardware manifest must parse");
+        .expect("checked-in seeed/xiao-esp32-c6 board manifest must parse");
     let board_labels = assigned_board_label_by_gpio(&file);
 
     default_esp32c6_hardware_manifest()

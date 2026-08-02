@@ -8,7 +8,7 @@
 //! ```sh
 //! just studio-firmware-package-esp32c6
 //! cargo run -p lpa-link --features host-serial-esp32 --example manage_smoke -- \
-//!     /dev/cu.usbmodem101 target/studio-web-assets/firmware/esp32c6/manifest.json
+//!     /dev/cu.usbmodem101 target/studio-web-assets/firmware/esp32c6-4mb/manifest.json
 //! ```
 //!
 //! DESTRUCTIVE: erases the connected device's flash, then reflashes the
