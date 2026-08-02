@@ -154,7 +154,7 @@ fn baked_git() -> Option<BakedGit> {
 
 /// What the header chip shows for a fetch state + baked git facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum BuildChip {
+pub(crate) enum BuildChip {
     Loading,
     /// Deployed build: the version tag from `version.json`.
     Release(String),
@@ -225,6 +225,17 @@ fn chip_open_class(chip: &BuildChip) -> &'static str {
         BuildChip::Branch { dirty: true, .. } => CHIP_DIRTY_OPEN_CLASS,
         BuildChip::Release(_) => CHIP_RELEASE_OPEN_CLASS,
         _ => CHIP_OPEN_CLASS,
+    }
+}
+
+/// Pure, popover-free rendering of a chip state — the story surface for
+/// the trigger visuals (the live chip's state depends on a fetch and on
+/// compile-time git facts, neither of which fixtures can set).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn VersionChipPreview(chip: BuildChip) -> Element {
+    rsx! {
+        span { class: "{chip_class(&chip)}", {chip_trigger(&chip)} }
     }
 }
 
