@@ -109,7 +109,7 @@ pub struct HardwareFacts {
     pub radio: bool,
     /// A button input service is wired on this unit.
     pub button: bool,
-    /// The board id from the unit's loaded hardware manifest, when it has
+    /// The board id from the unit's loaded board manifest, when it has
     /// one.
     ///
     /// Always `None` today: nothing on the device writes a board identity

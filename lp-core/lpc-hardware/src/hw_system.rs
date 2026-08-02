@@ -9,7 +9,7 @@ use crate::{
     Ws281xDriver, Ws281xOutput,
 };
 
-/// Driver registry and endpoint router for one hardware manifest.
+/// Driver registry and endpoint router for one board manifest.
 ///
 /// `HardwareSystem` owns the set of registered drivers for a target. It does not
 /// own resources directly; each opened device claims resources through the

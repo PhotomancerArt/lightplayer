@@ -48,5 +48,21 @@ justfile recipes.
 `target/studio-web-assets/firmware/<id>/` (merged image + `manifest.json`
 schemaVersion 2). Only **esp32c6-4mb** is copied into the Studio site /
 Pages artifact today; `esp32s3-8mb` packages correctly but nothing serves it
-yet (the provisioning picker gains per-build selection in roadmap M5).
+yet.
+
+## Consumers
+
+These files are also read app-side, embedded by `lpa-boards`
+(`BUILD_DEF_SOURCES`), for the **computed board↔firmware join**: a board runs
+a build when `chip.name` equals the board's chip and the board's flash is at
+least `flashSizeMb`. The boards catalog renders the result; the provisioning
+picker will select through the same function when it lands (board-selection
+roadmap M5). A drift test fails if this directory and `BUILD_DEF_SOURCES`
+disagree, so adding a build def means adding its `include_str!` entry.
+
+Feature lines shown for a build come from that package's
+`manifest-core.expected.json` — the CI-verified extraction of the image's own
+manifest — so **two build defs sharing a `package` must share
+`cargoFeatures`** (a test enforces it); the day they need to differ, the
+fixtures must go per build rather than per package.
 
