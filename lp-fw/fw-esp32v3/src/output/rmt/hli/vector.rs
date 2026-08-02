@@ -91,7 +91,7 @@ pub(super) const HLI_CPU_INTERRUPT: u32 = 24;
 /// the build instead of silently corrupting the walk.
 const CH_SIZE: usize = size_of::<HliChannel>();
 const CH_HALF_SIZE: usize = CH_SIZE / 2;
-const _: () = assert!(CH_SIZE % 8 == 0 && CH_HALF_SIZE <= 127);
+const _: () = assert!(CH_SIZE % 4 == 0 && CH_HALF_SIZE * 2 == CH_SIZE && CH_HALF_SIZE <= 127);
 // The histogram bases must stay within l32i/s32i's 0..=1020 offset range even
 // after the +32 a bucket index can add.
 const _: () = assert!(offset_of!(HliChannel, lag_hist) + 4 * 8 <= 1020);
@@ -233,6 +233,21 @@ __naked_level_4_interrupt:
     addi    a6, a6, 1
     s32i    a6, a5, {off_entry_hist}
 
+    // Selection-mismatch diagnostic (see the contract crate's field docs):
+    // reader's half (pos vs half, a4 vs a9) against the armed boundary's
+    // half (boundary != 0). Boundary is still the pre-flip value here.
+    l32i    a6, a2, {off_boundary}
+    movi    a5, 0
+    bltu    a4, a9, 20f
+    movi    a5, 1
+20: movi    a10, 0
+    beqz    a6, 21f
+    movi    a10, 1
+21: beq     a5, a10, 22f
+    l32i    a10, a2, {off_sel_mismatch}
+    addi    a10, a10, 1
+    s32i    a10, a2, {off_sel_mismatch}
+22:
     // Select the free half; flip the software boundary; re-arm. The classic's
     // CH_TX_LIM is a repeating count, so the armed value is always the half
     // size (mirroring v3_rmt::set_tx_threshold's clamp).
@@ -490,6 +505,7 @@ __naked_level_4_interrupt:
     off_lag_count = const offset_of!(HliChannel, lag_count),
     off_lag_max = const offset_of!(HliChannel, lag_max),
     off_entry_hist = const offset_of!(HliChannel, entry_hist),
+    off_sel_mismatch = const offset_of!(HliChannel, sel_mismatch),
     off_lag_hist = const offset_of!(HliChannel, lag_hist),
 );
 

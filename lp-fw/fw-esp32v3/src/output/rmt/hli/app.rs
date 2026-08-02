@@ -353,7 +353,7 @@ mod telemetry {
             esp_println::println!(
                 "[WS281X] t_ms={} ch={} half={} frames={} complete={} trips={} skips={} \
                  errors={} refills={} wanted={} lag_avg={}.{} lag_max={} over_half={} \
-                 hist={} entry_max={} entry_hist={} src=hli4",
+                 hist={} entry_max={} entry_hist={} src=hli4 selmis={}",
                 now_ms,
                 slot,
                 half,
@@ -371,6 +371,7 @@ mod telemetry {
                 Hist(&ch.lag_hist),
                 ch.entry_max.load(Relaxed),
                 Hist(&ch.entry_hist),
+                ch.sel_mismatch.load(Relaxed),
             );
         }
     }

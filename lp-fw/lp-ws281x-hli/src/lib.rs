@@ -164,6 +164,11 @@ pub struct HliChannel {
     pub lag_count: AtomicU32,
     /// Worst refill lag, in words.
     pub lag_max: AtomicU32,
+    /// Services where the reader's half disagreed with the armed boundary's
+    /// half — the signature of a missed or duplicated threshold event (the
+    /// boundary bookkeeping and the silicon got out of step). Diagnostic for
+    /// the stress trips question.
+    pub sel_mismatch: AtomicU32,
     /// Entry-delay histogram, eighths of a half + overflow.
     pub entry_hist: [AtomicU32; LAG_BUCKETS],
     /// Refill-lag histogram, same edges.
@@ -204,6 +209,7 @@ impl HliChannel {
             lag_sum: AtomicU32::new(0),
             lag_count: AtomicU32::new(0),
             lag_max: AtomicU32::new(0),
+            sel_mismatch: AtomicU32::new(0),
             entry_hist: [const { AtomicU32::new(0) }; LAG_BUCKETS],
             lag_hist: [const { AtomicU32::new(0) }; LAG_BUCKETS],
         }
@@ -430,6 +436,15 @@ pub unsafe fn service_threshold(ch: &HliChannel, port: &mut impl HliPort) {
         ch.entry_max.store(delay, Relaxed);
     }
     ch.entry_hist[bucket(ch, delay)].fetch_add(1, Relaxed);
+
+    // Selection-mismatch diagnostic: the armed boundary names the half the
+    // reader should be inside when this event is serviced (boundary `half` ->
+    // second half, boundary 0 -> first). Disagreement means an event was
+    // missed or duplicated somewhere between the silicon and this bookkeeping.
+    let expected_in_second = boundary != 0;
+    if (pos >= half) != expected_in_second {
+        ch.sel_mismatch.fetch_add(1, Relaxed);
+    }
 
     // The transmitter is inside one half; the other is free.
     let (free_start, guard_slot, new_boundary) = if pos >= half {
