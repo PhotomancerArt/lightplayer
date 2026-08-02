@@ -544,9 +544,17 @@ impl LpvmInstance for WasmLpvmInstance {
         width: u32,
         height: u32,
     ) -> Result<(), Self::Error> {
+        // Deliberately still Q32-only, unlike lpvm-native's two backends: the
+        // wasm tier cannot compile a *correct* Float module at all yet — its
+        // f32 builtin id resolution is unimplemented, which is also what keeps
+        // `wasm.f32` out of the filetest defaults
+        // (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`). The synth
+        // wrapper is mode-aware now, so this guard is the only thing left; drop
+        // it when that resolution lands, not before.
         if self.float_mode != FloatMode::Q32 {
             return Err(WasmError::runtime(
-                "WasmLpvmInstance::call_render_texture requires FloatMode::Q32",
+                "WasmLpvmInstance::call_render_texture requires FloatMode::Q32 \
+                 (the wasm tier has no f32 builtin lowering yet)",
             ));
         }
 
@@ -586,9 +594,11 @@ impl LpvmInstance for WasmLpvmInstance {
         out: &mut LpvmBuffer,
         count: u32,
     ) -> Result<(), Self::Error> {
+        // See `call_render_texture` for why this one stays.
         if self.float_mode != FloatMode::Q32 {
             return Err(WasmError::runtime(
-                "WasmLpvmInstance::call_render_samples requires FloatMode::Q32",
+                "WasmLpvmInstance::call_render_samples requires FloatMode::Q32 \
+                 (the wasm tier has no f32 builtin lowering yet)",
             ));
         }
 
@@ -686,7 +696,7 @@ mod tests {
 
     use lp_shader::synth::synthesise_render_texture;
     use lpir::builder::FunctionBuilder;
-    use lpir::{FuncId, IrType, LpirModule, LpirOp};
+    use lpir::{FloatMode, FuncId, IrType, LpirModule, LpirOp};
     use lps_shared::{
         FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureStorageFormat,
     };
@@ -767,9 +777,14 @@ mod tests {
     fn render_texture_trap_reports_offending_pixel_index() {
         let k = 2u32; // pixel (2, 0) of a 4x1 texture
         let (mut ir, mut meta) = render_module_spinning_at(k as i32 * Q_ONE + Q_HALF);
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
 
         let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
         let module = engine.compile(&ir, &meta).expect("compile");
@@ -905,9 +920,14 @@ mod tests {
 
     fn bounded_render_bytes(fuel: bool) -> Vec<u8> {
         let (mut ir, mut meta) = bounded_render_module();
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         let options = WasmOptions {
             fuel,
             ..WasmOptions::default()
