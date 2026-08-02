@@ -17,5 +17,5 @@ pub use project_read::{
     ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
     RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, WireBindingDirection,
     WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireEffectiveBinding,
+    WireEffectiveBinding, WireScopeRef,
 };

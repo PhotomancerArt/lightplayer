@@ -379,10 +379,27 @@ impl ProjectController {
                 focus: node.map(node_focus_action),
             })
         };
+        let root_scope = graph
+            .channels
+            .iter()
+            .find(|channel| channel.primary_visual)
+            .and_then(|channel| channel.scope);
         let channels = graph
             .channels
             .iter()
             .map(|channel| crate::UiBusChannelView {
+                scope: channel.scope,
+                // Root-scope rows carry no label; embedded scopes label by
+                // their owner module's node label (display derivation is a
+                // client concern — the wire ships structure only).
+                scope_label: channel
+                    .scope
+                    .filter(|scope| Some(*scope) != root_scope)
+                    .map(|scope| {
+                        self.node_by_runtime_id(scope.owner())
+                            .map(|node| node.label().to_string())
+                            .unwrap_or_else(|| format!("node {}", scope.owner().0))
+                    }),
                 name: channel.name.clone(),
                 kind: channel.kind.map(|kind| format!("{kind:?}")),
                 value: channel
@@ -580,7 +597,7 @@ impl ProjectController {
             // the authoring surface is built, so Retarget/Unbind state never
             // carries the churning value (P6 item 1).
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
-                && let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint
+                && let lpc_wire::WireBindingEndpoint::Bus { channel, .. } = &binding.endpoint
                 && let Some(live) = live_channel_value(graph, channel, binding.kind)
             {
                 endpoint = endpoint.with_live_value(live);
@@ -607,7 +624,7 @@ impl ProjectController {
         endpoint: &lpc_wire::WireBindingEndpoint,
     ) -> crate::UiBindingEndpoint {
         match endpoint {
-            lpc_wire::WireBindingEndpoint::Bus { channel } => {
+            lpc_wire::WireBindingEndpoint::Bus { channel, .. } => {
                 crate::UiBindingEndpoint::new(format!("bus:{channel}"))
             }
             lpc_wire::WireBindingEndpoint::NodeSlot { node, slot } => {
@@ -1337,7 +1354,7 @@ impl ProjectController {
             if binding.direction != lpc_wire::WireBindingDirection::Consumes {
                 continue;
             }
-            let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint else {
+            let lpc_wire::WireBindingEndpoint::Bus { channel, .. } = &binding.endpoint else {
                 continue;
             };
             let Some(slot) = binding.slot.as_ref() else {
@@ -5771,6 +5788,7 @@ mod tests {
                     slot: Some(SlotPath::parse("input").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Consumes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "visual.out".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Authored,
@@ -5783,6 +5801,7 @@ mod tests {
                     slot: Some(SlotPath::parse("output").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Publishes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "visual.out".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -5791,6 +5810,7 @@ mod tests {
                 },
             ],
             channels: vec![lpc_wire::WireBusChannel {
+                scope: None,
                 name: "visual.out".to_string(),
                 kind: Some(lpc_model::Kind::Color),
                 providers: vec![1],
@@ -5843,6 +5863,7 @@ mod tests {
                     slot: Some(SlotPath::parse("seconds").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Publishes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "time".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -5855,6 +5876,7 @@ mod tests {
                     slot: Some(SlotPath::parse("time").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Consumes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "time".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -5923,6 +5945,7 @@ mod tests {
                 slot: Some(SlotPath::parse("seconds").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Publishes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "other".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6008,6 +6031,7 @@ mod tests {
             revision: Revision::new(2),
             bindings: Vec::new(),
             channels: vec![lpc_wire::WireBusChannel {
+                scope: None,
                 name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
                 kind: Some(lpc_model::Kind::Color),
                 providers: Vec::new(),
@@ -6192,6 +6216,7 @@ mod tests {
                 slot: Some(SlotPath::parse("time").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "time".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6227,6 +6252,7 @@ mod tests {
                 slot: Some(SlotPath::parse("time").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "time".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6373,6 +6399,7 @@ mod tests {
             bindings: Vec::new(),
             channels: vec![
                 lpc_wire::WireBusChannel {
+                    scope: None,
                     name: "time".to_string(),
                     kind: Some(lpc_model::Kind::Instant),
                     providers: vec![0],
@@ -6381,6 +6408,7 @@ mod tests {
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
+                    scope: None,
                     name: "wobble".to_string(),
                     kind: None,
                     providers: vec![0],
@@ -6429,6 +6457,7 @@ mod tests {
                 slot: Some(SlotPath::parse(slot).unwrap()),
                 direction,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "visual.out".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Authored,
@@ -6483,6 +6512,7 @@ mod tests {
                 slot: Some(SlotPath::parse(slot).unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: channel.to_string(),
                 },
                 origin,
@@ -6492,6 +6522,7 @@ mod tests {
         };
         let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
             lpc_wire::WireBusChannel {
+                scope: None,
                 name: name.to_string(),
                 kind: Some(kind),
                 providers: Vec::new(),
