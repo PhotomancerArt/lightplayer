@@ -4417,6 +4417,7 @@ label:has(> input:not(:disabled)) {
 
 .lpb-ed-hidden-input {
     display: none;
+}
 
 /* ---------------------------------------------------------------------------
    Debug (hazard) treatment — D9.

@@ -18,9 +18,12 @@ use crate::resource::{
 
 /// The color the `test_pattern` Debug slot paints.
 ///
-/// Full white on every channel: the slot exists to answer "is this pin wired to
-/// that strip?", so it must be unmistakable and independent of the graph.
-const TEST_PATTERN_RGB: [u8; 3] = [255, 255, 255];
+/// 25% white on every channel (G2 decision): the slot answers "is this pin
+/// wired to that strip?", which needs an unmistakable, graph-independent
+/// color — but full white is the maximum-current draw on a long strip, so
+/// the pattern stays deliberately dim. If power limits ever become
+/// first-class settings, this is the constant a smarter policy replaces.
+const TEST_PATTERN_RGB: [u8; 3] = [64, 64, 64];
 
 /// Output node that owns the materialized control sample buffer.
 pub struct OutputNode {
@@ -217,7 +220,9 @@ mod tests {
     /// One RGB lamp: the smallest extent that still exercises the triplet layout.
     const ONE_LAMP: ControlExtent = ControlExtent::new(1, 3);
     /// The white the bypass paints, in the u16 unorm units the buffer carries.
-    const WHITE16: u16 = 255 * 257;
+    /// The pattern color as the 16-bit unorm samples `fill_solid` publishes,
+    /// derived from the const so the tests track a retune automatically.
+    const PATTERN16: u16 = TEST_PATTERN_RGB[0] as u16 * 257;
 
     fn node_id() -> NodeId {
         NodeId::new(1)
@@ -404,7 +409,7 @@ mod tests {
 
         assert_eq!(
             resolver.published_samples(),
-            vec![WHITE16, WHITE16, WHITE16],
+            vec![PATTERN16, PATTERN16, PATTERN16],
             "buffer should hold the solid test color as u16 unorm triplets",
         );
         assert_eq!(
@@ -446,7 +451,7 @@ mod tests {
             );
             assert_eq!(
                 resolver.published_samples(),
-                vec![WHITE16, WHITE16, WHITE16]
+                vec![PATTERN16, PATTERN16, PATTERN16]
             );
         }
 
@@ -488,7 +493,7 @@ mod tests {
         consume_at(&mut node, &mut resolver, Revision::new(2)).expect("pattern frame");
         assert_eq!(
             resolver.published_samples(),
-            vec![WHITE16, WHITE16, WHITE16]
+            vec![PATTERN16, PATTERN16, PATTERN16]
         );
 
         resolver.test_pattern = false;
@@ -499,7 +504,7 @@ mod tests {
         consume_at(&mut node, &mut resolver, Revision::new(4)).expect("pattern frame");
         assert_eq!(
             resolver.published_samples(),
-            vec![WHITE16, WHITE16, WHITE16]
+            vec![PATTERN16, PATTERN16, PATTERN16]
         );
 
         assert_eq!(
@@ -520,7 +525,7 @@ mod tests {
 
         assert_eq!(
             resolver.published_samples(),
-            vec![WHITE16; 6],
+            vec![PATTERN16; 6],
             "the pattern repaints the last-established extent, it does not resize it",
         );
         assert_eq!(
