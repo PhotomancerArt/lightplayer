@@ -113,6 +113,10 @@ pub struct HomeDeviceEvidence {
     /// the safe-mode output clamp the card must surface (with its exit:
     /// a power cycle).
     pub recovery: Option<lpc_wire::server::RecoveryStatus>,
+    /// Chip identity from the session snapshot (SYNC probe when one ran,
+    /// else the passive boot banner) — the setup form's board picker leads
+    /// with boards matching it (M5).
+    pub detected_chip: Option<String>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -349,6 +353,7 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         safe_clamp: None,
         fw: None,
         hardware: None,
+        detected_chip: None,
         sim: true,
         console_tail: sim.console_tail.clone(),
         ui: CardUiState::default(),
@@ -432,6 +437,7 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         project,
         fw,
         hardware,
+        detected_chip: live.detected_chip.clone(),
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
         // after they already did it.
@@ -565,6 +571,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         // remembered only: no live hello, no firmware provenance
         fw: None,
         hardware: None,
+        detected_chip: None,
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
@@ -884,6 +891,7 @@ mod tests {
                 sim: false,
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
+                detected_chip: None,
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
@@ -897,6 +905,7 @@ mod tests {
                 sim: false,
                 console_tail: Vec::new(),
                 ui: CardUiState::default(),
+                detected_chip: None,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
