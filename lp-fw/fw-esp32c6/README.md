@@ -31,24 +31,49 @@ belongs in `fw-host`. Browser Studio simulation belongs in `fw-browser`.
 `src/output/rmt/` implements `lp_ws281x::RmtHw` for this chip and registers one
 driver at boot; the sequencing lives in `lp-fw/lp-ws281x` and is shared with
 `fw-esp32s3` and `fw-esp32v3`. The chip has **two RMT TX channels** (48-word
-memory blocks), and both are usable in the shipped configuration:
+memory blocks):
 
 | Build | Blocks/channel | Usable channels | Window | Refill half |
 | --- | --- | --- | --- | --- |
-| default | 1 | 2 (`/rmt/ws281x0`, `/rmt/ws281x1`) | 48 words | 24 words (~30 µs) |
+| default (**shipped**) | 1 | 2 (`/rmt/ws281x0`, `/rmt/ws281x1`) | 48 words | 24 words (~30 µs) |
 | `--features ws281x_2blocks` | 2 | 1 (slot 1 absorbed) | 96 words | 48 words (~60 µs) |
 
-Which one ships is a measurement question (roadmap M5's stress matrix), so it is
-a cargo feature, never an env var — and cargo tracks feature-driven `cfg`
-unreliably here, so `touch src/main.rs` before rebuilding after flipping it.
-`--features ws281x_telemetry` adds a periodic `[WS281X]` counters line per
-channel, in the same field order the classic firmware prints.
+**2ch × 24-word halves ships as the default**, decided at roadmap M5's G1 gate
+(`2026-08-01-1459-rmt-priority-hli`, phase P4) from measurement, not
+arithmetic: under a WiFi scan, the default's first channel truncates 28.0 %
+of frames (1,380/4,932) vs the `ws281x_2blocks` single-channel config's
+0.49 % (25/5,071) — margin drops truncation 57×, but does not eliminate it,
+and the C6 sits at `Priority::max()` already (RISC-V has no headroom above
+maskable levels to raise into). Yona's call: "wifi load isn't a big concern
+for actual used installs. that's mostly an editing concern, unless we start
+streaming opc or e131" — so `ws281x_2blocks` is the documented fallback for
+scan-heavy conditions (e.g. mid-edit with the client connected over WiFi),
+not the shipped default. **Reopen trigger**: OPC/E1.31-over-WiFi streaming
+lands (that is also the unmeasured S4 scenario — sustained UDP while
+associated — so S4 measurement precedes any config revisit).
+
+Which one ships is therefore a cargo feature, never an env var — and cargo
+tracks feature-driven `cfg` unreliably here, so `touch src/main.rs` before
+rebuilding after flipping it. `--features ws281x_telemetry` adds a periodic
+`[WS281X]` counters line per channel, in the same field order the classic
+firmware prints, including the entry-delay fields (see `lp-fw/lp-ws281x`'s
+README for what they measure — they are what attributed the scan truncation
+above to interrupt-to-service latency rather than refill work).
+
+`--features stress_s2` and `--features stress_s3` add embassy tasks that
+replace the ESP-NOW radio driver registration with a continuous load
+generator — S2 repeats active WiFi scans to completion, S3 sends bursts of
+ESP-NOW broadcasts — for reproducing the M5 stress matrix on the desk. Both
+imply `radio`, are off by default, and cost the shipping image nothing
+(byte-identical size-check with either enabled). They are a measurement tool,
+not a product feature.
 
 Which pins the two channels drive is authored, not fixed: an `Output` node names
 a board label (`ws281x:rmt:D10`) and the driver binds that GPIO when the project
 opens the endpoint. The desk jig used for M5 wires three strips — D10/GPIO18,
 D9/GPIO20, and D8/GPIO19. Only the first two can be RMT channels; D8 is spare
-for a future SPI-class output, since the chip has no third TX channel.
+for a future SPI-class output — **not an RMT resource**, since the chip has
+no third TX channel.
 
 ## Common Commands
 
