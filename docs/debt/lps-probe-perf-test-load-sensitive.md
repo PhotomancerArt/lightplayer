@@ -46,6 +46,16 @@ already recorded in story-capture-pipeline.md).
   moments later. Third sighting of the same shape; no code in the failing
   crate had changed.
 
+- 2026-08-02 (second, M5 merge gate) — 10.49 s under a concurrent story
+  capture; 4.04 s isolated minutes later. **This one masked a real
+  failure**: `test-rust-core` aborting means `just test` never reaches
+  `test-studio-host`, so a genuine compile break in `lpa-studio-web`
+  (a stale test call after a signature change) shipped to CI unseen and
+  failed there instead. The flake's cost is no longer just a re-run —
+  it hides the recipes behind it. Workaround while it stands: when
+  `test-rust-core` fails on this test alone, re-run the LATER recipes
+  explicitly (`just test-studio-host`) before believing the tree.
+
 **Exit criteria** — The default suite contains no load-sensitive
 wall-clock assert: the perf measurement either moves behind an opt-in
 feature/recipe (perf job), switches to a load-insensitive proxy (eval
