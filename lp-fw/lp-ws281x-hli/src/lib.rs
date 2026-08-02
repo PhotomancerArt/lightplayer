@@ -149,8 +149,10 @@ pub struct HliChannel {
     /// Frames that ended short of `total_bits` — a lost/late refill hit the
     /// guard word.
     pub trips: AtomicU32,
-    /// Guard placements skipped because the read pointer still sat on the
-    /// guard slot.
+    /// Refills that ended with no guard planted: the read pointer sat on the
+    /// guard slot at entry **and** was still there after the fill. (The
+    /// level-3 driver counts pre-fill misses only; this path retries after
+    /// the fill because a zero-entry-delay service is its normal case.)
     pub skips: AtomicU32,
     /// `chN_err` causes seen.
     pub errors: AtomicU32,
@@ -442,13 +444,19 @@ pub unsafe fn service_threshold(ch: &HliChannel, port: &mut impl HliPort) {
     ch.boundary.store(new_boundary, Relaxed);
     port.write_tx_lim(half);
 
-    if pos == guard_slot {
-        // The reader has not left the slot; a STOP there would end a healthy
-        // frame.
-        ch.skips.fetch_add(1, Relaxed);
+    // Guard placement. The level-4 handler routinely arrives with the reader
+    // still ON the boundary slot (entry delay 0 — measured on silicon, where
+    // `skips == refills` before this retry existed), so a pre-fill-only
+    // guard would leave most refills unguarded. Plant it up front when the
+    // slot is already clear; otherwise retry after the fill, by which point
+    // the reader has moved on. `skips` counts only refills left unguarded by
+    // BOTH attempts.
+    let deferred_guard = if pos == guard_slot {
+        Some(guard_slot)
     } else {
         port.write_ram(guard_slot, STOP_WORD);
-    }
+        None
+    };
 
     // SAFETY: forwarded contract.
     unsafe { fill_half(ch, port, free_start) };
@@ -461,6 +469,15 @@ pub unsafe fn service_threshold(ch: &HliChannel, port: &mut impl HliPort) {
         ch.lag_max.store(advanced, Relaxed);
     }
     ch.lag_hist[bucket(ch, advanced)].fetch_add(1, Relaxed);
+
+    if let Some(slot) = deferred_guard {
+        let pos_now = port.read_pos_abs().wrapping_sub(window_start) & mask;
+        if pos_now == slot {
+            ch.skips.fetch_add(1, Relaxed);
+        } else {
+            port.write_ram(slot, STOP_WORD);
+        }
+    }
 }
 
 /// Service one `tx_end` for `ch` — the model of the handler's finish: classify

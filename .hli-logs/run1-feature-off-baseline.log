@@ -1,0 +1,192 @@
+[WS281X] t_ms=20071 ch=0 half=64[WS281X] t_ms=30111 ch=0 half=64 frames=647 complete=647 trips=0 skips=0 errors=0 refills=7117 wanted=7764 lag_avg=15.0 lag_max=17 over_half=0 hist=647:0:6470:0:0:0:0:0:0 entry_max=55 entry_hist=5824:646:0:0:1:0:646:0:0
+[WS281X] t_ms=30111 ch=2 half=64 frames=646 complete=646 trips=0 skips=0 errors=0 refills=7106 wanted=7752 lag_avg=15.0 lag_max=17 over_half=0 hist=646:646:5814:0:0:0:0:0:0 entry_max=8 entry_hist=7105:1:0:0:0:0:0:0:0
+[WS281X] t_ms=30111 ch=4 half=64 frames=646 complete=646 trips=0 skips=0 errors=0 refills=7106 wanted=7752 lag_avg=14.0 lag_max=16 over_half=0 hist=1292:0:5814:0:0:0:0:0:0 entry_max=8 entry_hist=7105:1:0:0:0:0:0:0:0
+[WS281X] t_ms=30111 ch=6 half=64 frames=646 complete=646 trips=0 skips=0 errors=0 refills=7106 wanted=7752 lag_avg=14.0 lag_max=16 over_half=0 hist=1292:0:5814:0:0:0:0:0:0 entry_max=8 entry_hist=7105:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.744175,"sdev":0,"min":21.744175,"max":21.744175},"frame_count":656,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":30169,"memory":{"freeBytes":9856,"usedBytes":102784,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=656 fps=21 elapsed=5045ms recv=1ms tick=44ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.7558,"sdev":0,"min":21.7558,"max":21.7558},"frame_count":766,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":35209,"memory":{"freeBytes":9856,"usedBytes":102784,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=766 fps=21 elapsed=5040ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+[WS281X] t_ms=40150 ch=0 half=64 frames=866 complete=866 trips=0 skips=0 errors=0 refills=9526 wanted=10392 lag_avg=15.0 lag_max=17 over_half=0 hist=866:0:8660:0:0:0:0:0:0 entry_max=55 entry_hist=7795:865:0:0:1:0:865:0:0
+[WS281X] t_ms=40150 ch=2 half=64 frames=865 complete=865 trips=0 skips=0 errors=0 refills=9515 wanted=10380 lag_avg=15.0 lag_max=17 over_half=0 hist=865:865:7785:0:0:0:0:0:0 entry_max=8 entry_hist=9514:1:0:0:0:0:0:0:0
+[WS281X] t_ms=40150 ch=4 half=64 frames=865 complete=865 trips=0 skips=0 errors=0 refills=9515 wanted=10380 lag_avg=14.0 lag_max=16 over_half=0 hist=1730:0:7785:0:0:0:0:0:0 entry_max=8 entry_hist=9514:1:0:0:0:0:0:0:0
+[WS281X] t_ms=40150 ch=6 half=64 frames=865 complete=865 trips=0 skips=0 errors=0 refills=9515 wanted=10380 lag_avg=14.0 lag_max=16 over_half=0 hist=1730:0:7785:0:0:0:0:0:0 entry_max=8 entry_hist=9514:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.761812,"sdev":0,"min":21.761812,"max":21.761812},"frame_count":876,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":40254,"memory":{"freeBytes":9856,"usedBytes":102784,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=876 fps=21 elapsed=5045ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.768888,"sdev":0,"min":21.768888,"max":21.768888},"frame_count":986,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":45294,"memory":{"freeBytes":9856,"usedBytes":102784,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=986 fps=21 elapsed=5040ms recv=0ms tick=44ms send=0ms total=45ms responses=0
+[WS281X] t_ms=50190 ch=0 half=64 frames=1085 complete=1085 trips=0 skips=0 errors=0 refills=11935 wanted=13020 lag_avg=15.0 lag_max=17 over_half=0 hist=1085:0:10850:0:0:0:0:0:0 entry_max=55 entry_hist=9766:1084:0:0:1:0:1084:0:0
+[WS281X] t_ms=50190 ch=2 half=64 frames=1084 complete=1084 trips=0 skips=0 errors=0 refills=11924 wanted=13008 lag_avg=15.0 lag_max=17 over_half=0 hist=1084:1084:9756:0:0:0:0:0:0 entry_max=8 entry_hist=11923:1:0:0:0:0:0:0:0
+[WS281X] t_ms=50190 ch=4 half=64 frames=1084 complete=1084 trips=0 skips=0 errors=0 refills=11924 wanted=13008 lag_avg=14.0 lag_max=16 over_half=0 hist=2168:0:9756:0:0:0:0:0:0 entry_max=8 entry_hist=11923:1:0:0:0:0:0:0:0
+[WS281X] t_ms=50190 ch=6 half=64 frames=1084 complete=1084 trips=0 skips=0 errors=0 refills=11924 wanted=13008 lag_avg=14.0 lag_max=16 over_half=0 hist=2168:0:9756:0:0:0:0:0:0 entry_max=8 entry_hist=11923:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.77198,"sdev":0,"min":21.768888,"max":21.77198},"frame_count":1095,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":50294,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1095 fps=21 elapsed=5000ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.776846,"sdev":0,"min":21.776846,"max":21.776846},"frame_count":1205,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":55334,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1205 fps=21 elapsed=5040ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+[WS281X] t_ms=60229 ch=0 half=64 frames=1304 complete=1304 trips=0 skips=0 errors=0 refills=14344 wanted=15648 lag_avg=15.0 lag_max=17 over_half=0 hist=1304:0:13040:0:0:0:0:0:0 entry_max=55 entry_hist=11737:1303:0:0:1:0:1303:0:0
+[WS281X] t_ms=60229 ch=2 half=64 frames=1303 complete=1303 trips=0 skips=0 errors=0 refills=14333 wanted=15636 lag_avg=15.0 lag_max=17 over_half=0 hist=1303:1303:11727:0:0:0:0:0:0 entry_max=8 entry_hist=14332:1:0:0:0:0:0:0:0
+[WS281X] t_ms=60229 ch=4 half=64 frames=1303 complete=1303 trips=0 skips=0 errors=0 refills=14333 wanted=15636 lag_avg=14.0 lag_max=16 over_half=0 hist=2606:0:11727:0:0:0:0:0:0 entry_max=8 entry_hist=14332:1:0:0:0:0:0:0:0
+[WS281X] t_ms=60229 ch=6 half=64 frames=1303 complete=1303 trips=0 skips=0 errors=0 refills=14333 wanted=15636 lag_avg=14.0 lag_max=16 over_half=0 hist=2606:0:11727:0:0:0:0:0:0 entry_max=8 entry_hist=14332:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.778765,"sdev":0,"min":21.776846,"max":21.778765},"frame_count":1314,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":60334,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1314 fps=21 elapsed=5000ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.78236,"sdev":0,"min":21.78236,"max":21.78236},"frame_count":1424,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":65374,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1424 fps=21 elapsed=5040ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=70269 ch=0 half=64 frames=1523 complete=1523 trips=0 skips=0 errors=0 refills=16753 wanted=18276 lag_avg=15.0 lag_max=17 over_half=0 hist=1523:0:15230:0:0:0:0:0:0 entry_max=55 entry_hist=13708:1522:0:0:1:0:1522:0:0
+[WS281X] t_ms=70269 ch=2 half=64 frames=1522 complete=1522 trips=0 skips=0 errors=0 refills=16742 wanted=18264 lag_avg=15.0 lag_max=17 over_half=0 hist=1522:1522:13698:0:0:0:0:0:0 entry_max=8 entry_hist=16741:1:0:0:0:0:0:0:0
+[WS281X] t_ms=70269 ch=4 half=64 frames=1522 complete=1522 trips=0 skips=0 errors=0 refills=16742 wanted=18264 lag_avg=14.0 lag_max=16 over_half=0 hist=3044:0:13698:0:0:0:0:0:0 entry_max=8 entry_hist=16741:1:0:0:0:0:0:0:0
+[WS281X] t_ms=70269 ch=6 half=64 frames=1522 complete=1522 trips=0 skips=0 errors=0 refills=16742 wanted=18264 lag_avg=14.0 lag_max=16 over_half=0 hist=3044:0:13698:0:0:0:0:0:0 entry_max=8 entry_hist=16741:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.783613,"sdev":0,"min":21.78236,"max":21.783613},"frame_count":1533,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":70374,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1533 fps=21 elapsed=5000ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.786406,"sdev":0,"min":21.786406,"max":21.786406},"frame_count":1643,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":75414,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1643 fps=21 elapsed=5040ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+[WS281X] t_ms=80309 ch=0 half=64 frames=1742 complete=1742 trips=0 skips=0 errors=0 refills=19162 wanted=20904 lag_avg=15.0 lag_max=17 over_half=0 hist=1742:0:17420:0:0:0:0:0:0 entry_max=55 entry_hist=15679:1741:0:0:1:0:1741:0:0
+[WS281X] t_ms=80309 ch=2 half=64 frames=1741 complete=1741 trips=0 skips=0 errors=0 refills=19151 wanted=20892 lag_avg=15.0 lag_max=17 over_half=0 hist=1741:1741:15669:0:0:0:0:0:0 entry_max=8 entry_hist=19150:1:0:0:0:0:0:0:0
+[WS281X] t_ms=80309 ch=4 half=64 frames=1741 complete=1741 trips=0 skips=0 errors=0 refills=19151 wanted=20892 lag_avg=14.0 lag_max=16 over_half=0 hist=3482:0:15669:0:0:0:0:0:0 entry_max=8 entry_hist=19150:1:0:0:0:0:0:0:0
+[WS281X] t_ms=80309 ch=6 half=64 frames=1741 complete=1741 trips=0 skips=0 errors=0 refills=19151 wanted=20892 lag_avg=14.0 lag_max=16 over_half=0 hist=3482:0:15669:0:0:0:0:0:0 entry_max=8 entry_hist=19150:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.78725,"sdev":0,"min":21.786406,"max":21.78725},"frame_count":1752,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":80414,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1752 fps=21 elapsed=5000ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.789755,"sdev":0,"min":21.789755,"max":21.789755},"frame_count":1862,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":85453,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1862 fps=21 elapsed=5039ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=90349 ch=0 half=64 frames=1961 complete=1961 trips=0 skips=0 errors=0 refills=21571 wanted=23532 lag_avg=15.0 lag_max=17 over_half=0 hist=1961:0:19610:0:0:0:0:0:0 entry_max=55 entry_hist=17650:1960:0:0:1:0:1960:0:0
+[WS281X] t_ms=90349 ch=2 half=64 frames=1960 complete=1960 trips=0 skips=0 errors=0 refills=21560 wanted=23520 lag_avg=15.0 lag_max=17 over_half=0 hist=1960:1960:17640:0:0:0:0:0:0 entry_max=8 entry_hist=21559:1:0:0:0:0:0:0:0
+[WS281X] t_ms=90349 ch=4 half=64 frames=1960 complete=1960 trips=0 skips=0 errors=0 refills=21560 wanted=23520 lag_avg=14.0 lag_max=16 over_half=0 hist=3920:0:17640:0:0:0:0:0:0 entry_max=8 entry_hist=21559:1:0:0:0:0:0:0:0
+[WS281X] t_ms=90349 ch=6 half=64 frames=1960 complete=1960 trips=0 skips=0 errors=0 refills=21560 wanted=23520 lag_avg=14.0 lag_max=16 over_half=0 hist=3920:0:17640:0:0:0:0:0:0 entry_max=8 entry_hist=21559:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.790081,"sdev":0,"min":21.790081,"max":21.790081},"frame_count":1971,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":90454,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=1971 fps=21 elapsed=5001ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.792173,"sdev":0,"min":21.792173,"max":21.792173},"frame_count":2081,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":95493,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2081 fps=21 elapsed=5039ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=100389 ch=0 half=64 frames=2180 complete=2180 trips=0 skips=0 errors=0 refills=23980 wanted=26160 lag_avg=15.0 lag_max=17 over_half=0 hist=2180:0:21800:0:0:0:0:0:0 entry_max=55 entry_hist=19621:2179:0:0:1:0:2179:0:0
+[WS281X] t_ms=100389 ch=2 half=64 frames=2179 complete=2179 trips=0 skips=0 errors=0 refills=23969 wanted=26148 lag_avg=15.0 lag_max=17 over_half=0 hist=2179:2179:19611:0:0:0:0:0:0 entry_max=8 entry_hist=23968:1:0:0:0:0:0:0:0
+[WS281X] t_ms=100389 ch=4 half=64 frames=2179 complete=2179 trips=0 skips=0 errors=0 refills=23969 wanted=26148 lag_avg=14.0 lag_max=16 over_half=0 hist=4358:0:19611:0:0:0:0:0:0 entry_max=8 entry_hist=23968:1:0:0:0:0:0:0:0
+[WS281X] t_ms=100389 ch=6 half=64 frames=2179 complete=2179 trips=0 skips=0 errors=0 refills=23969 wanted=26148 lag_avg=14.0 lag_max=16 over_half=0 hist=4358:0:19611:0:0:0:0:0:0 entry_max=8 entry_hist=23968:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.792345,"sdev":0,"min":21.792345,"max":21.792345},"frame_count":2190,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":100494,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2190 fps=21 elapsed=5001ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.793924,"sdev":0,"min":21.793924,"max":21.793924},"frame_count":2300,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":105534,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2300 fps=21 elapsed=5040ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=110430 ch=0 half=64 frames=2399 complete=2399 trips=0 skips=0 errors=0 refills=26389 wanted=28788 lag_avg=15.0 lag_max=17 over_half=0 hist=2399:0:23990:0:0:0:0:0:0 entry_max=55 entry_hist=21592:2398:0:0:1:0:2398:0:0
+[WS281X] t_ms=110430 ch=2 half=64 frames=2398 complete=2398 trips=0 skips=0 errors=0 refills=26378 wanted=28776 lag_avg=15.0 lag_max=17 over_half=0 hist=2398:2398:21582:0:0:0:0:0:0 entry_max=8 entry_hist=26377:1:0:0:0:0:0:0:0
+[WS281X] t_ms=110430 ch=4 half=64 frames=2398 complete=2398 trips=0 skips=0 errors=0 refills=26378 wanted=28776 lag_avg=14.0 lag_max=16 over_half=0 hist=4796:0:21582:0:0:0:0:0:0 entry_max=8 entry_hist=26377:1:0:0:0:0:0:0:0
+[WS281X] t_ms=110430 ch=6 half=64 frames=2398 complete=2398 trips=0 skips=0 errors=0 refills=26378 wanted=28776 lag_avg=14.0 lag_max=16 over_half=0 hist=4796:0:21582:0:0:0:0:0:0 entry_max=8 entry_hist=26377:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.794199,"sdev":0,"min":21.793924,"max":21.794199},"frame_count":2409,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":110534,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2409 fps=21 elapsed=5000ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.795559,"sdev":0,"min":21.795559,"max":21.795559},"frame_count":2519,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":115574,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2519 fps=21 elapsed=5040ms recv=1ms tick=44ms send=0ms total=45ms responses=0
+[WS281X] t_ms=120470 ch=0 half=64 frames=2618 complete=2618 trips=0 skips=0 errors=0 refills=28798 wanted=31416 lag_avg=15.0 lag_max=17 over_half=0 hist=2618:0:26180:0:0:0:0:0:0 entry_max=55 entry_hist=23563:2617:0:0:1:0:2617:0:0
+[WS281X] t_ms=120470 ch=2 half=64 frames=2617 complete=2617 trips=0 skips=0 errors=0 refills=28787 wanted=31404 lag_avg=15.0 lag_max=17 over_half=0 hist=2617:2617:23553:0:0:0:0:0:0 entry_max=8 entry_hist=28786:1:0:0:0:0:0:0:0
+[WS281X] t_ms=120470 ch=4 half=64 frames=2617 complete=2617 trips=0 skips=0 errors=0 refills=28787 wanted=31404 lag_avg=14.0 lag_max=16 over_half=0 hist=5234:0:23553:0:0:0:0:0:0 entry_max=8 entry_hist=28786:1:0:0:0:0:0:0:0
+[WS281X] t_ms=120470 ch=6 half=64 frames=2617 complete=2617 trips=0 skips=0 errors=0 refills=28787 wanted=31404 lag_avg=14.0 lag_max=16 over_half=0 hist=5234:0:23553:0:0:0:0:0:0 entry_max=8 entry_hist=28786:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.795744,"sdev":0,"min":21.795559,"max":21.795744},"frame_count":2628,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":120574,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2628 fps=21 elapsed=5000ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.796934,"sdev":0,"min":21.796934,"max":21.796934},"frame_count":2738,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":125614,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2738 fps=21 elapsed=5040ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=130510 ch=0 half=64 frames=2837 complete=2837 trips=0 skips=0 errors=0 refills=31207 wanted=34044 lag_avg=15.0 lag_max=17 over_half=0 hist=2837:0:28370:0:0:0:0:0:0 entry_max=55 entry_hist=25534:2836:0:0:1:0:2836:0:0
+[WS281X] t_ms=130510 ch=2 half=64 frames=2836 complete=2836 trips=0 skips=0 errors=0 refills=31196 wanted=34032 lag_avg=15.0 lag_max=17 over_half=0 hist=2836:2836:25524:0:0:0:0:0:0 entry_max=8 entry_hist=31195:1:0:0:0:0:0:0:0
+[WS281X] t_ms=130510 ch=4 half=64 frames=2836 complete=2836 trips=0 skips=0 errors=0 refills=31196 wanted=34032 lag_avg=14.0 lag_max=16 over_half=0 hist=5672:0:25524:0:0:0:0:0:0 entry_max=8 entry_hist=31195:1:0:0:0:0:0:0:0
+[WS281X] t_ms=130510 ch=6 half=64 frames=2836 complete=2836 trips=0 skips=0 errors=0 refills=31196 wanted=34032 lag_avg=14.0 lag_max=16 over_half=0 hist=5672:0:25524:0:0:0:0:0:0 entry_max=8 entry_hist=31195:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.796885,"sdev":0,"min":21.796885,"max":21.796885},"frame_count":2847,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":130615,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2847 fps=21 elapsed=5001ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.798103,"sdev":0,"min":21.798103,"max":21.798103},"frame_count":2957,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":135654,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=2957 fps=21 elapsed=5039ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=140550 ch=0 half=64 frames=3056 complete=3056 trips=0 skips=0 errors=0 refills=33616 wanted=36672 lag_avg=15.0 lag_max=17 over_half=0 hist=3056:0:30560:0:0:0:0:0:0 entry_max=55 entry_hist=27505:3055:0:0:1:0:3055:0:0
+[WS281X] t_ms=140550 ch=2 half=64 frames=3055 complete=3055 trips=0 skips=0 errors=0 refills=33605 wanted=36660 lag_avg=15.0 lag_max=17 over_half=0 hist=3055:3055:27495:0:0:0:0:0:0 entry_max=8 entry_hist=33604:1:0:0:0:0:0:0:0
+[WS281X] t_ms=140550 ch=4 half=64 frames=3055 complete=3055 trips=0 skips=0 errors=0 refills=33605 wanted=36660 lag_avg=14.0 lag_max=16 over_half=0 hist=6110:0:27495:0:0:0:0:0:0 entry_max=8 entry_hist=33604:1:0:0:0:0:0:0:0
+[WS281X] t_ms=140550 ch=6 half=64 frames=3055 complete=3055 trips=0 skips=0 errors=0 refills=33605 wanted=36660 lag_avg=14.0 lag_max=16 over_half=0 hist=6110:0:27495:0:0:0:0:0:0 entry_max=8 entry_hist=33604:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.798016,"sdev":0,"min":21.798016,"max":21.798016},"frame_count":3066,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":140655,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3066 fps=21 elapsed=5001ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.798964,"sdev":0,"min":21.798964,"max":21.798964},"frame_count":3176,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":145695,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3176 fps=21 elapsed=5040ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=150591 ch=0 half=64 frames=3275 complete=3275 trips=0 skips=0 errors=0 refills=36025 wanted=39300 lag_avg=15.0 lag_max=17 over_half=0 hist=3275:0:32750:0:0:0:0:0:0 entry_max=55 entry_hist=29476:3274:0:0:1:0:3274:0:0
+[WS281X] t_ms=150591 ch=2 half=64 frames=3274 complete=3274 trips=0 skips=0 errors=0 refills=36014 wanted=39288 lag_avg=15.0 lag_max=17 over_half=0 hist=3274:3274:29466:0:0:0:0:0:0 entry_max=8 entry_hist=36013:1:0:0:0:0:0:0:0
+[WS281X] t_ms=150591 ch=4 half=64 frames=3274 complete=3274 trips=0 skips=0 errors=0 refills=36014 wanted=39288 lag_avg=14.0 lag_max=16 over_half=0 hist=6548:0:29466:0:0:0:0:0:0 entry_max=8 entry_hist=36013:1:0:0:0:0:0:0:0
+[WS281X] t_ms=150591 ch=6 half=64 frames=3274 complete=3274 trips=0 skips=0 errors=0 refills=36014 wanted=39288 lag_avg=14.0 lag_max=16 over_half=0 hist=6548:0:29466:0:0:0:0:0:0 entry_max=8 entry_hist=36013:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.798998,"sdev":0,"min":21.798964,"max":21.798998},"frame_count":3285,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":150695,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3285 fps=21 elapsed=5000ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.799852,"sdev":0,"min":21.799852,"max":21.799852},"frame_count":3395,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":155735,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3395 fps=21 elapsed=5040ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+[WS281X] t_ms=160631 ch=0 half=64 frames=3494 complete=3494 trips=0 skips=0 errors=0 refills=38434 wanted=41928 lag_avg=15.0 lag_max=17 over_half=0 hist=3494:0:34940:0:0:0:0:0:0 entry_max=55 entry_hist=31447:3493:0:0:1:0:3493:0:0
+[WS281X] t_ms=160631 ch=2 half=64 frames=3493 complete=3493 trips=0 skips=0 errors=0 refills=38423 wanted=41916 lag_avg=15.0 lag_max=17 over_half=0 hist=3493:3493:31437:0:0:0:0:0:0 entry_max=8 entry_hist=38422:1:0:0:0:0:0:0:0
+[WS281X] t_ms=160631 ch=4 half=64 frames=3493 complete=3493 trips=0 skips=0 errors=0 refills=38423 wanted=41916 lag_avg=14.0 lag_max=16 over_half=0 hist=6986:0:31437:0:0:0:0:0:0 entry_max=8 entry_hist=38422:1:0:0:0:0:0:0:0
+[WS281X] t_ms=160631 ch=6 half=64 frames=3493 complete=3493 trips=0 skips=0 errors=0 refills=38423 wanted=41916 lag_avg=14.0 lag_max=16 over_half=0 hist=6986:0:31437:0:0:0:0:0:0 entry_max=8 entry_hist=38422:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.799856,"sdev":0,"min":21.799852,"max":21.799856},"frame_count":3504,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":160735,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3504 fps=21 elapsed=5000ms recv=0ms tick=44ms send=0ms total=44ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.800632,"sdev":0,"min":21.800632,"max":21.800632},"frame_count":3614,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":165775,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3614 fps=21 elapsed=5040ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+[WS281X] t_ms=170671 ch=0 half=64 frames=3713 complete=3713 trips=0 skips=0 errors=0 refills=40843 wanted=44556 lag_avg=15.0 lag_max=17 over_half=0 hist=3713:0:37130:0:0:0:0:0:0 entry_max=55 entry_hist=33418:3712:0:0:1:0:3712:0:0
+[WS281X] t_ms=170671 ch=2 half=64 frames=3712 complete=3712 trips=0 skips=0 errors=0 refills=40832 wanted=44544 lag_avg=15.0 lag_max=17 over_half=0 hist=3712:3712:33408:0:0:0:0:0:0 entry_max=8 entry_hist=40831:1:0:0:0:0:0:0:0
+[WS281X] t_ms=170671 ch=4 half=64 frames=3712 complete=3712 trips=0 skips=0 errors=0 refills=40832 wanted=44544 lag_avg=14.0 lag_max=16 over_half=0 hist=7424:0:33408:0:0:0:0:0:0 entry_max=8 entry_hist=40831:1:0:0:0:0:0:0:0
+[WS281X] t_ms=170671 ch=6 half=64 frames=3712 complete=3712 trips=0 skips=0 errors=0 refills=40832 wanted=44544 lag_avg=14.0 lag_max=16 over_half=0 hist=7424:0:33408:0:0:0:0:0:0 entry_max=8 entry_hist=40831:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.800615,"sdev":0,"min":21.800615,"max":21.800632},"frame_count":3723,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":170775,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3723 fps=21 elapsed=5000ms recv=1ms tick=44ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.801325,"sdev":0,"min":21.801325,"max":21.801325},"frame_count":3833,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":175815,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3833 fps=21 elapsed=5040ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+[WS281X] t_ms=180710 ch=0 half=64 frames=3932 complete=3932 trips=0 skips=0 errors=0 refills=43252 wanted=47184 lag_avg=15.0 lag_max=17 over_half=0 hist=3932:0:39320:0:0:0:0:0:0 entry_max=55 entry_hist=35389:3931:0:0:1:0:3931:0:0
+[WS281X] t_ms=180710 ch=2 half=64 frames=3931 complete=3931 trips=0 skips=0 errors=0 refills=43241 wanted=47172 lag_avg=15.0 lag_max=17 over_half=0 hist=3931:3931:35379:0:0:0:0:0:0 entry_max=8 entry_hist=43240:1:0:0:0:0:0:0:0
+[WS281X] t_ms=180710 ch=4 half=64 frames=3931 complete=3931 trips=0 skips=0 errors=0 refills=43241 wanted=47172 lag_avg=14.0 lag_max=16 over_half=0 hist=7862:0:35379:0:0:0:0:0:0 entry_max=8 entry_hist=43240:1:0:0:0:0:0:0:0
+[WS281X] t_ms=180710 ch=6 half=64 frames=3931 complete=3931 trips=0 skips=0 errors=0 refills=43241 wanted=47172 lag_avg=14.0 lag_max=16 over_half=0 hist=7862:0:35379:0:0:0:0:0:0 entry_max=8 entry_hist=43240:1:0:0:0:0:0:0:0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.801289,"sdev":0,"min":21.801289,"max":21.801325},"frame_count":3942,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":180815,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=3942 fps=21 elapsed=5000ms recv=0ms tick=45ms send=0ms total=45ms responses=0
+
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":21.801943,"sdev":0,"min":21.801943,"max":21.801943},"frame_count":4052,"loaded_projects":[{"handle":1,"path":"/projects/Quad strips v3"}],"uptime_ms":185855,"memory":{"freeBytes":9852,"usedBytes":102788,"totalBytes":112640},"recovery":{"level":"green","resetReason":"power-on","bootCount":1,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]}}}}
+
+[INFO] fw_esp32_common::server_loop: [perf] frame=4052 fps=21 elapsed=5040ms recv=0ms tick=45ms send=0ms total=45ms responses=0

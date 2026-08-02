@@ -253,18 +253,23 @@ __naked_level_4_interrupt:
     s32i    a9, a5, 0
 
     // Guard word at the first slot of the half being read — unless the reader
-    // still sits on it (planting a STOP there would end a healthy frame).
-    beq     a4, a11, .Lhli_guard_skip
+    // still sits on it (planting a STOP there would end a healthy frame). At
+    // level 4 the reader routinely IS still on the slot (entry delay 0), so
+    // the miss is stashed and retried after the fill; save slot 56 holds the
+    // pending guard slot, or -1.
+    beq     a4, a11, .Lhli_guard_defer
     l32i    a5, a2, {off_ram_base}
-    slli    a11, a11, 2
-    add     a5, a5, a11
-    movi    a11, 0
-    s32i    a11, a5, 0
+    slli    a10, a11, 2
+    add     a5, a5, a10
+    movi    a10, 0
+    s32i    a10, a5, 0
+    movi    a5, -1
+    movi    a10, _hli_l4_save
+    s32i    a5, a10, 56
     j       .Lhli_fill
-.Lhli_guard_skip:
-    l32i    a5, a2, {off_skips}
-    addi    a5, a5, 1
-    s32i    a5, a2, {off_skips}
+.Lhli_guard_defer:
+    movi    a10, _hli_l4_save
+    s32i    a11, a10, 56
 
 .Lhli_fill:
     // Stash pos_before for the lag measurement; a4 is needed as the write
@@ -388,6 +393,32 @@ __naked_level_4_interrupt:
     l32i    a6, a5, {off_lag_hist}
     addi    a6, a6, 1
     s32i    a6, a5, {off_lag_hist}
+
+    // Deferred guard: if the pre-fill attempt found the reader on the slot,
+    // it has had a whole fill to move off it — plant now, or count the
+    // refill as genuinely unguarded.
+    movi    a0, _hli_l4_save
+    l32i    a11, a0, 56
+    movi    a5, -1
+    beq     a11, a5, .Lhli_next
+    l32i    a4, a2, {off_status_addr}
+    l32i    a4, a4, 0
+    extui   a4, a4, 12, 10
+    l32i    a5, a2, {off_window_start}
+    sub     a4, a4, a5
+    l32i    a5, a2, {off_ram_mask}
+    and     a4, a4, a5
+    beq     a4, a11, .Lhli_guard_still
+    l32i    a5, a2, {off_ram_base}
+    slli    a11, a11, 2
+    add     a5, a5, a11
+    movi    a11, 0
+    s32i    a11, a5, 0
+    j       .Lhli_next
+.Lhli_guard_still:
+    l32i    a5, a2, {off_skips}
+    addi    a5, a5, 1
+    s32i    a5, a2, {off_skips}
 
 .Lhli_next:
     addi    a2, a2, {ch_half_size}
