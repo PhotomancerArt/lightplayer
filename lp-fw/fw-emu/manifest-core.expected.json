@@ -15,7 +15,6 @@
     "node.radio",
     "node.shader",
     "node.texture",
-    "diag.unwind",
     "gfx.lpvm"
   ],
   "limits": {},
