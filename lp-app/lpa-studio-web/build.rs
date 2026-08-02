@@ -11,6 +11,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    emit_git_facts(&manifest_dir);
     let src_dir = manifest_dir.join("src");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("out dir"));
     let generated_path = out_dir.join("story_registry.generated.rs");
@@ -34,6 +35,49 @@ fn main() {
     validate_default_story_id(&src_dir, &story_modules);
     fs::write(generated_path, generate_registry(&story_modules))
         .expect("write generated story registry");
+}
+
+/// Bake git facts into the build so the header's version chip can show the
+/// branch on dev builds (deploys fetch `version.json` instead, which wins).
+/// Best-effort by design: no git, no repo, or a failing command simply
+/// leaves the env vars unset and the chip falls back to "dev build" —
+/// this must never fail the build.
+///
+/// The dirty flag is only as fresh as the last build-script run; we rerun
+/// on HEAD moves (commit/branch switch) but deliberately not on every file
+/// edit, so a stale dirty marker between builds is accepted.
+fn emit_git_facts(manifest_dir: &Path) {
+    let git = |args: &[&str]| -> Option<String> {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(manifest_dir)
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
+
+    if let Some(branch) = git(&["rev-parse", "--abbrev-ref", "HEAD"]) {
+        if !branch.is_empty() {
+            println!("cargo:rustc-env=STUDIO_GIT_BRANCH={branch}");
+        }
+    }
+    if let Some(sha) = git(&["rev-parse", "--short=8", "HEAD"]) {
+        if !sha.is_empty() {
+            println!("cargo:rustc-env=STUDIO_GIT_SHA={sha}");
+        }
+    }
+    if let Some(status) = git(&["status", "--porcelain"]) {
+        let dirty = if status.is_empty() { "0" } else { "1" };
+        println!("cargo:rustc-env=STUDIO_GIT_DIRTY={dirty}");
+    }
+    // Rerun when HEAD moves. `--absolute-git-dir` resolves linked worktrees,
+    // where `.git` is a file pointing at the real gitdir.
+    if let Some(git_dir) = git(&["rev-parse", "--absolute-git-dir"]) {
+        println!("cargo:rerun-if-changed={git_dir}/HEAD");
+    }
 }
 
 fn discover_story_files(src_dir: &Path) -> io::Result<Vec<PathBuf>> {
