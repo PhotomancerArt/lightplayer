@@ -234,6 +234,14 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 # `panic-recovery` is absent on purpose: this chip is abort tier
 # (ADR 2026-07-29-per-chip-fw-toolchains), and that feature pulls `unwinding`,
 # which is the C6's tier and has no Xtensa backend.
+#
+# `resolver-payload-cache` is absent on purpose, and it is the one gate this
+# image drops for memory rather than for flash. With it on, the resolver keeps
+# every resolved slot payload resident: 8,368 B on `quad-strips-v3`, which on a
+# 110 KB arena is ~90 LEDs of capacity, in exchange for 13 ms of frame time.
+# Off, the route and intern caches still run — 58 ms/frame here against 69 ms
+# before any of it existed, so most of the speed survives.
+# `docs/defects/2026-08-01-classic-heap-regression-after-f32-merge.md`.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-shader",
     "node-fixture",
