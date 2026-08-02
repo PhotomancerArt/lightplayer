@@ -15,6 +15,16 @@
 pub mod shared_driver;
 pub mod v3_rmt;
 
+// The level-4 experiment (see its module docs): an alternative refill path
+// behind `hli_refill`/`hli_stress`, absent from the shipping image.
+#[cfg(any(feature = "hli_refill", feature = "hli_stress"))]
+pub mod hli;
+
+// The endpoint layer needs the whole `lpc-hardware` vocabulary, which only
+// the server build links; the `hli_stress` harness compiles this module tree
+// without it.
+#[cfg(feature = "server")]
 mod esp32v3_rmt_ws281x_driver;
 
+#[cfg(feature = "server")]
 pub use esp32v3_rmt_ws281x_driver::Esp32V3RmtWs281xDriver;

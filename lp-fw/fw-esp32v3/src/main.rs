@@ -49,8 +49,14 @@
 // than as a generic panic with no heap numbers. Same reason fw-esp32c6 takes
 // the feature; the esp toolchain is nightly-based, so it is available here too.
 #![cfg_attr(
-    all(feature = "server", not(feature = "radio_ram_probe")),
+    all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")),
     feature(alloc_error_handler)
+)]
+// The HLI experiment's level-4 vector is `global_asm!`, which is
+// `asm_experimental_arch` on Xtensa — same gate xtensa-lx-rt itself carries.
+#![cfg_attr(
+    any(feature = "hli_refill", feature = "hli_stress"),
+    feature(asm_experimental_arch)
 )]
 #![allow(
     unstable_features,
@@ -60,7 +66,7 @@
 // The server path is the whole LightPlayer stack. The hello and probe
 // entrypoints install the allocator but never name `alloc` themselves, and
 // `unused_extern_crates` is deny-by-default in this workspace's lint table.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 extern crate alloc;
 
 // The build's self-description, embedded as a scannable blob (extracted by
@@ -88,18 +94,25 @@ lpc_model::lp_embed_manifest_core! {
 // The hello/probe entrypoint at the bottom of this file keeps its own inline
 // init on purpose: it needs the `WIFI` peripheral that `init_board` does not
 // hand back, and it is M2-P3's measured code, worth preserving byte for byte.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 mod board;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 mod flash_storage;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(
+    any(feature = "server", feature = "hli_stress"),
+    not(feature = "radio_ram_probe")
+))]
 mod output;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 mod recovery;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 mod serial;
+// The HLI experiment's radio-linked head-to-head harness; replaces the
+// entrypoint like `radio_ram_probe` (which wins if both are enabled).
+#[cfg(all(feature = "hli_stress", not(feature = "radio_ram_probe")))]
+mod stress;
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32v3::init::{init_board, start_runtime},
@@ -155,12 +168,16 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT`
 /// (`0x3FFE_8000..0x3FFF_F000`), so handing it to the allocator would hand the
 /// JIT's code region to the heap.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 const HEAP_SIZE: usize = 110 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
 /// skeleton, kept buildable as the minimal bring-up image.
-#[cfg(all(not(feature = "server"), not(feature = "radio_ram_probe")))]
+#[cfg(all(
+    not(feature = "server"),
+    not(feature = "radio_ram_probe"),
+    not(feature = "hli_stress")
+))]
 const HEAP_SIZE: usize = 100 * 1024;
 
 /// Probe heap: the radio stack's own DRAM statics come out of the same 192 KB
@@ -168,6 +185,12 @@ const HEAP_SIZE: usize = 100 * 1024;
 /// at all. 72 KB is the experiment repo's proven radio-coexistent size on this
 /// chip (led-lab-esp32 `test_stress`).
 #[cfg(feature = "radio_ram_probe")]
+const HEAP_SIZE: usize = 72 * 1024;
+
+/// HLI stress-harness heap: radio-coexistent like the probe's, and the
+/// harness allocates almost nothing beside it (four 90-byte staging
+/// buffers).
+#[cfg(all(feature = "hli_stress", not(feature = "radio_ram_probe")))]
 const HEAP_SIZE: usize = 72 * 1024;
 
 /// Abort-tier panic handler for the **app** image: stage a breadcrumb into the
@@ -179,7 +202,7 @@ const HEAP_SIZE: usize = 72 * 1024;
 /// handler controls, and once the record is already committed to RTC RAM,
 /// spending 40 ms per line to protect the *serial copy* of information the next
 /// boot will print anyway buys nothing.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     recovery::panic_path::stage_and_reset(info)
@@ -191,7 +214,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// then the request size is only a formatted string and the free/used numbers
 /// are gone. On a chip whose whole difficulty is a 110 KB arena, "how much was
 /// left" is the question, so it gets its own path.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 #[alloc_error_handler]
 fn on_alloc_error(layout: core::alloc::Layout) -> ! {
     recovery::panic_path::stage_oom_and_reset(layout)
@@ -215,7 +238,7 @@ fn on_alloc_error(layout: core::alloc::Layout) -> ! {
 /// state is exactly what may have just gone wrong. 240 MHz × ~40 ms is far
 /// more than the ~1.4 ms a full 128-byte FIFO needs at 921600 baud, and the
 /// cost is paid only on a boot that is already dead.
-#[cfg(not(all(feature = "server", not(feature = "radio_ram_probe"))))]
+#[cfg(not(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress"))))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     /// Give the TX FIFO time to clock out before the next print or the reset.
@@ -267,7 +290,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
 /// Heap free/used for the heartbeat. A chip fact `fw-esp32-common` must not
 /// know, so it is injected.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
         esp_alloc::HEAP.free().min(u32::MAX as usize) as u32,
@@ -276,14 +299,14 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 }
 
 /// Everything `main` needs to hand to the server loop.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 struct FirmwareApp {
     server: LpServer,
     transport: transport::StreamingMessageRouterTransport,
     time_provider: Esp32TimeProvider,
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 #[inline(never)]
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
@@ -478,7 +501,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
 /// Mount the `lpfs` partition, falling back to RAM so an unformattable or
 /// mis-flashed board still comes up reachable and can say so over the wire.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs::LpFs> {
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
@@ -504,7 +527,7 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
     }
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(feature = "hli_stress")))]
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
     let app = boot_firmware(spawner);
@@ -536,7 +559,11 @@ async fn main(spawner: embassy_executor::Spawner) {
 /// radio RAM probe. Both replace the server app rather than extending it.
 #[cfg(any(
     feature = "radio_ram_probe",
-    all(not(feature = "server"), not(feature = "radio_ram_probe"))
+    all(
+        not(feature = "server"),
+        not(feature = "radio_ram_probe"),
+        not(feature = "hli_stress")
+    )
 ))]
 #[esp_hal::main]
 fn main() -> ! {
