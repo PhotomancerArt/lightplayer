@@ -15,8 +15,8 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     LpType, ModelEnumVariant, ModelStructMember, ProductKind, SlotEnumEncoding, SlotFieldShape,
-    SlotMapKeyShape, SlotMeta, SlotName, SlotShape, SlotShapeId, SlotShapeRegistry, SlotValueShape,
-    SlotVariantShape,
+    SlotMapKeyShape, SlotMeta, SlotName, SlotRole, SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotValueShape, SlotVariantShape,
 };
 
 use super::custom_codec_schemas::custom_codec_schema;
@@ -195,9 +195,21 @@ impl<'r> SchemaCompiler<'r> {
     /// require any field — missing fields keep their factory defaults (see
     /// `dynamic_slot_reader_leaves_missing_fields_at_defaults`) — so there is
     /// deliberately no `required` list, not even for non-`Option` fields.
+    ///
+    /// [`SlotRole::Debug`] fields are omitted entirely (D2, P4): the reader
+    /// still tolerates an authored value at these paths (it warns and
+    /// ignores it — see `dynamic_slot_reader_ignores_authored_debug_role_fields`),
+    /// but the *authoring* schema describes what a def file may validly
+    /// author, not everything the reader is lenient about, so Debug fields
+    /// never appear here. This is the one place this compiler's "accepted
+    /// implies valid" fidelity contract (module docs) is deliberately
+    /// narrower than the reader.
     fn compile_record(&mut self, meta: &SlotMeta, fields: &[SlotFieldShape]) -> Value {
         let mut properties = Map::new();
         for field in fields {
+            if field.role == SlotRole::Debug {
+                continue;
+            }
             properties.insert(
                 String::from(field.name.as_str()),
                 self.compile(&field.shape),
@@ -266,7 +278,15 @@ impl<'r> SchemaCompiler<'r> {
         );
         match payload {
             SlotShape::Record { fields, .. } => {
+                // Same Debug-role omission as `compile_record` (D2, P4): a
+                // variant's flattened top-level fields go through this loop
+                // instead, so the filter is duplicated here rather than
+                // shared, since the discriminator property must stay merged
+                // into the same object.
                 for record_field in fields {
+                    if record_field.role == SlotRole::Debug {
+                        continue;
+                    }
                     properties.insert(
                         String::from(record_field.name.as_str()),
                         self.compile(&record_field.shape),
@@ -576,11 +596,36 @@ mod tests {
     use crate::slot::shape;
     use crate::slot_codec::{JsonSyntaxSource, SlotReader, SyntaxError, read_dynamic_slot};
     use crate::{
-        LpType, ModelEnumVariant, ModelStructMember, ProductKind, SlotShape, SlotShapeId,
+        LpType, ModelEnumVariant, ModelStructMember, ProductKind, SlotRole, SlotShape, SlotShapeId,
         SlotShapeRegistry,
     };
 
     use super::compile_slot_shape_schema;
+
+    /// D2 (P4): the authoring schema omits `SlotRole::Debug` fields entirely
+    /// — `node.schema.json`/`project.schema.json` must not advertise a
+    /// session-only control as something a def file can author, even though
+    /// the reader still tolerates (and now warns-and-ignores) the value.
+    #[test]
+    fn debug_role_fields_are_omitted_from_the_authoring_schema() {
+        let (registry, id) = registered(
+            "test.SchemaDebugField",
+            shape::record(vec![
+                shape::field("pin", shape::value(LpType::U32)),
+                shape::field_with_role("rate", shape::value(LpType::F32), SlotRole::Debug),
+            ]),
+        );
+        let shape = registry.get(&id).unwrap().clone();
+
+        let schema = compile_slot_shape_schema(&registry, &shape);
+
+        let properties = schema["properties"].as_object().expect("properties");
+        assert!(properties.contains_key("pin"), "{schema}");
+        assert!(
+            !properties.contains_key("rate"),
+            "debug-role field must not appear in the authoring schema: {schema}"
+        );
+    }
 
     #[test]
     fn record_accepts_partial_objects_and_rejects_unknown_fields() {

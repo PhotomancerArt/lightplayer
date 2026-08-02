@@ -579,14 +579,24 @@ impl SlotController {
         }
     }
 
-    /// Collect config and asset rows under this slot.
+    /// Collect config, asset, and **Debug** rows under this slot.
+    ///
+    /// The three buckets are the node card's three slot sections, and the
+    /// split is by [`SlotRole`] (D3/D4): a `Debug` row leaves the settings
+    /// bucket entirely and lands **flat** in `debug_slots`, whatever record
+    /// declared it — see [`Self::partition_debug`].
     pub(in crate::app::project) fn collect_config(
         &self,
         edits: &SlotEditJoin<'_>,
         config_slots: &mut Vec<UiConfigSlot>,
         asset_slots: &mut Vec<UiConfigSlot>,
+        debug_slots: &mut Vec<UiConfigSlot>,
     ) {
         if self.is_internal_config_slot() {
+            return;
+        }
+        if self.role == SlotRole::Debug {
+            debug_slots.push(self.ui_config_slot(edits));
             return;
         }
         if let Some(asset) = self.ui_asset_slot(edits) {
@@ -595,11 +605,60 @@ impl SlotController {
         }
         if self.address.is_root() && self.children_are_top_level_rows() {
             for child in &self.children {
-                child.collect_config(edits, config_slots, asset_slots);
+                child.collect_config(edits, config_slots, asset_slots, debug_slots);
             }
             return;
         }
-        config_slots.push(self.ui_config_slot(edits));
+        if let Some(row) = self.partition_debug(edits, debug_slots) {
+            config_slots.push(row);
+        }
+    }
+
+    /// Split one settings row into its Debug part — appended **flat** to
+    /// `debug_slots`, so a Debug field never renders nested under the record
+    /// that declared it (D4: the clock's `controls.running/rate/
+    /// scrub_offset_seconds` become three top-level Debug rows, not a
+    /// "Controls › Controls" group) — and the Setting remainder, returned for
+    /// the settings section. `None` when nothing but Debug fields remained.
+    ///
+    /// A row with no Debug descendant takes the fast path and is built exactly
+    /// as before, so the common case is unchanged.
+    fn partition_debug(
+        &self,
+        edits: &SlotEditJoin<'_>,
+        debug_slots: &mut Vec<UiConfigSlot>,
+    ) -> Option<UiConfigSlot> {
+        if self.role == SlotRole::Debug {
+            debug_slots.push(self.ui_config_slot(edits));
+            return None;
+        }
+        if !self.has_debug_descendant() {
+            return Some(self.ui_config_slot(edits));
+        }
+        let mut row = self.ui_config_slot(edits);
+        // Only plain records are re-partitioned: map entries, enum variants,
+        // and options carry structure a role split must not rewrite.
+        if matches!(self.body, SlotControllerBody::Record)
+            && let UiConfigSlotBody::Record(record) = &mut row.body
+        {
+            record.fields = self
+                .children
+                .iter()
+                .filter(|child| !child.is_internal_config_slot())
+                .filter_map(|child| child.partition_debug(edits, debug_slots))
+                .collect();
+            if record.fields.is_empty() {
+                return None;
+            }
+        }
+        Some(row)
+    }
+
+    /// True when any field beneath this slot declares [`SlotRole::Debug`].
+    fn has_debug_descendant(&self) -> bool {
+        self.children
+            .iter()
+            .any(|child| child.role == SlotRole::Debug || child.has_debug_descendant())
     }
 
     /// Find a mutable descendant slot controller by address.
@@ -947,11 +1006,20 @@ impl SlotController {
         effective_writable(self.role, self.semantics.direction)
     }
 
-    /// Whether this slot is "live": a runtime/session value that ordinary
-    /// save/writeback never persists (a `Debug`-role field, or any produced
-    /// field regardless of role).
-    fn is_live(&self) -> bool {
-        effective_persistence(self.role, self.semantics.direction) == SlotPersistence::Transient
+    /// Whether this slot is a **Debug** control (D6): transient by nature,
+    /// with no durable value underneath, so save never writes it and its verb
+    /// is Clear. Keyed on the ROLE alone — a produced field is transient too
+    /// ([`effective_persistence`]) but is read-only by direction and therefore
+    /// never wears edit chrome, and it belongs to the produced sections, not
+    /// the Debug one.
+    fn is_debug(&self) -> bool {
+        debug_assert!(
+            self.role != SlotRole::Debug
+                || effective_persistence(self.role, self.semantics.direction)
+                    == SlotPersistence::Transient,
+            "a Debug-role slot is transient whatever its direction"
+        );
+        self.role == SlotRole::Debug
     }
 
     /// Context for one record field, inheriting from the parent's ambient
@@ -959,7 +1027,7 @@ impl SlotController {
     /// semantics nor its own role, else taking the field's own declared
     /// values directly. Either way the result is safe by construction: a
     /// produced field is always effectively read-only and live regardless of
-    /// its role (D1, [`Self::is_writable`]/[`Self::is_live`]), so no field
+    /// its role (D1, [`Self::is_writable`]/[`effective_persistence`]), so no field
     /// ever needs a role override to compensate for its direction — a state
     /// field that leaves everything default inherits `Produced` from the
     /// `State` root's ambient context ([`SlotApplyContext::for_root`]) and a
@@ -1195,7 +1263,7 @@ impl SlotController {
         } else {
             UiSlotFieldState::readonly()
         };
-        state = state.with_live(self.is_live());
+        state = state.with_debug(self.is_debug());
 
         // Join order: edit buffer (Saving/Error + invalid reason), then the
         // overlay mirror (Dirty), then — for composite slots only — the
@@ -1524,6 +1592,7 @@ fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
         | ValueEditorHint::ControlProduct => UiSlotEditorHint::Auto,
         ValueEditorHint::Dimensions => UiSlotEditorHint::Dimensions,
         ValueEditorHint::Affine2d => UiSlotEditorHint::Affine2d,
+        ValueEditorHint::Power => UiSlotEditorHint::Power,
         ValueEditorHint::Number { min, max, step } => UiSlotEditorHint::Number {
             min: min.map(|value| value.0),
             max: max.map(|value| value.0),

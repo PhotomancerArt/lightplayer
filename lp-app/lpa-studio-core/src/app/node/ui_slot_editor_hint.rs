@@ -63,6 +63,9 @@ pub enum UiSlotEditorHint {
     Dimensions,
     /// Render a 2D affine transform (wire `Mat3x3`, six active params).
     Affine2d,
+    /// Render a lamp type + supply budget pair (`FixturePower`-shaped
+    /// struct) as one compact power control.
+    Power,
 }
 
 impl UiSlotEditorHint {

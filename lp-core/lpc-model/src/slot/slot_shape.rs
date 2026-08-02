@@ -122,6 +122,43 @@ impl fmt::Display for SlotShapeIdError {
 
 impl core::error::Error for SlotShapeIdError {}
 
+/// A record field whose declared role and direction contradict each other.
+///
+/// Produced runtime state must declare [`SlotRole::State`], and nothing else
+/// may (G2 amendment to `2026-08-01-debug-slots-taxonomy`). Reported by
+/// [`SlotShape::validate_role_direction`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlotRoleDirectionError {
+    pub field: SlotName,
+    pub role: SlotRole,
+    pub direction: crate::SlotDirection,
+}
+
+impl fmt::Display for SlotRoleDirectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.role == SlotRole::State {
+            write!(
+                f,
+                "slot field `{}` declares role \"state\" but is not produced \
+                 (direction {:?}): the State role marks runtime-produced \
+                 state only",
+                self.field.as_str(),
+                self.direction
+            )
+        } else {
+            write!(
+                f,
+                "slot field `{}` is produced but declares role \"{}\": \
+                 produced runtime state must declare role \"state\"",
+                self.field.as_str(),
+                self.role.as_str()
+            )
+        }
+    }
+}
+
+impl core::error::Error for SlotRoleDirectionError {}
+
 /// Authored syntax used when reading and writing an enum slot.
 ///
 /// Encoding changes only the source/document representation of an enum. The
@@ -189,6 +226,44 @@ impl SlotShape {
         let mut refs = Vec::new();
         self.collect_referenced_shape_ids(&mut refs);
         refs
+    }
+
+    /// Check that every field declared inside this shape pairs
+    /// [`SlotRole::State`] with [`crate::SlotDirection::Produced`] and vice
+    /// versa (G2 amendment — see [`crate::role_matches_direction`]).
+    ///
+    /// This is the runtime half of the enforcement: the `Slotted` derive
+    /// rejects a mismatch at compile time, and shapes assembled at runtime
+    /// (dynamic node state, artifact shapes) are checked here when they are
+    /// registered. The walk deliberately does **not** follow
+    /// [`SlotShape::Ref`]: a referenced shape is validated when it is itself
+    /// registered, so each field declaration is checked exactly once.
+    pub fn validate_role_direction(&self) -> Result<(), SlotRoleDirectionError> {
+        match self {
+            Self::Ref { .. } | Self::Unit { .. } | Self::Value { .. } => Ok(()),
+            Self::Record { fields, .. } => {
+                for field in fields {
+                    if !crate::role_matches_direction(field.role, field.semantics.direction) {
+                        return Err(SlotRoleDirectionError {
+                            field: field.name.clone(),
+                            role: field.role,
+                            direction: field.semantics.direction,
+                        });
+                    }
+                    field.shape.validate_role_direction()?;
+                }
+                Ok(())
+            }
+            Self::Map { value, .. } => value.validate_role_direction(),
+            Self::Enum { variants, .. } => {
+                for variant in variants {
+                    variant.shape.validate_role_direction()?;
+                }
+                Ok(())
+            }
+            Self::Option { some, .. } => some.validate_role_direction(),
+            Self::Custom { shape, .. } => shape.validate_role_direction(),
+        }
     }
 
     fn collect_referenced_shape_ids(&self, refs: &mut Vec<SlotShapeId>) {

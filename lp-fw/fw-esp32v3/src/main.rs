@@ -267,11 +267,27 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
 /// Heap free/used for the heartbeat. A chip fact `fw-esp32-common` must not
 /// know, so it is injected.
+///
+/// It also prints `[MEM]`, which the heartbeat's own `memory` field cannot
+/// carry: the wire type is two numbers, and the third one — the largest block
+/// the heap could actually hand out — is the one that matters on a 110 KB arena.
+/// A board with 12 KB free in 400-byte pieces cannot compile a shader, and from
+/// free/used alone it looks healthy. See
+/// [`recovery::panic_path::largest_free_block`]; the OOM report prints the same
+/// figure at the moment of failure, and this prints it on the way there so the
+/// trend is visible before the crash rather than only after it.
+///
+/// The probe is ~17 first-fit walks, once per heartbeat (5 s) — invisible next
+/// to a frame.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
+    let free = esp_alloc::HEAP.free();
+    let used = esp_alloc::HEAP.used();
+    let largest = recovery::panic_path::largest_free_block();
+    esp_println::println!("[MEM] free={free} used={used} largest_free={largest}");
     Some((
-        esp_alloc::HEAP.free().min(u32::MAX as usize) as u32,
-        esp_alloc::HEAP.used().min(u32::MAX as usize) as u32,
+        free.min(u32::MAX as usize) as u32,
+        used.min(u32::MAX as usize) as u32,
     ))
 }
 
@@ -356,12 +372,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // and it costs the board its output rather than its boot, so it is logged
     // and not fatal.
     //
-    // How many outputs appear is decided in two places and nowhere else: the
-    // board manifest's `/rmt/ws281xK` resources (four on the DOM-Z-102), and
-    // `output::rmt::v3_rmt::BLOCKS_PER_CHANNEL` = 2, which turns the chip's
-    // eight RMT slots into four usable ones (0/2/4/6 — a two-block channel
-    // absorbs its neighbour's memory). Manifest channel K drives slot
-    // K * SLOT_STRIDE; absorbed slots are never configured.
+    // How many outputs appear is decided in one place: the board manifest's
+    // `/rmt/ws281xK` resources (four on the DOM-Z-102). The RMT block plan
+    // follows from that count at driver init — four declared channels get two
+    // 64-word blocks each (slots 0/2/4/6, the same split the old compile-time
+    // constant produced), fewer get wider windows. See
+    // `output::rmt::v3_rmt::plan_for_declared`; absorbed slots are never
+    // configured.
     match esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK) {
         Ok(rmt) => {
             hardware_system.add_ws281x_driver(Box::new(Esp32V3RmtWs281xDriver::new(

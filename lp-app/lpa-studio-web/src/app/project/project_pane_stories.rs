@@ -36,7 +36,6 @@ pub(crate) fn uncommitted() -> Element {
         StoryPane {
             dirty: DirtySummary {
                 persisted: 2,
-                transient: 1,
                 failed: 0,
             },
             edits_in_flight: 0,
@@ -46,18 +45,68 @@ pub(crate) fn uncommitted() -> Element {
 }
 
 #[story(
-    description = "Only live (transient) edits: blue header wash; no persisted edits, so no Save/Revert icons and a quiet 'i' trigger."
+    description = "D8 tier (a): the global \"Debug active · N · Clear all\" chip. Three debug overrides are live somewhere in the project, and NOTHING else announces them — the header wash stays clean, there are no Save/Revert icons, and the detail trigger keeps its quiet \"i\", because a debug override is not unsaved work (D7). Pressing the chip dispatches `ProjectOp::ClearDebugEdits`, which leaves persisted edits alone."
 )]
-pub(crate) fn live_only() -> Element {
+pub(crate) fn debug_active_chip() -> Element {
+    rsx! {
+        StoryPane {
+            dirty: DirtySummary::default(),
+            edits_in_flight: 0,
+            actions: false,
+            debug_overrides: 3,
+        }
+    }
+}
+
+#[story(
+    description = "The chip beside real unsaved work: two persisted edits (amber wash, Save/Revert icons, edited trigger) AND three debug overrides. The two channels read as different things — the chip is hazard-striped orange, the dirty treatment is amber — and the counts never mix."
+)]
+pub(crate) fn debug_active_with_unsaved() -> Element {
     rsx! {
         StoryPane {
             dirty: DirtySummary {
-                persisted: 0,
-                transient: 2,
+                persisted: 2,
                 failed: 0,
             },
             edits_in_flight: 0,
-            actions: false,
+            actions: true,
+            debug_overrides: 3,
+        }
+    }
+}
+
+#[story(
+    description = "G1 absence proof (D7): the save panel open while three debug overrides are active. The change list holds ONLY the two persisted edits, the Unsaved count reads 2, and there is no debug section anywhere in the popup — Save has nothing to do with debug values. The chip in the header is their one and only announcement."
+)]
+pub(crate) fn debug_absent_from_save_panel() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:min-h-[640px] tw:justify-start",
+            StoryPane {
+                dirty: DirtySummary {
+                    persisted: 2,
+                    failed: 0,
+                },
+                edits_in_flight: 0,
+                actions: true,
+                debug_overrides: 3,
+                initially_open: true,
+                pending_edits: vec![
+                    pending_edit(
+                        "Orbit shader",
+                        "brightness",
+                        UiPendingEditKind::Assign {
+                            value_display: "0.82".to_string(),
+                        },
+                        UiPendingEditPhase::Persisted,
+                    ),
+                    pending_edit(
+                        "Sunrise palette",
+                        "entries[dusk]",
+                        UiPendingEditKind::Added,
+                        UiPendingEditPhase::Persisted,
+                    ),
+                ],
+            }
         }
     }
 }
@@ -70,7 +119,6 @@ pub(crate) fn in_progress() -> Element {
         StoryPane {
             dirty: DirtySummary {
                 persisted: 1,
-                transient: 0,
                 failed: 0,
             },
             edits_in_flight: 1,
@@ -80,7 +128,7 @@ pub(crate) fn in_progress() -> Element {
 }
 
 #[story(
-    description = "The detail popup as the save panel: identity with the status pill, state, overlay revision, and the per-bucket sections as headed change lists (counts in the headers, node label + path + op/value + revert per row), plus the project stats section."
+    description = "The detail popup as the save panel: identity with the status pill, state, overlay revision, and the per-bucket sections as headed change lists (counts in the headers, node label + path + op/value + revert per row), plus the project stats section. Debug overrides never appear here (D7)."
 )]
 pub(crate) fn detail_popup() -> Element {
     rsx! {
@@ -88,7 +136,6 @@ pub(crate) fn detail_popup() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 2,
-                    transient: 1,
                     failed: 0,
                 },
                 edits_in_flight: 0,
@@ -105,7 +152,6 @@ pub(crate) fn detail_popup() -> Element {
                         UiPendingEditKind::Added,
                         UiPendingEditPhase::Persisted,
                     ),
-                    assign_edit("Orbit shader", "controls.rate", "2.0", UiPendingEditPhase::Live),
                 ],
             }
         }
@@ -113,7 +159,7 @@ pub(crate) fn detail_popup() -> Element {
 }
 
 #[story(
-    description = "A mixed change list in the save panel: value assigns (old → new where the saved value is known), a structural add and remove (the remove with its replaced value), a live control, and a failed entry with its reason in the error-tinted section — every row with its own revert."
+    description = "A mixed change list in the save panel: value assigns (old → new where the saved value is known), a structural add and remove (the remove with its replaced value), and a failed entry with its reason in the error-tinted section — every row with its own revert. Debug overrides are deliberately absent: they are not dirty (D7)."
 )]
 pub(crate) fn change_list() -> Element {
     rsx! {
@@ -121,7 +167,6 @@ pub(crate) fn change_list() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 3,
-                    transient: 1,
                     failed: 1,
                 },
                 edits_in_flight: 0,
@@ -147,7 +192,6 @@ pub(crate) fn change_list() -> Element {
                         ),
                         "{\"shader\":\"stripe.glsl\",\"duration\":2.0}",
                     ),
-                    assign_edit("Orbit shader", "controls.rate", "2.0", UiPendingEditPhase::Live),
                     pending_edit(
                         "Sunrise palette",
                         "entries[ghost]",
@@ -197,7 +241,6 @@ pub(crate) fn change_list_overflow() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 14,
-                    transient: 0,
                     failed: 0,
                 },
                 edits_in_flight: 0,
@@ -321,7 +364,6 @@ pub(crate) fn staged_node_removal() -> Element {
             StoryPane {
                 dirty: DirtySummary {
                     persisted: 3,
-                    transient: 0,
                     failed: 0,
                 },
                 edits_in_flight: 0,
@@ -351,10 +393,12 @@ fn StoryPane(
     actions: bool,
     #[props(default = false)] initially_open: bool,
     #[props(default = false)] add_picker_open: bool,
+    #[props(default = 0)] debug_overrides: usize,
     #[props(default = Vec::new())] pending_edits: Vec<UiPendingEdit>,
 ) -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
     view.dirty = dirty;
+    view.debug_overrides = debug_overrides;
     view.edits_in_flight = edits_in_flight;
     view.pending_edits = pending_edits;
     view.header_actions = if actions {

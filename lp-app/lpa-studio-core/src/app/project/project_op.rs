@@ -49,11 +49,18 @@ pub enum ProjectOp {
     /// quiesces first and that session stays in the pool.
     OpenSimProject,
     /// Commit the pending-edit overlay: persisted edits are written back to
-    /// def artifacts; transient edits stay pending (live-only).
+    /// def artifacts; Debug overrides stay pending (live-only).
     SaveOverlay,
     /// Discard every pending edit — the local edit buffer and the server
     /// overlay both clear.
     RevertAllEdits,
+    /// **Clear** every Debug override in the project (D7, the project scope
+    /// of the Clear verb). Persisted edits survive untouched: this is not
+    /// Revert-all, and Debug values were never part of Save.
+    ///
+    /// P3's global "Debug active · N · Clear all" chip dispatches this; the
+    /// op is exposed here so the chip is pure presentation.
+    ClearDebugEdits,
 }
 
 impl ControllerOp for ProjectOp {
@@ -109,6 +116,11 @@ impl ControllerOp for ProjectOp {
                 "Discard every pending edit on this project.",
                 ActionPriority::Secondary,
             ),
+            Self::ClearDebugEdits => ActionMeta::new(
+                "Clear all",
+                "Clear every debug override in this project.",
+                ActionPriority::Secondary,
+            ),
         }
     }
 
@@ -144,9 +156,11 @@ impl ControllerOp for ProjectOp {
             },
             // Editing ops share the project-editor quiet-gap budget (D5:
             // all edit ops are Foreground/6 s).
-            Self::SaveOverlay | Self::RevertAllEdits => ActionClass::Foreground {
-                deadline: PROJECT_EDITOR_ACTION_DEADLINE,
-            },
+            Self::SaveOverlay | Self::RevertAllEdits | Self::ClearDebugEdits => {
+                ActionClass::Foreground {
+                    deadline: PROJECT_EDITOR_ACTION_DEADLINE,
+                }
+            }
         }
     }
 
@@ -216,7 +230,11 @@ mod tests {
 
     #[test]
     fn overlay_edit_ops_use_the_editor_deadline() {
-        for op in [ProjectOp::SaveOverlay, ProjectOp::RevertAllEdits] {
+        for op in [
+            ProjectOp::SaveOverlay,
+            ProjectOp::RevertAllEdits,
+            ProjectOp::ClearDebugEdits,
+        ] {
             assert_eq!(
                 op.action_class(),
                 ActionClass::Foreground {
@@ -225,5 +243,14 @@ mod tests {
                 "{op:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_project_scope_of_the_clear_verb_says_clear() {
+        // D7 vocabulary: Debug values are cleared, never reverted or reset.
+        let meta = ProjectOp::ClearDebugEdits.default_action_meta();
+        assert_eq!(meta.label, "Clear all");
+        assert!(!meta.summary.contains("Revert"));
+        assert!(!meta.summary.contains("Reset"));
     }
 }
