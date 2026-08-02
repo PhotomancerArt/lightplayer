@@ -10,6 +10,12 @@
 //! - **routes** — [`ResolvedRoute`], the decision about *how* a query is
 //!   answered. See that type's documentation.
 //!
+//! The two value tables are behind the `resolver-payload-cache` gate; the
+//! route table and the intern table are not. That is the line between the
+//! decisions this cache makes and the payloads it holds, and on a part with a
+//! 110 KB arena only the decisions are affordable — see
+//! [`ResolverCache::set_retain_payloads`].
+//!
 //! Discarding frame values does not clear the table. Each entry carries the
 //! frame it was written for, and a new frame simply stops matching — so a
 //! steady scene neither frees nor reallocates its entries, it overwrites them
@@ -67,7 +73,7 @@ impl ResolverCache {
     /// | | free heap | fps | `tick` |
     /// |---|---|---|---|
     /// | no cache at all (pre-#243) | 18,128 B | 13 | 69 ms |
-    /// | decisions only (`false`) | 18,188 B | 17 | 54 ms |
+    /// | decisions only (`false`) | 18,220 B | 17 | 54 ms |
     /// | decisions + payloads (`true`) | 9,852 B | 20 | 47 ms |
     ///
     /// So the decisions buy 15 ms of the 22 ms for no heap, and the payloads
@@ -85,10 +91,6 @@ impl ResolverCache {
             self.values = Vec::new();
             self.structural = Vec::new();
         }
-    }
-
-    pub fn retains_payloads(&self) -> bool {
-        self.retain_payloads
     }
 
     /// Whether a production may outlive the frame that computed it.
