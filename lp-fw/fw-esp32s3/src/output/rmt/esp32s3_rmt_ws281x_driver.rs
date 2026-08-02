@@ -352,15 +352,15 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             });
         }
 
-        let index = self
-            .free_channel()
-            .ok_or_else(|| HardwareEndpointError::EndpointUnavailable {
-                endpoint_id: endpoint_id.clone(),
-                reason: format!(
-                    "all {} RMT WS281x channels are in use",
-                    self.offered_channels()
-                ),
-            })?;
+        let index =
+            self.free_channel()
+                .ok_or_else(|| HardwareEndpointError::EndpointUnavailable {
+                    endpoint_id: endpoint_id.clone(),
+                    reason: format!(
+                        "all {} RMT WS281x channels are in use",
+                        self.offered_channels()
+                    ),
+                })?;
         let timing_address = HwAddress::rmt_ws281x(index as u8);
 
         self.registry
