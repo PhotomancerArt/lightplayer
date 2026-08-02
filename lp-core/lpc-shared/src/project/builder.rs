@@ -356,6 +356,7 @@ impl OutputBuilder {
             endpoint: ValueSlot::new(self.endpoint),
             bindings: bus_input_binding_defs("control.out"),
             options: OptionSlot::some(self.options),
+            ..Default::default()
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Output(config));

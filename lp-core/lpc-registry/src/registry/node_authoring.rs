@@ -3,7 +3,7 @@
 //! `create_node` and `remove_node` are the operations the `ModuleDef.nodes`
 //! `Fixed` role promises: node creation and removal never
 //! arrive as raw slot edits, they arrive here. Both address the node through
-//! a [`NodeAttachSite`] — either the policy-locked project `nodes` map (the
+//! a [`NodeAttachSite`] — either the role-locked project `nodes` map (the
 //! dedicated-op bypass applies **only** to that site) or any writable
 //! `NodeInvocationSlot`-shaped slot such as a playlist's `entries[k].node`.
 //!
@@ -45,7 +45,7 @@ use crate::overlay::apply_op_to_def;
 use crate::overlay::inventory_change_summary::change_summary_between;
 use crate::registry::base_value_display;
 use crate::registry::project_registry::{
-    ProjectRegistry, effective_map_entry_presence, resolve_edit_policy, shape_at_path,
+    ProjectRegistry, effective_map_entry_presence, resolve_edit_role, shape_at_path,
 };
 
 /// Outcome of an accepted [`ProjectRegistry::create_node`].
@@ -194,7 +194,7 @@ impl ProjectRegistry {
             }
             NodeAttachSite::Slot { artifact, path } => {
                 let def = self.loaded_def_for_mutation(artifact)?;
-                let Some(resolution) = resolve_edit_policy(def, path, ctx) else {
+                let Some(resolution) = resolve_edit_role(def, path, ctx) else {
                     return Err(reject(
                         MutationRejectionReason::UnknownSlotPath,
                         format!(
@@ -444,13 +444,14 @@ impl ProjectRegistry {
                     .any(|(path, _)| is_at_or_under(&entry_path, path))
             });
 
-        // Stage the entry removal through the singular mutation path: it is
-        // deliberately unvalidated (the dedicated-op bypass of the `nodes`
-        // map's `Fixed` role), normalizes an overlay-only entry
-        // away instead of storing a no-op edit, and re-derives the effective
-        // inventory. `PutSlotEdit` cannot fail on that path.
+        // Stage the entry removal through the dedicated-op staging path: it
+        // deliberately skips validation (the sanctioned bypass of the `nodes`
+        // map's `Fixed` role — this operation IS how that map is edited),
+        // normalizes an overlay-only entry away instead of storing a no-op
+        // edit, and re-derives the effective inventory. `PutSlotEdit` cannot
+        // fail on that path.
         let removal = self
-            .mutate(
+            .stage_dedicated_op(
                 fs,
                 MutationOp::PutSlotEdit {
                     artifact: site_artifact.clone(),
@@ -564,7 +565,7 @@ impl ProjectRegistry {
             }
             NodeAttachSite::Slot { artifact, path } => {
                 let def = self.loaded_def_for_mutation(artifact)?;
-                let Some(resolution) = resolve_edit_policy(def, path, ctx) else {
+                let Some(resolution) = resolve_edit_role(def, path, ctx) else {
                     return Err(reject(
                         MutationRejectionReason::UnknownSlotPath,
                         format!(
@@ -1027,11 +1028,12 @@ mod tests {
         assert_eq!(rejection.reason, MutationRejectionReason::TargetOccupied);
         assert_nothing_written(&fs, "/texture.json");
 
-        // Overlay-staged key: stage `nodes[strip]` through the unvalidated
-        // single-mutation path (the validated path rejects the read-only
-        // map), then create at the same key — the EFFECTIVE map counts.
+        // Overlay-staged key: stage `nodes[strip]` through the dedicated-op
+        // staging path (the validated path rejects the read-only map, which
+        // is exactly why the authoring ops stage there), then create at the
+        // same key — the EFFECTIVE map counts.
         registry
-            .mutate(
+            .stage_dedicated_op(
                 &fs,
                 MutationOp::PutSlotEdit {
                     artifact: ArtifactLocation::file("/module.json"),
@@ -1115,8 +1117,8 @@ mod tests {
         let body = texture_body(&shapes);
 
         // Read-only slot site: `nodes[…]` on the project root is invocation-
-        // shaped but policy-locked — only the dedicated `ProjectNodes` site
-        // bypasses the policy.
+        // shaped but role-locked — only the dedicated `ProjectNodes` site
+        // bypasses the `Fixed` role.
         let rejection = create(
             &fs,
             &mut registry,
@@ -1454,7 +1456,7 @@ mod tests {
         let outcome =
             remove(&fs, &mut registry, &shapes, &project_nodes("shader")).expect("remove accepted");
 
-        // Revert = RemoveSlotEdit at the site (policy-exempt) + ClearArtifact
+        // Revert = RemoveSlotEdit at the site (role-exempt) + ClearArtifact
         // per staged delete — existing ops only, through the validated path.
         let mut commands = vec![MutationCmd {
             id: MutationCmdId::new(1),
@@ -1530,7 +1532,7 @@ mod tests {
         .expect_err("non-invocation path rejects");
         assert_eq!(rejection.reason, MutationRejectionReason::UnknownSlotPath);
 
-        // The policy bypass applies only to the dedicated `ProjectNodes`
+        // The role bypass applies only to the dedicated `ProjectNodes`
         // site; the same target addressed as a raw slot stays locked.
         let rejection = remove(
             &fs,

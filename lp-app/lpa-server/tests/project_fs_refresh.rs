@@ -21,18 +21,32 @@ fn server_tick_refreshes_referenced_artifact_without_recreating_runtime_node() {
     let handle = server.load_project(project_path.as_path()).expect("load");
     let before_id = clock_runtime_node_id(project(&server, handle));
 
+    // `controls.rate` is Debug-role (D2): an external file edit to it is
+    // ignored by the loader (warn-and-skip), so it cannot prove a body
+    // actually re-parsed. A Setting-role field (a binding) is the probe
+    // here instead.
     server
         .base_fs_mut()
         .write_file(
             project_file("fs-refresh", "clock.json").as_path(),
-            clock_json_with_rate(2.0).as_bytes(),
+            br#"
+{
+  "kind": "Clock",
+  "bindings": {
+    "seconds": { "target": "bus:custom" }
+  }
+}
+"#,
         )
         .expect("write clock");
 
     server.advance_frame(16).expect("tick");
 
     let project = project(&server, handle);
-    assert_eq!(clock_rate(project), 2.0);
+    assert!(
+        clock_has_seconds_binding(project),
+        "refreshed body should carry the new binding"
+    );
     assert_eq!(clock_runtime_node_id(project), before_id);
 }
 
@@ -159,6 +173,21 @@ fn clock_rate(project: &Project) -> f32 {
         panic!("expected clock definition");
     };
     *def.controls.rate.value()
+}
+
+fn clock_has_seconds_binding(project: &Project) -> bool {
+    let entry = project
+        .registry()
+        .def(&NodeDefLocation::artifact_root(ArtifactLocation::file(
+            "/clock.json",
+        )))
+        .expect("clock definition");
+    let NodeDef::Clock(def) = entry.state.loaded_def().expect("loaded clock") else {
+        panic!("expected clock definition");
+    };
+    def.bindings
+        .entries()
+        .contains_key(&alloc::string::String::from("seconds"))
 }
 
 fn clock_use() -> NodeUseLocation {

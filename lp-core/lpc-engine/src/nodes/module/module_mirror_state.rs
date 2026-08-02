@@ -13,6 +13,7 @@ use lpc_model::{Slotted, VisualProductSlot};
 /// authored artifact surface, so it stays out of the model's static shape
 /// catalog (and therefore out of `schemas/`).
 #[derive(Default, Slotted)]
+#[slot(default_role = "state")]
 pub struct ModuleMirrorState {
     /// This module node's own renderable handle. No `default_bind`: the
     /// mirror reads its scope's channel directly and never writes a bus

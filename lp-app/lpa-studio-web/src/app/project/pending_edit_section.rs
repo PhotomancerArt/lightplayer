@@ -1,7 +1,7 @@
 //! Save-panel change list: dense pending-edit rows with per-entry revert.
 //!
 //! The pending-edit surfaces share this module: the project detail popup's
-//! per-bucket sections (unsaved / live / failed) render the full editor list
+//! per-bucket sections (unsaved / failed) render the full editor list
 //! bucketed, and the node detail popup renders the node's own entries the
 //! same way. Sections are `DetailSection`s titled with the bucket name (the
 //! count rides the title row's meta cell) and tinted via
@@ -15,12 +15,14 @@ use crate::base::DetailSectionTint;
 
 /// The save-panel buckets, mirroring `UiPendingEditPhase` for filtering
 /// entries into their popup sections.
+///
+/// There is no live/debug bucket (D7): a debug override is not dirty, so the
+/// controller never lists it — the save panel is about work Save would write
+/// and work that failed, nothing else.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PendingEditBucket {
     /// Written to project files on save (the "Unsaved" section).
     Persisted,
-    /// Live-only transient controls (the "Live" section).
-    Live,
     /// Failed edits needing attention (the "Failed" section).
     Failed,
 }
@@ -37,13 +39,12 @@ pub(crate) fn entries_in(edits: &[UiPendingEdit], bucket: PendingEditBucket) -> 
 fn edit_bucket(edit: &UiPendingEdit) -> PendingEditBucket {
     match edit.phase {
         UiPendingEditPhase::Persisted => PendingEditBucket::Persisted,
-        UiPendingEditPhase::Live => PendingEditBucket::Live,
         UiPendingEditPhase::Failed { .. } => PendingEditBucket::Failed,
     }
 }
 
 /// The [`DetailSectionTint`] a pending-edit bucket section wears while it
-/// holds entries — the same treatment as edited/live/failed slot rows, worn
+/// holds entries — the same treatment as edited/failed slot rows, worn
 /// on the section TITLE per the `DetailSection` convention. A bucket at zero
 /// stays untinted (its section reads as plain information).
 ///
@@ -55,7 +56,6 @@ pub(crate) fn bucket_section_tint(bucket: PendingEditBucket, count: usize) -> De
     }
     match bucket {
         PendingEditBucket::Persisted => DetailSectionTint::Warning,
-        PendingEditBucket::Live => DetailSectionTint::Live,
         PendingEditBucket::Failed => DetailSectionTint::Error,
     }
 }
@@ -97,9 +97,9 @@ fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
 
 /// Revert-button wording matching the per-slot detail popups: "Revert" for
 /// unsaved persisted edits (and failed entries, where it clears the parked
-/// error), "Reset" for live controls — except the staged node removal,
-/// whose revert restores the node (and cancels its staged file deletions),
-/// so it reads "Restore".
+/// error) — except the staged node removal, whose revert restores the node
+/// (and cancels its staged file deletions), so it reads "Restore". Debug
+/// overrides never reach this list (D7); their verb is Clear, on the row.
 fn revert_label(edit: &UiPendingEdit) -> (&'static str, &'static str) {
     if matches!(edit.kind, UiPendingEditKind::NodeRemoved) {
         return (
@@ -109,8 +109,7 @@ fn revert_label(edit: &UiPendingEdit) -> (&'static str, &'static str) {
     }
     match edit.phase {
         UiPendingEditPhase::Persisted => ("Revert", "Discard this pending edit"),
-        UiPendingEditPhase::Live => ("Reset", "Reset this live control to its authored value"),
-        UiPendingEditPhase::Failed { .. } => ("Revert", "Clear this failed edit"),
+        UiPendingEditPhase::Failed { .. } => ("Revert", "Discard this failed edit"),
     }
 }
 
@@ -192,7 +191,6 @@ mod tests {
     fn entries_filter_into_their_bucket_preserving_order() {
         let edits = vec![
             edit("entries[a]", UiPendingEditPhase::Persisted),
-            edit("rate", UiPendingEditPhase::Live),
             edit(
                 "entries[c]",
                 UiPendingEditPhase::Failed {
@@ -212,7 +210,6 @@ mod tests {
             paths(PendingEditBucket::Persisted),
             vec!["entries[a]", "entries[b]"]
         );
-        assert_eq!(paths(PendingEditBucket::Live), vec!["rate"]);
         assert_eq!(paths(PendingEditBucket::Failed), vec!["entries[c]"]);
     }
 
@@ -281,18 +278,10 @@ mod tests {
             DetailSectionTint::Warning
         );
         assert_eq!(
-            bucket_section_tint(PendingEditBucket::Live, 1),
-            DetailSectionTint::Live
-        );
-        assert_eq!(
             bucket_section_tint(PendingEditBucket::Failed, 1),
             DetailSectionTint::Error
         );
-        for bucket in [
-            PendingEditBucket::Persisted,
-            PendingEditBucket::Live,
-            PendingEditBucket::Failed,
-        ] {
+        for bucket in [PendingEditBucket::Persisted, PendingEditBucket::Failed] {
             assert_eq!(bucket_section_tint(bucket, 0), DetailSectionTint::None);
         }
     }
@@ -346,10 +335,6 @@ mod tests {
         assert_eq!(
             revert_label(&edit("a", UiPendingEditPhase::Persisted)).0,
             "Revert"
-        );
-        assert_eq!(
-            revert_label(&edit("a", UiPendingEditPhase::Live)).0,
-            "Reset"
         );
         assert_eq!(
             revert_label(&edit(

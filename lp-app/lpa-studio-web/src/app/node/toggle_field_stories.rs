@@ -104,7 +104,7 @@ fn live() -> Element {
                     true,
                     UiSlotFieldState::editable()
                         .with_dirty(UiNodeDirtyState::Dirty)
-                        .with_live(true),
+                        .with_debug(true),
                     UiSlotSourceState::Unset,
                 ),
                 on_action: move |_| {},

@@ -818,17 +818,37 @@ mod tests {
         );
 
         // Mutate the overlay at revision 9; the next read must report it.
-        let fs = lpfs::LpFsMemory::new();
+        // `mutate` validates like the batch path (W9), so the edit must be a
+        // real one: load a minimal root MODULE and stage an authored export.
+        // Post-mitosis `nodes` is role `Fixed` (dedicated ops own it) and the
+        // identity fields live in the container manifest, so `exports` is the
+        // writable authored map this probe can touch.
+        let mut fs = lpfs::LpFsMemory::new();
+        // Both halves: the container manifest gates the load (D-A refuses a
+        // project without one), the root module carries the def.
+        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 3}"#)
+            .expect("write container manifest");
+        fs.write_file_mut(lpfs::LpPath::new("/module.json"), br#"{"kind": "Module"}"#)
+            .expect("write root module");
         let ctx = lpc_registry::ParseCtx {
             shapes: h.engine.slot_shapes(),
         };
+        h.registry
+            .load_root(
+                &fs,
+                lpfs::LpPath::new("/module.json"),
+                Revision::new(8),
+                &ctx,
+            )
+            .expect("load project root");
         h.registry
             .mutate(
                 &fs,
                 lpc_model::MutationOp::PutSlotEdit {
                     artifact: lpc_model::ArtifactLocation::file("/module.json"),
-                    edit: lpc_model::SlotEdit::ensure_present(
-                        lpc_model::SlotPath::parse("nodes[clock]").expect("slot path"),
+                    edit: lpc_model::SlotEdit::assign_value(
+                        lpc_model::SlotPath::parse("exports[glow]").expect("slot path"),
+                        lpc_model::LpValue::String(alloc::string::String::from("bus:glow")),
                     ),
                 },
                 Revision::new(9),
