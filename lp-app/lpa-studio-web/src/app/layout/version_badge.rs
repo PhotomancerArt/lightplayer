@@ -12,9 +12,9 @@
 //! [`VersionBadge`] wrapper owns the fetches and drives that component.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{GitBranch, GitPullRequest, LibraryBig};
+use dioxus_icons::lucide::{GitBranch, GitPullRequest, LibraryBig, Tag};
 
-use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
+use crate::base::{PopoverButton, PopoverPlacement};
 
 /// GitHub slug used when no deploy `version.json` is present (local dev builds),
 /// so the repo link and copyright still resolve.
@@ -113,26 +113,118 @@ pub fn VersionBadge() -> Element {
         VersionState::Loaded(info) => Some(info.clone()),
         VersionState::Loading | VersionState::Unavailable => None,
     };
-    let trigger_label = trigger_label(&current);
+    let chip = build_chip(&current, baked_git());
 
     rsx! {
-        div { class: "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-            span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:font-mono tw:text-[0.7rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
-                "{trigger_label}"
-            }
-            IconPopoverButton {
-                class: TRIGGER_CLASS.to_string(),
-                open_class: TRIGGER_OPEN_CLASS.to_string(),
-                icon: StudioIconName::Info,
-                icon_size: 15,
-                label: "Build info".to_string(),
-                title: "Build info".to_string(),
-                popup_class: POPUP_CLASS.to_string(),
-                chrome_class: "ux-popover-chrome-neutral".to_string(),
-                placement: PopoverPlacement::BottomEnd,
-                VersionDetails { info, changelog: changelog() }
-            }
+        PopoverButton {
+            class: chip_class(&chip).to_string(),
+            open_class: chip_open_class(&chip).to_string(),
+            trigger: chip_trigger(&chip),
+            label: "Build info".to_string(),
+            title: "Build info".to_string(),
+            popup_class: POPUP_CLASS.to_string(),
+            chrome_class: "ux-popover-chrome-neutral".to_string(),
+            placement: PopoverPlacement::BottomEnd,
+            layer_keeps_layout: true,
+            VersionDetails { info, changelog: changelog() }
         }
+    }
+}
+
+/// Git facts baked in by `build.rs` at compile time — the dev-build
+/// fallback identity. A fetched `version.json` always wins (that is the
+/// deployed artifact's identity); these only surface when the fetch 404s
+/// (local `dx serve`, `just studio-web-build`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BakedGit {
+    pub branch: String,
+    pub dirty: bool,
+}
+
+fn baked_git() -> Option<BakedGit> {
+    let branch = option_env!("STUDIO_GIT_BRANCH")?;
+    if branch.is_empty() {
+        return None;
+    }
+    Some(BakedGit {
+        branch: branch.to_string(),
+        dirty: option_env!("STUDIO_GIT_DIRTY") == Some("1"),
+    })
+}
+
+/// What the header chip shows for a fetch state + baked git facts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum BuildChip {
+    Loading,
+    /// Deployed build: the version tag from `version.json`.
+    Release(String),
+    /// Dev build with baked git facts: the branch, `±` when dirty.
+    Branch { name: String, dirty: bool },
+    /// Dev build without git facts — today's "dev build" text.
+    DevFallback,
+}
+
+/// Precedence: fetched deploy identity > baked git facts > "dev build".
+fn build_chip(state: &VersionState, baked: Option<BakedGit>) -> BuildChip {
+    match state {
+        VersionState::Loading => BuildChip::Loading,
+        VersionState::Loaded(info) => BuildChip::Release(
+            info.version
+                .clone()
+                .filter(|version| !version.is_empty())
+                .unwrap_or_else(|| "unknown".to_string()),
+        ),
+        VersionState::Unavailable => match baked {
+            Some(BakedGit { branch, dirty }) => BuildChip::Branch { name: branch, dirty },
+            None => BuildChip::DevFallback,
+        },
+    }
+}
+
+fn chip_text(chip: &BuildChip) -> String {
+    match chip {
+        BuildChip::Loading => "…".to_string(),
+        BuildChip::Release(version) => version.clone(),
+        BuildChip::Branch { name, dirty: false } => name.clone(),
+        BuildChip::Branch { name, dirty: true } => format!("{name} ±"),
+        BuildChip::DevFallback => "dev build".to_string(),
+    }
+}
+
+/// The chip trigger content: state icon + build identity. Long branch
+/// names ellipsize from the LEFT (RTL container, LTR bidi-override text)
+/// so the distinctive tail of `claude/some-long-branch-b6680f` survives.
+fn chip_trigger(chip: &BuildChip) -> Element {
+    let text = chip_text(chip);
+    rsx! {
+        match chip {
+            BuildChip::Release(_) => rsx! { Tag { size: 12 } },
+            BuildChip::Branch { .. } => rsx! { GitBranch { size: 12 } },
+            BuildChip::Loading | BuildChip::DevFallback => rsx! {},
+        }
+        span {
+            class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap",
+            style: "direction: rtl; text-align: left;",
+            span { style: "unicode-bidi: bidi-override; direction: ltr;", "{text}" }
+        }
+    }
+}
+
+/// Closed-state chip class per state (dirty gets the warning family; a
+/// deployed version reads in the heading color).
+fn chip_class(chip: &BuildChip) -> &'static str {
+    match chip {
+        BuildChip::Branch { dirty: true, .. } => CHIP_DIRTY_CLASS,
+        BuildChip::Release(_) => CHIP_RELEASE_CLASS,
+        _ => CHIP_CLASS,
+    }
+}
+
+fn chip_open_class(chip: &BuildChip) -> &'static str {
+    match chip {
+        BuildChip::Branch { dirty: true, .. } => CHIP_DIRTY_OPEN_CLASS,
+        BuildChip::Release(_) => CHIP_RELEASE_OPEN_CLASS,
+        _ => CHIP_OPEN_CLASS,
     }
 }
 
@@ -287,8 +379,30 @@ fn VersionDetailRow(label: &'static str, value: String, href: Option<String>) ->
     }
 }
 
-const TRIGGER_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:p-0 tw:text-status-neutral-foreground";
-const TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-card-raised tw:p-0 tw:text-status-neutral-foreground";
+// Chip classes: one shared geometry, three tone families. Kept as full
+// literals (no runtime concat) so the Tailwind scanner sees every class.
+macro_rules! chip_class_str {
+    ($tone:literal) => {
+        concat!(
+            "tw:inline-flex tw:h-7 tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer ",
+            "tw:items-center tw:gap-1.5 tw:rounded-full tw:border tw:px-2.5 ",
+            "tw:font-mono tw:text-[0.65rem] tw:font-bold ",
+            $tone
+        )
+    };
+}
+const CHIP_CLASS: &str =
+    chip_class_str!("tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-subtle-foreground");
+const CHIP_OPEN_CLASS: &str =
+    chip_class_str!("tw:border-status-neutral-border tw:bg-card-raised tw:text-subtle-foreground");
+const CHIP_RELEASE_CLASS: &str =
+    chip_class_str!("tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-heading");
+const CHIP_RELEASE_OPEN_CLASS: &str =
+    chip_class_str!("tw:border-status-neutral-border tw:bg-card-raised tw:text-heading");
+const CHIP_DIRTY_CLASS: &str =
+    chip_class_str!("tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground");
+const CHIP_DIRTY_OPEN_CLASS: &str =
+    chip_class_str!("tw:border-status-warning-border tw:bg-card-raised tw:text-status-warning-foreground");
 const POPUP_CLASS: &str = "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_74%)] tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 
 /// Fetch and deserialize same-origin static JSON. Any failure (404 in dev,
@@ -299,19 +413,6 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(path: &str) -> Option<T> {
         return None;
     }
     response.json::<T>().await.ok()
-}
-
-/// At-a-glance header text for the current fetch state.
-fn trigger_label(state: &VersionState) -> String {
-    match state {
-        VersionState::Loading => "…".to_string(),
-        VersionState::Unavailable => "dev build".to_string(),
-        VersionState::Loaded(info) => info
-            .version
-            .clone()
-            .filter(|version| !version.is_empty())
-            .unwrap_or_else(|| "unknown".to_string()),
-    }
 }
 
 fn display_or(value: Option<&str>, fallback: &str) -> String {
@@ -395,17 +496,43 @@ mod tests {
     }
 
     #[test]
-    fn trigger_label_uses_version_when_loaded() {
+    fn chip_prefers_the_fetched_deploy_identity() {
         let info = VersionInfo {
             version: Some("2026.07.04-1".to_string()),
             ..VersionInfo::default()
         };
-        assert_eq!(trigger_label(&VersionState::Loaded(info)), "2026.07.04-1");
+        // A fetched version.json wins even when git facts were baked in.
+        let baked = Some(BakedGit { branch: "feature-x".to_string(), dirty: true });
+        let chip = build_chip(&VersionState::Loaded(info), baked);
+        assert_eq!(chip_text(&chip), "2026.07.04-1");
+        assert!(matches!(chip, BuildChip::Release(_)));
     }
 
     #[test]
-    fn trigger_label_unavailable_is_dev_build() {
-        assert_eq!(trigger_label(&VersionState::Unavailable), "dev build");
+    fn chip_falls_back_to_the_baked_branch_on_dev_builds() {
+        let baked = Some(BakedGit { branch: "top-bar-ux".to_string(), dirty: false });
+        let chip = build_chip(&VersionState::Unavailable, baked);
+        assert_eq!(chip_text(&chip), "top-bar-ux");
+        assert_eq!(chip_class(&chip), CHIP_CLASS);
+    }
+
+    #[test]
+    fn chip_marks_a_dirty_tree() {
+        let baked = Some(BakedGit { branch: "top-bar-ux".to_string(), dirty: true });
+        let chip = build_chip(&VersionState::Unavailable, baked);
+        assert_eq!(chip_text(&chip), "top-bar-ux ±");
+        assert_eq!(chip_class(&chip), CHIP_DIRTY_CLASS);
+    }
+
+    #[test]
+    fn chip_without_git_facts_is_the_dev_build_text() {
+        let chip = build_chip(&VersionState::Unavailable, None);
+        assert_eq!(chip_text(&chip), "dev build");
+    }
+
+    #[test]
+    fn chip_loading_is_ellipsis() {
+        assert_eq!(chip_text(&build_chip(&VersionState::Loading, None)), "…");
     }
 
     #[test]
