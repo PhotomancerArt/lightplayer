@@ -670,6 +670,7 @@ fn status_label(status: &NodeRuntimeStatus) -> &str {
         NodeRuntimeStatus::Ok => "ok",
         NodeRuntimeStatus::Warn(_) => "warn",
         NodeRuntimeStatus::Error(_) => "error",
+        NodeRuntimeStatus::Unsupported(_) => "not in this build",
     }
 }
 

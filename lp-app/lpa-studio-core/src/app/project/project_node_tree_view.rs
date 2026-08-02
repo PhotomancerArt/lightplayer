@@ -93,17 +93,89 @@ pub enum ProjectNodeStatusTone {
     Good,
     Warning,
     Error,
+    /// The node's kind has no runtime on the device this project runs on
+    /// ("Not on this device").
+    ///
+    /// Wears the ERROR tone: a node the device cannot run usually means
+    /// the project does not work here at all. A few kinds are genuinely
+    /// optional (a radio node on a board with no radio), so this
+    /// over-states those slightly — the right trade, because the common
+    /// case is a broken show and a broken show must not read as fine. It
+    /// stays a tone of its own — rather than plain `Error` — because the
+    /// panes must also know to render the node EMPTY (see
+    /// [`Self::is_unsupported`]): there is no runtime here, so there are
+    /// no live params, products or slots to show.
+    ///
+    /// (Dimmed/neutral, then warning-yellow, were both tried and rejected
+    /// at the M4 G1 gate — see
+    /// `docs/adr/2026-08-01-capability-reporting-on-hello.md`.)
+    Disabled,
 }
 
 impl ProjectNodeStatusTone {
     /// The `UiStatusKind` this tree tone corresponds to (tree statuses never
     /// carry an in-flight `Working` state).
+    ///
+    /// `Disabled` rides `Error`, matching the red the node's own pane
+    /// wears. (Warning and Error already collapse to the same tree
+    /// affordance, so this changes no tree glyph — it aligns the pane
+    /// header wash and the popover pill with the body treatment, which
+    /// warning-yellow chrome around a red body did not.)
     pub fn ui_status_kind(self) -> UiStatusKind {
         match self {
             Self::Neutral => UiStatusKind::Neutral,
             Self::Good => UiStatusKind::Good,
             Self::Warning => UiStatusKind::Warning,
-            Self::Error => UiStatusKind::Error,
+            Self::Error | Self::Disabled => UiStatusKind::Error,
+        }
+    }
+
+    /// Whether the node has no runtime on this device, so its pane renders
+    /// an empty state instead of a body. Params, products and slots all
+    /// describe a runtime that is not there; showing them invites edits
+    /// that cannot take effect.
+    pub fn is_unsupported(self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A not-on-this-device node ANNOUNCES itself in the error family, the
+    /// same red its pane body wears. Regression guard for the G1 gate
+    /// outcome: the first build routed it through `Neutral` (read as
+    /// healthy silence), the second through `Warning` (yellow chrome
+    /// around a red body). Both were rejected.
+    #[test]
+    fn unsupported_announces_itself_in_the_error_family() {
+        assert_eq!(
+            ProjectNodeStatusTone::Disabled.ui_status_kind(),
+            UiStatusKind::Error
+        );
+        assert!(ProjectNodeStatusTone::Disabled.is_unsupported());
+
+        let clean = DirtySummary::clean();
+        assert_eq!(
+            UiAffordance::merged(ProjectNodeStatusTone::Disabled.ui_status_kind(), &clean),
+            UiAffordance::merged(ProjectNodeStatusTone::Error.ui_status_kind(), &clean),
+        );
+        assert_ne!(
+            UiAffordance::merged(ProjectNodeStatusTone::Disabled.ui_status_kind(), &clean),
+            UiAffordance::merged(ProjectNodeStatusTone::Good.ui_status_kind(), &clean),
+            "it must never read as healthy silence (the first G1 rejection)"
+        );
+
+        // Only Disabled empties the pane; the plain error tone does not —
+        // a broken shader still shows its slots so you can fix it.
+        for tone in [
+            ProjectNodeStatusTone::Neutral,
+            ProjectNodeStatusTone::Good,
+            ProjectNodeStatusTone::Warning,
+            ProjectNodeStatusTone::Error,
+        ] {
+            assert!(!tone.is_unsupported(), "{tone:?}");
         }
     }
 }

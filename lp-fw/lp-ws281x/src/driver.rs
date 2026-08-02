@@ -62,7 +62,6 @@
 use core::sync::atomic::AtomicU32;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use crate::blocks::BlockPlan;
 use crate::hw::RmtHw;
 use crate::pulse::STOP_WORD;
 use crate::state::{ChannelState, ChannelStats, BITS_PER_PIXEL, BYTES_PER_PIXEL};
@@ -95,9 +94,10 @@ pub enum FillResult {
 pub enum ConfigError {
     /// `ch` is not in `0..N`.
     ChannelOutOfRange,
-    /// `ch` owns no memory blocks under the driver's
-    /// [`BlockPlan`](crate::BlockPlan): a lower-numbered channel extended over
-    /// them, or the plan left the channel out.
+    /// `ch` owns no memory blocks under the backend's
+    /// [`BlockPlan`](crate::BlockPlan) — a lower-numbered channel extended
+    /// over them, the plan left the channel out, or no plan has been
+    /// published yet. Reported as [`RmtHw::ram_words`] returning zero.
     ChannelUnavailable,
     /// The backend reported fewer than 4 words for the channel.
     RamTooSmall,
@@ -142,7 +142,6 @@ pub enum StartError {
 pub struct Ws281xDriver<H, const N: usize> {
     hw: H,
     channels: [ChannelState; N],
-    blocks: BlockPlan<N>,
     /// Test hook (feature `test_hooks`), per channel: threshold interrupts to
     /// service normally before the drop counter starts consuming them.
     #[cfg(feature = "test_hooks")]
@@ -154,27 +153,19 @@ pub struct Ws281xDriver<H, const N: usize> {
 }
 
 impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
-    /// Wrap a backend, one memory block per channel. No hardware is touched
-    /// until [`Self::configure`].
+    /// Wrap a backend. No hardware is touched until [`Self::configure`].
+    ///
+    /// The backend is the sole authority on window sizes: which channels
+    /// exist, and how much RAM each owns, is whatever [`RmtHw::ram_words`]
+    /// reports — typically a [`BlockPlan`](crate::BlockPlan) the backend
+    /// reads from a [`SharedBlockPlan`](crate::SharedBlockPlan) published at
+    /// driver init. A channel whose window is zero words is rejected by
+    /// [`Self::configure`] with [`ConfigError::ChannelUnavailable`] instead
+    /// of quietly transmitting into RAM it does not own.
     pub const fn new(hw: H) -> Self {
-        Self::with_blocks(hw, BlockPlan::one_per_channel())
-    }
-
-    /// Wrap a backend with an explicit [`BlockPlan`].
-    ///
-    /// The plan decides which channels exist at all: a channel whose memory
-    /// block was absorbed by a lower-numbered one is rejected by
-    /// [`Self::configure`] with [`ConfigError::ChannelUnavailable`] instead of
-    /// quietly transmitting into RAM it does not own.
-    ///
-    /// The backend must be built from the *same* plan — it is a `Copy` value
-    /// precisely so that both halves can share one — because
-    /// [`RmtHw::ram_words`] remains the authority on window size.
-    pub const fn with_blocks(hw: H, blocks: BlockPlan<N>) -> Self {
         Self {
             hw,
             channels: [const { ChannelState::new() }; N],
-            blocks,
             #[cfg(feature = "test_hooks")]
             hook_threshold_skip: [const { AtomicU32::new(0) }; N],
             #[cfg(feature = "test_hooks")]
@@ -185,11 +176,6 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// The backend.
     pub fn hw(&self) -> &H {
         &self.hw
-    }
-
-    /// The memory-block allocation this driver was built with.
-    pub const fn block_plan(&self) -> &BlockPlan<N> {
-        &self.blocks
     }
 
     /// Number of channels this driver manages, available or not.
@@ -224,11 +210,11 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
             .channels
             .get(ch as usize)
             .ok_or(ConfigError::ChannelOutOfRange)?;
-        if !self.blocks.is_available(ch) {
-            return Err(ConfigError::ChannelUnavailable);
-        }
 
         let ram_words = self.hw.ram_words(ch);
+        if ram_words == 0 {
+            return Err(ConfigError::ChannelUnavailable);
+        }
         if ram_words < 4 {
             return Err(ConfigError::RamTooSmall);
         }
@@ -293,6 +279,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
 
         let half = state.half_words.load(Relaxed);
         self.hw.set_tx_threshold(ch, half as u16);
+        state.threshold_boundary.store(half, Relaxed);
         self.hw.start_tx(ch);
         Ok(())
     }
@@ -424,10 +411,11 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     ///
     /// Channels are served in index order, which means the highest-numbered
     /// channel of a coincident group waits for all the others' refills. That
-    /// cost is measurable — it is exactly what
-    /// [`ChannelStats::refill_lag_sum`] records — and it is the reason the
-    /// deadline budget in the crate README is stated per *group* rather than
-    /// per channel.
+    /// cost is measurable — it lands in that channel's
+    /// [`ChannelStats::entry_delay_max`], which is sampled per channel at the
+    /// top of its own service and therefore includes every earlier channel's
+    /// refill — and it is the reason the deadline budget in the crate README is
+    /// stated per *group* rather than per channel.
     pub fn on_interrupt(&self) {
         let flags = self.hw.take_interrupts();
         #[cfg(feature = "test_hooks")]
@@ -522,8 +510,23 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         state.frame_complete.store(true, Release);
     }
 
-    /// Handle `tx_thr_event`: plant the guard, refill the free half, flip the
-    /// threshold, and record how far the read pointer moved meanwhile.
+    /// Handle `tx_thr_event`: measure the entry delay, plant the guard, refill
+    /// the free half, flip the threshold, and record how far the read pointer
+    /// moved meanwhile.
+    ///
+    /// The two measurements split the one deadline — a ping-pong half — into
+    /// the part spent *getting here* and the part spent *doing the work*:
+    ///
+    /// * [`ChannelStats::entry_delay_max`] is `(read_pos - boundary) mod
+    ///   ram_words` at the top of this function, i.e. interrupt-to-service
+    ///   latency in 1.25 µs units. It costs nothing extra to obtain — it reuses
+    ///   the `read_pos` the half selection already needs.
+    /// * [`ChannelStats::refill_lag_max`] is the advance across the refill
+    ///   itself.
+    ///
+    /// Which of the two dominates is the whole question when a chip starts
+    /// truncating frames: entry delay says the handler could not get in, refill
+    /// lag says it could not get out.
     fn refill(&self, ch: u8, state: &ChannelState) {
         if state.is_complete() {
             return;
@@ -535,6 +538,21 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         }
 
         let pos_before = self.hw.read_pos(ch) as usize;
+
+        // Entry delay, before anything else is done with this channel: the
+        // words the transmitter got through between raising `tx_thr_event` at
+        // the armed boundary and this handler arriving.
+        //
+        // The threshold alternates between `half` and `ram`, and the `ram` one
+        // fires as the pointer returns to word 0 — so reducing it mod `ram`
+        // turns the armed value into the word the event actually fired at, and
+        // keeps `ram - boundary` in range for the subtraction. The outer
+        // modulus is the one that carries weight: a service late enough for the
+        // pointer to have wrapped past the boundary reads a `read_pos`
+        // numerically *below* it, for a delay that is positive.
+        let boundary = state.threshold_boundary.load(Relaxed) % ram;
+        state.record_entry_delay((pos_before + ram - boundary) % ram, half);
+
         let in_second_half = pos_before >= half;
 
         // The transmitter is inside one half; the other one is free.
@@ -547,6 +565,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         // Flip the threshold first: the next event must be armed before the
         // refill, which is the long part of this handler.
         self.hw.set_tx_threshold(ch, next_threshold as u16);
+        state.threshold_boundary.store(next_threshold, Relaxed);
 
         if pos_before == guard_slot {
             // The read pointer has not passed the slot yet — writing a STOP

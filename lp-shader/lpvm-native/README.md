@@ -187,6 +187,23 @@ assembly in `rt_jit::call`, `IsaTarget::native`'s answer); the backport adds a
 sibling `#[cfg(target_arch = "xtensa")]` arm next to it instead. The same two
 spellings are used in `lp-gfx-lpvm::target_backend` and `lpc-shared::backtrace`.
 
+**Per-chip JIT code placement** is a third axis, orthogonal to the ISA: it is
+about where the *bytes* live, not what is emitted. Two placements exist
+(`rt_jit::JitBuffer`):
+
+| Chip / target        | Placement    | Write→execute rule                                                     |
+| -------------------- | ------------ | ---------------------------------------------------------------------- |
+| host, ESP32-C6       | in place     | identity (`exec_addr`)                                                  |
+| ESP32-S3 (LX7)       | in place     | `+0x6F_0000` inside SRAM1's dual-mapped window (`exec_addr`)            |
+| classic ESP32 (LX6)  | **placed**   | none — heap has no I-bus view; code is installed into a fixed SRAM1 region through the word-mirrored D-bus walk (`codemem_esp32`), linked against its final address by `link::link_jit_at` |
+
+The classic path is `compile_module_jit_placed`: reserve a span in the
+`codemem_esp32::CodeArena` (real `TooLarge` capacity edge), link at the span's
+I-bus base, install via the descending mirrored word walk, sync. The region
+constants are pinned against `lp-xt-emu`'s `BoardProfile::esp32()` and the
+whole install-then-execute path runs on the host in
+`tests/xt_classic_profile.rs`.
+
 **3. Each backend is a Cargo feature, and firmware pays only for its own.**
 `isa-rv32` and `isa-xt` gate the modules, the `IsaTarget` variants, and every
 match arm. `default = ["isa-rv32", "isa-xt"]`, so host builds and tests get
@@ -390,9 +407,42 @@ the feature nowhere and is the negative control that proves the gate holds. It
 was 2,874,560 B before and after M7 (P5). The S3 paid +65,680 B for hardware
 float, against 4.4 MB of headroom.
 
+That control covers **this gate only**. Code outside `float-f32` — the
+per-compile mode threading, the capability query, the refusal message — is
+linked on every board and moves the C6 legitimately; it cost +416 B when it
+landed (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`). Read a nonzero
+C6 delta as "did the gate leak, or did always-on code grow?", and answer it by
+building once with the always-on part removed rather than by guessing.
+
 The two device configurations that turn it on today: `fw-esp32c6`'s
 `test_f32_softfloat` harness (soft float, no FPU) and **`fw-esp32s3`, in
 `default`** (hardware FPU).
+
+#### Who asks for the mode
+
+Linking the feature makes Float *possible*; it does not select it. The request
+comes from the authored `float_mode` slot on each shader node and arrives here
+per compile:
+
+```
+ShaderDef.float_mode          (lpc-model — Fixed | Float, one per shader node)
+  → LpGraphics::native_semantics() / float_semantics()   (which tier, per backend)
+  → ShaderCompileOptions.semantics                       (Q32 | F32Cpu | F32Gpu)
+  → CompilePxDesc.float_mode → LpvmCompileParams.float_mode
+  → NativeCompileOptions.float_mode → compile_module     (lower.rs | lower_f32.rs)
+```
+
+The mode is **per compile, not per engine**, because one engine is constructed
+once at boot and a project may mix Fixed and Float nodes. `NativeJitEngine` is
+therefore the engine that reads `params.float_mode`; engines whose mode is
+fixed at construction answer `supports_float_mode` with the mode they were
+built with, so a caller learns they cannot honour a request instead of
+receiving a module in the wrong numerics.
+
+Callers ask `LpvmEngine::supports_float_mode` **before** compiling. That is
+what turns an unsupported request into an error naming the backend and the
+slot, rather than the `LowerError::UnsupportedOp` about a Cargo feature that
+the lowering would otherwise raise after a full frontend run.
 
 **Import resolution is mode-aware, and must stay that way.** `@glsl::sin` in f32
 mode resolves to `LpGlslSinF32`, never to the Q32 twin. Getting this wrong does

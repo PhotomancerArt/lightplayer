@@ -45,6 +45,16 @@ fn labels_likely_esp32_ports() {
         label_for_port("/dev/cu.usbmodem2101"),
         "ESP32 Serial (/dev/cu.usbmodem2101)"
     );
+    // CH340-bridged classic ESP32 boards enumerate as `cu.wchusbserial*` on
+    // macOS (with the WCH driver) — no `usbmodem`, no `tty.` prefix.
+    assert_eq!(
+        label_for_port("/dev/cu.wchusbserial1140"),
+        "ESP32 Serial (/dev/cu.wchusbserial1140)"
+    );
+    assert_eq!(
+        label_for_port("/dev/cu.usbserial-0001"),
+        "ESP32 Serial (/dev/cu.usbserial-0001)"
+    );
     assert_eq!(
         label_for_port("/dev/cu.Bluetooth"),
         "Serial (/dev/cu.Bluetooth)"

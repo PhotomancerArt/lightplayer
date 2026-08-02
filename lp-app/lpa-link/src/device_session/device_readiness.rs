@@ -218,7 +218,7 @@ fn recent_line_summary(recent_lines: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use lpc_wire::{FwProvenance, ServerMessage};
+    use lpc_wire::{BuildFacts, HardwareFacts, ServerMessage};
 
     use super::*;
 
@@ -405,11 +405,17 @@ mod tests {
     fn test_hello(proto: u32) -> ServerHello {
         ServerHello {
             proto,
-            fw: FwProvenance {
+            build: BuildFacts {
+                features: Vec::new(),
                 package: "fw-esp32c6".to_string(),
                 commit: "test".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+            },
+            hardware: HardwareFacts {
+                radio: true,
+                button: true,
+                board_id: None,
             },
             device_uid: None,
         }

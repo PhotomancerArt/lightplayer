@@ -281,6 +281,7 @@ fn non_empty(value: String) -> Option<String> {
 )]
 fn target_matches_calibration(target: HardwareTarget, calibration_target: &str) -> Result<()> {
     let expected = match calibration_target {
+        "esp32" => HardwareTarget::Esp32,
         "esp32c6" => HardwareTarget::Esp32c6,
         "esp32s3" => HardwareTarget::Esp32s3,
         "rv32imac_emu" => HardwareTarget::Rv32imacEmu,

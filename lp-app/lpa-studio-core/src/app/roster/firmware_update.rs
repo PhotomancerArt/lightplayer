@@ -2,21 +2,26 @@
 //!
 //! On any Running row, project drift owns the status circle; firmware
 //! drift is advisory — an amber chip, never the circle. The comparison is
-//! bundled-manifest commit (`build.sourceCommit` in Studio's packaged
-//! `firmware/esp32c6/manifest.json`) vs the device hello's
-//! [`FwProvenance::commit`], both short git commits produced the same way
+//! bundled-manifest commit (`core.commit` in Studio's packaged
+//! `firmware/<build-id>/manifest.json`, schemaVersion 2 — the commit the
+//! image reports about *itself*) vs the device hello's
+//! [`BuildFacts::commit`], both short git commits produced the same way
 //! (`git rev-parse --short=12`).
 
-use lpc_wire::FwProvenance;
+use lpc_wire::BuildFacts;
 
 /// Sentinel both producers emit when git was unavailable at build time.
 const UNKNOWN_COMMIT: &str = "unknown";
 
 /// Studio's bundled firmware image provenance, as chip-comparison
-/// evidence: `build.sourceCommit` / dirty flag from the packaged
-/// `firmware/esp32c6/manifest.json`. Callers assemble it wherever the
+/// evidence: `core.commit` / `core.dirty` from the packaged
+/// `firmware/<build-id>/manifest.json`. Callers assemble it wherever the
 /// manifest is on hand; absence of the manifest is honest evidence of
 /// absence (no chip).
+///
+/// Known gap: nothing in production fetches the manifest yet, so
+/// `bundled_fw` is only ever populated in stories
+/// (`docs/debt/bundled-firmware-chip-unplumbed.md`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BundledFirmware {
     pub commit: String,
@@ -26,7 +31,7 @@ pub struct BundledFirmware {
 impl BundledFirmware {
     /// Whether this bundled image should be offered over the running
     /// firmware (see [`firmware_update_available`]).
-    pub fn update_available(&self, device_fw: &FwProvenance) -> bool {
+    pub fn update_available(&self, device_fw: &BuildFacts) -> bool {
         firmware_update_available(&self.commit, self.dirty, device_fw)
     }
 }
@@ -36,13 +41,13 @@ impl BundledFirmware {
 ///
 /// Suppressed whenever the comparison would be a guess:
 /// - either side built from a dirty tree (`bundled_dirty` /
-///   [`FwProvenance::dirty`]) — dev builds drift constantly and the
+///   [`BuildFacts::dirty`]) — dev builds drift constantly and the
 ///   commit no longer names the bits;
 /// - either commit is `"unknown"` or empty (git absent at build time).
 pub fn firmware_update_available(
     bundled_commit: &str,
     bundled_dirty: bool,
-    device_fw: &FwProvenance,
+    device_fw: &BuildFacts,
 ) -> bool {
     if bundled_dirty || device_fw.dirty {
         return false;
@@ -113,8 +118,9 @@ mod tests {
         ));
     }
 
-    fn device(commit: &str, dirty: bool) -> FwProvenance {
-        FwProvenance {
+    fn device(commit: &str, dirty: bool) -> BuildFacts {
+        BuildFacts {
+            features: Vec::new(),
             package: "fw-esp32c6".to_string(),
             commit: commit.to_string(),
             dirty,

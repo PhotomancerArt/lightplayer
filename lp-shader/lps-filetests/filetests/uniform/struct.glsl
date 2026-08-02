@@ -94,8 +94,19 @@ vec4 test_shared_struct_match_combined() {
 // @unsupported(wgpu.f32)
 // wasm.f32: the two f32 targets disagree. All uniforms default to zero, so this
 // evaluates normalize(vec3(0)) — 0/0 — and then max(NaN, 0.0). wasm.f32 returns
-// vec4(NaN..), interp.f32 returns vec4(0..). IEEE says NaN, so the expectation
-// below (written before any f32 backend ran) and the interp oracle may both be
-// wrong. Which side is authoritative is a G1 question; @broken until answered.
+// vec4(NaN..), interp.f32 returns vec4(0..).
+//
+// G1 answered this (2026-07-31): the authority is the product spec, not IEEE and
+// not silicon. docs/design/float.md §5 now classifies BOTH operations as
+// **Unspecified** — `max` with a NaN operand (IEEE defines competing operations
+// and GLSL declares it undefined) and `normalize(vec3(0))` (a GLSL-undefined
+// library input). So neither target is wrong and there is nothing to fix here.
+//
+// What is left is a disposition question, not a semantics one: float.md §5 rule
+// 3 says unspecified behavior is never asserted, so the f32 side of this
+// expectation should be retired rather than carried as @broken. Deferred out of
+// the G3 sweep because retiring it correctly needs the behavior of all five f32
+// targets, and the q32 assertion below must survive. See
+// g3-roadmap-final-review.md, "Follow-ups".
 // @broken(wasm.f32)
 // run: test_shared_struct_match_combined() ~= vec4(0.0, 0.0, 0.0, 0.0)

@@ -1,0 +1,13 @@
+[package]
+name = "lp-bootctl"
+version = "1.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Boot-control sector: a flash-persisted instruction to the firmware's next boot"
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -28,14 +28,14 @@ use crate::{
     UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent,
     UxUpdateSink,
 };
-use lpc_model::slot::SlotPersistence;
+use lpc_model::slot::{SlotPersistence, effective_persistence};
 use lpc_model::{
     ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
     MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
-    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
-    SlotPath, SlotPathSegment, SlotPolicy, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
-    TreePath, glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_policy,
-    starter_for_kind,
+    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotDirection, SlotEdit,
+    SlotMapKey, SlotPath, SlotPathSegment, SlotRole, SlotShapeId, SlotShapeLookup,
+    SlotShapeRegistry, TreePath, glsl_type_for_lp_type, resolve_artifact_specifier,
+    resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -44,7 +44,7 @@ use lpc_wire::{
 };
 
 use super::node::node_naming::{file_stem, node_kind_slug, sanitize_node_name, unique_node_name};
-use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu};
+use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu, gate_add_node_menu};
 use super::{
     NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
 };
@@ -64,6 +64,11 @@ pub struct ProjectController {
     /// scope. `None` (no lens / tests) behaves like a device lens for
     /// subscription scope and uses the default probe resolution.
     lens_runtime_kind: Option<crate::RuntimeKind>,
+    /// The lens DEVICE's reported build features, pushed down beside the
+    /// runtime kind. `None` = no device has said otherwise (sim/host lens,
+    /// or a link that is not Ready): the add-node picker then offers every
+    /// kind. Gating only ever narrows when a device affirmatively reports.
+    lens_device_features: Option<Vec<lpc_model::LpFeature>>,
     active_editor_target: Option<ProjectEditorTarget>,
     /// The storage dir (under `/projects/`) the LENS runtime actually
     /// serves the project from. The sim always uses the demo slot, but a
@@ -186,6 +191,7 @@ impl ProjectController {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
             lens_runtime_kind: None,
+            lens_device_features: None,
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
@@ -1217,11 +1223,12 @@ impl ProjectController {
     }
 
     /// Classify the persistence governing an edit entry's path through the
-    /// retained shapes (`lpc_model::resolve_slot_policy`). The walk is
+    /// retained shapes (`lpc_model::resolve_slot_role`). The walk is
     /// shape-only, so it classifies paths with no surviving slot row —
-    /// removed map entries — exactly like paths that still have data.
-    /// Unresolvable entries (unknown node/shape/path) classify as the default
-    /// policy's bucket (persisted).
+    /// removed map entries — exactly like paths that still have data. A
+    /// produced field (e.g. under the `State` root) always classifies as
+    /// transient regardless of its role (D1). Unresolvable entries (unknown
+    /// node/shape/path) classify as the default role's bucket (persisted).
     fn resolve_edit_persistence(&self, address: &ProjectSlotAddress) -> SlotPersistence {
         self.node(&address.node)
             .and_then(|node| {
@@ -1229,10 +1236,13 @@ impl ProjectController {
                 let shape = self
                     .slot_shapes
                     .get_shape(*self.root_shape_ids.get(&key)?)?;
-                let policy = resolve_slot_policy(shape, &self.slot_shapes, &address.path)?;
-                Some(policy.persistence)
+                let resolution = resolve_slot_role(shape, &self.slot_shapes, &address.path)?;
+                Some(effective_persistence(resolution.role, resolution.direction))
             })
-            .unwrap_or(SlotPolicy::default().persistence)
+            .unwrap_or(effective_persistence(
+                SlotRole::default(),
+                SlotDirection::default(),
+            ))
     }
 
     /// Entry keys of `artifact`'s `entries` map that carry pending overlay
@@ -1577,7 +1587,17 @@ impl ProjectController {
         // address-keyed store so it survives re-renders and remounts.
         for node in &mut nodes {
             self.overlay_node_card_ui(node);
+            // The lens device's gate lands here, on every menu at once —
+            // node views are built deep in `NodeController` where the
+            // session is not visible, so one pass at the top keeps a
+            // playlist's picker honest with the project pane's.
+            self.gate_add_node_menus(node);
         }
+        let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        gate_add_node_menu(
+            &mut root_add_node_menu,
+            self.lens_device_features.as_deref(),
+        );
         // Node dirty covers slot + node-mapped asset edits across the subtree;
         // asset edits whose artifact maps to no node (a shader's `.glsl`) are
         // added on top so they still count toward Save (see `dirty_summary`).
@@ -1608,7 +1628,7 @@ impl ProjectController {
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
-        .with_add_node_menu(add_node_menu(&UiAttachTarget::ProjectRoot))
+        .with_add_node_menu(root_add_node_menu)
         .with_edits_in_flight(self.edits_in_flight())
     }
 
@@ -2073,6 +2093,17 @@ impl ProjectController {
         self.overlay_child_card_ui(&mut node.children);
     }
 
+    /// Apply the lens device's capability gate to a node view's add-node
+    /// picker. Node views are built inside [`NodeController`], which cannot
+    /// see the session; the gate therefore lands here, at the one place
+    /// that knows the lens, so a playlist's "+" agrees with the project
+    /// pane's.
+    fn gate_add_node_menus(&self, node: &mut UiNodeView) {
+        if let Some(menu) = node.add_node_menu.as_mut() {
+            gate_add_node_menu(menu, self.lens_device_features.as_deref());
+        }
+    }
+
     fn overlay_child_card_ui(&self, children: &mut [crate::UiNodeChild]) {
         for child in children {
             if let Some(saved) = self.node_card_ui.get(&child.detail) {
@@ -2392,6 +2423,14 @@ impl ProjectController {
     /// wiring.
     pub fn set_lens_runtime_kind(&mut self, kind: Option<crate::RuntimeKind>) {
         self.lens_runtime_kind = kind;
+    }
+
+    /// Record the lens DEVICE's reported build features (the add-node
+    /// picker's gate). Pushed by the studio controller from the same
+    /// chokepoint as [`Self::set_lens_runtime_kind`]; `None` for a sim/host
+    /// lens or a link that has not reported a hello.
+    pub fn set_lens_device_features(&mut self, features: Option<Vec<lpc_model::LpFeature>>) {
+        self.lens_device_features = features;
     }
 
     /// The runtime-tiered visual probe resolution for the current lens.
@@ -5020,8 +5059,8 @@ mod tests {
     use lpc_model::{
         ControlExtent, ControlProduct, LpType, LpValue, NodeId, ProductKind, ProductRef, Revision,
         SlotData, SlotEnum, SlotEnumEncoding, SlotFieldShape, SlotMapDyn, SlotMapKey,
-        SlotMapKeyShape, SlotMeta, SlotName, SlotOptionDyn, SlotPath, SlotRecord, SlotShape,
-        SlotShapeId, SlotVariantShape, TreePath, VisualProduct, WithRevision,
+        SlotMapKeyShape, SlotMeta, SlotName, SlotOptionDyn, SlotPath, SlotRecord, SlotRole,
+        SlotShape, SlotShapeId, SlotVariantShape, TreePath, VisualProduct, WithRevision,
     };
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
@@ -7961,8 +8000,9 @@ mod tests {
     }
 
     /// A ready project with an applied view whose def root has a persisted
-    /// `brightness` (default policy) and a transient `rate` control, plus the
-    /// def-artifact map a connect-time inventory read would have installed.
+    /// `brightness` (default role) and a `Debug`-role `rate` control, plus
+    /// the def-artifact map a connect-time inventory read would have
+    /// installed.
     fn editable_project_with_scripted_client(
         responses: Vec<WireServerMessage>,
     ) -> (
@@ -7992,7 +8032,7 @@ mod tests {
         view.slots.registry = Default::default();
         let def_shape = SlotShapeId::new(500);
         let mut rate = SlotFieldShape::new("rate", SlotShape::value(LpType::F32)).unwrap();
-        rate.policy = lpc_model::SlotPolicy::writable_transient();
+        rate.role = SlotRole::Debug;
         view.slots
             .registry
             .register_dynamic_shape(

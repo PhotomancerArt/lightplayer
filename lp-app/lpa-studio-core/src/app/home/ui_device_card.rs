@@ -1,6 +1,6 @@
 //! One device as the gallery's *Devices* roster shows it.
 
-use lpc_wire::FwProvenance;
+use lpc_wire::{BuildFacts, HardwareFacts};
 
 use crate::UiLogEntry;
 use crate::app::home::card_ui_state::CardUiState;
@@ -25,10 +25,20 @@ pub struct UiDeviceCard {
     /// The project the device holds (live cards) or last ran (offline
     /// cards) — identity for the header chip, never health.
     pub project: Option<UiDeviceProjectChip>,
-    /// Running-firmware provenance from the live link's hello — Technical
-    /// evidence for the card's rich-object detail; `None` for remembered
-    /// (offline) cards and pre-hello links.
-    pub fw: Option<FwProvenance>,
+    /// Running-firmware build facts from the live link's hello (provenance
+    /// + the feature set compiled into the image) — Technical evidence for
+    /// the card's rich-object detail; `None` for remembered (offline)
+    /// cards and pre-hello links.
+    pub fw: Option<BuildFacts>,
+    /// What the live link's hello says this UNIT has wired (services,
+    /// board identity) — the runtime half of the same report. `None`
+    /// wherever `fw` is `None`.
+    pub hardware: Option<HardwareFacts>,
+    /// Device-level safe-mode output ceiling (0–255) reported by the live
+    /// session's heartbeat. A power cycle is the only exit, so the card
+    /// must both flag the state AND say how to leave it. `None` when the
+    /// device reports no clamp (and always on offline/sim cards).
+    pub safe_clamp: Option<u8>,
     /// D36: this card is the live SIMULATOR session, wearing the same card
     /// grammar with the sim presentation (sim glyph, no connect ceremony,
     /// no rename, its own rich-object sections). The sim is not a device
@@ -88,7 +98,17 @@ impl UiDeviceCard {
         }
         match target_uid {
             Some(uid) => self.uid.as_deref() == Some(uid),
-            None => !matches!(self.state, RosterCardState::Offline { .. }),
+            // A uid-less op belongs to THE anonymous hardware session (there
+            // is at most one), so it rides any uid-less card — including the
+            // Offline card that `op_in_flight` pins when the session dies
+            // mid-op. The offline exclusion only guards uid'd REGISTRY cards
+            // of other devices from adopting a stray anonymous op. Before
+            // pinned anonymous cards existed, "not offline" was equivalent;
+            // once a recovery write killed its own session, the pinned card
+            // was offline, the op refused to ride it, and the user got a
+            // bare "Not seen yet" instead of the replug instruction (bench,
+            // 2026-07-31 — bootloader-mode arm).
+            None => self.uid.is_none() || !matches!(self.state, RosterCardState::Offline { .. }),
         }
     }
 }

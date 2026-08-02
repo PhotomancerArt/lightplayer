@@ -1,0 +1,27 @@
+{
+  "lpManifestCore": 1,
+  "package": "fw-esp32c6",
+  "target": {
+    "family": "esp32",
+    "chip": "esp32c6",
+    "cargoTarget": "riscv32imac-unknown-none-elf"
+  },
+  "features": [
+    "node.button",
+    "node.clock",
+    "node.fluid",
+    "node.fixture",
+    "node.playlist",
+    "node.radio",
+    "node.shader",
+    "node.texture",
+    "diag.unwind",
+    "gfx.lpvm",
+    "svc.button",
+    "svc.radio-espnow"
+  ],
+  "limits": {
+    "flashAppBytes": 3145728
+  },
+  "wireProto": 5
+}

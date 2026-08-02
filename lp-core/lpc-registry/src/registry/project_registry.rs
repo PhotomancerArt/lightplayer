@@ -4,16 +4,15 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_model::slot::SlotPersistence;
 use lpc_model::{
     ArtifactChangeSummary, ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, CommitResult,
     MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
     NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
     ProjectInventory, ProjectManifest, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
-    SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotPolicyResolution,
+    SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotRole, SlotRoleResolution,
     SlotShapeLookup, SlotShapeView, StaticSlotShape, StoredSlotEdit, WithRevision,
-    lookup_slot_data, lp_value_matches_type, resolve_slot_policy_and_leaf,
+    lookup_slot_data, lp_value_matches_type, resolve_slot_role,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
@@ -530,13 +529,13 @@ impl ProjectRegistry {
             }
         }
 
-        // Commit retains transient slot edits: the writer never serializes
-        // transient values into def files, so their pending state must stay
-        // live after save. Persisted slot edits and asset overlays are on
-        // disk now and drop. The overlay revision only advances when this
-        // actually changed the overlay's content, so clients re-fetch exactly
-        // when the pending set changed.
-        let retained = self.retain_transient_edits(&overlay, ctx);
+        // Commit retains Debug-role slot edits: the writer never serializes
+        // them into def files, so their pending state must stay live after
+        // save. Persisted slot edits and asset overlays are on disk now and
+        // drop. The overlay revision only advances when this actually
+        // changed the overlay's content, so clients re-fetch exactly when
+        // the pending set changed.
+        let retained = self.retain_debug_edits(&overlay, ctx);
         if retained != overlay {
             self.overlay.set(frame, retained);
         }
@@ -552,19 +551,15 @@ impl ProjectRegistry {
         Ok(CommitResult { artifact_changes })
     }
 
-    /// Post-commit overlay: keep slot edits whose governing policy is
-    /// transient (they never serialize to def files, so commit does not
-    /// resolve them; they stay pending and runtime-effective). Persisted slot
-    /// edits and asset overlays drop — their content is now on disk. A stale
-    /// edit whose path no longer resolves in the def shape drops like a
-    /// persisted one: it was already unenforceable. Artifacts left without
-    /// edits are not retained, preserving the empty-artifact-overlay removal
+    /// Post-commit overlay: keep slot edits whose governing role is `Debug`
+    /// (they never serialize to def files, so commit does not resolve them;
+    /// they stay pending and runtime-effective). Persisted slot edits and
+    /// asset overlays drop — their content is now on disk. A stale edit
+    /// whose path no longer resolves in the def shape drops like a persisted
+    /// one: it was already unenforceable. Artifacts left without edits are
+    /// not retained, preserving the empty-artifact-overlay removal
     /// invariant.
-    fn retain_transient_edits(
-        &self,
-        committed: &ProjectOverlay,
-        ctx: &ParseCtx<'_>,
-    ) -> ProjectOverlay {
+    fn retain_debug_edits(&self, committed: &ProjectOverlay, ctx: &ParseCtx<'_>) -> ProjectOverlay {
         let mut retained = ProjectOverlay::new();
         for (location, artifact_overlay) in committed.iter() {
             let Some(slot_overlay) = artifact_overlay.as_slot() else {
@@ -578,15 +573,14 @@ impl ProjectRegistry {
             else {
                 continue;
             };
-            let transient = slot_overlay.filtered(|path, _| {
-                resolve_edit_policy(def, path, ctx).is_some_and(|resolution| {
-                    resolution.policy.persistence == SlotPersistence::Transient
-                })
+            let debug = slot_overlay.filtered(|path, _| {
+                resolve_edit_policy(def, path, ctx)
+                    .is_some_and(|resolution| resolution.role == SlotRole::Debug)
             });
-            if !transient.is_empty() {
+            if !debug.is_empty() {
                 retained
                     .artifacts
-                    .insert(location.clone(), ArtifactOverlay::slot(transient));
+                    .insert(location.clone(), ArtifactOverlay::slot(debug));
             }
         }
         retained
@@ -778,7 +772,7 @@ impl ProjectRegistry {
                         ),
                     ));
                 };
-                if !resolution.policy.writable {
+                if !resolution.is_writable() {
                     return Err(MutationRejection::new(
                         MutationRejectionReason::NotWritable,
                         format!("slot {} is not writable", edit.path),
@@ -858,7 +852,7 @@ impl ProjectRegistry {
                 artifact.file_path()
             )));
         };
-        if !resolution.policy.writable {
+        if !resolution.is_writable() {
             return Err(MutationRejection::new(
                 MutationRejectionReason::NotWritable,
                 format!("slot {to} is not writable"),
@@ -1021,7 +1015,7 @@ impl ProjectRegistry {
     /// variant must clear, or empty when the mutation is no such edit.
     ///
     /// Detection is a shape-only walk (the same resolution family as
-    /// [`resolve_edit_policy`] / [`resolve_slot_policy_and_leaf`], so it works
+    /// [`resolve_edit_policy`] / [`resolve_slot_role`], so it works
     /// regardless of which variant is currently active): the edit's terminal
     /// segment must name a declared variant of the enum its parent path
     /// resolves to in the effective definition's shape. Returns the paths of
@@ -1356,7 +1350,7 @@ pub(crate) fn resolve_edit_policy(
     def: &NodeDef,
     path: &SlotPath,
     ctx: &ParseCtx<'_>,
-) -> Option<SlotPolicyResolution> {
+) -> Option<SlotRoleResolution> {
     let root_shape_id = match path.segments().first() {
         Some(SlotPathSegment::Field(name)) if NodeDef::is_variant_name(name.as_str()) => {
             NodeArtifact::SHAPE_ID
@@ -1364,7 +1358,7 @@ pub(crate) fn resolve_edit_policy(
         _ => def.shape_id(),
     };
     let shape = ctx.shapes.get_shape(root_shape_id)?;
-    resolve_slot_policy_and_leaf(shape, ctx.shapes, path)
+    resolve_slot_role(shape, ctx.shapes, path)
 }
 
 /// Paths of the other declared variants when `path` terminates at an enum
@@ -1451,7 +1445,7 @@ fn ensure_effective_scope(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>) ->
 }
 
 /// Shape at `segments` under `shape`: the same shape-only walk as
-/// [`resolve_slot_policy_and_leaf`] (chasing `Ref` indirections and `Custom`
+/// [`resolve_slot_role`] (chasing `Ref` indirections and `Custom`
 /// projections, resolving enum variant segments against any declared
 /// variant), returning the shape view instead of a policy. `None` when the
 /// path does not resolve in the shape.
@@ -1573,7 +1567,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use lpc_model::{
-        ClockDef, LpValue, MutationCmd, MutationCmdId, MutationCmdStatus, SlotEdit, SlotPolicy,
+        ClockDef, LpValue, MutationCmd, MutationCmdId, MutationCmdStatus, SlotEdit, SlotRole,
         SlotShape, SlotShapeRegistry,
     };
     use lpfs::LpFsMemory;
@@ -1619,11 +1613,12 @@ mod tests {
 
     #[test]
     fn module_root_nodes_reject_writes_and_container_fields_are_unknown() {
-        // Post-mitosis policy: `ModuleDef.nodes` is `read_only_persisted` —
-        // only dedicated project ops own it. The container identity fields
-        // (`format`/`uid`/`name`) are no longer slots on the root at all
-        // (they live in the `project.json` manifest), so edits addressed at
-        // them reject as unknown paths rather than policy violations.
+        // Post-mitosis: `ModuleDef.nodes` carries role `Fixed` — only
+        // dedicated project ops own it, and the role inherits into the
+        // subtree (map entries, option interior). The container identity
+        // fields (`format`/`uid`/`name`) are no longer slots on the root at
+        // all (they live in the `project.json` manifest), so edits addressed
+        // at them reject as unknown paths rather than role violations.
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
         let module = ArtifactLocation::file("/module.json");
@@ -1815,7 +1810,7 @@ mod tests {
     }
 
     #[test]
-    fn clock_controls_writable_transient_fields_accept_writes() {
+    fn clock_controls_debug_role_fields_accept_writes() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
 
@@ -3624,7 +3619,7 @@ mod tests {
 
     /// Shape registry where `controls.rate` on the clock definition is
     /// read-only. No authored definition declares a non-writable field today,
-    /// so the fixture flips one policy in the real clock shape.
+    /// so the fixture flips one role in the real clock shape.
     fn shapes_with_read_only_rate() -> SlotShapeRegistry {
         let mut shape = ClockDef::slot_shape();
         let SlotShape::Record { fields, .. } = &mut shape else {
@@ -3641,7 +3636,7 @@ mod tests {
             .iter_mut()
             .find(|field| field.name.as_str() == "rate")
             .expect("rate field");
-        rate.policy = SlotPolicy::read_only_transient();
+        rate.role = SlotRole::Fixed;
 
         let mut shapes = SlotShapeRegistry::default();
         shapes.replace_shape(ClockDef::SHAPE_ID, shape);

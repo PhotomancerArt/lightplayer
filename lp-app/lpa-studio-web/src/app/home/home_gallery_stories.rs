@@ -74,6 +74,8 @@ fn devices() -> Vec<UiDeviceCard> {
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
+            hardware: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -90,6 +92,8 @@ fn devices() -> Vec<UiDeviceCard> {
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
+            hardware: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -110,6 +114,7 @@ fn first_run() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -137,6 +142,7 @@ fn gallery_chooser_buttons() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -159,6 +165,7 @@ fn populated() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -196,6 +203,8 @@ fn connected_device_and_project_chip() -> Element {
         state: RosterCardState::ReadyToSetUp,
         project: None,
         fw: None,
+        hardware: None,
+        safe_clamp: None,
         sim: false,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -207,6 +216,7 @@ fn connected_device_and_project_chip() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -233,6 +243,7 @@ fn project_open_in_another_tab() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -255,6 +266,7 @@ fn opening_a_project() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     home.opening = Some(home.projects[0].uid.clone());
     rsx! {
@@ -334,6 +346,8 @@ fn sim_device_card(with_project: bool) -> UiDeviceCard {
             name: "2026-07-02-0930-porch-sign".to_string(),
         }),
         fw: None,
+        hardware: None,
+        safe_clamp: None,
         sim: true,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -363,6 +377,7 @@ fn sim_and_live_device_home() -> UiHomeView {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     }
 }
 
@@ -394,6 +409,7 @@ fn sim_running_only() -> Element {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         },
         None,
     )
@@ -404,6 +420,26 @@ fn sim_running_only() -> Element {
 )]
 fn sim_and_live_device() -> Element {
     gallery(sim_and_live_device_home(), None)
+}
+
+#[story(
+    description = "Safe mode: the device booted with the recovery output clamp (dim on purpose). The card wears the warning callout on every tab — what happened, and that a replug is the exit — because a clamped board otherwise just looks broken."
+)]
+fn device_in_safe_mode() -> Element {
+    let mut device = devices().remove(0);
+    device.safe_clamp = Some(26);
+    gallery(
+        UiHomeView {
+            devices: vec![device],
+            projects: packages(),
+            examples: examples(),
+            library_available: true,
+            opening: None,
+            issue: None,
+            backup: None,
+        },
+        None,
+    )
 }
 
 #[story(
@@ -431,6 +467,7 @@ fn project_live_in_two_places() -> Element {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         },
         None,
     )
@@ -451,6 +488,7 @@ fn sim_and_offline_device() -> Element {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         },
         None,
     )
@@ -486,6 +524,7 @@ fn store_unavailable_with_issue() -> Element {
         library_available: false,
         opening: None,
         issue: Some(UiIssue::new("Failed to open serial port.")),
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",

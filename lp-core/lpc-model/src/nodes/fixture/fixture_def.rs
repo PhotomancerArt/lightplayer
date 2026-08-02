@@ -35,11 +35,15 @@ pub struct FixtureDef {
     /// Texture-space 2D affine transform.
     pub transform: Affine2dSlot,
     /// Brightness level (0-255) — the fixture card's front-panel fader
-    /// ([`Brightness`] carries the panel meta + slider hint).
+    /// ([`Brightness`] carries the panel meta + slider hint). A linear light
+    /// scale, applied after the gamma encode: half the slider is half the
+    /// photons (which the eye reads as ~78% brightness).
     pub brightness: OptionSlot<ValueSlot<Brightness>>,
     /// Enable gamma correction.
     pub gamma_correction: OptionSlot<ValueSlot<bool>>,
-    /// Lamp type and supply budget. Absent means output is never limited.
+    /// Lamp type and supply budget. Absent means the default guard applies
+    /// ([`FixturePower::default`], 1000 mA); a stated budget of zero is the
+    /// explicit unlimited opt-out.
     pub power: OptionSlot<ValueSlot<FixturePower>>,
 }
 

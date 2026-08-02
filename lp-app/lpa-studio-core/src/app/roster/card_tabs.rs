@@ -139,7 +139,8 @@ fn tone_severity(tone: UiStatusKind) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use lpc_wire::FwProvenance;
+    use lpc_model::LpFeature;
+    use lpc_wire::{BuildFacts, HardwareFacts};
 
     use crate::app::roster::device_rich_object::{DeviceRichInput, device_rich_object};
     use crate::app::roster::roster_card_state::RosterCardState;
@@ -177,6 +178,8 @@ mod tests {
         assert_eq!(
             tabs[4].sections[0].affordances,
             vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::BackUpFilesystem,
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
@@ -252,10 +255,16 @@ mod tests {
             tab(&tabs, DeviceCardTab::Status).sections[0].affordances,
             vec![DeviceDetailAffordance::Roster(RosterAffordance::Reconnect)]
         );
-        // registered + offline → the danger zone is Forget, nothing else
+        // registered + offline → Troubleshoot (always offered, 2026-07-31)
+        // then Forget. Troubleshoot earns its place even here: an offline
+        // card is exactly a device that stopped answering, and the sheet's
+        // Reconnect and recovery steps are what you want.
         assert_eq!(
             tab(&tabs, DeviceCardTab::Danger).sections[0].affordances,
-            vec![DeviceDetailAffordance::ForgetDevice]
+            vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::ForgetDevice
+            ]
         );
         // a Neutral remembered card announces nothing
         assert!(tabs.iter().all(|tab| tab.badge.is_none()));
@@ -317,16 +326,38 @@ mod tests {
             transport: "USB",
             project_name: Some("porch-sign"),
             fw: Some(&DEVICE_FW),
+            hardware: Some(&DEVICE_HW),
             bundled_fw: None,
             now_secs: NOW,
         }
     }
 
-    static DEVICE_FW: std::sync::LazyLock<FwProvenance> =
-        std::sync::LazyLock::new(|| FwProvenance {
-            package: "fw-esp32c6".to_string(),
-            commit: "abc123456789".to_string(),
-            dirty: false,
-            profile: "release-esp32".to_string(),
+    static DEVICE_FW: std::sync::LazyLock<BuildFacts> = std::sync::LazyLock::new(|| BuildFacts {
+        features: vec![
+            LpFeature::NodeButton,
+            LpFeature::NodeClock,
+            LpFeature::NodeFluid,
+            LpFeature::NodeFixture,
+            LpFeature::NodePlaylist,
+            LpFeature::NodeRadio,
+            LpFeature::NodeShader,
+            LpFeature::NodeTexture,
+            LpFeature::SvcButton,
+            LpFeature::SvcRadioEspnow,
+            LpFeature::GfxLpvm,
+        ],
+        package: "fw-esp32c6".to_string(),
+        commit: "abc123456789".to_string(),
+        dirty: false,
+        profile: "release-esp32".to_string(),
+    });
+
+    /// An all-capable unit: the gaps-only Technical lines add nothing here,
+    /// which is the point.
+    static DEVICE_HW: std::sync::LazyLock<HardwareFacts> =
+        std::sync::LazyLock::new(|| HardwareFacts {
+            radio: true,
+            button: true,
+            board_id: None,
         });
 }

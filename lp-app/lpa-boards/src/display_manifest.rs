@@ -23,11 +23,21 @@ pub struct BoardDisplayFile {
     pub manufacturer: String,
     /// Human SoC name, e.g. "ESP32-C6".
     pub soc: String,
-    /// Filter family for the provisioning picker: "esp32", "esp32s3",
-    /// "esp32c6". Kept a plain string so display data never gates on firmware
-    /// target enums.
+    /// The chip this board carries, in **espflash spelling**: "esp32",
+    /// "esp32c6", "esp32s3". Kept a plain string so display data never gates
+    /// on firmware target enums, but the vocabulary is not free-form — it is
+    /// the same identity a build def's `chip.name` states, and the
+    /// board↔build join (`compatible_builds`) matches on it exactly. It
+    /// doubles as the catalog's SoC filter key.
     pub family: String,
+    /// Flash size as written on the datasheet, e.g. "8 MB".
     pub flash: String,
+    /// The same flash size as a number of megabytes, for the board↔build
+    /// join (a build's `flashSizeMb` must fit). Omit when the flash size is
+    /// not verified — a board with no `flash_mb` matches no build, which is
+    /// the honest outcome (boards/README.md: omit what you cannot verify).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flash_mb: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub psram: Option<String>,
     /// Approximate street price, USD, for catalog sorting.
@@ -52,7 +62,29 @@ pub struct BoardDisplayFile {
     /// (an untagged note shows everywhere; a tagged one only on that OS).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<BoardNote>,
+    /// Firmware builds this board runs even though the computed join says
+    /// otherwise (it relaxes the flash-fit rule only — chip identity is
+    /// never overridable). Empty on every normal board: hand-listing
+    /// board→firmware is forbidden, so each entry states its reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub firmware_allow: Vec<FirmwarePin>,
+    /// Firmware builds this board must never be offered even though the
+    /// computed join matches. Empty on every normal board.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub firmware_deny: Vec<FirmwarePin>,
     pub hw: BoardDrawing,
+}
+
+/// One pinned board↔firmware exception. The reason is required: an exception
+/// with no stated cause is indistinguishable from the hand-authored
+/// compatibility tables the computed join replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct FirmwarePin {
+    /// Build id, i.e. the stem of a `lp-fw/builds/<id>.json` build def.
+    pub build_id: String,
+    /// Why this board deviates from the computed result.
+    pub reason: String,
 }
 
 /// One detail-view note. Deliberately minimal: text plus optional OS (and
@@ -340,9 +372,32 @@ impl BoardDisplayFile {
                 self.price_usd
             ));
         }
+        if self.family.trim().is_empty() {
+            return invalid("family (espflash chip name) must not be empty".into());
+        }
+        if self.flash_mb == Some(0) {
+            return invalid("flash_mb must be positive when present".into());
+        }
         for url in &self.purchase_urls {
             if !(url.href.starts_with("https://") || url.href.starts_with("http://")) {
                 return invalid(format!("purchase url must be http(s): {}", url.href));
+            }
+        }
+        for pin in self.firmware_allow.iter().chain(&self.firmware_deny) {
+            if pin.build_id.trim().is_empty() || pin.reason.trim().is_empty() {
+                return invalid("firmware pin needs both a build_id and a reason".into());
+            }
+        }
+        for allow in &self.firmware_allow {
+            if self
+                .firmware_deny
+                .iter()
+                .any(|deny| deny.build_id == allow.build_id)
+            {
+                return invalid(format!(
+                    "build {:?} is both allowed and denied",
+                    allow.build_id
+                ));
             }
         }
         let mut seen = Vec::new();
@@ -400,6 +455,7 @@ mod tests {
             soc: "ESP32-C6".into(),
             family: "esp32c6".into(),
             flash: "8 MB".into(),
+            flash_mb: Some(8),
             psram: None,
             price_usd: 9.0,
             tier: SupportTier::Bronze,
@@ -409,6 +465,8 @@ mod tests {
             purchase_urls: vec![],
             usb_bridge: None,
             notes: vec![],
+            firmware_allow: vec![],
+            firmware_deny: vec![],
             hw: BoardDrawing {
                 width: 100.0,
                 module: DrawnModule {
@@ -473,6 +531,37 @@ mod tests {
         ] {
             assert!(!role.output_eligible(), "{role:?} must not be eligible");
         }
+    }
+
+    #[test]
+    fn rejects_zero_flash_mb() {
+        let mut file = minimal();
+        file.flash_mb = Some(0);
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_a_firmware_pin_without_a_reason() {
+        let mut file = minimal();
+        file.firmware_allow = vec![FirmwarePin {
+            build_id: "esp32c6-4mb".into(),
+            reason: "  ".into(),
+        }];
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_a_build_that_is_both_allowed_and_denied() {
+        let mut file = minimal();
+        file.firmware_allow = vec![FirmwarePin {
+            build_id: "esp32c6-4mb".into(),
+            reason: "verified on the bench".into(),
+        }];
+        file.firmware_deny = vec![FirmwarePin {
+            build_id: "esp32c6-4mb".into(),
+            reason: "bricks the bootloader".into(),
+        }];
+        assert!(file.validate().is_err());
     }
 
     #[test]

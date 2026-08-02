@@ -17,12 +17,13 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use lpa_studio_core::LpFeature;
 use lpa_studio_core::{
-    BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase, DegradedReason,
-    DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel,
-    UiLogOrigin, UiLogSource,
+    BootloaderEntryFlow, BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase,
+    DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiLogSource,
 };
-use lpc_wire::FwProvenance;
+use lpc_wire::{BuildFacts, HardwareFacts};
 
 use crate::app::home::device_card::DeviceCard;
 
@@ -221,6 +222,130 @@ fn troubleshoot_sheet_open() -> Element {
     }])
 }
 
+#[story(
+    description = "Amber filled edge: the chip is sitting in ROM download mode. Split out of Ready-to-set-up 2026-07-31 after a bench report — the two were collapsed, so Studio detected download mode and then discarded the fact, showing the blank-board flow instead. The load-bearing difference: a device flashed from here does NOT boot the new firmware on its own; it has to be physically replugged."
+)]
+fn recovery_mode() -> Element {
+    sheet(vec![card(RosterCardState::RecoveryMode, false)])
+}
+
+#[story(
+    description = "Bootloader-entry, step 1 (M5): the ritual for a chip Studio KNOWS — the card's firmware provenance named it, so the steps are specific. Every sequence starts by unplugging: the boot strap is sampled at reset, so holding BOOT on a running board does nothing."
+)]
+fn bootloader_entry_instructing() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(Some(
+                            "fw-esp32c6",
+                        )))),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry for an UNKNOWN device (M5): Studio never reached this board, so it cannot name the chip. Generic steps, hedged button name, and an explicit admission that they may not match — an unhedged wrong instruction reads as a dead device."
+)]
+fn bootloader_entry_generic() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(None))),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry, waiting (M5): the user has done the steps. Nothing is probed in this state — the probe reboots the device, so it fires only on a re-enumeration, which the ritual's replug already provides."
+)]
+fn bootloader_entry_waiting() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(
+                            BootloaderEntryFlow::start(Some("fw-esp32c6")).begin_waiting(),
+                        )),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry, CONFIRMED (M5): the payoff, and the reason this flow exists. Without it a failed attempt and a dead board look identical, so people repeat the wrong motion and conclude the device is bricked."
+)]
+fn bootloader_entry_confirmed() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(
+                            BootloaderEntryFlow::start(Some("fw-esp32c6"))
+                                .begin_waiting()
+                                .on_probe_answered(Some("ESP32-C6".to_string())),
+                        )),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry, not-yet (M5): the probe went unanswered. Deliberately NOT 'your device is broken' — an app-mode device ignores the handshake too, so the honest reading is that the attempt did not land."
+)]
+fn bootloader_entry_not_yet() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(
+                            BootloaderEntryFlow::start(Some("fw-esp32c6"))
+                                .begin_waiting()
+                                .on_probe_unanswered(),
+                        )),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
 #[story(description = "Gray filled edge: the port is held by another tab; quiet auto-retry.")]
 fn in_use_elsewhere() -> Element {
     sheet(vec![card(RosterCardState::InUseElsewhere, false)])
@@ -289,6 +414,52 @@ fn settings_tab_running() -> Element {
             }
         }
     }])
+}
+
+#[story(
+    description = "G1 question 3 — the Settings tab's capability lines are GAPS-ONLY. Left: an all-capable device, whose Technical section says nothing extra (no noise where there is no news). Right: the same device on a build with no fluid/radio runtime and no radio wired — three added lines naming exactly what is missing."
+)]
+fn settings_tab_capability_gaps() -> Element {
+    let gapped: Vec<LpFeature> = all_capable_features()
+        .into_iter()
+        .filter(|feature| {
+            !matches!(
+                feature,
+                LpFeature::NodeFluid | LpFeature::NodeRadio | LpFeature::SvcRadioEspnow
+            )
+        })
+        .collect();
+    sheet(vec![
+        rsx! {
+            div { class: "tw:w-64",
+                DeviceCard {
+                    card: UiDeviceCard {
+                        ui: opened(DeviceCardTab::Settings, None),
+                        ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
+                    },
+                    now_secs: Some(STORY_NOW),
+                    on_action: |_| {},
+                }
+            }
+        },
+        rsx! {
+            div { class: "tw:w-64",
+                DeviceCard {
+                    card: UiDeviceCard {
+                        ui: opened(DeviceCardTab::Settings, None),
+                        ..device_card_with_capabilities(
+                            RosterCardState::RunningUpToDate,
+                            true,
+                            gapped,
+                            false,
+                        )
+                    },
+                    now_secs: Some(STORY_NOW),
+                    on_action: |_| {},
+                }
+            }
+        },
+    ])
 }
 
 #[story(
@@ -636,6 +807,8 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
             name: "porch-sign".to_string(),
         }),
         fw: None,
+        hardware: None,
+        safe_clamp: None,
         sim: false,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -660,6 +833,8 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
             name: "porch-sign".to_string(),
         }),
         fw: None,
+        hardware: None,
+        safe_clamp: None,
         sim: true,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -701,12 +876,46 @@ fn device_card_with_console(state: RosterCardState, with_project: bool) -> UiDev
 /// The same card carrying hello firmware provenance (live-link Technical
 /// evidence for the Settings tab and the chip comparison).
 fn device_card_with_fw(state: RosterCardState, with_project: bool) -> UiDeviceCard {
+    device_card_with_capabilities(state, with_project, all_capable_features(), true)
+}
+
+/// Everything a normal C6 build carries — the "no gaps" side of the
+/// gaps-only Technical presentation.
+fn all_capable_features() -> Vec<LpFeature> {
+    vec![
+        LpFeature::NodeButton,
+        LpFeature::NodeClock,
+        LpFeature::NodeFluid,
+        LpFeature::NodeFixture,
+        LpFeature::NodePlaylist,
+        LpFeature::NodeRadio,
+        LpFeature::NodeShader,
+        LpFeature::NodeTexture,
+        LpFeature::SvcButton,
+        LpFeature::SvcRadioEspnow,
+        LpFeature::GfxLpvm,
+    ]
+}
+
+/// The same card whose hello reported a specific build and hardware set.
+fn device_card_with_capabilities(
+    state: RosterCardState,
+    with_project: bool,
+    features: Vec<LpFeature>,
+    radio: bool,
+) -> UiDeviceCard {
     UiDeviceCard {
-        fw: Some(FwProvenance {
+        fw: Some(BuildFacts {
+            features,
             package: "fw-esp32c6".to_string(),
             commit: "def987654321".to_string(),
             dirty: false,
             profile: "release-esp32".to_string(),
+        }),
+        hardware: Some(HardwareFacts {
+            radio,
+            button: true,
+            board_id: None,
         }),
         ..device_card(state, with_project)
     }

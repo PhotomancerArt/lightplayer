@@ -11,5 +11,5 @@ pub use api::{
 pub use config::ServerConfig;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};
 pub use fs_api::{FsRequest, FsResponse};
-pub use hello::{FwProvenance, ServerHello, WIRE_PROTO_VERSION};
+pub use hello::{BuildFacts, HardwareFacts, HelloIdentity, ServerHello, WIRE_PROTO_VERSION};
 pub use recovery_status::{CrashSummaryWire, RecoveryLevelWire, RecoveryPathWire, RecoveryStatus};

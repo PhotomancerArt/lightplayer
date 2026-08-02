@@ -29,7 +29,7 @@ const checks = {
       { prefix: "assets/lpa-studio-web_bg-", suffix: ".wasm" },
       "pkg/fw_browser.js",
       "pkg/fw_browser_bg.wasm",
-      "firmware/esp32c6/manifest.json",
+      "firmware/esp32c6-4mb/manifest.json",
       "lpa-link/browser_esp32_device_controller.js",
     ],
   },

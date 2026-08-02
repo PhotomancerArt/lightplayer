@@ -109,16 +109,22 @@ shader node alone does not drop `lp-shader` — fixture and fluid keep it
 alive. A gate's worth depends on its dependency closure at the time of
 measurement, not on adding rows in this table.
 
-**A disabled node is silently inert.** The project still loads —
+**A disabled node reports itself.** The project still loads —
 `engine::project_loader`'s attach loop falls back to
 `CorePlaceholderNode::new_leaf(kind)` for a gated-off kind — and the node
-attaches, produces nothing, and consumes nothing. Nothing on the device or
-in the studio reports why. This is a deliberate, scoped-down stopgap, not an
-oversight; see
-[`docs/debt/firmware-capability-reporting.md`](../../docs/debt/firmware-capability-reporting.md)
-for what makes it acceptable now, what makes it unacceptable once boards
-genuinely differ in capability, and the real fix (general firmware
-capability reporting).
+attaches, produces nothing, and consumes nothing. Since 2026-08-01 it also
+**says so**: the placeholder's `runtime_status()` returns
+`NodeRuntimeStatus::Unsupported("node kind X is not included in this
+firmware build")`, adopted at attach time so it rides the first tree delta,
+and the resolve path's `ProduceResult::Unsupported` arm names that cause
+instead of the old, misleading *"does not produce slot"*. Studio renders it
+as an error-toned "Not on this device", with the node's pane body replaced
+by a hazard-striped "not supported on this device" surface. Only kinds that CAN be gated report it —
+the project root is a placeholder too, and `LpFeature::for_node_kind` is the
+line. See
+[`docs/adr/2026-08-01-capability-reporting-on-hello.md`](../../docs/adr/2026-08-01-capability-reporting-on-hello.md)
+and the retired
+[`docs/debt/firmware-capability-reporting.md`](../../docs/debt/firmware-capability-reporting.md).
 
 **The trap** — the compiler will not catch this: any crate depending on
 `lpc-engine` (or `lpa-server`, which forwards these same eight gates — see

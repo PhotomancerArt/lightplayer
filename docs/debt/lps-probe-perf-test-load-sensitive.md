@@ -39,6 +39,11 @@ already recorded in story-capture-pipeline.md).
   boards-catalog visual-gate session while the worktree dev server and a
   second agent session were active; passed clean between them with the
   server stopped. Filed this entry.
+- 2026-08-02 — one full-gate failure during the modules-roadmap merge
+  session, with a firmware build and background cargo jobs sharing the
+  machine: **12.02 s against the 10 s bound**. Re-run alone on the same
+  tree: **8.42 s**. A 43% swing from load alone, on an assert with 20%
+  of headroom — the measurement is reporting the machine, not the code.
 
 **Exit criteria** — The default suite contains no load-sensitive
 wall-clock assert: the perf measurement either moves behind an opt-in

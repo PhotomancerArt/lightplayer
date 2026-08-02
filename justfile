@@ -21,11 +21,36 @@ fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 # defaults it to 4MB, and the bootloader validates the partition table against
 # that header — not against the physical chip. Omit it and a board with 16 MB
 # soldered on still boot-loops with "partition N invalid ... exceeds flash chip
-# size 0x400000". The same value is duplicated in
-# lp-fw/fw-esp32s3/.cargo/config.toml's runner, which cannot read this var.
+# size 0x400000".
+#
+# CANONICAL SOURCE: lp-fw/builds/esp32s3-8mb.json (`flashSizeMb`). This var and
+# lp-fw/fw-esp32s3/.cargo/config.toml's runner are mirrors — neither can read a
+# JSON file — and `cargo test -p lp-cli` fails if either drifts from the def.
 s3_flash_size := "8mb"
+
+# fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) also builds on Espressif's Rust
+# fork (see lp-fw/fw-esp32v3/rust-toolchain.toml). Like fw-esp32s3 it is a
+# repo-root workspace member excluded from `default-members` (M3-P1 folded it
+# in when it gained real lp2025-internal path dependencies), so its artifacts
+# land in the shared root `target/`. The build still runs from the crate
+# directory — see `build-fw-esp32v3`.
+xt_v3_target := "xtensa-esp32-none-elf"
+fw_esp32v3_dir := "lp-fw/fw-esp32v3"
+fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
+
+# This crate's 4 MB flash size (docs/adr/2026-07-29-per-chip-fw-toolchains.md,
+# Q7 in the classic-ESP32 bring-up plan: C6-shaped table, not the S3's 8 MB
+# floor). Must match lp-fw/fw-esp32v3/partitions.csv and the runner in
+# lp-fw/fw-esp32v3/.cargo/config.toml, which cannot read this var — same
+# reasoning as s3_flash_size above.
+v3_flash_size := "4mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
+
+# The one firmware build the Studio site serves (lp-fw/builds/<id>.json). The
+# browser provisioning picker gains per-build selection in roadmap M5; until
+# then this names the single `firmware/<id>/` directory that ships.
+studio_firmware_build := "esp32c6-4mb"
 
 # Default recipe - show available commands
 default:
@@ -282,14 +307,14 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
     cp "${sidecar_dir}/fw_browser_bg.wasm" "{{ out_dir }}/pkg/fw_browser_bg.wasm"
 
     if [[ "{{ include_firmware }}" == "true" ]]; then
-        firmware_dir="{{ studio_assets_dir }}/firmware/esp32c6"
+        firmware_dir="{{ studio_assets_dir }}/firmware/{{ studio_firmware_build }}"
         if [[ ! -f "${firmware_dir}/manifest.json" ]]; then
             echo "missing Studio firmware assets in ${firmware_dir}" >&2
             exit 1
         fi
-        mkdir -p "{{ out_dir }}/firmware/esp32c6"
-        cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/esp32c6/manifest.json"
-        cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/esp32c6/"
+        mkdir -p "{{ out_dir }}/firmware/{{ studio_firmware_build }}"
+        cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/{{ studio_firmware_build }}/manifest.json"
+        cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/{{ studio_firmware_build }}/"
     fi
 
 studio-web-dev-build: install-wasm32-target studio-firmware-package-esp32c6
@@ -380,15 +405,15 @@ studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
     public_dir="target/dx/lpa-studio-web/debug/web/public"
     sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
-    firmware_dir="{{ studio_assets_dir }}/firmware/esp32c6"
+    firmware_dir="{{ studio_assets_dir }}/firmware/{{ studio_firmware_build }}"
     sync_generated_assets() {
         [[ -d "${public_dir}" ]] || return 0
         mkdir -p "${public_dir}/pkg"
         cp "${sidecar_dir}/fw_browser.js" "${public_dir}/pkg/fw_browser.js"
         cp "${sidecar_dir}/fw_browser_bg.wasm" "${public_dir}/pkg/fw_browser_bg.wasm"
-        mkdir -p "${public_dir}/firmware/esp32c6"
-        cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/esp32c6/manifest.json"
-        cp "${firmware_dir}"/*.bin "${public_dir}/firmware/esp32c6/"
+        mkdir -p "${public_dir}/firmware/{{ studio_firmware_build }}"
+        cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/{{ studio_firmware_build }}/manifest.json"
+        cp "${firmware_dir}"/*.bin "${public_dir}/firmware/{{ studio_firmware_build }}/"
         # Host settings layer (P4): machine-level settings become the app's
         # dev-settings.json (fetched at boot; 404 => no host layer). Edits
         # appear on the next reload via this 1s loop.
@@ -408,67 +433,28 @@ studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     echo "Storybook: http://127.0.0.1:${port}/#/stories"
     dx serve --web -p lpa-studio-web --features stories --port "${port}" --addr 127.0.0.1 --open false
 
+# Package a firmware variant for browser flashing / host flashing. Both are
+# thin wrappers over `lp-cli firmware package`, which owns the build inputs
+# (lp-fw/builds/<id>.json) and EXTRACTS the manifest core from the image it
+# just built — there is no hand-written feature list or wireProto `sed` any
+# more. Output: target/studio-web-assets/firmware/<id>/.
 studio-firmware-package-esp32c6: install-rv32-target
+    cargo run -p lp-cli -- firmware package esp32c6-4mb
+
+# The S3 sibling. lp-cli runs cargo in the crate dir so `rust-toolchain.toml`
+# selects Espressif's fork, but the fork's GNU binutils must already be on
+# PATH — that part only this recipe can do (see `_xt-gcc-dir`).
+#
+# Packaged but NOT served: the Studio site still ships the C6 image only. See
+# lp-fw/builds/README.md.
+studio-firmware-package-esp32s3:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v espflash >/dev/null 2>&1; then
-        echo "espflash not found. Install it before packaging Studio firmware assets."
-        exit 1
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
     fi
-
-    firmware_id="lightplayer-esp32c6-server"
-    display_name="LightPlayer ESP32-C6 server firmware"
-    features="esp32c6,server"
-    out_dir="{{ studio_assets_dir }}/firmware/esp32c6"
-    image_name="fw-esp32c6-server-merged.bin"
-    image_file="${out_dir}/${image_name}"
-    manifest_file="${out_dir}/manifest.json"
-
-    echo "Building ${display_name}..."
-    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features "${features}")
-
-    mkdir -p "${out_dir}"
-    rm -f "${out_dir}"/*.bin "${manifest_file}"
-
-    echo "Generating browser-flashable merged ESP32-C6 image..."
-    espflash save-image \
-        --chip esp32c6 \
-        --partition-table lp-fw/fw-esp32c6/partitions.csv \
-        --merge \
-        --skip-padding \
-        {{ fw_esp32c6_elf }} \
-        "${image_file}"
-
-    size_bytes="$(wc -c < "${image_file}" | tr -d ' ')"
-    sha256="$(shasum -a 256 "${image_file}" | awk '{print $1}')"
-    generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    source_commit="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-    source_dirty=false
-    if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then
-        source_dirty=true
-    fi
-    # Wire protocol version: grep the hand-bumped const out of its single
-    # source of truth so the manifest can never drift from the built image.
-    wire_proto="$(sed -n 's/^pub const WIRE_PROTO_VERSION: u32 = \([0-9][0-9]*\);$/\1/p' lp-core/lpc-wire/src/server/hello.rs)"
-    if [ -z "${wire_proto}" ]; then
-        echo "could not extract WIRE_PROTO_VERSION from lp-core/lpc-wire/src/server/hello.rs"
-        exit 1
-    fi
-
-    MANIFEST_FIRMWARE_ID="${firmware_id}" \
-    MANIFEST_DISPLAY_NAME="${display_name}" \
-    MANIFEST_TARGET="{{ rv32_target }}" \
-    MANIFEST_PROFILE="{{ fw_esp32c6_profile }}" \
-    MANIFEST_SOURCE_COMMIT="${source_commit}" \
-    MANIFEST_SOURCE_DIRTY="${source_dirty}" \
-    MANIFEST_WIRE_PROTO="${wire_proto}" \
-    MANIFEST_GENERATED_AT="${generated_at}" \
-    MANIFEST_IMAGE_PATH="${image_name}" \
-    MANIFEST_IMAGE_SIZE="${size_bytes}" \
-    MANIFEST_IMAGE_SHA256="${sha256}" \
-    node lp-app/lpa-studio-web/scripts/studio-firmware-manifest.mjs "${manifest_file}"
-    echo "Firmware manifest: ${manifest_file}"
-    echo "Firmware image: ${image_file} (${size_bytes} bytes, sha256=${sha256})"
+    cargo run -p lp-cli -- firmware package esp32s3-8mb
 
 studio-web-build: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
@@ -626,6 +612,51 @@ clippy-fw-esp32s3:
     cargo clippy --release --no-default-features \
         --features esp32s3,server,test_xt_jit_corpus -- --no-deps -D warnings
 
+# Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
+# `clippy-host` for the same reason as the S3: the crate is excluded there
+# (it cross-compiles for Xtensa under a different toolchain), so nothing else
+# lints it.
+clippy-fw-esp32v3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    # `cd` for the same reason the build recipe does it: .cargo/config.toml
+    # here selects the Xtensa target, and cargo reads it from the CWD upward.
+    cd {{ fw_esp32v3_dir }}
+    # `--profile release-esp32v3`, NOT fw-esp32s3's `--release`: esp-storage's
+    # build script hard-errors on this chip at the workspace release profile's
+    # `opt-level = "z"` ("Building esp-storage for ESP32 needs optimization
+    # level 2, 3 or s"), because classic-ESP32 flash operations must execute
+    # from IRAM inside a tight window that "z" codegen misses. `release-esp32v3`
+    # is "s", which is also what ships — so this lints the real image.
+    #
+    # The app path (default features = esp32 + server).
+    cargo clippy --profile release-esp32v3 -- --no-deps -D warnings
+    # The two non-default entrypoints in main.rs. Neither is reachable from
+    # the default build, so linting only the defaults would leave both
+    # completely uncovered — the same way 13 fw-esp32 harnesses once rotted.
+    for feats in "esp32" "esp32,radio_ram_probe"; do
+      echo "clippy: --no-default-features --features $feats"
+      cargo clippy --profile release-esp32v3 --no-default-features --features "$feats" -- --no-deps -D warnings
+    done
+    # `ws281x_telemetry` is ADDITIVE (it turns on a module inside the default
+    # app build), so it needs its own invocation on top of the defaults rather
+    # than a `--no-default-features` one. Linted for the same reason the two
+    # entrypoints above are: a diagnostic build nothing compiles is a
+    # diagnostic build that has rotted by the time someone reaches for it.
+    echo "clippy: --features ws281x_telemetry"
+    cargo clippy --profile release-esp32v3 --features ws281x_telemetry -- --no-deps -D warnings
+    # `frame-dump` is additive for the same reason and gets the same treatment.
+    # It is the M7 FINAL-gate instrument (`scripts/m4-hardware-walk.sh --chip
+    # esp32`), reached only when someone is already debugging a pixel
+    # mismatch — precisely the moment a rotted diagnostic costs the most.
+    echo "clippy: --features frame-dump"
+    cargo clippy --profile release-esp32v3 --features frame-dump -- --no-deps -D warnings
+
+
 # `features` is a comma-separated list added to the defaults — for the app path
 # that means `frame-dump` and nothing else today. Harnesses have their own
 # recipes because they REPLACE the entrypoint; this argument only decorates it,
@@ -643,19 +674,87 @@ build-fw-esp32s3 features="":
     fi
     cd lp-fw/fw-esp32s3 && cargo "${args[@]}"
 
-# Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
-# or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
-# which is how CI arrives (the esp-rs/xtensa-toolchain action puts it there),
-# versus a local espup install, which leaves it under ~/.rustup.
-_xt-gcc-dir:
+# Build the classic ESP32 ("v3") firmware. Same Xtensa-fork story as the S3
+# (see build-fw-esp32s3 above), and — since M3-P1 — the same workspace shape:
+# a root-workspace member writing into the shared root `target/`. The `cd` is
+# still required, exactly as it is for fw-esp32s3: `.cargo/config.toml` inside
+# the crate selects the Xtensa target, the linker flags and the espflash
+# runner, and cargo reads that file from the CWD upward — invoking from the
+# repo root would silently build for the host.
+#
+# `features` is a comma-separated list ADDED to the defaults, same contract as
+# `build-fw-esp32s3`: today that means `frame-dump` and `ws281x_telemetry`, the
+# two additive diagnostics. The harness-style entrypoints (`radio_ram_probe`)
+# are not passed this way — they REPLACE the entrypoint and need
+# `--no-default-features`, so they have their own invocations.
+build-fw-esp32v3 features="":
     #!/usr/bin/env bash
     set -euo pipefail
-    if command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    args=(build --profile release-esp32v3)
+    if [[ -n "{{ features }}" ]]; then
+      args+=(--features "{{ features }}")
+      # Feature flips do not always retrigger the cfg-dependent codegen on this
+      # crate (the roadmap's stale-binary lesson; the Cargo.toml feature blocks
+      # carry the same warning). Touching the crate root is the cheap guarantee
+      # that `--features frame-dump` produces an image that actually has it.
+      touch {{ fw_esp32v3_dir }}/src/main.rs
+    fi
+    cd {{ fw_esp32v3_dir }} && cargo "${args[@]}"
+
+# Flash fw-esp32v3 to a connected classic ESP32 and open the serial monitor.
+#
+# ⚠️ ALWAYS pass the port. The desk classic is a DOM-Z-102 whose CH340K bridge
+# enumerates as /dev/cu.wchusbserial* with a trailing number that is only stable
+# per physical hub location, and several boards are usually on the desk bus at
+# once. Verify with `espflash board-info --port <port>` (`Chip type: esp32`) or
+# let `cargo run -q -p lp-cli -- fwcheck port --chip esp32` pick by probing.
+#
+# `--monitor-baud 921600` is not optional: `board::esp32v3::init` programs
+# UART0 at 921600 (lpc_model::DEFAULT_SERIAL_BAUD_RATE), and espflash's monitor
+# otherwise reads at 115200 and shows garbage. The ROM's own boot banner really
+# is 115200 and will look garbled in this monitor — that part is cosmetic.
+#
+# ⚠️ `espflash monitor` on its own stub-halts this board. Attach the monitor via
+# `flash --monitor`, as this recipe does, or hold the fd open by hand
+# (`exec 3<> $port; stty -f $port 921600 raw -echo clocal; cat <&3`).
+#
+# The optional second argument is passed straight to `build-fw-esp32v3`. The one
+# that matters is `frame-dump`, which makes the board print every transmitted
+# frame — `scripts/m4-hardware-walk.sh --chip esp32` flashes with it because an
+# LED cannot be diffed against a host render:
+#
+#   just flash-fw-esp32v3 /dev/cu.wchusbserial1140 frame-dump
+flash-fw-esp32v3 port="" features="": (build-fw-esp32v3 features)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32v3_elf }}
+
+# Print the directory to prepend to PATH so the chip's xtensa-*-elf-gcc
+# resolves, or fail with the fix. Prints NOTHING when the toolchain is already
+# on PATH — which is how CI arrives (the esp-rs/xtensa-toolchain action puts
+# it there), versus a local espup install, which leaves it under ~/.rustup.
+#
+# `bin` names the specific gcc binary to probe for (all Xtensa chips share one
+# toolchain bundle, so any installed chip's binary proves the bundle exists,
+# but only checking the caller's own chip catches a bundle that is present but
+# missing that target — e.g. `buildtargets` scoped too narrowly in CI).
+_xt-gcc-dir bin="xtensa-esp32s3-elf-gcc":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v {{ bin }} >/dev/null 2>&1; then
       exit 0
     fi
     GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
-    if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
-      echo "error: xtensa-esp32s3-elf-gcc is not on PATH and was not found under" >&2
+    if [[ ! -x "$GCC_BIN/{{ bin }}" ]]; then
+      echo "error: {{ bin }} is not on PATH and was not found under" >&2
       echo "       ~/.rustup/toolchains/esp — run 'espup install' (or 'espup update'" >&2
       echo "       if it is stale). The Rust target spec links through it, not rust-lld." >&2
       exit 1
@@ -916,6 +1015,23 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     just _fw-size-check esp32c6 esp32c6 4mb {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
         "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
 
+# Drift checks: the manifest core embedded in a built firmware must match the
+# checked-in expected fixture (provenance fields stripped). The firmware
+# describes ITSELF — these checks prove the extraction path and catch feature
+# drift; they never re-state what a build contains. Build the target first
+# (the CI jobs run them right after their size checks, which build).
+fw-manifest-check-esp32c6:
+    node scripts/extract-fw-manifest.mjs {{ fw_esp32c6_elf }} --stable | diff -u lp-fw/fw-esp32c6/manifest-core.expected.json -
+
+fw-manifest-check-esp32s3:
+    node scripts/extract-fw-manifest.mjs {{ fw_esp32s3_elf }} --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -
+
+fw-manifest-check-esp32v3:
+    node scripts/extract-fw-manifest.mjs {{ fw_esp32v3_elf }} --stable | diff -u lp-fw/fw-esp32v3/manifest-core.expected.json -
+
+fw-manifest-check-emu: build-fw-emu
+    node scripts/extract-fw-manifest.mjs target/{{ rv32_target }}/release/fw-emu --stable | diff -u lp-fw/fw-emu/manifest-core.expected.json -
+
 # Fail when the esp32s3 app image gets too close to its 6 MB partition.
 #
 # Unlike the C6, this number is a TREND, not a budget gate. The S3 moved to an
@@ -930,6 +1046,22 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     # lp-fw/fw-esp32s3/partitions.csv (0x600000).
     just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
+
+# Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
+# partition. Same C6-shaped 4 MB table and budget posture as fw-esp32c6 (Q7 in
+# the classic-ESP32 bring-up plan) — unlike the S3, this chip has no 8 MB
+# floor to grow into, so this IS a hard budget gate, not just a trend.
+#
+# `chip` passed to `_fw-size-check` is the real espflash chip id ("esp32");
+# `name` is the crate's own "esp32v3" label, same split as fw-esp32c6's
+# name/chip both being "esp32c6" happens to hide (there the two coincide).
+fw-esp32v3-size-check margin="65536": build-fw-esp32v3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Keep `partition` in sync with the `factory` app partition in
+    # lp-fw/fw-esp32v3/partitions.csv (0x300000).
+    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} 3145728 {{ margin }} \
+        "See lp-fw/fw-esp32v3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
 # compare it against the app partition. Factored so the two chips cannot drift
@@ -1106,7 +1238,7 @@ fmt-check:
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
@@ -1443,6 +1575,23 @@ push: check
 merge: check
     scripts/push.sh --merge
 
+# Watch a PR's CI to completion (exit 0 green / 1 failed), diagnosing the
+# "no checks" causes (path filters, stacked base, GITHUB_TOKEN pushes).
+# `just watch-pr --merged <n>` waits for a dependency PR to merge instead.
+# Run it as a background task, not a foreground sleep loop.
+watch-pr *args:
+    scripts/watch-pr.sh {{ args }}
+
+# ============================================================================
+# Hardware discovery
+# ============================================================================
+
+# List attached serial hardware (passive; never hangs). Identify chips with
+# `just hardware-list --probe` (resets idle boards; per-port timeout), filter
+# with `--chip esp32s3`, script with `--json`.
+hardware-list *args:
+    cargo run -q -p lp-cli -- hardware list {{ args }}
+
 # ============================================================================
 # Demo projects
 # ============================================================================
@@ -1457,7 +1606,7 @@ demo example="basic":
 # Usage: just demo-esp32c6-host [example-name]
 demo-esp32c6-host example="basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server
-    PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
@@ -1475,7 +1624,7 @@ test-native-rainbow: build-rv32-builtins
 # Usage: just demo-esp32c6-host-naga [example-name]
 demo-esp32c6-host-naga example="basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
-    PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
@@ -1486,7 +1635,7 @@ demo-esp32c6-check-naga example="basic": install-rv32-target
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
 demo-esp32c6-standalone: build-fw-esp32c6
-    PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}
 
@@ -1514,20 +1663,10 @@ fwtest-usb-esp32c6: install-rv32-target
 fwtest-gpio-calibrate-esp32c6: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    port="${ESPFLASH_PORT:-}"
-    if [[ -z "$port" ]]; then
-        candidates=()
-        for pattern in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
-            for candidate in $pattern; do
-                [[ -e "$candidate" ]] && candidates+=("$candidate")
-            done
-        done
-        if [[ "${#candidates[@]}" -eq 0 ]]; then
-            echo "No ESP32 serial port found. Set ESPFLASH_PORT=/dev/..." >&2
-            exit 1
-        fi
-        port="${candidates[0]}"
-    fi
+    # Resolves ESPFLASH_PORT/LP_CHIP itself; with several boards attached it
+    # probes for the C6 instead of grabbing the first port (which has
+    # flashed the wrong board before).
+    port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
@@ -1535,20 +1674,9 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
 calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    port="${ESPFLASH_PORT:-}"
-    if [[ -z "$port" ]]; then
-        candidates=()
-        for pattern in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
-            for candidate in $pattern; do
-                [[ -e "$candidate" ]] && candidates+=("$candidate")
-            done
-        done
-        if [[ "${#candidates[@]}" -eq 0 ]]; then
-            echo "No ESP32 serial port found. Set ESPFLASH_PORT=/dev/..." >&2
-            exit 1
-        fi
-        port="${candidates[0]}"
-    fi
+    # Resolves ESPFLASH_PORT/LP_CHIP itself; probes for the C6 on a crowded
+    # desk instead of grabbing the first port.
+    port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && cargo build --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
     cd ../..
@@ -1578,8 +1706,7 @@ fwtest-fluid-demo-esp32c6: install-rv32-target
 
 # Run firmware with test_jit_math_perf: Q32 JIT math kernel cycle experiment
 fwtest-jit-math-perf-esp32c6: install-rv32-target
-    PORT="$(find /dev -maxdepth 1 -name 'cu.usbmodem*' | sort | head -n 1)"; \
-    test -n "$PORT"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$PORT" cargo run --features test_jit_math_perf,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
@@ -1599,22 +1726,15 @@ fwtest-espnow-esp32c6: install-rv32-target
 # path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
 # on-device in FloatMode::F32 and executed.
 #
-# The port is NOT auto-detected. Several ESP32 boards are usually attached and
-# picking the first one has flashed the wrong board before; pass the C6's port
-# explicitly, e.g. `just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodem1301`.
+# Without an explicit port (or ESPFLASH_PORT), resolution probes attached
+# boards and picks the one that identifies as a C6 — first-match auto-picking
+# flashed the wrong board before; chip-verified selection is the fix.
 fwtest-f32-softfloat-esp32c6 port="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     port="{{ port }}"
     if [[ -z "$port" ]]; then
-        port="${ESPFLASH_PORT:-}"
-    fi
-    if [[ -z "$port" ]]; then
-        echo "Pass the ESP32-C6 port explicitly (or set ESPFLASH_PORT):" >&2
-        echo "  just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodemXXXX" >&2
-        echo "Available:" >&2
-        ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null >&2 || true
-        exit 1
+        port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     fi
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
@@ -1687,6 +1807,40 @@ decode-backtrace-esp32s3 *addrs:
         xtensa-esp32s3-elf-addr2line -pfiaC -e {{ fw_esp32s3_elf }} $ADDRS
     else
         addr2line -e {{ fw_esp32s3_elf }} -f -a $ADDRS
+    fi
+
+# Symbolize a classic-ESP32 (fw-esp32v3) backtrace.
+#
+# Separate from `decode-backtrace-esp32s3` because the ELF differs — and on this
+# chip the addresses look nothing alike either: classic flash text lives at
+# 0x400Dxxxx where the S3's and C6's live at 0x42xxxxxx, so feeding one to the
+# other's recipe produces confident nonsense rather than an obvious failure.
+# `recovery::panic_path` and the boot report both print the right recipe name
+# next to the addresses for exactly that reason.
+#
+# Usage: just decode-backtrace-esp32v3 0x400d1234 ...
+#        pbpaste | just decode-backtrace-esp32v3
+decode-backtrace-esp32v3 *addrs:
+    #!/usr/bin/env bash
+    set -e
+    test -f {{ fw_esp32v3_elf }}
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace-esp32v3 0x400d... or: pbpaste | just decode-backtrace-esp32v3"
+        exit 1
+    fi
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    if command -v xtensa-esp32-elf-addr2line >/dev/null 2>&1; then
+        xtensa-esp32-elf-addr2line -pfiaC -e {{ fw_esp32v3_elf }} $ADDRS
+    else
+        addr2line -e {{ fw_esp32v3_elf }} -f -a $ADDRS
     fi
 
 # ============================================================================

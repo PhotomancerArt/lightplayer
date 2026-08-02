@@ -21,7 +21,10 @@
 //! [`derive_roster_card_state`](super::derive_roster_card_state)), so the
 //! popover can never disagree with the circle.
 
-use lpc_wire::FwProvenance;
+use lpc_model::{LpFeature, NodeKind};
+use lpc_wire::{BuildFacts, HardwareFacts};
+
+use crate::app::project::node::node_naming::node_kind_label;
 
 use crate::app::rich_object::{RichChip, RichLine, RichObjectView, RichSection, RichWeight};
 use crate::core::status::UiStatusKind;
@@ -37,6 +40,10 @@ use super::roster_card_state::RosterCardState;
 pub enum DeviceDetailAffordance {
     /// A card-grammar affordance (per the direction state table).
     Roster(RosterAffordance),
+    /// Danger zone, live device: download a ZIP of the device's storage,
+    /// read raw over the bootloader. The non-destructive row that belongs
+    /// ABOVE the destructive ones — it is what makes them survivable.
+    BackUpFilesystem,
     /// Danger zone, live device: install/repair firmware.
     FlashFirmware,
     /// Danger zone, live device: wipe the flash (confirmed).
@@ -59,8 +66,11 @@ pub struct DeviceRichInput<'a> {
     pub transport: &'a str,
     /// The project the device holds (live) or last ran (offline).
     pub project_name: Option<&'a str>,
-    /// Running-firmware provenance from the hello (live links only).
-    pub fw: Option<&'a FwProvenance>,
+    /// Running-firmware build facts from the hello (live links only):
+    /// provenance plus the features compiled into the image.
+    pub fw: Option<&'a BuildFacts>,
+    /// What the unit has wired, from the same hello.
+    pub hardware: Option<&'a HardwareFacts>,
     /// Studio's bundled firmware image, when the packaged manifest is on
     /// hand — the advisory chip comparison's other half.
     pub bundled_fw: Option<&'a BundledFirmware>,
@@ -213,6 +223,7 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
             format!("{} @ {}{dirty} · {}", fw.package, fw.commit, fw.profile),
         ));
     }
+    lines.extend(capability_lines(input.fw, input.hardware));
     if lines.is_empty() {
         return None;
     }
@@ -237,6 +248,62 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
 /// Backup: what banking knows. Today that is the D8 connect-time bank of
 /// a diverged device copy; a download affordance lands with the flow that
 /// can serve it (no dead buttons).
+/// The device's capabilities as Technical lines — **gaps only**.
+///
+/// A fully-capable device says nothing extra: listing everything a normal
+/// board has would bury the one line that matters on the board that lacks
+/// something. So each line here reports an ABSENCE (or a backend that is
+/// not the norm), and a device with no gaps contributes no lines at all.
+fn capability_lines(build: Option<&BuildFacts>, hardware: Option<&HardwareFacts>) -> Vec<RichLine> {
+    let mut lines = Vec::new();
+    let Some(build) = build else {
+        return lines;
+    };
+
+    // Node kinds whose runtime this build does not carry. Ungated kinds
+    // (`for_node_kind` → None) are always present and never listed.
+    let missing: Vec<&'static str> = NodeKind::ALL
+        .iter()
+        .filter(|kind| {
+            LpFeature::for_node_kind(**kind)
+                .is_some_and(|feature| !build.features.contains(&feature))
+        })
+        .map(|kind| node_kind_label(*kind))
+        .collect();
+    if !missing.is_empty() {
+        lines.push(RichLine::new("no nodes", missing.join(" · ")));
+    }
+
+    // A graphics backend worth naming: the norm (the CPU shader backend)
+    // stays silent; "no shaders at all" and "GPU" do not.
+    if build.features.contains(&LpFeature::GfxNull) {
+        lines.push(RichLine::new(
+            "graphics",
+            "none — this build runs no shaders",
+        ));
+    } else if build.features.contains(&LpFeature::GfxWgpu) {
+        lines.push(RichLine::new("graphics", "GPU (wgpu)"));
+    }
+
+    if let Some(hardware) = hardware {
+        let mut absent = Vec::new();
+        if !hardware.radio {
+            absent.push("radio");
+        }
+        if !hardware.button {
+            absent.push("button");
+        }
+        if !absent.is_empty() {
+            lines.push(RichLine::new("no hardware", absent.join(" · ")));
+        }
+        if let Some(board_id) = &hardware.board_id {
+            lines.push(RichLine::new("board", board_id.clone()));
+        }
+    }
+
+    lines
+}
+
 fn backup_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetailAffordance>> {
     matches!(input.state, RosterCardState::EditedOnDevice { .. }).then(|| RichSection {
         title: "Backup".to_string(),
@@ -265,6 +332,14 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
             .is_some()
             .then_some(DeviceDetailAffordance::ForgetDevice)
     };
+    // Troubleshoot is offered in EVERY state (2026-07-31). It used to hang
+    // off NotResponding alone, which is the wrong gate: the states where a
+    // user most needs the recovery flow are the ones where the ladder ended
+    // somewhere else — a board in download mode presents as Recovery mode,
+    // not as Not-responding, and had no path to it at all. The danger zone
+    // is already present in every state, so it is the natural permanent
+    // home for the recovery verbs.
+    let troubleshoot = || DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot);
     let affordances = match input.state {
         RosterCardState::Offline { .. }
         | RosterCardState::ConnectingRetrying { .. }
@@ -296,9 +371,36 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
             rows
         }
     };
+    // "Always available" means "wherever the danger zone exists". Working
+    // states deliberately have no danger zone at all — and troubleshooting
+    // mid-operation would want the wire the operation is already holding —
+    // so an empty list still means no section, not a section with one row.
     if affordances.is_empty() {
         return None;
     }
+    // Backup rides above the destructive verbs wherever a filesystem could
+    // be read (M6): the wire is attached, and the board has LightPlayer
+    // storage on it.
+    //
+    // NOT on a blank or foreign board — their `lpfs` is erased or was never
+    // written, so the row could only ever fail — and not on the offline /
+    // retrying / port-held cards, which have no wire to read over.
+    let can_back_up = !matches!(
+        input.state,
+        RosterCardState::ReadyToSetUp
+            | RosterCardState::OtherFirmware
+            | RosterCardState::Offline { .. }
+            | RosterCardState::ConnectingRetrying { .. }
+            | RosterCardState::InUseElsewhere
+    );
+    let backup = can_back_up.then_some(DeviceDetailAffordance::BackUpFilesystem);
+    // Prepend: these are the non-destructive rows, above the destructive
+    // verbs — and backup in particular is what makes those survivable, so it
+    // must be READ before them, not found after.
+    let affordances: Vec<_> = core::iter::once(troubleshoot())
+        .chain(backup)
+        .chain(affordances)
+        .collect();
     Some(RichSection {
         title: "Danger zone".to_string(),
         // Neutral by construction: Danger weight never colors the rollup;
@@ -344,6 +446,13 @@ mod tests {
         assert_eq!(
             danger.affordances,
             vec![
+                // Troubleshoot leads the danger zone in EVERY state
+                // (2026-07-31) — recovery must not be gated on the ladder
+                // having ended on Not-responding.
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                // Backup is READ before the destructive verbs, because it is
+                // what makes them survivable (M6).
+                DeviceDetailAffordance::BackUpFilesystem,
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
@@ -372,7 +481,10 @@ mod tests {
         );
         assert_eq!(
             view.sections.last().unwrap().affordances,
-            vec![DeviceDetailAffordance::ForgetDevice]
+            vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::ForgetDevice
+            ]
         );
     }
 
@@ -397,6 +509,50 @@ mod tests {
         );
     }
 
+    /// The state this milestone exists for: a board sitting in ROM download
+    /// mode, whose own project is what stopped it. Backup must be reachable
+    /// from here, and it must be READ before the verbs that destroy the
+    /// thing it saves.
+    #[test]
+    fn a_board_in_recovery_mode_can_back_up_before_it_is_flashed_or_erased() {
+        let mut input = input(&RosterCardState::RecoveryMode);
+        input.project_name = None;
+        input.fw = None;
+
+        let view = device_rich_object(&input);
+
+        assert_eq!(
+            view.sections.last().unwrap().affordances,
+            vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::BackUpFilesystem,
+                DeviceDetailAffordance::FlashFirmware,
+                DeviceDetailAffordance::EraseDevice,
+            ]
+        );
+    }
+
+    /// A blank or foreign board has no `lpfs` to read — the row could only
+    /// ever fail, so it is not offered.
+    #[test]
+    fn a_blank_or_foreign_board_is_offered_no_backup() {
+        for state in [
+            RosterCardState::ReadyToSetUp,
+            RosterCardState::OtherFirmware,
+        ] {
+            let view = device_rich_object(&input(&state));
+            assert!(
+                !view
+                    .sections
+                    .last()
+                    .unwrap()
+                    .affordances
+                    .contains(&DeviceDetailAffordance::BackUpFilesystem),
+                "{state:?} has nothing to back up"
+            );
+        }
+    }
+
     #[test]
     fn firmware_chip_is_advisory_and_never_colors_the_rollup() {
         let bundled = BundledFirmware {
@@ -417,6 +573,72 @@ mod tests {
         assert_eq!(chip.tone, UiStatusKind::Attention);
         // …but the rollup stays the Health section's Good.
         assert_eq!(view.rollup().tone, UiStatusKind::Good);
+    }
+
+    /// Gaps-only: a device that can do everything says nothing extra, so
+    /// the one line that matters on a lesser board is not buried.
+    #[test]
+    fn an_all_capable_device_adds_no_capability_lines() {
+        let view = device_rich_object(&input(&RosterCardState::RunningUpToDate));
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .unwrap();
+        let labels: Vec<&str> = technical
+            .lines
+            .iter()
+            .map(|line| line.label.as_str())
+            .collect();
+        assert_eq!(labels, vec!["uid", "transport", "firmware"]);
+    }
+
+    /// A build without the fluid/radio runtimes and a unit with no radio
+    /// wired: each absence gets exactly one line, naming what is missing.
+    #[test]
+    fn a_device_with_gaps_names_each_one() {
+        let gapped_build = BuildFacts {
+            features: DEVICE_FW
+                .features
+                .iter()
+                .copied()
+                .filter(|feature| {
+                    !matches!(
+                        feature,
+                        LpFeature::NodeFluid | LpFeature::NodeRadio | LpFeature::SvcRadioEspnow
+                    )
+                })
+                .collect(),
+            ..DEVICE_FW.clone()
+        };
+        let gapped_hw = HardwareFacts {
+            radio: false,
+            button: true,
+            board_id: None,
+        };
+        let state = RosterCardState::RunningUpToDate;
+        let mut input = input(&state);
+        input.fw = Some(&gapped_build);
+        input.hardware = Some(&gapped_hw);
+
+        let view = device_rich_object(&input);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .unwrap();
+        let lines: Vec<(&str, &str)> = technical
+            .lines
+            .iter()
+            .map(|line| (line.label.as_str(), line.value.as_str()))
+            .collect();
+        assert!(lines.contains(&("no nodes", "Fluid · Radio")), "{lines:?}");
+        assert!(lines.contains(&("no hardware", "radio")), "{lines:?}");
+        // The CPU shader backend is the norm and stays silent.
+        assert!(
+            !lines.iter().any(|(label, _)| *label == "graphics"),
+            "{lines:?}"
+        );
     }
 
     #[test]
@@ -440,17 +662,39 @@ mod tests {
             transport: "USB",
             project_name: Some("porch-sign"),
             fw: Some(&DEVICE_FW),
+            hardware: Some(&DEVICE_HW),
             bundled_fw: None,
             now_secs: NOW,
         }
     }
 
-    static DEVICE_FW: std::sync::LazyLock<FwProvenance> =
-        std::sync::LazyLock::new(|| FwProvenance {
-            package: "fw-esp32c6".to_string(),
-            commit: "abc123456789".to_string(),
-            dirty: false,
-            profile: "release-esp32".to_string(),
+    static DEVICE_FW: std::sync::LazyLock<BuildFacts> = std::sync::LazyLock::new(|| BuildFacts {
+        features: vec![
+            LpFeature::NodeButton,
+            LpFeature::NodeClock,
+            LpFeature::NodeFluid,
+            LpFeature::NodeFixture,
+            LpFeature::NodePlaylist,
+            LpFeature::NodeRadio,
+            LpFeature::NodeShader,
+            LpFeature::NodeTexture,
+            LpFeature::SvcButton,
+            LpFeature::SvcRadioEspnow,
+            LpFeature::GfxLpvm,
+        ],
+        package: "fw-esp32c6".to_string(),
+        commit: "abc123456789".to_string(),
+        dirty: false,
+        profile: "release-esp32".to_string(),
+    });
+
+    /// An all-capable unit: the gaps-only Technical lines add nothing here,
+    /// which is the point.
+    static DEVICE_HW: std::sync::LazyLock<HardwareFacts> =
+        std::sync::LazyLock::new(|| HardwareFacts {
+            radio: true,
+            button: true,
+            board_id: None,
         });
 
     fn titles(view: &RichObjectView<DeviceDetailAffordance>) -> Vec<&str> {

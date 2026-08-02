@@ -408,6 +408,14 @@ impl RuntimeSession {
             .unwrap_or_default()
     }
 
+    /// The latest heartbeat-reported recovery status from this session's
+    /// attached client (safe-mode clamp evidence for the device card).
+    pub fn recovery_status(&self) -> Option<&lpc_wire::server::RecoveryStatus> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::recovery_status)
+    }
+
     /// Drain device-console lines buffered by this session's event sink
     /// (device sessions; the sim buffers nothing here).
     pub fn take_device_console_logs(&mut self) -> Vec<UiLogDraft> {
@@ -701,11 +709,17 @@ pub fn ready_state_for_test() -> DeviceState {
     DeviceState::Ready {
         hello: lpc_wire::ServerHello {
             proto: lpc_wire::WIRE_PROTO_VERSION,
-            fw: lpc_wire::FwProvenance {
+            build: lpc_wire::BuildFacts {
+                features: lpc_model::LpFeature::ALL.to_vec(),
                 package: "fw-test".to_string(),
                 commit: "0000000".to_string(),
                 dirty: false,
                 profile: "test".to_string(),
+            },
+            hardware: lpc_wire::HardwareFacts {
+                radio: true,
+                button: true,
+                board_id: None,
             },
             device_uid: None,
         },

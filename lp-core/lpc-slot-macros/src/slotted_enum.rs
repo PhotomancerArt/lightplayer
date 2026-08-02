@@ -143,7 +143,7 @@ pub(crate) fn derive_enum(
                             name: #field_name,
                             shape: #static_shape_binding,
                             semantics: ::lpc_model::SlotSemantics::local(),
-                            policy: ::lpc_model::SlotPolicy::writable_persisted(),
+                            role: ::lpc_model::SlotRole::Setting,
                         default_bind: None,
                         }
                     });
