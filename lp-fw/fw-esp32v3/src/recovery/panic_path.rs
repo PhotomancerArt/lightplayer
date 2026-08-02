@@ -75,6 +75,18 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 /// are indistinguishable from the report. `free - largest` is the amount of
 /// memory the board owns but cannot hand out in one piece.
 ///
+/// ⚠️ **This image's heap is TWO regions**, not one: the `dram_seg` arena plus
+/// the 64 KiB SRAM1 tail (`main.rs`'s `add_sram1_heap_region`). The number
+/// below is still exactly what it claims — the largest single allocation the
+/// heap can satisfy — because `esp_alloc::alloc_caps` walks the regions in
+/// turn and the probe goes through that same path. What changed is the
+/// *reading*: `free - largest` no longer measures fragmentation alone, since
+/// two regions that are each perfectly unfragmented still cannot serve a
+/// request larger than the bigger one. A large `free - largest` on this chip
+/// now means "fragmented **or** split across regions", and only a
+/// per-region breakdown (`esp_alloc::HEAP.stats()`) separates them. Do not
+/// infer fragmentation from this figure alone.
+///
 /// `linked_list_allocator` exposes no free-list walk, so this asks the allocator
 /// the only question it answers: binary-search the largest size it will accept,
 /// returning each probe immediately. ~17 probes bounded by `free()`, each a
