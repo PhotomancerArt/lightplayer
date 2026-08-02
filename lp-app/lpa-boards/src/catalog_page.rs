@@ -16,6 +16,10 @@
 use dioxus::prelude::*;
 
 use crate::display_manifest::{BoardDisplayFile, SupportTier};
+use crate::firmware_join::{
+    CompatibilityBasis, CompatibleBuild, NoBuildReason, compatible_builds_for, feature_summary,
+    no_build_reason_for, node_kind_label,
+};
 use crate::geometry::DiagramMode;
 use crate::usb_bridge::{DriverGuidance, DriverNeedLevel, HostOs};
 use crate::{BoardDiagram, all_boards, board_by_id};
@@ -57,6 +61,69 @@ fn driver_warning(board: &BoardDisplayFile, os: HostOs) -> Option<DriverGuidance
         .usb_bridge
         .map(|bridge| bridge.guidance(os))
         .filter(|guidance| guidance.level == DriverNeedLevel::Warning)
+}
+
+/// The node-runtime sentence for a build: the positive form when nothing is
+/// missing, otherwise the gaps. Never a count against the registry — the
+/// graphics features are mutually exclusive, so "12 of 15" would be a lie.
+fn node_sentence(matched: &CompatibleBuild) -> Option<String> {
+    let summary = feature_summary(matched.build)?;
+    Some(if summary.runs_every_node_kind() {
+        "every node type".to_string()
+    } else {
+        let missing: Vec<&str> = summary
+            .missing_node_kinds
+            .iter()
+            .map(|kind| node_kind_label(*kind))
+            .collect();
+        format!("no {}", missing.join(", "))
+    })
+}
+
+/// The card's one-line firmware note: what this build is, said shortest.
+/// Every phrase comes from the build's manifest — nothing here is authored
+/// per board.
+fn card_feature_note(matched: &CompatibleBuild) -> Option<String> {
+    let summary = feature_summary(matched.build)?;
+    let mut parts = Vec::new();
+    parts.extend(node_sentence(matched));
+    parts.extend(summary.extras.iter().map(|text| (*text).to_string()));
+    parts.extend(summary.gaps.iter().map(|text| (*text).to_string()));
+    parts.truncate(3);
+    Some(parts.join(" · "))
+}
+
+/// Why the board runs nothing, in the reader's terms.
+fn no_build_sentence(board: &BoardDisplayFile, reason: &NoBuildReason) -> String {
+    match reason {
+        NoBuildReason::NoBuildForChip => {
+            format!("no firmware build targets {} yet", board.family)
+        }
+        NoBuildReason::NeedsMoreFlash { needs_mb, board_mb } => format!(
+            "the smallest {} build needs {needs_mb} MB flash; this board has {board_mb} MB",
+            board.family
+        ),
+        NoBuildReason::FlashUnknown => "flash size unverified — nothing can be matched".to_string(),
+        NoBuildReason::AllDenied => {
+            format!("every {} build is excluded for this board", board.family)
+        }
+    }
+}
+
+/// The fit line: the computed rule, shown so the reader can check it.
+fn fit_sentence(board: &BoardDisplayFile, matched: &CompatibleBuild) -> String {
+    let image = format!(
+        "{} image, {} MB flash",
+        matched.build.chip.name, matched.build.flash_size_mb
+    );
+    match (matched.headroom_mb, &matched.basis) {
+        (_, CompatibilityBasis::Pinned { reason }) => {
+            format!("{image} — pinned for this board: {reason}")
+        }
+        (Some(0), _) => format!("{image} — exactly this board's {}", board.flash),
+        (Some(spare), _) => format!("{image} — {spare} MB spare on this board"),
+        (None, _) => image,
+    }
 }
 
 /// `family` value → the human SoC name shown on its filter chip, taken from
@@ -255,6 +322,11 @@ pub fn BoardsCatalogPage(os: HostOs, #[props(default)] initial_board: Option<Str
 fn BoardCard(board: BoardDisplayFile, os: HostOs, on_open: EventHandler<()>) -> Element {
     let price = price_label(board.price_usd);
     let driver = driver_warning(&board, os);
+    // Computed, never authored: chip identity ∧ flash fit over the checked-in
+    // build defs. The card shows the best fit only; the detail view lists all.
+    let builds = compatible_builds_for(&board);
+    let best = builds.first().cloned();
+    let no_build = no_build_reason_for(&board);
 
     rsx! {
         article { class: "lpb-cat-card",
@@ -298,6 +370,30 @@ fn BoardCard(board: BoardDisplayFile, os: HostOs, on_open: EventHandler<()>) -> 
                 if let Some(note) = &board.support_note {
                     p { class: "lpb-cat-support-note", "{note}" }
                 }
+                // Firmware sits in its own strip, deliberately unlike the
+                // capability chips above it: those are the vendor's marketing
+                // words, this is what our manifests say.
+                match (best, no_build) {
+                    (Some(matched), _) => rsx! {
+                        div { class: "lpb-cat-fw",
+                            span { class: "lpb-cat-fw-key", "runs" }
+                            span { class: "lpb-cat-fw-build", "{matched.build.id}" }
+                            if builds.len() > 1 {
+                                span { class: "lpb-cat-fw-more", "+{builds.len() - 1}" }
+                            }
+                            if let Some(note) = card_feature_note(&matched) {
+                                span { class: "lpb-cat-fw-note", "{note}" }
+                            }
+                        }
+                    },
+                    (None, Some(reason)) => rsx! {
+                        div { class: "lpb-cat-fw lpb-cat-fw--none",
+                            span { class: "lpb-cat-fw-key", "runs" }
+                            span { class: "lpb-cat-fw-note", "{no_build_sentence(&board, &reason)}" }
+                        }
+                    },
+                    (None, None) => rsx! {},
+                }
                 div { class: "lpb-cat-links",
                     for url in board.purchase_urls.iter() {
                         a {
@@ -306,6 +402,67 @@ fn BoardCard(board: BoardDisplayFile, os: HostOs, on_open: EventHandler<()>) -> 
                             target: "_blank",
                             rel: "noopener",
                             "{url.label} ↗"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The board's firmware block: every build it can run, with the computed fit
+/// and the feature facts read from that build's manifest.
+///
+/// This is also the seam roadmap M6 slots into: *measured* soft limits are a
+/// property of a (build × board) pair, so they belong per-build inside this
+/// section — never on the build manifest, which is board-independent.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BoardFirmware(board: BoardDisplayFile) -> Element {
+    let builds = compatible_builds_for(&board);
+    let no_build = no_build_reason_for(&board);
+
+    rsx! {
+        section { class: "lpb-det-section lpb-det-fw",
+            h2 { "Firmware" }
+            p { class: "lpb-det-fw-caption",
+                "Computed from this board's chip and flash size — feature lines come from the manifest compiled into each image, not from this page."
+            }
+            if builds.is_empty() {
+                if let Some(reason) = no_build {
+                    p { class: "lpb-det-fw-empty", "{no_build_sentence(&board, &reason)}" }
+                }
+            }
+            for matched in builds.iter() {
+                div { class: "lpb-det-fw-build",
+                    div { class: "lpb-det-fw-head",
+                        span { class: "lpb-cat-fw-build", "{matched.build.id}" }
+                        span { class: "lpb-det-fw-name", "{matched.build.display_name}" }
+                    }
+                    div { class: "lpb-det-fw-row",
+                        span { class: "lpb-det-fw-key", "fit" }
+                        span { class: "lpb-det-fw-val", "{fit_sentence(&board, matched)}" }
+                    }
+                    if let Some(summary) = feature_summary(matched.build) {
+                        if let Some(nodes) = node_sentence(matched) {
+                            div { class: "lpb-det-fw-row",
+                                span { class: "lpb-det-fw-key", "nodes" }
+                                span { class: "lpb-det-fw-val", "{nodes}" }
+                            }
+                        }
+                        if !summary.extras.is_empty() {
+                            div { class: "lpb-det-fw-row",
+                                span { class: "lpb-det-fw-key", "extra" }
+                                span { class: "lpb-det-fw-val", "{summary.extras.join(\" · \")}" }
+                            }
+                        }
+                        if !summary.gaps.is_empty() {
+                            div { class: "lpb-det-fw-row",
+                                span { class: "lpb-det-fw-key", "gaps" }
+                                span { class: "lpb-det-fw-val lpb-det-fw-val--gap",
+                                    "{summary.gaps.join(\" · \")}"
+                                }
+                            }
                         }
                     }
                 }
@@ -373,6 +530,7 @@ fn BoardDetail(board: BoardDisplayFile, os: HostOs) -> Element {
                     scale: 1.35,
                 }
             }
+            BoardFirmware { board: board.clone() }
             if let Some(bridge) = bridge {
                 {
                     let guidance = bridge.guidance(os);
