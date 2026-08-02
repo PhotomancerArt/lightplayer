@@ -2,8 +2,20 @@
 runner    = "espflash flash --chip esp32c6 --monitor --after hard-reset"
 rustflags = [
   "-C", "link-arg=-Tlinkall.x",
-  "-C", "force-frame-pointers",       # kept: the s0-chain backtrace walker needs it
+  # Abort tier (ADR 2026-08-02-rv32-firmwares-are-abort-tier): panic=abort +
+  # the lp-recovery RTC ledger, same posture as fw-esp32s3 and fw-esp32v3.
+  # `-C panic=abort` must be HERE and not only in the profile: the Cargo
+  # profile's `panic` key is silently overridden by the target spec, which is
+  # how the cost of unwinding stayed invisible for months (see
+  # docs/reports/2026-03-13-esp32-unwinding-implementation.md, Problem 6).
   "-C", "panic=abort",
+
+  # ⚠️ NOT part of the unwinding machinery, and deliberately kept when
+  # `force-unwind-tables` was removed: `lpc-shared`'s `capture_frames_arch`
+  # walks the `s0` frame-pointer chain to build the crash report, and that
+  # report is the whole of what abort-tier recovery can tell you. Dropping this
+  # also means flipping `FRAME_WALKER_PRESENT` in recovery/panic_path.rs.
+  "-C", "force-frame-pointers",
   "-C", "link-arg=--gc-sections",     # Remove unused sections
   "-C", "link-arg=-znoseparate-code",  # Don't separate code segments (lld syntax: -z<option>)
 
