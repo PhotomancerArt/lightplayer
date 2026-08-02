@@ -1,8 +1,12 @@
-# Hardware Board Manifests
+# Board Manifests
 
-This directory contains checked-in hardware manifests for boards LightPlayer can
-run on. A manifest describes the board metadata, known board-visible labels, and
-claimable resources such as GPIOs, RMT timing channels, and radios.
+This directory contains checked-in **board manifests** for boards LightPlayer
+can run on. A manifest describes the board metadata, known board-visible
+labels, and claimable resources such as GPIOs, RMT timing channels, and radios.
+(It is not the *firmware* manifest — that is the build's self-description,
+embedded in each image; see
+`docs/adr/2026-08-01-firmware-manifest-architecture.md`. The CLI subcommand is
+still spelled `lp-cli hardware manifest`.)
 
 The default layout is:
 
@@ -205,6 +209,22 @@ runtime-reserved GPIOs may not display as plain io. A board may be
 display-only (no runtime manifest) only while its SoC has no
 `HardwareTarget`; those live on an explicit allowlist in the drift tests with
 the reason recorded.
+
+### Firmware compatibility is computed, not authored
+
+Which firmware a board runs is **derived**, never listed: `family` (the chip,
+in espflash spelling — `esp32`, `esp32c6`, `esp32s3`) must equal a build def's
+`chip.name`, and `flash_mb` must be at least the build's `flashSizeMb`. See
+`lpa-boards/src/firmware_join.rs` and `lp-fw/builds/README.md`.
+
+- `flash_mb` is the join's input and `flash` (`"8 MB"`) is what the reader
+  sees; a drift test asserts they agree. **Omit `flash_mb` when the flash size
+  is not verified** — an omitted value matches no build, which is the honest
+  outcome, and beats guessing a board into a firmware image.
+- `firmware_allow` / `firmware_deny` pin exceptions and are empty on every
+  board today (a test enforces that). Each entry needs a `reason`. An
+  allow-pin relaxes the flash rule only: chip identity is never overridable,
+  because a different ISA cannot execute the image at all.
 
 ### Support tiers
 

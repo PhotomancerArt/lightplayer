@@ -5,6 +5,7 @@
   "soc": "ESP32",
   "family": "esp32",
   "flash": "4 MB",
+  "flash_mb": 4,
   "price_usd": 10.0,
   "tier": "bronze",
   "capabilities": ["Wi-Fi", "BT classic", "everywhere"],

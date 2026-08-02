@@ -140,7 +140,7 @@ devices by spec, ID, or address.
 
 `boards/`
 
-Checked-in board manifest TOML files. Use the `lp-cli hardware manifest` tools
+Checked-in board manifest files. Use the `lp-cli hardware manifest` tools
 to create, inspect, and validate manifests, and `lp-cli hardware calibrate` to
 map board-visible GPIO labels when calibration firmware is running. See
 [boards/README.md](boards/README.md) for the workflow.

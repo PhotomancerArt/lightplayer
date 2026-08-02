@@ -5,6 +5,7 @@
   "soc": "ESP32-S3",
   "family": "esp32s3",
   "flash": "16 MB",
+  "flash_mb": 16,
   "psram": "8 MB",
   "price_usd": 9.9,
   "tier": "gold",

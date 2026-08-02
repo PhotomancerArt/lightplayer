@@ -5,6 +5,7 @@
   "soc": "ESP32-C6",
   "family": "esp32c6",
   "flash": "4 MB",
+  "flash_mb": 4,
   "price_usd": 5.2,
   "tier": "silver",
   "capabilities": ["Wi-Fi 6", "BLE 5", "802.15.4", "thumb-sized"],

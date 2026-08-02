@@ -5,6 +5,7 @@
   "soc": "ESP32",
   "family": "esp32",
   "flash": "4 MB",
+  "flash_mb": 4,
   "price_usd": 32.0,
   "tier": "bronze",
   "capabilities": ["level shifter", "fuse", "screw terminals", "2 LED ports", "5-24 V input"],
