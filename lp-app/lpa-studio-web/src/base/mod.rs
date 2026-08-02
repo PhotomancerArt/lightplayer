@@ -16,6 +16,7 @@ pub mod icon_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod icon_menu_stories;
 pub mod keyboard;
+pub mod logo_mark;
 pub mod markdown_text;
 #[cfg(feature = "stories")]
 pub(crate) mod markdown_text_stories;
@@ -37,6 +38,7 @@ pub use field_row::FieldRow;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use keyboard::Platform;
+pub use logo_mark::LogoMark;
 pub use markdown_text::MarkdownText;
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};
