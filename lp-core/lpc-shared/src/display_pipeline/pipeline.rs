@@ -96,7 +96,11 @@ impl DisplayPipeline {
             return Err(DisplayPipelineError::AllocationFailed { num_leds: 0 });
         }
         let size = (num_leds as usize) * 3;
-        let prev_size = if options.interpolation_enabled { size } else { 0 };
+        let prev_size = if options.interpolation_enabled {
+            size
+        } else {
+            0
+        };
         let overflow_size = if options.dithering_enabled {
             num_leds as usize
         } else {
@@ -490,7 +494,11 @@ mod tests {
             lut_enabled: true,
         };
         let mut pipeline = DisplayPipeline::new(100, opts).expect("pipeline");
-        assert_eq!(pipeline.prev.len(), 0, "prev allocated with interpolation off");
+        assert_eq!(
+            pipeline.prev.len(),
+            0,
+            "prev allocated with interpolation off"
+        );
         assert_eq!(
             pipeline.dither_overflow.len(),
             0,
