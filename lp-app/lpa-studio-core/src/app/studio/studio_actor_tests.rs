@@ -727,6 +727,9 @@ fn planned_slot_ops(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
             Some(crate::SlotEditOp::Revert { address }) => {
                 (format!("revert:{}", address.path), None)
             }
+            Some(crate::SlotEditOp::Clear { address }) => {
+                (format!("clear:{}", address.path), None)
+            }
             None => ("other".to_string(), None),
         })
         .collect()

@@ -2,9 +2,15 @@
 //!
 //! Faults run through `catch_node_panic_framed` — the same wrapper the
 //! engine uses around node execution — so injected crashes exercise the
-//! full stack: frame entry/gating, `unwinding` panic + catch, breadcrumb
-//! staging (guest panic handler), recovered-crash ledger accounting, and
-//! for uncaught faults the finalize-and-reset path.
+//! full stack: frame entry, red-gate denial, breadcrumb staging (guest panic
+//! handler), and the finalize-and-reset path.
+//!
+//! Since the unwind tier was removed (ADR
+//! `2026-08-02-rv32-firmwares-are-abort-tier`) every injected panic is
+//! terminal — the guest resets and the host reboots it. What the wrapper still
+//! decides is whether the fault body runs **at all**: a red-gated path is
+//! denied up front and returns [`hs::FAULT_RESULT_GATED`] without panicking,
+//! which is the behavior these faults exist to prove.
 //!
 //! Only the host test harness can trigger these (it must write the fault
 //! word into `LP_RECOVERY_AREA` in guest RAM); the code is inert otherwise.
@@ -54,7 +60,7 @@ fn child_name(arg: u32) -> &'static str {
 
 fn run_fault(code: u32, arg: u32) -> u32 {
     match code {
-        hs::FAULT_RECOVERED_PANIC => in_frames(arg, || -> Result<(), NodeError> {
+        hs::FAULT_FRAMED_PANIC => in_frames(arg, || -> Result<(), NodeError> {
             begin_guest_panic("injected panic");
         }),
         hs::FAULT_OOM_PANIC => in_frames(arg, || -> Result<(), NodeError> {
@@ -71,9 +77,10 @@ fn run_fault(code: u32, arg: u32) -> u32 {
             }
         }
         hs::FAULT_HARD_PANIC => {
-            // Frames stay live (leaked guards), and there is no catch
-            // boundary here: the panic escapes to the panic handler, which
-            // commits the staged breadcrumb and requests a reset.
+            // Frames stay live (leaked guards) and the engine wrapper is
+            // bypassed entirely: nothing consults the gate, so this fault
+            // panics even on a red path. That is the difference from
+            // `FAULT_FRAMED_PANIC`, and it is why both still exist.
             match lp_recovery::enter(lp_recovery::FrameKind::NodeRender, "fault-parent") {
                 Ok(parent) => core::mem::forget(parent),
                 Err(_) => return hs::FAULT_RESULT_GATED,
@@ -114,7 +121,7 @@ fn in_frames(arg: u32, f: impl FnOnce() -> Result<(), NodeError>) -> u32 {
 }
 
 /// Panic through the real machinery: `panic!` → guest `#[panic_handler]`
-/// (stages the breadcrumb) → `begin_panic` unwinding.
+/// (stages the breadcrumb, commits it) → reset request.
 fn begin_guest_panic(message: &'static str) -> ! {
     panic!("{message}");
 }

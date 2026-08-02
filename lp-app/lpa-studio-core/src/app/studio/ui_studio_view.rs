@@ -264,6 +264,7 @@ mod tests {
             sim: false,
             console_tail: Vec::new(),
             ui: CardUiState::default(),
+            detected_chip: None,
         }
     }
 

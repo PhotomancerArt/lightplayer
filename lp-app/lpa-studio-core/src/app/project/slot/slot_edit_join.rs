@@ -43,9 +43,9 @@ pub(in crate::app::project) struct SlotEditJoin<'a> {
     /// shadow; the structural ops shadow nothing).
     overlay: BTreeMap<ProjectSlotAddress, SlotEditOp>,
     /// Persistence classification for every buffer/overlay address, resolved
-    /// by `ProjectController` through the shape-only policy walk
-    /// (`lpc_model::resolve_slot_policy`), which works on data-less paths —
-    /// so a removed entry with no surviving row still classifies correctly.
+    /// by `ProjectController` through the shape-only role walk
+    /// (`lpc_model::resolve_slot_role`), which works on data-less paths — so
+    /// a removed entry with no surviving row still classifies correctly.
     persistence: BTreeMap<ProjectSlotAddress, SlotPersistence>,
     /// Asset body edits (buffer + overlay `ArtifactOverlay::Asset` mirror),
     /// keyed per owning node so [`Self::dirty_summary_for_node`] counts them
@@ -137,7 +137,13 @@ pub(in crate::app::project) struct SlotEditEntry<'a> {
     pub pending: Option<&'a PendingEdit>,
     /// The entry's op for display, from the source that classifies it.
     pub op: SlotEditEntrySource<'a>,
-    /// The entry's [`DirtySummary`] classification (exactly one bucket).
+    /// The persistence governing the entry's path.
+    /// [`SlotPersistence::Transient`] marks a **Debug** (live-only) override:
+    /// not dirty (D7), listed nowhere, and cleared by the Clear verb rather
+    /// than reverted.
+    pub persistence: SlotPersistence,
+    /// The entry's [`DirtySummary`] classification (at most one bucket —
+    /// a non-failed Debug entry counts in none).
     pub summary: DirtySummary,
 }
 
@@ -303,14 +309,16 @@ impl<'a> SlotEditJoin<'a> {
                             .expect("entry addresses come from the buffer or the overlay"),
                     ),
                 };
+                let persistence = self.entry_persistence(address);
                 SlotEditEntry {
                     address,
                     pending,
                     op,
+                    persistence,
                     summary: DirtySummary::for_slot(
                         pending,
                         self.overlay_dirty(address),
-                        self.entry_persistence(address),
+                        persistence,
                     ),
                 }
             })
@@ -323,8 +331,9 @@ impl<'a> SlotEditJoin<'a> {
     ///
     /// Counts are per edit entry ([`Self::entries`]), classified by
     /// [`DirtySummary::for_slot`] exactly like the per-field affordances: a
-    /// failed buffer entry → `failed`, anything else → its resolved
-    /// persistence bucket. Each entry counts **once** regardless of whether
+    /// failed buffer entry → `failed`, a persisted one → `persisted`, and a
+    /// Debug (transient) override → nothing at all (D7). Each entry counts
+    /// **at most once** regardless of whether
     /// a slot row survives at its path (a removed map entry still counts) —
     /// prefix-dirty on ancestor composites is display state, never an
     /// additional count.
@@ -345,6 +354,36 @@ impl<'a> SlotEditJoin<'a> {
             .map(|entry| entry.summary)
             .sum();
         slots + assets
+    }
+
+    /// Active **Debug** overrides addressed to `node` — the count D8's
+    /// node-card marking reads (tier b).
+    ///
+    /// The same entries [`crate::ProjectController::clear_node_debug_edits`]
+    /// sweeps and [`Self::dirty_summary_for_node`] deliberately counts as
+    /// nothing: transient by nature, so never dirty (D7), but very much
+    /// *active*, which is exactly what the marking announces.
+    pub(in crate::app::project) fn debug_overrides_for_node(
+        &self,
+        node: &ProjectNodeAddress,
+    ) -> usize {
+        self.debug_entries()
+            .filter(|entry| entry.address.node == *node)
+            .count()
+    }
+
+    /// Active Debug overrides anywhere in the project — the count the global
+    /// "Debug active · N · Clear all" chip shows (D8 tier a).
+    pub(in crate::app::project) fn debug_override_count(&self) -> usize {
+        self.debug_entries().count()
+    }
+
+    /// The join's Debug (transient-persistence) entries — one enumeration
+    /// behind both counts and the Clear sweep.
+    fn debug_entries(&self) -> impl Iterator<Item = SlotEditEntry<'_>> {
+        self.entries()
+            .into_iter()
+            .filter(|entry| entry.persistence == SlotPersistence::Transient)
     }
 
     /// Enumerate every asset body edit entry in the join — the single
@@ -492,7 +531,8 @@ mod tests {
     fn dirty_summary_counts_entries_once_including_rowless_removals() {
         // One overlay removal at a path with no surviving row, one buffered
         // failed edit, one address present in both buffer and overlay: three
-        // entries, three counts — the buffer classification wins on overlap.
+        // entries — the buffer classification wins on overlap, and the Debug
+        // (transient) one counts in no bucket (D7).
         let buffer = BTreeMap::from([
             (
                 at("entries[b]"),
@@ -514,16 +554,78 @@ mod tests {
             join.dirty_summary_for_node(&node()),
             DirtySummary {
                 persisted: 1,
-                transient: 1,
                 failed: 1,
             }
         );
+        // The Debug entry is still an ENTRY (Clear enumerates it) — it just
+        // carries no dirty weight.
+        let entries = join.entries();
+        assert_eq!(entries.len(), 3);
+        let debug_entry = entries
+            .iter()
+            .find(|entry| *entry.address == at("brightness"))
+            .expect("the transient address is an entry");
+        assert_eq!(debug_entry.persistence, SlotPersistence::Transient);
+        assert!(debug_entry.summary.is_clean());
         assert!(
             join.dirty_summary_for_node(
                 &ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap()
             )
             .is_clean(),
             "entries only count for their own node"
+        );
+    }
+
+    #[test]
+    fn debug_overrides_count_on_their_own_channel() {
+        // Two Debug overrides on this node, one persisted edit, one Debug
+        // override on ANOTHER node: the debug channel counts three overall
+        // and two here, while the dirty summary sees only the persisted one.
+        let other = ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap();
+        let buffer = BTreeMap::from([(at("brightness"), PendingEdit::pending(LpValue::F32(0.9)))]);
+        let overlay = BTreeMap::from([
+            (
+                at("controls.rate"),
+                SlotEditOp::AssignValue(LpValue::F32(2.0)),
+            ),
+            (
+                at("controls.running"),
+                SlotEditOp::AssignValue(LpValue::Bool(false)),
+            ),
+            (
+                ProjectSlotAddress::new(
+                    other.clone(),
+                    ProjectSlotRoot::def(),
+                    SlotPath::parse("controls.rate").unwrap(),
+                ),
+                SlotEditOp::AssignValue(LpValue::F32(0.5)),
+            ),
+        ]);
+        let persistence = BTreeMap::from([
+            (at("brightness"), SlotPersistence::Persisted),
+            (at("controls.rate"), SlotPersistence::Transient),
+            (at("controls.running"), SlotPersistence::Transient),
+            (
+                ProjectSlotAddress::new(
+                    other.clone(),
+                    ProjectSlotRoot::def(),
+                    SlotPath::parse("controls.rate").unwrap(),
+                ),
+                SlotPersistence::Transient,
+            ),
+        ]);
+        let join = SlotEditJoin::new(&buffer, overlay, persistence);
+
+        assert_eq!(join.debug_override_count(), 3);
+        assert_eq!(join.debug_overrides_for_node(&node()), 2);
+        assert_eq!(join.debug_overrides_for_node(&other), 1);
+        assert_eq!(
+            join.dirty_summary_for_node(&node()),
+            DirtySummary {
+                persisted: 1,
+                failed: 0,
+            },
+            "the debug channel never leaks into the dirty summary (D7)"
         );
     }
 
@@ -535,6 +637,8 @@ mod tests {
         assert!(!join.overlay_dirty(&at("entries[a]")));
         assert_eq!(join.state_under(&at("entries")), None);
         assert!(join.dirty_summary_for_node(&node()).is_clean());
+        assert_eq!(join.debug_override_count(), 0);
+        assert_eq!(join.debug_overrides_for_node(&node()), 0);
         assert!(join.asset_entries().is_empty());
         assert!(join.unmapped_asset_dirty_summary().is_clean());
     }
@@ -566,7 +670,6 @@ mod tests {
 
         let one_persisted = DirtySummary {
             persisted: 1,
-            transient: 0,
             failed: 0,
         };
         assert_eq!(join.dirty_summary_for_node(&node()), one_persisted);
@@ -609,7 +712,6 @@ mod tests {
             join.dirty_summary_for_node(&node()),
             DirtySummary {
                 persisted: 0,
-                transient: 0,
                 failed: 1,
             }
         );

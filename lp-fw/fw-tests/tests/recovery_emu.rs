@@ -64,7 +64,6 @@ impl RecoveryEmuHarness {
                 .with_target("riscv32imac-unknown-none-elf")
                 .with_profile("release-emu")
                 .with_backtrace_support(true)
-                .with_unwind_support(true)
                 .with_build_std(true),
         )
         .expect("Failed to build fw-emu");
@@ -250,21 +249,34 @@ fn baseline_boot_is_green_and_completes() {
     assert_eq!(snapshot.boot_count, 1);
 }
 
+/// A panic on the same path twice red-gates it, and a power-on clears
+/// everything.
+///
+/// Every injected panic is terminal since the unwind tier was removed (ADR
+/// `2026-08-02-rv32-firmwares-are-abort-tier`), so each offense costs a boot.
+/// The escalation itself is unchanged, and the ordering inside
+/// `Recovery::init` is what makes it observable: `on_boot` demotes reds for
+/// their one-retry first, and the prior crash is recorded *after* — so a repeat
+/// offender lands straight back on red for the run that follows it, rather than
+/// being handed a retry it already used.
 #[test_log::test]
 #[ignore = "slow emulator suite; run via `just test-recovery-emu`"]
-fn recovered_panics_gate_then_power_on_clears() {
+fn repeat_panics_gate_then_power_on_clears() {
     let mut harness = RecoveryEmuHarness::new();
     harness.boot(hs::CAUSE_POWER_ON, false);
     harness.run_until_boot_complete();
 
-    // Crash 1 (caught in-process): path goes yellow, server keeps running.
-    let (outcome, result) = inject(&mut harness, hs::FAULT_RECOVERED_PANIC, 1);
+    // Offense 1 on fault/a: terminal, so the guest asks for a reset.
+    let (outcome, _) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
     assert_eq!(
         outcome,
-        RunOutcome::Yielded,
-        "caught panic must not kill the guest"
+        RunOutcome::ResetRequested,
+        "an uncaught panic must request a reset"
     );
-    assert_eq!(result, hs::FAULT_RESULT_ERROR);
+
+    // Boot 2: yellow, and the path is still runnable (one retry).
+    harness.reboot_preserving(hs::CAUSE_SOFTWARE_RESET);
+    harness.run_until_boot_complete();
     let snapshot = harness.snapshot();
     assert_eq!(snapshot.level, RecoveryLevel::Yellow);
     assert!(
@@ -275,21 +287,26 @@ fn recovered_panics_gate_then_power_on_clears() {
         entry_states(&snapshot)
     );
 
-    // Crash 2 on the same path: red.
-    let (outcome, result) = inject(&mut harness, hs::FAULT_RECOVERED_PANIC, 1);
-    assert_eq!(outcome, RunOutcome::Yielded);
-    assert_eq!(result, hs::FAULT_RESULT_ERROR);
-    assert_eq!(harness.snapshot().level, RecoveryLevel::Red);
+    // Offense 2 on the same path: the retry is spent.
+    let (outcome, _) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+    assert_eq!(outcome, RunOutcome::ResetRequested);
 
-    // Third attempt: gated up front — the fault body never runs.
-    let (outcome, result) = inject(&mut harness, hs::FAULT_RECOVERED_PANIC, 1);
-    assert_eq!(outcome, RunOutcome::Yielded);
+    // Boot 3: red — and the gate is enforced up front. The fault body never
+    // runs, which is why the outcome is a clean yield and not another reset.
+    harness.reboot_preserving(hs::CAUSE_SOFTWARE_RESET);
+    harness.run_until_boot_complete();
+    assert_eq!(harness.snapshot().level, RecoveryLevel::Red);
+    let (outcome, result) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+    assert_eq!(
+        outcome,
+        RunOutcome::Yielded,
+        "a gated path must be denied without running (and so without panicking)"
+    );
     assert_eq!(result, hs::FAULT_RESULT_GATED);
 
-    // OOM-shaped crash on a sibling still works (sibling unaffected by gate).
-    let (outcome, result) = inject(&mut harness, hs::FAULT_OOM_PANIC, 2);
-    assert_eq!(outcome, RunOutcome::Yielded);
-    assert_eq!(result, hs::FAULT_RESULT_ERROR);
+    // A sibling path is unaffected by the gate — it panics as usual.
+    let (outcome, _) = inject(&mut harness, hs::FAULT_OOM_PANIC, 2);
+    assert_eq!(outcome, RunOutcome::ResetRequested);
 
     // Power-on clears everything even with region bytes preserved:
     // the reset cause alone invalidates them.
@@ -300,6 +317,14 @@ fn recovered_panics_gate_then_power_on_clears() {
     assert!(snapshot.last_crash.is_none());
 }
 
+/// Crashes under two DISTINCT children escalate to the parent, and clean runs
+/// bring it back to green.
+///
+/// Reboot-shaped for the same reason as
+/// [`repeat_panics_gate_then_power_on_clears`]: each panic is terminal. The
+/// hierarchical rule under test is unchanged — a parent that saw crashes under
+/// two different children goes red itself, so an untouched third child is
+/// denied.
 #[test_log::test]
 #[ignore = "slow emulator suite; run via `just test-recovery-emu`"]
 fn escalation_gates_the_parent_and_clean_runs_return_to_green() {
@@ -307,14 +332,21 @@ fn escalation_gates_the_parent_and_clean_runs_return_to_green() {
     harness.boot(hs::CAUSE_POWER_ON, false);
     harness.run_until_boot_complete();
 
-    // Crashes under two DISTINCT children of fault-parent.
-    let (_, result) = inject(&mut harness, hs::FAULT_RECOVERED_PANIC, 1);
-    assert_eq!(result, hs::FAULT_RESULT_ERROR);
-    let (_, result) = inject(&mut harness, hs::FAULT_RECOVERED_PANIC, 2);
-    assert_eq!(result, hs::FAULT_RESULT_ERROR);
+    // Crash under fault/a.
+    let (outcome, _) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+    assert_eq!(outcome, RunOutcome::ResetRequested);
 
-    // Parent is gated: even an untouched child is denied.
-    let (outcome, result) = inject(&mut harness, hs::FAULT_RECOVERED_PANIC, 3);
+    // Crash under fault/b — a DISTINCT child of the same parent.
+    harness.reboot_preserving(hs::CAUSE_SOFTWARE_RESET);
+    harness.run_until_boot_complete();
+    let (outcome, _) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 2);
+    assert_eq!(outcome, RunOutcome::ResetRequested);
+
+    // Next boot: fault-parent is red on its own account, so fault/c — which
+    // has never crashed — is denied too.
+    harness.reboot_preserving(hs::CAUSE_SOFTWARE_RESET);
+    harness.run_until_boot_complete();
+    let (outcome, result) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 3);
     assert_eq!(outcome, RunOutcome::Yielded);
     assert_eq!(
         result,
@@ -411,29 +443,44 @@ fn hang_is_watchdog_attributed() {
     );
 }
 
-/// Fuel exhaustion end-to-end over the real wire: a shader whose render
-/// loops forever must abort **in-frame** with a legible node error and
-/// ledger blame — never a reboot (contrast [`hang_is_watchdog_attributed`],
-/// where a non-shader hang really does burn the whole budget). A repeat
-/// offense red-gates the node (the retry latch of the fuel ADR) while the
-/// rest of the project keeps rendering.
+/// Fuel exhaustion end-to-end over the real wire: a shader whose render loops
+/// forever must abort **in-frame** with a legible node error — never a reboot
+/// (contrast [`hang_is_watchdog_attributed`], where a non-shader hang really
+/// does burn the whole budget), and never a hang.
+///
+/// ## This test lost its latch on 2026-08-02, deliberately
+///
+/// It used to assert that a repeat offense **red-gated** the node. That worked
+/// because `fuel_exhausted_failure` raised a *panic* under `panic-recovery`,
+/// which `catch_node_panic_framed` caught, and only a caught panic records
+/// blame. With the unwind tier removed (ADR
+/// `2026-08-02-rv32-firmwares-are-abort-tier`) the fuel trap returns a plain
+/// typed `Err` on every target, so nothing is recorded and nothing latches: a
+/// hung shader now reports its error *every frame* instead of being disabled
+/// after the second offense.
+///
+/// That is a real behavioral regression in the fuel ADR's retry latch, and it
+/// is pinned here rather than quietly dropped — the ledger staying **green**
+/// across repeated offenses is asserted explicitly, so anyone restoring blame
+/// for fuel traps (via a typed path into the ledger, not a panic) will see
+/// this test fail and know it is the contract they changed.
+///
+/// What has NOT changed, and is the reason this test still earns its runtime:
+/// the abort is in-frame, the error is legible, the rest of the project keeps
+/// rendering, and the device never reboots.
 ///
 /// The looping shader publishes on a bus channel nothing consumes, so the
-/// only renders are the ones this test triggers via render-product probes —
-/// giving exact control over offense counts. The blame ledger is inspected
-/// directly in guest RAM (no frames consumed), which matters because every
-/// server frame tick is a clean completion on the node's path and three of
-/// those would heal a yellow entry.
+/// only renders are the ones this test triggers via render-product probes.
+/// The blame ledger is inspected directly in guest RAM (no frames consumed).
 #[tokio::test]
 #[test_log::test]
 #[ignore = "slow emulator suite; run via `just test-recovery-emu`"]
-async fn fuel_exhausted_shader_gates_without_reboot() {
+async fn fuel_exhausted_shader_errors_without_reboot_or_blame() {
     let fw_emu_path = ensure_binary_built(
         BinaryBuildConfig::new("fw-emu")
             .with_target("riscv32imac-unknown-none-elf")
             .with_profile("release-emu")
             .with_backtrace_support(true)
-            .with_unwind_support(true)
             .with_build_std(true),
     )
     .expect("Failed to build fw-emu");
@@ -517,8 +564,7 @@ async fn fuel_exhausted_shader_gates_without_reboot() {
 
     // Offense 1: the render aborts in-frame (the probe read completes over
     // the live transport — a hang would exhaust the transport's instruction
-    // budget instead) with the legible fuel diagnostic; ledger goes yellow
-    // on the node's path.
+    // budget instead) with the legible fuel diagnostic.
     advance_guest_time(&emulator, 40);
     let message = probe_render_error(&client, handle, bad_shader).await;
     assert!(
@@ -528,43 +574,45 @@ async fn fuel_exhausted_shader_gates_without_reboot() {
         "first offense should report the fuel diagnostic; message: {message}"
     );
     let snapshot = recovery_snapshot(&emulator, area_addr);
-    assert_eq!(snapshot.level, RecoveryLevel::Yellow);
-    assert!(
+    assert_eq!(
+        snapshot.level,
+        RecoveryLevel::Green,
+        "a typed fuel error is not a crash and must not colour the ledger; entries: {:?}",
         entry_states(&snapshot)
-            .iter()
-            .any(|(name, state)| !name.is_empty()
-                && bad_shader_path.starts_with(name.as_str())
-                && *state == "yellow"),
-        "expected a yellow entry on {bad_shader_path}; entries: {:?}",
+    );
+    assert!(
+        entry_states(&snapshot).is_empty(),
+        "no path entry may be opened by a fuel abort; entries: {:?}",
         entry_states(&snapshot)
     );
     assert!(
         snapshot.last_crash.is_none(),
-        "a recovered fuel abort must not stage a reboot crash record"
+        "a fuel abort must not stage a reboot crash record"
     );
 
-    // Offense 2 (immediately — no wire reads in between, so clean produce
-    // ticks cannot heal the yellow first): red-gate.
+    // Offense 2, immediately: the SAME error again. This is the latch that
+    // was lost — see the doc comment. The node is not gated, so the shader
+    // body really does run and burn its fuel a second time.
     advance_guest_time(&emulator, 40);
     let message = probe_render_error(&client, handle, bad_shader).await;
     assert!(
         message.contains("shader fuel exhausted"),
         "second offense message: {message}"
     );
-    let snapshot = recovery_snapshot(&emulator, area_addr);
-    assert_eq!(snapshot.level, RecoveryLevel::Red);
     assert!(
-        entry_states(&snapshot)
-            .iter()
-            .any(|(name, state)| !name.is_empty()
-                && bad_shader_path.starts_with(name.as_str())
-                && *state == "red"),
-        "expected a red entry on {bad_shader_path}; entries: {:?}",
+        !message.contains("recovery:"),
+        "the node must NOT be gated up front — nothing records blame for a \
+         typed error; message: {message}"
+    );
+    let snapshot = recovery_snapshot(&emulator, area_addr);
+    assert_eq!(
+        snapshot.level,
+        RecoveryLevel::Green,
+        "repeat fuel offenses still record nothing; entries: {:?}",
         entry_states(&snapshot)
     );
 
-    // The node status carries the fuel error (red entries ignore clean
-    // completions, so wire reads are safe from here on).
+    // The node status carries the fuel error.
     let status = read_node_status(&client, handle, bad_shader).await;
     let NodeRuntimeStatus::Error(status_message) = status else {
         panic!("expected error status on the looping shader, got: {status:?}");
@@ -574,13 +622,15 @@ async fn fuel_exhausted_shader_gates_without_reboot() {
         "status: {status_message}"
     );
 
-    // Offense 3: denied up front — the red gate is the retry latch; the
-    // shader body never runs again.
+    // Offense 3: still the fuel error, still not a reboot. An unbounded run
+    // of offenses is now the steady state for a hung shader, and the point of
+    // this assertion is that it stays *survivable* — legible every time,
+    // never escalating into a crash.
     advance_guest_time(&emulator, 40);
     let message = probe_render_error(&client, handle, bad_shader).await;
     assert!(
-        message.contains("recovery:"),
-        "gated render should be denied up front; message: {message}"
+        message.contains("shader fuel exhausted"),
+        "third offense message: {message}"
     );
 
     // The rest of the project is untouched: healthy shader still renders,

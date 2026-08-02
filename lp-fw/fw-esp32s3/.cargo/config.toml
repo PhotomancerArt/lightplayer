@@ -21,10 +21,11 @@ rustflags = [
   "-C", "link-arg=-Wl,-Tlinkall.x",
   "-C", "link-arg=-nostartfiles",
 
-  # Abort-tier recovery (ADR 2026-07-29-per-chip-fw-toolchains): panic=abort +
-  # the lp-recovery RTC ledger. Deliberately NOT the C6's panic=unwind +
-  # `unwinding` + __eh_frame machinery, which the ADR says stays chip-local.
-  # That is why there is no force-unwind-tables / force-frame-pointers here.
+  # Abort-tier recovery (ADR 2026-08-02-rv32-firmwares-are-abort-tier):
+  # panic=abort + the lp-recovery RTC ledger, which is now what every firmware
+  # does. No force-unwind-tables here, and no force-frame-pointers either —
+  # unlike the C6, this chip's stack walker uses the windowed ABI's
+  # base-save-area chain and needs no frame pointer.
   "-C", "panic=abort",
 ]
 

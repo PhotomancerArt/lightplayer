@@ -62,6 +62,11 @@ block each: a 48-word block halves into 24 words = one LED, and the classic
 ESP32's 64-word block halves into 32 words = 1⅓ LEDs. A bit cursor makes every
 half size work on every chip, and turns `blocks_per_channel` into a free tuning
 knob — more blocks per channel means fewer channels but a lower interrupt rate.
+Since the board manifest became the sole authority on channel count, the knob
+turns itself: each chip backend computes the plan at driver init from the
+number of declared channels (`BlockPlan::for_channels`, published through a
+`SharedBlockPlan`), so a one-strip board automatically gets the whole buffer
+and the widest refill margin the chip can give.
 
 ### `blocks_per_channel` and the interrupt rate
 
@@ -212,6 +217,14 @@ With several channels flagged in one interrupt snapshot, the entry delay of the
 higher-numbered ones includes every earlier channel's refill — which is the cost
 `on_interrupt`'s index-order service actually imposes, now measured rather than
 inferred.
+
+This is the instrument that settled the C6's WiFi-scan truncation: roadmap
+M5's stress matrix (`2026-08-01-1459-rmt-priority-hli`, phase P4) found
+refill lag flat with or without radio load, while the entry-delay histogram's
+delayed-entry population grew two orders of magnitude under scan — the
+truncation is interrupt-to-service latency, not refill work, which is also
+why raising software priority alone (already at `Priority::max()`) had no
+headroom left to give.
 
 `record_lag` deliberately keeps the running maximum with a load/compare/store
 rather than `fetch_max`, and the interrupt handler is the only writer, so

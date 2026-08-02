@@ -17,9 +17,9 @@ default = [
     "node-playlist",
     "node-clock",
     "node-shader",
+    "resolver-payload-cache",
 ]
 # Panic recovery via catch_unwind (shader compilation, node render)
-panic-recovery = ["lpc-engine/panic-recovery"]
 naga = ["lpc-engine/naga"]
 std = [
 	"lpc-hardware/std",
@@ -51,6 +51,11 @@ node-texture = ["lpc-engine/node-texture"]
 node-playlist = ["lpc-engine/node-playlist"]
 node-clock = ["lpc-engine/node-clock"]
 node-shader = ["lpc-engine/node-shader"]
+
+# Removal-only, same contract as the node gates above: forwards to
+# `lpc-engine/resolver-payload-cache`, defaults on, and a firmware taking
+# `default-features = false` simply omits it to trade frame time for heap.
+resolver-payload-cache = ["lpc-engine/resolver-payload-cache"]
 
 [dependencies]
 # `default-features = false` here means lpa-server takes none of

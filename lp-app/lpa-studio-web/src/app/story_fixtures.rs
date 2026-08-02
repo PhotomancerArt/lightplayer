@@ -58,6 +58,7 @@ pub(crate) fn simulator_lens_card() -> UiDeviceCard {
             "engine: project loaded",
         )],
         ui: Default::default(),
+        detected_chip: None,
     }
 }
 

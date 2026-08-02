@@ -160,6 +160,7 @@ impl SlotShapeRegistry {
         if self.shapes.contains_key(&id) {
             return Err(SlotShapeRegistryError::DuplicateShapeId(id));
         }
+        check_role_direction(id, &shape)?;
         self.shapes.insert(id, SlotShapeEntry::new(revision, shape));
         self.factories.insert(id, factory);
         self.ids_revision = revision;
@@ -193,6 +194,7 @@ impl SlotShapeRegistry {
         if self.shapes.contains_key(&id) {
             return Err(SlotShapeRegistryError::DuplicateShapeId(id));
         }
+        check_role_direction(id, &shape)?;
         self.shapes
             .insert(id, SlotShapeEntry::named(revision, name, shape));
         self.factories.insert(id, factory);
@@ -314,6 +316,7 @@ impl SlotShapeRegistry {
             };
         }
 
+        check_role_direction(id, &shape)?;
         self.shapes.insert(id, SlotShapeEntry::new(revision, shape));
         self.factories.insert(id, factory);
         self.ids_revision = revision;
@@ -354,6 +357,7 @@ impl SlotShapeRegistry {
             };
         }
 
+        check_role_direction(id, &shape)?;
         self.shapes
             .insert(id, SlotShapeEntry::named(revision, name, shape));
         self.factories.insert(id, factory);
@@ -398,6 +402,7 @@ impl SlotShapeRegistry {
         shape: SlotShape,
         factory: SlotFactory,
     ) {
+        assert_role_direction(id, &shape);
         self.shapes.insert(id, SlotShapeEntry::new(revision, shape));
         self.factories.insert(id, factory);
         self.ids_revision = revision;
@@ -436,6 +441,7 @@ impl SlotShapeRegistry {
         shape: SlotShape,
         factory: SlotFactory,
     ) {
+        assert_role_direction(id, &shape);
         self.shapes
             .insert(id, SlotShapeEntry::named(revision, name, shape));
         self.factories.insert(id, factory);
@@ -719,6 +725,32 @@ impl SlotShapeLookup for SlotShapeRegistry {
     }
 }
 
+/// Reject a shape whose fields contradict the role/direction pairing rule
+/// (G2 amendment: produced ⇔ [`crate::SlotRole::State`]).
+///
+/// The `Slotted` derive already refuses to emit such a field, so this only
+/// ever fires for shapes assembled at runtime — a node publishing dynamic
+/// state, an artifact shape built from a file.
+fn check_role_direction(id: SlotShapeId, shape: &SlotShape) -> Result<(), SlotShapeRegistryError> {
+    shape
+        .validate_role_direction()
+        .map_err(|error| SlotShapeRegistryError::RoleDirectionMismatch(id, error))
+}
+
+/// [`check_role_direction`] for the infallible `replace_*` entry points.
+///
+/// These are hot runtime paths whose signature cannot report an error, so the
+/// check is a debug assertion: it fails loudly in tests and dev builds and
+/// costs nothing in release. Every *fallible* registration path returns
+/// [`SlotShapeRegistryError::RoleDirectionMismatch`] instead.
+fn assert_role_direction(id: SlotShapeId, shape: &SlotShape) {
+    debug_assert!(
+        shape.validate_role_direction().is_ok(),
+        "slot shape {id} violates the role/direction pairing rule: {:?}",
+        shape.validate_role_direction()
+    );
+}
+
 fn min_shape_id(left: Option<SlotShapeId>, right: Option<SlotShapeId>) -> Option<SlotShapeId> {
     match (left, right) {
         (Some(left), Some(right)) => Some(core::cmp::min(left, right)),
@@ -740,6 +772,9 @@ pub enum SlotShapeRegistryError {
     DuplicateShapeId(SlotShapeId),
     ShapeIdConflict(SlotShapeId),
     MissingReferencedShape(SlotShapeId),
+    /// A registered shape declares a field whose role and direction
+    /// contradict each other (G2: produced ⇔ `SlotRole::State`).
+    RoleDirectionMismatch(SlotShapeId, crate::SlotRoleDirectionError),
     FactoryError(String),
 }
 
@@ -750,6 +785,9 @@ impl core::fmt::Display for SlotShapeRegistryError {
             Self::ShapeIdConflict(id) => write!(f, "conflicting slot shape id: {id}"),
             Self::MissingReferencedShape(id) => {
                 write!(f, "missing referenced slot shape id: {id}")
+            }
+            Self::RoleDirectionMismatch(id, error) => {
+                write!(f, "slot shape {id}: {error}")
             }
             Self::FactoryError(message) => f.write_str(message),
         }
