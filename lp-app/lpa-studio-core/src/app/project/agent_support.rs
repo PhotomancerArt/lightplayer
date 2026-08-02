@@ -62,6 +62,13 @@ pub(crate) fn engine_verdict(status: &ProjectNodeStatusView) -> EngineVerdict {
             message: None,
             line_col: None,
         },
+        // The agent gets the build gap as a message, not as an error: no
+        // amount of shader editing fixes a missing node runtime.
+        ProjectNodeStatusTone::Disabled => EngineVerdict {
+            status: EngineStatusKind::Unknown,
+            message: status.detail.clone(),
+            line_col: None,
+        },
     }
 }
 

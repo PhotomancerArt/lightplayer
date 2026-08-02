@@ -551,19 +551,21 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Some(radio_service),
         graphics,
     );
-    // Wire hello payload: compile-time provenance from build.rs, injected
+    // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
-    // plus the boot-time read of the root-stamped device identity.
-    server.set_hello(lpc_wire::ServerHello {
-        proto: lpc_wire::WIRE_PROTO_VERSION,
-        fw: lpc_wire::FwProvenance {
-            package: alloc::string::String::from("fw-esp32c6"),
-            commit: alloc::string::String::from(env!("LP_BUILD_COMMIT")),
-            dirty: env!("LP_BUILD_DIRTY") == "true",
-            profile: alloc::string::String::from(env!("LP_BUILD_PROFILE")),
-        },
-        device_uid,
-    });
+    // plus the boot-time read of the root-stamped device identity. The
+    // hello's CAPABILITY half is derived inside the constructor above from
+    // the engine's gates and the services just injected — never restated
+    // here.
+    server.set_hello_identity(
+        lpc_wire::HelloIdentity::new(
+            "fw-esp32c6",
+            env!("LP_BUILD_COMMIT"),
+            env!("LP_BUILD_DIRTY") == "true",
+            env!("LP_BUILD_PROFILE"),
+        )
+        .with_device_uid(device_uid),
+    );
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

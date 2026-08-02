@@ -22,7 +22,7 @@ async fn unsolicited_hello_arrives_as_the_first_id0_frame() {
     match first.msg {
         ServerMsgBody::Hello(hello) => {
             assert_eq!(hello.proto, WIRE_PROTO_VERSION);
-            assert_eq!(hello.fw.package, "fw-host");
+            assert_eq!(hello.build.package, "fw-host");
             assert_eq!(hello.device_uid, None);
         }
         other => panic!("expected the hello as the first frame, got {other:?}"),
