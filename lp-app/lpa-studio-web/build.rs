@@ -59,15 +59,18 @@ fn emit_git_facts(manifest_dir: &Path) {
             .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
     };
 
-    if let Some(branch) = git(&["rev-parse", "--abbrev-ref", "HEAD"]) {
-        if !branch.is_empty() {
-            println!("cargo:rustc-env=STUDIO_GIT_BRANCH={branch}");
-        }
+    let sha = git(&["rev-parse", "--short=8", "HEAD"]).filter(|sha| !sha.is_empty());
+    // A detached HEAD (mid-rebase, CI checkouts, `git checkout <sha>`)
+    // reports the literal "HEAD", which tells a reader nothing — show the
+    // commit instead.
+    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .filter(|branch| !branch.is_empty() && branch != "HEAD")
+        .or_else(|| sha.clone());
+    if let Some(branch) = branch {
+        println!("cargo:rustc-env=STUDIO_GIT_BRANCH={branch}");
     }
-    if let Some(sha) = git(&["rev-parse", "--short=8", "HEAD"]) {
-        if !sha.is_empty() {
-            println!("cargo:rustc-env=STUDIO_GIT_SHA={sha}");
-        }
+    if let Some(sha) = sha {
+        println!("cargo:rustc-env=STUDIO_GIT_SHA={sha}");
     }
     if let Some(status) = git(&["status", "--porcelain"]) {
         let dirty = if status.is_empty() { "0" } else { "1" };
