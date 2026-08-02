@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-08-02      # how: hardware-walk
+fixed: this change
 area: lpvm (Instance hot path) — lpvm-native, lpvm-wasm rt_wasmtime, rt_browser
 class: untested-path
 related:
@@ -59,18 +60,49 @@ frame. The 41/41 run specifically asked the app's own Q32-constructed engine for
 Float per compile and asserted the module's disclosed `FloatImpl` — which is a
 real check of the *compile* seam, and reads like a check of the whole thing.
 
-**Fix** — none yet. The shape is an f32 frame boundary: either f32 variants of
-the two synthesised entries with `f32`-packed `points`/`out`, or a documented
-conversion at the boundary (Q16.16 in → f32 compute → RGBA16 out), which keeps
-one marshalling contract and costs two conversions per sample. The second is
-probably right for a first cut: the sample buffers are an interchange format
-shared with fixtures and outputs, and widening them is a much larger change than
-making the shader interior f32.
+**Fix** — convert at the boundary, keeping **one** marshalling contract: the
+frame boundary stays Q16.16 in / RGBA16 out in both modes, and the synthesised
+wrapper decodes each coordinate into whatever an F32 *lane* means for the mode
+it compiled in. `synthesise_render_texture` / `synthesise_render_samples_rgba16`
+now take a `FloatMode`, and one `Q16CoordDecoder` emits:
 
-**Regression coverage** — none, and that is the actionable half of this entry. A
-test that compiles *any* shader in `FloatMode::Float` and drives it through
-`call_render_samples` would have failed the day M7 landed. The gap is not deep in
-the backend; it is that no test ever asked an f32 module to render.
+- **Q32** — the lane *is* the Q16.16 word, so the decode stays the single
+  `FfromI32Bits` reinterpret. Nothing is allocated and nothing is emitted for
+  the hoisted scale, so Q32 IR is unchanged op for op and vreg for vreg — which
+  is why no Q32 filetest snapshot moved.
+- **Float** — `ItofS(word) * 2^-16` against one scale constant hoisted out of
+  the render loop. Both steps are Guaranteed-class in `docs/design/float.md` §3
+  (int→float correctly rounded, `2^-16` exactly representable), so the decode is
+  bit-identical across f32 targets rather than target-defined.
+
+The **out** side already worked: `FtoUnorm16` has had mode-aware lowerings since
+M5, and `unorm_conv_f32` deliberately uses the same `floor(v * 65536)` clamped
+convention as `unorm_conv_q32`, so the two modes agree to the count.
+
+The alternative — f32-packed `points`/`out` variants of both synthesised entries
+— was rejected for the reason the entry gave before the fix: those buffers are
+an interchange format shared with fixtures and outputs, so widening them is a
+far larger blast radius than making the shader interior f32. The cost paid
+instead is two conversions per coordinate per sample, in the frame hot path.
+
+With the marshalling correct, the guards came out of `lpvm-native`'s two
+backends (`rt_jit` — the device — and `rt_emu`). The **wasm pair keeps
+refusing, deliberately**: `rt_wasmtime` and `rt_browser` cannot compile a
+correct Float module at all yet, because the wasm emitter's f32 builtin id
+resolution is unimplemented — the same defect that keeps `wasm.f32` out of
+`DEFAULT_TARGETS` and the CPU preview tier Q32-only
+(`../adr/2026-08-01-float-mode-reaches-the-device.md`). Their messages now name
+that reason instead of just stating the requirement. So the three-way split is
+now a decision with one open follow-up, not an accident.
+
+**Regression coverage** — `lp-shader/lps-filetests/tests/f32_render_entry.rs`,
+entering through the **product's** door: it compiles GLSL with
+`LpsEngine::compile_px_desc(...).with_float_mode(Float)` and drives
+`sample_points_rgba16` and `render_frame` — the same two calls the app makes per
+frame — on the host rv32 emulator. Verified load-bearing by reverting just the
+Float decode: both f32 tests fail with every channel at 0 (the "renders black"
+signature), both Q32 controls still pass. `lp-shader`'s synth unit tests pin the
+same contract at the IR level, including that Q32 gains no op.
 
 **Lesson** — *proving a capability through the door you built for testing does
 not prove it through the door the product uses.* The f32 roadmap was unusually
