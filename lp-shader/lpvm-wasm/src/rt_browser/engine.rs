@@ -71,6 +71,16 @@ impl LpvmEngine for BrowserLpvmEngine {
     type Module = BrowserLpvmModule;
     type Error = WasmError;
 
+    /// Fixed at construction ([`WasmOptions::float_mode`]): this engine emits
+    /// with `self.compile_options` and takes nothing per call, so it claims
+    /// only the mode it was built with. `TargetLpvmGraphics` builds it from
+    /// `WasmOptions::default()`, which is Q32 — so a Float shader previewed on
+    /// the browser CPU tier gets a compile error naming the backend rather
+    /// than a quietly-Fixed render.
+    fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
+        mode == self.compile_options.float_mode
+    }
+
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let artifact = compile_lpir(ir, meta, &self.compile_options)?;
         let wm = artifact.wasm_module();

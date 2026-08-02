@@ -5,8 +5,8 @@ use alloc::string::String;
 
 use lp_shader::CompileComputeDesc;
 use lpc_model::{
-    ComputeShaderDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderValueShapeRef,
-    SlotShapeLookup, SlotShapeRegistry,
+    ComputeShaderDef, FloatMode, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind,
+    ShaderValueShapeRef, SlotShapeLookup, SlotShapeRegistry,
 };
 use lpir::CompilerConfig;
 use lps_shared::LpsType;
@@ -24,7 +24,17 @@ pub fn compute_desc_from_model_def<'a>(
     registry: &SlotShapeRegistry,
     compiler_config: CompilerConfig,
 ) -> Result<CompileComputeDesc<'a>, ComputeDescError> {
-    let mut desc = CompileComputeDesc::new(glsl, compiler_config);
+    // The authored numeric mode travels with the descriptor. Compute shaders
+    // have no `ShaderSemantics` tier to pick from — they only ever run on a
+    // CPU backend (`LpsEngine::compile_compute_desc`) — so the model's slot
+    // maps straight onto the LPIR mode, and a backend that cannot compile it
+    // refuses rather than substituting Fixed.
+    let mut desc = CompileComputeDesc::new(glsl, compiler_config).with_float_mode(
+        match def.float_mode.value() {
+            FloatMode::Fixed => lpir::FloatMode::Q32,
+            FloatMode::Float => lpir::FloatMode::F32,
+        },
+    );
 
     for (name, slot) in &def.consumed_slots.entries {
         let ty = lps_type_for_slot_value(slot.value.value(), registry)?;
