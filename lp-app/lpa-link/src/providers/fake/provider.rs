@@ -121,7 +121,9 @@ impl FakeProvider {
                 .with_capabilities(
                     LinkCapabilities::esp32_serial_base()
                         .with_flash()
-                        .with_device_erase(),
+                        .with_device_erase()
+                        .with_boot_control()
+                        .with_raw_filesystem_read(),
                 ),
         );
         self.devices.insert(
@@ -160,6 +162,35 @@ impl FakeProvider {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Ok(core::mem::take(&mut *lines))
+    }
+
+    /// Scripted bootloader probe.
+    ///
+    /// Mirrors the real providers' contract: `Ok(Some(chip))` when a
+    /// bootloader answers, `Err` when nothing does — and `Err` is NOT proof
+    /// the device is absent, only that the handshake went unanswered. The
+    /// fake reports a bootloader whenever its scripted device is in a
+    /// no-firmware state, which is what a real board in download mode does.
+    pub async fn probe_target(
+        &self,
+        session_id: &LinkSessionId,
+    ) -> Result<Option<String>, LinkError> {
+        #[cfg(feature = "fake-device")]
+        {
+            let endpoint_id = {
+                let sessions = self.sessions.borrow();
+                sessions
+                    .get(session_id)
+                    .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?
+                    .endpoint_id
+                    .clone()
+            };
+            if self.devices.contains_key(&endpoint_id) {
+                return Ok(Some("ESP32-C6 (fake)".to_string()));
+            }
+        }
+        let _ = session_id;
+        Err(LinkError::unsupported("probe_target"))
     }
 
     fn endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<&LinkEndpoint, LinkError> {
@@ -411,8 +442,9 @@ fn manage_fake_device(
 ) -> Result<crate::LinkManagementResult, LinkError> {
     use crate::providers::fake_device::FAKE_IMAGE_IDENTITY;
     use crate::{
-        LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest,
-        LinkManagementProgress, LinkManagementRequest, LinkManagementResult,
+        LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult,
+        LinkFirmwareManifest, LinkFlashRegion, LinkManagementProgress, LinkManagementRequest,
+        LinkManagementResult, LinkRawFilesystemReadResult,
     };
 
     match request {
@@ -451,10 +483,81 @@ fn manage_fake_device(
                 },
             ))
         }
+        LinkManagementRequest::SetBootControl { flags } => {
+            // The fake device has no flash; echoing the flags is enough to
+            // exercise dispatch, capability gating, and the UX arm without
+            // hardware. The record's *encoding* is covered by lp-bootctl's
+            // golden vector, not here.
+            Ok(LinkManagementResult::SetBootControl(
+                LinkBootControlResult {
+                    flags,
+                    chip_name: Some("ESP32-C6 (fake)".to_string()),
+                    logs: vec![format!(
+                        "fake boot-control: recorded flags {flags:#010x} for the next boot"
+                    )],
+                    progress: vec![
+                        LinkManagementProgress::new("Writing boot-control record")
+                            .with_percent(100),
+                    ],
+                },
+            ))
+        }
+        LinkManagementRequest::ReadRawFilesystem => {
+            let files = fake_device_files(device);
+            let region = LinkFlashRegion::lpfs_for_chip(FAKE_CHIP_NAME)
+                .expect("the fake device presents as a C6");
+            let image =
+                crate::providers::fake_device::fake_filesystem_image::build_image(region, &files);
+            Ok(LinkManagementResult::ReadRawFilesystem(
+                LinkRawFilesystemReadResult {
+                    logs: vec![format!(
+                        "fake filesystem read: {} bytes at {:#x}",
+                        image.len(),
+                        region.offset
+                    )],
+                    progress: vec![
+                        LinkManagementProgress::new("Reading filesystem")
+                            .with_steps(region.length, region.length)
+                            .with_percent(100),
+                    ],
+                    image,
+                    region,
+                    chip_name: Some(FAKE_CHIP_NAME.to_string()),
+                },
+            ))
+        }
         LinkManagementRequest::EraseRawFilesystem => {
             Err(LinkError::unsupported(format!("{:?}", request.operation())))
         }
     }
+}
+
+/// What the scripted device answers to a chip probe. Kept as one constant so
+/// the fake's flash-region lookup and its result payloads cannot disagree.
+#[cfg(feature = "fake-device")]
+const FAKE_CHIP_NAME: &str = "ESP32-C6 (fake)";
+
+/// The device's storage as absolute paths: its project files under the
+/// scripted project dir, plus the root-level identity stamp — the same two
+/// things `finish_light_player_boot` seeds into the fake server's memory fs.
+#[cfg(feature = "fake-device")]
+fn fake_device_files(
+    device: &crate::providers::fake_device::FakeEsp32Device,
+) -> Vec<(String, Vec<u8>)> {
+    let Some(state) = device.light_player_state() else {
+        return Vec::new();
+    };
+    let mut files: Vec<(String, Vec<u8>)> = state
+        .project_files
+        .iter()
+        .map(|(relative, bytes)| (format!("{}/{relative}", state.project_dir), bytes.clone()))
+        .collect();
+    if let Some(identity) = &state.identity
+        && let Ok(json) = lpc_wire::json::to_string(identity)
+    {
+        files.push((fw_host::DEVICE_IDENTITY_PATH.to_string(), json.into_bytes()));
+    }
+    files
 }
 
 /// Resources built when a device-backed endpoint connects.

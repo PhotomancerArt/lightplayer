@@ -75,14 +75,19 @@ pub(crate) fn exec_addr(write: usize) -> usize {
     write
 }
 
-/// Xtensa sibling of [`exec_addr`] — a per-board *rule*, not a bare constant:
+/// Xtensa sibling of [`exec_addr`] — the **in-place** (heap-backed) rule,
+/// which among Xtensa chips only the ESP32-S3 has:
 ///
 /// - **ESP32-S3**: the dual-mapped window above.
-/// - **Classic ESP32** (M7 of the backport): the heap is NOT executable and
-///   SRAM1's alias is word-mirrored, so classic JIT buffers must be IRAM-side
-///   allocations whose addresses are already executable — the fall-through
-///   arm. A heap write address outside a known dual-mapped window is a
-///   placement bug, caught by the debug assert.
+/// - **Classic ESP32**: has NO in-place rule at all — the heap is not
+///   executable and SRAM1's alias is word-mirrored, so no address offset can
+///   make a heap buffer fetchable. Classic JIT code takes the *placed* path
+///   instead ([`crate::codemem_esp32`] + `JitBuffer::Placed` +
+///   [`crate::link::link_jit_at`]) and never consults this function. If
+///   classic code DOES land here, it is a wiring bug (an in-place buffer on
+///   a chip that cannot execute one); the fall-through arm's debug assert
+///   catches the heap case, and I-bus addresses (≥ `0x4000_0000`) pass
+///   through as identity, which is correct on every Xtensa chip.
 #[cfg(target_arch = "xtensa")]
 #[must_use]
 pub(crate) fn exec_addr(write: usize) -> usize {

@@ -34,8 +34,9 @@ pub use app::agent::{
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
-    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployTarget,
-    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
+    BootloaderEntryFlow, ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp,
+    DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
+    RecoveryInstructions, RecoveryStep, UiDeviceBackup,
 };
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, HOME_NODE_ID,
@@ -96,9 +97,10 @@ pub use app::server::{
     StudioServerClient,
 };
 pub use app::settings::{
-    AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
-    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiModelOption,
-    UiSettingsView, provider_guidance,
+    AgentProvider, AgentProviderGuidance, AgentSettings, BrowserFacts, COMMON_LOCAL_SERVERS,
+    DEFAULT_AGENT_MODEL, FindingKind, LocalModelProbeState, LocalServer, ProbeFinding, ProbeLevel,
+    ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
+    UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
@@ -116,14 +118,12 @@ pub use app::studio::{
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
-pub use core::view::steps_view::UiStepState;
-pub use core::view::steps_view::UiStepView;
 pub use core::{
     ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
     ControllerContext, ControllerId, ControllerOp, PASSIVE_REFRESH_DEADLINE,
     PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction,
     UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView, UiProgress, UiStatus,
-    UiStepsView, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

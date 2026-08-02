@@ -3,8 +3,7 @@ use core::fmt::Write;
 use crate::app::runtime_pool::CONSOLE_TAIL_LEN;
 use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::{
-    ActionPriority, UiActivityView, UiPaneView, UiStatus, UiStepState, UiViewContent,
-    UxActivityTarget,
+    ActionPriority, UiActivityView, UiPaneView, UiStatus, UiViewContent, UxActivityTarget,
 };
 
 /// Which runtime session the editor lens is bound to (D35/D37 — the SDI
@@ -147,27 +146,7 @@ impl UiStudioView {
             return;
         };
         pane.status = status;
-
-        match target {
-            UxActivityTarget::Pane { .. } => {
-                pane.body = UiViewContent::Activity(activity);
-            }
-            UxActivityTarget::StackSection { section_id, .. } => {
-                if let UiViewContent::Stack(stack) = &mut pane.body {
-                    if let Some(section) = stack
-                        .sections
-                        .iter_mut()
-                        .find(|section| &section.id == section_id)
-                    {
-                        section.state = UiStepState::Active;
-                        section.body = UiViewContent::Activity(activity);
-                        section.actions.clear();
-                        return;
-                    }
-                }
-                pane.body = UiViewContent::Activity(activity);
-            }
-        }
+        pane.body = UiViewContent::Activity(activity);
     }
 
     /// Apply the CARD-OWNED op flow's live state in place, so a long
@@ -280,6 +259,7 @@ mod tests {
             state,
             project: None,
             fw: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: CardUiState::default(),
@@ -294,6 +274,7 @@ mod tests {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         }))
     }
 

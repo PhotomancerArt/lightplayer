@@ -21,7 +21,9 @@ pub struct LinkedJitImage {
     pub entries: VecMap<String, usize>,
 }
 
-/// Resolve all relocations and produce a JIT-ready image.
+/// Resolve all relocations and produce a JIT-ready image that executes **in
+/// place** — from the returned `code` Vec itself, through the target's
+/// write→execute rule ([`crate::exec_addr`]).
 ///
 /// # Arguments
 /// * `module` - Compiled module with functions and relocations
@@ -32,6 +34,40 @@ pub struct LinkedJitImage {
 pub fn link_jit<F>(
     module: &CompiledModule,
     isa: IsaTarget,
+    resolve_symbol: F,
+) -> Result<LinkedJitImage, NativeError>
+where
+    F: FnMut(&str) -> Option<u32>,
+{
+    link_jit_impl(module, isa, None, resolve_symbol)
+}
+
+/// [`link_jit`] for an image that will be **copied elsewhere before
+/// execution**: intra-module call targets are patched against `exec_base`,
+/// the address byte 0 of the image will be *fetched* at after installation —
+/// not against the staging Vec's own address.
+///
+/// This is the classic-ESP32 path ([`crate::codemem_esp32`]): the staging Vec
+/// lives in non-executable heap, so the in-place rule has no valid answer for
+/// it; the caller reserves a span in the fixed code region first and links
+/// against that. It is also how the host tests link images for execution at
+/// an emulator's code base.
+pub fn link_jit_at<F>(
+    module: &CompiledModule,
+    isa: IsaTarget,
+    exec_base: u32,
+    resolve_symbol: F,
+) -> Result<LinkedJitImage, NativeError>
+where
+    F: FnMut(&str) -> Option<u32>,
+{
+    link_jit_impl(module, isa, Some(exec_base), resolve_symbol)
+}
+
+fn link_jit_impl<F>(
+    module: &CompiledModule,
+    isa: IsaTarget,
+    exec_base: Option<u32>,
     mut resolve_symbol: F,
 ) -> Result<LinkedJitImage, NativeError>
 where
@@ -74,19 +110,26 @@ where
                 //
                 // The resolver's answers (builtins) are addresses of code
                 // linked into the firmware, so they are already execute
-                // addresses. Intra-module targets are not: they are derived
-                // from `image_base`, which is where the linker *writes*. The
-                // emitted code jumps to whatever goes in here, so it must be
-                // the address the fetch path names — on the S3 that is the
-                // I-bus alias, not the D-bus address the bytes were stored
-                // through. See `crate::exec_addr`.
+                // addresses. Intra-module targets are not: the emitted code
+                // jumps to whatever goes in here, so it must be the address
+                // the fetch path will name. In-place (`exec_base == None`)
+                // that is the staging Vec's own address through the target's
+                // write→execute rule — on the S3 the I-bus alias, not the
+                // D-bus address the bytes were stored through (see
+                // `crate::exec_addr`). For a placed image it is the caller's
+                // `exec_base`, where the bytes will be installed.
                 let target_offset = entries.get(&reloc.symbol).ok_or_else(|| {
                     NativeError::Internal(format!(
                         "unresolved symbol `{}` for JIT relocation at offset {}",
                         reloc.symbol, reloc.offset
                     ))
                 })?;
-                crate::exec_addr::exec_addr(image_base.wrapping_add(*target_offset)) as u32
+                match exec_base {
+                    None => {
+                        crate::exec_addr::exec_addr(image_base.wrapping_add(*target_offset)) as u32
+                    }
+                    Some(base) => base.wrapping_add(*target_offset as u32),
+                }
             };
 
             let absolute_offset = func_base + reloc.offset;
@@ -99,8 +142,16 @@ where
                             symbol: String::new(),
                             r_type: reloc.r_type,
                         };
+                        // PC-relative patching needs the address the code
+                        // will EXECUTE at: in place that is the write base
+                        // (identity rule on every rv32 target), for a placed
+                        // image it is the caller's exec_base.
+                        let pc_base = match exec_base {
+                            None => image_base,
+                            Some(base) => base as usize,
+                        };
                         crate::isa::rv32::link::patch_call_plt(
-                            &mut code, &abs_reloc, image_base, target,
+                            &mut code, &abs_reloc, pc_base, target,
                         )?;
                     } else {
                         return Err(NativeError::Internal(alloc::format!(

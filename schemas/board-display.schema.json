@@ -174,7 +174,7 @@
       "type": "object"
     },
     "DrawnPin": {
-      "description": "One header pin on a left/right rail.",
+      "description": "One pin on a left/right rail.",
       "properties": {
         "caps": {
           "items": {
@@ -194,6 +194,10 @@
         "label": {
           "description": "Silkscreen label (\"4\", \"3V3\", \"D10\", \"RST\").",
           "type": "string"
+        },
+        "pad_style": {
+          "$ref": "#/$defs/PadStyle",
+          "description": "The pin's physical connector. Header/solder pads are the default;\nscrew terminals (DIN-rail controllers like the DOM-Z-102) draw as a\nsquare block with a screw head."
         },
         "role": {
           "$ref": "#/$defs/PinRole"
@@ -286,6 +290,21 @@
         "linux"
       ],
       "type": "string"
+    },
+    "PadStyle": {
+      "description": "How a rail pin physically presents on the board.",
+      "oneOf": [
+        {
+          "const": "pad",
+          "description": "Header pin / solder pad.",
+          "type": "string"
+        },
+        {
+          "const": "screw",
+          "description": "Screw terminal.",
+          "type": "string"
+        }
+      ]
     },
     "PinCap": {
       "description": "A capability cell in the pin's row (\"ADC1_3\", \"Touch4\", \"U0_TXD\").",

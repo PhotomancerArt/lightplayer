@@ -17,6 +17,7 @@
 //! [`DeviceCardTab`]: crate::app::roster::DeviceCardTab
 //! [identity]: super::ui_device_card::UiDeviceCard::identity_key
 
+use crate::app::device::BootloaderEntryFlow;
 use crate::app::roster::DeviceCardTab;
 
 /// One card's UI view-state. `Default` is a fresh card: the Status tab,
@@ -46,6 +47,18 @@ pub enum CardSheet {
     Name,
     /// The Not-responding card's troubleshooting sheet (M6).
     Troubleshoot,
+    /// The bootloader-entry ritual: steps → waiting → confirmation.
+    ///
+    /// Carries the whole [`BootloaderEntryFlow`] as a value, so advancing
+    /// the ritual is just re-opening the sheet with the next state — no
+    /// separate op vocabulary, and the flow stays inspectable by e2e.
+    ///
+    /// Core ownership matters more here than for any other sheet: the
+    /// ritual REQUIRES physically unplugging the device, which tears down
+    /// the session and re-renders the card. View-state that died with the
+    /// component would lose the user's place at exactly the moment the
+    /// confirmation is supposed to arrive.
+    BootloaderEntry(BootloaderEntryFlow),
 }
 
 /// The destructive verb a [`CardSheet::Confirm`] gates. The web maps

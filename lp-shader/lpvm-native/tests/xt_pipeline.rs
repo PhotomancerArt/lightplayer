@@ -117,7 +117,7 @@ fn run_unary(build: impl FnOnce(&mut FunctionBuilder, lpir::VReg), x: i32) -> i3
 fn binary_module(
     build: impl FnOnce(&mut FunctionBuilder, lpir::VReg, lpir::VReg),
 ) -> (LpirModule, LpsModuleSig) {
-    let mut fb = FunctionBuilder::new("f", &[IrType::I32, IrType::I32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::I32]);
     let a = fb.add_param(IrType::I32);
     let b = fb.add_param(IrType::I32);
     build(&mut fb, a, b);

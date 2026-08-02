@@ -145,6 +145,21 @@ pub struct Emulator {
     cycle_count: u64,
     /// Ring buffer of the most recent instructions (log_level = Instructions).
     inst_log: VecDeque<InstRecord>,
+    /// What the boot chain left in `CPENABLE`, applied to every staged entry.
+    ///
+    /// **Zero by default, and that is the load-bearing choice.** `Cpu::new()`
+    /// clears `CPENABLE` so that code which forgets to arm the FPU faults here
+    /// rather than on a board — arming a coprocessor is a property of the
+    /// execution *context*, which firmware owns, not of the code being run.
+    /// Staging a call resets the whole `Cpu`, so a caller cannot simply write
+    /// `cpu.cpenable` before entering; this field is how "the boot chain armed
+    /// it" survives that reset.
+    ///
+    /// Set it via [`with_boot_cpenable`](Self::with_boot_cpenable) when the
+    /// emulator is standing in for firmware that arms at boot — which is what
+    /// `lpvm-native`'s `rt_emu` does, mirroring `fw-esp32s3`'s
+    /// `board::esp32s3::fpu::arm()`.
+    boot_cpenable: u32,
 }
 
 impl Emulator {
@@ -172,7 +187,20 @@ impl Emulator {
             instruction_count: 0,
             cycle_count: 0,
             inst_log: VecDeque::new(),
+            boot_cpenable: 0,
         }
+    }
+
+    /// Declare what the boot chain left in `CPENABLE` (builder form).
+    ///
+    /// Applied at every staged entry, because staging resets the `Cpu`. Pass
+    /// [`crate::cpu::CPENABLE_FPU`] to model a board whose firmware armed the
+    /// FPU before running compiled float code. Leave it unset to keep the
+    /// default that makes a missing arm visible.
+    #[must_use]
+    pub fn with_boot_cpenable(mut self, cpenable: u32) -> Self {
+        self.boot_cpenable = cpenable;
+        self
     }
 
     /// Install a floating-point policy (builder form). P6 uses this to hand the
@@ -379,6 +407,9 @@ impl Emulator {
         self.cycle_count = 0;
         self.inst_log.clear();
         self.cpu = Cpu::new();
+        // Whatever the boot chain left behind, re-applied because the reset
+        // above wiped it. Zero unless a caller declared otherwise.
+        self.cpu.cpenable = self.boot_cpenable;
         self.cpu.window_base = 0;
         self.cpu.window_start = 1; // frame 0 resident
         self.cpu.call_stack.push(crate::cpu::FrameRec {

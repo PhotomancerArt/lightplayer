@@ -13,6 +13,7 @@ extern crate alloc;
 
 pub mod dataflow;
 pub mod engine;
+pub mod features;
 pub mod node;
 pub mod nodes;
 pub mod product;
@@ -27,6 +28,7 @@ pub use engine::{
     FrameTime, OutputFlushError, ProjectLoadError, ProjectLoader, ProjectReadEventStreamError,
     RadioService, RuntimeApplyResult,
 };
+pub use features::supported_features;
 // Graphics seam re-exports: the traits/handles live in `lp-gfx`; the
 // cfg-selected CPU implementation is `lp_gfx_lpvm::LpvmGraphics` (constructed
 // by hosts, injected via `Engine::set_graphics`). `ShaderFrontend` is the
