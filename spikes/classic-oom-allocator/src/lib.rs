@@ -60,7 +60,11 @@ fn largest_free_block(heap: &mut Heap) -> usize {
 }
 
 /// Port of `fw-esp32v3::recovery::panic_path::free_list_shape`.
-const MAX_RUNS: usize = 32;
+///
+/// ⚠️ `MAX_RUNS` is one fact in two places: it must track the constant of the
+/// same name in `panic_path.rs`, or the truncation test stops exercising the
+/// bound the firmware actually ships.
+const MAX_RUNS: usize = 64;
 
 #[derive(Debug, Clone, Copy)]
 struct Shape {

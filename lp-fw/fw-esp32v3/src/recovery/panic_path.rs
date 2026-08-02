@@ -149,8 +149,18 @@ pub struct FreeListShape {
 }
 
 /// How many holes the walk will describe before it gives up. Each costs one
-/// `(usize, usize)` of stack and nothing else.
-const MAX_RUNS: usize = 32;
+/// `(usize, usize)` — 8 bytes on this target — of stack and nothing else, so
+/// this is 512 B of the OOM handler's frame.
+///
+/// ⚠️ This bounds **coverage**, not just detail. The walk stops allocating when
+/// the array fills, so a heap with more holes than this reports a `total` well
+/// below `free()` and a `largest` that only describes the low end — see the
+/// `truncated` flag, which is the only thing separating "the heap has 32 holes"
+/// from "the heap has at least 32 holes". 64 rather than 32 because #288 takes
+/// this arena from 112,640 to 178,176 B across two regions, and a bigger,
+/// more-divided heap runs out of runs sooner for exactly the fragmentation case
+/// the walk exists to characterise.
+const MAX_RUNS: usize = 64;
 
 /// Read the free list exactly, using only the allocator's public API.
 ///
