@@ -164,7 +164,10 @@
   picks — except when identity is CERTAIN, e.g. a distinctive USB vid:pid,
   demonstrated by the identity toggle); headline does the chip's work
   ("Set up ESP32-C6 device" replaces "Ready to set up" + "BOARD"); names are
-  sortable-date-first and adopt the board slug on pick.
+  sortable-date-first and adopt the board slug on pick. Round 3: Generic
+  leads the grid (it is the no-decision outcome and must stay findable as
+  the set grows), and the card may grow to <b>4 rows</b> — 11 tiles, then
+  a "+N more" cell.
 </p>
 
 <div class="controls">
@@ -180,6 +183,7 @@
   <span class="group"><b>served boards</b>
     <button data-served="today" aria-pressed="true">today (2×C6)</button>
     <button data-served="future" aria-pressed="false">future (5, multi-chip)</button>
+    <button data-served="many" aria-pressed="false">many (14)</button>
   </span>
 </div>
 
@@ -187,7 +191,8 @@
 <p class="note">Click tiles to pick/unpick (a second click deselects — back to
 generic). The name field derives <span style="font-family:var(--mono)">
 YYYY-MM-DD - chip</span> until a board is picked, then adopts the board slug;
-edit it once and it stops deriving. "+N more" folds the non-matching boards.</p>
+edit it once and it stops deriving. Flip <b>served boards &rarr; many (14)</b>
+to see the 11-tile ceiling and its "+N more" cell.</p>
 <div class="gallery"><div class="dcard" id="main"></div></div>
 
 <h2>Rejected this round</h2>
@@ -210,7 +215,21 @@ const BOARDS = [
   { id: "espressif/esp32-s3-devkitc-1", slug: "esp32-s3-devkitc-1", name: "ESP32-S3-DevKitC-1", chip: "esp32s3", kind: "devkit", future: true },
   { id: "seeed/xiao-esp32-s3-plus",     slug: "xiao-esp32-s3-plus", name: "XIAO ESP32-S3 Plus", chip: "esp32s3", kind: "xiao",   future: true },
   { id: "domraem/dom-z-102",            slug: "dom-z-102",          name: "WLED LAN 4-Channel", chip: "esp32",   kind: "din",    future: true },
+  // A "many boards" horizon, to exercise the 11-tile limit.
+  { id: "espressif/esp32-c6-wroom",     slug: "esp32-c6-wroom",     name: "ESP32-C6-WROOM",     chip: "esp32c6", kind: "devkit", many: true },
+  { id: "seeed/xiao-esp32-c6-mini",     slug: "xiao-esp32-c6-mini", name: "XIAO C6 Mini",       chip: "esp32c6", kind: "xiao",   many: true },
+  { id: "adafruit/qt-py-esp32-c6",      slug: "qt-py-esp32-c6",     name: "QT Py ESP32-C6",     chip: "esp32c6", kind: "xiao",   many: true },
+  { id: "unexpected/tinypico-c6",       slug: "tinypico-c6",        name: "TinyPICO C6",        chip: "esp32c6", kind: "xiao",   many: true },
+  { id: "m5stack/atom-c6",              slug: "atom-c6",            name: "M5Stack Atom C6",    chip: "esp32c6", kind: "devkit", many: true },
+  { id: "lilygo/t-display-c6",          slug: "t-display-c6",       name: "LilyGO T-Display",   chip: "esp32c6", kind: "devkit", many: true },
+  { id: "waveshare/esp32-c6-zero",      slug: "esp32-c6-zero",      name: "Waveshare C6 Zero",  chip: "esp32c6", kind: "xiao",   many: true },
+  { id: "olimex/esp32-c6-evb",          slug: "esp32-c6-evb",       name: "Olimex C6-EVB",      chip: "esp32c6", kind: "din",    many: true },
+  { id: "sparkfun/thing-plus-c6",       slug: "thing-plus-c6",      name: "SparkFun Thing+",    chip: "esp32c6", kind: "devkit", many: true },
 ];
+
+/* Round-3 decision: the card may grow tall (better than the alternatives),
+   but 4 rows of 3 is the ceiling — 11 tiles + a "+N more" cell. */
+const TILE_LIMIT = 11;
 const CHIP_LABEL = { esp32c6: "ESP32-C6", esp32s3: "ESP32-S3", esp32: "ESP32" };
 const DATE = "2026-08-02";
 
@@ -220,7 +239,9 @@ const state = { chip: "esp32c6", ident: "chip", served: "today",
                 sel: null, explicit: false, showAll: false,
                 nameEdited: false, nameValue: "" };
 
-const served = () => BOARDS.filter(b => state.served === "future" || !b.future);
+const served = () => BOARDS.filter(b =>
+  (state.served === "many") ||
+  (state.served === "future" ? !b.many : !b.future && !b.many));
 const matching = () => served().filter(b => b.chip === state.chip);
 const chipKnown = () => state.chip !== "unknown";
 /* "Exact" identity: only real when the port's vid:pid singles out ONE board.
@@ -277,9 +298,15 @@ function tile(b, idTagged) {
 
 function render() {
   const exact = exactBoard();
-  const lead = chipKnown() ? matching() : served();
-  const rest = chipKnown() ? served().filter(b => b.chip !== state.chip) : [];
-  const shown = state.showAll ? lead.concat(rest) : lead;
+  /* Order (round-3): Generic FIRST — it is the no-decision outcome, and it
+     stops being findable if it trails a long grid. Then the boards matching
+     the detected chip, then the rest. */
+  const ordered = chipKnown()
+    ? matching().concat(served().filter(b => b.chip !== state.chip))
+    : served();
+  const capacity = TILE_LIMIT - 1;                  // Generic occupies one
+  const overflow = Math.max(0, ordered.length - capacity);
+  const shown = state.showAll || !overflow ? ordered : ordered.slice(0, capacity);
   const headline = chipKnown()
     ? `Set up <span class="chip">${CHIP_LABEL[state.chip]}</span> device`
     : "Set up this device";
@@ -298,13 +325,13 @@ function render() {
       </div>
       <div>
         <div class="b-grid">
-          ${shown.map(b => tile(b, exact && exact.id === b.id)).join("")}
           <button class="b-tile ${state.sel === null ? (state.explicit ? "sel" : "implicit") : ""}"
               onclick="pickBoard(null)">
             <span class="artbox">${art("generic", 40)}</span><span class="cap">Generic</span>
           </button>
-          ${rest.length && !state.showAll
-            ? `<button class="b-more" onclick="state.showAll = true; render()">+${rest.length} more</button>`
+          ${shown.map(b => tile(b, exact && exact.id === b.id)).join("")}
+          ${overflow && !state.showAll
+            ? `<button class="b-more" onclick="state.showAll = true; render()">+${overflow} more</button>`
             : ""}
         </div>
       </div>
