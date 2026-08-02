@@ -148,9 +148,11 @@ async fn main(spawner: Spawner) {
     }
 
     // ---- radio up (station started), scan task spawned but gated off ----
-    let (controller, _interfaces) =
-        esp_radio::wifi::new(peripherals.WIFI, esp_radio::wifi::ControllerConfig::default())
-            .expect("wifi init");
+    let (controller, _interfaces) = esp_radio::wifi::new(
+        peripherals.WIFI,
+        esp_radio::wifi::ControllerConfig::default(),
+    )
+    .expect("wifi init");
     spawner.spawn(scan_task(controller).expect("stress: scan_task token"));
     esp_println::println!("[STRESS] radio up (station, idle)");
 
@@ -257,7 +259,9 @@ async fn run_cell(mode: Mode, scan: bool, secs: u64, frame_no: &mut u32) {
 /// unlike a solid color — exercises both pulse codes in every byte position.
 fn fill_pattern(frame: &mut [u8; FRAME_BYTES], frame_no: u32, strip: usize) {
     for led in 0..LEDS_PER_STRIP {
-        let phase = (frame_no as usize).wrapping_add(led * 8).wrapping_add(strip * 64) as u8;
+        let phase = (frame_no as usize)
+            .wrapping_add(led * 8)
+            .wrapping_add(strip * 64) as u8;
         frame[led * 3] = phase;
         frame[led * 3 + 1] = phase.wrapping_add(85);
         frame[led * 3 + 2] = phase.wrapping_add(170);

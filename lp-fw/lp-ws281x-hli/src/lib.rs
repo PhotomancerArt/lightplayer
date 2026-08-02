@@ -57,8 +57,8 @@
 
 #![no_std]
 
-use core::sync::atomic::{AtomicU32, AtomicUsize};
 use core::sync::atomic::Ordering::Relaxed;
+use core::sync::atomic::{AtomicU32, AtomicUsize};
 
 /// An all-zero RMT word: the STOP marker (same value as
 /// `lp_ws281x::pulse::STOP_WORD`, restated here so the contract crate stays
