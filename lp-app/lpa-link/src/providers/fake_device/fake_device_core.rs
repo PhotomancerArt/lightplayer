@@ -100,6 +100,17 @@ impl FakeEsp32Device {
         self.lock().reset_current();
     }
 
+    /// The scripted LightPlayer state, when the device is in that boot
+    /// state. Backs the fake raw-filesystem read: the image it returns holds
+    /// the same files the fake server serves, so a backup taken through the
+    /// fake contains what the device actually "has".
+    pub(crate) fn light_player_state(&self) -> Option<FakeLightPlayerState> {
+        match &self.lock().script.boot {
+            FakeBootState::LightPlayer(state) => Some(state.clone()),
+            _ => None,
+        }
+    }
+
     /// Consume the scripted one-shot manage failure, if any.
     pub(crate) fn take_manage_failure(&self) -> Option<String> {
         self.lock().script.manage_failure.take()

@@ -58,6 +58,12 @@ pub struct RecoveryStatus {
     /// Whether this boot skipped project auto-load after repeated
     /// incomplete boots.
     pub safe_mode: bool,
+    /// Device-level safe-mode output ceiling (0–255) applied to every
+    /// loaded project this boot, from a consumed boot-control record.
+    /// `None` = no clamp. RAM-only: a power cycle clears it, which is the
+    /// user's exit from safe mode — clients must say so.
+    #[serde(default)]
+    pub output_clamp: Option<u8>,
     #[serde(default)]
     pub last_crash: Option<CrashSummaryWire>,
     /// Active blame-ledger entries (yellow and red).

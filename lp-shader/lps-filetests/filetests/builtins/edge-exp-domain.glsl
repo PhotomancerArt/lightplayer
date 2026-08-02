@@ -16,6 +16,7 @@ float test_pow_negative_base() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_pow_negative_base() ~= 0.0
 
 float test_pow_zero_negative_exponent() {
@@ -25,6 +26,7 @@ float test_pow_zero_negative_exponent() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_pow_zero_negative_exponent() ~= 0.0
 
 float test_pow_zero_zero() {
@@ -34,6 +36,7 @@ float test_pow_zero_zero() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_pow_zero_zero() ~= 0.0
 
 float test_log_zero() {
@@ -43,6 +46,7 @@ float test_log_zero() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_log_zero() ~= 0.0
 
 float test_log_negative() {
@@ -52,6 +56,7 @@ float test_log_negative() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_log_negative() ~= 0.0
 
 float test_log2_zero() {
@@ -61,6 +66,7 @@ float test_log2_zero() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_log2_zero() ~= 0.0
 
 float test_log2_negative() {
@@ -70,6 +76,7 @@ float test_log2_negative() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_log2_negative() ~= 0.0
 
 float test_sqrt_negative() {
@@ -79,6 +86,7 @@ float test_sqrt_negative() {
 
 // @unsupported(frontend!=lp)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_sqrt_negative() ~= 0.0
 
 float test_inversesqrt_zero() {

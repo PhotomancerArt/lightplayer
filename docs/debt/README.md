@@ -53,6 +53,7 @@ stay in place when retired; the log is the history).
 
 | Entry | Status | Since | Area | Cost in one line |
 | --- | --- | --- | --- | --- |
+| [brightness-applied-before-gamma](brightness-applied-before-gamma.md) | carried | 2026-08-01 | lpc-engine fixture node (value pipeline) | dim gamma-on fixtures collapse to ~1 wire code (30× resolution loss at brightness 38); projects work around it by shipping gamma off |
 | [lps-probe-perf-test-load-sensitive](lps-probe-perf-test-load-sensitive.md) | carried | 2026-08-01 | lps-probe/tests | spurious full-gate reds whenever a dev server or sibling session runs; ~20% wall-clock headroom |
 | [bundled-firmware-chip-unplumbed](bundled-firmware-chip-unplumbed.md) | carried | 2026-07-27 | studio-web roster cards | the "firmware update available" chip is implemented, tested and story-visible, but `bundled_fw` is never supplied in production — the feature never fires |
 | [story-capture-pipeline](story-capture-pipeline.md) | carried | 2026-07-08 | studio-web/story-capture | ~15 min + flake retries per UI change; visual gates block under load |
@@ -65,3 +66,5 @@ stay in place when retired; the log is the history).
 | [s3-frame-cost-scales-per-fixture](s3-frame-cost-scales-per-fixture.md) | carried | 2026-07-31 | lpc-engine resolver + lpc-hardware registry | Frame cost is flat ~8.4 ms/fixture: per-frame dataflow re-resolution + per-frame endpoint-status recomputation; the shader JIT is ~1%, sends 11% |
 | [c6-on-legacy-ws281x-driver](c6-on-legacy-ws281x-driver.md) | carried | 2026-07-31 | lp-fw/fw-esp32c6/src/output | C6 still runs its own single-channel WS281x driver, not `lp-ws281x`; the two now diverge in features and both hardcode `MAX_LEDS` |
 | [example-shaders-not-compile-gated](example-shaders-not-compile-gated.md) | carried | 2026-07-29 | examples GLSL + CI + lps-filetests | an example shader can compile on the host yet fail on 4 of 5 targets; the break surfaces only when a human opens it in Studio |
+| [safe-mode-dim-boot-unproven](safe-mode-dim-boot-unproven.md) | retired | 2026-08-01 | fw-esp32c6/bootctl + lpc-engine safe clamp | RETIRED 2026-08-01: dim boot seen on silicon (serial: record found/consumed/clamped 26/255; heartbeat outputClamp; eyes: dim) |
+| [studio-no-reconnect-after-replug](studio-no-reconnect-after-replug.md) | carried | 2026-07-31 | lpa-link/browser-serial + studio device cards | every bootloader-mode op ends on a replug Studio cannot see; the op card waits forever and the user reloads the tab |

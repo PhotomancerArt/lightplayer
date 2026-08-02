@@ -80,4 +80,9 @@ pub struct FwcheckPortArgs {
     /// Optional serial port override.
     #[arg(long)]
     pub port: Option<String>,
+    /// With several boards attached, probe candidates and pick the one that
+    /// identifies as this chip (e.g. esp32c6, esp32s3). Falls back to the
+    /// LP_CHIP environment variable. Probing reboots idle boards.
+    #[arg(long)]
+    pub chip: Option<String>,
 }

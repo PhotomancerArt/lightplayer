@@ -362,6 +362,79 @@ jobs:
       - name: Clippy esp32s3 firmware
         run: cd lp2025 && just clippy-fw-esp32s3
 
+  # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) — the second crate on the
+  # Xtensa fork, cloned from firmware-xtensa above. Same anti-rot rationale:
+  # nothing else in CI compiles this crate.
+  #
+  # Shares the broad `firmware` filter with firmware-xtensa and
+  # firmware-size, for the same reason both give: it is the link closure of
+  # the device image, and a narrow lp-fw/fw-esp32v3 filter would stop
+  # rebuilding on shared-crate changes most likely to break it — which since
+  # M3-P1 is the whole `lpa-server` / `fw-esp32-common` stack.
+  #
+  # Compile-only, like firmware-xtensa: hardware validation is manual.
+  firmware-esp32v3:
+    name: Firmware build (esp32v3)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firmware == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Install system deps (libudev for espflash)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Installs the Xtensa Rust fork as the `esp` toolchain plus its bundled
+      # GNU binutils, which the build needs on PATH — the Rust target spec
+      # links through xtensa-esp32-elf-gcc, not rust-lld.
+      #
+      # Pinned rather than floating, same reasoning and same pin as
+      # firmware-xtensa: the crate's rust-toolchain.toml says `channel = "esp"`,
+      # which locally tracks whatever espup installed; CI pins so a fork
+      # release cannot turn a green PR red on its own. Keep this version in
+      # sync with firmware-xtensa's.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32
+          default: true
+          ldproxy: false
+
+      # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
+      # repo-root workspace member (M3-P1 folded it in) and writes into the
+      # shared root target/, so the cache key must be the repo root.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match the firmware-size and firmware-xtensa jobs.
+      # ~/.cargo/bin is restored by rust-cache above, so this is a no-op on a
+      # warm cache.
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked
+
+      # Builds the crate and checks the image against its 3 MB app partition.
+      - name: Check esp32v3 image size
+        run: cd lp2025 && just fw-esp32v3-size-check
+
+      # The lint gate for this crate. Nothing else in CI lints it —
+      # `clippy-host` excludes it, because it cross-compiles for Xtensa under
+      # a different toolchain.
+      - name: Clippy esp32v3 firmware
+        run: cd lp2025 && just clippy-fw-esp32v3
+
   # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
   # and executing them on `lp-xt-emu`, linked against a cross-compiled builtins
   # image. Nothing else in CI runs Xtensa *code* — `firmware-xtensa` above only
@@ -1158,9 +1231,22 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch --depth=1 origin "$HEAD_REF"
           BEFORE_SHA="$(git rev-parse "origin/$HEAD_REF")"
+          # The build steps above can leave tracked files modified (observed
+          # 2026-08-01: the dx story build regenerated assets/tailwind.css
+          # with drifted content, and the checkout below aborted with "local
+          # changes would be overwritten"). Everything this step commits comes
+          # from the gitignored story-images/.new/ staging area, so tracked
+          # dirt is never payload — discard it, but log the paths so a
+          # checked-in generated file that SHOULD be refreshed shows up here
+          # instead of vanishing silently.
+          if ! git diff --quiet HEAD --; then
+            echo "Discarding incidental build-produced changes to tracked files:"
+            git diff --name-only HEAD --
+            git reset --hard HEAD
+          fi
           # The pull_request checkout is a detached merge commit; the fresh
           # captures live in the gitignored story-images/.new/ and survive the
-          # branch switch in place.
+          # branch switch in place (reset --hard above leaves them alone too).
           git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
           # Manifest-driven, NOT a wholesale swap: the check tolerates
           # sub-threshold anti-aliasing jitter, and copying the whole fresh set

@@ -20,6 +20,10 @@ lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true, features
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, default-features = false }
 lp-emu-core = { path = "../../lp-emu/lp-emu-core", optional = true }
 serialport = { version = "4.8", optional = true }
+# Raw TIOCMGET/TIOCMSET for whole-status modem-line writes (see
+# stream/serialport_stream.rs — the WCH CH34x macOS driver ignores the
+# single-bit ioctls serialport's per-line calls use).
+libc = { version = "0.2", optional = true }
 hashbrown = { workspace = true, optional = true }
 log = { workspace = true, features = ["std"], optional = true }
 
@@ -35,6 +39,7 @@ serial = [
     "lp-emu-core/std",
     "hashbrown",
     "serialport",
+    "dep:libc",
 ]
 emu = ["host", "lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "lp-emu-core", "lp-emu-core/std", "hashbrown"]
 ws = ["host", "tokio-tungstenite"]
