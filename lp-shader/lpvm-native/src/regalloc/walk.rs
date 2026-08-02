@@ -1580,6 +1580,51 @@ mod tests {
         assert_eq!(output.num_spill_slots, 0);
     }
 
+    /// A function that outruns the spill-slot index space must be **reported**,
+    /// not wrapped.
+    ///
+    /// `SpillAlloc::next_slot` used to be the same `u8` it hands out, so the
+    /// 257th slot wrapped to 0. Under `overflow-checks` that is a panic — taken
+    /// down the on-device compiler in `fw-esp32v3`, which compiles authored
+    /// GLSL. With overflow checks off (the firmware's release profile) it is
+    /// worse and quieter: a fresh vreg gets slot 0, two live values share four
+    /// bytes of frame, and the shader miscompiles all the way to the strip.
+    ///
+    /// The shape is the one that found it — hundreds of values live at once in
+    /// a single function, which is what a long straight-line `render()` body
+    /// lowers to. Every value is defined up front and consumed in definition
+    /// order, so each one's live range spans the whole chain.
+    #[test]
+    fn a_function_past_the_spill_slot_ceiling_reports_instead_of_wrapping() {
+        use alloc::string::String;
+        use core::fmt::Write as _;
+
+        // Comfortably past the 256-slot ceiling without being so large that a
+        // debug-build walk is slow.
+        const N: u16 = 400;
+        let mut input = String::new();
+        for i in 0..N {
+            writeln!(input, "i{i} = IConst32 {i}").unwrap();
+        }
+        let mut acc = 0u16;
+        for i in 1..N {
+            let dst = N + i;
+            writeln!(input, "i{dst} = Add i{acc}, i{i}").unwrap();
+            acc = dst;
+        }
+        writeln!(input, "Ret i{acc}").unwrap();
+
+        let (vinsts, _symbols, pool) = vinst::parse(&input).unwrap();
+        let err = walk_linear(&vinsts, &pool, &make_abi())
+            .expect_err("400 simultaneously live values must exhaust the slot space");
+        assert_eq!(
+            err,
+            AllocError::TooManySpillSlots {
+                max: u32::from(crate::regalloc::spill::SpillAlloc::MAX_SLOTS)
+            },
+        );
+    }
+
     /// Pool size 2, three live values → one must spill.
     ///
     /// ```text
