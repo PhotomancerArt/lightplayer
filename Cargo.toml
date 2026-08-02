@@ -202,15 +202,8 @@ cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift", bran
 cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-module = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-object = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-cranelift-reader = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-cranelift-control = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-
-# regalloc2 - fork (ChunkedVec for OOM mitigation, feature-gating ION allocator)
-regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "lightplayer", default-features = false, features = ["std"] }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
-lp-bootctl = { path = "lp-base/lp-bootctl", default-features = false }
 
 # Common dependencies
 
@@ -221,7 +214,6 @@ anyhow = { version = "1.0.100", default-features = false }
 log = { version = "0.4", default-features = false }
 regex = "1.9.1"
 glob = "0.3.3"
-object = { version = "0.37.3", default-features = false, features = ['read_core', 'elf'] }
 critical-section = { version = "1.2.0", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
@@ -278,33 +270,16 @@ opt-level = "z"
 codegen-units = 1
 panic = "unwind"
 
-# fw-emu: keep debug info for backtrace symbolication
-[profile.release.package.fw-emu]
-debug = 1
-
 # ESP32: panic=unwind for OOM recovery via unwinding crate
 [profile.release-esp32]
 inherits = "release"
 panic = "unwind"
-
-[profile.release-esp32.package.fw-esp32c6]
-debug = 1
-strip = "none"
 
 [profile.release-esp32.package.esp-radio]
 opt-level = "s"
 
 [profile.release-esp32.package.lps-glsl]
 opt-level = "s"
-
-[profile.release-esp32.package.esp-phy]
-opt-level = "z"
-
-[profile.release-esp32.package.esp-radio-rtos-driver]
-opt-level = "z"
-
-[profile.release-esp32.package.esp-wifi-sys-esp32c6]
-opt-level = "z"
 
 # fw-esp32s3: speed-optimized codegen, NOT the workspace's opt-level="z".
 # Measured on silicon 2026-07-31: at "z" the ws281x RX drain path misses the
@@ -333,10 +308,6 @@ opt-level = "s"
 inherits = "release"
 opt-level = 3
 codegen-units = 4
-# panic = "unwind" inherited from release
-
-[profile.release-emu.package.fw-emu]
-debug = 1
 
 # Hot-path builtins are size-sensitive but still execute per pixel.
 [profile.release.package.lps-builtins]
