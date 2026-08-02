@@ -1202,6 +1202,9 @@
   .tw\:bg-transparent {
     background-color: transparent;
   }
+  .tw\:bg-\[image\:var\(--studio-status-error-stripes\)\] {
+    background-image: var(--studio-status-error-stripes);
+  }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-attention-bg\)\,transparent_62\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-attention-bg),transparent 62%);
   }
@@ -1381,6 +1384,9 @@
   }
   .tw\:py-10 {
     padding-block: calc(var(--tw-spacing) * 10);
+  }
+  .tw\:py-12 {
+    padding-block: calc(var(--tw-spacing) * 12);
   }
   .tw\:py-px {
     padding-block: 1px;
@@ -1732,6 +1738,9 @@
   .tw\:underline-offset-2 {
     text-underline-offset: 2px;
   }
+  .tw\:underline-offset-4 {
+    text-underline-offset: 4px;
+  }
   .tw\:opacity-0 {
     opacity: 0%;
   }
@@ -1741,11 +1750,17 @@
   .tw\:opacity-50 {
     opacity: 50%;
   }
+  .tw\:opacity-55 {
+    opacity: 55%;
+  }
   .tw\:opacity-60 {
     opacity: 60%;
   }
   .tw\:opacity-70 {
     opacity: 70%;
+  }
+  .tw\:opacity-80 {
+    opacity: 80%;
   }
   .tw\:opacity-100 {
     opacity: 100%;

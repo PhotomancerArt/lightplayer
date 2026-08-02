@@ -1,11 +1,14 @@
 ---
-status: carried
+status: retired
 since: 2026-07-31
 logged: 2026-07-31
+retired: 2026-08-01
 area: lp-fw/fw-esp32c6/src/output/rmt_ws281x_driver.rs
 related:
   - lp-fw/lp-ws281x/
   - 2026-07-31-0720-s3-led-output-4ch (plan dir)
+  - 2026-08-01-1459-rmt-priority-hli (plan dir, P1+P2)
+  - docs/adr/2026-07-31-lp-ws281x-multi-channel-driver-adoption.md
 ---
 # The C6 still runs its own legacy single-channel WS281x driver, not `lp-ws281x`
 
@@ -55,6 +58,32 @@ plumbing into the legacy code.
   that plan's explicit scope note; no incident, a deliberate deferral being
   recorded as a condition rather than left implicit.
 
+- **2026-08-01 (what made it unacceptable)** — Both named triggers arrived at
+  once. M5 (`2026-08-01-1459-rmt-priority-hli`) needs `lp-ws281x`'s telemetry
+  counters on the C6 to attribute its 29 % frame truncation under a WiFi scan,
+  and Yona asked for the second channel the board has always had the hardware
+  for. Priority work on the legacy driver would have been dead work.
+
+- **2026-08-01 (retirement)** — P1 implemented `RmtHw` for the C6's RMT
+  (`src/output/rmt/c6_rmt.rs`), P2 made it the only driver: legacy
+  `rmt_ws281x_driver.rs` and `rmt/{buffer,channel,config,interrupt}.rs`
+  deleted, `fw-esp32-common::output::rmt_state` deleted with its last
+  consumer, and the manifest's second `/rmt/ws281x1` declared. Desk smoke on
+  the 3-strip jig: both channels transmit concurrently (D10/GPIO18 → slot 0,
+  D9/GPIO20 → slot 1), 1 158 frames each with `trips=0 skips=0 errors=0` and
+  `refills == wanted`. The swap **saved** flash rather than spending it —
+  2,873,632 B against the legacy image's 2,876,320 B (−2,688 B), because the
+  legacy driver's own ISR/refill/pulse tables outweighed the shared core.
+  Two consequences worth knowing: the harnesses' `LedChannel` API survives as
+  a thin shim over the shared driver (`src/output/rmt/led_channel.rs`, harness
+  builds only), and the driver-level duplicate of the 256-LED cap went with
+  the legacy file — `Esp32OutputProvider` is now the single cap site on this
+  chip.
+
 **Exit criteria** — `fw-esp32c6/src/output/` depends on `lp-ws281x` the same
 way `fw-esp32s3/src/output/rmt/` does, and `rmt_ws281x_driver.rs` /
-`LedChannel` are deleted.
+`LedChannel` are deleted. **Met 2026-08-01**, with one deliberate deviation:
+the *name* `LedChannel` survives as a harness-only shim over the shared driver
+rather than being deleted outright, because five hardware harnesses drive a
+strip without a registry. Nothing of the legacy implementation remains behind
+it — no second ISR, no second refill loop, no `rmt_state`.

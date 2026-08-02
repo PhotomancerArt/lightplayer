@@ -70,6 +70,7 @@ server = [
     "dep:lpc-hardware",
     "dep:lpc-shared",
     "dep:lpc-wire",
+    "dep:lpc-model",
     "dep:lpfs",
     "dep:lp-ws281x",
     "dep:fw-core",
@@ -199,6 +200,7 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 
 # io_task's wire-serialization path plus the boot-time `ServerHello`.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 # ⚠️ Two of eight node gates, the same pair fw-esp32s3 lists. `node-fixture` is

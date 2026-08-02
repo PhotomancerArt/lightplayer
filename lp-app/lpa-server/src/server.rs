@@ -53,11 +53,17 @@ pub struct LpServer {
     radio_service: Option<Rc<dyn RadioService>>,
     /// Shader backend (Cranelift, WASM, …).
     graphics: Arc<dyn LpGraphics>,
-    /// Identity/version payload answered to `ClientRequest::Hello` and sent
-    /// unsolicited by embedder loops. Injected by the embedder via
-    /// [`LpServer::set_hello`] (sans-IO: the server never reads git/fs/env
-    /// state itself); defaults to an `"unknown"` provenance with the
-    /// compiled-in [`lpc_wire::WIRE_PROTO_VERSION`].
+    /// Identity/version/capability payload answered to
+    /// `ClientRequest::Hello` and sent unsolicited by embedder loops.
+    ///
+    /// Two halves with two owners. The CAPABILITY half — `build.features`
+    /// and `hardware` — is computed in the constructor from the engine's
+    /// own `cfg!` truth and the services injected here, so every embedder
+    /// reports it correctly including the two that never state an identity
+    /// (`fw-emu`, `lp-cli`). The IDENTITY half — provenance and the
+    /// stamped uid — is injected by the embedder via
+    /// [`LpServer::set_hello_identity`] (sans-IO: the server never reads
+    /// git/fs/env state itself) and defaults to `"unknown"`.
     hello: lpc_wire::ServerHello,
     /// Consecutive per-project tick failures, so a PERSISTENT error states
     /// itself instead of restating itself every frame.
@@ -161,6 +167,15 @@ impl LpServer {
         graphics: Arc<dyn LpGraphics>,
     ) -> Self {
         let project_manager = ProjectManager::new(projects_base_dir);
+        let hardware = lpc_wire::HardwareFacts {
+            radio: radio_service.is_some(),
+            button: button_service.is_some(),
+            // Nothing on the device writes a board identity yet; the field
+            // becomes populatable when provisioning writes `/hardware.json`
+            // (board-selection roadmap M5).
+            board_id: None,
+        };
+        let features = server_features(&hardware, graphics.backend_name());
         Self {
             output_provider,
             project_manager,
@@ -174,24 +189,72 @@ impl LpServer {
             graphics,
             hello: lpc_wire::ServerHello {
                 proto: lpc_wire::WIRE_PROTO_VERSION,
-                fw: lpc_wire::FwProvenance {
+                build: lpc_wire::BuildFacts {
+                    features,
                     package: "unknown".to_string(),
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "unknown".to_string(),
                 },
+                hardware,
                 device_uid: None,
             },
             tick_failures: HashMap::new(),
         }
     }
 
-    /// Inject the hello payload this server reports (embedder-supplied
-    /// provenance/uid; the `proto` field should stay
-    /// [`lpc_wire::WIRE_PROTO_VERSION`]). Call once at construction time,
-    /// before the server loop starts serving.
-    pub fn set_hello(&mut self, hello: lpc_wire::ServerHello) {
-        self.hello = hello;
+    /// Inject the embedder-owned half of the hello: build provenance, the
+    /// stamped device uid, and the wire proto to report. Call once at
+    /// construction time, before the server loop starts serving.
+    ///
+    /// Deliberately CANNOT reach the capability half (`build.features`,
+    /// `hardware`): those are derived in the constructor from the engine's
+    /// `cfg!` truth and the injected services, so a server whose embedder
+    /// never calls this still reports its abilities honestly.
+    pub fn set_hello_identity(&mut self, identity: lpc_wire::HelloIdentity) {
+        let lpc_wire::HelloIdentity {
+            proto,
+            package,
+            commit,
+            dirty,
+            profile,
+            device_uid,
+        } = identity;
+        self.hello.proto = proto;
+        self.hello.build.package = package;
+        self.hello.build.commit = commit;
+        self.hello.build.dirty = dirty;
+        self.hello.build.profile = profile;
+        self.hello.device_uid = device_uid;
+    }
+
+    /// Declare embedder-owned features the server cannot derive from
+    /// anything it holds.
+    ///
+    /// Today that is exactly [`LpFeature::ShaderF32`]: whether the shader
+    /// engine linked into the image does native f32 math is a property of
+    /// the embedder's Cargo graph (`float-f32`), invisible from the
+    /// `Arc<dyn LpGraphics>` and from `lpc-engine`'s gates. Features the
+    /// server DOES know (the engine's node runtimes, the graphics backend,
+    /// the wired services) are computed in the constructor and are not
+    /// affected by this call; declaring one again is harmless.
+    ///
+    /// Call at construction, beside [`Self::set_hello_identity`]. This
+    /// mirrors the firmware manifest macro, where the embedder likewise
+    /// names only its own facts.
+    pub fn declare_embedder_features(&mut self, features: &[lpc_model::LpFeature]) {
+        let declared = &mut self.hello.build.features;
+        for feature in features {
+            if !declared.contains(feature) {
+                declared.push(*feature);
+            }
+        }
+        declared.sort_unstable_by_key(|feature| {
+            lpc_model::LpFeature::ALL
+                .iter()
+                .position(|candidate| candidate == feature)
+                .unwrap_or(usize::MAX)
+        });
     }
 
     /// The hello payload answered to `ClientRequest::Hello` and emitted
@@ -639,5 +702,141 @@ fn classify_project_read_stream_error(
                 ProjectReadStreamOutcome::Fatal(ServerError::Core(format!("{transport_error}")))
             }
         }
+    }
+}
+
+/// The features this server can honestly report about itself: the engine's
+/// own `cfg!`-derived list, plus the two facts the server holds directly —
+/// which hardware services were injected and which graphics backend it was
+/// handed. Embedder-only facts (`shader.f32`) arrive via
+/// [`LpServer::declare_embedder_features`].
+///
+/// Result is in [`lpc_model::LpFeature::ALL`] order, matching the embedded
+/// firmware manifest core's ordering, so the two projections of the same
+/// truth read identically.
+fn server_features(
+    hardware: &lpc_wire::HardwareFacts,
+    backend_name: &str,
+) -> Vec<lpc_model::LpFeature> {
+    use lpc_model::LpFeature;
+
+    let mut features = lpc_engine::features::supported_features();
+    if hardware.button {
+        features.push(LpFeature::SvcButton);
+    }
+    if hardware.radio {
+        features.push(LpFeature::SvcRadioEspnow);
+    }
+    if let Some(gfx) = graphics_feature(backend_name) {
+        features.push(gfx);
+    }
+    features.sort_unstable_by_key(|feature| {
+        LpFeature::ALL
+            .iter()
+            .position(|candidate| candidate == feature)
+            .unwrap_or(usize::MAX)
+    });
+    features
+}
+
+/// The `gfx.*` feature a backend label names, or `None` for a backend
+/// outside the registry (test doubles, the timing harness's passthrough).
+///
+/// The match is over [`lpc_model::LpFeature`], not over the label, so a new
+/// feature variant is a compile error here until someone decides whether it
+/// is a graphics backend and, if so, which labels it answers for. Labels
+/// are matched by prefix because the LPVM family names its engine
+/// (`lpvm-native::rt_jit`, `lpvm-wasm::rt_wasmtime`, …).
+fn graphics_feature(backend_name: &str) -> Option<lpc_model::LpFeature> {
+    use lpc_model::LpFeature;
+
+    /// The backend-label prefixes a feature answers for; `None` for every
+    /// non-graphics feature.
+    const fn label_prefix(feature: LpFeature) -> Option<&'static str> {
+        match feature {
+            LpFeature::GfxLpvm => Some("lpvm-"),
+            LpFeature::GfxNull => Some("null-graphics"),
+            LpFeature::GfxWgpu => Some("wgpu"),
+            LpFeature::NodeButton
+            | LpFeature::NodeClock
+            | LpFeature::NodeFluid
+            | LpFeature::NodeFixture
+            | LpFeature::NodePlaylist
+            | LpFeature::NodeRadio
+            | LpFeature::NodeShader
+            | LpFeature::NodeTexture
+            | LpFeature::SvcButton
+            | LpFeature::SvcRadioEspnow
+            | LpFeature::DiagUnwind
+            | LpFeature::ShaderF32 => None,
+        }
+    }
+
+    LpFeature::ALL.iter().copied().find(|feature| {
+        label_prefix(*feature).is_some_and(|prefix| backend_name.starts_with(prefix))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_model::LpFeature;
+
+    /// The graphics backend is read off the injected backend's own label,
+    /// and an unregistered label reports nothing rather than guessing.
+    #[test]
+    fn graphics_backends_map_to_their_features() {
+        assert_eq!(
+            graphics_feature("lpvm-native::rt_jit"),
+            Some(LpFeature::GfxLpvm)
+        );
+        assert_eq!(
+            graphics_feature("lpvm-wasm::rt_wasmtime"),
+            Some(LpFeature::GfxLpvm)
+        );
+        assert_eq!(graphics_feature("wgpu"), Some(LpFeature::GfxWgpu));
+        assert_eq!(graphics_feature("null-graphics"), Some(LpFeature::GfxNull));
+        assert_eq!(graphics_feature("test-double"), None);
+    }
+
+    /// Wired services become `svc.*` features beside the engine's own list,
+    /// and an unwired service simply does not appear.
+    #[test]
+    fn wired_services_become_features() {
+        let both = lpc_wire::HardwareFacts {
+            radio: true,
+            button: true,
+            board_id: None,
+        };
+        let features = server_features(&both, "lpvm-native::rt_jit");
+        assert!(features.contains(&LpFeature::SvcButton));
+        assert!(features.contains(&LpFeature::SvcRadioEspnow));
+        assert!(features.contains(&LpFeature::GfxLpvm));
+
+        let neither = lpc_wire::HardwareFacts {
+            radio: false,
+            button: false,
+            board_id: None,
+        };
+        let features = server_features(&neither, "lpvm-native::rt_jit");
+        assert!(!features.contains(&LpFeature::SvcButton));
+        assert!(!features.contains(&LpFeature::SvcRadioEspnow));
+    }
+
+    /// The reported list keeps `LpFeature::ALL` order, so hello and the
+    /// embedded manifest core read identically.
+    #[test]
+    fn reported_features_are_in_registry_order() {
+        let hardware = lpc_wire::HardwareFacts {
+            radio: true,
+            button: true,
+            board_id: None,
+        };
+        let features = server_features(&hardware, "lpvm-native::rt_jit");
+        let mut ordered = features.clone();
+        ordered.sort_unstable_by_key(|feature| {
+            LpFeature::ALL.iter().position(|c| c == feature).unwrap()
+        });
+        assert_eq!(features, ordered);
     }
 }

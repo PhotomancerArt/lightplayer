@@ -170,7 +170,7 @@ fn running_state(evidence: &RosterEvidence<'_>) -> RosterCardState {
 mod tests {
     use lpa_link::IncompatibleReason;
     use lpc_history::ContentHash;
-    use lpc_wire::{FwProvenance, ServerHello, WIRE_PROTO_VERSION};
+    use lpc_wire::{BuildFacts, HardwareFacts, ServerHello, WIRE_PROTO_VERSION};
 
     use super::*;
 
@@ -465,11 +465,17 @@ mod tests {
         DeviceState::Ready {
             hello: ServerHello {
                 proto: WIRE_PROTO_VERSION,
-                fw: FwProvenance {
+                build: BuildFacts {
+                    features: Vec::new(),
                     package: "fw-esp32c6".to_string(),
                     commit: "abc123456789".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),
+                },
+                hardware: HardwareFacts {
+                    radio: true,
+                    button: true,
+                    board_id: None,
                 },
                 device_uid: Some("dev_0000000000000001".to_string()),
             },

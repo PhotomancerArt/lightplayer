@@ -27,6 +27,14 @@ pub struct UiNodeHeader {
     /// override is not pending work (D7) — and deliberately not merged into
     /// [`Self::affordance`], so it can never mask an unsaved or failed edit.
     pub debug_overrides: usize,
+    /// The node exists in the project but has NO RUNTIME on the device
+    /// running it (its kind is not in that firmware build). The pane
+    /// replaces its whole body with the hazard-striped error treatment:
+    /// params, products and slots all describe a runtime that is not
+    /// there, and showing them invites edits that cannot take effect.
+    /// [`Self::kind`] names the kind in the pane's message;
+    /// [`Self::detail`] carries the engine's own wording for the popover.
+    pub unsupported: bool,
 }
 
 impl UiNodeHeader {
@@ -42,6 +50,7 @@ impl UiNodeHeader {
             detail: None,
             dirty: DirtySummary::clean(),
             debug_overrides: 0,
+            unsupported: false,
         }
     }
 
@@ -60,6 +69,12 @@ impl UiNodeHeader {
     /// Set the count of active Debug overrides in the node's subtree.
     pub fn with_debug_overrides(mut self, debug_overrides: usize) -> Self {
         self.debug_overrides = debug_overrides;
+        self
+    }
+
+    /// Mark the node as having no runtime here (see [`Self::unsupported`]).
+    pub fn with_unsupported(mut self, unsupported: bool) -> Self {
+        self.unsupported = unsupported;
         self
     }
 

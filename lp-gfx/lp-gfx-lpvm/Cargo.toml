@@ -28,8 +28,11 @@ std = []
 # (f32 roadmap D2). Its zero-byte delta is the check that proves the gate holds.
 #
 # Enabling this links the f32 lowering and builtins; it does not *select* F32
-# mode. `NativeCompileOptions::default()` is still Q32, and which boards offer
-# Float mode is a product decision M7 does not make.
+# mode. Selection comes from each shader node's authored `float_mode` slot,
+# which reaches the compiler through `ShaderSemantics::F32Cpu` and
+# `LpvmCompileParams::float_mode`. On a board built without this feature the
+# same request is refused by name in `LpvmGraphics::compile_shader` — never
+# quietly compiled as Fixed.
 float-f32 = ["lpvm-native/float-f32", "lps-builtins/float-f32"]
 
 [dependencies]

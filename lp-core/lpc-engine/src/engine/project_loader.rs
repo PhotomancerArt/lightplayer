@@ -4580,5 +4580,27 @@ mod tests {
             "a project referencing a disabled node kind must still load: {:?}",
             result.err()
         );
+
+        // ...and it does not masquerade as a healthy quiet node: the
+        // placeholder standing in for the gated-out kind reports the build
+        // gap by name, so the studio can say "not on this device" instead
+        // of inventing an authoring error.
+        let engine = result.expect("loads");
+        let statuses: alloc::vec::Vec<lpc_model::NodeRuntimeStatus> = engine
+            .tree()
+            .entries()
+            .map(|entry| entry.status.get().clone())
+            .collect();
+        let unsupported = statuses
+            .iter()
+            .find(|status| matches!(status, lpc_model::NodeRuntimeStatus::Unsupported(_)))
+            .unwrap_or_else(|| panic!("expected an Unsupported entry, got {statuses:?}"));
+        let lpc_model::NodeRuntimeStatus::Unsupported(message) = unsupported else {
+            unreachable!()
+        };
+        assert!(
+            message.contains("Button"),
+            "the status must name the missing kind: {message}"
+        );
     }
 }

@@ -48,6 +48,7 @@ pub(crate) fn simulator_lens_card() -> UiDeviceCard {
             name: "demo-project".to_string(),
         }),
         fw: None,
+        hardware: None,
         safe_clamp: None,
         sim: true,
         console_tail: vec![UiLogEntry::new(

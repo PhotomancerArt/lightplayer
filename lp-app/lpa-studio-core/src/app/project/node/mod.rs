@@ -30,4 +30,4 @@ pub use node_share_op::{NodeCopyOp, NodePasteOp};
 pub use playlist_activate_op::PlaylistActivateOp;
 pub use project_node_address::ProjectNodeAddress;
 pub use project_node_target::ProjectNodeTarget;
-pub use ui_add_node_menu::{UiAddNodeMenu, UiAddNodeMenuEntry, add_node_menu};
+pub use ui_add_node_menu::{UiAddNodeMenu, UiAddNodeMenuEntry, add_node_menu, gate_add_node_menu};

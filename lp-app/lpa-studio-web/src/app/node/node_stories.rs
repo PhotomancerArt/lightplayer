@@ -5,7 +5,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::node_story_fixtures::{
     clock_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
     node_delete_pane_action, output_node_view, playlist_node_view, playlist_pending_edits,
-    unsaved_dirty_node_view,
+    unsaved_dirty_node_view, unsupported_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -211,6 +211,33 @@ pub(crate) fn output_debug_test_pattern_idle() -> Element {
 )]
 pub(crate) fn error_detail_popup() -> Element {
     let view = error_node_view();
+
+    rsx! {
+        div { class: "tw:flex tw:min-h-[320px] tw:justify-end",
+            NodeDetailPopover {
+                header: view.header,
+                pending_edits: vec![],
+                on_action: move |_| {},
+                initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A node whose kind this device's firmware does not carry. The pane body is GONE — the fixture has two config slots and a second tab, and none of it renders: there is no runtime here, so there is no live state to show and no edit that could take effect. The whole body region below the header becomes the message instead: hazard-striped error red, edge to edge (no box inside the box), one plain sentence naming the kind, and a link to the boards catalog. G1 round 3 — dimmed/neutral (too quiet) and warning-yellow-in-a-bordered-block (crowded, box-in-a-box) were both rejected before this."
+)]
+pub(crate) fn unsupported_node() -> Element {
+    rsx! {
+        NodePane { view: unsupported_node_view() }
+    }
+}
+
+#[story(
+    description = "The detail popup on a not-on-this-device node: the error-family status pill reading 'Not on this device' plus the engine's own reason ('node kind Fluid is not included in this firmware build') — the build-level wording lives HERE, keeping the pane's own message to one clean sentence."
+)]
+pub(crate) fn unsupported_detail_popup() -> Element {
+    let view = unsupported_node_view();
 
     rsx! {
         div { class: "tw:flex tw:min-h-[320px] tw:justify-end",

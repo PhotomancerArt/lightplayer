@@ -243,7 +243,8 @@ impl NodeController {
         )
         .with_status(self.ui_status())
         .with_dirty(dirty)
-        .with_debug_overrides(debug_overrides);
+        .with_debug_overrides(debug_overrides)
+        .with_unsupported(self.status.tone.is_unsupported());
         // Status detail (error/warning/failure text) rides the header so the
         // node detail popup can answer "why" — the compact status alone read
         // as an unexplained Error state (gate follow-up, 2026-07-15).
@@ -1056,6 +1057,13 @@ fn node_status_view(entry: &TreeEntryView) -> ProjectNodeStatusView {
                 "Error",
                 Some(message.clone()),
                 ProjectNodeStatusTone::Error,
+            ),
+            // Deliberately NOT the error family: the project is fine, this
+            // device's firmware simply carries no runtime for the kind.
+            NodeRuntimeStatus::Unsupported(message) => ProjectNodeStatusView::new(
+                "Not on this device",
+                Some(message.clone()),
+                ProjectNodeStatusTone::Disabled,
             ),
         },
     }

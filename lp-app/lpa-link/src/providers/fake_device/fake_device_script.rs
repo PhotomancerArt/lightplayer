@@ -65,9 +65,11 @@ pub struct FakeLightPlayerState {
     /// Stamped identity: written to `/.lp/device.json` at the device's fs
     /// root and reported as the hello's `device_uid`.
     pub identity: Option<FakeDeviceIdentity>,
-    /// Firmware provenance for the boot line and the wire hello. Scripted
+    /// Firmware identity for the boot line and the wire hello. Scripted
     /// flash (`fake_flash(image_identity)`) records the image identity here.
-    pub provenance: lpc_wire::FwProvenance,
+    /// Only the IDENTITY half: the fake's capabilities are the real host
+    /// server's own, never scripted.
+    pub provenance: lpc_wire::HelloIdentity,
     /// Never emit a hello on the wire (unsolicited or requested): mimics
     /// PRE-HELLO firmware whose server loop runs but never identifies
     /// itself. The device session's hello gate classifies this as
@@ -180,13 +182,8 @@ impl FakeDeviceScript {
     }
 }
 
-/// A plausible fake firmware provenance whose `commit` is the given image
+/// A plausible fake firmware identity whose `commit` is the given image
 /// identity.
-pub fn fake_provenance(image_identity: &str) -> lpc_wire::FwProvenance {
-    lpc_wire::FwProvenance {
-        package: "fw-esp32c6".to_string(),
-        commit: image_identity.to_string(),
-        dirty: false,
-        profile: "release-esp32".to_string(),
-    }
+pub fn fake_provenance(image_identity: &str) -> lpc_wire::HelloIdentity {
+    lpc_wire::HelloIdentity::new("fw-esp32c6", image_identity, false, "release-esp32")
 }
