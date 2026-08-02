@@ -172,10 +172,10 @@ pub(crate) fn write_failed() -> Element {
 }
 
 #[story(
-    label = "Live Chrome",
-    description = "Touched transient controls: the live (blue) row tint, the detail icon, and the inline Reset icon on rows with an own edit entry — no text chips."
+    label = "Debug Chrome",
+    description = "Touched Debug controls (D9): the hazard row tint — attention-orange under diagonal stripes, never the amber a persisted edit wears — plus the detail icon and the inline Clear icon on rows with an own edit entry. No text chips."
 )]
-pub(crate) fn live_chrome() -> Element {
+pub(crate) fn debug_chrome() -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
             ConfigSlotRow {
@@ -185,7 +185,7 @@ pub(crate) fn live_chrome() -> Element {
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
-                            .with_live(true),
+                            .with_debug(true),
                     ),
                 depth: 0,
                 index: 0,
@@ -206,7 +206,7 @@ pub(crate) fn live_chrome() -> Element {
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
-                            .with_live(true),
+                            .with_debug(true),
                     ),
                 depth: 0,
                 index: 1,
@@ -217,10 +217,10 @@ pub(crate) fn live_chrome() -> Element {
 }
 
 #[story(
-    label = "Live Detail Popup",
-    description = "The detail popup for a touched live control: the edited section hosts the Reset button; no saved value is known for a transient control, so no Was row (degraded state)."
+    label = "Debug Detail Popup",
+    description = "The detail popup for a touched Debug control: the edited section hosts the Clear button; no saved value is known for a debug override, so no Was row (degraded state)."
 )]
-pub(crate) fn live_detail_popup() -> Element {
+pub(crate) fn debug_detail_popup() -> Element {
     rsx! {
         div { class: "tw:min-h-72",
             ConfigSlotRow {
@@ -230,7 +230,7 @@ pub(crate) fn live_detail_popup() -> Element {
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
-                            .with_live(true),
+                            .with_debug(true),
                     ),
                 depth: 0,
                 index: 0,
@@ -307,7 +307,7 @@ pub(crate) fn editable_clean_controls() -> Element {
             ConfigSlotRow {
                 slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(true))
                     .with_address(story_slot_address("controls.running"))
-                    .with_state(UiSlotFieldState::editable().with_live(true)),
+                    .with_state(UiSlotFieldState::editable().with_debug(true)),
                 depth: 0,
                 index: 0,
                 on_action: move |_| {},
@@ -323,7 +323,7 @@ pub(crate) fn editable_clean_controls() -> Element {
                     }),
                 )
                     .with_address(story_slot_address("controls.rate"))
-                    .with_state(UiSlotFieldState::editable().with_live(true)),
+                    .with_state(UiSlotFieldState::editable().with_debug(true)),
                 depth: 0,
                 index: 1,
                 on_action: move |_| {},
@@ -579,7 +579,7 @@ pub(crate) fn rejected_edit() -> Element {
                     UiSlotFieldState::editable()
                         .with_dirty(UiNodeDirtyState::Error)
                         .with_invalid("target slot is not writable")
-                        .with_live(true),
+                        .with_debug(true),
                 ),
             depth: 0,
             index: 0,

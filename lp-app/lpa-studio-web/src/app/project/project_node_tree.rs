@@ -196,8 +196,6 @@ fn tree_item_dirty_var_class(dirty: DirtySummary) -> &'static str {
         "tw:[--studio-tree-dirty-bg:var(--studio-status-error-bg)]"
     } else if dirty.persisted > 0 {
         "tw:[--studio-tree-dirty-bg:var(--studio-status-warning-bg)]"
-    } else if dirty.transient > 0 {
-        "tw:[--studio-tree-dirty-bg:var(--studio-status-live-bg)]"
     } else {
         ""
     }
@@ -218,9 +216,6 @@ fn tree_item_title(kind: &str, status: &ProjectNodeStatusView, dirty: DirtySumma
     if dirty.persisted > 0 {
         parts.push(format!("{} unsaved", dirty.persisted));
     }
-    if dirty.transient > 0 {
-        parts.push(format!("{} live", dirty.transient));
-    }
     if dirty.failed > 0 {
         parts.push(format!("{} failed", dirty.failed));
     }
@@ -231,12 +226,8 @@ fn tree_item_title(kind: &str, status: &ProjectNodeStatusView, dirty: DirtySumma
 mod tests {
     use super::*;
 
-    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
-        DirtySummary {
-            persisted,
-            transient,
-            failed,
-        }
+    fn dirty(persisted: usize, failed: usize) -> DirtySummary {
+        DirtySummary { persisted, failed }
     }
 
     #[test]
@@ -249,7 +240,7 @@ mod tests {
 
     #[test]
     fn dirty_row_wears_the_node_header_tint_in_the_dominant_bucket_color() {
-        let unsaved = tree_item_row_class(false, dirty(2, 0, 0));
+        let unsaved = tree_item_row_class(false, dirty(2, 0));
         assert!(unsaved.contains("tw:[--studio-tree-dirty-bg:var(--studio-status-warning-bg)]"));
         assert!(unsaved.contains(
             "tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)]"
@@ -258,18 +249,18 @@ mod tests {
         assert!(unsaved.contains("tw:bg-card-subtle"));
 
         assert!(
-            tree_item_row_class(false, dirty(0, 1, 0))
-                .contains("--studio-tree-dirty-bg:var(--studio-status-live-bg)")
-        );
-        assert!(
-            tree_item_row_class(false, dirty(1, 1, 1))
+            tree_item_row_class(false, dirty(1, 1))
                 .contains("--studio-tree-dirty-bg:var(--studio-status-error-bg)")
         );
+        // D7: a subtree carrying only debug overrides reads clean — the
+        // summary never learns about them, so no wash and no variable.
+        let debug_only = tree_item_row_class(false, DirtySummary::clean());
+        assert!(!debug_only.contains("--studio-tree-dirty-bg:"));
     }
 
     #[test]
     fn focused_dirty_row_mixes_the_dirty_color_into_the_selection_highlight() {
-        let class = tree_item_row_class(true, dirty(2, 0, 0));
+        let class = tree_item_row_class(true, dirty(2, 0));
         assert!(class.contains("tw:border-selection-border"));
         assert!(class.contains("--studio-tree-dirty-bg:var(--studio-status-warning-bg)"));
         assert!(class.contains(
@@ -307,11 +298,11 @@ mod tests {
             "Visual — Warning: using fallback palette"
         );
         assert_eq!(
-            tree_item_title("Shader", &running, dirty(2, 1, 0)),
-            "Shader — Running — edits in this subtree: 2 unsaved, 1 live"
+            tree_item_title("Shader", &running, dirty(2, 0)),
+            "Shader — Running — edits in this subtree: 2 unsaved"
         );
         assert_eq!(
-            tree_item_title("Output", &running, dirty(0, 0, 3)),
+            tree_item_title("Output", &running, dirty(0, 3)),
             "Output — Running — edits in this subtree: 3 failed"
         );
     }
@@ -345,7 +336,7 @@ mod tests {
         assert!(affordance_indicator_class(clean.affordance()).is_none());
 
         // Dirty and failing rows announce with the affordance glyph.
-        let unsaved = item(ProjectNodeStatusTone::Good, dirty(1, 0, 0));
+        let unsaved = item(ProjectNodeStatusTone::Good, dirty(1, 0));
         assert_eq!(unsaved.affordance(), UiAffordance::Unsaved);
         let warn = item(ProjectNodeStatusTone::Warning, DirtySummary::clean());
         assert_eq!(warn.affordance(), UiAffordance::Error);

@@ -435,6 +435,31 @@ mod tests {
         }
     }
 
+    /// D2 (P4): the clock's `controls.*` fields are `SlotRole::Debug`
+    /// (session-only), so `node.schema.json` must not advertise them as
+    /// authorable — kills W2, where the schema previously invited a def
+    /// author to write a value the loader now warns-and-ignores.
+    #[test]
+    fn node_schema_omits_clock_debug_controls() {
+        let outputs = generate_outputs().unwrap();
+        let node: Value = serde_json::from_str(&outputs["node.schema.json"]).unwrap();
+        let clock_branch = node["oneOf"]
+            .as_array()
+            .expect("node schema oneOf")
+            .iter()
+            .find(|branch| branch["properties"]["kind"]["const"] == json!("Clock"))
+            .expect("clock branch");
+
+        let controls = &clock_branch["properties"]["controls"];
+        let controls_properties = controls["properties"]
+            .as_object()
+            .expect("controls is a compiled object schema");
+        assert!(
+            controls_properties.is_empty(),
+            "clock controls.* are all Debug-role and must be omitted: {controls}"
+        );
+    }
+
     #[test]
     fn project_schema_is_a_closed_container_manifest() {
         let outputs = generate_outputs().unwrap();

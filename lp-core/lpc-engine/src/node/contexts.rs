@@ -678,6 +678,7 @@ mod tests {
     use lps_shared::LpsValueF32;
 
     #[derive(Default, Slotted)]
+    #[slot(default_role = "state")]
     struct TestRuntimeState {
         #[slot(produced)]
         pub value: ValueSlot<f32>,

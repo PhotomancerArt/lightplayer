@@ -75,13 +75,34 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         "container-manifest fields must not surface as root slots"
     );
 
+    // D3/D4 over the real wire: the clock's three `controls.*` Debug fields
+    // land FLAT in the node's Debug section — no "Controls" record row in
+    // the settings section, no nesting inside the Debug one — while the
+    // clock's persisted settings stay where they were.
+    let clock_sections = node_sections(&snapshot, "/edit_e2e.show/clock.clock");
+    let debug_labels = section_slot_labels(&clock_sections, |section| {
+        matches!(section, UiNodeSection::DebugSlots(_))
+    });
+    assert_eq!(
+        debug_labels,
+        vec!["Running", "Rate", "Scrub offset seconds"],
+        "every Debug field renders directly in the Debug section (D4 flattening)"
+    );
+    let settings_labels = section_slot_labels(&clock_sections, |section| {
+        matches!(section, UiNodeSection::ConfigSlots(_))
+    });
+    assert!(
+        !settings_labels.iter().any(|label| label == "Controls"),
+        "the Debug section replaces the old `controls` record row, never duplicates it: {settings_labels:?}"
+    );
+
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
-    assert!(rate.state.live, "clock rate is a transient (live) control");
+    assert!(rate.state.debug, "clock rate is a Debug control");
     let rate_address = rate.address.clone().expect("rate slot carries an address");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
-    assert!(!color_order.state.live, "color order is a persisted slot");
+    assert!(!color_order.state.debug, "color order is a persisted slot");
     let color_order_address = color_order
         .address
         .clone()
@@ -110,20 +131,20 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     );
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
-    assert!(rate.state.live);
+    assert!(rate.state.debug);
     assert_eq!(slot_value_display(rate), "2");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Dirty);
-    assert!(!color_order.state.live);
+    assert!(!color_order.state.debug);
     assert_eq!(slot_value_display(color_order), "rgb");
     assert_eq!(
         editor_dirty(&snapshot),
-        (1, 1),
-        "one persisted and one transient slot are dirty"
+        (1, 0),
+        "only the persisted slot is dirty; the debug rate override is not (D7)"
     );
 
     // Save: the persisted color-order edit commits to fixture.json; the
-    // transient rate edit stays pending (dirty-live), clock.json untouched.
+    // debug rate override stays pending (live), clock.json untouched.
     handle.tx.send(project_action(ProjectOp::SaveOverlay));
     drive(actor.run_one_batch_for_test());
     // Pull a refresh so the synced view reflects the committed def.
@@ -139,13 +160,13 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     let clock_json = read_project_file(&server, "clock.json");
     assert!(
         !clock_json.contains("\"rate\":2"),
-        "clock.json must not gain the transient rate edit: {clock_json}"
+        "clock.json must not gain the debug rate override: {clock_json}"
     );
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(
         rate.state.dirty,
         UiNodeDirtyState::Dirty,
-        "transient edit survives the save as dirty-live"
+        "the debug override survives the save, live on the project"
     );
     assert_eq!(slot_value_display(rate), "2");
     let color_order = find_slot(&snapshot, "color_order");
@@ -155,7 +176,11 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         "rgb",
         "committed value synced back"
     );
-    assert_eq!(editor_dirty(&snapshot), (0, 1));
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (0, 0),
+        "with the persisted edit written the project reads clean — the surviving debug override is not dirty"
+    );
 
     // Revert all: the overlay clears, every slot returns to Clean, and the
     // *gated* refresh (since = last known revision) delivers the reverted
@@ -1002,10 +1027,10 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
 }
 
 #[test]
-fn per_slot_transient_reset_reverts_value_through_gated_refresh() {
-    // The per-slot Reset affordance on a transient control (the clock `rate`
-    // slider): SetValue then `SlotEditOp::Revert` must bring the DTO back to
-    // the authored default through a *gated* refresh, without a reconnect.
+fn per_slot_clear_restores_the_debug_default_through_gated_refresh() {
+    // The per-slot Clear affordance on a debug control (the clock `rate`
+    // slider): SetValue then `SlotEditOp::Clear` must bring the DTO back to
+    // the default through a *gated* refresh, without a reconnect.
     // The intermediate refresh below syncs the mutated def into the view
     // first, so the final assertion can only pass if the refresh after the
     // revert delivers the *reverted* def root (monotonic revisions, studio
@@ -1031,7 +1056,7 @@ fn per_slot_transient_reset_reverts_value_through_gated_refresh() {
     assert_eq!(slot_value_display(rate), "1");
     let rate_address = rate.address.clone().expect("rate slot carries an address");
 
-    // Edit the transient control, then pull a gated refresh so the synced
+    // Edit the debug control, then pull a gated refresh so the synced
     // view itself holds the edited value.
     handle
         .tx
@@ -1044,20 +1069,21 @@ fn per_slot_transient_reset_reverts_value_through_gated_refresh() {
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
     assert_eq!(slot_value_display(rate), "2");
 
-    // Per-slot reset: revert the rate edit, then a gated refresh must show
-    // the authored default again.
-    handle.tx.send(revert_action(rate_address));
+    // Per-value Clear: drop the debug override, then a gated refresh must
+    // show the default again. For a Debug slot the authored default IS the
+    // shape default, so Clear and reset-to-authored coincide.
+    handle.tx.send(clear_action(rate_address));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
+    let snapshot = view.try_recv().expect("clear + refresh emit a snapshot");
 
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(rate),
         "1",
-        "per-slot reset restores the authored default through the gated refresh"
+        "per-value Clear restores the default through the gated refresh"
     );
 }
 
@@ -1718,7 +1744,7 @@ fn special_editor_values_round_trip_save_and_revert() {
 
     let render_size = find_slot(&snapshot, "render_size");
     assert_eq!(render_size.state.dirty, UiNodeDirtyState::Dirty);
-    assert!(!render_size.state.live, "render_size is a persisted slot");
+    assert!(!render_size.state.debug, "render_size is a persisted slot");
     let transform = find_slot(&snapshot, "transform");
     assert_eq!(transform.state.dirty, UiNodeDirtyState::Dirty);
     assert_eq!(editor_dirty(&snapshot), (2, 0));
@@ -2072,6 +2098,62 @@ fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
 }
 
 #[test]
+fn the_output_card_gets_a_debug_section_for_test_pattern() {
+    // P5, over the real wire: `OutputDef.test_pattern` is `SlotRole::Debug`,
+    // and NOTHING output-specific exists in the UI layer — the same
+    // role-keyed partition that gives the Clock its Debug section (P3) gives
+    // the output card one, with the toggle in it. `endpoint` stays a Setting.
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let sections = node_sections(&snapshot, "/edit_e2e.show/output.output");
+    assert_eq!(
+        section_slot_labels(&sections, |section| matches!(
+            section,
+            UiNodeSection::DebugSlots(_)
+        )),
+        vec!["Test pattern"],
+        "the output's one Debug field renders in the Debug section"
+    );
+    assert!(
+        !section_slot_labels(&sections, |section| matches!(
+            section,
+            UiNodeSection::ConfigSlots(_)
+        ))
+        .iter()
+        .any(|label| label == "Test pattern"),
+        "a Debug field is never also a Setting row"
+    );
+
+    let test_pattern = find_slot(&snapshot, "test_pattern");
+    assert!(test_pattern.state.debug, "test_pattern is a Debug slot");
+    assert!(
+        test_pattern.state.editable,
+        "a Debug slot is writable — that is the whole point of the toggle"
+    );
+    assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
+    let endpoint = find_slot(&snapshot, "endpoint");
+    assert!(
+        !endpoint.state.debug,
+        "the endpoint is authored config, not debug"
+    );
+}
+
+#[test]
 fn successive_shader_applies_each_reach_the_engine() {
     // Regression: an overlay→overlay body change (second Apply before any
     // Save) must recompile just like the first (base→overlay) one. Observed
@@ -2189,7 +2271,9 @@ pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
     }
     fn in_sections(sections: &[UiNodeSection]) -> Option<crate::UiAssetEditor> {
         sections.iter().find_map(|section| match section {
-            UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => in_slots(slots),
+            UiNodeSection::AssetSlots(slots)
+            | UiNodeSection::ConfigSlots(slots)
+            | UiNodeSection::DebugSlots(slots) => in_slots(slots),
             _ => None,
         })
     }
@@ -2413,6 +2497,15 @@ fn revert_action(address: crate::ProjectSlotAddress) -> StudioCommand {
     ))
 }
 
+/// The per-value scope of the Clear verb (D7) — same mechanism as
+/// `revert_action`, the vocabulary debug slots use.
+fn clear_action(address: crate::ProjectSlotAddress) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::Clear { address },
+    ))
+}
+
 fn ensure_present_action(address: crate::ProjectSlotAddress) -> StudioCommand {
     StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
@@ -2477,9 +2570,45 @@ fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
         .expect("project editor pane")
 }
 
+/// The editor DTO's dirty counts as `(persisted, failed)`. There is no debug
+/// bucket (D7): a debug override never enters the summary at all.
 pub(crate) fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
     let editor = project_editor(view);
-    (editor.dirty.persisted, editor.dirty.transient)
+    (editor.dirty.persisted, editor.dirty.failed)
+}
+
+/// The main-tab sections of one workspace card, by node address.
+pub(crate) fn node_sections(view: &UiStudioView, node_id: &str) -> Vec<UiNodeSection> {
+    let editor = project_editor(view);
+    let node = editor
+        .nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .unwrap_or_else(|| panic!("workspace card {node_id} should exist"));
+    match &node.tabs[0].body {
+        UiNodeTabBody::Sections(sections) => sections.clone(),
+        UiNodeTabBody::Text { .. } => panic!("expected node sections"),
+    }
+}
+
+/// Top-level row labels of the first section matching `pick` (empty when the
+/// node renders no such section).
+pub(crate) fn section_slot_labels(
+    sections: &[UiNodeSection],
+    pick: impl Fn(&UiNodeSection) -> bool,
+) -> Vec<String> {
+    sections
+        .iter()
+        .find(|section| pick(section))
+        .map(|section| match section {
+            UiNodeSection::ConfigSlots(slots)
+            | UiNodeSection::DebugSlots(slots)
+            | UiNodeSection::AssetSlots(slots) => {
+                slots.iter().map(|slot| slot.label.clone()).collect()
+            }
+            _ => Vec::new(),
+        })
+        .unwrap_or_default()
 }
 
 /// Find a config slot anywhere in the editor DTO tree by its address path.
@@ -2514,9 +2643,9 @@ fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigS
 
     fn in_sections<'a>(sections: &'a [UiNodeSection], path: &str) -> Option<&'a UiConfigSlot> {
         sections.iter().find_map(|section| match section {
-            UiNodeSection::ConfigSlots(slots) | UiNodeSection::AssetSlots(slots) => {
-                in_slots(slots, path)
-            }
+            UiNodeSection::ConfigSlots(slots)
+            | UiNodeSection::AssetSlots(slots)
+            | UiNodeSection::DebugSlots(slots) => in_slots(slots, path),
             _ => None,
         })
     }

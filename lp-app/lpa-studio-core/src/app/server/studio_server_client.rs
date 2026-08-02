@@ -661,7 +661,7 @@ impl StudioServerClient {
         Ok((node_def_artifacts(&inventory.value), logs))
     }
 
-    /// Commit the pending-edit overlay to artifact storage. Post-P2, transient
+    /// Commit the pending-edit overlay to artifact storage. Post-P2, Debug
     /// entries survive the commit as pending overlay edits.
     pub async fn project_overlay_commit(
         &mut self,

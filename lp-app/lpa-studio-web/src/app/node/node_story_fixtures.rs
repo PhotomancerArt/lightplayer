@@ -3,14 +3,14 @@
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
     ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ControllerId, DirtySummary,
-    NodeRemoveOp, NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, Revision,
-    SlotEditOp, SlotPath, UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot,
-    UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader,
-    UiNodeRemovePreflight, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPaneAction,
-    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProducedBinding, UiProducedBindings,
-    UiProducedProduct, UiProducedValue, UiProductPreview, UiProductTrackingState, UiSlotAsset,
-    UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
-    UiSlotUnit, UiSlotValue, UiStatus,
+    NodeCardUiState, NodeRemoveOp, NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress,
+    ProjectSlotRoot, Revision, SlotEditOp, SlotPath, UiAction, UiAssetEditorKind,
+    UiBindingEndpoint, UiConfigSlot, UiControlProductPreview, UiControlSampleFormat, UiNodeChild,
+    UiNodeDirtyState, UiNodeHeader, UiNodeRemovePreflight, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
+    UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
+    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -152,6 +152,173 @@ pub(crate) fn node_delete_pane_action() -> UiPaneAction {
     )
 }
 
+/// A Clock node card: one persisted **Settings** section plus the **Debug**
+/// section the D3/D4 partition produces. The clock's three `controls.*`
+/// fields are `SlotRole::Debug`, so core lifts them FLAT into
+/// `UiNodeSection::DebugSlots` — the card shows "Running / Rate / Scrub
+/// offset seconds" as top-level rows, never a nested "Controls" group.
+///
+/// `overrides` seeds how many of them carry an active override: `0` is the
+/// idle case (the section header is still debug territory — D8 tier c), and a
+/// non-zero count also lights the card's header marking (tier b).
+///
+/// `debug_open` seeds the core-owned disclosure (`NodeCardUiState::
+/// debug_open`). The live default is `false` — the rows are collapsed behind
+/// the always-visible striped header.
+pub(crate) fn clock_node_view(overrides: usize, debug_open: bool) -> UiNodeView {
+    let debug_row = |key: &str, label: &str, value: UiSlotValue, index: usize| {
+        let state = if index < overrides {
+            UiSlotFieldState::editable()
+                .with_debug(true)
+                .with_dirty(UiNodeDirtyState::Dirty)
+        } else {
+            UiSlotFieldState::editable().with_debug(true)
+        };
+        let mut row = UiConfigSlot::value(key, label, value)
+            .with_address(clock_slot_address(&format!("controls.{key}")))
+            .with_state(state);
+        if index < overrides {
+            // An active override owns its overlay entry, which is what puts
+            // the inline Clear verb on the row (untouched rows reserve its
+            // footprint instead, so the two are the same box).
+            row = row.with_edit_entry_address(clock_slot_address(&format!("controls.{key}")));
+        }
+        row
+    };
+
+    let mut view = UiNodeView::new(
+        UiNodeHeader::new("clock", "Clock", CLOCK_NODE)
+            .with_status(UiStatus::good("Running"))
+            .with_debug_overrides(overrides),
+        vec![UiNodeTab::main(vec![
+            UiNodeSection::ProducedValues(vec![UiProducedValue::new("Time", "12.480")]),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value(
+                    "epoch_offset_seconds",
+                    "Epoch offset seconds",
+                    UiSlotValue::f32(0.0).with_unit(UiSlotUnit::seconds()),
+                )
+                .with_address(clock_slot_address("epoch_offset_seconds")),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                debug_row("running", "Running", UiSlotValue::bool(true), 0),
+                debug_row("rate", "Rate", UiSlotValue::f32(2.0), 1),
+                debug_row(
+                    "scrub_offset_seconds",
+                    "Scrub offset seconds",
+                    UiSlotValue::f32(0.0).with_unit(UiSlotUnit::seconds()),
+                    2,
+                ),
+            ]),
+        ])],
+    )
+    .with_node_id(CLOCK_NODE);
+    view.card_ui = NodeCardUiState {
+        debug_open,
+        ..NodeCardUiState::default()
+    };
+    view.action = Some(UiAction::from_op(
+        ControllerId::new("story.project"),
+        SlotEditOp::Revert {
+            address: clock_slot_address("epoch_offset_seconds"),
+        },
+    ));
+    view
+}
+
+/// An Output node card: the hardware-mode Debug case (P5).
+///
+/// `OutputDef.test_pattern` is the first `SlotRole::Debug` **bool**, and the
+/// output card gets its Debug section for free — core partitions by role, so
+/// no output-specific UI exists. The persisted rows (endpoint, driver
+/// options) stay in `Settings`; the one Debug row sits below.
+///
+/// `active` seeds the override: `true` is the pattern lit — the card wears the
+/// `debug 1` marking, the section header offers Clear, and the row carries the
+/// hazard tint. This is the state where the strip on that pin is solid white
+/// and the graph is bypassed entirely.
+pub(crate) fn output_node_view(active: bool, debug_open: bool) -> UiNodeView {
+    let state = if active {
+        UiSlotFieldState::editable()
+            .with_debug(true)
+            .with_dirty(UiNodeDirtyState::Dirty)
+    } else {
+        UiSlotFieldState::editable().with_debug(true)
+    };
+    let mut test_pattern =
+        UiConfigSlot::value("test_pattern", "Test pattern", UiSlotValue::bool(active))
+            .with_address(output_slot_address("test_pattern"))
+            .with_state(state)
+            .with_detail("solid white on every channel");
+    if active {
+        test_pattern = test_pattern.with_edit_entry_address(output_slot_address("test_pattern"));
+    }
+
+    let mut view = UiNodeView::new(
+        UiNodeHeader::new("output", "Output", OUTPUT_NODE)
+            .with_source("output.json")
+            .with_status(UiStatus::good("Running"))
+            .with_summary("ws281x:rmt:D10")
+            .with_debug_overrides(usize::from(active)),
+        vec![UiNodeTab::main(vec![
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value(
+                    "endpoint",
+                    "Endpoint",
+                    UiSlotValue::string("ws281x:rmt:D10"),
+                )
+                .with_address(output_slot_address("endpoint")),
+                UiConfigSlot::value("input", "Input", UiSlotValue::unset()).with_source(
+                    UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:control.out")),
+                ),
+                UiConfigSlot::record(
+                    "options",
+                    "Options",
+                    vec![
+                        UiConfigSlot::value(
+                            "interpolation_enabled",
+                            "Interpolation enabled",
+                            UiSlotValue::bool(true),
+                        ),
+                        UiConfigSlot::value(
+                            "dithering_enabled",
+                            "Dithering enabled",
+                            UiSlotValue::bool(true),
+                        ),
+                    ],
+                ),
+            ]),
+            UiNodeSection::DebugSlots(vec![test_pattern]),
+        ])],
+    )
+    .with_node_id(OUTPUT_NODE);
+    view.card_ui = NodeCardUiState {
+        debug_open,
+        ..NodeCardUiState::default()
+    };
+    view
+}
+
+const OUTPUT_NODE: &str = "/fyeah_sign.show/output.output";
+
+fn output_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse(OUTPUT_NODE).expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
+
+const CLOCK_NODE: &str = "/fyeah_sign.show/clock.clock";
+
+fn clock_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse(CLOCK_NODE).expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
+
 /// Playlist node whose subtree carries unsaved (persisted) edits — drives the
 /// yellow pencil affordance, the header batch-revert action, and D7 tint
 /// variants.
@@ -159,21 +326,6 @@ pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
         persisted: 2,
-        transient: 0,
-        failed: 0,
-    };
-    view.header_actions = vec![node_revert_pane_action()];
-    view
-}
-
-/// Playlist node whose subtree carries live-only (transient) edits — drives
-/// the blue (live) pencil affordance, the header batch-revert action, and D7
-/// tint variants.
-pub(crate) fn live_dirty_node_view() -> UiNodeView {
-    let mut view = playlist_node_view();
-    view.header.dirty = DirtySummary {
-        persisted: 0,
-        transient: 1,
         failed: 0,
     };
     view.header_actions = vec![node_revert_pane_action()];
@@ -181,9 +333,10 @@ pub(crate) fn live_dirty_node_view() -> UiNodeView {
 }
 
 /// The editor-level change list the dirty playlist popup stories thread in:
-/// the playlist's OWN edits (two persisted plus one live control, matching
-/// the dirty-fixture counts) and one edit addressed to ANOTHER node that the
-/// popover must filter out of its list.
+/// the playlist's OWN edits (two persisted, matching the dirty-fixture
+/// counts) and one edit addressed to ANOTHER node that the popover must
+/// filter out of its list. There is no debug row: debug overrides are not
+/// dirty (D7), so the controller never lists them.
 pub(crate) fn playlist_pending_edits() -> Vec<UiPendingEdit> {
     let mut time_edit = story_pending_edit(
         "/fyeah_sign.show/playlist.playlist",
@@ -204,15 +357,6 @@ pub(crate) fn playlist_pending_edits() -> Vec<UiPendingEdit> {
             "entries[blast]",
             UiPendingEditKind::Added,
             UiPendingEditPhase::Persisted,
-        ),
-        story_pending_edit(
-            "/fyeah_sign.show/playlist.playlist",
-            "Playlist",
-            "controls.rate",
-            UiPendingEditKind::Assign {
-                value_display: "2.0".to_string(),
-            },
-            UiPendingEditPhase::Live,
         ),
         story_pending_edit(
             "/fyeah_sign.show/other.shader",
@@ -261,7 +405,6 @@ pub(crate) fn failed_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
         persisted: 1,
-        transient: 0,
         failed: 1,
     };
     view.header_actions = vec![node_revert_pane_action()];
@@ -270,12 +413,11 @@ pub(crate) fn failed_dirty_node_view() -> UiNodeView {
 
 /// Three-level bubbling fixture: the grandchild carries the edits and every
 /// ancestor's summary includes them, exactly as the controller's aggregation
-/// walk produces (grandchild {1p,1t} → child {1p,1t} → parent adds one
-/// persisted edit of its own → {2p,1t}).
+/// walk produces (grandchild {1p} → child {1p} → parent adds one persisted
+/// edit of its own → {2p}).
 pub(crate) fn nested_dirty_node_view() -> UiNodeView {
     let bubbled = DirtySummary {
         persisted: 1,
-        transient: 1,
         failed: 0,
     };
 
@@ -317,7 +459,6 @@ pub(crate) fn nested_dirty_node_view() -> UiNodeView {
     ]);
     view.header.dirty = bubbled.merge(DirtySummary {
         persisted: 1,
-        transient: 0,
         failed: 0,
     });
     view.header_actions = vec![node_revert_pane_action()];

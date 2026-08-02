@@ -28,14 +28,13 @@ use crate::{
     UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent,
     UxUpdateSink,
 };
-use lpc_model::slot::{SlotPersistence, effective_persistence};
+use lpc_model::slot::SlotPersistence;
 use lpc_model::{
     ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
     MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
-    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotDirection, SlotEdit,
-    SlotMapKey, SlotPath, SlotPathSegment, SlotRole, SlotShapeId, SlotShapeLookup,
-    SlotShapeRegistry, TreePath, glsl_type_for_lp_type, resolve_artifact_specifier,
-    resolve_slot_role, starter_for_kind,
+    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
+    SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath,
+    glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -996,7 +995,9 @@ impl ProjectController {
     /// The save panel's labeled change list (D5): one [`UiPendingEdit`] per
     /// edit entry of the same join [`DirtySummary`] counting uses
     /// (`SlotEditJoin::entries`), so the list length per phase equals the
-    /// summary's bucket counts by construction. Stable order: by node
+    /// summary's bucket counts by construction — Debug overrides count in no
+    /// bucket (D7) and are therefore listed in no section either; their verb
+    /// is Clear, not Revert. Stable order: by node
     /// address, then slot path. Overlay entries whose artifact no longer
     /// reverse-maps to a synced node are appended with the artifact path as
     /// their label rather than being dropped (no revert — there is no node
@@ -1010,6 +1011,11 @@ impl ProjectController {
         let mut edits: Vec<UiPendingEdit> = join
             .entries()
             .into_iter()
+            // D7: a Debug override carries no dirty weight, so it belongs in
+            // no save-panel section — the summary-clean filter keeps the list
+            // and the counts equal by construction. (A *failed* write to a
+            // Debug slot still needs attention and stays listed.)
+            .filter(|entry| !entry.summary.is_clean())
             .map(|entry| {
                 let old_value = join.base_display(entry.address).map(str::to_string);
                 self.ui_pending_edit(&entry, old_value)
@@ -1076,7 +1082,10 @@ impl ProjectController {
 
     /// Project one join entry into its change-list DTO. The phase derives
     /// from the entry's own [`DirtySummary`] classification — the same value
-    /// the counts sum — so list and counts cannot drift. `old_value` is the
+    /// the counts sum — so list and counts cannot drift. Only entries that
+    /// carry dirty weight get here (Debug overrides are filtered upstream in
+    /// [`Self::pending_edits`]), so the phase is Failed or Persisted.
+    /// `old_value` is the
     /// join's base display for the entry's address
     /// ([`SlotEditJoin::base_display`]), threaded by the caller.
     fn ui_pending_edit(
@@ -1121,8 +1130,6 @@ impl ProjectController {
                     .unwrap_or_default()
                     .to_string(),
             }
-        } else if entry.summary.transient > 0 {
-            UiPendingEditPhase::Live
         } else {
             UiPendingEditPhase::Persisted
         };
@@ -1147,13 +1154,35 @@ impl ProjectController {
     /// entries). Rendered with the artifact path as the label so a stale
     /// pending edit stays visible; save still writes it, so it lists as
     /// persisted.
+    ///
+    /// Classification is role-aware (S4): an artifact that left the node tree
+    /// may still be reachable through the connect-time def-artifact map (an
+    /// unmounted node's def is the common case), and a **Debug** override
+    /// there is not authored work — it belongs in no save-panel section,
+    /// exactly like a Debug entry the join classified (D7). Listing it would
+    /// amber-tint a value that Save will never write. Entries that classify
+    /// nowhere take the shared unresolvable rule (Setting) and list.
     fn stale_pending_edits(&self) -> Vec<UiPendingEdit> {
         let Some(sync) = &self.sync else {
             return Vec::new();
         };
         let nodes_by_artifact = self.nodes_by_def_artifact();
+        let node_ids_by_artifact: BTreeMap<&ArtifactLocation, NodeId> = self
+            .def_artifacts
+            .iter()
+            .map(|(node_id, artifact)| (artifact, *node_id))
+            .collect();
         sync.overlay_slot_edits()
             .filter(|(artifact, _, _)| !nodes_by_artifact.contains_key(artifact))
+            .filter(|(artifact, path, _)| {
+                node_ids_by_artifact
+                    .get(artifact)
+                    .map(|node_id| {
+                        self.persistence_at(*node_id, ProjectSlotRoot::def().name(), path)
+                    })
+                    .unwrap_or_else(SlotPersistence::for_unresolved_edit)
+                    .is_persisted()
+            })
             .map(|(artifact, path, op)| UiPendingEdit {
                 node_label: artifact.file_path().as_str().to_string(),
                 node_path: artifact.file_path().as_str().to_string(),
@@ -1228,21 +1257,28 @@ impl ProjectController {
     /// removed map entries — exactly like paths that still have data. A
     /// produced field (e.g. under the `State` root) always classifies as
     /// transient regardless of its role (D1). Unresolvable entries (unknown
-    /// node/shape/path) classify as the default role's bucket (persisted).
+    /// node/shape/path) take the shared unresolvable rule
+    /// ([`SlotPersistence::for_unresolved_edit`] — Setting), the same
+    /// fallback the server's commit-time retention uses, so the two sides
+    /// cannot disagree about what an edit is.
     fn resolve_edit_persistence(&self, address: &ProjectSlotAddress) -> SlotPersistence {
         self.node(&address.node)
-            .and_then(|node| {
-                let key = root_slot_key(node.target().node_id, address.root.name());
-                let shape = self
-                    .slot_shapes
-                    .get_shape(*self.root_shape_ids.get(&key)?)?;
-                let resolution = resolve_slot_role(shape, &self.slot_shapes, &address.path)?;
-                Some(effective_persistence(resolution.role, resolution.direction))
-            })
-            .unwrap_or(effective_persistence(
-                SlotRole::default(),
-                SlotDirection::default(),
-            ))
+            .map(|node| node.target().node_id)
+            .map(|node_id| self.persistence_at(node_id, address.root.name(), &address.path))
+            .unwrap_or_else(SlotPersistence::for_unresolved_edit)
+    }
+
+    /// The persistence governing `path` under one node's slot root — the
+    /// shape-only classifier behind [`Self::resolve_edit_persistence`] and
+    /// the stale-entry classification in [`Self::stale_pending_edits`], which
+    /// has an artifact and a node id but no slot address.
+    fn persistence_at(&self, node_id: NodeId, root_name: &str, path: &SlotPath) -> SlotPersistence {
+        self.root_shape_ids
+            .get(&root_slot_key(node_id, root_name))
+            .and_then(|shape_id| self.slot_shapes.get_shape(*shape_id))
+            .and_then(|shape| resolve_slot_role(shape, &self.slot_shapes, path))
+            .map(|resolution| resolution.persistence())
+            .unwrap_or_else(SlotPersistence::for_unresolved_edit)
     }
 
     /// Entry keys of `artifact`'s `entries` map that carry pending overlay
@@ -1626,6 +1662,7 @@ impl ProjectController {
         .with_manifest(self.active_manifest())
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
+        .with_debug_overrides(edits.debug_override_count())
         .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
         .with_add_node_menu(root_add_node_menu)
@@ -2619,7 +2656,16 @@ impl ProjectController {
                 )
                 .await
             }
-            SlotEditOp::Revert { address } => self.apply_revert(server, handle_id, address).await,
+            SlotEditOp::Revert { address } => {
+                self.apply_revert(server, handle_id, address, "Revert")
+                    .await
+            }
+            // Same mechanism, different verb: a Debug slot has nothing
+            // durable underneath, so dropping the overlay entry clears the
+            // override back to the shape default (D7).
+            SlotEditOp::Clear { address } => {
+                self.apply_revert(server, handle_id, address, "Clear").await
+            }
         }
     }
 
@@ -2734,12 +2780,12 @@ impl ProjectController {
     }
 
     /// Commit the pending-edit overlay (persisted edits are written back to
-    /// def artifacts; transient edits stay pending) and re-sync the overlay
+    /// def artifacts; Debug overrides stay pending) and re-sync the overlay
     /// mirror from a follow-up read.
     ///
     /// The full read (rather than trusting the commit response's revision
     /// alone) is deliberate: commit drops persisted entries but retains
-    /// transient ones (P2), and an only-transient commit does not bump the
+    /// Debug ones (P2), and an only-Debug commit does not bump the
     /// overlay revision, so a wholesale re-read is the reliable way for the
     /// mirror to converge immediately instead of waiting for the next tick's
     /// fetch-on-advance.
@@ -2908,6 +2954,125 @@ impl ProjectController {
             rejections.iter().fold(notices, |notices, rejection| {
                 notices.with_notice(UiNotice::warning(format!(
                     "Edit rejected: {}",
+                    rejection_text(rejection)
+                )))
+            })
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: mutation.logs,
+        })
+    }
+
+    // --- The Clear verb: Debug overrides only (D7) ---------------------------
+
+    /// **Clear** every Debug override under `node`'s subtree
+    /// ([`crate::NodeClearDebugOp`], the per-node scope of the Clear verb).
+    /// Persisted edits under the same node are untouched — their verb is
+    /// Revert and their home is the Save panel.
+    pub async fn clear_node_debug_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+        node: &ProjectNodeAddress,
+    ) -> Result<ProjectEditRun, UiError> {
+        let addresses = self.debug_edit_addresses(Some(node));
+        self.clear_debug_edits_at(server, addresses, &format!("under {node}"))
+            .await
+    }
+
+    /// **Clear** every Debug override in the project
+    /// ([`ProjectOp::ClearDebugEdits`], the project scope of the Clear verb —
+    /// P3's global debug chip dispatches it). Unlike
+    /// [`Self::revert_all_edits`] this leaves persisted edits pending: Debug
+    /// values were never part of Save, so clearing them is not a discard of
+    /// authored work.
+    pub async fn clear_debug_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<ProjectEditRun, UiError> {
+        let addresses = self.debug_edit_addresses(None);
+        self.clear_debug_edits_at(server, addresses, "in this project")
+            .await
+    }
+
+    /// Addresses of the join's Debug (transient-persistence) edit entries,
+    /// optionally restricted to one node's subtree. This is the same
+    /// enumeration `DirtySummary` counting walks — the entries it deliberately
+    /// counts as nothing.
+    fn debug_edit_addresses(&self, under: Option<&ProjectNodeAddress>) -> Vec<ProjectSlotAddress> {
+        self.slot_edit_join()
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.persistence == SlotPersistence::Transient)
+            .filter(|entry| under.is_none_or(|node| entry.address.node.is_self_or_under(node)))
+            .map(|entry| entry.address.clone())
+            .collect()
+    }
+
+    /// Drop the named Debug overlay entries in ONE batch of `RemoveSlotEdit`
+    /// mutations — the shared body of the node and project Clear scopes.
+    /// `scope` only phrases the notices.
+    async fn clear_debug_edits_at(
+        &mut self,
+        server: &mut StudioServerClient,
+        addresses: Vec<ProjectSlotAddress>,
+        scope: &str,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        if addresses.is_empty() {
+            return Ok(ProjectEditRun::notice(UiNotice::info(format!(
+                "No debug overrides {scope}"
+            ))));
+        }
+        // Every entry clears locally regardless of whether its artifact still
+        // resolves (matching `apply_revert`); an artifact shared by several
+        // node uses yields one wire removal per distinct `(artifact, path)`.
+        // Debug entries are never staged node removals (those are persisted),
+        // so no `ClearArtifact` companions are needed here.
+        let mut notices = UiNotices::new();
+        let mut wire_targets = BTreeSet::new();
+        for address in addresses {
+            self.edit_buffer.remove(&address);
+            match self.resolve_def_artifact(&address) {
+                Ok(artifact) => {
+                    wire_targets.insert((artifact, address.path.clone()));
+                }
+                Err(reason) => {
+                    notices = notices.with_notice(UiNotice::warning(format!(
+                        "Clear on {} could not reach the server overlay: {reason}",
+                        address.path
+                    )));
+                }
+            }
+        }
+        if wire_targets.is_empty() {
+            return Ok(ProjectEditRun {
+                notices,
+                logs: Vec::new(),
+            });
+        }
+        let batch = MutationCmdBatch::new(
+            wire_targets
+                .into_iter()
+                .map(|(artifact, path)| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::RemoveSlotEdit { artifact, path },
+                })
+                .collect(),
+        );
+        let cleared = batch.commands.len();
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        notices = if rejections.is_empty() {
+            notices.with_notice(UiNotice::info(format!(
+                "Cleared {cleared} debug override(s) {scope}"
+            )))
+        } else {
+            rejections.iter().fold(notices, |notices, rejection| {
+                notices.with_notice(UiNotice::warning(format!(
+                    "Clear rejected: {}",
                     rejection_text(rejection)
                 )))
             })
@@ -3799,11 +3964,18 @@ impl ProjectController {
         })
     }
 
+    /// Drop one edit entry: the shared mechanism behind both per-value verbs
+    /// ([`SlotEditOp::Revert`] and, for Debug slots, [`SlotEditOp::Clear`] —
+    /// D7). `verb` only names the gesture in the unreachable-overlay notice;
+    /// the mutation is one `RemoveSlotEdit` either way, and for a Debug slot
+    /// removing the overlay entry IS the return to the shape default (no
+    /// durable authored value sits underneath).
     async fn apply_revert(
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
         address: ProjectSlotAddress,
+        verb: &str,
     ) -> Result<ProjectEditRun, UiError> {
         // A revert at a staged node-removal site expands into the inverse
         // composed batch (site RemoveSlotEdit + ClearArtifact per staged
@@ -3820,7 +3992,7 @@ impl ProjectController {
             Ok(artifact) => artifact,
             Err(reason) => {
                 return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                    "Revert on {} could not reach the server overlay: {reason}",
+                    "{verb} on {} could not reach the server overlay: {reason}",
                     address.path
                 ))));
             }
@@ -7101,6 +7273,16 @@ mod tests {
             .unwrap_or(&[])
     }
 
+    fn section_debug_slots(sections: &[UiNodeSection]) -> &[crate::UiConfigSlot] {
+        sections
+            .iter()
+            .find_map(|section| match section {
+                UiNodeSection::DebugSlots(items) => Some(items.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
     fn tree_view() -> ProjectView {
         let mut view = ProjectView::new();
         let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
@@ -8600,6 +8782,15 @@ mod tests {
             .unwrap_or_else(|| panic!("config slot {label} should exist"))
     }
 
+    /// A row of the node's **Debug** section (D3/D4) — the partition means a
+    /// `SlotRole::Debug` field is deliberately NOT in `config_slot`'s bucket.
+    fn debug_slot<'a>(nodes: &'a [crate::UiNodeView], label: &str) -> &'a crate::UiConfigSlot {
+        section_debug_slots(node_sections(&nodes[0]))
+            .iter()
+            .find(|slot| slot.label == label)
+            .unwrap_or_else(|| panic!("debug slot {label} should exist"))
+    }
+
     fn slot_display(slot: &crate::UiConfigSlot) -> &str {
         let UiConfigSlotBody::Value(value) = &slot.body else {
             panic!("expected value body");
@@ -8724,14 +8915,13 @@ mod tests {
         let nodes = project.ui_nodes();
         let slot = config_slot(&nodes, "Brightness");
         assert_eq!(slot.state.dirty, UiNodeDirtyState::Dirty);
-        assert!(!slot.state.live);
+        assert!(!slot.state.debug);
         assert_eq!(slot_display(slot), "0.9");
         assert_eq!(slot.address, Some(brightness_address()));
         assert_eq!(
             project.dirty_summary(),
             DirtySummary {
                 persisted: 1,
-                transient: 0,
                 failed: 0,
             }
         );
@@ -9148,7 +9338,6 @@ mod tests {
             project.dirty_summary(),
             DirtySummary {
                 persisted: 1,
-                transient: 0,
                 failed: 0,
             }
         );
@@ -9198,7 +9387,6 @@ mod tests {
             project.dirty_summary(),
             DirtySummary {
                 persisted: 0,
-                transient: 0,
                 failed: 1,
             }
         );
@@ -9350,6 +9538,242 @@ mod tests {
         );
     }
 
+    // --- The Clear verb at three scopes (D7) --------------------------------
+
+    /// Seed the editable fixture with one persisted edit (`brightness`) and
+    /// one Debug override (`rate`), both acked into the overlay mirror.
+    fn project_with_one_persisted_and_one_debug_edit(
+        responses: Vec<WireServerMessage>,
+    ) -> (
+        ProjectController,
+        StudioServerClient,
+        Rc<RefCell<Vec<ClientMessage>>>,
+    ) {
+        let (mut project, client, sent) = editable_project_with_scripted_client(responses);
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(1),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("brightness").unwrap(),
+                                LpValue::F32(0.9),
+                            ),
+                        },
+                    },
+                    MutationEffect::overlay_changed(true),
+                ),
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(2),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("rate").unwrap(),
+                                LpValue::F32(2.0),
+                            ),
+                        },
+                    },
+                    MutationEffect::overlay_changed(true),
+                ),
+            ],
+            Revision::new(3),
+        );
+        (project, client, sent)
+    }
+
+    /// Per-value Clear: `SlotEditOp::Clear` is the Revert mechanism under the
+    /// Debug verb — one `RemoveSlotEdit` at the address.
+    #[test]
+    fn per_value_clear_removes_only_that_debug_overlay_entry() {
+        let (mut project, mut client, sent) =
+            project_with_one_persisted_and_one_debug_edit(vec![mutation_response(
+                1,
+                vec![accepted(1)],
+                5,
+            )]);
+
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::Clear {
+                address: rate_address(),
+            },
+        ))
+        .unwrap();
+
+        let sent = sent.borrow();
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        assert_eq!(request.batch.commands.len(), 1);
+        assert!(matches!(
+            &request.batch.commands[0].mutation,
+            MutationOp::RemoveSlotEdit { path, .. } if path.to_string() == "rate"
+        ));
+        drop(sent);
+
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("rate").unwrap()),
+            None,
+            "the debug override is cleared"
+        );
+        assert!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap())
+                .is_some(),
+            "the persisted edit beside it is untouched"
+        );
+    }
+
+    /// Per-node Clear: only the subtree's Debug overrides go; persisted edits
+    /// under the same node stay pending (their verb is Revert).
+    #[test]
+    fn node_clear_removes_debug_overrides_and_keeps_persisted_edits() {
+        let (mut project, mut client, sent) =
+            project_with_one_persisted_and_one_debug_edit(vec![mutation_response(
+                1,
+                vec![accepted(1)],
+                5,
+            )]);
+        let dirty_before = project.dirty_summary();
+
+        let run = block_on_ready(
+            project.clear_node_debug_edits(&mut client, &node_address("/demo.module/orbit.shader")),
+        )
+        .unwrap();
+
+        // ONE batch carrying exactly the debug entry.
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1, "one batch, one round trip");
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        let paths: Vec<String> = request
+            .batch
+            .commands
+            .iter()
+            .map(|command| match &command.mutation {
+                MutationOp::RemoveSlotEdit { path, .. } => path.to_string(),
+                other => panic!("expected RemoveSlotEdit, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(paths, ["rate"]);
+        drop(sent);
+
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("rate").unwrap()),
+            None
+        );
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.9))),
+            "Clear is not Revert: the persisted edit survives"
+        );
+        assert_eq!(
+            project.dirty_summary(),
+            dirty_before,
+            "clearing debug overrides changes nothing about dirtiness"
+        );
+        assert!(
+            run.notices.notices[0]
+                .message
+                .contains("Cleared 1 debug override(s)")
+        );
+    }
+
+    /// Per-node Clear on a subtree with no Debug overrides is a no-op that
+    /// never reaches the wire.
+    #[test]
+    fn node_clear_with_no_debug_overrides_sends_nothing() {
+        let (mut project, mut client, sent) = editable_project_with_scripted_client(Vec::new());
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit::pending(LpValue::F32(0.9)),
+        );
+
+        let run = block_on_ready(
+            project.clear_node_debug_edits(&mut client, &node_address("/demo.module/orbit.shader")),
+        )
+        .unwrap();
+
+        assert!(sent.borrow().is_empty(), "no wire traffic");
+        assert_eq!(
+            project.edit_buffer_for_test().len(),
+            1,
+            "the persisted buffer entry is untouched"
+        );
+        assert!(
+            run.notices.notices[0]
+                .message
+                .contains("No debug overrides under")
+        );
+    }
+
+    /// Project-wide Clear (the op P3's global chip dispatches): every Debug
+    /// override goes, nothing persisted does.
+    #[test]
+    fn project_clear_removes_every_debug_override_and_nothing_persisted() {
+        let (mut project, mut client, sent) =
+            project_with_one_persisted_and_one_debug_edit(vec![mutation_response(
+                1,
+                vec![accepted(1)],
+                5,
+            )]);
+        // A buffered (un-acked) debug edit joins the acked one in the sweep.
+        project.insert_pending_edit_for_test(
+            crate::ProjectSlotAddress::new(
+                node_address("/demo.module/orbit.shader"),
+                ProjectSlotRoot::def(),
+                SlotPath::parse("rate").unwrap(),
+            ),
+            PendingEdit::pending(LpValue::F32(3.0)),
+        );
+
+        block_on_ready(project.clear_debug_edits(&mut client)).unwrap();
+
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1, "one batch, one round trip");
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        assert_eq!(
+            request.batch.commands.len(),
+            1,
+            "the buffered and acked debug entries share one (artifact, path)"
+        );
+        drop(sent);
+
+        assert!(
+            project.edit_buffer_for_test().is_empty(),
+            "the buffered debug edit clears locally too"
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("rate").unwrap()),
+            None
+        );
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.9))),
+            "project-wide Clear is not Revert-all"
+        );
+    }
+
     #[test]
     fn accepted_move_entry_sends_the_move_op_and_mirrors_the_materialized_effect() {
         // The map's `entries` values are leaves, so a realistic materialized
@@ -9438,7 +9862,6 @@ mod tests {
             project.dirty_summary(),
             DirtySummary {
                 persisted: 2,
-                transient: 0,
                 failed: 0,
             }
         );
@@ -9502,7 +9925,6 @@ mod tests {
             project.dirty_summary(),
             DirtySummary {
                 persisted: 0,
-                transient: 0,
                 failed: 1,
             }
         );
@@ -9559,7 +9981,6 @@ mod tests {
         );
         let expected = DirtySummary {
             persisted: 1,
-            transient: 0,
             failed: 0,
         };
         assert_eq!(
@@ -9725,10 +10146,6 @@ mod tests {
                     persisted: 1,
                     ..DirtySummary::default()
                 },
-                crate::UiPendingEditPhase::Live => DirtySummary {
-                    transient: 1,
-                    ..DirtySummary::default()
-                },
                 crate::UiPendingEditPhase::Failed { .. } => DirtySummary {
                     failed: 1,
                     ..DirtySummary::default()
@@ -9796,7 +10213,6 @@ mod tests {
             editor.dirty,
             DirtySummary {
                 persisted: 2,
-                transient: 0,
                 failed: 1,
             }
         );
@@ -9849,8 +10265,11 @@ mod tests {
         );
     }
 
+    /// D7: a Debug override is not dirty, so it neither counts in the
+    /// summary nor lists in the save panel — while the persisted edit beside
+    /// it does both.
     #[test]
-    fn transient_edits_list_in_the_live_phase() {
+    fn debug_edits_are_absent_from_the_summary_and_the_save_panel() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         project.sync_mut().unwrap().apply_acked_edits(
             &[
@@ -9890,9 +10309,9 @@ mod tests {
             editor.dirty,
             DirtySummary {
                 persisted: 1,
-                transient: 1,
                 failed: 0,
-            }
+            },
+            "only the persisted brightness edit is dirty"
         );
         assert_eq!(pending_edits_by_phase(&editor.pending_edits), editor.dirty);
         let phases: Vec<(&str, &crate::UiPendingEditPhase)> = editor
@@ -9902,11 +10321,15 @@ mod tests {
             .collect();
         assert_eq!(
             phases,
-            vec![
-                ("brightness", &crate::UiPendingEditPhase::Persisted),
-                ("rate", &crate::UiPendingEditPhase::Live),
-            ]
+            vec![("brightness", &crate::UiPendingEditPhase::Persisted)],
+            "the debug `rate` override lists in no save-panel section"
         );
+        // The override is still LIVE on the project — it is simply not
+        // save/dirty business; its verb is Clear.
+        let nodes = project.ui_nodes();
+        let rate = debug_slot(&nodes, "Rate");
+        assert!(rate.state.debug);
+        assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
     }
 
     /// Overlay entries whose artifact no longer reverse-maps to a synced node
@@ -9954,9 +10377,114 @@ mod tests {
         assert!(stale.revert.is_none());
     }
 
+    /// S4: the stale-entry path classifies by role like every other entry.
+    /// A node whose def artifact left the tree (unmounted, retired) can still
+    /// be classified through the connect-time def-artifact map and the
+    /// retained shapes — and a Debug override there is not authored work, so
+    /// it must not list as a persisted pending edit (which would amber-tint
+    /// it and present Save as having something to write).
     #[test]
-    fn save_overlay_commits_persisted_edits_and_keeps_transient_dirty() {
-        // Post-commit overlay retains only the transient rate edit (P2).
+    fn stale_overlay_entries_are_classified_by_role_not_hard_coded_persisted() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(1),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("brightness").unwrap(),
+                                LpValue::F32(0.9),
+                            ),
+                        },
+                    },
+                    MutationEffect::overlay_changed(true),
+                ),
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(2),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("rate").unwrap(),
+                                LpValue::F32(2.0),
+                            ),
+                        },
+                    },
+                    MutationEffect::overlay_changed(true),
+                ),
+            ],
+            Revision::new(3),
+        );
+
+        // The node leaves the tree while its shapes (and the def-artifact
+        // map) survive — the unmounted-def case. Both edits are now stale.
+        let mut unmounted = ProjectView::new();
+        install_mixed_policy_slots(&mut unmounted, 1, Revision::new(2));
+        project.apply_project_view(&unmounted).unwrap();
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let listed: Vec<&str> = editor
+            .pending_edits
+            .iter()
+            .map(|edit| edit.slot_path_display.as_str())
+            .collect();
+        assert_eq!(
+            listed,
+            vec!["brightness"],
+            "the stale Debug override lists in no save-panel section (D7); \
+             the stale Setting still does"
+        );
+        assert_eq!(
+            editor.pending_edits[0].phase,
+            crate::UiPendingEditPhase::Persisted
+        );
+    }
+
+    /// The other half of S5, client side: an entry the shapes cannot
+    /// classify falls back to Setting — the same verdict the server's
+    /// commit-time retention reaches — so it lists as authored work rather
+    /// than becoming an override nothing accounts for.
+    #[test]
+    fn unclassifiable_stale_entries_fall_back_to_setting() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        // No node maps to this artifact at all: nothing can
+                        // resolve its role.
+                        artifact: ArtifactLocation::file("/retired.shader.json"),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("rate").unwrap(),
+                            LpValue::F32(2.0),
+                        ),
+                    },
+                },
+                MutationEffect::overlay_changed(true),
+            )],
+            Revision::new(3),
+        );
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert_eq!(editor.pending_edits.len(), 1);
+        assert_eq!(
+            editor.pending_edits[0].phase,
+            crate::UiPendingEditPhase::Persisted,
+            "unresolvable entries are Settings on both sides, so they stay \
+             visible as authored work"
+        );
+        assert_eq!(
+            editor.pending_edits[0].node_label, "/retired.shader.json",
+            "and keep the artifact label — there is no node to name them"
+        );
+    }
+
+    #[test]
+    fn save_overlay_commits_persisted_edits_and_keeps_debug_overrides() {
+        // Post-commit overlay retains only the debug rate override (P2).
         let mut post_commit_overlay = ProjectOverlay::new();
         post_commit_overlay.put_slot_edit(
             edit_artifact(),
@@ -9966,7 +10494,7 @@ mod tests {
             commit_response(1, vec![edit_artifact()], 5),
             overlay_read_response(2, post_commit_overlay, 5),
         ]);
-        // Mirror holds one persisted (brightness) and one transient (rate)
+        // Mirror holds one persisted (brightness) and one debug (rate)
         // acked edit before the save.
         project.sync_mut().unwrap().apply_acked_edits(
             &[
@@ -10003,9 +10531,9 @@ mod tests {
             project.dirty_summary(),
             DirtySummary {
                 persisted: 1,
-                transient: 1,
                 failed: 0,
-            }
+            },
+            "the debug rate override is not dirty (D7)"
         );
 
         let run = block_on_ready(project.save_overlay(&mut client)).unwrap();
@@ -10027,20 +10555,19 @@ mod tests {
         assert_eq!(
             sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("rate").unwrap()),
             Some(&SlotEditOp::AssignValue(LpValue::F32(2.0))),
-            "transient edit stays pending (dirty-live)"
+            "the debug override survives the commit, live on the project"
         );
-        assert_eq!(
-            project.dirty_summary(),
-            DirtySummary {
-                persisted: 0,
-                transient: 1,
-                failed: 0,
-            }
+        assert!(
+            project.dirty_summary().is_clean(),
+            "with the persisted edit written, only the debug override remains — and it is not dirty"
         );
         let nodes = project.ui_nodes();
-        let rate = config_slot(&nodes, "Rate");
+        let rate = debug_slot(&nodes, "Rate");
         assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
-        assert!(rate.state.live, "transient dirty is distinguishable");
+        assert!(
+            rate.state.debug,
+            "the live override is still distinguishable"
+        );
         assert_eq!(
             config_slot(&nodes, "Brightness").state.dirty,
             UiNodeDirtyState::Clean
@@ -10094,7 +10621,7 @@ mod tests {
             UiNodeDirtyState::Clean
         );
         assert_eq!(
-            config_slot(&nodes, "Rate").state.dirty,
+            debug_slot(&nodes, "Rate").state.dirty,
             UiNodeDirtyState::Clean
         );
     }
@@ -10192,7 +10719,6 @@ mod tests {
         // and must count toward Save at the project level.
         let expected = DirtySummary {
             persisted: 1,
-            transient: 0,
             failed: 0,
         };
         assert_eq!(project.dirty_summary(), expected);
@@ -10215,7 +10741,6 @@ mod tests {
 
         let expected = DirtySummary {
             persisted: 1,
-            transient: 0,
             failed: 0,
         };
         assert_eq!(project.dirty_summary(), expected);
@@ -10272,7 +10797,6 @@ mod tests {
             project.dirty_summary(),
             DirtySummary {
                 persisted: 0,
-                transient: 0,
                 failed: 1,
             }
         );
@@ -10322,7 +10846,6 @@ mod tests {
             project.dirty_summary(),
             DirtySummary {
                 persisted: 0,
-                transient: 0,
                 failed: 1,
             }
         );
@@ -10566,9 +11089,9 @@ mod tests {
             })
         }
         sections.iter().find_map(|section| match section {
-            crate::UiNodeSection::AssetSlots(slots) | crate::UiNodeSection::ConfigSlots(slots) => {
-                in_slots(slots)
-            }
+            crate::UiNodeSection::AssetSlots(slots)
+            | crate::UiNodeSection::ConfigSlots(slots)
+            | crate::UiNodeSection::DebugSlots(slots) => in_slots(slots),
             _ => None,
         })
     }
@@ -10698,7 +11221,6 @@ mod tests {
         );
         let one_persisted = DirtySummary {
             persisted: 1,
-            transient: 0,
             failed: 0,
         };
 
@@ -10752,7 +11274,6 @@ mod tests {
 
         let expected = DirtySummary {
             persisted: 0,
-            transient: 0,
             failed: 1,
         };
         assert_eq!(project.dirty_summary(), expected);
@@ -10843,20 +11364,37 @@ mod tests {
     }
 
     #[test]
-    fn transient_only_dirty_shows_no_header_actions() {
+    fn debug_only_dirty_is_clean_and_shows_no_header_actions() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
-        project
-            .insert_pending_edit_for_test(rate_address(), PendingEdit::pending(LpValue::F32(2.0)));
+        // An ACKED debug override (nothing in flight, so the only thing that
+        // could announce is the dirty projection).
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("rate").unwrap(),
+                            LpValue::F32(2.0),
+                        ),
+                    },
+                },
+                MutationEffect::overlay_changed(true),
+            )],
+            Revision::new(3),
+        );
 
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
 
+        // D7: the summary never learns about the debug override, so the
+        // project header stays untinted and offers no Save/Revert.
+        assert!(editor.dirty.is_clean());
+        assert!(editor.pending_edits.is_empty());
         assert_eq!(
-            editor.dirty,
-            DirtySummary {
-                persisted: 0,
-                transient: 1,
-                failed: 0,
-            }
+            editor.affordance(crate::UiStatusKind::Good),
+            crate::UiAffordance::Info,
+            "a debug-only project does not tint its header"
         );
         assert_eq!(
             editor
@@ -10865,7 +11403,7 @@ mod tests {
                 .map(|action| action.icon.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
-            "live-only edits do not surface Save/Revert"
+            "debug overrides do not surface Save/Revert"
         );
     }
 
@@ -10887,9 +11425,10 @@ mod tests {
 
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
 
+        // Only the persisted brightness edit counts; the debug rate override
+        // is absent from every aggregation (D7).
         let expected = DirtySummary {
             persisted: 1,
-            transient: 1,
             failed: 0,
         };
         // editor.dirty, the standalone walk, and dirty_summary agree — one

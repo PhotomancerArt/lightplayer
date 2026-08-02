@@ -27,6 +27,13 @@
 //! - Value-level parse validation that inspects string *content* beyond a
 //!   regular pattern (e.g. `ArtifactSpec::parse` of `lib:` suffixes, the
 //!   affine bottom-row epsilon check).
+//! - [`SlotRole::Debug`](crate::SlotRole::Debug) fields (D2, P4): the reader
+//!   still tolerates an authored value at these paths (it warns and ignores
+//!   it rather than rejecting — alpha posture), but the *authoring* schema
+//!   omits them entirely. This is the one deliberate exception to the
+//!   "accepted implies valid" direction: the schema describes what a def
+//!   file may validly author, which is narrower than everything the reader
+//!   is lenient about.
 //!
 //! # Custom-codec side table
 //!

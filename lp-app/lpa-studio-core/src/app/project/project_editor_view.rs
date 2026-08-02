@@ -47,9 +47,16 @@ pub struct ProjectEditorView {
     /// rather than a broken one.
     pub library_identity: Option<(String, String)>,
     /// Project-level aggregate of the per-node dirty summaries (persisted /
-    /// transient / failed) driving the save affordances; derived from the
-    /// same edit-state join as the per-field dirty affordances.
+    /// failed) driving the save affordances; derived from the same
+    /// edit-state join as the per-field dirty affordances. Debug overrides
+    /// are absent by construction (D7).
     pub dirty: DirtySummary,
+    /// Active **Debug** overrides anywhere in the project (D8 tier a): the
+    /// count the global "Debug active · N · Clear all" chip shows. Its own
+    /// channel — a debug override is not dirty (D7), so it is absent from
+    /// [`Self::dirty`], from [`Self::pending_edits`], and from
+    /// [`Self::affordance`]; the chip is the only place it announces.
+    pub debug_overrides: usize,
     /// The save panel's labeled change list: one entry per pending edit,
     /// built from the same edit-state join as [`Self::dirty`], so the list
     /// length per phase equals the summary's bucket counts by construction.
@@ -94,6 +101,7 @@ impl ProjectEditorView {
             manifest: None,
             library_identity: None,
             dirty: DirtySummary::clean(),
+            debug_overrides: 0,
             pending_edits: Vec::new(),
             header_actions: Vec::new(),
             add_node_menu: None,
@@ -138,6 +146,12 @@ impl ProjectEditorView {
         self
     }
 
+    /// Attach the project-wide count of active Debug overrides.
+    pub fn with_debug_overrides(mut self, debug_overrides: usize) -> Self {
+        self.debug_overrides = debug_overrides;
+        self
+    }
+
     /// Attach the save panel's labeled change list.
     pub fn with_pending_edits(mut self, pending_edits: Vec<UiPendingEdit>) -> Self {
         self.pending_edits = pending_edits;
@@ -176,6 +190,13 @@ impl ProjectEditorView {
             UiAffordance::Info
         };
         UiAffordance::merged(status, &self.dirty).merge(busy)
+    }
+
+    /// The project's DEBUG channel (D8 tier a), separate from
+    /// [`Self::affordance`]: [`UiAffordance::Debug`] while any override is
+    /// active anywhere, else the silent [`UiAffordance::Info`].
+    pub fn debug_affordance(&self) -> UiAffordance {
+        UiAffordance::from_debug_overrides(self.debug_overrides)
     }
 }
 

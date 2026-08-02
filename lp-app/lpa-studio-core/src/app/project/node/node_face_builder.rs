@@ -222,9 +222,9 @@ fn inline_editor_of_kind(
         })
     }
     sections.iter().find_map(|section| match section {
-        UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => {
-            in_slots(slots, kind)
-        }
+        UiNodeSection::AssetSlots(slots)
+        | UiNodeSection::ConfigSlots(slots)
+        | UiNodeSection::DebugSlots(slots) => in_slots(slots, kind),
         _ => None,
     })
 }
