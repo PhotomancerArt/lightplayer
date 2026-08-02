@@ -252,22 +252,18 @@ mod hardware;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
 // extern reference from the JIT builtin table.
+// The app, plus the five harnesses that light a strip. `test_gpio` used to be
+// in this list and drives pins directly, so it only pulled in an output tree
+// nothing in that build touches.
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
     feature = "test_dither",
-    feature = "test_gpio",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_fluid_demo",
 ))]
-// `pub` so the `lp-ws281x` backend in `output::rmt_v2` counts as a live root
-// while nothing constructs it yet: dead-code analysis works from reachability,
-// and a private module chain would make the whole not-yet-integrated subtree
-// unreachable — which is a warning to suppress rather than a fact worth
-// knowing. Revert to a private `mod` once the output provider calls it
-// (roadmap M5, P2).
-pub mod output;
+mod output;
 mod recovery;
 mod serial;
 #[cfg(not(fw_harness))]
@@ -298,7 +294,7 @@ use {
     lpc_hardware::{HardwareSystem, HwRegistry},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
-    output::{Esp32OutputProvider, Esp32RmtWs281xDriver},
+    output::{Esp32C6RmtWs281xDriver, Esp32OutputProvider},
     serial::io_task,
     server_loop::run_server_loop,
     time::Esp32TimeProvider,
@@ -435,10 +431,12 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
     esp_println::println!("[INIT] StreamingMessageRouterTransport created");
 
-    // Initialize RMT peripheral for output
-    // Use 80MHz clock rate (standard for ESP32-C6)
+    // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
+    // with the per-channel divider of 1 gives the 12.5 ns tick
+    // `lp_ws281x::PulseCodes` assumes — the same pair the legacy C6 driver's
+    // `config.rs` encoded and drove strips with since the project started.
     esp_println::println!("[INIT] Initializing RMT peripheral at 80MHz...");
-    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
+    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK)
         .expect("Failed to initialize RMT");
     esp_println::println!("[INIT] RMT peripheral initialized");
 
@@ -482,7 +480,14 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
-    hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(
+    // How many outputs appear is decided in two places and nowhere else: the
+    // board manifest's `/rmt/ws281xK` resources (two on the XIAO C6), and
+    // `output::rmt::c6_rmt::BLOCKS_PER_CHANNEL` = 1, which leaves both of the
+    // chip's RMT TX slots usable. Under the `ws281x_2blocks` feature a channel
+    // takes two blocks, absorbs its neighbour's, and only slot 0 remains;
+    // manifest channel K drives slot K * SLOT_STRIDE and absorbed slots are
+    // never configured.
+    hardware_system.add_ws281x_driver(Box::new(Esp32C6RmtWs281xDriver::new(
         Rc::clone(&hardware_registry),
         rmt,
     )));

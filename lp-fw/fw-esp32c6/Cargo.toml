@@ -41,6 +41,25 @@ naga = ["lpa-server/naga"]
 # otherwise (roadmap M5, G1). Feature-driven cfg is unreliably tracked: run
 # `touch src/main.rs` after flipping this before rebuilding.
 ws281x_2blocks = []
+
+# Periodic WS281x telemetry over the serial link — OFF by default.
+#
+# The classic's `fw-esp32v3` feature of the same name, ported field for field:
+# one `[WS281X]` line per configured channel every ~10 s from the frame-write
+# path — frames/complete/trips/skips/errors, refills vs the refills an
+# untruncated frame set would have needed, mean/max refill lag with its
+# 9-bucket histogram, and the entry-delay pair. Identical field order on both
+# chips is the point: the stress matrix compares the C6's truncation under a
+# WiFi scan with the classic's, and the same grep has to read both captures.
+#
+# Off by default because the shipping image should not spend serial bandwidth
+# or code space on it; the whole module is `cfg`'d out and the call site
+# becomes an empty `#[inline(always)]` fn, so a release build pays nothing —
+# not even the timer read.
+#
+# Build (touch src/main.rs first if flipping features):
+#   cargo build --profile release-esp32 --features esp32c6,server,ws281x_telemetry
+ws281x_telemetry = []
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
@@ -128,7 +147,6 @@ lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 
-smart-leds = "0.3"
 embassy-futures = "0.1"
 embedded-io-async = "0.6"
 log = { workspace = true, default-features = false }
