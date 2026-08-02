@@ -278,9 +278,24 @@ impl Engine {
         scope: crate::node::ScopeRef,
         channel: lpc_model::ChannelName,
         value: lpc_model::LpValue,
+        ttl_ms: Option<u32>,
     ) {
-        self.panel_writers.set(scope, channel, value, self.revision);
+        // Momentary liveness (panel.md P14): the deadline is an engine-time
+        // instant; renewal is just another write with a fresh TTL.
+        let expires_at_ms = ttl_ms.map(|ttl| self.frame_time.total_ms as u64 + u64::from(ttl));
+        self.panel_writers
+            .set(scope, channel, value, self.revision, expires_at_ms);
         self.resolver.invalidate_structure();
+    }
+
+    /// Clear every engaged writer everywhere — sink scopes included
+    /// (settled P-Q4). Returns the count.
+    pub fn panel_clear_all(&mut self) -> usize {
+        let cleared = self.panel_writers.clear_all();
+        if cleared > 0 {
+            self.resolver.invalidate_structure();
+        }
+        cleared
     }
 
     /// Clear one engaged panel writer (panel.md P3). Returns whether
@@ -491,6 +506,15 @@ impl Engine {
         self.revision = advance_revision();
         self.frame_time =
             FrameTime::new(delta_ms, self.frame_time.total_ms.saturating_add(delta_ms));
+        // Momentary panel writers despawn on expiry (panel.md P14) — the
+        // despawn IS the release fallback for a dropped client.
+        if self
+            .panel_writers
+            .despawn_expired(self.frame_time.total_ms as u64)
+            > 0
+        {
+            self.resolver.invalidate_structure();
+        }
 
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
         let trace = ResolveTrace::new(ResolveLogLevel::Off);

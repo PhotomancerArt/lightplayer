@@ -316,6 +316,7 @@ fn panel_writer_engages_shadows_and_clears() {
         inner_scope,
         lpc_model::ChannelName(alloc::string::String::from("chan")),
         lpc_model::LpValue::F32(0.9),
+        None,
     );
     h.tick(16).expect("tick");
     assert_eq!(
@@ -339,6 +340,7 @@ fn panel_writer_engages_shadows_and_clears() {
         root_scope,
         lpc_model::ChannelName(alloc::string::String::from("chan")),
         lpc_model::LpValue::F32(0.6),
+        None,
     );
     h.tick(16).expect("tick");
     assert_eq!(h.output_f32("root_reader"), Some(0.6));
@@ -384,6 +386,7 @@ fn engaged_panel_writer_replaces_the_scopes_provider_set() {
         root_scope,
         lpc_model::ChannelName(alloc::string::String::from("chan")),
         lpc_model::LpValue::F32(0.5),
+        None,
     );
     h.tick(16).expect("tick");
     // Two authored providers would be AMBIGUOUS (equal priority) — the
@@ -414,6 +417,7 @@ fn probe_reports_engaged_writers_with_panel_origin() {
         root_scope,
         lpc_model::ChannelName(alloc::string::String::from("chan")),
         lpc_model::LpValue::F32(0.9),
+        None,
     );
     h.tick(16).expect("tick");
 
@@ -443,4 +447,98 @@ fn probe_reports_engaged_writers_with_panel_origin() {
         lpc_wire::WireBindingOrigin::Panel,
         "the engaged writer leads the provider list with Panel origin"
     );
+}
+
+#[test]
+fn momentary_writers_despawn_on_ttl_expiry() {
+    // panel.md P14: gesture channels write while active and despawn past
+    // their renewal deadline — the despawn IS the release fallback for a
+    // dropped client. Renewal is just another write.
+    let mut h = EngineTestBuilder::new()
+        .shader("writer", output("outputs[0]", 0.25))
+        .bind_bus("chan", produced_slot("writer", "outputs[0]"))
+        .output_node("reader")
+        .bind_demand_input("reader", bus("chan"))
+        .demand_root("reader")
+        .build();
+    let writer = h.node("writer");
+    let reader = h.node("reader");
+    let root_scope = assign_root_scope(&mut h, &[writer, reader]);
+    let channel = lpc_model::ChannelName(alloc::string::String::from("chan"));
+
+    h.engine.panel_write(
+        root_scope,
+        channel.clone(),
+        lpc_model::LpValue::F32(0.9),
+        Some(40),
+    );
+    h.tick(16).expect("tick");
+    assert_eq!(
+        h.output_f32("reader"),
+        Some(0.9),
+        "gesture writes while live"
+    );
+
+    // Renewal keeps it alive past the original deadline…
+    h.tick(16).expect("tick");
+    h.engine.panel_write(
+        root_scope,
+        channel.clone(),
+        lpc_model::LpValue::F32(0.8),
+        Some(40),
+    );
+    h.tick(16).expect("tick");
+    assert_eq!(h.output_f32("reader"), Some(0.8));
+
+    // …and silence despawns it: the authored writer returns.
+    h.tick(60).expect("tick");
+    assert!(
+        h.engine.panel_writers().get(root_scope, &channel).is_none(),
+        "expired gesture despawns"
+    );
+    h.tick(16).expect("tick");
+    assert_eq!(
+        h.output_f32("reader"),
+        Some(0.25),
+        "despawn IS the fallback — authored wiring returns"
+    );
+}
+
+#[test]
+fn clear_all_reaches_sink_scopes() {
+    // Settled P-Q4: clear-all clears EVERYTHING, including a playlist
+    // entry's sink-scope latched value.
+    let mut h = EngineTestBuilder::new()
+        .shader("standin", output("outputs[0]", 0.0))
+        .shader("writer", output("outputs[0]", 0.25))
+        .bind_bus("chan", produced_slot("writer", "outputs[0]"))
+        .output_node("reader")
+        .bind_demand_input("reader", bus("chan"))
+        .demand_root("reader")
+        .build();
+    let standin = h.node("standin");
+    let writer = h.node("writer");
+    let reader = h.node("reader");
+    let root_scope = assign_root_scope(&mut h, &[standin, writer, reader]);
+    let sink = ScopeRef::Sink {
+        owner: standin,
+        entry: 3,
+    };
+    let channel = lpc_model::ChannelName(alloc::string::String::from("chan"));
+    h.engine.panel_write(
+        root_scope,
+        channel.clone(),
+        lpc_model::LpValue::F32(0.9),
+        None,
+    );
+    h.engine
+        .panel_write(sink, channel.clone(), lpc_model::LpValue::F32(0.7), None);
+    assert_eq!(h.engine.panel_writers().len(), 2);
+
+    assert_eq!(
+        h.engine.panel_clear_all(),
+        2,
+        "sink-scope writers clear too"
+    );
+    assert!(h.engine.panel_writers().is_empty());
 }

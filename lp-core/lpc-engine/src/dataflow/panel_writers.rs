@@ -25,6 +25,11 @@ pub struct PanelWriter {
     pub value: LpValue,
     /// Engine revision of the most recent write (display/coalescing aid).
     pub written_at: Revision,
+    /// Momentary liveness deadline (panel.md P14), in engine total-ms:
+    /// gesture channels write while active and DESPAWN past this instant —
+    /// the despawn IS the fallback mechanism. `None` = latching writer.
+    /// Renewal is simply another write. Momentary writers never persist.
+    pub expires_at_ms: Option<u64>,
 }
 
 /// Engine-owned store of engaged panel writers, keyed by the scope the
@@ -40,14 +45,50 @@ impl PanelWriterStore {
     }
 
     /// Engage (or update) the writer for `(scope, channel)`.
-    pub fn set(&mut self, scope: ScopeRef, channel: ChannelName, value: LpValue, at: Revision) {
+    pub fn set(
+        &mut self,
+        scope: ScopeRef,
+        channel: ChannelName,
+        value: LpValue,
+        at: Revision,
+        expires_at_ms: Option<u64>,
+    ) {
         self.writers.insert(
             (scope, channel),
             PanelWriter {
                 value,
                 written_at: at,
+                expires_at_ms,
             },
         );
+    }
+
+    /// Despawn every momentary writer whose deadline has passed (a dropped
+    /// client must release its gesture). Returns the number despawned.
+    pub fn despawn_expired(&mut self, now_ms: u64) -> usize {
+        let expired: alloc::vec::Vec<(ScopeRef, ChannelName)> = self
+            .writers
+            .iter()
+            .filter(|(_, writer)| {
+                writer
+                    .expires_at_ms
+                    .is_some_and(|deadline| now_ms >= deadline)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        let count = expired.len();
+        for key in expired {
+            self.writers.remove(&key);
+        }
+        count
+    }
+
+    /// Clear EVERYTHING — including sink-scope writers (settled P-Q4: a
+    /// playlist entry's latched value clears too). Returns the count.
+    pub fn clear_all(&mut self) -> usize {
+        let count = self.writers.len();
+        self.writers = VecMap::new();
+        count
     }
 
     /// Clear one writer. Returns true when something was engaged.

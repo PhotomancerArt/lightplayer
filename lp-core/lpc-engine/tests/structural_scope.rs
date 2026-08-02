@@ -533,7 +533,12 @@ fn panel_writer_survives_apply_project_changes() {
         .node_scope(engine.tree().root())
         .expect("root scope");
     let channel = lpc_model::ChannelName(String::from("time"));
-    engine.panel_write(root_scope, channel.clone(), lpc_model::LpValue::F32(42.0));
+    engine.panel_write(
+        root_scope,
+        channel.clone(),
+        lpc_model::LpValue::F32(42.0),
+        None,
+    );
 
     fs.write_file(
         "/clock.json".as_path(),

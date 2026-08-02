@@ -277,6 +277,15 @@ fn shader_uniform_control(
             .find(|row| row.key == name)
             .and_then(|row| bound_live_value(row));
     }
+    // The panel-write target rides the same binding-derived row: a wired
+    // uniform's knob writes the consumed (scope, channel) down the command
+    // path; an unwired one keeps editing the authored default.
+    if control.panel_target.is_none() {
+        control.panel_target = top_rows
+            .iter()
+            .find(|row| row.key == name)
+            .and_then(|row| bound_panel_target(row));
+    }
     Some(control)
 }
 
@@ -305,6 +314,16 @@ fn snap_control_display(control: &mut UiPanelControl, min: f32, step: f32) {
 fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
     match &slot.source {
         UiSlotSourceState::Bound(endpoint) => endpoint.live_value.clone(),
+        _ => None,
+    }
+}
+
+/// A row's panel-write target: the `(scope, channel)` its bound source
+/// endpoint consumes, so the control dispatches panel commands (panel.md
+/// P8) instead of editing the authored default.
+fn bound_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
+    match &slot.source {
+        UiSlotSourceState::Bound(endpoint) => endpoint.panel_target.clone(),
         _ => None,
     }
 }
@@ -587,6 +606,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         widget,
         value: value.clone(),
         live_value: bound_live_value(slot),
+        panel_target: bound_panel_target(slot),
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),

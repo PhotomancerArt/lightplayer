@@ -140,6 +140,16 @@ silently destroyed.)
   staged, nothing dirty, no overlay interaction. Studio, play mode,
   phones, and future hardware inputs all speak exactly these two ops.
 
+> Status: implemented 2026-08-02. `WireProjectCommand::PanelWrite` /
+> `PanelClear` (project-level arms — they address a scope, not a node),
+> `PanelWriteOp` / `PanelClearOp` in Studio, coalesced per
+> `(scope, channel)` in the actor's batch planner beside the slot-edit
+> flood rule. The panel controls that already existed (shader uniform
+> knobs, the fixture brightness fader) were re-pointed off
+> `SlotEditOp::SetValue` onto this path wherever the backing slot
+> consumes a bus channel; a control with no channel behind it still
+> edits its authored default.
+
 ### P9 — Multi-client: the engine is the authority
 
 Panel state lives in the engine (sim or device), never in a client. All
@@ -209,6 +219,15 @@ mode switch.
   is domain logic and belongs to a node (a gate with a timeout param),
   never to writer resolution.
 
+> Status: implemented 2026-08-02 (engine-side lifecycle). A momentary
+> write carries a renewal deadline; the engine despawns the writer past
+> it, in the tick. That makes despawn survive a dropped client — a
+> gesture nobody is renewing releases on its own — and renewal is simply
+> the next write. The wire shape is our own; PR #233's TTL/press_id
+> direction was design reference only. Widget-side gesture classes (which
+> channel kinds ARE momentary) arrive with the touch-set vocabulary,
+> P-Q5.
+
 ## 3. Worked walkthroughs
 
 - **The scarf**: boot → P10 restores `brightness` writer before frame 1
@@ -239,15 +258,24 @@ this document never specifies resolution.
 - **P-Q1:** slew defaults — which widget kinds slew at all (brightness
   fader: yes; stepped knob: no?), and is the time constant per-widget
   meta or one project default?
+  *Disposition 2026-08-02: still open, deliberately unimplemented.*
+  Emission is immediate (P5 takeover = jump), which is correct behavior
+  on its own and not a placeholder. The seam when slew arrives is
+  **writer-side shaping**: the panel writer holds the raw value (P7) and
+  what it emits is shaped on the way out, so nothing downstream of the
+  writer — resolution, persistence, identity — changes.
 - **P-Q2:** engaged-affordance treatment (distinct from bound-violet) —
   UX spike owns the visual; confirm the *requirement* that Read-following
   -automation, Read-at-default, and Latch are three visibly distinct
   states.
 - **P-Q3:** `state.json` schema version field name/shape, and whether a
   clean-shutdown flush is feasible on device (or throttle-only).
-- **P-Q4:** does Clear-all also clear *sink-scope* (playlist entry)
-  state, or only visible panels? Lean: everything under the cleared
-  scope, sinks included — "reset means reset".
+- **P-Q4:** ~~does Clear-all also clear *sink-scope* (playlist entry)
+  state, or only visible panels?~~ **Settled 2026-08-02 as leaned:
+  clear-all reaches sink scopes** — a playlist entry's latched value
+  clears with everything else. "Reset means reset"; a reset that leaves
+  values latched in scopes the user cannot currently see is a haunting,
+  not a safety feature. Implemented and pinned by test.
 - **P-Q5:** the touch-set value shape (per-touch id, position,
   pressure/z, velocity — carried or derived?) and the multi-XY pad
   widget spec. Prior art: old lightPlayer's `MultiTouchInput.Touch`
