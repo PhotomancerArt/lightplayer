@@ -16,6 +16,8 @@ pub enum HardwareSubcommand {
     Manifest(ManifestArgs),
     /// Calibrate board-visible GPIO labels with ESP32 firmware.
     Calibrate(CalibrateArgs),
+    /// Measure a board's soft LED limit and write a measurement record.
+    Bench(BenchArgs),
 }
 
 #[derive(Debug, Args)]
@@ -137,6 +139,44 @@ pub struct CalibrateArgs {
     /// Board-visible label currently connected to the scope.
     #[arg(long)]
     pub label: Option<String>,
+}
+
+/// `lp-cli hardware bench` — ramp a board's LED count until it runs out of
+/// memory, then record the envelope.
+///
+/// The board must already be running the firmware build under test: the bench
+/// refuses a mismatched image rather than flashing one, so what it measures is
+/// always the image the operator chose (see `lp-cli firmware` for flashing).
+#[derive(Debug, Args)]
+pub struct BenchArgs {
+    /// Board manifest id, for example seeed/xiao-esp32-c6.
+    #[arg(long)]
+    pub board: String,
+    /// Firmware build def id (lp-fw/builds/<id>.json). Defaults to the single
+    /// build whose chip matches the board's target.
+    #[arg(long)]
+    pub build: Option<String>,
+    /// Serial port path, or auto. Defaults to the attached board whose probed
+    /// chip matches the build.
+    #[arg(long)]
+    pub port: Option<String>,
+    /// LED count the ramp starts from. Defaults per chip (120 classic ESP32,
+    /// 200 otherwise); only affects how many doubling steps the run costs.
+    #[arg(long)]
+    pub start: Option<u32>,
+    /// Measurement store directory to write into. Defaults to measurements/
+    /// under the repository root.
+    #[arg(long)]
+    pub out: Option<PathBuf>,
+    /// Repository root. Defaults to searching upward from the current directory.
+    #[arg(long)]
+    pub repo: Option<PathBuf>,
+    /// Board manifest directory. Defaults to lp-core/lpc-hardware/boards under the repo root.
+    #[arg(long)]
+    pub boards_dir: Option<PathBuf>,
+    /// Echo the device console to stderr.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
