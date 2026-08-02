@@ -180,12 +180,15 @@ impl Esp32C6RmtWs281xDriver {
             1 => channel1,
         );
 
+        // No `{:?}` here: this crate builds with `-Zfmt-debug=none` (flash
+        // budget), which formats Debug to nothing — measured on the desk as a
+        // boot line reading `plan=`.
         log::info!(
-            "Esp32C6RmtWs281xDriver: {} WS281x channels for {} declared (plan={:?} \
-             ch0_window_words={} ch0_half_words={})",
+            "Esp32C6RmtWs281xDriver: {} WS281x channels for {} declared \
+             (ch0_blocks={} ch0_window_words={} ch0_half_words={})",
             slots.iter().flatten().count(),
             declared,
-            TX_PLAN.get().map(|plan| *plan.as_array()),
+            TX_PLAN.blocks(0),
             TX_PLAN.window_words(0, BLOCK_WORDS),
             TX_PLAN.window_words(0, BLOCK_WORDS) / 2,
         );
