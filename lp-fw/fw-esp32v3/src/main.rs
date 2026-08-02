@@ -285,6 +285,25 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     let used = esp_alloc::HEAP.used();
     let largest = recovery::panic_path::largest_free_block();
     esp_println::println!("[MEM] free={free} used={used} largest_free={largest}");
+    // The JIT code region is NOT part of the heap above — it is a separate
+    // fixed SRAM1 reservation, and its residency is the number that decides
+    // how much of it can be handed back. `peak` is the high-water mark of
+    // concurrent residency since boot; `allocs`/`frees` diverging while the
+    // board sits idle is a span leak, which must be read before any figure
+    // here is used to justify a smaller region.
+    if let Some((jit, jit_largest)) = lpvm_native::codemem_esp32::global::stats() {
+        esp_println::println!(
+            "[JIT] used={} peak={} cap={} spans={} peak_spans={} allocs={} frees={} fails={} largest_free={jit_largest}",
+            jit.used,
+            jit.peak_used,
+            lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.len_bytes,
+            jit.live_spans,
+            jit.peak_spans,
+            jit.allocs,
+            jit.frees,
+            jit.alloc_failures,
+        );
+    }
     Some((
         free.min(u32::MAX as usize) as u32,
         used.min(u32::MAX as usize) as u32,

@@ -252,6 +252,44 @@ pub struct CodeArena {
     region: CodeRegion,
     /// Sorted, non-adjacent free spans as `(ibus_base, len)`.
     free: Vec<(u32, u32)>,
+    stats: ArenaStats,
+}
+
+/// Residency counters for the arena — the numbers that decide how big the
+/// region actually has to be.
+///
+/// `peak_used` is the high-water mark of *concurrent* residency, which is the
+/// only figure a region size may be derived from: total-ever-allocated says
+/// nothing when spans are recycled, and instantaneous `used` misses the peak
+/// between two heartbeats.
+///
+/// `allocs`/`frees` exist to answer the span-leak question directly rather
+/// than by inference. A workload that returns to idle with
+/// `allocs == frees` and `live_spans == 0` has leaked nothing; a Studio
+/// editing loop whose `allocs` climbs while `frees` does not is leaking a
+/// slice of the region per recompile, and that must be fixed *before* the
+/// region is shrunk — otherwise the shrink only converts a slow leak into a
+/// fast one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ArenaStats {
+    /// Bytes currently reserved (word-rounded, so this is what the region
+    /// actually has to hold — not the callers' unrounded byte lengths).
+    pub used: u32,
+    /// High-water mark of [`ArenaStats::used`] since boot.
+    pub peak_used: u32,
+    /// Spans currently reserved.
+    pub live_spans: u32,
+    /// High-water mark of [`ArenaStats::live_spans`] since boot.
+    pub peak_spans: u32,
+    /// Successful [`CodeArena::alloc`] calls since boot.
+    pub allocs: u32,
+    /// [`CodeArena::free`] calls since boot.
+    pub frees: u32,
+    /// [`CodeArena::alloc`] calls that failed with
+    /// [`CodeMemError::TooLarge`] — a nonzero value here means the region is
+    /// too small for the workload that ran, and is the signal that a shrink
+    /// went too far.
+    pub alloc_failures: u32,
 }
 
 impl CodeArena {
@@ -261,7 +299,14 @@ impl CodeArena {
         Self {
             free: alloc::vec![(region.ibus_base(), region.len_bytes)],
             region,
+            stats: ArenaStats::default(),
         }
+    }
+
+    /// Residency counters — see [`ArenaStats`].
+    #[must_use]
+    pub fn stats(&self) -> ArenaStats {
+        self.stats
     }
 
     #[must_use]
@@ -299,9 +344,15 @@ impl CodeArena {
                 } else {
                     self.free[i] = (base + need, flen - need);
                 }
+                self.stats.used += need;
+                self.stats.peak_used = self.stats.peak_used.max(self.stats.used);
+                self.stats.live_spans += 1;
+                self.stats.peak_spans = self.stats.peak_spans.max(self.stats.live_spans);
+                self.stats.allocs += 1;
                 return Ok(base);
             }
         }
+        self.stats.alloc_failures += 1;
         Err(CodeMemError::TooLarge {
             requested: len,
             largest_free: self.largest_free(),
@@ -319,6 +370,9 @@ impl CodeArena {
                 && ibus_base % 4 == 0,
             "freeing span {ibus_base:#x}+{need:#x} outside the arena"
         );
+        self.stats.used = self.stats.used.saturating_sub(need);
+        self.stats.live_spans = self.stats.live_spans.saturating_sub(1);
+        self.stats.frees += 1;
         let idx = self
             .free
             .iter()
@@ -376,6 +430,18 @@ pub mod global {
     #[must_use]
     pub fn installed() -> bool {
         !ARENA.load(Ordering::SeqCst).is_null()
+    }
+
+    /// Residency counters for the installed arena, plus its `largest_free`.
+    ///
+    /// `None` when no arena is installed or one is mid-compile — a reporting
+    /// path (the heartbeat) must never block or alias the compiler's `&mut`,
+    /// and a skipped sample is worth nothing lost when the next one is 5 s
+    /// away. Note that `used`/`peak_used` are word-rounded reservation
+    /// totals, so they are the figures a region size may be derived from.
+    #[must_use]
+    pub fn stats() -> Option<(super::ArenaStats, u32)> {
+        with(|arena| (arena.stats(), arena.largest_free())).ok()
     }
 
     /// Run `f` with exclusive access to the arena.
@@ -527,6 +593,55 @@ mod tests {
         a.free(s3, 16);
         assert_eq!(a.available(), a.capacity());
         assert_eq!(a.largest_free(), a.capacity());
+    }
+
+    /// The counters the region-sizing decision rests on: `peak_used` survives
+    /// the frees that follow it (an instantaneous `used` would not), and a
+    /// balanced workload returns to zero live spans — which is exactly the
+    /// shape "no leak" has on the device.
+    #[test]
+    fn stats_track_peak_and_return_to_zero_when_balanced() {
+        let mut a = CodeArena::new(CodeRegion::ESP32_DEFAULT);
+        // Two concurrent modules, then a third after the first is freed:
+        // peak is the 2-module moment, not the 3-alloc total.
+        let s1 = a.alloc(2_032).unwrap(); // word-rounds to 2_032
+        let s2 = a.alloc(2_030).unwrap(); // word-rounds to 2_032
+        assert_eq!(a.stats().used, 4_064);
+        assert_eq!(a.stats().live_spans, 2);
+        a.free(s1, 2_032);
+        let s3 = a.alloc(1_000).unwrap();
+        assert_eq!(a.stats().used, 3_032);
+        // Peak is remembered across the free.
+        assert_eq!(a.stats().peak_used, 4_064);
+        assert_eq!(a.stats().peak_spans, 2);
+
+        a.free(s2, 2_030);
+        a.free(s3, 1_000);
+        let st = a.stats();
+        assert_eq!(st.used, 0, "balanced workload leaks nothing");
+        assert_eq!(st.live_spans, 0);
+        assert_eq!(st.allocs, 3);
+        assert_eq!(st.frees, 3);
+        assert_eq!(st.alloc_failures, 0);
+        assert_eq!(st.peak_used, 4_064, "peak survives the drain");
+        // And the arena really is whole again.
+        assert_eq!(a.available(), a.capacity());
+    }
+
+    /// A failed `alloc` is counted and changes nothing else — the shrink's
+    /// safety net has to be visible in the telemetry, not only in the error.
+    #[test]
+    fn stats_count_alloc_failures_without_disturbing_residency() {
+        let mut a = CodeArena::new(CodeRegion::ESP32_DEFAULT);
+        let s = a.alloc(64).unwrap();
+        assert!(a.alloc(a.capacity()).is_err());
+        let st = a.stats();
+        assert_eq!(st.alloc_failures, 1);
+        assert_eq!(st.allocs, 1, "a failure is not an alloc");
+        assert_eq!(st.used, 64);
+        assert_eq!(st.live_spans, 1);
+        a.free(s, 64);
+        assert_eq!(a.stats().used, 0);
     }
 
     #[test]
