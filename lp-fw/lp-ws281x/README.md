@@ -218,6 +218,14 @@ higher-numbered ones includes every earlier channel's refill — which is the co
 `on_interrupt`'s index-order service actually imposes, now measured rather than
 inferred.
 
+This is the instrument that settled the C6's WiFi-scan truncation: roadmap
+M5's stress matrix (`2026-08-01-1459-rmt-priority-hli`, phase P4) found
+refill lag flat with or without radio load, while the entry-delay histogram's
+delayed-entry population grew two orders of magnitude under scan — the
+truncation is interrupt-to-service latency, not refill work, which is also
+why raising software priority alone (already at `Priority::max()`) had no
+headroom left to give.
+
 `record_lag` deliberately keeps the running maximum with a load/compare/store
 rather than `fetch_max`, and the interrupt handler is the only writer, so
 nothing is lost. This began as a workaround — `AtomicI32::fetch_max` would not
