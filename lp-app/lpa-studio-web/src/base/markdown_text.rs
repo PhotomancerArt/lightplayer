@@ -39,7 +39,10 @@ pub(crate) enum MdNode {
     Paragraph(Vec<MdNode>),
     /// A heading with its source level. Chat rendering demotes every
     /// level to one small strong style; docs rendering keeps the levels.
-    Heading { level: u8, children: Vec<MdNode> },
+    Heading {
+        level: u8,
+        children: Vec<MdNode>,
+    },
     Text(String),
     Strong(Vec<MdNode>),
     Emphasis(Vec<MdNode>),
@@ -77,7 +80,9 @@ struct Frame {
 
 enum FrameKind {
     Paragraph,
-    Heading { level: u8 },
+    Heading {
+        level: u8,
+    },
     Strong,
     Emphasis,
     Strikethrough,
@@ -212,9 +217,7 @@ impl TreeBuilder {
 fn frame_kind(tag: Tag<'_>) -> FrameKind {
     match tag {
         Tag::Paragraph => FrameKind::Paragraph,
-        Tag::Heading { level, .. } => FrameKind::Heading {
-            level: level as u8,
-        },
+        Tag::Heading { level, .. } => FrameKind::Heading { level: level as u8 },
         Tag::Strong => FrameKind::Strong,
         Tag::Emphasis => FrameKind::Emphasis,
         Tag::Strikethrough => FrameKind::Strikethrough,
@@ -280,7 +283,9 @@ fn docs_heading_class(level: u8) -> &'static str {
     match level {
         1 => "tw:m-0 tw:mb-3 tw:text-lg tw:font-bold tw:text-strong-foreground",
         2 => "tw:m-0 tw:mt-5 tw:mb-2 tw:first:mt-0 tw:text-[15px] tw:font-bold tw:text-heading",
-        _ => "tw:m-0 tw:mt-4 tw:mb-1.5 tw:first:mt-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+        _ => {
+            "tw:m-0 tw:mt-4 tw:mb-1.5 tw:first:mt-0 tw:text-sm tw:font-bold tw:text-strong-foreground"
+        }
     }
 }
 

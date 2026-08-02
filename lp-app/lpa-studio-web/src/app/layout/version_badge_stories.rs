@@ -21,7 +21,9 @@ pub(crate) fn loaded() -> Element {
     })
 }
 
-#[story(description = "The header chip across its states: branch, dirty, deployed tag, no-git fallback.")]
+#[story(
+    description = "The header chip across its states: branch, dirty, deployed tag, no-git fallback."
+)]
 pub(crate) fn chip_states() -> Element {
     rsx! {
         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4",
