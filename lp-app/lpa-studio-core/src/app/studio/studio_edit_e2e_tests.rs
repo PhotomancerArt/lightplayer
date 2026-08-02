@@ -1767,6 +1767,98 @@ fn special_editor_values_round_trip_save_and_revert() {
     assert_eq!(editor_dirty(&snapshot), (0, 0));
 }
 
+#[test]
+fn power_option_gains_the_editor_and_round_trips_save() {
+    // The fixture `power` option (base-absent): toggling it on materializes
+    // the server-constructed default (WS2812B at 1000 mA), the present value
+    // carries the `Power` editor hint so the lamp/budget pair is editable
+    // rather than an opaque struct display, and a whole-struct SetValue —
+    // composed exactly the way `PowerSlotField` composes it — reaches
+    // fixture.json on save.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let power = find_slot(&snapshot, "power");
+    assert!(
+        matches!(power.body, UiConfigSlotBody::Empty),
+        "power starts absent (the default guard is engine-side, not authored)"
+    );
+    let power_address = power
+        .address
+        .clone()
+        .expect("power slot carries an address");
+
+    // Toggle on: the server constructs the default value.
+    handle.tx.send(ensure_present_action(child_address(
+        &power_address,
+        "power.some",
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("toggle-on emits a snapshot");
+
+    let power = find_slot(&snapshot, "power");
+    assert_eq!(
+        slot_editor_hint(power),
+        &UiSlotEditorHint::Power,
+        "the present power value carries the Power editor hint"
+    );
+    assert!(
+        slot_value_display(power).contains("1000"),
+        "the server default budget materializes: {}",
+        slot_value_display(power)
+    );
+
+    // Whole-struct write as PowerSlotField dispatches it.
+    handle.tx.send(set_value_action(
+        child_address(&power_address, "power.some"),
+        LpValue::Struct {
+            name: Some("FixturePower".to_string()),
+            fields: vec![
+                (
+                    "lamp_type".to_string(),
+                    LpValue::String("ws2811_12v".to_string()),
+                ),
+                ("budget_ma".to_string(), LpValue::U32(4000)),
+            ],
+        },
+    ));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
+
+    let fixture_json = read_project_file(&server, "fixture.json");
+    assert!(
+        fixture_json.contains("\"lamp_type\":\"ws2811_12v\""),
+        "fixture.json gained the lamp edit: {fixture_json}"
+    );
+    assert!(
+        fixture_json.contains("\"budget_ma\":4000"),
+        "fixture.json gained the budget edit: {fixture_json}"
+    );
+    let power = find_slot(&snapshot, "power");
+    assert_eq!(power.state.dirty, UiNodeDirtyState::Clean);
+    assert!(slot_value_display(power).contains("4000"));
+}
+
 // --- Harness ---------------------------------------------------------------
 
 #[test]
