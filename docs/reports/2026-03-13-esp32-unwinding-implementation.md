@@ -1,8 +1,23 @@
 # ESP32 Stack Unwinding: Implementation Report
 
 **Date:** 2026-03-13
-**Status:** Complete — OOM recovery confirmed working on device (2026-03-13)
+**Status:** HISTORICAL — the configuration described here was removed 2026-08-02
 **Predecessor:** [OOM Recovery: Stack Unwinding via `unwinding` Crate](2026-03-12-oom-recovery/stack-unwinding.md)
+
+> **Historical, as of 2026-08-02.** The configuration this report describes was
+> removed: all RV32 firmwares are abort tier
+> (`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`). The report is kept
+> deliberately, and is still the most useful document in the repo about what
+> unwinding cost:
+>
+> - **Problem 6** is the source for the Cargo-profile-vs-target-spec precedence
+>   trap, which is what made a later size measurement report ~2 KB for something
+>   that was actually worth 778 KiB.
+> - Its **binary size impact** table (~610 KB of ROM on a 1.44 MB image) was
+>   right, was in the repo the whole time, and was quietly overwritten in the
+>   record by that bad measurement.
+> - Problems 1-5 remain the reference for what bare-metal unwinding requires,
+>   should anyone ever price it again.
 
 ---
 

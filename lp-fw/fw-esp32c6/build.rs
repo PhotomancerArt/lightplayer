@@ -3,20 +3,22 @@
 //! Linker script (-Tlinkall.x) is configured via .cargo/config.toml to avoid
 //! duplicate -Tlinkall.x (which would cause "region 'RAM' already defined").
 //!
-//! Patches two of esp-hal's generated linker scripts:
+//! Patches two of esp-hal's generated linker scripts, both because the ESP32
+//! bootloader maps at most 2 ROM segments:
 //!
-//! - `text.x`, to pin down the `.text` layout this image needs.
 //! - `rodata.x`, to merge `.rodata_desc` and `.rodata` into ONE output section.
 //!   esp-hal's default defines them separately, and `.rodata`'s 128-byte input
 //!   alignment leaves a gap that espflash reads as a segment boundary —
 //!   producing 3 ROM-mapped segments and tripping the ESP32 bootloader's
 //!   `rom_index < 2` assert. See `89487cc05`.
+//! - `eh_frame.x`, flattened to a no-op so nothing captures `.eh_frame` into a
+//!   section of its own.
 //!
-//! Until 2026-08-02 it also captured `.eh_frame` into `.text` for the
-//! `unwinding` crate. That is gone with the rest of the unwind tier
-//! (ADR `2026-08-02-rv32-firmwares-are-abort-tier`); the bootloader's
-//! two-segment limit is why `.eh_frame` had to share `.text` in the first
-//! place, and it still constrains the `rodata.x` patch above.
+//! Until 2026-08-02 it also patched `text.x`, to capture `.eh_frame` into
+//! `.text` for the `unwinding` crate. That is gone with the rest of the unwind
+//! tier (ADR `2026-08-02-rv32-firmwares-are-abort-tier`), and with it the
+//! `text.x` patch — see the comment in `main` for why it was not merely
+//! trimmed.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -84,13 +86,15 @@ fn main() {
     emit_build_provenance();
     emit_partition_facts();
 
-    // Harness builds: any test_* feature except test_oom selects a hardware
-    // harness entrypoint instead of the app (test_oom runs the full app plus
-    // an OOM/panic exercise). Collapsed to one cfg so app-only code carries a
+    // Harness builds: any test_* feature selects a hardware harness entrypoint
+    // instead of the app. Collapsed to one cfg so app-only code carries a
     // single gate instead of a 12-feature wall at every site.
+    //
+    // `test_oom` used to be the one exception — it ran the full app plus an
+    // OOM/panic exercise rather than replacing the entrypoint — and it went
+    // with the unwind tier it existed to validate.
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
-    let harness = std::env::vars()
-        .any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_") && k != "CARGO_FEATURE_TEST_OOM");
+    let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
     if harness {
         println!("cargo::rustc-cfg=fw_harness");
     }
@@ -201,7 +205,6 @@ SECTIONS {
             build_dir.join("esp-hal-out-pending").display()
         );
     }
-
 }
 
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded

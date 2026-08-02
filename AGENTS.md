@@ -619,12 +619,15 @@ lint/test signal.
 The workspace pins a **specific dated nightly** in `rust-toolchain.toml`
 (`channel = "nightly-2026-04-27"`), and every job in `pre-merge.yml`
 hardcodes that same date via `dtolnay/rust-toolchain`. Do **not** run
-`rustup update nightly` — this is a build-std project, and the
-`unwinding` crate is bound to a specific nightly
-`core::intrinsics::catch_unwind` ABI (0.2.8 = integer return; 0.2.9
-switched to the bool return introduced in a later nightly). An unpinned
-or locally-updated nightly drifts off the pinned toolchain and breaks
-the build.
+`rustup update nightly` — this is a build-std project, and an unpinned
+or locally-updated nightly drifts off the pinned toolchain, so local and
+CI stop agreeing.
+
+The pin used to be far sharper than that: the `unwinding` crate was bound
+to a specific nightly `core::intrinsics::catch_unwind` ABI, so the crate
+version and the toolchain date had to move together. That coupling is
+gone with the unwind tier — see
+`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`.
 
 Because the toolchain is pinned, lints don't drift underneath you:
 local `just check` and CI see the same clippy set, so a green local run
@@ -632,15 +635,15 @@ is a real signal.
 
 To bump the toolchain, do it deliberately as its own change:
 
-1. Update `channel` in `rust-toolchain.toml`.
-2. Update the matching `unwinding` version in the crates that depend on
-   it (`fw-esp32c6`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
-   nightly date and the `unwinding` version move together.
-3. Update the hardcoded `toolchain:` value in every job in
+1. Update `channel` in `rust-toolchain.toml` (root **and**
+   `lp-fw/fw-esp32c6/`; esp-channel files are skipped).
+2. Update the hardcoded `toolchain:` value in every job in
    `.github/workflows/pre-merge.yml` (the workflow carries a
    "keep this in sync" comment at each site).
-4. Run the full gate (`just check test`) before pushing, and
+3. Run the full gate (`just check test`) before pushing, and
    expect new-lint fallout in the same change.
+
+`just bump-nightly [YYYY-MM-DD]` does steps 1-2 and validates.
 
 ### Architecture coverage
 
