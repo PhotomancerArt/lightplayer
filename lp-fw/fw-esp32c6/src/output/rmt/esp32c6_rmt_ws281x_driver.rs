@@ -30,14 +30,13 @@
 //! registry only ever sees the former; [`super::c6_rmt`] only ever sees the
 //! latter.
 //!
-//! # Not yet wired in
+//! # The board's side of the count
 //!
-//! Nothing constructs this type yet — replacing the legacy single-channel
-//! driver, declaring the C6's second WS281x channel in the board manifest and
-//! retiring `fw-esp32-common`'s `rmt_state` are the *next* phase's job, and
-//! doing any of it here would change the shipping image. What P1 owes is a
-//! backend that compiles under both block configurations and a `pub` surface
-//! that integration can call without redesign.
+//! `main.rs` constructs exactly one of these at boot and hands it the RMT
+//! peripheral. How many outputs it then offers is the manifest's answer, not
+//! this file's: the XIAO C6 profile declares `/rmt/ws281x0` and
+//! `/rmt/ws281x1`, and a board profile that declares fewer simply gets fewer.
+//! The ceiling is [`USABLE_CHANNELS`], which the block plan sets.
 //!
 //! # Why the pin is bound at `open`, not at construction
 //!
@@ -76,11 +75,13 @@ use lpc_hardware::{
     Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
 
-use crate::output::rmt_v2::c6_rmt::{
+use crate::output::rmt::c6_rmt::{
     self, BLOCKS_PER_CHANNEL, CHANNEL_WORDS, SLOT_STRIDE, TX_BLOCKS, USABLE_CHANNELS,
     slot_for_index,
 };
-use crate::output::rmt_v2::shared_driver::{DRIVER, FRAME_TIMEOUT, install_isr};
+use crate::output::rmt::shared_driver::{
+    DRIVER, FRAME_TIMEOUT, install_isr, report_telemetry_if_due,
+};
 
 const DRIVER_ID: &str = "esp32c6-rmt-ws281x";
 const DISPLAY_LABEL: &str = "ESP32-C6 RMT WS281x";
@@ -439,6 +440,10 @@ impl Ws281xOutput for Esp32C6RmtWs281xOutput {
                 DRIVER.abort(self.channel);
             }
         });
+
+        // After the frame, never during it, and a no-op unless the
+        // `ws281x_telemetry` feature is on.
+        report_telemetry_if_due();
 
         if let Err(error) = result {
             return Err(start_error_to_output_error(self.channel, error));
