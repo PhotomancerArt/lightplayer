@@ -48,6 +48,10 @@ pub const BUILD_DEF_SOURCES: &[(&str, &str)] = &[
         "esp32s3-8mb",
         include_str!("../../../lp-fw/builds/esp32s3-8mb.json"),
     ),
+    (
+        "esp32v3-4mb",
+        include_str!("../../../lp-fw/builds/esp32v3-4mb.json"),
+    ),
 ];
 
 /// `(package, manifest_core_fixture)` for every firmware package a build def
@@ -61,6 +65,10 @@ const MANIFEST_CORE_SOURCES: &[(&str, &str)] = &[
     (
         "fw-esp32s3",
         include_str!("../../../lp-fw/fw-esp32s3/manifest-core.expected.json"),
+    ),
+    (
+        "fw-esp32v3",
+        include_str!("../../../lp-fw/fw-esp32v3/manifest-core.expected.json"),
     ),
 ];
 
@@ -425,11 +433,14 @@ mod tests {
 
     #[test]
     fn chip_mismatch_never_matches() {
-        // Classic-ESP32 board; the checked-in builds are C6 and S3 only.
-        let dom = board("domraem/dom-z-102");
-        assert!(compatible_builds_for(&dom).is_empty());
+        // A chip no checked-in build targets: synthesized, so this test
+        // survives new firmware families landing (esp32v3 obsoleted the
+        // original classic-ESP32 form of this test the day it shipped).
+        let mut board = board("domraem/dom-z-102");
+        board.family = "esp32c99".to_string();
+        assert!(compatible_builds_for(&board).is_empty());
         assert_eq!(
-            no_build_reason_for(&dom),
+            no_build_reason_for(&board),
             Some(NoBuildReason::NoBuildForChip)
         );
     }
