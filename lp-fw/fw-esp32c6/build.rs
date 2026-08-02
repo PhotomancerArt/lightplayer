@@ -104,11 +104,6 @@ SECTIONS {
     KEEP(*(.init.rust));
     KEEP(*(.text.abort));
     *(.literal .text .literal.* .text.*)
-    /* Unwind tables: appended to .text so they share one ROM segment. */
-    . = ALIGN(4);
-    PROVIDE(__eh_frame = .);
-    KEEP(*(.eh_frame));
-    KEEP(*(.eh_frame.*));
   } > ROTEXT
 }
 ";
@@ -130,7 +125,6 @@ SECTIONS {
     _rodata_start = ABSOLUTE(.);
     *(.rodata .rodata.*)
     *(.srodata .srodata.*)
-    *(.gcc_except_table .gcc_except_table.*)
     . = ALIGN(4);
     *( .rodata_wlog_*.* )
     . = ALIGN(4);
@@ -187,8 +181,6 @@ SECTIONS {
         );
     }
 
-    let eh_frame = manifest_dir.join("linker").join("eh_frame_unwind.x");
-    println!("cargo:rustc-link-arg=-T{}", eh_frame.display());
 }
 
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded

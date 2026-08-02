@@ -3938,7 +3938,6 @@ dependencies = [
  "lpvm",
  "lpvm-native",
  "serde",
- "unwinding",
 ]
 
 [[package]]

@@ -87,7 +87,6 @@ test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 embassy-executor = "0.10.0"
 embassy-time = "0.5.0"
 embassy-sync = "0.8.0"
@@ -132,7 +131,6 @@ lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, opt
 # `lpa-server` dependency and link only the node kinds it runs. See
 # `lpc-engine/README.md` for what each gate is worth in flash.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
-    "panic-recovery",
     "node-button",
     "node-radio",
     "node-fluid",
