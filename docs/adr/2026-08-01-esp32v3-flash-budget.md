@@ -191,11 +191,24 @@ in the *emulator's* RAM filesystem, which is flash-resident on silicon) + 21.0
 
 ⚠️ **"Scales with `render_size`" was wrong** for the projects these numbers come
 from. Both use `sampling: "direct"`, which allocates per *mapped lamp*, not per
-canvas pixel. The `render_size`-sized allocations — `precomputed:
-Vec<PixelMappingEntry>` at 4 B per canvas pixel plus a W×H×8 B RGBA16 render
-target per fixture — are on the `TextureArea` path only. That path is a real
-multiplier (a 60×4 canvas driving 60 LEDs allocates 240 entries and a 7,680 B
-texture per fixture) and remains **unmeasured**.
+canvas pixel.
+
+The `render_size` multiplier is real, but it lives on the **`TextureArea`
+sampling path**, and it is now measured too — profiling `examples/fast`
+(`texture_area`, 16×16 canvas, **one** lamp):
+
+| bytes | owner |
+|------:|-------|
+| 1,024 | `ensure_texture_area_mapping` — 256 canvas pixels × 4 B `PixelMappingEntry` |
+| 2,048 | `create_render_target` — 256 × 8 B RGBA16 |
+| **3,072** | **per fixture, for 1 LED** |
+
+So that path costs **12 B per canvas pixel per fixture, independent of how many
+lamps are actually mapped**. `examples/fast` spends 3,072 B on one LED — 34× the
+~90 B a direct-sampled LED costs. Nothing in the authoring surface warns that
+widening `render_size` on a texture-area fixture is a RAM decision. Only one
+project in the tree uses this path today, which is why it does not appear in the
+89.5 B/LED figure.
 
 The shape of the waste is duplication, not any single fat buffer: a lamp's
 position is stored three times and its colour twice. Filed as
