@@ -501,13 +501,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
-    // How many outputs appear is decided in two places and nowhere else: the
-    // board manifest's `/rmt/ws281xK` resources (two on the XIAO C6), and
-    // `output::rmt::c6_rmt::BLOCKS_PER_CHANNEL` = 1, which leaves both of the
-    // chip's RMT TX slots usable. Under the `ws281x_2blocks` feature a channel
-    // takes two blocks, absorbs its neighbour's, and only slot 0 remains;
-    // manifest channel K drives slot K * SLOT_STRIDE and absorbed slots are
-    // never configured.
+    // How many outputs appear is decided in one place: the board manifest's
+    // `/rmt/ws281xK` resources (two on the XIAO C6). The RMT block plan
+    // follows from that count at driver init — two declared channels get one
+    // 48-word block each; a single declared channel absorbs the whole
+    // 192-word RMT RAM (RX blocks included) for legacy-class refill margin.
+    // See `output::rmt::c6_rmt::plan_for_declared`; absorbed slots are never
+    // configured.
     hardware_system.add_ws281x_driver(Box::new(Esp32C6RmtWs281xDriver::new(
         Rc::clone(&hardware_registry),
         rmt,
