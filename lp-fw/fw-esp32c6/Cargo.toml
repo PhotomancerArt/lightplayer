@@ -144,6 +144,10 @@ lpa-server = { path = "../../lp-app/lpa-server", default-features = false, featu
     "node-playlist",
     "node-clock",
     "node-shader",
+    # Kept explicitly: this crate takes `default-features = false`, and this
+    # part has the RAM for the resolver's value caches. Only `fw-esp32v3`
+    # trades them away.
+    "resolver-payload-cache",
 ], optional = true }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }

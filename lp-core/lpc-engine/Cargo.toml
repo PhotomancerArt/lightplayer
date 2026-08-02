@@ -18,6 +18,7 @@ default = [
     "node-playlist",
     "node-clock",
     "node-shader",
+    "resolver-payload-cache",
 ]
 # Panic recovery via catch_unwind (embedded targets)
 panic-recovery = ["dep:unwinding"]
@@ -55,6 +56,19 @@ node-texture = []
 node-playlist = []
 node-clock = []
 node-shader = []
+
+# --- Resolver payload cache (removal-only, same contract as the node gates) --
+#
+# On: the resolver keeps resolved slot *payloads* across frames as well as the
+# route and intern decisions. Off: it keeps only the decisions and recomputes
+# the values, which is slower and much smaller. Measured on the classic ESP32
+# with `projects/test/quad-strips-v3`: 8,276 B of heap against 7 ms of frame
+# time — see `ResolverCache::set_retain_payloads`.
+#
+# It defaults on, so nothing changes for the studio, `lp-cli` or any host with
+# real memory. `fw-esp32v3` is the one build that leaves it off, because on a
+# 110 KB arena 8,276 B is roughly 90 LEDs of capacity.
+resolver-payload-cache = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

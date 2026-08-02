@@ -206,6 +206,23 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
     // that failed has already released the allocator's lock, and interrupts are
     // masked, so nothing can be mid-allocation underneath us.
     let largest = largest_free_block();
+    // Ask the allocator the caller's own question a second time. If the answer
+    // is now yes, the shortfall was not the heap's state at this instant, and
+    // no amount of reading `free`/`largest` here will explain it — the report
+    // has to say so rather than let the next reader infer fragmentation from
+    // numbers that do not support it.
+    //
+    // SAFETY: `layout` came from a real allocation request, so its size is
+    // non-zero, and the block is released immediately with the same layout.
+    let retry_ok = unsafe {
+        let ptr = alloc::alloc::alloc(layout);
+        if ptr.is_null() {
+            false
+        } else {
+            alloc::alloc::dealloc(ptr, layout);
+            true
+        }
+    };
 
     let mut frames = [0u32; MAX_FRAMES];
     let count = capture_frames(&mut frames);
@@ -234,17 +251,25 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
 
     esp_println::println!("\n\n====================== OOM ======================");
     esp_println::println!(
-        "allocation failed: requested={} align={} free={} used={} largest_free={} context={}",
+        "allocation failed: requested={} align={} free={} used={} largest_free={} retry_ok={} context={}",
         layout.size(),
         layout.align(),
         free,
         used,
         largest,
+        retry_ok,
         lpc_shared::backtrace::oom_context().unwrap_or("<unset>"),
     );
-    // Spelled out rather than left as arithmetic for the reader: this is the
-    // line that distinguishes "the board is full" from "the board is shredded".
-    if largest < layout.size() && free >= layout.size() {
+    // Spelled out rather than left as arithmetic for the reader: these are the
+    // lines that say which of three different bugs this is.
+    if retry_ok {
+        esp_println::println!(
+            "[OOM] RETRY SUCCEEDED: the same {}-byte request fits now. The failure was not this \
+             heap state — look for a second allocator (the JIT code region) or a caller that \
+             asked for more than it reported",
+            layout.size(),
+        );
+    } else if largest < layout.size() && free >= layout.size() {
         esp_println::println!(
             "[OOM] FRAGMENTED: {} bytes free but the largest single block is {} — {} bytes unusable",
             free,
