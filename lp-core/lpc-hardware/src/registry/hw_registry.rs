@@ -7,7 +7,7 @@ use crate::{
     HwManifest,
 };
 
-/// Live ownership registry for a hardware manifest.
+/// Live ownership registry for a board manifest.
 ///
 /// The registry validates capabilities against the [`HwManifest`], tracks active
 /// [`HardwareLease`]s, and reports endpoint status for drivers. It uses interior

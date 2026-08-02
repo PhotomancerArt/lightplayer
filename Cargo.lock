@@ -5639,6 +5639,7 @@ version = "40.0.0"
 dependencies = [
  "dioxus",
  "lpc-hardware",
+ "lpc-model",
  "schemars",
  "serde",
  "serde_json",
