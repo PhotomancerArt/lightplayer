@@ -27,9 +27,17 @@ pub enum UiAffordance {
     /// Genuine in-flight activity (sync, save, provision, an edit awaiting
     /// its ack). Steady-state "running" is `Good` status and never Busy.
     Busy,
-    /// Live-only (transient) edits in the subtree; blue, never written by
-    /// Save.
-    Live,
+    /// **Debug** overrides are active on the surface (D8/D9): transient
+    /// diagnostics/authoring values with no durable value underneath.
+    ///
+    /// [`Self::from_dirty`] never produces this — since D7 a Debug value is
+    /// not dirty and has no bucket in [`DirtySummary`], so it must not tint a
+    /// header wash or announce as pending work. Its source is the separate
+    /// debug-override count ([`Self::from_debug_overrides`]), which the debug
+    /// section, the node-card marking, and the global "Debug active" chip
+    /// read. The web layer is the ONE place that turns this variant into
+    /// pixels (attention-orange + hazard stripes) — change the look there.
+    Debug,
     /// Unsaved persisted edits in the subtree; yellow edit glyph.
     Unsaved,
     /// Needs attention: the surface's own status is failing (error or
@@ -62,17 +70,25 @@ impl UiAffordance {
     }
 
     /// Project the subtree dirty summary onto the affordance vocabulary
-    /// (failed > unsaved > live, the established dirty precedence).
+    /// (failed > unsaved, the established dirty precedence). Debug overrides
+    /// are absent from the summary (D7), so they never announce here.
     pub fn from_dirty(dirty: &DirtySummary) -> Self {
         if dirty.failed > 0 {
             Self::Error
         } else if dirty.persisted > 0 {
             Self::Unsaved
-        } else if dirty.transient > 0 {
-            Self::Live
         } else {
             Self::Info
         }
+    }
+
+    /// Project a debug-override count onto the affordance vocabulary — the
+    /// separate channel D8 needs, deliberately NOT folded into
+    /// [`Self::merged`]: a debug override is not pending work, so it never
+    /// masks (or is masked by) the dirty/status rollup. Surfaces that mark
+    /// debug territory ask for this explicitly.
+    pub fn from_debug_overrides(count: usize) -> Self {
+        if count > 0 { Self::Debug } else { Self::Info }
     }
 
     /// Priority merge: the more important affordance wins.
@@ -95,8 +111,8 @@ mod tests {
     #[test]
     fn enum_order_is_the_confirmed_priority() {
         assert!(UiAffordance::Error > UiAffordance::Unsaved);
-        assert!(UiAffordance::Unsaved > UiAffordance::Live);
-        assert!(UiAffordance::Live > UiAffordance::Busy);
+        assert!(UiAffordance::Unsaved > UiAffordance::Debug);
+        assert!(UiAffordance::Debug > UiAffordance::Busy);
         assert!(UiAffordance::Busy > UiAffordance::Info);
     }
 
@@ -137,29 +153,43 @@ mod tests {
             UiAffordance::Info
         );
         assert_eq!(
-            UiAffordance::from_dirty(&dirty(0, 2, 0)),
-            UiAffordance::Live
-        );
-        assert_eq!(
-            UiAffordance::from_dirty(&dirty(1, 2, 0)),
+            UiAffordance::from_dirty(&dirty(1, 0)),
             UiAffordance::Unsaved
         );
+        assert_eq!(UiAffordance::from_dirty(&dirty(1, 1)), UiAffordance::Error);
+    }
+
+    #[test]
+    fn the_debug_channel_is_separate_from_the_dirty_rollup() {
+        // D8: the debug count has its own projection; it never enters
+        // `merged`, so a debug-only surface still reads Info there.
+        assert_eq!(UiAffordance::from_debug_overrides(0), UiAffordance::Info);
+        assert_eq!(UiAffordance::from_debug_overrides(3), UiAffordance::Debug);
         assert_eq!(
-            UiAffordance::from_dirty(&dirty(1, 2, 1)),
-            UiAffordance::Error
+            UiAffordance::merged(UiStatusKind::Good, &DirtySummary::clean()),
+            UiAffordance::Info
         );
+    }
+
+    #[test]
+    fn a_debug_only_project_never_tints_a_header() {
+        // D7: debug overrides leave the summary clean, so every hierarchy
+        // surface stays quiet — no wash, no announced trigger.
+        let debug_only = DirtySummary::clean();
+        assert_eq!(UiAffordance::from_dirty(&debug_only), UiAffordance::Info);
+        assert!(!UiAffordance::merged(UiStatusKind::Good, &debug_only).is_announced());
     }
 
     #[test]
     fn merged_takes_the_max_of_status_and_edits() {
         // Unsaved edits outrank an in-flight status…
         assert_eq!(
-            UiAffordance::merged(UiStatusKind::Working, &dirty(1, 0, 0)),
+            UiAffordance::merged(UiStatusKind::Working, &dirty(1, 0)),
             UiAffordance::Unsaved
         );
         // …but an error status is never masked by a dirty wash.
         assert_eq!(
-            UiAffordance::merged(UiStatusKind::Error, &dirty(1, 1, 0)),
+            UiAffordance::merged(UiStatusKind::Error, &dirty(1, 0)),
             UiAffordance::Error
         );
         // A clean, healthy surface stays silent.
@@ -169,11 +199,7 @@ mod tests {
         );
     }
 
-    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
-        DirtySummary {
-            persisted,
-            transient,
-            failed,
-        }
+    fn dirty(persisted: usize, failed: usize) -> DirtySummary {
+        DirtySummary { persisted, failed }
     }
 }

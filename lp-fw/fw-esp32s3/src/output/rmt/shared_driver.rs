@@ -8,7 +8,7 @@
 //! layer of per-channel state — which is why this module holds a `static` and
 //! the endpoint-facing driver holds none.
 //!
-//! `Ws281xDriver::with_blocks` is `const` and every field of `ChannelState` is
+//! `Ws281xDriver::new` is `const` and every field of `ChannelState` is
 //! an atomic, so this needs neither `static mut` nor a `StaticCell`: the
 //! handler and thread context share a `&'static`.
 
@@ -19,7 +19,7 @@ use esp_hal::rmt::Rmt;
 use esp_hal::time::{Duration, Rate};
 use lp_ws281x::Ws281xDriver;
 
-use super::s3_rmt::{S3Rmt, TX_BLOCKS, TX_CHANNELS};
+use super::s3_rmt::{S3Rmt, TX_CHANNELS};
 
 /// RMT source clock. Divider 1 makes one tick 12.5 ns, which is what
 /// [`lp_ws281x::PulseCodes::DEFAULT_CLOCK_HZ`] assumes.
@@ -31,8 +31,7 @@ pub const RMT_CLOCK: Rate = Rate::from_mhz(80);
 pub const FRAME_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// The driver, shared between thread context and the interrupt handler.
-pub static DRIVER: Ws281xDriver<S3Rmt, TX_CHANNELS> =
-    Ws281xDriver::with_blocks(S3Rmt::new(TX_BLOCKS), TX_BLOCKS);
+pub static DRIVER: Ws281xDriver<S3Rmt, TX_CHANNELS> = Ws281xDriver::new(S3Rmt::new());
 
 /// Set once the RMT interrupt handler has been bound.
 ///

@@ -42,23 +42,18 @@ use esp_hal::rmt::{
 use esp_hal::time::Instant;
 use lp_ws281x::ChannelTiming;
 
-use super::c6_rmt::{
-    self, BLOCKS_PER_CHANNEL, CHANNEL_WORDS, SLOT_STRIDE, TX_BLOCKS, USABLE_CHANNELS,
-    slot_for_index,
-};
+use super::c6_rmt::{self, BLOCK_WORDS, TX_PLAN, plan_for_declared};
 use super::shared_driver::{DRIVER, FRAME_TIMEOUT, install_isr, report_telemetry_if_due};
 
-/// Manifest channel the harnesses stand in for. There is no manifest here, so
-/// they take the first one — whichever RMT slot the block plan gives it.
-const HARNESS_INDEX: usize = 0;
+/// The harnesses drive one strip, so they publish the one-channel plan — the
+/// whole RMT RAM on slot 0, RX blocks absorbed, exactly what a one-channel
+/// board manifest gets from the app path. That makes every harness run a
+/// silicon check of the widened window, not just of the refill machinery.
+const HARNESS_DECLARED: usize = 1;
 
-/// RMT slot the harnesses drive. Index 0 owns memory under every block plan,
-/// so the `unwrap_or` is unreachable; it exists so a hand-edited plan degrades
-/// to slot 0 instead of failing to compile.
-const HARNESS_CHANNEL: u8 = match slot_for_index(HARNESS_INDEX) {
-    Some(slot) => slot,
-    None => 0,
-};
+/// RMT slot the harnesses drive. The one-channel plan always lands its single
+/// window on slot 0.
+const HARNESS_CHANNEL: u8 = 0;
 
 /// One WS2812 strip on RMT slot 0, for the hardware harnesses.
 pub struct LedChannel<'ch> {
@@ -89,13 +84,26 @@ impl<'ch> LedChannel<'ch> {
     where
         O: PeripheralOutput<'ch>,
     {
+        // One strip, one channel: publish the widest plan before anything is
+        // configured, exactly as the app driver would for a one-channel
+        // manifest. A prior identical publication (a harness re-creating its
+        // channel) is a no-op; a different one is a harness bug worth hearing
+        // about.
+        if let Some(plan) = plan_for_declared(HARNESS_DECLARED) {
+            if let Err(error) = TX_PLAN.init(plan) {
+                log::error!("LedChannel::new: block plan already published: {error:?}");
+            }
+        }
+        let window_words = TX_PLAN.window_words(HARNESS_CHANNEL, BLOCK_WORDS);
+
         // The app's boot line, in harness form: a capture should say which
-        // window the run was measured against, not just that it ran.
+        // window the run was measured against, not just that it ran. No
+        // `{:?}` — `-Zfmt-debug=none` formats Debug to nothing on this crate.
         log::info!(
-            "LedChannel::new: RMT slot {HARNESS_CHANNEL} of {USABLE_CHANNELS} usable, \
-             {num_leds} LEDs (blocks/channel={BLOCKS_PER_CHANNEL} slot_stride={SLOT_STRIDE} \
-             window_words={CHANNEL_WORDS} half_words={})",
-            CHANNEL_WORDS / 2,
+            "LedChannel::new: RMT slot {HARNESS_CHANNEL}, {num_leds} LEDs (blocks={} \
+             window_words={window_words} half_words={})",
+            TX_PLAN.blocks(HARNESS_CHANNEL),
+            window_words / 2,
         );
 
         install_isr(&mut rmt);
@@ -105,13 +113,13 @@ impl<'ch> LedChannel<'ch> {
             .with_idle_output(true)
             .with_idle_output_level(Level::Low)
             .with_carrier_modulation(false)
-            .with_memsize(BLOCKS_PER_CHANNEL);
+            .with_memsize(TX_PLAN.blocks(HARNESS_CHANNEL));
         let channel = rmt.channel0.configure_tx(&config)?.with_pin(pin);
 
         c6_rmt::enable_tx_interrupts(HARNESS_CHANNEL);
         // All-STOP until the first frame prefills the window, so a spurious
         // start transmits nothing.
-        c6_rmt::clear_ram(&TX_BLOCKS, HARNESS_CHANNEL);
+        c6_rmt::clear_ram(HARNESS_CHANNEL);
         if let Err(error) = DRIVER.configure_default_clock(HARNESS_CHANNEL, &ChannelTiming::WS2812)
         {
             log::error!("LedChannel::new: timing configuration failed: {error:?}");

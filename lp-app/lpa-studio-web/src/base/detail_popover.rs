@@ -148,6 +148,9 @@ pub enum DetailSectionTint {
     Error,
     /// Live/transient (blue) wash.
     Live,
+    /// **Debug** (D9): attention-orange + hazard stripes, the section wash
+    /// for transient-by-nature diagnostics territory.
+    Debug,
     /// Bound/bus-linked (violet) wash.
     Bound,
 }
@@ -178,6 +181,7 @@ pub fn detail_popover_section_class(tint: DetailSectionTint) -> &'static str {
         DetailSectionTint::Live => {
             "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-live-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
         }
+        DetailSectionTint::Debug => "lp-debug-detail-section",
         DetailSectionTint::Bound => {
             "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-bound-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
         }
@@ -208,6 +212,7 @@ fn detail_section_title_class(tint: DetailSectionTint) -> &'static str {
         DetailSectionTint::Live => {
             "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-live-foreground"
         }
+        DetailSectionTint::Debug => "tw:m-0 tw:text-xs tw:font-bold tw:uppercase lp-debug-title",
         DetailSectionTint::Bound => {
             "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-bound-foreground"
         }

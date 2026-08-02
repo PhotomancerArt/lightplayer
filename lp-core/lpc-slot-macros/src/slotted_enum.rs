@@ -127,6 +127,14 @@ pub(crate) fn derive_enum(
                         .as_ref()
                         .map_or_else(|| field_ident.to_string(), syn::LitStr::value);
                     validate_slot_name(&field_name, field_ident.span())?;
+                    // Variant payload fields are always local settings (see
+                    // the static shape below), so a `produced`/`state`
+                    // declaration here would be silently dropped. Reject it.
+                    attr::check_role_direction(
+                        field_attr.role,
+                        field_attr.direction,
+                        field_ident.span(),
+                    )?;
 
                     let field_ty = field.ty;
                     let shape = attr::field_shape_tokens(&field_attr.shape, &field_ty);
