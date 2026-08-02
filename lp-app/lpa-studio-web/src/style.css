@@ -1,9 +1,18 @@
 /*
+<<<<<<< Updated upstream
  * Bundled fonts (public/fonts/, see its README.md) so studio typography does
  * not depend on the viewer's OS — required for CI-canonical story baselines.
  * `font-display: block` keeps captures (and users) from ever painting a
  * fallback-font frame; the story capture harness additionally waits for
  * document.fonts to settle.
+=======
+ * Bundled fonts (public/fonts/, served verbatim like the codemirror vendor
+ * bundle) so typography does not depend on the viewer's OS — most users
+ * don't have Inter installed and were silently getting system-ui, and the
+ * story-PNG baselines require cross-platform rendering determinism.
+ * font-display: block — the app paints nothing text-critical before wasm
+ * boot anyway, and a fallback-font flash would flap story captures.
+>>>>>>> Stashed changes
  */
 @font-face {
     font-family: "Inter";
@@ -12,6 +21,10 @@
     font-display: block;
     src: url("/fonts/Inter-Regular.woff2") format("woff2");
 }
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 @font-face {
     font-family: "Inter";
     font-style: normal;
@@ -19,6 +32,10 @@
     font-display: block;
     src: url("/fonts/Inter-Medium.woff2") format("woff2");
 }
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 @font-face {
     font-family: "Inter";
     font-style: normal;
@@ -26,6 +43,10 @@
     font-display: block;
     src: url("/fonts/Inter-SemiBold.woff2") format("woff2");
 }
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 @font-face {
     font-family: "Inter";
     font-style: normal;
@@ -33,6 +54,10 @@
     font-display: block;
     src: url("/fonts/Inter-Bold.woff2") format("woff2");
 }
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 @font-face {
     font-family: "Inter";
     font-style: normal;
@@ -40,6 +65,10 @@
     font-display: block;
     src: url("/fonts/Inter-ExtraBold.woff2") format("woff2");
 }
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 @font-face {
     font-family: "JetBrains Mono";
     font-style: normal;
@@ -47,6 +76,7 @@
     font-display: block;
     src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
 }
+<<<<<<< Updated upstream
 @font-face {
     font-family: "JetBrains Mono";
     font-style: normal;
@@ -54,6 +84,9 @@
     font-display: block;
     src: url("/fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
 }
+=======
+
+>>>>>>> Stashed changes
 @font-face {
     font-family: "JetBrains Mono";
     font-style: normal;

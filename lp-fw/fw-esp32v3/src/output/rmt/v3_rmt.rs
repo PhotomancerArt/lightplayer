@@ -208,16 +208,19 @@ const TX_LIM_MAX: u16 = 0x1FF;
 
 /// Bit position of `chN_tx_end` in the `INT_*` registers: three bits per
 /// channel, interleaved by channel (see module docs).
+#[inline]
 pub(crate) const fn int_tx_end_bit(ch: u8) -> u32 {
     1u32 << (3 * ch)
 }
 
 /// Bit position of `chN_err` (combined TX/RX error) in the `INT_*` registers.
+#[inline]
 pub(crate) const fn int_err_bit(ch: u8) -> u32 {
     1u32 << (3 * ch + 2)
 }
 
 /// Bit position of `chN_tx_thr_event` in the `INT_*` registers.
+#[inline]
 pub(crate) const fn int_thr_bit(ch: u8) -> u32 {
     1u32 << (24 + ch)
 }

@@ -7,9 +7,15 @@ to native RISC-V code on the device itself.
 **Try it now at [lightplayer.app](https://lightplayer.app)** — the Studio runs entirely in your
 browser, and the built-in simulator means you don't need any hardware to start playing.
 
+<<<<<<< Updated upstream
 ![LightPlayer Studio — editing a show with live node previews, shader knobs, and the built-in simulator](lp-app/lpa-studio-web/story-images/studio__readme__studio-hero__lg.png)
 
 ![Studio home — the simulator and devices running projects, your library, and examples](lp-app/lpa-studio-web/story-images/studio__readme__home-gallery__lg.png)
+=======
+![LightPlayer Studio — project editing with live node cards](lp-app/lpa-studio-web/story-images/studio__layout__studio-pane__overview__lg.png)
+
+![Studio home — devices, projects, and examples](lp-app/lpa-studio-web/story-images/studio__home__home-gallery__populated__lg.png)
+>>>>>>> Stashed changes
 
 *Screenshots are CI-maintained UI captures from the story test suite — they update automatically
 as the app changes.*
@@ -25,8 +31,11 @@ as the app changes.*
 - **Self-contained, open projects.** A project is a folder of JSON and GLSL files. Open format,
   AGPL-licensed platform.
 
+<<<<<<< Updated upstream
 ![Node cards — playlist, shader, and fixture with live previews](lp-app/lpa-studio-web/story-images/studio__readme__node-cards__lg.png)
 
+=======
+>>>>>>> Stashed changes
 # Status: alpha
 
 LightPlayer is in **alpha**. A determined tester can get real value today: author GLSL effects in
@@ -110,7 +119,11 @@ For an empty flash and firmware only (no project push), use `just demo-esp32c6-s
    - `just fci-glsl` - Fix, check, build, and test the GLSL compiler.
 
 See `just --list` for all available commands, and [`docs/development.md`](docs/development.md) for
+<<<<<<< Updated upstream
 deeper workflows: board manifests, schema generation, GPIO calibration, and on-hardware
+=======
+deeper workflows: hardware manifests, schema generation, GPIO calibration, and on-hardware
+>>>>>>> Stashed changes
 firmware tests.
 
 # Repository Structure
@@ -118,6 +131,7 @@ firmware tests.
 - **`lp-app/`** Browser Studio (Dioxus + WASM): studio UI, server/client, device link, OPFS
   filesystem, browser firmware host
 - **`lp-core/`** Platform core (`lpc-*` crates): rendering engine, data model, wire protocol,
+<<<<<<< Updated upstream
   registry, board manifests
 - **`lp-shader/`** GLSL compiler: frontend (via naga), LightPlayer IR, backends (native RV32 JIT,
   Cranelift, WASM), Q16.16 fixed-point math, and the filetest suite — see
@@ -133,6 +147,21 @@ firmware tests.
 - **`lp-base/`** Foundation crates: collections, filesystem, performance, recovery
 - **`examples/`** Example LightPlayer projects
 - **`schemas/`** Generated JSON Schemas for project/node/board files
+=======
+  registry, hardware manifests
+- **`lp-shader/`** GLSL compiler: frontend (via naga), LightPlayer IR, backends (native RV32 JIT,
+  Cranelift, WASM), Q16.16 fixed-point math, and the filetest suite — see
+  [`lp-shader/README.md`](lp-shader/README.md)
+- **`lp-fw/`** Firmware: ESP32-C6 (`fw-esp32`), emulator firmware (`fw-emu`), browser worker
+  (`fw-browser`), integration tests (`fw-tests`)
+- **`lp-gfx/`** GPU rendering layer (wgpu) used for Studio previews
+- **`lp-riscv/`** RISC-V 32-bit emulator, instruction encoding/decoding, and ELF tooling
+- **`lp-cli/`** Developer CLI (projects, dev server, hardware manifests, GPIO calibration); runs
+  from a source checkout
+- **`lp-base/`** Foundation crates: collections, filesystem, performance, recovery
+- **`examples/`** Example LightPlayer projects
+- **`schemas/`** Generated JSON Schemas for project/node/hardware files
+>>>>>>> Stashed changes
 - **`docs/`** Documentation, ADRs, and design notes
 - **`scripts/`** Build scripts and development utilities
 - **`third_party/`** Vendored forks (naga, and friends)
