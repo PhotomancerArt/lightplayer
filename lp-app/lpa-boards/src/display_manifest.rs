@@ -195,7 +195,7 @@ pub struct DrawnTerminal {
     pub caps: Vec<PinCap>,
 }
 
-/// One header pin on a left/right rail.
+/// One pin on a left/right rail.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct DrawnPin {
@@ -204,8 +204,32 @@ pub struct DrawnPin {
     pub role: PinRole,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpio: Option<u8>,
+    /// The pin's physical connector. Header/solder pads are the default;
+    /// screw terminals (DIN-rail controllers like the DOM-Z-102) draw as a
+    /// square block with a screw head.
+    #[serde(default, skip_serializing_if = "PadStyle::is_default")]
+    pub pad_style: PadStyle,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub caps: Vec<PinCap>,
+}
+
+/// How a rail pin physically presents on the board.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum PadStyle {
+    /// Header pin / solder pad.
+    #[default]
+    Pad,
+    /// Screw terminal.
+    Screw,
+}
+
+impl PadStyle {
+    /// serde skip helper: the default style is omitted from sidecars.
+    fn is_default(&self) -> bool {
+        *self == Self::Pad
+    }
 }
 
 /// Pin role: drives pad/label color and output eligibility.
@@ -403,6 +427,7 @@ mod tests {
                     label: "4".into(),
                     role: PinRole::Io,
                     gpio: Some(4),
+                    pad_style: PadStyle::Pad,
                     caps: vec![],
                 }],
                 right: vec![],

@@ -1,6 +1,13 @@
 //! Xtensa (ESP32-S3 / LX7, LX6-compatible) forward emitter:
 //! VInst + AllocOutput → machine code bytes.
 //!
+//! **The integer half.** Floating-point VInsts are emitted by the sibling
+//! [`super::emit_fp`] (behind `float-f32`), which this module dispatches to;
+//! that module also owns the FR/BR conventions — 15 allocatable FRs with `f15`
+//! as scratch, and `b0` fused into every compare so the allocator never sees a
+//! Boolean register. Floats reach and leave a function in **address**
+//! registers, so the layout contract below is unchanged by their existence.
+//!
 //! Ported from the experiment repo's `xt-mini-emit/src/emit.rs` (hardware-
 //! proven on S3 silicon, LX6-conformance-verified) onto the exact interface of
 //! [`crate::isa::rv32::emit`]. Original Photomancer code; machine encodings are

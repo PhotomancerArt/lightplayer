@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server"]
+default = ["esp32s3", "server", "float-f32"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -34,6 +34,7 @@ server = [
     "dep:lpc-hardware",
     "dep:lpfs",
     "dep:lpc-wire",
+    "dep:lpc-model",
 ]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
@@ -44,6 +45,33 @@ server = [
 # feature: it decorates the app path rather than replacing it, so a frame-dump
 # build is the real firmware plus a transcript.
 frame-dump = []
+
+# Hardware float. This is the board that has an FPU, so this is the board that
+# gets `FloatMode::F32` compiled in — the whole point of M7.
+#
+# Every reference is **weak** (`dep?/feat`): `lpvm-native`, `lps-builtins` and
+# `lp-gfx-lpvm` are all optional here, and a strong reference would enable the
+# dependency itself, dragging the JIT stack into builds that deliberately do
+# not have it. So this says "if that crate is in this build, turn its f32 on",
+# which is exactly the intent — the harness path reaches the first two
+# directly, the app path reaches all three through `server`.
+#
+# On by default. The ESP32-C6 has no such feature and names nothing: it has no
+# FPU and its image must not grow by a backend it never enters (f32 roadmap
+# D2). The C6's byte-identical image size across this change is the proof that
+# the gate does not leak, and it is checked, not asserted — see
+# `just fw-esp32c6-size-check`.
+#
+# Note what this does *not* do: it links the capability, it does not select the
+# mode. Compiled shaders on the app path are still Q32 until the project-level
+# `float_mode` slot (M2) is plumbed through to the device graphics backend,
+# which is later work. `CPENABLE` is armed regardless — see
+# `board::esp32s3::fpu`.
+float-f32 = [
+    "lpvm-native?/float-f32",
+    "lps-builtins?/float-f32",
+    "lp-gfx-lpvm?/float-f32",
+]
 
 # Hardware harnesses. Any `test_*` feature makes build.rs set the `fw_harness`
 # cfg, which replaces the (future) app entrypoint with a harness — mirroring
@@ -140,6 +168,7 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 # `fw_esp32_common::serial::server_msg`. The `ser-write-json` sink itself moved
 # down with that module, so this crate no longer names the serializer.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 
 # Chip-generic firmware layer: logger, time provider, output provider, the
 # chunked serial writer, and — behind `server` — the server loop, transport,

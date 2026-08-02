@@ -115,6 +115,10 @@ pub struct UiModelOption {
     /// Human-readable name when the provider supplies one (the option's
     /// text; the id renders otherwise).
     pub label: Option<String>,
+    /// The published facts that put this option where it is — its coding
+    /// score and rates, when the provider publishes them (`code 78 · $5/$25`).
+    /// Rendered after the name so the ordering explains itself.
+    pub detail: Option<String>,
 }
 
 /// Mask an API key for display: enough of the tail to recognize which key

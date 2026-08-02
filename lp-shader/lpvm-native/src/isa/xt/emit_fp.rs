@@ -730,21 +730,23 @@ mod tests {
         assert_eq!(got, bits(-0.0), "-1.0 * 0.0 is -0.0, not +0.0");
     }
 
-    /// **Awaiting M6-P6.** NaN *propagation through arithmetic* is a
-    /// deliberately-unresolved `lp-xt-emu` policy field (`nan_propagation`,
-    /// vector family F2): the emulator panics rather than inventing which
-    /// payload an `add.s` returns, because nothing has measured it on silicon.
-    /// That is M6's design, not a defect here, and this test is left in place
-    /// and marked rather than weakened — un-ignore it when the campaign closes
-    /// the field.
+    /// NaN survives arithmetic.
     ///
-    /// The NaN behaviors M7 *can* assert today are all here already and all
-    /// pass: the compare predicates
-    /// (`fcmp_is_correct_when_an_operand_is_nan`) and the sign-bit ops'
-    /// payload preservation (`fabs_and_fneg_are_sign_bit_operations`), neither
-    /// of which reads the policy.
+    /// This was `#[ignore]`d while `lp-xt-emu`'s `nan_propagation` policy field
+    /// was deliberately unresolved: the emulator panicked rather than invent
+    /// which payload an `add.s` returns, because nothing had measured it on
+    /// silicon. **M6-P6 closed the field** — vector family F2's 540 propagation
+    /// rows all show the *last* NaN operand surviving with the quiet bit forced
+    /// and the payload preserved (`NanRule::LastOperandQuieted`), recorded in
+    /// `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` — so the test runs.
+    ///
+    /// It asserts only "still a NaN", which is `float.md`'s *Unspecified* class
+    /// being respected: the exact payload out of `add.s` is a measured fact
+    /// about this silicon rather than a promise, and pinning it here would
+    /// turn a Target-defined behaviour into a contract M7 never made. The
+    /// payload rule itself is pinned where it belongs, in `lp-xt-emu`'s policy
+    /// against the campaign data.
     #[test]
-    #[ignore = "awaiting M6-P6: lp-xt-emu's nan_propagation policy field is unresolved"]
     fn arithmetic_propagates_nan() {
         let e = binop_code(FAluOp::Add);
         let got = run_f(&e.code, &[bits(f32::NAN), bits(1.0)]);

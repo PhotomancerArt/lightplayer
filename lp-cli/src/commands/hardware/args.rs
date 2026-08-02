@@ -10,10 +10,38 @@ pub struct HardwareCli {
 
 #[derive(Debug, Subcommand)]
 pub enum HardwareSubcommand {
+    /// List attached serial hardware; `--probe` identifies ESP32 chips.
+    List(ListArgs),
     /// Manage checked-in board manifests.
     Manifest(ManifestArgs),
     /// Calibrate board-visible GPIO labels with ESP32 firmware.
     Calibrate(CalibrateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ListArgs {
+    /// Identify the chip on each port via the espflash handshake. Resets
+    /// idle boards (bootloader, then back into the app); busy ports are
+    /// reported, not reset. Each port gets a hard timeout.
+    #[arg(long)]
+    pub probe: bool,
+
+    /// Only show boards whose probed chip matches (implies --probe).
+    /// Exits nonzero when nothing matches.
+    #[arg(long)]
+    pub chip: Option<String>,
+
+    /// Show every serial port, not just USB devices.
+    #[arg(long)]
+    pub all: bool,
+
+    /// Per-port probe timeout in seconds.
+    #[arg(long, default_value_t = 10)]
+    pub probe_timeout_secs: u64,
+
+    /// Emit JSON instead of a table.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

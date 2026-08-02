@@ -101,12 +101,19 @@ Do NOT disable the compiler. The compiler is the product.
 - **Default server/engine builds include the full compiler pipeline.** Optional
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
   test builds), not for *adding* the compiler.
-- **`float-f32`** (`lpvm-native`, `lps-builtins`) enables IEEE-754 f32 shader
-  math alongside Q16.16. Off by default: `FloatMode` is matched on a *runtime*
-  value, so LTO cannot drop the f32 arms, and the shipping ESP32-C6 runs
-  Fixed-mode shaders only. The one device configuration that turns it on is
-  `fw-esp32c6`'s `test_f32_softfloat` harness — a test build, never product
-  firmware. See `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+- **`float-f32`** (`lpvm-native`, `lps-builtins`, `lp-gfx-lpvm`) enables
+  IEEE-754 f32 shader math alongside Q16.16. Off so a **Fixed-only device image
+  links none of the f32 family**: `FloatMode` is matched on a *runtime* value,
+  so LTO cannot drop the f32 arms, and the shipping ESP32-C6 has no FPU and runs
+  Fixed-mode shaders only — its image size is byte-identical with the feature in
+  the tree, which is the check that proves the gate holds. **`fw-esp32s3` turns
+  it on in `default`** (the LX7 has a real FPU and executes f32 natively);
+  `fw-esp32c6`'s `test_f32_softfloat` is a soft-float *test* build, never
+  product firmware. A firmware crate's references must be **weak**
+  (`lpvm-native?/float-f32`) — the deps are optional there, and a strong
+  reference would enable the dependency itself. See
+  `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md` and
+  `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
 
 > **Gating the crate that *uses* a table does not gate the crate that *holds*
 > it.** `lps-builtin-ids` is linked by every firmware image and is not behind
@@ -517,7 +524,8 @@ If pushes to a PR branch suddenly create **no CI runs at all**, check
 baseline PNG conflict with main is blocking the merge ref and GitHub silently
 skips `pull_request` runs. Merge `main`, resolving every conflicted PNG by
 taking **main's bytes** (if main's copy is stale, the next capture re-drifts
-and the bot fixes it), then push.
+and the bot fixes it), then push. A modify/delete conflict means main *retired*
+that baseline — take the deletion.
 
 For local interactive review, capture scratch PNGs — optionally filtered to a
 story-id substring so small subsets are cheap:
@@ -535,6 +543,36 @@ with `cargo install oxipng` / `brew install oxipng`.
 Do not add an auto-mutating Git hook for this workflow unless the user asks for
 one explicitly. Hooks that rewrite the working tree during commit are annoying
 during rebases, merges, and partial commits.
+
+## Finding attached hardware
+
+One resolver, two commands — do not hand-roll port globs or `espflash
+board-info` loops (both idioms have flashed the wrong board or hung on a
+wedged port before; the resolver probes with per-port timeouts instead):
+
+```bash
+just hardware-list                  # passive: never opens a port, cannot hang
+just hardware-list --probe          # identify chips (resets idle boards)
+just hardware-list --chip esp32s3   # only boards probing as that chip; --json to script
+cargo run -q -p lp-cli -- fwcheck port --chip esp32c6   # resolve exactly one port
+```
+
+Overrides, in precedence order: an explicit `--port`, then `ESPFLASH_PORT`,
+then `LP_CHIP` as the default chip filter. All the `just` firmware recipes
+already resolve through `fwcheck port`, so exporting `ESPFLASH_PORT` (or
+`LP_CHIP`) steers every one of them.
+
+Rules of the desk:
+
+- **Never auto-pick the first port.** With several boards attached the
+  resolver bails or probes; a script that grabs `candidates[0]` will
+  eventually flash the wrong board.
+- Probing is **active**: it resets idle boards into the bootloader and back.
+  Don't probe while another session is mid-flash or holding a bench state;
+  busy ports fail the open and are reported rather than reset.
+- Passive listing can't tell an S3 from a C6 — Espressif native USB shares
+  one PID (`303a:1001`). The USB serial number (the MAC) does distinguish
+  individual boards; chip identity needs `--probe`.
 
 ## Validation Commands
 
@@ -620,3 +658,26 @@ needs no browser and keeps a second architecture compiling the tree.
 
 The production target is RV32 (`lpvm-native`); the host-side path runs
 through `lpvm-wasm` (wasmtime) per M4b.
+
+## Waiting on CI and PRs
+
+Never write a foreground `sleep && gh pr view` loop. Waiting is a background
+task with a notification, not a poll you babysit:
+
+```bash
+just watch-pr            # current branch's PR: watch checks, exit 0 green / 1 failed
+just watch-pr 123        # a specific PR
+just watch-pr --merged 123   # wait for a dependency PR to merge
+```
+
+Run it via a background shell task (`run_in_background`), which re-invokes
+you when it exits — that's the whole waiting story. For conditions the
+script doesn't cover, poll `gh pr view --json ...` from a background/Monitor
+loop, or arm `gh pr merge --auto` so GitHub does the waiting.
+
+If CI looks silent, don't wait harder — `scripts/watch-pr.sh` times out its
+registration phase and names the three legitimate no-checks causes in this
+repo: path-filtered CI (no job matches the diff), a stacked PR (bases other
+than main get **no CI** until retargeted), and pushes made with
+`GITHUB_TOKEN` (e.g. the story-baseline auto-commit), which never trigger
+workflows.

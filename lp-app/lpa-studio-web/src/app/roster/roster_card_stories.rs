@@ -18,9 +18,9 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase, DegradedReason,
-    DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel,
-    UiLogOrigin, UiLogSource,
+    BootloaderEntryFlow, BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase,
+    DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiLogSource,
 };
 use lpc_wire::FwProvenance;
 
@@ -212,6 +212,130 @@ fn troubleshoot_sheet_open() -> Element {
             DeviceCard {
                 card: UiDeviceCard {
                     ui: opened(DeviceCardTab::Status, Some(CardSheet::Troubleshoot)),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Amber filled edge: the chip is sitting in ROM download mode. Split out of Ready-to-set-up 2026-07-31 after a bench report — the two were collapsed, so Studio detected download mode and then discarded the fact, showing the blank-board flow instead. The load-bearing difference: a device flashed from here does NOT boot the new firmware on its own; it has to be physically replugged."
+)]
+fn recovery_mode() -> Element {
+    sheet(vec![card(RosterCardState::RecoveryMode, false)])
+}
+
+#[story(
+    description = "Bootloader-entry, step 1 (M5): the ritual for a chip Studio KNOWS — the card's firmware provenance named it, so the steps are specific. Every sequence starts by unplugging: the boot strap is sampled at reset, so holding BOOT on a running board does nothing."
+)]
+fn bootloader_entry_instructing() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(Some(
+                            "fw-esp32c6",
+                        )))),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry for an UNKNOWN device (M5): Studio never reached this board, so it cannot name the chip. Generic steps, hedged button name, and an explicit admission that they may not match — an unhedged wrong instruction reads as a dead device."
+)]
+fn bootloader_entry_generic() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(None))),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry, waiting (M5): the user has done the steps. Nothing is probed in this state — the probe reboots the device, so it fires only on a re-enumeration, which the ritual's replug already provides."
+)]
+fn bootloader_entry_waiting() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(
+                            BootloaderEntryFlow::start(Some("fw-esp32c6")).begin_waiting(),
+                        )),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry, CONFIRMED (M5): the payoff, and the reason this flow exists. Without it a failed attempt and a dead board look identical, so people repeat the wrong motion and conclude the device is bricked."
+)]
+fn bootloader_entry_confirmed() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(
+                            BootloaderEntryFlow::start(Some("fw-esp32c6"))
+                                .begin_waiting()
+                                .on_probe_answered(Some("ESP32-C6".to_string())),
+                        )),
+                    ),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "Bootloader-entry, not-yet (M5): the probe went unanswered. Deliberately NOT 'your device is broken' — an app-mode device ignores the handshake too, so the honest reading is that the attempt did not land."
+)]
+fn bootloader_entry_not_yet() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: opened(
+                        DeviceCardTab::Status,
+                        Some(CardSheet::BootloaderEntry(
+                            BootloaderEntryFlow::start(Some("fw-esp32c6"))
+                                .begin_waiting()
+                                .on_probe_unanswered(),
+                        )),
+                    ),
                     ..device_card(RosterCardState::NotResponding, false)
                 },
                 now_secs: Some(STORY_NOW),
@@ -636,6 +760,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
             name: "porch-sign".to_string(),
         }),
         fw: None,
+        safe_clamp: None,
         sim: false,
         console_tail: Vec::new(),
         ui: Default::default(),
@@ -660,6 +785,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
             name: "porch-sign".to_string(),
         }),
         fw: None,
+        safe_clamp: None,
         sim: true,
         console_tail: Vec::new(),
         ui: Default::default(),

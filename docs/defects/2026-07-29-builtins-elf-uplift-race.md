@@ -4,7 +4,7 @@ found: 2026-07-29      # how: live-debugging (intermittent local `just test`)
 fixed: this change
 area: justfile `test` + lp-shader/lpvm-cranelift/build.rs (rv32 builtins ELF)
 class: unsynchronized-shared-artifact
-related: []
+related: [2026-08-01-xt-builtins-image-strands-just-test.md]  # the Xtensa twin: reader half ported, builder half not
 ---
 # Parallel `just test` raced the builtins ELF uplift
 
