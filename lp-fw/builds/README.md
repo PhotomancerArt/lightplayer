@@ -50,4 +50,3 @@ schemaVersion 2). Only **esp32c6-4mb** is copied into the Studio site /
 Pages artifact today; `esp32s3-8mb` packages correctly but nothing serves it
 yet (the provisioning picker gains per-build selection in roadmap M5).
 
-TODO: add `esp32v3-4mb` when `fw-esp32v3` lands (PR #239).
