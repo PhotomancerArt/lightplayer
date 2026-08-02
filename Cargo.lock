@@ -4007,6 +4007,7 @@ dependencies = [
  "lp-ws281x",
  "lpa-server",
  "lpc-hardware",
+ "lpc-model",
  "lpc-shared",
  "lpc-wire",
  "lpfs",

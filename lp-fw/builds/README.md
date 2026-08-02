@@ -66,4 +66,3 @@ manifest — so **two build defs sharing a `package` must share
 `cargoFeatures`** (a test enforces it); the day they need to differ, the
 fixtures must go per build rather than per package.
 
-TODO: add `esp32v3-4mb` when `fw-esp32v3` lands (PR #239).
