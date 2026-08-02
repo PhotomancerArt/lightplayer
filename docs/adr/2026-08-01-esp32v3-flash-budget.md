@@ -182,10 +182,30 @@ Measured on the desk DOM-Z-102, boot green, `safeMode=false`:
 | `quad-strips-v3` running | 18,128 B free | **74,720 B free** |
 
 The +65,056 at idle is the +65,536 region minus the second region's allocator
-bookkeeping. ⚠️ The `quad-strips-v3` row is **not** a clean +/- comparison:
-`used` came out ~9 KB above the 94,508 B recorded earlier for that project, for
-reasons unrelated to this change (which only *adds* heap). Quote the idle row
-for the reclaim figure.
+bookkeeping. **Quote the idle row for the reclaim figure** — it is the only
+clean +/- comparison here.
+
+⚠️ **The loaded row is not, and the reason is worth recording: the ADR's own
+94,508 B figure is stale relative to `main`.** Three measurements of
+`quad-strips-v3` loaded, `used` bytes:
+
+| measurement | arena | used |
+|---|---|---|
+| the 94,508 B row above (older `main`) | 112,640 B | 94,508 B |
+| PR #285's, on `main` @ `e2272d0f8` | 112,640 B | 98,244 B |
+| this change | 178,176 B | 103,456 B |
+
+The middle row is the one that settles it: it is +3,736 B over the recorded
+figure on the **unchanged** arena, taken with a change that only *subtracts*
+heap use. So the loaded cost has grown in `main` independently of both PRs, and
+the ~9 KB seen here is that drift measured from a newer `main` (plus whatever a
+different fragmentation regime contributes at 178,176 B) — not a cost of the
+reclaim, which only adds heap and cannot raise `used`.
+
+Recorded as three regimes rather than absorbed into either PR's narrative. It
+deserves a bisect of its own; neither PR owns it, and `used` figures taken
+before and after this change are not comparable in any case, because they are
+measuring different heaps.
 
 This does not cost `.stack` anything — that is the point. The 64 KiB comes from
 a segment `.stack` never had access to, so the "as high as it links" ceiling
@@ -200,21 +220,44 @@ compile working set (below), so a 17 KB one cannot compile at any region size.
 The code region was never the binding constraint for those shaders; the heap
 was, and this trade moves 64 KiB to the side that binds.
 
-⚠️ **That last argument is the one thing here with a moving dependency.** It
-rests on the ~65 KB compile working set, and PR #284 shrinks that figure:
-`ChunkedVec` was bounding chunks in *elements* (64), so a 96-byte `HirExpr`
-gave 6,144 B chunks with a 9,216 B peak across the doubling step; at
-`CHUNK_BYTES = 1024` those become 960 B and 1,440 B. If the transient falls far
-enough that a 17 KB-GLSL shader becomes compilable, then for *that* shader the
-32 KiB region really would be the binding constraint, and this paragraph would
-need revisiting rather than merely re-baselining.
+**That argument was checked rather than assumed, and it holds with room.** It
+rested on the ~65 KB compile working set, which PR #284 shrinks — so the
+question was whether a 17 KB-GLSL shader might become compilable, in which case
+the 32 KiB region *would* genuinely bind for it. Measured on the host
+(`spikes/glsl-compile-working-set`, counting a `#[global_allocator]` over a real
+`lps_glsl::compile`), peak heap scales linearly with source at ~38 B per byte
+of GLSL:
 
-Two reasons not to treat that as urgent: the corpus guard in
-`tests/xt_classic_codemem_corpus.rs` fails on the host the moment a real shader
-outgrows the region, so the failure mode is a red CI rather than a surprise on
-a board; and the reclaim's *value* argument only strengthens as the transient
-shrinks (less transient plus more heap). Re-derive the ~65 KB with #284 in
-before quoting it again.
+| GLSL | peak heap | largest single allocation |
+|---|---|---|
+| 4,092 B (`examples/basic`) | 156,972 B | 24,576 B |
+| 17,714 B (synthetic) | 1,680,167 B | **196,608 B** |
+
+The decisive figure needs no host-vs-device caveat: at 17 KB of GLSL the
+**single largest allocation alone is 196,608 B**, which exceeds even the
+two-region 178,176 B heap — before counting anything else. A 17 KB shader
+cannot be *lexed* on this chip, let alone compiled, at any region size. The
+paragraph above is if anything understated, and #284 does not move it, because
+the dominant term was never `ChunkedVec`.
+
+### ⚠️ The compiler's largest single allocation is the lexer's token vector
+
+Measured in the same pass, and the more useful finding: `lps_glsl::lex` alone
+accounts for the whole 24,576 B peak allocation — a plain doubling
+`Vec<Token>`, not chunked at all. `Token` is **12 bytes on `riscv32imac` and
+on the 64-bit host alike**, so unlike the peak-heap figures this transfers to
+the device unchanged.
+
+That means compiling `examples/basic` asks the classic's allocator for a single
+**24,576 B contiguous block — 22 % of the old 112,640 B arena, and 8× the
+3,072 B request whose failure was originally diagnosed as the OOM**. The
+`ChunkedVec` backtrace named what happened to fail, not what was largest.
+
+This does not change the reclaim argument, but it is the allocation the
+reclaimed 64 KiB actually has to accommodate, and it is a *contiguous* one — so
+it is also the case where "two regions cannot serve one allocation spanning
+both" bites. Chunking the token vector, or lexing on demand, is the next RAM
+lever on this chip.
 
 Verified on silicon: the JIT arena's span accounting closes exactly across a
 project swap (`allocs=2 frees=1 spans=1 used=2032`, `largest_free` back to
@@ -280,6 +323,15 @@ this chip has.
 > stands, but nobody has run 400 LEDs on the two-region image yet. Do not quote
 > a new LED number for a product claim until someone does; measure and replace
 > this paragraph.
+>
+> ⚠️ The division also assumes the per-LED allocations are individually small
+> enough to land in whichever region has room. **A second region cannot serve a
+> single allocation spanning both**, so any one contiguous buffer that scales
+> with LED count is bounded by the larger region, not by the 178,176 B total.
+> `largest_free` is the figure to watch, not `free`. (The compiler already has
+> such an allocation — the 24,576 B token vector above.) PR #285's per-LED
+> attribution is the place to check whether any per-LED cost is one big buffer
+> rather than many small ones; if it is, this arithmetic does not apply.
 >
 > The more important consequence is the **other** axis. The binding constraint
 > was never LED count alone but LED count × shader size, via the ~65 KB compile
