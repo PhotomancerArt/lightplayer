@@ -89,10 +89,15 @@ Three separable steps, cheapest first:
   recorded in the flash-budget ADR as "unattributed and the single most
   valuable RAM lead this chip has", and was believed to scale with `render_size`.
   It does not, on the direct-sampling path: it scales with mapped lamp count.
-  The `render_size`-sized allocations (`precomputed: Vec<PixelMappingEntry>` at
-  4 B per canvas pixel, plus a W×H×8 B RGBA16 render target per fixture) are on
-  the `TextureArea` sampling path, which the measured projects do not use. That
-  path remains a genuine multiplier and is unmeasured.
+- **2026-08-02** — the `render_size` multiplier measured separately, on the
+  `TextureArea` path (`examples/fast`, 16×16 canvas, **one** lamp): 1,024 B of
+  `PixelMappingEntry` (4 B/canvas pixel) + 2,048 B of RGBA16 render target
+  (8 B/canvas pixel) = **3,072 B per fixture for a single LED**, i.e. 12 B per
+  canvas pixel *independent of lamp count*. 34× what a direct-sampled LED costs.
+  Only `examples/fast` uses this path today, so it contributes nothing to the
+  89.5 B/LED figure — but nothing in the authoring surface tells an author that
+  widening `render_size` on a texture-area fixture is a RAM decision. Worth its
+  own entry if that path ever ships.
 - **2026-08-02** — 13 B/LED of the 89.5 paid down in #282 (conditional
   `DisplayPipeline` buffers, 9; `direct_points` right-sizing, 4). The three
   steps above are what remains.

@@ -24,9 +24,18 @@ use lpfs::LpFs;
 fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {
     if let Some(f) = memory_stats {
         if let Some((free, used)) = f() {
+            // Bytes as well as KB, deliberately. The `load_project` and
+            // `stop_all_projects` before/after pairs are the cheapest bracket
+            // we have on what a project costs, and the classic ESP32's per-LED
+            // figure — which its advertised LED ceiling is derived from — comes
+            // from differencing two such brackets. At KB granularity that
+            // difference carries ±8 B/LED of rounding, enough to hide a whole
+            // optimisation. See `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
             log::info!(
-                "[mem] {}: {}k free / {}k used",
+                "[mem] {}: {} B free / {} B used ({}k / {}k)",
                 label,
+                free,
+                used,
                 free / 1024,
                 used / 1024
             );
