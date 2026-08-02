@@ -19,6 +19,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::UiAction;
 
 use crate::base::{IconMenuButton, IconMenuTone, LogoMark, StudioIconName};
+use crate::router::StudioRoute;
 
 /// Which nav tab renders as the current section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +43,35 @@ pub fn SiteChrome(
     on_action: Option<EventHandler<UiAction>>,
     children: Element,
 ) -> Element {
+    // Standalone pages (no `on_action`) have no studio route listener, so
+    // the chrome owns leaving its own section: any hash change that lands
+    // outside this section hard-reloads (standalone pages and the studio
+    // app all mount on fresh page loads). Guarded on the CURRENT route
+    // actually being this section so a story-book mount never installs a
+    // reload listener into the book's own hash navigation.
+    #[cfg(target_arch = "wasm32")]
+    use_hook(move || {
+        if on_action.is_some() || route_section(&crate::router::current_route()) != Some(section) {
+            return;
+        }
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen::closure::Closure;
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let hash = web_sys::window()
+                .map(|window| window.location().hash().unwrap_or_default())
+                .unwrap_or_default();
+            if route_section(&StudioRoute::parse(&hash)) != Some(section) {
+                crate::router::hard_reload();
+            }
+        });
+        if let Some(window) = web_sys::window() {
+            let _ = window
+                .add_event_listener_with_callback("hashchange", closure.as_ref().unchecked_ref());
+        }
+        // The page lives until its own reload; leak the handler with it.
+        closure.forget();
+    });
+
     rsx! {
         header { class: "tw:mb-[18px] tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
             // Brand lockup — inert by design (see module docs).
@@ -76,6 +106,17 @@ pub fn SiteChrome(
                 ToolsMenu {}
             }
         }
+    }
+}
+
+/// The section a route belongs to, for the standalone leave-section
+/// reload. Tools (mapping/board editor), stories, and every studio-app
+/// route are `None` — always "outside" a standalone section.
+fn route_section(route: &StudioRoute) -> Option<SiteSection> {
+    match route {
+        StudioRoute::Boards { .. } => Some(SiteSection::Boards),
+        StudioRoute::Docs { .. } => Some(SiteSection::Docs),
+        _ => None,
     }
 }
 

@@ -95,7 +95,10 @@ pub fn App() -> Element {
         return rsx! {
             style { "{STYLE}" }
             document::Stylesheet { href: asset!("/assets/tailwind.css") }
-            crate::app::DocsPage { initial_page: page }
+            main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
+                crate::app::layout::SiteChrome { section: crate::app::layout::SiteSection::Docs }
+                crate::app::DocsPage { initial_page: page }
+            }
         };
     }
 
@@ -106,6 +109,11 @@ pub fn App() -> Element {
         return rsx! {
             style { "{STYLE}" }
             document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            // The chrome sits in the studio-width container; the catalog
+            // keeps its own narrower `.lpb-cat-page` container below it.
+            div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pt-[18px]",
+                crate::app::layout::SiteChrome { section: crate::app::layout::SiteSection::Boards }
+            }
             lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
         };
     }
