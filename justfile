@@ -21,8 +21,11 @@ fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 # defaults it to 4MB, and the bootloader validates the partition table against
 # that header — not against the physical chip. Omit it and a board with 16 MB
 # soldered on still boot-loops with "partition N invalid ... exceeds flash chip
-# size 0x400000". The same value is duplicated in
-# lp-fw/fw-esp32s3/.cargo/config.toml's runner, which cannot read this var.
+# size 0x400000".
+#
+# CANONICAL SOURCE: lp-fw/builds/esp32s3-8mb.json (`flashSizeMb`). This var and
+# lp-fw/fw-esp32s3/.cargo/config.toml's runner are mirrors — neither can read a
+# JSON file — and `cargo test -p lp-cli` fails if either drifts from the def.
 s3_flash_size := "8mb"
 
 # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) also builds on Espressif's Rust
@@ -43,6 +46,11 @@ fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 v3_flash_size := "4mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
+
+# The one firmware build the Studio site serves (lp-fw/builds/<id>.json). The
+# browser provisioning picker gains per-build selection in roadmap M5; until
+# then this names the single `firmware/<id>/` directory that ships.
+studio_firmware_build := "esp32c6-4mb"
 
 # Default recipe - show available commands
 default:
@@ -299,14 +307,14 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
     cp "${sidecar_dir}/fw_browser_bg.wasm" "{{ out_dir }}/pkg/fw_browser_bg.wasm"
 
     if [[ "{{ include_firmware }}" == "true" ]]; then
-        firmware_dir="{{ studio_assets_dir }}/firmware/esp32c6"
+        firmware_dir="{{ studio_assets_dir }}/firmware/{{ studio_firmware_build }}"
         if [[ ! -f "${firmware_dir}/manifest.json" ]]; then
             echo "missing Studio firmware assets in ${firmware_dir}" >&2
             exit 1
         fi
-        mkdir -p "{{ out_dir }}/firmware/esp32c6"
-        cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/esp32c6/manifest.json"
-        cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/esp32c6/"
+        mkdir -p "{{ out_dir }}/firmware/{{ studio_firmware_build }}"
+        cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/{{ studio_firmware_build }}/manifest.json"
+        cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/{{ studio_firmware_build }}/"
     fi
 
 studio-web-dev-build: install-wasm32-target studio-firmware-package-esp32c6
@@ -397,15 +405,15 @@ studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
     public_dir="target/dx/lpa-studio-web/debug/web/public"
     sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
-    firmware_dir="{{ studio_assets_dir }}/firmware/esp32c6"
+    firmware_dir="{{ studio_assets_dir }}/firmware/{{ studio_firmware_build }}"
     sync_generated_assets() {
         [[ -d "${public_dir}" ]] || return 0
         mkdir -p "${public_dir}/pkg"
         cp "${sidecar_dir}/fw_browser.js" "${public_dir}/pkg/fw_browser.js"
         cp "${sidecar_dir}/fw_browser_bg.wasm" "${public_dir}/pkg/fw_browser_bg.wasm"
-        mkdir -p "${public_dir}/firmware/esp32c6"
-        cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/esp32c6/manifest.json"
-        cp "${firmware_dir}"/*.bin "${public_dir}/firmware/esp32c6/"
+        mkdir -p "${public_dir}/firmware/{{ studio_firmware_build }}"
+        cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/{{ studio_firmware_build }}/manifest.json"
+        cp "${firmware_dir}"/*.bin "${public_dir}/firmware/{{ studio_firmware_build }}/"
         # Host settings layer (P4): machine-level settings become the app's
         # dev-settings.json (fetched at boot; 404 => no host layer). Edits
         # appear on the next reload via this 1s loop.
@@ -425,67 +433,28 @@ studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     echo "Storybook: http://127.0.0.1:${port}/#/stories"
     dx serve --web -p lpa-studio-web --features stories --port "${port}" --addr 127.0.0.1 --open false
 
+# Package a firmware variant for browser flashing / host flashing. Both are
+# thin wrappers over `lp-cli firmware package`, which owns the build inputs
+# (lp-fw/builds/<id>.json) and EXTRACTS the manifest core from the image it
+# just built — there is no hand-written feature list or wireProto `sed` any
+# more. Output: target/studio-web-assets/firmware/<id>/.
 studio-firmware-package-esp32c6: install-rv32-target
+    cargo run -p lp-cli -- firmware package esp32c6-4mb
+
+# The S3 sibling. lp-cli runs cargo in the crate dir so `rust-toolchain.toml`
+# selects Espressif's fork, but the fork's GNU binutils must already be on
+# PATH — that part only this recipe can do (see `_xt-gcc-dir`).
+#
+# Packaged but NOT served: the Studio site still ships the C6 image only. See
+# lp-fw/builds/README.md.
+studio-firmware-package-esp32s3:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v espflash >/dev/null 2>&1; then
-        echo "espflash not found. Install it before packaging Studio firmware assets."
-        exit 1
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
     fi
-
-    firmware_id="lightplayer-esp32c6-server"
-    display_name="LightPlayer ESP32-C6 server firmware"
-    features="esp32c6,server"
-    out_dir="{{ studio_assets_dir }}/firmware/esp32c6"
-    image_name="fw-esp32c6-server-merged.bin"
-    image_file="${out_dir}/${image_name}"
-    manifest_file="${out_dir}/manifest.json"
-
-    echo "Building ${display_name}..."
-    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features "${features}")
-
-    mkdir -p "${out_dir}"
-    rm -f "${out_dir}"/*.bin "${manifest_file}"
-
-    echo "Generating browser-flashable merged ESP32-C6 image..."
-    espflash save-image \
-        --chip esp32c6 \
-        --partition-table lp-fw/fw-esp32c6/partitions.csv \
-        --merge \
-        --skip-padding \
-        {{ fw_esp32c6_elf }} \
-        "${image_file}"
-
-    size_bytes="$(wc -c < "${image_file}" | tr -d ' ')"
-    sha256="$(shasum -a 256 "${image_file}" | awk '{print $1}')"
-    generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    source_commit="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-    source_dirty=false
-    if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then
-        source_dirty=true
-    fi
-    # Wire protocol version: grep the hand-bumped const out of its single
-    # source of truth so the manifest can never drift from the built image.
-    wire_proto="$(sed -n 's/^pub const WIRE_PROTO_VERSION: u32 = \([0-9][0-9]*\);$/\1/p' lp-core/lpc-wire/src/server/hello.rs)"
-    if [ -z "${wire_proto}" ]; then
-        echo "could not extract WIRE_PROTO_VERSION from lp-core/lpc-wire/src/server/hello.rs"
-        exit 1
-    fi
-
-    MANIFEST_FIRMWARE_ID="${firmware_id}" \
-    MANIFEST_DISPLAY_NAME="${display_name}" \
-    MANIFEST_TARGET="{{ rv32_target }}" \
-    MANIFEST_PROFILE="{{ fw_esp32c6_profile }}" \
-    MANIFEST_SOURCE_COMMIT="${source_commit}" \
-    MANIFEST_SOURCE_DIRTY="${source_dirty}" \
-    MANIFEST_WIRE_PROTO="${wire_proto}" \
-    MANIFEST_GENERATED_AT="${generated_at}" \
-    MANIFEST_IMAGE_PATH="${image_name}" \
-    MANIFEST_IMAGE_SIZE="${size_bytes}" \
-    MANIFEST_IMAGE_SHA256="${sha256}" \
-    node lp-app/lpa-studio-web/scripts/studio-firmware-manifest.mjs "${manifest_file}"
-    echo "Firmware manifest: ${manifest_file}"
-    echo "Firmware image: ${image_file} (${size_bytes} bytes, sha256=${sha256})"
+    cargo run -p lp-cli -- firmware package esp32s3-8mb
 
 studio-web-build: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
