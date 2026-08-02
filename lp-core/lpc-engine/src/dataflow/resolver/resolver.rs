@@ -165,6 +165,17 @@ impl Resolver {
         self.force_invalidate_per_frame = force;
     }
 
+    /// Keep the route and intern caches, drop the value caches — see
+    /// [`ResolverCache::set_retain_payloads`] for the measured trade.
+    ///
+    /// Unlike [`Self::set_force_invalidate_per_frame`] this is a supported
+    /// production setting, not a test lever: `fw-esp32v3` runs this way,
+    /// because on a 110 KB arena the payload tables cost more LEDs than they
+    /// buy frames.
+    pub fn set_retain_payloads(&mut self, retain: bool) {
+        self.cache.set_retain_payloads(retain);
+    }
+
     /// How many times the graph has changed shape. Only equality across two
     /// observations is meaningful; the absolute value is not.
     pub fn structure_epoch(&self) -> u64 {

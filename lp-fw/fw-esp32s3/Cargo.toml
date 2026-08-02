@@ -203,6 +203,10 @@ lpa-server = { path = "../../lp-app/lpa-server", default-features = false, featu
     "node-playlist",
     "node-clock",
     "node-shader",
+    # Kept explicitly: this crate takes `default-features = false`, and this
+    # part has the RAM for the resolver's value caches. Only `fw-esp32v3`
+    # trades them away.
+    "resolver-payload-cache",
 ], optional = true }
 
 # The graphics backend, and the single biggest lever in the image. Through M3
