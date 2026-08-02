@@ -32,6 +32,11 @@ pub struct CardUiState {
     /// when one is running on this card. While set, the card renders the
     /// progress overlay (blur + cover the tabs) instead of its tab body.
     pub op: Option<CardOp>,
+    /// The setup form's board choice (`vendor/product`, board-selection
+    /// M5). `None` = the generic-board fallback. Core-owned for the same
+    /// reason as the tab: the pick must survive the card re-rendering
+    /// (every view tick) and the tab being toggled away mid-setup.
+    pub setup_board: Option<String>,
 }
 
 /// A card-resident sheet (D41). The confirm arm carries a CORE-TYPED
@@ -170,6 +175,11 @@ pub enum CardUiOp {
     /// the card re-derives its honest state ("Back to set up" lands the
     /// blank board on the setup form).
     ClearOp { card: String },
+    /// Pick the setup form's board (`None` = generic fallback).
+    SelectSetupBoard {
+        card: String,
+        board_id: Option<String>,
+    },
 }
 
 impl CardUiOp {
@@ -179,7 +189,8 @@ impl CardUiOp {
             Self::SelectTab { card, .. }
             | Self::OpenSheet { card, .. }
             | Self::CloseSheet { card }
-            | Self::ClearOp { card } => card,
+            | Self::ClearOp { card }
+            | Self::SelectSetupBoard { card, .. } => card,
         }
     }
 }

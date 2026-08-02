@@ -849,6 +849,7 @@ mod tests {
                     transport: "USB".to_string(),
                     last_seen_at: 5.0,
                     association: None,
+                    board_id: None,
                 })
                 .unwrap();
         }
@@ -923,6 +924,7 @@ mod tests {
                     version: head,
                     at: 5.0,
                 }),
+                board_id: None,
             })
             .unwrap();
 
@@ -962,6 +964,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 5.0,
                 association: None,
+                board_id: None,
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1000,6 +1003,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 5.0,
                 association: None,
+                board_id: None,
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1039,6 +1043,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 5.0,
                 association: None,
+                board_id: None,
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1101,6 +1106,7 @@ mod tests {
                     transport: "USB".to_string(),
                     last_seen_at: seen,
                     association: None,
+                    board_id: None,
                 })
                 .unwrap();
         }
@@ -1161,6 +1167,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 50.0,
                 association: None,
+                board_id: None,
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);

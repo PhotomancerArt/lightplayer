@@ -26,6 +26,7 @@ mod diagram;
 mod display_manifest;
 mod firmware_join;
 pub mod geometry;
+mod runtime_manifests;
 pub mod usb_bridge;
 
 pub use catalog::{DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id};
@@ -44,4 +45,5 @@ pub use firmware_join::{
     compatible_builds_for, feature_summary, no_build_reason, no_build_reason_for, node_kind_label,
 };
 pub use geometry::{DiagramMode, DiagramOptions, PinSwatch, WiredConnection};
+pub use runtime_manifests::{RUNTIME_MANIFEST_SOURCES, runtime_manifest_json};
 pub use usb_bridge::{DriverGuidance, DriverNeedLevel, HostOs, UsbBridge};
