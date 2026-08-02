@@ -5760,6 +5760,7 @@ dependencies = [
  "log",
  "lp-gfx-lpvm",
  "lpa-agent",
+ "lpa-boards",
  "lpa-client",
  "lpa-link",
  "lpa-server",

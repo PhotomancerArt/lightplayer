@@ -224,7 +224,7 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         onclick: move |_| {
                             on_action.call(UiAction::from_op(
                                 ControllerId::new(DeviceController::NODE_ID),
-                                DeviceOp::ProvisionFirmware { setup_name: None },
+                                DeviceOp::ProvisionFirmware { setup_name: None, board_id: None },
                             ));
                         },
                     }
@@ -334,7 +334,10 @@ fn SetupForm(
                             .filter(|value| !value.is_empty());
                         on_action.call(UiAction::from_op(
                             ControllerId::new(DeviceController::NODE_ID),
-                            DeviceOp::ProvisionFirmware { setup_name },
+                            DeviceOp::ProvisionFirmware {
+                                setup_name,
+                                board_id: None,
+                            },
                         ));
                     },
                 }
@@ -1557,7 +1560,10 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware { setup_name: None },
+            DeviceOp::ProvisionFirmware {
+                setup_name: None,
+                board_id: None,
+            },
         )
     } else {
         UiAction::from_op(
@@ -1718,7 +1724,10 @@ pub(super) fn device_affordance_action(
         // without a dialog. Destructive re-flash/erase keep their confirm.
         RosterAffordance::SetUp => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware { setup_name: None },
+            DeviceOp::ProvisionFirmware {
+                setup_name: None,
+                board_id: None,
+            },
         )
         .with_summary(
             "Install LightPlayer firmware on this board — about a minute; \
@@ -1727,7 +1736,10 @@ pub(super) fn device_affordance_action(
         .with_icon("zap"),
         RosterAffordance::UpdateFirmware => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware { setup_name: None },
+            DeviceOp::ProvisionFirmware {
+                setup_name: None,
+                board_id: None,
+            },
         )
         .with_summary(
             "Install this build's firmware over the device's older build — \
@@ -1806,7 +1818,10 @@ fn wire_card_affordance(
             let display = strip_confirmation(
                 UiAction::from_op(
                     ControllerId::new(DeviceController::NODE_ID),
-                    DeviceOp::ProvisionFirmware { setup_name: None },
+                    DeviceOp::ProvisionFirmware {
+                        setup_name: None,
+                        board_id: None,
+                    },
                 )
                 .with_label(RosterAffordance::Troubleshoot.label())
                 .with_summary("Steps to try when the device is not responding.")
