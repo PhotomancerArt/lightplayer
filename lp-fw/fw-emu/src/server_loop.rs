@@ -89,6 +89,15 @@ pub fn run_server_loop(
 
         last_tick = frame_start;
 
+        // Heap accounting per frame, for tests that watch the heap across
+        // frames (leak vs. bounded transient). Off by default: this is one
+        // log line per frame.
+        #[cfg(feature = "heap_report")]
+        {
+            let (used, free) = lp_riscv_emu_guest::allocator::heap_stats();
+            log::info!("[heap] used={used} free={free}");
+        }
+
         // Yield control back to host
         // This allows the host to process serial output, update time, add serial input, etc.
         sys_yield();
