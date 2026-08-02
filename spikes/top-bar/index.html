@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Top bar &amp; site chrome — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --gold: #e4c065; --gold-bg: rgba(228,192,101,.10);
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 780px; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 780px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+
+  /* ---- exploration controls -------------------------------------- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; font-family: var(--sans);
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ================= section 1 · logo marks ======================== */
+  .markgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+    gap: 14px; max-width: 1400px; }
+  .markcard {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; display: flex; flex-direction: column; gap: 10px; cursor: pointer;
+    transition: border-color .15s;
+  }
+  .markcard:hover { border-color: var(--border-strong); }
+  .markcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .markcard .mname { font-size: 12px; font-weight: 700; color: var(--strong); }
+  .markcard .mdesc { font-size: 11px; color: var(--dim); line-height: 1.4; min-height: 30px; }
+  .markrow { display: flex; align-items: center; gap: 16px;
+    background: var(--terminal); border: 1px solid var(--border-muted); border-radius: 8px;
+    padding: 12px 14px; }
+  .markrow svg { color: var(--accent); flex: none; }
+  .markrow .fav { color: var(--accent); opacity: .9; }
+  .lockup { display: flex; align-items: center; gap: 8px; }
+  .lockup svg { color: var(--accent); }
+  .lockup .word { font-size: 13px; font-weight: 700; letter-spacing: .01em; color: var(--strong); }
+  .lockup .word .lite { color: var(--heading); font-weight: 600; }
+
+  /* rejected-concepts strip (kept small for contrast) */
+  .rejrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; max-width: 1400px; }
+  .rejchip {
+    appearance: none; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border-muted); background: var(--surface-muted); border-radius: 8px;
+    padding: 6px 10px; color: var(--dim); font: 500 11px/1.3 var(--sans); text-align: left;
+  }
+  .rejchip:hover { border-color: var(--border-strong); color: var(--subtle); }
+  .rejchip[aria-pressed=true] { border-color: var(--accent-border); }
+  .rejchip svg { color: var(--subtle); flex: none; }
+  .rejchip b { color: var(--subtle); font-weight: 700; margin-right: 2px; }
+  .rejnote { font-size: 11.5px; color: var(--dim); max-width: 1400px; margin: 10px 0 0;
+    padding: 9px 12px; border: 1px solid var(--border-muted); border-radius: 8px;
+    background: var(--surface-muted); line-height: 1.55; }
+  .rejnote b { color: var(--subtle); }
+
+  /* ================= section 2 · bar concepts ====================== */
+  .barwrap { max-width: 1400px; margin-bottom: 26px; }
+  .barwrap .cap { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .barwrap .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .barwrap .cap .cnote { font-size: 11.5px; color: var(--dim); }
+  .appframe {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 140px), var(--bg);
+  }
+  .appframe .page { padding: 14px 22px 0; }
+
+  /* the bar itself — shared bones, per-concept modifiers */
+  .bar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 10px 22px; min-height: 46px;
+  }
+  .bar.hairline { border-bottom: 1px solid var(--border-subtle); }
+
+  .brand { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+  .brand svg { color: var(--accent); }
+  .brand .word { font-size: 12.5px; font-weight: 700; color: var(--strong); letter-spacing: .01em; white-space: nowrap; }
+  .brand .word .lite { color: var(--heading); font-weight: 600; }
+  .brand.inert { cursor: default; }
+  .brand.aslink { cursor: pointer; }
+  .brand.aslink:hover .word { color: var(--accent); }
+
+  /* nav links (concept A) */
+  .navrow { display: inline-flex; align-items: center; gap: 4px; }
+  .navlink {
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 12px/1 var(--sans); color: var(--subtle);
+    padding: 8px 10px 9px; border-radius: 6px; position: relative;
+  }
+  .navlink:hover { color: var(--text); background: var(--bg-wash); }
+  .navlink.active { color: var(--heading); }
+  .navlink.active::after {
+    content: ""; position: absolute; left: 10px; right: 10px; bottom: 2px;
+    height: 2px; border-radius: 2px; background: var(--accent);
+  }
+
+  /* pill nav (concept B) */
+  .pillnav { display: inline-flex; border: 1px solid var(--border-strong);
+    border-radius: 999px; overflow: hidden; }
+  .pillnav .navpill {
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 11.5px/1 var(--sans); color: var(--subtle); padding: 6px 13px;
+  }
+  .pillnav .navpill:hover { color: var(--text); background: var(--bg-wash); }
+  .pillnav .navpill.active { color: var(--strong); background: var(--surface-raised); cursor: default; }
+
+  /* breadcrumb (concept C) */
+  .crumbs { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+  .crumbs .root {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    font: 700 12.5px/1 var(--sans); color: var(--heading);
+    padding: 6px 8px; border-radius: 6px;
+  }
+  .crumbs .root:hover { background: var(--bg-wash); color: var(--accent); }
+  .crumbs .root .chev { color: var(--dim); font-size: 9px; transform: translateY(1px); }
+  .crumbs .sep { color: var(--dim); font-size: 11px; }
+  .crumbs .leaf { font: 600 12.5px/1 var(--sans); color: var(--strong);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+  .crumbs .leaf.dimmed { color: var(--subtle); font-weight: 500; }
+
+  /* mark-menu (concept D) */
+  .markbtn {
+    appearance: none; border: 1px solid transparent; background: transparent; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: 8px;
+    color: var(--accent);
+  }
+  .markbtn:hover, .markbtn[aria-expanded=true] { border-color: var(--border-strong); background: var(--surface-subtle); }
+  .markbtn .chev { color: var(--dim); font-size: 9px; }
+  .popmenu {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+    min-width: 216px; padding: 6px;
+    background: var(--surface); border: 1px solid var(--neutral-border); border-radius: 10px;
+    box-shadow: 0 12px 34px rgba(0,0,0,.5);
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .popmenu .mi {
+    appearance: none; border: 0; background: transparent; cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px;
+    font: 600 12px/1 var(--sans); color: var(--muted);
+  }
+  .popmenu .mi:hover { background: var(--surface-raised); color: var(--strong); }
+  .popmenu .mi.active { color: var(--heading); }
+  .popmenu .mi .k { margin-left: auto; font: 500 10px/1 var(--mono); color: var(--dim); }
+  .popmenu .div { height: 1px; background: var(--border-subtle); margin: 5px 4px; }
+  .popmenu .mi svg { color: var(--subtle); flex: none; }
+  .popmenu .mi:hover svg { color: var(--accent); }
+
+  /* right-side cluster */
+  .rside { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+
+  /* version / branch chip */
+  .vchip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font: 600 10.5px/1 var(--mono); color: var(--subtle);
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    border-radius: 999px; padding: 4px 10px; max-width: 200px; min-width: 0;
+  }
+  .vchip:hover { color: var(--neutral-text); border-color: var(--border-strong); }
+  .vchip svg { flex: none; opacity: .75; }
+  .vchip .vtxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .vchip .vtxt bdo { direction: ltr; unicode-bidi: bidi-override; }
+  .vchip.release { color: var(--heading); }
+  .vchip.dirty { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+
+  /* legacy version treatment (concept 0) */
+  .devlabel { font: 700 11px/1 var(--mono); text-transform: uppercase; color: var(--subtle);
+    letter-spacing: .04em; }
+
+  /* round icon buttons (today's chip idiom) */
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    color: var(--neutral-text); padding: 0;
+  }
+  .iconbtn:hover { background: var(--surface-raised); }
+  .iconbtn.ai { color: var(--bound-text); border-color: var(--bound-border); background: var(--bound-bg); }
+
+  /* wordmark-as-link (concept 0 baseline) */
+  .oldword {
+    font: 700 12px/1 var(--sans); text-transform: uppercase; letter-spacing: .02em;
+    color: var(--heading); text-decoration: none; cursor: pointer;
+  }
+  .oldword:hover { color: var(--strong); }
+
+  /* page peek content under each bar */
+  .peek { display: flex; gap: 14px; padding-bottom: 18px; opacity: .55; pointer-events: none;
+    mask-image: linear-gradient(180deg, #000 30%, transparent 96%); }
+  .pcard {
+    flex: 1; height: 84px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface); overflow: hidden; display: flex; flex-direction: column;
+  }
+  .pcard .strip { height: 46px; }
+  .pcard .meta { padding: 7px 10px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .g1 { background: linear-gradient(90deg, #14323f, #1d5c50, #7be0b2, #1d5c50, #14323f); }
+  .g2 { background: linear-gradient(90deg, #3f2114, #a34b1e, #f0b97a, #a34b1e, #3f2114); }
+  .g3 { background: linear-gradient(90deg, #241a33, #5f4a85, #c9b1f5, #5f4a85, #241a33); }
+
+  /* ================= section 3 · in context ======================== */
+  .ctxgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 16px; max-width: 1400px; }
+  .ctxcard { border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 120px), var(--bg);
+    display: flex; flex-direction: column; }
+  .ctxcard .bar { padding: 8px 16px; min-height: 42px; gap: 12px; }
+  .ctxcard .navlink { padding: 7px 8px 8px; font-size: 11.5px; }
+  .ctxcard .body { padding: 12px 16px 16px; flex: 1; }
+  .ctxlabel { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); padding: 8px 16px 0; }
+
+  /* boards mini */
+  .brow { display: flex; gap: 10px; }
+  .bmini { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .bmini svg { align-self: center; }
+  .bmini .bn { font-size: 11.5px; font-weight: 700; color: var(--strong); }
+  .tier { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 800;
+    letter-spacing: .09em; text-transform: uppercase; border-radius: 999px; padding: 1.5px 8px 1.5px 6px;
+    color: var(--gold); background: var(--gold-bg); border: 1px solid rgba(228,192,101,.35); }
+  .tier::before { content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 5px currentColor; }
+  .haveone { appearance: none; cursor: pointer; border: 1px solid var(--accent-border);
+    background: transparent; color: var(--accent); font: 700 10.5px/1 var(--sans);
+    border-radius: 5px; padding: 5px 9px; }
+  .haveone:hover { background: rgba(123,224,178,.08); }
+
+  /* docs mini — the interactive-docs vision */
+  .docsplit { display: flex; gap: 14px; }
+  .docnav { width: 118px; flex: none; display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+  .docnav .dh { font-size: 9.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); margin: 4px 0 3px; }
+  .docnav a { color: var(--subtle); text-decoration: none; padding: 3px 6px; border-radius: 5px; font-weight: 600; }
+  .docnav a:hover { color: var(--text); background: var(--bg-wash); }
+  .docnav a.here { color: var(--heading); background: var(--surface-subtle); }
+  .docbody { flex: 1; min-width: 0; }
+  .docbody h4 { margin: 2px 0 6px; font-size: 13px; color: var(--strong); }
+  .docbody p { margin: 0 0 10px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .nodedemo { display: flex; align-items: center; gap: 10px; }
+  .dnode { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px;
+    min-width: 108px; overflow: hidden; }
+  .dnode .nh { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700;
+    color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface-muted); }
+  .dnode .nh .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good-text); box-shadow: 0 0 5px var(--good-text); }
+  .dnode .nv { font: 600 15px/1 var(--mono); color: var(--accent); padding: 9px 8px; }
+  .dnode .shader { height: 34px; margin: 7px; border-radius: 5px;
+    background: linear-gradient(90deg, #ff5c5c, #f0dc7a, #7be0b2, #9cc8ee, #c9b1f5, #ff5c5c);
+    background-size: 300% 100%; animation: hue 4s linear infinite; }
+  @keyframes hue { to { background-position: 300% 0; } }
+  .flow { color: var(--dim); font-size: 10px; font-weight: 600; text-align: center; }
+  .flow .arr { color: var(--bound-text); font-size: 14px; display: block; }
+
+  /* ================= section 4 · version states ==================== */
+  .vstates { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-end;
+    background: var(--surface-subtle); border: 1px solid var(--border-muted); border-radius: 10px;
+    padding: 18px; max-width: 1400px; }
+  .vstate { display: flex; flex-direction: column; gap: 8px; }
+  .vstate .lbl { font-size: 10.5px; color: var(--dim); font-weight: 600; }
+
+  /* ================= section 5 · AI trigger ======================== */
+  .aigrid { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-end;
+    background: var(--surface-subtle); border: 1px solid var(--border-muted); border-radius: 10px;
+    padding: 18px; max-width: 1400px; }
+  .aiv { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .aiv .lbl { font-size: 10.5px; color: var(--dim); font-weight: 600; max-width: 150px; }
+  .aiv .row { display: flex; gap: 8px; align-items: center; }
+  .ailabelbtn {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--bound-border); background: var(--bound-bg); color: var(--bound-text);
+    font: 700 10.5px/1 var(--sans); border-radius: 999px; padding: 5px 11px;
+  }
+  .ailabelbtn:hover { background: var(--surface-raised); }
+</style>
+</head>
+<body>
+
+<!-- ==================== SVG defs: logo marks + icons ==================== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- mark A · chip-play: IC package, play as the die -->
+    <symbol id="mark-a" viewBox="0 0 32 32">
+      <g stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round">
+        <rect x="7.5" y="7.5" width="17" height="17" rx="3.4"/>
+        <path d="M4 11.5h2M4 16h2M4 20.5h2M26 11.5h2M26 16h2M26 20.5h2"/>
+      </g>
+      <path d="M13.6 12.15v7.7c0 .62.68 1 1.21.68l6.3-3.85a.8.8 0 0 0 0-1.36l-6.3-3.85a.8.8 0 0 0-1.21.68z" fill="currentColor"/>
+    </symbol>
+    <!-- mark B · trace-play: signal in, play, signal out -->
+    <symbol id="mark-b" viewBox="0 0 32 32">
+      <g stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 9.2v13.6c0 .9 1 1.5 1.8 1L23.6 17a1.17 1.17 0 0 0 0-2L12.8 8.2c-.8-.5-1.8.1-1.8 1z"/>
+        <path d="M6.2 16H11"/>
+        <path d="M24.6 16h2.2"/>
+      </g>
+      <circle cx="4" cy="16" r="1.9" fill="currentColor"/>
+      <circle cx="29" cy="16" r="1.9" fill="currentColor"/>
+    </symbol>
+    <!-- mark C · node-play: three nodes wired into an implied play triangle -->
+    <symbol id="mark-c" viewBox="0 0 32 32">
+      <polygon points="10.5,9.5 10.5,22.5 23,16" fill="currentColor" opacity=".14"/>
+      <g stroke="currentColor" stroke-width="1.7" fill="none">
+        <path d="M10.5 12.4v7.2M13.2 10.9l7.4 3.7M13.2 21.1l7.4-3.7"/>
+      </g>
+      <g stroke="currentColor" stroke-width="1.7" fill="#101317">
+        <circle cx="10.5" cy="9.5" r="2.9"/>
+        <circle cx="10.5" cy="22.5" r="2.9"/>
+        <circle cx="23" cy="16" r="2.9"/>
+      </g>
+    </symbol>
+    <!-- mark D · via-play: annular ring, solid play -->
+    <symbol id="mark-d" viewBox="0 0 32 32">
+      <circle cx="16" cy="16" r="11.4" stroke="currentColor" stroke-width="1.8" fill="none"/>
+      <g fill="currentColor">
+        <circle cx="16" cy="2.6" r="1.5"/><circle cx="16" cy="29.4" r="1.5"/>
+        <circle cx="2.6" cy="16" r="1.5"/><circle cx="29.4" cy="16" r="1.5"/>
+      </g>
+      <path d="M12.7 11.4v9.2c0 .68.75 1.1 1.33.74l7.4-4.6a.87.87 0 0 0 0-1.48l-7.4-4.6a.87.87 0 0 0-1.33.74z" fill="currentColor"/>
+    </symbol>
+    <!-- mark E · pixel-play: WS2812 package, lens, play -->
+    <symbol id="mark-e" viewBox="0 0 32 32">
+      <rect x="5.5" y="5.5" width="21" height="21" rx="2.4" stroke="currentColor" stroke-width="1.7" fill="none"/>
+      <g fill="currentColor" opacity=".75">
+        <rect x="3.2" y="8" width="2.3" height="4.6" rx="1"/>
+        <rect x="3.2" y="19.4" width="2.3" height="4.6" rx="1"/>
+        <rect x="26.5" y="8" width="2.3" height="4.6" rx="1"/>
+        <rect x="26.5" y="19.4" width="2.3" height="4.6" rx="1"/>
+      </g>
+      <circle cx="16" cy="16" r="7.6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+      <path d="M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z" fill="currentColor"/>
+    </symbol>
+
+    <!-- marks F/G/H · inverted: the play button is the container; the icon
+         is knocked out of a solid play (fill-rule evenodd = real holes) -->
+    <symbol id="mark-f" viewBox="0 0 32 32">
+      <path fill="currentColor" fill-rule="evenodd" d="M8.6 7.4v17.2c0 1.4 1.5 2.27 2.72 1.57l14.9-8.6a1.81 1.81 0 0 0 0-3.14l-14.9-8.6C10.1 5.13 8.6 6 8.6 7.4z
+        M12.4 12.9h6v6.2h-6z
+        M10.9 14.1h1.1v.9h-1.1z M10.9 17h1.1v.9h-1.1z
+        M18.8 14.1h1.1v.9h-1.1z M18.8 17h1.1v.9h-1.1z"/>
+    </symbol>
+    <symbol id="mark-g" viewBox="0 0 32 32">
+      <path fill="currentColor" fill-rule="evenodd" d="M8.6 7.4v17.2c0 1.4 1.5 2.27 2.72 1.57l14.9-8.6a1.81 1.81 0 0 0 0-3.14l-14.9-8.6C10.1 5.13 8.6 6 8.6 7.4z
+        M11.9 14.2a3 3 0 1 0 6 0a3 3 0 1 0-6 0z
+        M11.7 17.9h6.4v1h-6.4z
+        M13.3 19.6h.9v1h-.9z M15.7 19.6h.9v1h-.9z"/>
+    </symbol>
+    <symbol id="mark-h" viewBox="0 0 32 32">
+      <path fill="currentColor" fill-rule="evenodd" d="M8.6 7.4v17.2c0 1.4 1.5 2.27 2.72 1.57l14.9-8.6a1.81 1.81 0 0 0 0-3.14l-14.9-8.6C10.1 5.13 8.6 6 8.6 7.4z
+        M11.8 14.4a3.1 3.1 0 1 0 6.2 0a3.1 3.1 0 1 0-6.2 0z
+        M13.3 18.3h3.2v.8h-3.2z
+        M13.7 19.7h2.4v.8h-2.4z"/>
+    </symbol>
+    <!-- marks I/J · play ⊃ pixel: E's WS2812 inside the play triangle.
+         square package knocked out; lens (and pads, J) added back -->
+    <symbol id="mark-i" viewBox="0 0 32 32">
+      <path fill="currentColor" fill-rule="evenodd" d="M8.6 7.4v17.2c0 1.4 1.5 2.27 2.72 1.57l14.9-8.6a1.81 1.81 0 0 0 0-3.14l-14.9-8.6C10.1 5.13 8.6 6 8.6 7.4z
+        M12.1 12.8h6v6h-6z
+        M13 15.8a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0-4.2 0z"/>
+    </symbol>
+    <symbol id="mark-j" viewBox="0 0 32 32">
+      <path fill="currentColor" fill-rule="evenodd" d="M8.6 7.4v17.2c0 1.4 1.5 2.27 2.72 1.57l14.9-8.6a1.81 1.81 0 0 0 0-3.14l-14.9-8.6C10.1 5.13 8.6 6 8.6 7.4z
+        M12.1 12.8h6v6h-6z
+        M13.15 15.8a1.95 1.95 0 1 0 3.9 0a1.95 1.95 0 1 0-3.9 0z
+        M12.4 13.1h1.1v1.1h-1.1z M16.7 13.1h1.1v1.1h-1.1z
+        M12.4 17.4h1.1v1.1h-1.1z M16.7 17.4h1.1v1.1h-1.1z"/>
+    </symbol>
+
+    <!-- small ui glyphs -->
+    <symbol id="i-branch" viewBox="0 0 16 16">
+      <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+        <circle cx="4.5" cy="3.5" r="1.7"/><circle cx="4.5" cy="12.5" r="1.7"/><circle cx="11.5" cy="6" r="1.7"/>
+        <path d="M4.5 5.2v5.6M11.5 7.7c0 2.6-3 3-5 3.4"/>
+      </g>
+    </symbol>
+    <symbol id="i-tag" viewBox="0 0 16 16">
+      <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round">
+        <path d="M2.2 7.4V2.8c0-.33.27-.6.6-.6h4.6c.16 0 .31.06.42.18l5.9 5.9a.6.6 0 0 1 0 .85l-4.6 4.6a.6.6 0 0 1-.84 0l-5.9-5.9a.6.6 0 0 1-.18-.43z"/>
+      </g>
+      <circle cx="5.3" cy="5.3" r="1.1" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-gear" viewBox="0 0 16 16">
+      <g stroke="currentColor" stroke-width="1.3" fill="none">
+        <circle cx="8" cy="8" r="2"/>
+        <circle cx="8" cy="8" r="4.6"/>
+        <path d="M8 1.4v2M8 12.6v2M1.4 8h2M12.6 8h2M3.3 3.3l1.5 1.5M11.2 11.2l1.5 1.5M12.7 3.3l-1.5 1.5M4.8 11.2l-1.5 1.5"/>
+      </g>
+    </symbol>
+    <symbol id="i-sparkles" viewBox="0 0 16 16">
+      <path d="M6.2 1.8l1.05 2.85 2.85 1.05-2.85 1.05L6.2 9.6 5.15 6.75 2.3 5.7l2.85-1.05z" fill="currentColor"/>
+      <path d="M11.6 8.4l.72 1.98 1.98.72-1.98.72-.72 1.98-.72-1.98-1.98-.72 1.98-.72z" fill="currentColor" opacity=".8"/>
+    </symbol>
+    <symbol id="i-bot" viewBox="0 0 16 16">
+      <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+        <rect x="3" y="5" width="10" height="7.4" rx="2"/>
+        <path d="M8 5V2.8"/><circle cx="8" cy="2.2" r=".9" fill="currentColor" stroke="none"/>
+      </g>
+      <circle cx="5.9" cy="8.4" r="1" fill="currentColor"/>
+      <circle cx="10.1" cy="8.4" r="1" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-info" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.3" fill="none"/>
+      <path d="M8 7.2v3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="8" cy="4.9" r=".95" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-home" viewBox="0 0 16 16">
+      <path d="M2.6 7.4L8 2.6l5.4 4.8M4 6.6v6.2c0 .33.27.6.6.6h6.8c.33 0 .6-.27.6-.6V6.6"
+        stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-board" viewBox="0 0 16 16">
+      <rect x="2.5" y="4" width="11" height="8" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none"/>
+      <circle cx="5.4" cy="6.6" r=".8" fill="currentColor"/><circle cx="5.4" cy="9.4" r=".8" fill="currentColor"/>
+      <rect x="8.2" y="6" width="3.4" height="4" rx=".6" stroke="currentColor" stroke-width="1.1" fill="none"/>
+    </symbol>
+    <symbol id="i-book" viewBox="0 0 16 16">
+      <path d="M8 3.6C6.9 2.7 5.2 2.4 3 2.4v10.2c2.2 0 3.9.3 5 1.2 1.1-.9 2.8-1.2 5-1.2V2.4c-2.2 0-3.9.3-5 1.2zM8 3.6v10.2"
+        stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-map" viewBox="0 0 16 16">
+      <path d="M2.5 4.2l3.6-1.5 3.8 1.5 3.6-1.5v9.1l-3.6 1.5-3.8-1.5-3.6 1.5zM6.1 2.7v9.1M9.9 4.2v9.1"
+        stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-github" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M8 1.3a6.7 6.7 0 0 0-2.1 13.05c.33.06.45-.14.45-.32v-1.12c-1.86.4-2.25-.9-2.25-.9-.3-.77-.74-.98-.74-.98-.6-.4.05-.4.05-.4.67.05 1.02.68 1.02.68.6 1 1.55.73 1.93.56.06-.43.23-.73.42-.9-1.49-.17-3.05-.74-3.05-3.3 0-.74.26-1.33.68-1.8-.07-.17-.3-.85.07-1.76 0 0 .56-.18 1.84.68a6.4 6.4 0 0 1 3.36 0c1.28-.86 1.84-.68 1.84-.68.37.91.14 1.6.07 1.76.42.47.68 1.06.68 1.8 0 2.57-1.57 3.13-3.06 3.3.24.2.45.6.45 1.23v1.83c0 .18.12.38.46.32A6.7 6.7 0 0 0 8 1.3z"/>
+    </symbol>
+  </defs>
+</svg>
+
+<h1>Top bar &amp; site chrome — design spike</h1>
+<p class="hint">
+  Thesis: the top bar becomes real site navigation. LightPlayer is one cohesive app —
+  Studio (the gallery + editor), Boards, and Docs are its sections. The logo is brand,
+  <b>not</b> the home link (that's reserved for a future landing page); an explicit
+  <b>Studio</b> nav item is the way home. The version indicator earns its place by showing
+  the git branch on dev builds. The gear stops lying: it's AI settings.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Context</b>
+    <button class="chip" data-ctx="home" aria-pressed="true">Home gallery</button>
+    <button class="chip" data-ctx="project">Project open</button>
+    <button class="chip" data-ctx="boards">Boards</button>
+    <button class="chip" data-ctx="docs">Docs</button>
+  </span>
+  <span class="group"><b>Build</b>
+    <button class="chip" data-build="branch" aria-pressed="true">dev · branch</button>
+    <button class="chip" data-build="longbranch">dev · long branch</button>
+    <button class="chip" data-build="release">deployed</button>
+    <button class="chip" data-build="dirty">dev · dirty</button>
+  </span>
+  <span class="group"><b>Brand text</b>
+    <button class="chip" data-brand="lp" aria-pressed="true">LightPlayer</button>
+    <button class="chip" data-brand="lps">LightPlayer Studio</button>
+  </span>
+  <span class="group"><b>Mark</b> <span id="markpick" style="color:var(--accent);font-weight:700"></span>
+    <span style="color:var(--dim)">(click a card in §1)</span>
+  </span>
+</div>
+
+<!-- ==================== 1 · logo marks ==================== -->
+<h2 id="s1"><span class="n">1</span> Interim logo mark — chosen: E · Pixel</h2>
+<p class="sub"><b>Decision: E ships as the interim mark</b> — a WS2812 package, corner pads, lens, play
+  in the lens — until the human-designed logo (in progress) lands. Shown at favicon (16), bar (22)
+  and hero (56) sizes. The explored alternates below remain clickable for comparison.</p>
+<div class="markgrid" id="markgrid">
+  <div class="markcard" data-mark="e" role="button" aria-pressed="true">
+    <span class="mname">E · Pixel (chosen interim)</span>
+    <span class="mdesc">A WS2812 addressable-LED package — corner pads, lens, play in the lens. Placeholder until the real logo arrives.</span>
+    <div class="markrow">
+      <svg class="fav" width="16" height="16"><use href="#mark-e"/></svg>
+      <svg width="22" height="22"><use href="#mark-e"/></svg>
+      <svg width="56" height="56"><use href="#mark-e"/></svg>
+    </div>
+    <div class="lockup"><svg width="20" height="20"><use href="#mark-e"/></svg>
+      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
+  </div>
+</div>
+<div class="rejrow">
+  <button class="rejchip" data-mark="i"><svg width="18" height="18"><use href="#mark-i"/></svg><span><b>I · Play ⊃ pixel</b> inverted knockout — close second, E preferred</span></button>
+  <button class="rejchip" data-mark="j"><svg width="18" height="18"><use href="#mark-j"/></svg><span><b>J · Play ⊃ pixel + pads</b> — busier I, same verdict</span></button>
+  <button class="rejchip" data-mark="a"><svg width="18" height="18"><use href="#mark-a"/></svg><span><b>A · Chip</b> play-in-IC — strong but generic "hardware"</span></button>
+  <button class="rejchip" data-mark="b"><svg width="18" height="18"><use href="#mark-b"/></svg><span><b>B · Trace</b> routed net — reads "amplifier"</span></button>
+  <button class="rejchip" data-mark="c"><svg width="18" height="18"><use href="#mark-c"/></svg><span><b>C · Nodes</b> node graph — conceptual, weak at 16px</span></button>
+  <button class="rejchip" data-mark="d"><svg width="18" height="18"><use href="#mark-d"/></svg><span><b>D · Via</b> badge ring — pleasant, says little</span></button>
+  <button class="rejchip" data-mark="f"><svg width="18" height="18"><use href="#mark-f"/></svg><span><b>F · Play ⊃ chip</b> — pins mush at small sizes</span></button>
+  <button class="rejchip" data-mark="g"><svg width="18" height="18"><use href="#mark-g"/></svg><span><b>G · Play ⊃ LED</b> — 5mm silhouette too intricate</span></button>
+  <button class="rejchip" data-mark="h"><svg width="18" height="18"><use href="#mark-h"/></svg><span><b>H · Play ⊃ bulb</b> — obvious but skeuomorphic-generic</span></button>
+</div>
+
+<!-- ==================== 2 · bar concepts ==================== -->
+<h2 id="s2"><span class="n">2</span> The bar — chosen: A · section tabs</h2>
+<p class="sub">Converged on <b>A</b>: brand (inert) · Studio / Boards / Docs tabs · branch chip +
+  bot icon chip (no label) on the right · hairline under the bar. Reacts to the
+  <b>Context</b> / <b>Build</b> / <b>Brand</b> / <b>Mark</b> controls above; concept 0 kept
+  as the frozen baseline. The 390px frame shows the narrow story: the brand word yields
+  first, the branch chip truncates harder, the bot chip is already minimal.</p>
+
+<!-- concept 0 -->
+<div class="barwrap">
+  <p class="cap"><span class="cname">0 · Today (baseline)</span>
+    <span class="cnote">tiny uppercase wordmark doubling as the home link · "dev build" text · gear that is secretly AI settings · no nav at all</span></p>
+  <div class="appframe">
+    <div class="bar">
+      <a class="oldword">LightPlayer Studio</a>
+      <span class="rside">
+        <span class="devlabel">dev build</span>
+        <button class="iconbtn" title="Build info"><svg width="15" height="15"><use href="#i-info"/></svg></button>
+        <button class="iconbtn" title="Studio settings"><svg width="15" height="15"><use href="#i-gear"/></svg></button>
+      </span>
+    </div>
+    <div class="page"><div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div></div>
+  </div>
+</div>
+
+<!-- concept A — the winner -->
+<div class="barwrap">
+  <p class="cap"><span class="cname">A · Section tabs (chosen)</span>
+    <span class="cnote">home is the Studio tab, not the logo · one chrome for the whole app</span></p>
+  <div class="appframe">
+    <div class="bar hairline" data-concept="A">
+      <span class="brand inert" title="LightPlayer">
+        <svg width="22" height="22" class="markslot"><use href="#mark-i"/></svg>
+        <span class="word brandword">LightPlayer</span>
+      </span>
+      <span class="navrow">
+        <button class="navlink" data-nav="studio">Studio</button>
+        <button class="navlink" data-nav="boards">Boards</button>
+        <button class="navlink" data-nav="docs">Docs</button>
+      </span>
+      <span class="rside">
+        <button class="vchip" title="Build info"></button>
+        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+      </span>
+    </div>
+    <div class="page"><div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div></div>
+  </div>
+</div>
+
+<!-- concept A at phone width -->
+<div class="barwrap" style="max-width: 390px">
+  <p class="cap"><span class="cname">A @ 390px</span>
+    <span class="cnote">brand word hidden, chip truncates, bot chip unchanged</span></p>
+  <div class="appframe">
+    <div class="bar hairline" data-concept="A" style="padding: 10px 14px; gap: 10px">
+      <span class="brand inert" title="LightPlayer">
+        <svg width="22" height="22" class="markslot"><use href="#mark-i"/></svg>
+      </span>
+      <span class="navrow">
+        <button class="navlink" data-nav="studio">Studio</button>
+        <button class="navlink" data-nav="boards">Boards</button>
+        <button class="navlink" data-nav="docs">Docs</button>
+      </span>
+      <span class="rside" style="gap: 6px">
+        <button class="vchip" style="max-width: 84px" title="Build info"></button>
+        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+      </span>
+    </div>
+    <div class="page" style="padding: 12px 14px 0"><div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+    </div></div>
+  </div>
+</div>
+
+<p class="rejnote"><b>Rejected structures</b> (were concepts B–D):
+  <b>B · pills right</b> — segmented pill nav gathered right; crowds the status cluster and
+  fights the chips for the same corner.
+  <b>C · breadcrumb</b> — "Studio ▸ project" wayfinding; lovely in a project but hides the
+  sibling sections behind a menu click.
+  <b>D · mark menu</b> — all nav in a popover under the logo; zero width but makes navigation
+  <i>less</i> discoverable, the opposite of this round's goal. The project-name breadcrumb idea
+  from C may return <i>inside</i> the Studio tab later.</p>
+
+<!-- ==================== 3 · in context ==================== -->
+<h2 id="s3"><span class="n">3</span> One chrome across the whole app</h2>
+<p class="sub">Concept A's bar rendered on all three sections (compact size). The Boards mini keeps its
+  catalog content but gains the shared chrome — and an <b>"I have one of these"</b> action showing
+  where the future setup flow starts. The Docs mini shows the interactive-docs vision: real,
+  live nodes embedded in an article (the clock below is ticking; the shader strip is animating).</p>
+<div class="ctxgrid">
+  <div class="ctxcard">
+    <span class="ctxlabel">Studio · home gallery</span>
+    <div class="bar hairline">
+      <span class="brand inert"><svg width="20" height="20" class="markslot"><use href="#mark-a"/></svg>
+        <span class="word brandword" style="font-size:12px">LightPlayer</span></span>
+      <span class="navrow">
+        <button class="navlink active">Studio</button>
+        <button class="navlink">Boards</button>
+        <button class="navlink">Docs</button>
+      </span>
+      <span class="rside"><button class="vchip" title="Build info"></button>
+        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-bot"/></svg></button></span>
+    </div>
+    <div class="body"><div class="peek" style="opacity:.8; mask-image:none; padding-bottom:0">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+    </div></div>
+  </div>
+  <div class="ctxcard">
+    <span class="ctxlabel">Boards catalog</span>
+    <div class="bar hairline">
+      <span class="brand inert"><svg width="20" height="20" class="markslot"><use href="#mark-a"/></svg>
+        <span class="word brandword" style="font-size:12px">LightPlayer</span></span>
+      <span class="navrow">
+        <button class="navlink">Studio</button>
+        <button class="navlink active">Boards</button>
+        <button class="navlink">Docs</button>
+      </span>
+      <span class="rside"><button class="vchip" title="Build info"></button>
+        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-bot"/></svg></button></span>
+    </div>
+    <div class="body"><div class="brow">
+      <div class="bmini">
+        <svg width="84" height="46" viewBox="0 0 84 46">
+          <rect x="2" y="2" width="80" height="42" rx="4" fill="#101418" stroke="#2c3440" stroke-width="1.5"/>
+          <rect x="26" y="8" width="32" height="20" rx="2" fill="#1a2027" stroke="#3e4852"/>
+          <g fill="#8b93a0"><circle cx="9" cy="9" r="2.4"/><circle cx="9" cy="37" r="2.4"/><circle cx="75" cy="9" r="2.4"/><circle cx="75" cy="37" r="2.4"/></g>
+          <rect x="34" y="32" width="16" height="9" rx="1.5" fill="#26313a"/>
+        </svg>
+        <span class="bn">ESP32-C6 DevKit-C</span>
+        <span class="tier">Gold</span>
+        <button class="haveone">I have one of these →</button>
+      </div>
+      <div class="bmini">
+        <svg width="84" height="46" viewBox="0 0 84 46">
+          <rect x="2" y="2" width="80" height="42" rx="4" fill="#101418" stroke="#2c3440" stroke-width="1.5"/>
+          <rect x="22" y="8" width="40" height="22" rx="2" fill="#1a2027" stroke="#3e4852"/>
+          <g fill="#8b93a0"><circle cx="9" cy="9" r="2.4"/><circle cx="9" cy="37" r="2.4"/><circle cx="75" cy="9" r="2.4"/><circle cx="75" cy="37" r="2.4"/></g>
+          <rect x="36" y="33" width="14" height="8" rx="1.5" fill="#26313a"/>
+        </svg>
+        <span class="bn">ESP32-S3 DevKitC-1</span>
+        <span class="tier">Gold</span>
+        <button class="haveone">I have one of these →</button>
+      </div>
+    </div></div>
+  </div>
+  <div class="ctxcard">
+    <span class="ctxlabel">Docs · interactive article</span>
+    <div class="bar hairline">
+      <span class="brand inert"><svg width="20" height="20" class="markslot"><use href="#mark-a"/></svg>
+        <span class="word brandword" style="font-size:12px">LightPlayer</span></span>
+      <span class="navrow">
+        <button class="navlink">Studio</button>
+        <button class="navlink">Boards</button>
+        <button class="navlink active">Docs</button>
+      </span>
+      <span class="rside"><button class="vchip" title="Build info"></button>
+        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-bot"/></svg></button></span>
+    </div>
+    <div class="body"><div class="docsplit">
+      <nav class="docnav">
+        <span class="dh">Guide</span>
+        <a class="here">Getting started</a>
+        <a>Brightness &amp; fades</a>
+        <span class="dh">Nodes</span>
+        <a>Clock</a>
+        <a>Shader</a>
+        <a>Fixture</a>
+      </nav>
+      <div class="docbody">
+        <h4>LightPlayer is made of nodes</h4>
+        <p>Here's one — a <b>clock</b>. It's really running. It sends <code style="font-family:var(--mono);font-size:10.5px">time.s</code> to a shader node:</p>
+        <div class="nodedemo">
+          <div class="dnode">
+            <div class="nh"><span class="dot"></span> clock</div>
+            <div class="nv" id="clockval">0.00</div>
+          </div>
+          <span class="flow"><span class="arr">⟶</span>time.s</span>
+          <div class="dnode">
+            <div class="nh"><span class="dot"></span> shader · rainbow</div>
+            <div class="shader"></div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<!-- ==================== 4 · version chip states ==================== -->
+<h2 id="s4"><span class="n">4</span> Version chip states</h2>
+<p class="sub">One chip replaces today's "dev build" text + separate info button — the chip itself opens
+  the build-info popover. <b>Feasibility:</b> deploys already ship <code style="font-family:var(--mono);font-size:11px">source.ref</code>
+  in version.json; dev builds bake the branch in at compile time (tiny build.rs). Long branch names
+  ellipsize from the left so the distinctive tail survives.</p>
+<div class="vstates">
+  <div class="vstate"><span class="lbl">dev · branch</span>
+    <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt"><bdo>top-bar-ux-ace649</bdo></span></button></div>
+  <div class="vstate"><span class="lbl">dev · long branch (max-width, left ellipsis)</span>
+    <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt"><bdo>claude/settings-provenance-rework-b6680f</bdo></span></button></div>
+  <div class="vstate"><span class="lbl">dev · dirty tree</span>
+    <button class="vchip dirty"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt"><bdo>top-bar-ux-ace649 ±</bdo></span></button></div>
+  <div class="vstate"><span class="lbl">deployed · version tag</span>
+    <button class="vchip release"><svg width="12" height="12"><use href="#i-tag"/></svg><span class="vtxt"><bdo>2026.08.01-2</bdo></span></button></div>
+  <div class="vstate"><span class="lbl">loading</span>
+    <button class="vchip"><span class="vtxt"><bdo>…</bdo></span></button></div>
+</div>
+
+<!-- ==================== 5 · AI settings trigger ==================== -->
+<h2 id="s5"><span class="n">5</span> AI settings trigger</h2>
+<p class="sub"><b>Chosen: the bot icon, violet family, no label</b> (live in the bars above). The popover
+  content stays as-is (provider / key / model); only the trigger changes. Violet is the existing
+  "bound / system" color — reads as "agent", never as status; the gear is freed for a future real
+  studio-settings surface.</p>
+<div class="aigrid">
+  <div class="aiv"><span class="lbl">today: neutral gear, label says "Studio settings"</span>
+    <span class="row"><button class="iconbtn" title="Studio settings"><svg width="15" height="15"><use href="#i-gear"/></svg></button></span></div>
+  <div class="aiv"><span class="lbl">sparkles, violet family, label "AI settings"</span>
+    <span class="row"><button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-sparkles"/></svg></button></span></div>
+  <div class="aiv"><span class="lbl">bot, violet family</span>
+    <span class="row"><button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-bot"/></svg></button></span></div>
+  <div class="aiv"><span class="lbl">labeled pill — most explicit, costs width</span>
+    <span class="row"><button class="ailabelbtn"><svg width="13" height="13"><use href="#i-sparkles"/></svg> AI</button></span></div>
+  <div class="aiv"><span class="lbl">sparkles, neutral family (if violet feels loud)</span>
+    <span class="row"><button class="iconbtn" title="AI settings"><svg width="15" height="15"><use href="#i-sparkles"/></svg></button></span></div>
+</div>
+
+<script>
+  const state = { ctx: "home", build: "branch", brand: "lp", mark: "e" };
+
+  const BUILDS = {
+    branch:     { cls: "",        icon: "#i-branch", text: "top-bar-ux-ace649" },
+    longbranch: { cls: "",        icon: "#i-branch", text: "claude/settings-provenance-rework-b6680f" },
+    release:    { cls: "release", icon: "#i-tag",    text: "2026.08.01-2" },
+    dirty:      { cls: "dirty",   icon: "#i-branch", text: "top-bar-ux-ace649 ±" },
+  };
+  const CTX_SECTION = { home: "studio", project: "studio", boards: "boards", docs: "docs" };
+  const MARK_NAMES = { a: "A · Chip", b: "B · Trace", c: "C · Nodes", d: "D · Via", e: "E · Pixel",
+    f: "F · Play ⊃ chip", g: "G · Play ⊃ LED", h: "H · Play ⊃ bulb",
+    i: "I · Play ⊃ pixel", j: "J · Play ⊃ pixel + pads" };
+
+  function render() {
+    // controls pressed state
+    document.querySelectorAll("[data-ctx]").forEach(b => b.setAttribute("aria-pressed", b.dataset.ctx === state.ctx));
+    document.querySelectorAll("[data-build]").forEach(b => b.setAttribute("aria-pressed", b.dataset.build === state.build));
+    document.querySelectorAll("[data-brand]").forEach(b => b.setAttribute("aria-pressed", b.dataset.brand === state.brand));
+    document.querySelectorAll(".markcard, .rejchip").forEach(c => c.setAttribute("aria-pressed", c.dataset.mark === state.mark));
+    document.getElementById("markpick").textContent = MARK_NAMES[state.mark];
+
+    // marks everywhere
+    document.querySelectorAll(".markslot use").forEach(u => u.setAttribute("href", "#mark-" + state.mark));
+
+    // brand text
+    document.querySelectorAll(".brandword").forEach(w => {
+      w.innerHTML = state.brand === "lps" ? 'LightPlayer <span class="lite">Studio</span>' : "LightPlayer";
+    });
+
+    // nav active state (tabs + pills + menus)
+    const section = CTX_SECTION[state.ctx];
+    document.querySelectorAll(".navlink[data-nav], .navpill[data-nav], .mi[data-nav]").forEach(el => {
+      el.classList.toggle("active", el.dataset.nav === section);
+    });
+
+    // version chips (all reactive bars — not the frozen concept-0 bar)
+    const build = BUILDS[state.build];
+    document.querySelectorAll(".bar[data-concept] .vchip, .ctxcard .vchip").forEach(chip => {
+      chip.className = "vchip " + build.cls;
+      chip.innerHTML = '<svg width="12" height="12"><use href="' + build.icon + '"/></svg>' +
+        '<span class="vtxt"><bdo>' + build.text + "</bdo></span>";
+    });
+  }
+
+  document.querySelectorAll("[data-ctx]").forEach(b => b.onclick = () => { state.ctx = b.dataset.ctx; render(); });
+  document.querySelectorAll("[data-build]").forEach(b => b.onclick = () => { state.build = b.dataset.build; render(); });
+  document.querySelectorAll("[data-brand]").forEach(b => b.onclick = () => { state.brand = b.dataset.brand; render(); });
+  document.querySelectorAll(".markcard, .rejchip").forEach(c => c.onclick = () => { state.mark = c.dataset.mark; render(); });
+
+  // clicking a nav item switches context (so the bars feel navigable)
+  const NAV_CTX = { studio: "home", boards: "boards", docs: "docs" };
+  document.querySelectorAll("[data-nav]").forEach(el => el.addEventListener("click", () => {
+    state.ctx = NAV_CTX[el.dataset.nav]; render();
+  }));
+
+  // live clock node in the docs mini
+  setInterval(() => {
+    document.getElementById("clockval").textContent = (performance.now() / 1000).toFixed(2);
+  }, 50);
+
+  render();
+</script>
+</body>
+</html>
