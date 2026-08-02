@@ -1,63 +1,22 @@
 //! [`DocsPage`]: sidebar + article for the docs section.
 //!
-//! A standalone page like the boards catalog (early return in
-//! `web_app.rs`, no studio actor). Article switches within the section
-//! navigate by hash and re-render through a `hashchange` listener — no
-//! reload; the studio's route listener is never installed on standalone
-//! pages, so owning `onhashchange` here clobbers nothing.
+//! A section of the running app, not a standalone page: `web_app`'s route
+//! signal drives `page`, so article switches and section switches are both
+//! plain re-renders — the actor and every open runtime session survive
+//! them. That is also what makes live, running examples inside articles
+//! possible (the interactive-docs initiative builds on it).
 
 use dioxus::prelude::*;
 
 use super::{DocPage, PAGES, page_for};
 use crate::base::MarkdownDocs;
 
-/// The docs section body. `initial_page` is the deep-linked slug from the
-/// URL at mount; later in-section navigation is handled internally.
+/// The docs section body. `page` is the route's article slug; unknown and
+/// missing slugs resolve to the guide's landing article.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn DocsPage(#[props(default)] initial_page: Option<String>) -> Element {
-    let mut current = use_signal(|| page_for(initial_page.as_deref()).slug);
-
-    // Follow hash changes (sidebar clicks, back/forward within docs).
-    // Guarded on the current route so a story-book mount never installs
-    // this into the book's own hash navigation.
-    #[cfg(target_arch = "wasm32")]
-    use_hook(move || {
-        use wasm_bindgen::JsCast;
-        use wasm_bindgen::closure::Closure;
-        if !matches!(
-            crate::router::current_route(),
-            crate::router::StudioRoute::Docs { .. }
-        ) {
-            return;
-        }
-        let closure = Closure::<dyn FnMut()>::new(move || {
-            let hash = web_sys::window()
-                .map(|window| window.location().hash().unwrap_or_default())
-                .unwrap_or_default();
-            match crate::router::StudioRoute::parse(&hash) {
-                crate::router::StudioRoute::Docs { page } => {
-                    current.set(page_for(page.as_deref()).slug);
-                }
-                // Leaving the section (a chrome tab, back/forward): the
-                // studio app mounts on fresh page loads only — reload,
-                // mirroring the studio-side route listener.
-                _ => crate::router::hard_reload(),
-            }
-        });
-        if let Some(window) = web_sys::window() {
-            // addEventListener, not `onhashchange = …`: the SiteChrome
-            // wrapper installs its own leave-section listener on the same
-            // event, and the two must coexist.
-            let _ = window
-                .add_event_listener_with_callback("hashchange", closure.as_ref().unchecked_ref());
-        }
-        // Leak deliberately: the page lives for the document's lifetime
-        // (route changes out of standalone pages hard-reload).
-        closure.forget();
-    });
-
-    let page = page_for(Some(current()));
+pub fn DocsPage(#[props(default)] page: Option<String>) -> Element {
+    let page = page_for(page.as_deref());
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-start tw:gap-7 tw:max-[720px]:flex-col",
             nav { class: "tw:flex tw:w-[200px] tw:flex-none tw:flex-col tw:gap-0.5 tw:max-[720px]:w-full",

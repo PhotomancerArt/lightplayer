@@ -33,23 +33,33 @@ embedded nodes as the teaching strategy — both point at in-app.
   overflow menu.
 - **The chrome lives in `lpa-studio-web` only.** `lpa-boards` stays
   platform-blind and chrome-free; the web shell composes the chrome above
-  `BoardsCatalogPage` at the `web_app.rs` route boundary.
-- **Standalone sections own leaving themselves.** Standalone pages
-  early-return before the studio's hooks, so no studio route listener
-  exists there. `SiteChrome` (standalone mode) installs a `hashchange`
-  listener that hard-reloads when the hash leaves its section, mirroring
-  the studio-side listener's treatment of standalone routes. Listeners are
-  added with `addEventListener` (never `onhashchange =`) so a section page
-  and its chrome can both listen, and installation is guarded on the
-  current route so story-book mounts never capture the book's navigation.
+  `BoardsCatalogPage` in its render body.
+- **Sections render inside the running app — nothing unloads.** Boards and
+  docs are NOT early returns. `App()` always runs its hooks (actor, runtime
+  pool, route listener) and its render body switches on the route between
+  the studio shell, the catalog, and the docs section. Moving between
+  sections is a re-render: sims keep running, device sessions stay
+  attached, and docs articles can host live, running examples — the
+  foundation the interactive-docs initiative needs.
+- **One shell owns the chrome.** `web_app` renders the single `main`
+  container, the chrome, and the local-store banner; `StudioShell` and the
+  section pages render bodies only. The bar therefore sits at an identical
+  offset in every section by construction, not by three call sites
+  agreeing on padding.
+- **The story book and the two editors stay early-return.** They replace
+  the whole app rather than sitting in a section, so entering or leaving
+  them still hard-reloads to keep hook order sound.
 
 ## Consequences
 
-- Adding a section = a `SiteSection` variant, a route, and a wrapped
-  early-return; the section inherits navigation for free.
-- Section transitions are full page loads (the existing standalone-page
-  contract), which keeps hook order sound at the cost of a reload between
-  sections.
+- Adding a section = a `SiteSection` variant, a route, and an arm in the
+  render body; the section inherits navigation and the live runtime.
+- Section transitions are instant and lossless — no reload, no unmount.
+- The studio runtime boots for every visitor, including someone who opened
+  `#/docs` directly. Accepted deliberately: live docs and an actionable
+  boards catalog both need it. If cold start on those entry points ever
+  becomes a real complaint, defer the heavy pieces behind first use rather
+  than reintroducing a runtime-less mode.
 - The chrome's studio mode threads `on_action` so the Studio tab preserves
   the direct lens-detach dispatch (the D29 device editor lives at `#/` and
   never fires `hashchange`).
@@ -62,6 +72,10 @@ embedded nodes as the teaching strategy — both point at in-app.
   and hides the home affordance.
 - **In-bar links to the tools:** rejected — tabs imply sections; the tools
   are editors.
+- **Sections as early-return pages with a reload between them** (the first
+  implementation of this ADR, reverted the same day at the visual gate):
+  rejected — the reload was visibly janky, and a section with no actor
+  behind it cannot host the live examples docs are being built around.
 
 ## Follow-ups
 
