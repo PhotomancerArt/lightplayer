@@ -239,7 +239,10 @@ fn panel_label_visual(label: &str, color_class: &'static str) -> Element {
 fn panel_label_class(control: &UiPanelControlData) -> &'static str {
     match primary_affordance(&control.aspects) {
         UiSlotAffordance::Error | UiSlotAffordance::Invalid => "tw:text-status-error-foreground",
-        UiSlotAffordance::Edited if control.state.live => "tw:text-status-live-foreground",
+        // A Debug control fronted on a panel keeps the panel surface's own
+        // live-value blue: preview/play surfaces are out of the debug
+        // treatment's scope (D8) — the panels line owns their indication.
+        UiSlotAffordance::Edited if control.state.debug => "tw:text-status-live-foreground",
         UiSlotAffordance::Edited => "tw:text-status-warning-foreground",
         UiSlotAffordance::Saving => "tw:text-status-working-foreground",
         UiSlotAffordance::Bound => "tw:text-status-bound-foreground",
@@ -399,13 +402,13 @@ mod tests {
         );
         assert!(panel_label_class(&unsaved).contains("warning"));
 
-        let live = control(
+        let debug = control(
             UiSlotValue::f32(1.0),
             UiSlotFieldState::editable()
                 .with_dirty(UiNodeDirtyState::Dirty)
-                .with_live(true),
+                .with_debug(true),
         );
-        assert!(panel_label_class(&live).contains("live"));
+        assert!(panel_label_class(&debug).contains("live"));
 
         let failed = control(
             UiSlotValue::f32(1.0),

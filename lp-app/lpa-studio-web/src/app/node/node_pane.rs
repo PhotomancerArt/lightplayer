@@ -1,15 +1,18 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
+    DirtySummary, NodeCardDrawer, NodeUiOp, UiAction, UiConfigSlot, UiNodeDirtyState,
+    UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
 use crate::app::layout::{PaneCollapse, RichObjectPane};
+use crate::app::node::face::node_ui_action;
+use crate::app::node::slot_edit_actions::node_clear_debug_action;
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
     SlotRecordEditor,
 };
-use crate::base::{Platform, StudioIcon, node_kind_icon};
+use crate::base::{Platform, StudioIcon, StudioIconName, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -48,6 +51,9 @@ pub fn NodePane(
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
+    // The debug channel is separate from the dirty rollup (D7/D8): it marks
+    // the card, it never washes the header.
+    let debug_overrides = view.header.debug_overrides;
     // The rollup: the merged affordance tones the header (P6 — no count
     // chips; the detail trigger is the whole announcement). RichObjectPane
     // pins that composition.
@@ -81,6 +87,10 @@ pub fn NodePane(
     // node's address path — the header path carries it for panes and
     // nested child cards alike.
     let face_node = view.header.path.clone();
+    // The node address the Debug section's per-node Clear targets, and its
+    // core-owned disclosure bit (collapsed on a fresh card).
+    let section_node = Some(view.header.path.clone());
+    let debug_open = view.card_ui.debug_open;
     let face_card_ui = view.card_ui.clone();
     let add_node_menu = view.add_node_menu.clone();
 
@@ -111,6 +121,7 @@ pub fn NodePane(
                     actions: header_actions,
                     on_action,
                     trailing: rsx! {
+                        NodeDebugMarker { count: debug_overrides }
                         if !kind_label.is_empty() {
                             span { class: "tw:self-center tw:whitespace-nowrap tw:pl-2 tw:pr-1 tw:text-[11px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-dim-foreground",
                                 "{kind_label}"
@@ -166,6 +177,8 @@ pub fn NodePane(
                                                     section,
                                                     first: index == 0,
                                                     focus_action: focus_action.clone(),
+                                                    node: section_node.clone(),
+                                                    debug_open,
                                                     on_action,
                                                     pending_edits: pending_edits.clone(),
                                                     dirty_tint,
@@ -304,6 +317,15 @@ pub fn NodeSection(
     #[props(default = false)] first: bool,
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The owning node's address path — the Debug section's per-node Clear
+    /// dispatches `NodeClearDebugOp` against it, and its disclosure toggle
+    /// keys `NodeCardUiState` on it.
+    #[props(default = None)]
+    node: Option<String>,
+    /// Core-owned disclosure state for the Debug section
+    /// (`NodeCardUiState::debug_open`); every other section ignores it.
+    #[props(default = false)]
+    debug_open: bool,
     /// The editor-level pending-edit list, threaded through extracted child
     /// sections into their nested panes' detail popovers.
     #[props(default)]
@@ -323,11 +345,17 @@ pub fn NodeSection(
         },
         UiNodeSection::ConfigSlots(slots) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
+                div { class: "lp-settings-section-header",
+                    span { class: "lp-settings-section-label", "Settings" }
+                }
                 SlotRecordEditor {
                     record: UiSlotRecord::new(slots),
                     on_action,
                 }
             }
+        },
+        UiNodeSection::DebugSlots(slots) => rsx! {
+            DebugSlotsSection { slots, node, open: debug_open, on_action }
         },
         UiNodeSection::AssetSlots(assets) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
@@ -347,6 +375,163 @@ pub fn NodeSection(
                 }
             }
         },
+    }
+}
+
+/// The node card's **Debug** section (D3/D4/D8 tier c): the node's
+/// `SlotRole::Debug` rows, flattened by core, behind a **collapsed-by-default
+/// disclosure** whose HEADER is the debug territory — hazard-striped and
+/// labelled DEBUG whether or not anything is overridden, so a transient
+/// control announces itself before it is touched (clean-transient
+/// invisibility). Most of the time those controls are not wanted, so the rows
+/// open on demand (G1 feedback); unmissability rides the always-visible
+/// header, the card marker, and the global chip instead.
+///
+/// While collapsed the header still carries "N active · session only" and the
+/// per-node **Clear** ([`lpa_studio_core::NodeClearDebugOp`]) — clearing never
+/// requires expanding. Nothing here ever says "Revert" or "Reset" (D7).
+///
+/// Open state is CORE-OWNED, on the same path as the code/advanced drawers:
+/// `NodeCardUiState::debug_open`, keyed by the node's address, mutated with
+/// `NodeUiOp::SetDrawer { drawer: NodeCardDrawer::Debug, .. }` — so disclosure
+/// survives re-renders and is e2e-drivable. The chevron follows the section
+/// grammar's rotation (right = closed, down = open) even though the striped
+/// header replaces `NodeCardSection`'s rail/collapsed-row pair.
+///
+/// **No state transition here may change a height.** The header reserves the
+/// Clear button's box (`min-height` in the CSS), so the count/Clear appearing
+/// does not reflow the card.
+///
+/// Every pixel of the treatment is the `.lp-debug-*` block in `style.css` —
+/// the semantic side is `UiNodeSection::DebugSlots` in core.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DebugSlotsSection(
+    slots: Vec<UiConfigSlot>,
+    /// The owning node's address path — both the Clear target and the
+    /// disclosure's `NodeCardUiState` key. `None` (a caller with no address
+    /// to give) renders the header as a plain label: no Clear, and no
+    /// toggle, since there would be nowhere to store the bit.
+    #[props(default = None)]
+    node: Option<String>,
+    /// Core-owned disclosure state (`NodeCardUiState::debug_open`).
+    #[props(default = false)]
+    open: bool,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let active = slots
+        .iter()
+        .filter(|slot| slot.state.dirty != UiNodeDirtyState::Clean)
+        .count();
+    let clear = node
+        .as_deref()
+        .filter(|_| active > 0)
+        .and_then(node_clear_debug_action);
+    let mut class = String::from("lp-debug-section");
+    if active > 0 {
+        class.push_str(" lp-debug-section--active");
+    }
+    if open {
+        class.push_str(" lp-debug-section--open");
+    }
+    let toggle_node = node.clone();
+    let toggle_title = if open {
+        "Collapse debug controls"
+    } else {
+        "Expand debug controls"
+    };
+
+    rsx! {
+        section { class,
+            div { class: "lp-debug-section-header",
+                if let Some(node) = toggle_node {
+                    button {
+                        class: "lp-debug-section-toggle",
+                        r#type: "button",
+                        aria_expanded: "{open}",
+                        aria_label: "{toggle_title}",
+                        title: "{toggle_title}",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            if let Some(handler) = on_action {
+                                handler.call(node_ui_action(NodeUiOp::SetDrawer {
+                                    node: node.clone(),
+                                    drawer: NodeCardDrawer::Debug,
+                                    open: !open,
+                                }));
+                            }
+                        },
+                        span { class: debug_chevron_class(open),
+                            StudioIcon {
+                                name: if open { StudioIconName::Expanded } else { StudioIconName::Collapsed },
+                                size: 12,
+                            }
+                        }
+                        span { class: "lp-debug-section-label", "Debug" }
+                        span { class: "lp-debug-section-note",
+                            if active > 0 { "{active} active · session only" } else { "session only" }
+                        }
+                    }
+                } else {
+                    span { class: "lp-debug-section-toggle",
+                        span { class: "lp-debug-section-label", "Debug" }
+                        span { class: "lp-debug-section-note",
+                            if active > 0 { "{active} active · session only" } else { "session only" }
+                        }
+                    }
+                }
+                if let Some(action) = clear {
+                    button {
+                        class: "lp-debug-button",
+                        r#type: "button",
+                        title: "Clear every debug override on this node",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            if let Some(handler) = on_action {
+                                handler.call(action.clone());
+                            }
+                        },
+                        "Clear"
+                    }
+                }
+            }
+            if open {
+                SlotRecordEditor {
+                    record: UiSlotRecord::new(slots),
+                    on_action,
+                }
+            }
+        }
+    }
+}
+
+/// Chevron rotation for the Debug disclosure — the section grammar's
+/// convention: the glyph previews the state the press leads to.
+fn debug_chevron_class(open: bool) -> &'static str {
+    if open {
+        "lp-debug-section-chevron lp-debug-section-chevron--open"
+    } else {
+        "lp-debug-section-chevron"
+    }
+}
+
+/// The node card's debug marking (D8 tier b): a hazard pill in the header's
+/// trailing slot while the node's subtree carries an active override. Not a
+/// `PaneChrome` chip — the rich-object pane renders none by convention — and
+/// deliberately not the header wash, which stays the dirty/status rollup's
+/// (D7: a debug override is not pending work).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeDebugMarker(count: usize) -> Element {
+    if count == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            class: "lp-debug-marker",
+            title: "This node carries {count} active debug override(s) — session only, never saved",
+            "debug {count}"
+        }
     }
 }
 
@@ -390,8 +575,6 @@ fn pane_surface_tint_class(variant: NodeDirtyTint, dirty: DirtySummary) -> &'sta
                 "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface-muted))]"
             } else if dirty.persisted > 0 {
                 "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface-muted))]"
-            } else if dirty.transient > 0 {
-                "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface-muted))]"
             } else {
                 "tw:contents tw:[--tw-color-card:var(--studio-color-surface)] tw:[--tw-color-card-subtle:var(--studio-color-surface-subtle)] tw:[--tw-color-card-muted:var(--studio-color-surface-muted)]"
             }
@@ -433,12 +616,8 @@ fn NodeTabs(
 mod tests {
     use super::*;
 
-    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
-        DirtySummary {
-            persisted,
-            transient,
-            failed,
-        }
+    fn dirty(persisted: usize, failed: usize) -> DirtySummary {
+        DirtySummary { persisted, failed }
     }
 
     #[test]
@@ -459,22 +638,24 @@ mod tests {
             tone(UiStatus::good("Running"), DirtySummary::clean()),
             PaneTone::Good
         );
-        // Dirty precedence: failed > unsaved > live.
+        // Dirty precedence: failed > unsaved.
         assert_eq!(
-            tone(UiStatus::good("Running"), dirty(2, 1, 1)),
+            tone(UiStatus::good("Running"), dirty(2, 1)),
             PaneTone::Error
         );
         assert_eq!(
-            tone(UiStatus::good("Running"), dirty(2, 1, 0)),
+            tone(UiStatus::good("Running"), dirty(2, 0)),
             PaneTone::Warning
         );
+        // D7: debug overrides never enter the summary, so a debug-only node
+        // keeps its runtime tone — no wash at all.
         assert_eq!(
-            tone(UiStatus::good("Running"), dirty(0, 1, 0)),
-            PaneTone::Live
+            tone(UiStatus::good("Running"), DirtySummary::clean()),
+            PaneTone::Good
         );
         // An error status is never masked by a dirty wash.
         assert_eq!(
-            tone(UiStatus::error("Failed"), dirty(0, 1, 0)),
+            tone(UiStatus::error("Failed"), dirty(1, 0)),
             PaneTone::Error
         );
     }
@@ -482,15 +663,13 @@ mod tests {
     #[test]
     fn surface_tint_applies_only_in_full_surface_variant_on_dirty_panes() {
         assert_eq!(
-            pane_surface_tint_class(NodeDirtyTint::HeaderOnly, dirty(2, 0, 0)),
+            pane_surface_tint_class(NodeDirtyTint::HeaderOnly, dirty(2, 0)),
             "tw:contents"
         );
 
-        let unsaved = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(2, 0, 0));
+        let unsaved = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(2, 0));
         assert!(unsaved.contains("--studio-status-warning-bg"));
-        let live = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(0, 1, 0));
-        assert!(live.contains("--studio-status-live-bg"));
-        let failed = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(1, 1, 1));
+        let failed = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(1, 1));
         assert!(failed.contains("--studio-status-error-bg"));
 
         let clean = pane_surface_tint_class(NodeDirtyTint::FullSurface, DirtySummary::clean());

@@ -75,7 +75,10 @@ impl ComputeShaderState {
                     .map_err(|e| ComputeStateError::InvalidSlotName(field.name.clone(), e))?,
                 shape: shape_for_shader_slot(&field.slot, registry)?,
                 semantics: lpc_model::SlotSemantics::produced(),
-                role: Default::default(),
+                // Produced ⇔ `SlotRole::State` (G2): this shape is assembled
+                // at runtime, so the derive cannot check it — the registry
+                // does, at `replace_shape_named` below.
+                role: lpc_model::SlotRole::State,
                 default_bind: None,
             });
         }

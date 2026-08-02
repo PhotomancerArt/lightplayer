@@ -22,7 +22,7 @@ use crate::{ArtifactLocation, SlotPath};
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeAttachSite {
-    /// `project.json` `nodes[key]` — the policy-locked site owned by
+    /// `project.json` `nodes[key]` — the role-locked site owned by
     /// dedicated node operations.
     ProjectNodes { key: String },
     /// Any writable `NodeInvocationSlot`, e.g. a playlist's

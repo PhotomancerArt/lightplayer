@@ -3,7 +3,7 @@
 //! `docs/adr/2026-07-26-card-view-state-ownership.md`, explicitly deferred
 //! this slice).
 //!
-//! What a node card's face is disclosing: whether the code/advanced
+//! What a node card's face is disclosing: whether the code/advanced/debug
 //! drawers are expanded, whether the agent section is collapsed, and the
 //! last MIRRORED composer draft. This used to live in the web renderer's
 //! `use_signal`s (`NodeCardDrawers`, `AgentChatPane`), which meant it died
@@ -27,13 +27,20 @@
 //! and a full card remount.
 
 /// One node card's UI view-state. `Default` is a fresh card: drawers
-/// closed, agent section expanded, no mirrored draft.
+/// closed (the Debug section included — most of the time those controls are
+/// not wanted, so it opens on demand), agent section expanded, no mirrored
+/// draft.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NodeCardUiState {
     /// Whether the code drawer (inline GLSL editor) is expanded.
     pub code_open: bool,
     /// Whether the advanced drawer (generic slot rows) is expanded.
     pub advanced_open: bool,
+    /// Whether the **Debug** section's rows are expanded. Default `false`:
+    /// the section is collapsed to its (always striped) header, which keeps
+    /// carrying the DEBUG label, the active-override count, and Clear — so
+    /// debug territory stays announced and clearable without expanding.
+    pub debug_open: bool,
     /// Whether the shader face's agent section is collapsed to its
     /// summary row.
     pub agent_collapsed: bool,
@@ -50,6 +57,7 @@ impl NodeCardUiState {
             NodeUiOp::SetDrawer { drawer, open, .. } => match drawer {
                 NodeCardDrawer::Code => self.code_open = *open,
                 NodeCardDrawer::Advanced => self.advanced_open = *open,
+                NodeCardDrawer::Debug => self.debug_open = *open,
             },
             NodeUiOp::SetAgentCollapsed { collapsed, .. } => {
                 self.agent_collapsed = *collapsed;
@@ -61,13 +69,16 @@ impl NodeCardUiState {
     }
 }
 
-/// The two expandable drawers under a node card's face.
+/// The expandable drawers under a node card's face.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NodeCardDrawer {
     /// The inline GLSL editor drawer (shader faces).
     Code,
     /// The generic slot-row drawer (every face).
     Advanced,
+    /// The **Debug** section's rows (any node declaring a `SlotRole::Debug`
+    /// field). Its header is never hidden — only the rows disclose.
+    Debug,
 }
 
 /// Mutations to a node card's UI view-state, dispatched by the card
@@ -130,6 +141,10 @@ mod tests {
         let node = "/demo.project/orbit.shader".to_string();
         let mut state = NodeCardUiState::default();
         assert!(!state.code_open && !state.advanced_open && !state.agent_collapsed);
+        assert!(
+            !state.debug_open,
+            "the Debug section defaults to collapsed (G1 feedback)"
+        );
         assert!(state.composer_draft.is_empty());
 
         state.apply(&NodeUiOp::SetDrawer {
@@ -140,6 +155,11 @@ mod tests {
         state.apply(&NodeUiOp::SetDrawer {
             node: node.clone(),
             drawer: NodeCardDrawer::Advanced,
+            open: true,
+        });
+        state.apply(&NodeUiOp::SetDrawer {
+            node: node.clone(),
+            drawer: NodeCardDrawer::Debug,
             open: true,
         });
         state.apply(&NodeUiOp::SetDraft {
@@ -155,6 +175,7 @@ mod tests {
             NodeCardUiState {
                 code_open: true,
                 advanced_open: true,
+                debug_open: true,
                 agent_collapsed: true,
                 composer_draft: "make it pulse".to_string(),
             }
