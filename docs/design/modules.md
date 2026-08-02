@@ -248,7 +248,7 @@ restoring R5/R6 resolution and dropping the persisted entries.
 
 ### R13 — Persistence *(summary — normative: panel.md P10/P11)*
 
-Panel state persists by default to `.lp/state.json` (§6) with throttled
+Panel state persists by default to `.lp/panel.json` (§6) with throttled
 writes (≥ ~10 s, flash preservation), auto-save on by default, and
 restore **before first render** on boot. Never in authored artifacts.
 
@@ -461,7 +461,7 @@ my-project/
 │     ├─ module.json     #   (no project.json, no format — see below)
 │     └─ …
 └─ .lp/                  # the ONE framework-owned dir: never authored,
-   └─ state.json         #   always safe to delete (panel state per R13;
+   └─ panel.json         #   always safe to delete (panel state per R13;
                          #   future caches/locks land here, never beside content)
 ```
 
@@ -480,7 +480,7 @@ my-project/
   in-tree dir.
 - `.lp/` is a project-folder concept; the device keeps its own filesystem
   conventions and needs only the panel-state *data*, not the layout.
-- `state.json` shape (proposed, Q3): a versioned map of
+- `panel.json` shape (proposed, Q3): a versioned map of
   `scope-path / channel → { value, engaged }`. Scope paths are node
   paths, so vendoring/renames invalidate entries gracefully (unknown
   paths are dropped on load).
@@ -490,7 +490,7 @@ my-project/
 
 > Status: the project.json/module.json split, the container-manifest
 > format gate (missing manifest = hard refuse, format bumped to 3), and
-> the split schemas landed 2026-08-01. `.lp/state.json` arrives with the
+> the split schemas landed 2026-08-01. `.lp/panel.json` arrives with the
 > panel phases.
 
 ## 7. Bus vocabulary — under discovery

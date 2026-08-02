@@ -168,9 +168,17 @@ must come back dim, with not one bright frame; next night, connect and
 reset.* A boot that renders even one frame at authored brightness before
 applying restored panel state is non-conforming.
 
+> Status: implemented 2026-08-02. The seam is Engine construction —
+> `Project::new`, and `Project::reload` because it rebuilds the Engine —
+> so restore completes before the first tick and therefore before the
+> first render. On device that is the boot path (`auto_load_project` runs
+> ahead of the main loop). `apply_project_changes` does NOT rebuild the
+> Engine, which is why an ordinary edit leaves engaged writers alone and
+> touches no file.
+
 ### P11 — Persistence
 
-- Panel state persists to **`.lp/state.json`** in the project folder
+- Panel state persists to **`.lp/panel.json`** in the project folder
   (the framework-owned tier — modules.md §6); on device, to the
   device's own filesystem. Never in authored artifacts.
 - Contents: a versioned map `scope-path / channel → { value }` — raw
@@ -180,6 +188,28 @@ applying restored panel state is non-conforming.
   a flush on clean shutdown/disconnect where the platform allows.
 - **Auto-save is on by default** with a user toggle; Clear (P2) removes
   the corresponding persisted entries immediately.
+
+> Status: implemented 2026-08-02 (`lpa-server/src/panel_state.rs`;
+> ADR `2026-08-02-panel-writers-and-state-persistence.md`).
+>
+> **Device-first, per settled D-B**: both sim tiers run on `LpFsMemory`,
+> so sims stay ephemeral by construction; the unit tests are the
+> correctness story and the device walk confirms it. Persistent sims are
+> recorded future work.
+>
+> The throttle gates on a writer-store mutation COUNTER, not on the
+> writer set: a clear followed by a re-write inside one window leaves an
+> identically-shaped map, so comparing size-and-revision would miss it.
+> An idle project writes nothing at all. Turning auto-save off records
+> itself in the file, so the choice survives a reboot instead of quietly
+> re-enabling overnight.
+>
+> **Prerequisite that made this safe:** a write inside the project fs
+> fires an FsEvent back at the artifact-refresh path, so `/.lp/**` is
+> filtered out of project changes before anything reads the batch —
+> otherwise every save would rebuild the binding graph and the rebuild
+> would schedule the next save. `Project::applied_refresh_count` makes
+> that observable rather than assumed.
 
 ### P12 — Play mode
 
@@ -268,8 +298,17 @@ this document never specifies resolution.
   UX spike owns the visual; confirm the *requirement* that Read-following
   -automation, Read-at-default, and Latch are three visibly distinct
   states.
-- **P-Q3:** `state.json` schema version field name/shape, and whether a
-  clean-shutdown flush is feasible on device (or throttle-only).
+- **P-Q3:** ~~`panel.json` schema version field name/shape, and whether a
+  clean-shutdown flush is feasible on device (or throttle-only).~~
+  **Settled 2026-08-02.** The file is
+  `{ version, auto_save, entries: [{ scope, channel, value }] }` with
+  `version: 1` and **bump-and-refuse** semantics — an unknown version is
+  ignored wholesale, never migrated, matching the alpha posture in the
+  rest of the format story. Losing panel state costs one re-dim; a
+  half-applied migration costs trust. A clean-shutdown flush IS included
+  (project unload flushes past the throttle); an unclean power cut simply
+  loses at most one throttle window, which is the trade the ~10 s
+  interval buys.
 - **P-Q4:** ~~does Clear-all also clear *sink-scope* (playlist entry)
   state, or only visible panels?~~ **Settled 2026-08-02 as leaned:
   clear-all reaches sink scopes** — a playlist entry's latched value
