@@ -40,6 +40,12 @@ already recorded in story-capture-pipeline.md).
   second agent session were active; passed clean between them with the
   server stopped. Filed this entry.
 
+- 2026-08-02 — M5 provisioning-gate session: `perf_4096_render_evals_under_10s_debug`
+  took **10.998 s** against the 10 s bound with the worktree dev server and a
+  story-PNG capture running; the same test passed at **7.86 s** in isolation
+  moments later. Third sighting of the same shape; no code in the failing
+  crate had changed.
+
 **Exit criteria** — The default suite contains no load-sensitive
 wall-clock assert: the perf measurement either moves behind an opt-in
 feature/recipe (perf job), switches to a load-insensitive proxy (eval
