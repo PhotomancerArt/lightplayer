@@ -1,4 +1,4 @@
-//! Header Studio-settings gear: agent provider selection + credentials.
+//! Header AI-settings trigger: agent provider selection + credentials.
 //!
 //! Renders the core-built [`UiSettingsView`] slice and emits
 //! [`SettingsCommand`]s — no merge/provenance/guidance logic lives here
@@ -19,7 +19,7 @@ use crate::local_model_probe::ProbeRequest;
 /// plausible model id).
 const CUSTOM_MODEL_VALUE: &str = "__custom__";
 
-/// Header gear button opening the Studio settings popover.
+/// Header bot-chip button opening the AI settings popover.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StudioSettingsPopover(
@@ -42,10 +42,10 @@ pub fn StudioSettingsPopover(
         IconPopoverButton {
             class: TRIGGER_CLASS.to_string(),
             open_class: TRIGGER_OPEN_CLASS.to_string(),
-            icon: StudioIconName::Settings,
+            icon: StudioIconName::AgentSettings,
             icon_size: 15,
-            label: "Studio settings".to_string(),
-            title: "Studio settings".to_string(),
+            label: "AI settings".to_string(),
+            title: "AI settings".to_string(),
             popup_class: POPUP_CLASS.to_string(),
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomEnd,
@@ -576,8 +576,11 @@ pub fn AgentSettingsSection(
     }
 }
 
-const TRIGGER_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:p-0 tw:text-status-neutral-foreground";
-const TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-card-raised tw:p-0 tw:text-status-neutral-foreground";
+// Violet (`status-bound-*`) is the system/agent color family — this trigger
+// must never read as status (green/neutral), per the studio bound=violet
+// convention.
+const TRIGGER_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-bound-border tw:bg-status-bound-bg tw:p-0 tw:text-status-bound-foreground";
+const TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-bound-border tw:bg-card-raised tw:p-0 tw:text-status-bound-foreground";
 const POPUP_CLASS: &str = "tw:grid tw:w-[min(340px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_74%)] tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 const INPUT_CLASS: &str = "tw:h-7 tw:w-full tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:font-mono tw:text-xs tw:text-muted-foreground";
 const CLEAR_BUTTON_CLASS: &str = "tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:text-[11px] tw:text-muted-foreground tw:hover:text-soft-foreground";

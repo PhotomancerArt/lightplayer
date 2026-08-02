@@ -1,4 +1,4 @@
-//! Stories for the Studio settings popover content.
+//! Stories for the AI settings popover content.
 //!
 //! `AgentSettingsSection` is pure, so these fixtures exercise the provider
 //! selection states (per-provider fields + guidance) and the layering
