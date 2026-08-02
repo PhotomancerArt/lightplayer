@@ -11,14 +11,16 @@
 //!
 //! # Manifest channel → RMT slot: the absorbed-slot guard
 //!
-//! On the S3 a manifest resource `/rmt/ws281xK` *is* RMT channel `K`, because
-//! every channel gets one memory block — which is also the C6's shipped
-//! default. Under the `ws281x_2blocks` feature a channel takes two blocks and
-//! absorbs its neighbour's, so only slot **0** owns memory and only it can be
-//! configured.
+//! The block plan is computed **here, at init, from the manifest**: the
+//! number of declared `/rmt/ws281xK` resources goes through
+//! [`super::c6_rmt::plan_for_declared`] and is published once via
+//! [`super::c6_rmt::TX_PLAN`] before any channel is configured. Two declared
+//! channels get one block each; a single declared channel absorbs the whole
+//! RMT RAM — 192-word window, legacy-class refill margin — because a board
+//! with one strip has nothing else to spend the blocks on.
 //!
-//! The mapping is therefore `slot = K * SLOT_STRIDE`, resolved once by
-//! [`super::c6_rmt::slot_for_index`], and the channel-creation block below
+//! The silicon-slot → manifest-index mapping is [`manifest_index_for_slot`]
+//! (the plan's `index_of_slot`), and the channel-creation block below
 //! *never offers an absorbed slot to `configure_tx` in the first place*. That
 //! is the construction the classic backend adopted after the S3 experiment's
 //! two-block harness config failed at `configure_tx`: it kept asking esp-hal
@@ -35,8 +37,8 @@
 //! `main.rs` constructs exactly one of these at boot and hands it the RMT
 //! peripheral. How many outputs it then offers is the manifest's answer, not
 //! this file's: the XIAO C6 profile declares `/rmt/ws281x0` and
-//! `/rmt/ws281x1`, and a board profile that declares fewer simply gets fewer.
-//! The ceiling is [`USABLE_CHANNELS`], which the block plan sets.
+//! `/rmt/ws281x1`, and a board profile that declares fewer simply gets fewer
+//! — with wider windows. The ceiling is [`TX_CHANNELS`].
 //!
 //! # Why the pin is bound at `open`, not at construction
 //!
@@ -75,10 +77,7 @@ use lpc_hardware::{
     Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
 
-use crate::output::rmt::c6_rmt::{
-    self, BLOCKS_PER_CHANNEL, CHANNEL_WORDS, SLOT_STRIDE, TX_BLOCKS, USABLE_CHANNELS,
-    slot_for_index,
-};
+use crate::output::rmt::c6_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 use crate::output::rmt::shared_driver::{
     DRIVER, FRAME_TIMEOUT, install_isr, report_telemetry_if_due,
 };
@@ -90,7 +89,7 @@ const DISPLAY_LABEL: &str = "ESP32-C6 RMT WS281x";
 struct ChannelSlot {
     /// The manifest resource backing this channel (`/rmt/ws281xK`), claimed
     /// alongside the GPIO for as long as an output holds it. `K` is the
-    /// *manifest* index, which under `ws281x_2blocks` is not the RMT slot
+    /// *manifest* index, which under a widened block plan is not the RMT slot
     /// number — see the module docs.
     timing: HwAddress,
     /// The silicon RMT channel the manifest index resolved to (`K *
@@ -108,8 +107,9 @@ struct ChannelSlot {
 ///
 /// Indexed by **manifest** channel `K`, not by RMT slot: a board that declares
 /// only some `/rmt/ws281xK` resources leaves the others `None` rather than
-/// shifting the numbering.
-type ChannelTable = Rc<RefCell<[Option<ChannelSlot>; USABLE_CHANNELS]>>;
+/// shifting the numbering. Sized by [`TX_CHANNELS`] — the most channels any
+/// plan can offer — with the plan deciding how many entries are ever filled.
+type ChannelTable = Rc<RefCell<[Option<ChannelSlot>; TX_CHANNELS]>>;
 
 /// WS281x driver over the ESP32-C6 RMT, one endpoint per board-labelled GPIO
 /// and up to one live output per declared `/rmt/ws281xK` resource.
@@ -119,32 +119,45 @@ pub struct Esp32C6RmtWs281xDriver {
 }
 
 impl Esp32C6RmtWs281xDriver {
-    /// Bind the RMT interrupt and configure one TX channel per `/rmt/ws281xK`
-    /// resource the manifest declares, on the slot the block plan gives it.
+    /// Compute and publish the block plan from the manifest's declared
+    /// channel count, bind the RMT interrupt, and configure one TX channel
+    /// per `/rmt/ws281xK` resource, on the slot the plan gives it.
     ///
     /// Channels are configured (memory blocks, divider, idle level) but not
     /// connected to any pin: that happens in [`Ws281xDriver::open`]. A resource
-    /// the chip cannot back — an index past [`USABLE_CHANNELS`], or one whose
+    /// the chip cannot back — an index past [`TX_CHANNELS`], or one whose
     /// slot the [`BlockPlan`](lp_ws281x::BlockPlan) absorbed — is skipped
-    /// silently at the `slot_for_index` step rather than offered and then
-    /// failing to open.
+    /// silently at the [`manifest_index_for_slot`] step rather than offered
+    /// and then failing to open.
     pub fn new(registry: Rc<HwRegistry>, mut rmt: Rmt<'static, Blocking>) -> Self {
+        // The plan, once, before the ISR and before any configure: windows
+        // must never change after init (`RmtHw::ram_words` contract).
+        let declared = declared_ws281x_channels(&registry);
+        if let Some(plan) = c6_rmt::plan_for_declared(declared) {
+            if let Err(error) = TX_PLAN.init(plan) {
+                // A harness or a second construction raced us with a different
+                // plan; the stored one stays authoritative.
+                log::error!("Esp32C6RmtWs281xDriver: block plan already published: {error:?}");
+            }
+        }
+
         install_isr(&mut rmt);
 
         let config = TxChannelConfig::default()
             .with_clk_divider(1)
             .with_idle_output(true)
             .with_idle_output_level(Level::Low)
-            .with_carrier_modulation(false)
-            .with_memsize(BLOCKS_PER_CHANNEL);
+            .with_carrier_modulation(false);
 
-        let mut slots: [Option<ChannelSlot>; USABLE_CHANNELS] = [const { None }; USABLE_CHANNELS];
+        let mut slots: [Option<ChannelSlot>; TX_CHANNELS] = [const { None }; TX_CHANNELS];
 
         // The two creators are distinct types (`ChannelCreator<_, _, K>`), so
         // they cannot be iterated; each is named once and consumed only when
         // the block plan says its slot owns memory AND the manifest declares
         // the timing resource that maps to it. An absorbed slot never reaches
-        // `configure_tx`.
+        // `configure_tx`. `memsize` is the slot's own share of the plan — up
+        // to all four blocks for a lone channel (the RX blocks absorbed, which
+        // esp-hal permits and marks reserved).
         macro_rules! adopt_slot {
             ($($slot:literal => $creator:ident),+ $(,)?) => {
                 $(
@@ -153,7 +166,9 @@ impl Esp32C6RmtWs281xDriver {
                             slots[index] = adopt_channel(
                                 index,
                                 $slot,
-                                rmt.$creator.configure_tx(&config),
+                                rmt.$creator.configure_tx(
+                                    &config.with_memsize(TX_PLAN.blocks($slot)),
+                                ),
                             );
                         }
                     }
@@ -166,14 +181,13 @@ impl Esp32C6RmtWs281xDriver {
         );
 
         log::info!(
-            "Esp32C6RmtWs281xDriver: {} of {} usable RMT TX channels available for WS281x \
-             output (blocks/channel={} slot_stride={} window_words={} half_words={})",
+            "Esp32C6RmtWs281xDriver: {} WS281x channels for {} declared (plan={:?} \
+             ch0_window_words={} ch0_half_words={})",
             slots.iter().flatten().count(),
-            USABLE_CHANNELS,
-            BLOCKS_PER_CHANNEL,
-            SLOT_STRIDE,
-            CHANNEL_WORDS,
-            CHANNEL_WORDS / 2,
+            declared,
+            TX_PLAN.get().map(|plan| *plan.as_array()),
+            TX_PLAN.window_words(0, BLOCK_WORDS),
+            TX_PLAN.window_words(0, BLOCK_WORDS) / 2,
         );
 
         Self {
@@ -275,7 +289,7 @@ impl Esp32C6RmtWs281xDriver {
 
         // Leave the window all-STOP until the first frame prefills it, so a
         // spurious start can only transmit nothing.
-        c6_rmt::clear_ram(&TX_BLOCKS, ch);
+        c6_rmt::clear_ram(ch);
 
         DRIVER
             .configure_default_clock(ch, &ChannelTiming::WS2812)
@@ -484,24 +498,29 @@ impl Drop for Esp32C6RmtWs281xOutput {
     }
 }
 
+/// How many WS281x channels the manifest declares: the highest declared
+/// `/rmt/ws281xK` index plus one, bounded by what the chip has.
+///
+/// Counted as a contiguous prefix would be, but tolerant of a gap: a manifest
+/// declaring only `ws281x1` still yields 2, so the index keeps addressing the
+/// declared resource rather than silently renumbering it.
+fn declared_ws281x_channels(registry: &HwRegistry) -> usize {
+    (0..TX_CHANNELS)
+        .rev()
+        .find(|&index| declares_timing_resource(registry, index))
+        .map_or(0, |index| index + 1)
+}
+
 /// The manifest channel index an RMT slot backs, or `None` when the slot is
 /// absorbed by a lower channel's window (or is past the usable range).
 ///
-/// The inverse of [`slot_for_index`], and the guard that keeps the
-/// channel-creation macro from ever handing an absorbed slot to
-/// `configure_tx`.
-const fn manifest_index_for_slot(slot: usize) -> Option<usize> {
-    if slot % SLOT_STRIDE != 0 {
+/// The guard that keeps the channel-creation macro from ever handing an
+/// absorbed slot to `configure_tx`.
+fn manifest_index_for_slot(slot: u8) -> Option<usize> {
+    if slot as usize >= TX_CHANNELS {
         return None;
     }
-    let index = slot / SLOT_STRIDE;
-    if index >= USABLE_CHANNELS {
-        return None;
-    }
-    match slot_for_index(index) {
-        Some(back) if back as usize == slot => Some(index),
-        _ => None,
-    }
+    TX_PLAN.index_of_slot(slot)
 }
 
 /// Does the manifest declare `/rmt/ws281x<index>` with both WS281x

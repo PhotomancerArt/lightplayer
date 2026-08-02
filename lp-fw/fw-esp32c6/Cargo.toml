@@ -34,13 +34,10 @@ radio = [
     "esp-rtos/esp-radio",
 ]  # Root-owned ESP-NOW radio capability
 naga = ["lpa-server/naga"]
-# Two RMT memory blocks per WS281x channel instead of one: 96-word windows
-# halving into 48 words (~60 µs of refill headroom) at the cost of the second
-# output, because channel 0's window absorbs channel 1's block. Off by default
-# — the C6 ships two channels of 24-word halves until the stress matrix says
-# otherwise (roadmap M5, G1). Feature-driven cfg is unreliably tracked: run
-# `touch src/main.rs` after flipping this before rebuilding.
-ws281x_2blocks = []
+# NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
+# computed at driver init from the board manifest's declared WS281x channel
+# count (1 declared channel = the whole 192-word RMT RAM, 2 = one 48-word
+# block each). See `src/output/rmt/c6_rmt.rs::plan_for_declared`.
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
 #
