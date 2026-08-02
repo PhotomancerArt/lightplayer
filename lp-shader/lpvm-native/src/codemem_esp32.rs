@@ -270,6 +270,24 @@ const _: () = {
     assert!(heap_base + heap_len == CodeRegion::ESP32_DRAM2_END);
     assert!(heap_len == 0x0001_0000); // 64 KiB returned to the allocator
 };
+// The reclaimed span must not be able to ABUT the `dram_seg` arena, which is
+// the firmware's other heap region. Adjacent regions are indistinguishable
+// from one region to any tool that recovers the free list by address
+// contiguity — `fw-esp32v3`'s `free_list_shape` walks runs exactly that way,
+// and two abutting regions would merge into one run whose reported `largest`
+// names a block no single allocation can ever get. `dram_seg` ends at
+// `0x3FFE_0000`; `dram2_seg` starts 32,304 B above it, and the region can
+// only be carved from `dram2_seg`, so a gap always exists. Asserted rather
+// than assumed because this file is where the boundary moves.
+const _: () = {
+    const DRAM_SEG_END: u32 = 0x3FFE_0000;
+    let (heap_base, _) = CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
+    assert!(
+        heap_base > DRAM_SEG_END,
+        "SRAM1 heap span could abut the arena"
+    );
+    assert!(CodeRegion::ESP32_DRAM2_BASE > DRAM_SEG_END);
+};
 
 /// Where installed words go. The device implementation writes through the
 /// mirrored D-bus addresses; tests hand in an `lp-xt-emu` memory (or a plain
