@@ -6,7 +6,8 @@
 //! plus overlay mirror keep the DTO value stable until the server acks.
 
 use lpa_studio_core::{
-    ControllerId, LpValue, ProjectController, ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction,
+    ControllerId, LpValue, PanelClearOp, PanelWriteOp, ProjectController, ProjectSlotAddress,
+    SlotEditOp, SlotMapKey, UiAction, UiPanelTarget,
 };
 
 /// Build the `SetValue` action a field dispatches on input.
@@ -14,6 +15,43 @@ pub(crate) fn slot_set_value_action(address: ProjectSlotAddress, value: LpValue)
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         SlotEditOp::SetValue { address, value },
+    )
+}
+
+/// Build the gesture action for a panel widget: a control with a panel
+/// target writes its `(scope, channel)` down the runtime command channel
+/// (panel.md P8 — nothing staged, nothing dirty, the actor coalesces per
+/// target); one without edits the authored default through the slot path.
+pub(crate) fn panel_or_slot_action(
+    panel_target: &Option<UiPanelTarget>,
+    address: ProjectSlotAddress,
+    value: LpValue,
+) -> UiAction {
+    match panel_target {
+        Some(target) => UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            PanelWriteOp {
+                scope: target.scope,
+                channel: target.channel.clone(),
+                value,
+                ttl_ms: None,
+            },
+        ),
+        None => slot_set_value_action(address, value),
+    }
+}
+
+/// Build the per-control clear (panel.md P2): release the engaged panel
+/// writer and return the control to Read.
+pub(crate) fn panel_clear_action(target: &UiPanelTarget) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Channel {
+                scope: target.scope,
+                channel: target.channel.clone(),
+            },
+        },
     )
 }
 

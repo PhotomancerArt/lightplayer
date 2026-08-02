@@ -26,7 +26,9 @@ use serde::{Deserialize, Serialize};
 /// - 6: structured scope on the probe surface — `WireBusChannel` gains
 ///   `scope` (channels list per scope) and `WireBindingEndpoint::Bus`
 ///   carries the endpoint's scope; display strings become a client
-///   concern.
+///   concern. Same train: `WireProjectCommand::PanelWrite`/`PanelClear`
+///   (the `(scope, channel)` panel command surface) and
+///   `WireBindingOrigin::Panel`.
 /// - 5: node kind `project` renamed to `module` — `NodeKind::Module`
 ///   serializes as `"Module"` in inventory frames, and `TreePath`
 ///   segments carry `.module` instead of `.project`.

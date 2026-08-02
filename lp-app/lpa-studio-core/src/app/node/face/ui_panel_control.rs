@@ -5,12 +5,31 @@ use crate::{
     UiSlotUnit, UiSlotValue,
 };
 
+/// The `(scope, channel)` a panel gesture writes (panel.md P1 identity),
+/// carried when the control's backing slot consumes a bus channel. Present
+/// = gestures dispatch `PanelWriteOp` down the runtime command channel (no
+/// overlay, no dirty); absent = the control has no channel to write (an
+/// unbound uniform) and keeps the authored-default slot-edit path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiPanelTarget {
+    /// The scope the write lands in (where the consuming binding reads).
+    pub scope: lpc_wire::WireScopeRef,
+    /// The bus channel the control drives.
+    pub channel: String,
+    /// Whether a panel writer is currently engaged for this target (a
+    /// Panel-origin provider row in the binding graph) — drives the
+    /// control's clear affordance.
+    pub engaged: bool,
+}
+
 /// A front-panel control projected from a panel-flagged slot.
 ///
 /// Panel controls sit directly on the card (no box-in-box) and open the SAME
-/// detail popover as their slot row (hover-revealed corner ⓘ). Edits dispatch
-/// through the standard slot write path (`SlotEditOp::SetValue` at
-/// [`Self::address`]), so knob drags coalesce exactly like slot field floods.
+/// detail popover as their slot row (hover-revealed corner ⓘ). A control
+/// with a [`Self::panel_target`] dispatches gestures as panel writes (the
+/// runtime command channel, panel.md P8); one without falls back to the
+/// standard slot write path (`SlotEditOp::SetValue` at [`Self::address`]).
+/// Both flood paths coalesce in the studio actor.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiPanelControl {
     /// Human-readable control label.
@@ -28,6 +47,9 @@ pub struct UiPanelControl {
     /// (≤2 decimals) and absent for monotonic/time-kind channels — see
     /// [`crate::UiBindingEndpoint::live_value`], the source it mirrors.
     pub live_value: Option<String>,
+    /// The `(scope, channel)` a gesture writes down the panel command
+    /// channel, present when the backing slot consumes a bus channel.
+    pub panel_target: Option<UiPanelTarget>,
     /// Optional display unit rendered near the value (e.g. "Hz", "%").
     pub unit: Option<UiSlotUnit>,
     /// Interaction, dirty, bound/live, and validation state (violet when
@@ -84,6 +106,7 @@ mod tests {
             },
             value: UiSlotValue::f32(1.6),
             live_value: None,
+            panel_target: None,
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects,

@@ -48,6 +48,22 @@ impl ScopeRef {
         matches!(self, Self::Sink { .. })
     }
 
+    /// Wire form of this scope.
+    pub fn to_wire(self) -> lpc_wire::WireScopeRef {
+        match self {
+            Self::Module { owner } => lpc_wire::WireScopeRef::Module { owner },
+            Self::Sink { owner, entry } => lpc_wire::WireScopeRef::Sink { owner, entry },
+        }
+    }
+
+    /// Engine form of a wire scope reference.
+    pub fn from_wire(scope: lpc_wire::WireScopeRef) -> Self {
+        match scope {
+            lpc_wire::WireScopeRef::Module { owner } => Self::Module { owner },
+            lpc_wire::WireScopeRef::Sink { owner, entry } => Self::Sink { owner, entry },
+        }
+    }
+
     /// The stable string identity of this scope, given its owner's tree
     /// path. This becomes the persisted panel-state key prefix
     /// (`<scope-path>/<channel>`), so it must be stable under sibling

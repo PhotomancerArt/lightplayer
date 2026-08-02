@@ -47,7 +47,8 @@ pub use project::{
 };
 pub use project_command::{
     WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
-    WireProjectCommand, WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WirePanelClearRequest, WirePanelCommandResponse, WirePanelWriteRequest, WireProjectCommand,
+    WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 pub use project_inventory::{
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,

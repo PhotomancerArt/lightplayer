@@ -141,6 +141,12 @@ fn handle_project_command(
                 response: project.node_command(node, &command),
             })
         }
+        WireProjectCommand::PanelWrite { request } => Ok(WireProjectCommandResponse::PanelWrite {
+            response: project.panel_write(&request),
+        }),
+        WireProjectCommand::PanelClear { request } => Ok(WireProjectCommandResponse::PanelClear {
+            response: project.panel_clear(&request),
+        }),
     }
 }
 

@@ -16,16 +16,17 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeCardUiState, NodeUiOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
-    PlaylistActivateOp, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotEditOp, StudioOverlayMutation, StudioProjectReadOutcome,
-    StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError,
-    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
-    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
-    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
+    NodeCardUiState, NodeUiOp, PanelClearOp, PanelWriteOp, PendingAssetEdit, PendingEdit,
+    PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState, ProjectConnectResult,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp, StudioOverlayMutation,
+    StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody,
+    UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView,
+    UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent,
+    UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -601,6 +602,19 @@ impl ProjectController {
                 && let Some(live) = live_channel_value(graph, channel, binding.kind)
             {
                 endpoint = endpoint.with_live_value(live);
+            }
+            // A consumed bus channel is a panel-write target (panel.md P1):
+            // the control built over this wiring dispatches PanelWrite at
+            // this (scope, channel) instead of editing the authored default.
+            if binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
+                && let Some(scope) = scope
+            {
+                endpoint = endpoint.with_panel_target(crate::UiPanelTarget {
+                    scope: *scope,
+                    channel: channel.clone(),
+                    engaged: panel_writer_engaged(graph, scope, channel),
+                });
             }
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
                 .with_description("Runtime slot wired by binding; it has no authored value here.")
@@ -2615,6 +2629,71 @@ impl ProjectController {
         })
     }
 
+    /// Engage (or update) the panel writer for `(scope, channel)` via
+    /// `WireProjectCommand::PanelWrite` — the runtime command channel, so
+    /// no overlay entry, no dirty flag, no Save-panel row. Quiet on
+    /// acceptance — the engaged badge and live value follow through the
+    /// tightened refresh ticks; a rejection comes back as a warning notice.
+    pub async fn panel_write(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelWriteOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let run = server
+            .panel_write(
+                handle_id,
+                lpc_wire::WirePanelWriteRequest {
+                    scope: op.scope,
+                    channel: op.channel.clone(),
+                    value: op.value,
+                    ttl_ms: op.ttl_ms,
+                },
+            )
+            .await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't set panel control {}: {reason}",
+                    op.channel
+                ))),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Clear engaged panel writers (one control, one scope, or all) via
+    /// `WireProjectCommand::PanelClear`. Same runtime-command posture as
+    /// [`Self::panel_write`].
+    pub async fn panel_clear(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelClearOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let run = server.panel_clear(handle_id, op.request).await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't reset panel control: {reason}"
+                ))),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
     /// Commit the pending-edit overlay (persisted edits are written back to
     /// def artifacts; transient edits stay pending) and re-sync the overlay
     /// mirror from a follow-up read.
@@ -4332,6 +4411,28 @@ fn live_channel_value(
     }
     let value = channel.value.as_ref()?.value.as_ref()?;
     crate::app::project::format_live_scalar(value)
+}
+
+/// Whether a panel writer is engaged for `(scope, channel)`: the probe
+/// surfaces one as a Panel-origin provider row on the scoped channel
+/// listing, so engagement reads from the graph the UI already pulls.
+fn panel_writer_engaged(
+    graph: &lpc_wire::WireBindingGraph,
+    scope: &lpc_wire::WireScopeRef,
+    channel_name: &str,
+) -> bool {
+    graph
+        .channels
+        .iter()
+        .find(|channel| channel.scope.as_ref() == Some(scope) && channel.name == channel_name)
+        .is_some_and(|channel| {
+            channel.providers.iter().any(|index| {
+                graph
+                    .bindings
+                    .get(*index as usize)
+                    .is_some_and(|binding| binding.origin == lpc_wire::WireBindingOrigin::Panel)
+            })
+        })
 }
 
 /// Collect `node` and every descendant controller (preorder) into `out`.

@@ -236,6 +236,57 @@ impl Project {
         }
     }
 
+    /// Dispatch a panel write (panel.md P8): engage/update the writer at
+    /// `(scope, channel)`. Runtime state only — no overlay, no dirty.
+    pub fn panel_write(
+        &mut self,
+        request: &lpc_wire::WirePanelWriteRequest,
+    ) -> lpc_wire::WirePanelCommandResponse {
+        let scope = lpc_engine::node::ScopeRef::from_wire(request.scope);
+        // A write to a scope no node introduces is a stale gesture from a
+        // client racing an edit — reject normally, never poison.
+        let engine = self.engine_mut();
+        if engine.tree().get(scope.owner()).is_none() {
+            return lpc_wire::WirePanelCommandResponse::Rejected {
+                reason: alloc::format!("unknown scope owner {:?}", scope.owner()),
+            };
+        }
+        engine.panel_write(
+            scope,
+            lpc_model::ChannelName(request.channel.clone()),
+            request.value.clone(),
+            request.ttl_ms,
+        );
+        lpc_wire::WirePanelCommandResponse::Accepted {
+            engaged: engine.panel_writers().len() as u32,
+        }
+    }
+
+    /// Dispatch a panel clear (panel.md P3; P-Q4: `All` reaches sink
+    /// scopes too).
+    pub fn panel_clear(
+        &mut self,
+        request: &lpc_wire::WirePanelClearRequest,
+    ) -> lpc_wire::WirePanelCommandResponse {
+        let engine = self.engine_mut();
+        match request {
+            lpc_wire::WirePanelClearRequest::Channel { scope, channel } => {
+                let scope = lpc_engine::node::ScopeRef::from_wire(*scope);
+                engine.panel_clear(scope, &lpc_model::ChannelName(channel.clone()));
+            }
+            lpc_wire::WirePanelClearRequest::Scope { scope } => {
+                let scope = lpc_engine::node::ScopeRef::from_wire(*scope);
+                engine.panel_clear_scope(scope);
+            }
+            lpc_wire::WirePanelClearRequest::All => {
+                engine.panel_clear_all();
+            }
+        }
+        lpc_wire::WirePanelCommandResponse::Accepted {
+            engaged: engine.panel_writers().len() as u32,
+        }
+    }
+
     pub fn mutate_overlay(
         &mut self,
         request: WireOverlayMutationRequest,
