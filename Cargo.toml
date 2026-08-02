@@ -282,10 +282,10 @@ panic = "unwind"
 [profile.release.package.fw-emu]
 debug = 1
 
-# ESP32: panic=unwind for OOM recovery via unwinding crate
+# ESP32: abort tier (measurement spike)
 [profile.release-esp32]
 inherits = "release"
-panic = "unwind"
+panic = "abort"
 
 [profile.release-esp32.package.fw-esp32c6]
 debug = 1

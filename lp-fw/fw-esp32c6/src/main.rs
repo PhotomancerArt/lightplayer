@@ -13,11 +13,6 @@
 )]
 
 extern crate alloc;
-#[allow(
-    unused_extern_crates,
-    reason = "unwinding is used for panic recovery; extern crate needed for no_std"
-)]
-extern crate unwinding;
 
 use core::alloc::Layout;
 use core::panic::PanicInfo;
@@ -89,46 +84,7 @@ fn panic_handler(info: &PanicInfo) -> ! {
         fatal_reset_or_hang();
     }
 
-    let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
-        #[cfg(feature = "server")]
-        {
-            let (file, line) = if let Some(loc) = info.location() {
-                (Some(loc.file()), Some(loc.line()))
-            } else {
-                (None, None)
-            };
-            if OOM_STATE.load(Ordering::Relaxed) == OOM_STATE_UNWINDING {
-                alloc::boxed::Box::new(lpc_shared::backtrace::PanicPayload::new_oom(
-                    info.message(),
-                    file,
-                    line,
-                    lpc_shared::backtrace::OomInfo {
-                        requested: OOM_ALLOC_SIZE.load(Ordering::Relaxed),
-                        align: OOM_ALLOC_ALIGN.load(Ordering::Relaxed),
-                        free: OOM_FREE_BYTES.load(Ordering::Relaxed),
-                        used: OOM_USED_BYTES.load(Ordering::Relaxed),
-                        context: lpc_shared::backtrace::oom_context(),
-                    },
-                ))
-            } else {
-                alloc::boxed::Box::new(lpc_shared::backtrace::PanicPayload::new(
-                    info.message(),
-                    file,
-                    line,
-                ))
-            }
-        }
-        #[cfg(not(feature = "server"))]
-        {
-            struct Dummy;
-            alloc::boxed::Box::new(Dummy)
-        }
-    };
     OOM_STATE.store(OOM_STATE_NORMAL, Ordering::Relaxed);
-    let code = unwinding::panic::begin_panic(payload);
-
-    // begin_panic returns if no catch_unwind was found on the stack.
-    esp_println::println!("unwinding failed: code={}", code.0);
     fatal_reset_or_hang();
 }
 

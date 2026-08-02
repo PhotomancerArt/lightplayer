@@ -2,9 +2,8 @@
 runner    = "espflash flash --chip esp32c6 --monitor --after hard-reset"
 rustflags = [
   "-C", "link-arg=-Tlinkall.x",
-  "-C", "force-frame-pointers",
-  "-C", "force-unwind-tables=yes",
-  "-C", "panic=unwind",               # Override target's default panic=abort
+  "-C", "force-frame-pointers",       # kept: the s0-chain backtrace walker needs it
+  "-C", "panic=abort",
   "-C", "link-arg=--gc-sections",     # Remove unused sections
   "-C", "link-arg=-znoseparate-code",  # Don't separate code segments (lld syntax: -z<option>)
 
