@@ -118,8 +118,8 @@ attaches, produces nothing, and consumes nothing. Since 2026-08-01 it also
 firmware build")`, adopted at attach time so it rides the first tree delta,
 and the resolve path's `ProduceResult::Unsupported` arm names that cause
 instead of the old, misleading *"does not produce slot"*. Studio renders it
-as a warning-toned "Not on this device", with the node's pane body replaced
-by an empty state. Only kinds that CAN be gated report it —
+as an error-toned "Not on this device", with the node's pane body replaced
+by a hazard-striped "not supported on this device" surface. Only kinds that CAN be gated report it —
 the project root is a placeholder too, and `LpFeature::for_node_kind` is the
 line. See
 [`docs/adr/2026-08-01-capability-reporting-on-hello.md`](../../docs/adr/2026-08-01-capability-reporting-on-hello.md)

@@ -96,17 +96,18 @@ pub enum ProjectNodeStatusTone {
     /// The node's kind has no runtime on the device this project runs on
     /// ("Not on this device").
     ///
-    /// Wears the WARNING tone, not a quiet one: a node the device cannot
-    /// run usually means the project does not work here at all. A few
-    /// kinds are genuinely optional (a radio node on a board with no
-    /// radio), but the common case is a broken show, so this announces
-    /// itself like any other warning instead of whispering. It stays a
-    /// tone of its own — rather than plain `Warning` — because the panes
-    /// must also know to render the node EMPTY (see
+    /// Wears the ERROR tone: a node the device cannot run usually means
+    /// the project does not work here at all. A few kinds are genuinely
+    /// optional (a radio node on a board with no radio), so this
+    /// over-states those slightly — the right trade, because the common
+    /// case is a broken show and a broken show must not read as fine. It
+    /// stays a tone of its own — rather than plain `Error` — because the
+    /// panes must also know to render the node EMPTY (see
     /// [`Self::is_unsupported`]): there is no runtime here, so there are
     /// no live params, products or slots to show.
     ///
-    /// (Tried dimmed/neutral first; rejected at the M4 G1 gate — see
+    /// (Dimmed/neutral, then warning-yellow, were both tried and rejected
+    /// at the M4 G1 gate — see
     /// `docs/adr/2026-08-01-capability-reporting-on-hello.md`.)
     Disabled,
 }
@@ -115,16 +116,17 @@ impl ProjectNodeStatusTone {
     /// The `UiStatusKind` this tree tone corresponds to (tree statuses never
     /// carry an in-flight `Working` state).
     ///
-    /// `Disabled` rides `Warning`, so it collapses into the attention class
-    /// through the ordinary affordance merge and the tree row announces it
-    /// exactly like any other warning. The status WORDS ("Not on this
-    /// device") carry what kind of warning it is.
+    /// `Disabled` rides `Error`, matching the red the node's own pane
+    /// wears. (Warning and Error already collapse to the same tree
+    /// affordance, so this changes no tree glyph — it aligns the pane
+    /// header wash and the popover pill with the body treatment, which
+    /// warning-yellow chrome around a red body did not.)
     pub fn ui_status_kind(self) -> UiStatusKind {
         match self {
             Self::Neutral => UiStatusKind::Neutral,
             Self::Good => UiStatusKind::Good,
-            Self::Warning | Self::Disabled => UiStatusKind::Warning,
-            Self::Error => UiStatusKind::Error,
+            Self::Warning => UiStatusKind::Warning,
+            Self::Error | Self::Disabled => UiStatusKind::Error,
         }
     }
 
@@ -141,33 +143,32 @@ impl ProjectNodeStatusTone {
 mod tests {
     use super::*;
 
-    /// A not-on-this-device node ANNOUNCES itself: it wears the warning
-    /// tone and collapses into the attention class through the ordinary
-    /// affordance merge, exactly like a `Warn` node. Regression guard for
-    /// the G1 gate outcome — an earlier build routed it through `Neutral`,
-    /// which read as healthy silence and was rejected, because a node the
-    /// device cannot run usually means the project does not work here.
+    /// A not-on-this-device node ANNOUNCES itself in the error family, the
+    /// same red its pane body wears. Regression guard for the G1 gate
+    /// outcome: the first build routed it through `Neutral` (read as
+    /// healthy silence), the second through `Warning` (yellow chrome
+    /// around a red body). Both were rejected.
     #[test]
-    fn unsupported_announces_itself_like_a_warning() {
+    fn unsupported_announces_itself_in_the_error_family() {
         assert_eq!(
             ProjectNodeStatusTone::Disabled.ui_status_kind(),
-            UiStatusKind::Warning
+            UiStatusKind::Error
         );
         assert!(ProjectNodeStatusTone::Disabled.is_unsupported());
 
         let clean = DirtySummary::clean();
         assert_eq!(
             UiAffordance::merged(ProjectNodeStatusTone::Disabled.ui_status_kind(), &clean),
-            UiAffordance::merged(ProjectNodeStatusTone::Warning.ui_status_kind(), &clean),
-            "an unsupported node announces itself like any other warning"
+            UiAffordance::merged(ProjectNodeStatusTone::Error.ui_status_kind(), &clean),
         );
         assert_ne!(
             UiAffordance::merged(ProjectNodeStatusTone::Disabled.ui_status_kind(), &clean),
             UiAffordance::merged(ProjectNodeStatusTone::Good.ui_status_kind(), &clean),
-            "it must never read as healthy silence (the G1 rejection)"
+            "it must never read as healthy silence (the first G1 rejection)"
         );
 
-        // Only Disabled empties the pane; the plain warning tone does not.
+        // Only Disabled empties the pane; the plain error tone does not —
+        // a broken shader still shows its slots so you can fix it.
         for tone in [
             ProjectNodeStatusTone::Neutral,
             ProjectNodeStatusTone::Good,
