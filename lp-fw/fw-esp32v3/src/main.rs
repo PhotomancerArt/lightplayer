@@ -149,12 +149,12 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// M3-P2 may reasonably trade some of that stack for heap once it has
 /// measured what an on-device compile actually needs of each.
 ///
-/// The tempting next lever is `dram2_seg` (`0x3FFE_7E30`, 98,768 B) as a
-/// second `esp_alloc` region — but see the ⚠️ at the graphics construction
-/// site first: that segment *overlaps*
-/// `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT`
-/// (`0x3FFE_8000..0x3FFF_F000`), so handing it to the allocator would hand the
-/// JIT's code region to the heap.
+/// ⚠️ This is no longer the whole heap. `dram2_seg`'s tail is now a **second**
+/// `esp_alloc` region worth 64 KiB — see [`add_sram1_heap_region`]. This
+/// constant sizes only the `dram_seg` arena, which is the one in zero-sum
+/// competition with `.stack`; the second region costs `.stack` nothing,
+/// which is exactly why it was worth reclaiming. Total heap is
+/// `HEAP_SIZE + 65,536`.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 const HEAP_SIZE: usize = 110 * 1024;
 
@@ -285,6 +285,25 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     let used = esp_alloc::HEAP.used();
     let largest = recovery::panic_path::largest_free_block();
     esp_println::println!("[MEM] free={free} used={used} largest_free={largest}");
+    // The JIT code region is NOT part of the heap above — it is a separate
+    // fixed SRAM1 reservation, and its residency is the number that decides
+    // how much of it can be handed back. `peak` is the high-water mark of
+    // concurrent residency since boot; `allocs`/`frees` diverging while the
+    // board sits idle is a span leak, which must be read before any figure
+    // here is used to justify a smaller region.
+    if let Some((jit, jit_largest)) = lpvm_native::codemem_esp32::global::stats() {
+        esp_println::println!(
+            "[JIT] used={} peak={} cap={} spans={} peak_spans={} allocs={} frees={} fails={} largest_free={jit_largest}",
+            jit.used,
+            jit.peak_used,
+            lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.len_bytes,
+            jit.live_spans,
+            jit.peak_spans,
+            jit.allocs,
+            jit.frees,
+            jit.alloc_failures,
+        );
+    }
     Some((
         free.min(u32::MAX as usize) as u32,
         used.min(u32::MAX as usize) as u32,
@@ -292,6 +311,48 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 }
 
 /// Everything `main` needs to hand to the server loop.
+/// Hand the SRAM1 tail — everything `CodeRegion::ESP32_DEFAULT` does *not*
+/// use — to the allocator as a second region, and return its size.
+///
+/// This is the memory the classic has always owned and never been able to
+/// spend. `dram_seg` gives the arena above only 192 KB to share between
+/// `.data`, `.bss` and `.stack`; esp-hal also declares `dram2_seg`
+/// (`0x3FFE_7E30`, 98,768 B), which no linker section targets — esp-idf uses
+/// the same span as heap. It could not join the heap here because the JIT
+/// code region sat in the middle of it. Now that the region is measured down
+/// to 32 KiB, 64 KiB of it is free.
+///
+/// ⚠️ The boundary is **computed from the region**, never restated: the base
+/// and length come from [`CodeRegion::reclaimable_heap_span`], whose
+/// const-asserts pin it to abut `dbus_end()` exactly. That is deliberate.
+/// Before this, the rule lived as prose warnings in two files, and prose does
+/// not fail to compile when someone changes the region and forgets — which
+/// would hand the allocator and the JIT the same bytes, a corruption whose
+/// symptom is a shader overwriting the heap.
+///
+/// The span carries no ROM hazard. esp-hal's four ROM reservations
+/// (`reserved_rom_data_pro/app`, `reserved_rom_stack_pro/app`) all sit
+/// *below* `dram2_seg`, the last of them ending exactly at its origin — the
+/// ROM's stacks and data are in the middle of SRAM1, and `dram2_seg` is
+/// precisely the part above them.
+///
+/// # Safety
+/// The span is `'static` (a fixed hardware address), exclusively the
+/// allocator's (the code region is the only other claimant on SRAM1, and the
+/// const-asserts prove they abut without overlap), and non-empty.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+fn add_sram1_heap_region() -> usize {
+    let (base, len) = lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            base as *mut u8,
+            len as usize,
+            esp_alloc::MemoryCapability::Internal.into(),
+        ));
+    }
+    len as usize
+}
+
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 struct FirmwareApp {
     server: LpServer,
@@ -307,8 +368,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let (sw_int, timg0, uart0, flash, rmt_peripheral) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+    let sram1_heap = add_sram1_heap_region();
     esp_println::println!("[INIT] fw-esp32v3 boot");
-    esp_println::println!("[INIT] chip=esp32 arch=xtensa heap={HEAP_SIZE}");
+    esp_println::println!(
+        "[INIT] chip=esp32 arch=xtensa heap={HEAP_SIZE}+{sram1_heap} (dram_seg arena + SRAM1 tail)"
+    );
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
@@ -413,14 +477,16 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // compile fails with a clean "arena not installed" error.
     //
     // Region facts (measured; see `lpvm_native::codemem_esp32`):
-    //   * `CodeRegion::ESP32_DEFAULT` = D-bus `0x3FFE_8000..0x3FFF_F000`,
-    //     I-bus image `0x400A_1000..0x400B_8000` (92 KiB of JIT code).
+    //   * `CodeRegion::ESP32_DEFAULT` = D-bus `0x3FFE_8000..0x3FFF_0000`,
+    //     I-bus image `0x400B_0000..0x400B_8000` (32 KiB of JIT code), sized
+    //     from the measured shader corpus — 2.06× the keep-last-good peak.
     //   * The linker cannot collide with it — esp-hal's `dram_seg` ends at
-    //     `0x3FFE_0000` — but it DOES overlap esp-hal's `dram2_seg`
-    //     (`0x3FFE_7E30`, 98,768 B). If anyone adds dram2_seg as a second
-    //     `esp_alloc` region to buy heap headroom, it must stop below
-    //     `0x3FFE_8000` or the allocator and the JIT will hand out the same
-    //     bytes.
+    //     `0x3FFE_0000`.
+    //   * The rest of `dram2_seg` above it (`0x3FFF_0000..0x4000_0000`,
+    //     64 KiB) IS the heap's second region, added at boot by
+    //     `add_sram1_heap_region`. The two abut exactly and the split is
+    //     const-asserted in `codemem_esp32`, so this is a fact the compiler
+    //     keeps rather than a rule a reader has to remember.
     //   * The frontend is passed, never defaulted: `LpGraphics::glsl_frontend`
     //     has no default impl so every host states its choice, and the device
     //     ships `LpsGlsl`.
@@ -428,9 +494,17 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT,
     );
     esp_println::println!(
-        "[INIT] JIT code region: ibus {:#010x}..{:#010x} (92 KiB, placed)",
+        "[INIT] JIT code region: ibus {:#010x}..{:#010x} ({} KiB, placed); \
+         SRAM1 heap tail dbus {:#010x}+{} B",
         lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.ibus_base(),
         lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.ibus_end(),
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.len_bytes / 1024,
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT
+            .reclaimable_heap_span()
+            .0,
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT
+            .reclaimable_heap_span()
+            .1,
     );
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
