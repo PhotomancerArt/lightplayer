@@ -76,16 +76,31 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 /// memory the board owns but cannot hand out in one piece.
 ///
 /// ⚠️ **This image's heap is TWO regions**, not one: the `dram_seg` arena plus
-/// the 64 KiB SRAM1 tail (`main.rs`'s `add_sram1_heap_region`). The number
-/// below is still exactly what it claims — the largest single allocation the
-/// heap can satisfy — because `esp_alloc::alloc_caps` walks the regions in
-/// turn and the probe goes through that same path. What changed is the
-/// *reading*: `free - largest` no longer measures fragmentation alone, since
-/// two regions that are each perfectly unfragmented still cannot serve a
-/// request larger than the bigger one. A large `free - largest` on this chip
-/// now means "fragmented **or** split across regions", and only a
-/// per-region breakdown (`esp_alloc::HEAP.stats()`) separates them. Do not
-/// infer fragmentation from this figure alone.
+/// the 64 KiB SRAM1 tail (`main.rs`'s `add_sram1_heap_region`). The probe
+/// still walks both — `esp_alloc::alloc_caps` tries each region in turn and
+/// only returns null once *every* one has refused, and this goes through that
+/// same path. Two consequences, neither of them "it now means less":
+///
+/// 1. `free - largest` no longer measures fragmentation alone. Two regions
+///    that are each perfectly unfragmented still cannot serve a request
+///    larger than the bigger one, so a large gap now means "fragmented **or**
+///    split across regions". Only a per-region breakdown
+///    (`esp_alloc::HEAP.stats()`) separates them; do not infer fragmentation
+///    from this figure alone.
+/// 2. A failed allocation has **already tried every region**, so a retry that
+///    then succeeds still means the *heap changed* — a second region does not
+///    give a successful retry a second explanation. That inference is safe.
+///
+/// ⚠️ Separately, and true before this heap had two regions: the value is a
+/// **floor, not a bound**. The bisection assumes "if S fits, so does S-4",
+/// and `HoleList::split_current` refuses a hole outright when the leftover
+/// could not hold a `Hole`, so `alloc(S)` can fail where `alloc(S+4)`
+/// succeeds (186 counterexample pairs in 409,000 host probes — see
+/// `spikes/classic-oom-allocator`). Bisecting a non-monotonic predicate lands
+/// somewhere at or below the true maximum; it never over-reports, because
+/// `fits` only advances on an actual success. A second region makes the
+/// predicate a union of two non-monotonic ones, so the floor may be looser
+/// still.
 ///
 /// `linked_list_allocator` exposes no free-list walk, so this asks the allocator
 /// the only question it answers: binary-search the largest size it will accept,
