@@ -48,6 +48,9 @@ std = []
 # Unified profile session (alloc + perf hooks); guest syscall path was renamed from `alloc-trace`.
 profile = ["lp-riscv-emu-guest/profile"]
 naga = ["lpa-server/naga"]
+# Log heap used/free once per frame, so a test can tell a bounded transient
+# from a leak. One log line per frame — tests only.
+heap_report = []
 
 [build-dependencies]
 

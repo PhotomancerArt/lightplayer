@@ -44,6 +44,20 @@ pub unsafe fn init_heap() {
     }
 }
 
+/// Live heap accounting as `(used_bytes, free_bytes)`.
+///
+/// The ESP32 firmwares report the same pair from `esp_alloc::HEAP` (see each
+/// chip's `esp32_memory_stats`); this is the emulator's equivalent, so a
+/// firmware test can watch the heap across frames rather than inferring it.
+pub fn heap_stats() -> (usize, usize) {
+    #[cfg(not(feature = "profile"))]
+    let heap = HEAP_ALLOCATOR.lock();
+    #[cfg(feature = "profile")]
+    let heap = HEAP_ALLOCATOR.inner.lock();
+
+    (heap.used(), heap.free())
+}
+
 // --- TrackingAllocator (only when profile feature is enabled) ---
 
 #[cfg(feature = "profile")]
