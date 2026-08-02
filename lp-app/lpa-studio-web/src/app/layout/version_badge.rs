@@ -194,8 +194,19 @@ fn chip_text(chip: &BuildChip) -> String {
 /// The chip trigger content: state icon + build identity. Long branch
 /// names ellipsize from the LEFT (RTL container, LTR bidi-override text)
 /// so the distinctive tail of `claude/some-long-branch-b6680f` survives.
+///
+/// On narrow viewports the text drops and the chip becomes its icon — a
+/// branch name is the first thing worth spending phone width on. States
+/// with no icon (loading, the no-git fallback) keep their short text
+/// instead, so the chip is never empty.
 fn chip_trigger(chip: &BuildChip) -> Element {
     let text = chip_text(chip);
+    let has_icon = matches!(chip, BuildChip::Release(_) | BuildChip::Branch { .. });
+    let text_class = if has_icon {
+        "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:max-[640px]:hidden"
+    } else {
+        "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap"
+    };
     rsx! {
         match chip {
             BuildChip::Release(_) => rsx! { Tag { size: 12 } },
@@ -203,7 +214,7 @@ fn chip_trigger(chip: &BuildChip) -> Element {
             BuildChip::Loading | BuildChip::DevFallback => rsx! {},
         }
         span {
-            class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap",
+            class: "{text_class}",
             style: "direction: rtl; text-align: left;",
             span { style: "unicode-bidi: bidi-override; direction: ltr;", "{text}" }
         }
@@ -397,6 +408,7 @@ macro_rules! chip_class_str {
         concat!(
             "tw:inline-flex tw:h-7 tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer ",
             "tw:items-center tw:gap-1.5 tw:rounded-full tw:border tw:px-2.5 ",
+            "tw:max-[640px]:gap-0 tw:max-[640px]:px-2 ",
             "tw:font-mono tw:text-[0.65rem] tw:font-bold ",
             $tone
         )

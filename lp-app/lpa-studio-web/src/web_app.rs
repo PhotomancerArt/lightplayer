@@ -21,6 +21,7 @@ use core::cell::{Cell, RefCell};
 use core::time::Duration;
 use std::rc::Rc;
 
+use crate::app::layout::{SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge};
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::local_store::{self, LocalStoreStatus};
@@ -87,36 +88,10 @@ pub fn App() -> Element {
         };
     }
 
-    // The docs section: same standalone-page pattern. In-section article
-    // switches re-render via the page's own hashchange listener (no
-    // reload); transitions into/out of the section hard-reload like every
-    // standalone page.
-    if let StudioRoute::Docs { page } = router::current_route() {
-        return rsx! {
-            style { "{STYLE}" }
-            document::Stylesheet { href: asset!("/assets/tailwind.css") }
-            main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
-                crate::app::layout::SiteChrome { section: crate::app::layout::SiteSection::Docs }
-                crate::app::DocsPage { initial_page: page }
-            }
-        };
-    }
-
-    // The boards catalog: same standalone-page pattern. The detected OS
-    // drives per-bridge driver warnings (plan D5) — detected here at the
-    // platform edge; lpa-boards stays platform-blind.
-    if let StudioRoute::Boards { board } = router::current_route() {
-        return rsx! {
-            style { "{STYLE}" }
-            document::Stylesheet { href: asset!("/assets/tailwind.css") }
-            // The chrome sits in the studio-width container; the catalog
-            // keeps its own narrower `.lpb-cat-page` container below it.
-            div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pt-[18px]",
-                crate::app::layout::SiteChrome { section: crate::app::layout::SiteSection::Boards }
-            }
-            lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
-        };
-    }
+    // NOTE: Boards and Docs deliberately have NO early return — they are
+    // sections of the running app, not standalone pages. An early return
+    // here would run before the hooks below, which is why the surfaces
+    // that do it can only be entered by a page load. See the render body.
 
     let mut view = use_signal(UiStudioView::empty);
     // The OpenRouter connect return leg (`?code=…`): consumed synchronously
@@ -434,15 +409,19 @@ pub fn App() -> Element {
                         )));
                     }
                 }
+                StudioRoute::Boards { .. } | StudioRoute::Docs { .. } => {
+                    // In-app sections: setting the route signal above already
+                    // re-rendered the body. Nothing unloads — the runtime
+                    // pool, sims, and device sessions keep running while the
+                    // user reads docs or browses boards.
+                }
                 StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
-                | StudioRoute::Boards { .. }
-                | StudioRoute::BoardEditor
-                | StudioRoute::Docs { .. } => {
-                    // the story book, mapping editor, boards catalog, board
-                    // editor, and docs section mount on fresh page loads
-                    // only (their early returns in App run before any
-                    // hooks); reload to keep the hook order sound
+                | StudioRoute::BoardEditor => {
+                    // the story book, mapping editor, and board editor mount
+                    // on fresh page loads only (their early returns in App
+                    // run before any hooks); reload to keep the hook order
+                    // sound
                     router::hard_reload();
                 }
             }
@@ -587,18 +566,47 @@ pub fn App() -> Element {
     let opening_frame = matches!(current_route, StudioRoute::Sim { .. })
         && !current_route.sim_matches_view(&current_view);
 
+    // One shell for every section: the chrome renders at the same offset
+    // whatever is below it, and switching sections swaps only the body —
+    // the actor, runtime pool, and open sessions are untouched.
+    // Shared by the chrome and the section body below: an EventHandler is
+    // Copy, the raw closure is not.
+    let on_action = EventHandler::new(on_action);
+    let section = match &current_route {
+        StudioRoute::Boards { .. } => SiteSection::Boards,
+        StudioRoute::Docs { .. } => SiteSection::Docs,
+        _ => SiteSection::Studio,
+    };
+    let settings = current_view.settings.clone();
+
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
-        div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-4 tw:max-[880px]:px-[18px]",
+        main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
+            SiteChrome { section, on_action,
+                VersionBadge {}
+                StudioSettingsPopover { settings, on_settings }
+            }
             LocalStoreBanner { status: store_status.read().clone() }
-        }
-        StudioShell {
-            view: current_view,
-            running: false,
-            opening_frame,
-            on_action,
-            on_settings,
+            match current_route {
+                StudioRoute::Boards { board } => rsx! {
+                    // The detected OS drives per-bridge driver warnings
+                    // (plan D5) — detected here at the platform edge;
+                    // lpa-boards stays platform-blind.
+                    lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
+                },
+                StudioRoute::Docs { page } => rsx! {
+                    crate::app::DocsPage { page }
+                },
+                _ => rsx! {
+                    StudioShell {
+                        view: current_view,
+                        running: false,
+                        opening_frame,
+                        on_action,
+                    }
+                },
+            }
         }
     }
 }

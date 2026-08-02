@@ -3238,10 +3238,10 @@ label:has(> input:not(:disabled)) {
 /* ---- boards catalog page (#/boards, lpa-boards BoardsCatalogPage) ------ */
 
 .lpb-cat-page {
-    max-width: 1340px;
-    margin: 0 auto;
-    /* Top rhythm comes from the site chrome above the page. */
-    padding: 4px 32px 120px;
+    /* The catalog is a section body inside the app shell: the shared
+       container owns width and side padding, so this only adds the
+       bottom run-out. */
+    padding: 0 0 60px;
 }
 
 .lpb-cat-header h1 {
