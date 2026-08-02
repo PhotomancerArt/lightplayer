@@ -1,7 +1,7 @@
 //! How much JIT code region a **real** shader actually needs, measured on the
 //! host over the repo's whole shader corpus.
 //!
-//! The classic ESP32 reserves a fixed 92 KiB of SRAM1 for JIT'd code
+//! The classic ESP32 reserved a fixed 92 KiB of SRAM1 for JIT'd code
 //! ([`CodeRegion::ESP32_DEFAULT`]) — memory that cannot be heap, on a chip
 //! whose entire heap is 110 KB. That size was never measured; it was chosen as
 //! "a comfortable span inside `dram2_seg`". This test supplies the missing
@@ -104,9 +104,14 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
             .map_err(|e| format!("synth render_samples: {e:?}"))?;
     }
 
+    // `fuel: true` is `NativeCompileOptions`'s default and what the device
+    // actually compiles with — measuring without it understates every figure
+    // here by ~9 % (checked against the board: `examples/shader-oracle`
+    // emitted 2,244 B fuel-off but the classic reported 2,444 B for the same
+    // shader). Sizing a region from a fuel-off number would build that error
+    // straight into the safety factor.
     let opts = NativeCompileOptions {
         float_mode: FloatMode::Q32,
-        fuel: false,
         ..Default::default()
     };
     let compiled = compile_module(&ir, &meta, FloatMode::Q32, opts, IsaTarget::Xtensa)
@@ -116,6 +121,96 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
     // (`link_jit_impl` asserts the linked image is this length).
     let total: usize = compiled.functions.iter().map(|f| f.code.len()).sum();
     Ok((total as u32, compiled.functions.len()))
+}
+
+/// A shader too big for the region must be a clean [`CodeMemError::TooLarge`]
+/// carrying diagnosable numbers — never a partial install or a wild write.
+///
+/// This is the backstop the whole sizing argument leans on: 32 KiB is not a
+/// proof that every shader fits, it is a bet that real ones do, and this is
+/// what happens when the bet loses. On the device the error surfaces as a
+/// `NativeError` from the compile, which `shader_node.rs` turns into a node
+/// status while keep-last-good keeps the previous program rendering — one
+/// node fails, the board does not.
+///
+/// The shader is synthesised rather than checked in: it exists to exceed the
+/// region, so it has to be regenerated if the region ever grows, and a
+/// 19 KB `.glsl` in the corpus directory would distort the very table above.
+///
+/// It is built as many small functions rather than one enormous one on
+/// purpose — that is the shape real large shaders have, and the giant-single-
+/// function shape hits an unrelated register-allocator defect
+/// (`regalloc/spill.rs`'s `next_slot: u8` overflows past 255 spill slots),
+/// which would make this test fail for a reason that has nothing to do with
+/// code memory.
+#[test]
+fn an_oversized_shader_is_a_clean_toolarge_not_a_wild_write() {
+    const HELPERS: usize = 160;
+    let mut body = String::new();
+    for i in 0..HELPERS {
+        body.push_str(&format!(
+            "float h{i}(float t) {{\n    \
+               float a = sin(t * {}.0) * cos(t + {}.0);\n    \
+               float b = sqrt(abs(a * {}.0 + t));\n    \
+               return fract(a + b * {}.0);\n}}\n",
+            i + 1,
+            i + 2,
+            i + 3,
+            i + 4
+        ));
+    }
+    body.push_str("vec3 render(vec2 pos) {\n    float acc = pos.x + pos.y;\n");
+    for i in 0..HELPERS {
+        body.push_str(&format!("    acc += h{i}(acc);\n"));
+    }
+    body.push_str(
+        "    return vec3(fract(acc * 0.013), fract(acc * 0.027), fract(acc * 0.041));\n}\n",
+    );
+
+    let (code_bytes, _) = measure(&body).expect("the oversized shader still compiles");
+    let region = CodeRegion::ESP32_DEFAULT.len_bytes;
+    assert!(
+        code_bytes > region,
+        "this shader is supposed to OUTGROW the region: {code_bytes} B vs {region} B. \
+         If the region grew, grow the generator too — otherwise this test proves nothing."
+    );
+
+    // Now the arena's answer, at real-region scale.
+    let mut arena = lpvm_native::codemem_esp32::CodeArena::new(CodeRegion::ESP32_DEFAULT);
+    let err = arena
+        .alloc(code_bytes)
+        .expect_err("an image larger than the region must not be placed");
+    match err {
+        lpvm_native::codemem_esp32::CodeMemError::TooLarge {
+            requested,
+            largest_free,
+            capacity,
+        } => {
+            assert_eq!(requested, code_bytes);
+            assert_eq!(capacity, region);
+            // Nothing was consumed by the failure: the region is still whole,
+            // so the next (reasonable) shader still compiles.
+            assert_eq!(largest_free, region);
+        }
+        other => panic!("expected TooLarge, got {other:?}"),
+    }
+    let stats = arena.stats();
+    assert_eq!(stats.alloc_failures, 1);
+    assert_eq!(stats.used, 0, "a refused alloc reserves nothing");
+    assert_eq!(stats.live_spans, 0);
+    assert_eq!(arena.available(), region, "the region is untouched");
+
+    // And a normal shader still fits immediately afterwards — the failure is
+    // not sticky.
+    let ok = arena.alloc(6_516);
+    assert!(ok.is_ok(), "region unusable after a refused alloc: {ok:?}");
+
+    println!(
+        "\noversized shader: {} B of GLSL -> {} B of Xtensa (region {} B) -> clean TooLarge",
+        body.len(),
+        code_bytes,
+        region
+    );
 }
 
 /// The corpus measurement and the region-size guard.
@@ -159,7 +254,11 @@ fn real_shaders_fit_the_classic_code_region_with_margin() {
     }
 
     measured.sort_by_key(|m| core::cmp::Reverse(m.code_bytes));
-    println!("\n== Xtensa emitted size, real shader corpus (Q32, no fuel) ==");
+    // Validated against silicon: the classic reported 2,444 B for
+    // `shader-oracle` and M3 measured 2,032 B for `quad-strips-v3` — both
+    // reproduced exactly by this table, so these are device figures, not a
+    // host approximation of them.
+    println!("\n== Xtensa emitted size, real shader corpus (Q32, fuel on — device settings) ==");
     println!(
         "{:<52} {:>9} {:>10} {:>6} {:>7}",
         "shader", "glsl B", "xtensa B", "fns", "×glsl"

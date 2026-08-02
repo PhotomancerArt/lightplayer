@@ -131,7 +131,88 @@ The `lp-recovery` RTC ledger costs **nothing** from this budget: its 976 B live
 in RTC fast RAM (`0x3FF8_0000`, 8 KiB, a separate segment). Only its code came
 out of `.stack`, 504 B.
 
+### Amended 2026-08-02 — the heap is now 178,176 B, in two regions
+
+Everything above concerns `dram_seg`, and every byte in it is zero-sum with
+`.stack`. It is no longer the whole heap.
+
+esp-hal also declares **`dram2_seg`** (`0x3FFE_7E30`, 98,768 B), which no
+linker section targets — esp-idf uses the same span as heap. This image could
+not, because `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` sat in the
+middle of it, reserving **92 KiB of SRAM1 for JIT'd shader code**. That size
+was never measured; it was chosen as a comfortable span.
+
+It has now been measured. `lpvm-native`'s `tests/xt_classic_codemem_corpus.rs`
+compiles every shader in `examples/` and `projects/` through the device's own
+pipeline at the device's own settings (Q32, fuel on):
+
+| figure | measured |
+|---|---|
+| largest single shader (`examples/basic`, 4,092 B GLSL) | 6,516 B |
+| mean over 27 shaders | 3,348 B |
+| worst real project (`fyeah-button`, 2 shader nodes) | 10,260 B |
+| + one keep-last-good recompile copy | **16,776 B** |
+
+The last row is the peak, because `shader_node.rs` keeps the old program
+resident while its replacement compiles. These are device figures, not a host
+estimate: the classic reported 2,444 B for `examples/shader-oracle` and M3
+measured 2,032 B for `quad-strips-v3`, and the test reproduces both exactly.
+
+Builtins are **not** resident in the region — `jit_builtin_code_ptr` hands the
+linker addresses of functions already in the firmware's `.text`, so a shader
+that calls `sin` costs a 4-byte literal slot, not a copy of `sin`. That is why
+per-shader cost stays in the low kilobytes regardless of how much of GLSL a
+shader touches.
+
+**The region is now 32 KiB** — 1.95× the measured peak, 5.03× the largest
+single real shader, ~9.8 shaders at the corpus mean. The remaining **64 KiB is
+a second `esp_alloc` region** (`main.rs`'s `add_sram1_heap_region`). The
+boundary is computed from `CodeRegion::reclaimable_heap_span()` and
+const-asserted to abut the region exactly, replacing the prose warnings that
+previously lived in two files and could not fail to compile. `dram2_seg`
+carries no ROM hazard: all four esp-hal ROM reservations sit *below* its
+origin, the last ending exactly at it.
+
+Measured on the desk DOM-Z-102, boot green, `safeMode=false`:
+
+| state | before (112,640 B) | after (178,176 B) |
+|---|---|---|
+| total heap | 112,640 B | **178,176 B** (+65,536) |
+| idle, no project | 102,156 B free | **167,212 B free** (+65,056) |
+| `quad-strips-v3` running | 18,128 B free | **74,720 B free** |
+
+The +65,056 at idle is the +65,536 region minus the second region's allocator
+bookkeeping. ⚠️ The `quad-strips-v3` row is **not** a clean +/- comparison:
+`used` came out ~9 KB above the 94,508 B recorded earlier for that project, for
+reasons unrelated to this change (which only *adds* heap). Quote the idle row
+for the reclaim figure.
+
+This does not cost `.stack` anything — that is the point. The 64 KiB comes from
+a segment `.stack` never had access to, so the "as high as it links" ceiling
+above is untouched.
+
+**What it gives up, stated plainly.** The old 92 KiB could hold the entire
+27-shader corpus at once (90,400 B); 32 KiB cannot. Shaders emitting between
+32,768 B and 94,208 B used to be placeable and no longer are — roughly 17–50 KB
+of GLSL, against a largest real shader of 4 KB. That range is already
+unreachable on this chip for a different reason: a 4 KB shader needs ~65 KB of
+compile working set (below), so a 17 KB one cannot compile at any region size.
+The code region was never the binding constraint for those shaders; the heap
+was, and this trade moves 64 KiB to the side that binds.
+
+Verified on silicon: the JIT arena's span accounting closes exactly across a
+project swap (`allocs=2 frees=1 spans=1 used=2032`, `largest_free` back to
+`32768 − 2032` unfragmented), so spans are returned, not leaked. An oversized
+shader is refused cleanly — `TooLarge` on the host at real-region scale, with
+the region left whole and the next allocation succeeding; on the device a
+26 KB-GLSL shader fails its node (black fallback, recovery-disabled frame)
+while the board stays up at full frame rate.
+
 ### Runtime heap, measured on silicon (112,640 B arena)
+
+> These rows predate the 2026-08-02 amendment above and were taken against the
+> single 112,640 B arena. Add 65,536 B to every `free` figure to reach today's
+> image; `used` is unchanged.
 
 | state | free | used |
 |---|---|---|
@@ -163,6 +244,22 @@ this chip has.
 **Practical ceiling: ~240 LEDs comfortable, ~300 at the edge, 400 impossible
 — for a project whose shader is already compiled.**
 
+> **Amended 2026-08-02 — the ceiling moves up with the reclaimed 64 KiB.** At
+> ≈89.5 B per LED, 65,536 B of new heap is **≈730 LEDs** of headroom on the
+> steady-state axis, so the 400-LED row that OOM'd is now expected to fit with
+> room, and the steady-state ceiling is no longer the interesting limit.
+>
+> ⚠️ These are *derived*, not measured — the arithmetic above the amendment
+> stands, but nobody has run 400 LEDs on the two-region image yet. Do not quote
+> a new LED number for a product claim until someone does; measure and replace
+> this paragraph.
+>
+> The more important consequence is the **other** axis. The binding constraint
+> was never LED count alone but LED count × shader size, via the ~65 KB compile
+> working set — and 64 KiB of new heap lands squarely on it. Whether
+> `examples/basic` (241 LEDs, 4,092 B GLSL) now compiles on-device, where it
+> previously OOM'd, is the single measurement most worth taking next.
+
 That qualifier is the correction. Every row in the table above is a
 *steady-state* number, read once the shader is resident, and steady state is
 not the peak. Compiling GLSL on-device is a transient of tens of KB on top of
@@ -186,6 +283,20 @@ WiFi + JIT does not fit without a RAM diet of serde-surface scale. That is the
 measured price of D1's "radio-off for v1", recorded here so the future attempt
 starts from a number rather than a hope.
 
+> **Amended 2026-08-02.** The 44,244 B heap requirement now has somewhere to
+> come from: the reclaimed 64 KiB exceeds it. `quad-strips-v3` running leaves
+> 74,720 B free, against 44,244 B needed — so the *heap* half of the radio
+> question has flipped from "impossible" to "arithmetically available", which
+> it has not been before.
+>
+> ⚠️ This does **not** reopen D1, and nobody should read it as radio being
+> affordable. Three things are unaddressed: the ~28 KB of radio *static* data
+> comes out of `dram_seg`, which is still zero-sum with `.stack` and is the
+> segment that actually binds; the radio-probe build already has to shrink the
+> arena to 72 KB just to link; and no measurement has been taken with both the
+> radio and a project resident. The honest statement is that the heap objection
+> is no longer the *first* blocker — the `.bss`/`.stack` one now is.
+
 ⚠️ Note the asymmetry this ADR exists to make explicit: **the RAM diet WiFi
 would need is a different lever from the flash diet the C6 needs**, even though
 both point at `lpc_model`/serde. Flash headroom on this chip is 1.4 MB; heap
@@ -201,6 +312,18 @@ headroom at four channels is 7 KB.
 - The ~68 B/LED engine-side cost is the next RAM lead. It is shared with the
   S3 and C6, which have the arena to absorb it — so it is latent there, not
   absent, exactly like the per-channel LUT this roadmap removed.
+- **The JIT code region is settled at 32 KiB and should not be re-litigated
+  from arithmetic.** It is pinned by two guards that will speak up on their
+  own: `tests/xt_classic_codemem_corpus.rs` fails if a real shader outgrows it,
+  and the const-asserts in `codemem_esp32` fail if the region and the heap
+  boundary stop abutting. Changing it means changing `lp-xt-emu`'s
+  `BoardProfile::esp32()` in the same commit — `tests/xt_classic_profile.rs`
+  enforces that.
+- `largest_free_block()` no longer measures fragmentation on its own: with two
+  heap regions, `free − largest` conflates fragmentation with a cross-region
+  split. Use `esp_alloc::HEAP.stats()` for a per-region breakdown before
+  concluding a heap is fragmented. This matters for anyone reading the
+  retry-succeeds-OOM signature.
 
 ## Reproducing
 

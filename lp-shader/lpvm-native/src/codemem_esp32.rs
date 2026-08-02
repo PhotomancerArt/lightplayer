@@ -116,20 +116,31 @@ impl CodeRegion {
     ///
     /// `tests/xt_classic_codemem_corpus.rs` measures the real cost by
     /// compiling every shader in `examples/` and `projects/` through the
-    /// device's own pipeline:
+    /// device's own pipeline, at the device's own settings (Q32, fuel on):
     ///
     /// | figure | measured |
     /// |---|---|
-    /// | largest single shader (`examples/basic`) | 6,108 B |
-    /// | mean over 27 shaders | 3,129 B |
-    /// | worst real project (`fyeah-button`, 2 shaders) | 9,800 B |
-    /// | + one keep-last-good recompile copy | **15,908 B** |
+    /// | largest single shader (`examples/basic`) | 6,516 B |
+    /// | mean over 27 shaders | 3,348 B |
+    /// | worst real project (`fyeah-button`, 2 shaders) | 10,260 B |
+    /// | + one keep-last-good recompile copy | **16,776 B** |
     ///
-    /// 15,908 B is the peak model, because `shader_node.rs` holds the old
-    /// program while the new one compiles. 32 KiB is **2.06×** that, and
-    /// **5.4×** the largest single real shader — so a user shader five times
-    /// larger than anything in this repo still compiles. The remaining
-    /// 64 KiB goes to the heap (`fw-esp32v3`'s `main.rs`).
+    /// Those are device figures, not a host estimate of them: the classic
+    /// reported 2,444 B for `examples/shader-oracle` and M3 measured 2,032 B
+    /// for `quad-strips-v3`, and the test reproduces both exactly.
+    ///
+    /// 16,776 B is the peak model, because `shader_node.rs` holds the old
+    /// program while the new one compiles ("Old + new coexist for the
+    /// compile duration"). 32 KiB is **1.95×** that, **5.03×** the largest
+    /// single real shader — a user shader five times larger than anything in
+    /// this repo still compiles — and about **9.8 shaders at the corpus
+    /// mean**. The remaining 64 KiB goes to the heap (`fw-esp32v3`'s
+    /// `main.rs`).
+    ///
+    /// What 32 KiB gives up honestly: the old 92 KiB could hold the entire
+    /// 27-shader corpus at once (90,400 B). This cannot. No project in the
+    /// repo has more than two shader nodes, and the heap those bytes buy is
+    /// the chip's actual binding constraint, so that is the trade taken.
     ///
     /// Nothing here is a hard bound: a shader is unbounded in principle, and
     /// [`CodeMemError::TooLarge`] is the real backstop — a project whose
