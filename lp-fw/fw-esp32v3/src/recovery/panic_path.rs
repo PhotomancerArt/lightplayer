@@ -65,7 +65,8 @@ const FRAME_WALKER_PRESENT: bool = true;
 /// recursing forever — `no_std` has no double-panic detection of its own.
 static PANICKING: AtomicBool = AtomicBool::new(false);
 
-/// The biggest single allocation the heap could satisfy **right now**, in bytes.
+/// A cheap **estimate** of the biggest single allocation the heap could satisfy
+/// right now, in bytes. Never larger than the truth; possibly smaller.
 ///
 /// `esp_alloc::HEAP.free()` is the *sum* of the free list. On a linked-list
 /// first-fit heap — which is what `esp-alloc` defaults to, and this image does
@@ -79,7 +80,22 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 /// the only question it answers: binary-search the largest size it will accept,
 /// returning each probe immediately. ~17 probes bounded by `free()`, each a
 /// first-fit walk — microseconds, and only on paths that already decided to
-/// spend time reporting.
+/// spend time reporting. That makes it cheap enough for the 5-second heartbeat,
+/// which is the only reason it still exists.
+///
+/// ⚠️ **The predicate it bisects is not monotonic, so this is not a bound.**
+/// `HoleList::split_current` rejects a hole outright when the leftover would be
+/// too small to record as a `Hole` — a hole of `S + 4` bytes refuses a request
+/// of `S` on this 32-bit target (`size_of::<Hole>()` is 8) while happily serving
+/// `S + 4`. So `alloc(S)` can fail where `alloc(S + 4)` succeeds, and bisection
+/// over that predicate lands on an arbitrary point below the true maximum.
+/// Measured on the host against `linked_list_allocator` 0.10.5 — the version
+/// `esp-alloc` 0.10 pins — 186 such size-pairs in 409,000 probes of randomised
+/// heaps. Every value it returns *did* allocate, so it never over-reports; treat
+/// it as a floor and nothing more.
+///
+/// When the answer has to be exact, use [`free_list_shape`], which reads the
+/// list instead of guessing at it.
 ///
 /// ⚠️ `alloc::alloc::alloc` is deliberately the raw entry point: it returns null
 /// on failure. The `handle_alloc_error` wrappers are what route into
@@ -113,6 +129,126 @@ pub fn largest_free_block() -> usize {
     }
 
     fits
+}
+
+/// The shape of the free list: how many holes, how big the biggest is, and how
+/// much of `free()` the walk could actually account for.
+#[derive(Clone, Copy)]
+pub struct FreeListShape {
+    /// Number of distinct holes found.
+    pub holes: usize,
+    /// Size of the largest hole, in bytes.
+    pub largest: usize,
+    /// Sum of every hole found, in bytes. Rounded down per hole to a multiple
+    /// of the allocator's 8-byte minimum block, so this can sit up to `4 *
+    /// holes` bytes below `free()` without anything being wrong.
+    pub total: usize,
+    /// The walk hit [`MAX_RUNS`] and stopped early; `holes`/`largest`/`total`
+    /// describe only the low end of the heap.
+    pub truncated: bool,
+}
+
+/// How many holes the walk will describe before it gives up. Each costs one
+/// `(usize, usize)` of stack and nothing else.
+const MAX_RUNS: usize = 32;
+
+/// Read the free list exactly, using only the allocator's public API.
+///
+/// `linked_list_allocator` exposes no way to walk its holes, and vendoring it
+/// to add one is a fork to carry forever. It does not need one: take the
+/// smallest block the allocator will hand out (8 bytes on this target) over and
+/// over until it refuses, and the returned addresses *are* the free list.
+/// First-fit over an address-sorted list returns them ascending, so a run of
+/// blocks with no gap is exactly one hole, and a gap is exactly one allocated
+/// block in between. Then give every block back.
+///
+/// This is what [`largest_free_block`] only estimates, and it answers the
+/// question that estimate cannot: is the heap one block or forty? At the OOM in
+/// `docs/defects/2026-08-02-classic-oom-retry-succeeds.md` the two numbers agreed
+/// to within 13 bytes, which *implied* one hole — but "implied" is what put an
+/// hour into a fragmentation theory the free list would have killed in one line.
+///
+/// ⚠️ **This briefly owns every free byte in the heap.** Anything that allocates
+/// while it runs — an ISR, another task — gets a null and dies. Call it only
+/// with interrupts masked and a reset already committed. That is why the
+/// heartbeat still uses the cheap estimate: a 5-second periodic that can OOM the
+/// board it is monitoring is worse than an approximate number.
+///
+/// Cost is O(free / 8) allocations and the same number of frees. Both stay O(1)
+/// each — allocation always takes the head hole, and the frees go back in
+/// ascending address order so each merges into the front rather than walking the
+/// list — so the whole walk is linear, well under a millisecond for a 110 KB
+/// arena.
+pub fn free_list_shape() -> FreeListShape {
+    /// Smallest block `linked_list_allocator` will hand out: `size_of::<Hole>()`,
+    /// which is `2 * size_of::<usize>()` — 8 bytes on this 32-bit target. A
+    /// request of 1 byte is rounded up to exactly this.
+    const STEP: usize = 2 * core::mem::size_of::<usize>();
+
+    let Ok(unit) = core::alloc::Layout::from_size_align(1, 4) else {
+        return FreeListShape {
+            holes: 0,
+            largest: 0,
+            total: 0,
+            truncated: false,
+        };
+    };
+
+    // (start address, length in bytes) per contiguous run.
+    let mut runs = [(0usize, 0usize); MAX_RUNS];
+    let mut n = 0usize;
+    let mut last_end = 0usize;
+    let mut truncated = false;
+
+    loop {
+        // SAFETY: `unit` has non-zero size; every block taken here is released
+        // in the loop below with the identical layout.
+        let ptr = unsafe { alloc::alloc::alloc(unit) } as usize;
+        if ptr == 0 {
+            break;
+        }
+        if n > 0 && ptr == last_end {
+            runs[n - 1].1 += STEP;
+        } else {
+            if n == MAX_RUNS {
+                // Give this one straight back rather than leaking it, and stop:
+                // beyond here we could not free what we took.
+                unsafe { alloc::alloc::dealloc(ptr as *mut u8, unit) };
+                truncated = true;
+                break;
+            }
+            runs[n] = (ptr, STEP);
+            n += 1;
+        }
+        last_end = ptr + STEP;
+    }
+
+    let mut largest = 0usize;
+    let mut total = 0usize;
+    for &(_, len) in &runs[..n] {
+        total += len;
+        if len > largest {
+            largest = len;
+        }
+    }
+
+    // Ascending order, so each block merges into the hole growing behind it.
+    for &(start, len) in &runs[..n] {
+        let mut off = 0usize;
+        while off < len {
+            // SAFETY: every address in the run came from the loop above and is
+            // freed exactly once, with the layout it was allocated with.
+            unsafe { alloc::alloc::dealloc((start + off) as *mut u8, unit) };
+            off += STEP;
+        }
+    }
+
+    FreeListShape {
+        holes: n,
+        largest,
+        total,
+        truncated,
+    }
 }
 
 /// Stage a breadcrumb into the RTC ledger, commit it, report on serial, reset.
@@ -201,16 +337,26 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
     // matters because we are here precisely because allocation is failing.
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
-    // Before the ledger write, because it is the number that decides which bug
-    // this is — see `largest_free_block`. Allocating here is safe: the request
-    // that failed has already released the allocator's lock, and interrupts are
-    // masked, so nothing can be mid-allocation underneath us.
-    let largest = largest_free_block();
-    // Ask the allocator the caller's own question a second time. If the answer
-    // is now yes, the shortfall was not the heap's state at this instant, and
-    // no amount of reading `free`/`largest` here will explain it — the report
-    // has to say so rather than let the next reader infer fragmentation from
-    // numbers that do not support it.
+
+    // ── ORDER IS LOAD-BEARING BELOW THIS LINE ──────────────────────────────
+    //
+    // The retry goes FIRST, before any probe touches the heap. It is the only
+    // measurement here that has to be taken on the heap the caller actually
+    // saw; everything after it is describing a heap that has since had blocks
+    // taken and given back.
+    //
+    // This was the other way round when the probe was written, and the report
+    // it produced — `largest_free=3495 retry_ok=true` for a failed 3,072-byte
+    // request — read as "the allocator refused something it could serve".
+    // Perhaps, but the evidence did not say so: `retry_ok` had ~17 allocate/free
+    // round trips standing between it and the failure. Replaying
+    // `linked_list_allocator` 0.10.5 on the host says those round trips are in
+    // fact inert (0 flips in 3,969,868 failing-request states), so that report
+    // survives — but it survived by luck, the reasoning could not be checked
+    // without a host replay, and it would NOT hold under `esp-alloc`'s TLSF
+    // algorithm, whose free lists are rebuilt by exactly this traffic. A probe
+    // that has to be proven harmless before its output means anything is the
+    // wrong probe. See `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
     //
     // SAFETY: `layout` came from a real allocation request, so its size is
     // non-zero, and the block is released immediately with the same layout.
@@ -223,6 +369,14 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
             true
         }
     };
+
+    // Now that the retry has been taken, the heap may be disturbed freely. Read
+    // the free list exactly rather than bisecting for it: `largest_free_block`
+    // is a floor, and a floor is what made the first report of this failure
+    // ambiguous. This is safe here and nowhere else — interrupts are masked and
+    // the reset below is already committed.
+    let shape = free_list_shape();
+    let largest = shape.largest;
 
     let mut frames = [0u32; MAX_FRAMES];
     let count = capture_frames(&mut frames);
@@ -260,13 +414,25 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
         retry_ok,
         lpc_shared::backtrace::oom_context().unwrap_or("<unset>"),
     );
+    // The free list itself, not an inference from it. `holes=1` and `holes=40`
+    // are the whole difference between exhaustion and fragmentation, and no
+    // combination of `free`/`largest` tells them apart on its own.
+    esp_println::println!(
+        "[OOM] free list: holes={} largest={} total={}{}",
+        shape.holes,
+        shape.largest,
+        shape.total,
+        if shape.truncated { " (truncated)" } else { "" },
+    );
     // Spelled out rather than left as arithmetic for the reader: these are the
     // lines that say which of three different bugs this is.
     if retry_ok {
         esp_println::println!(
-            "[OOM] RETRY SUCCEEDED: the same {}-byte request fits now. The failure was not this \
-             heap state — look for a second allocator (the JIT code region) or a caller that \
-             asked for more than it reported",
+            "[OOM] RETRY SUCCEEDED: the same {}-byte request fits now, on the heap the caller \
+             saw — this retry runs before any probe touches the list. So the failure was not \
+             this heap state. With interrupts unmasked between the null return and this handler, \
+             the first suspect is something that freed in that window; after that, a second \
+             allocator (the JIT code region) or a caller that asked for more than it reported",
             layout.size(),
         );
     } else if largest < layout.size() && free >= layout.size() {
