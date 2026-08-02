@@ -275,12 +275,21 @@ zero-length when their option is off.
 >    free heap with the project actually rendering — which is what the original
 >    18,128 B / 7,384 B two-point measurement did.
 >
-> **The next attempt is otherwise unblocked.** #281 landed `[MEM] free= used=
+> **The instrumentation is ready.** #281 landed `[MEM] free= used=
 > largest_free=` per heartbeat on `fw-esp32v3`, which is the byte-precision
 > *steady-state* readout this needs; this branch adds byte precision to the
-> `load_project`/`stop_all_projects` brackets as well. So the recipe is: clean
+> `load_project`/`stop_all_projects` brackets as well. The recipe is: clean
 > boot, load `quad-strips-v3`, read `[MEM] free` once steady, repeat for
 > `quad60-v3`, and difference over the 120-LED step. No KB rounding either side.
+>
+> ⚠️ **What actually stopped the third attempt: `espflash` wedged.** After two
+> flashes of this image succeeded earlier the same session, the next two both
+> hung at chunk `1/1019` and had to be killed. The chip stayed healthy at ROM
+> level (`espflash board-info` answers normally, correct MAC), but **the app
+> partition may be partially erased, so the board should be replugged and
+> reflashed before it is trusted.** Same family as the S3 wedge in memory
+> `esp32s3-espflash-serial-wedge` — a hung `espflash` is a replug, not a retry.
+> Retrying without a replug reproduced the hang exactly.
 
 ### Radio, if it is ever attempted
 
