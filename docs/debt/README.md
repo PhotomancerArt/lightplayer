@@ -53,6 +53,7 @@ stay in place when retired; the log is the history).
 
 | Entry | Status | Since | Area | Cost in one line |
 | --- | --- | --- | --- | --- |
+| [c6-scan-truncation-accepted](c6-scan-truncation-accepted.md) | carried | 2026-08-01 | fw-esp32c6 ws281x default config | 2ch default truncates ~28% of frames during WiFi scans (editing-time only); reopens on OPC/E1.31 streaming |
 | [brightness-applied-before-gamma](brightness-applied-before-gamma.md) | carried | 2026-08-01 | lpc-engine fixture node (value pipeline) | dim gamma-on fixtures collapse to ~1 wire code (30× resolution loss at brightness 38); projects work around it by shipping gamma off |
 | [lps-probe-perf-test-load-sensitive](lps-probe-perf-test-load-sensitive.md) | carried | 2026-08-01 | lps-probe/tests | spurious full-gate reds whenever a dev server or sibling session runs; ~20% wall-clock headroom |
 | [bundled-firmware-chip-unplumbed](bundled-firmware-chip-unplumbed.md) | carried | 2026-07-27 | studio-web roster cards | the "firmware update available" chip is implemented, tested and story-visible, but `bundled_fw` is never supplied in production — the feature never fires |
