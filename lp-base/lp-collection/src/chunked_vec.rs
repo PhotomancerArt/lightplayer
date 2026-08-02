@@ -22,7 +22,7 @@ use core::ptr;
 /// contiguous allocations was making the largest one in the compiler.
 ///
 /// 1 KiB is chosen to sit under the smallest hole a working classic reliably
-/// has. `HirExpr` gets 10 elements per chunk (960 B), `LpirOp` 51 (1,020 B).
+/// has. `HirExpr` gets 8 elements per chunk (768 B), `LpirOp` 32 (640 B).
 ///
 /// See `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
 const CHUNK_BYTES: usize = 1024;
@@ -43,17 +43,35 @@ impl<T> ChunkedVec<T> {
     /// Elements per chunk, derived from [`CHUNK_BYTES`] so the bound is on the
     /// allocation the heap sees rather than on a count that means nothing to it.
     ///
+    /// ⚠️ **A power of two, not `CHUNK_BYTES / size_of::<T>()`.** The last chunk
+    /// is a `Vec` grown by pushing, and `RawVec` doubles from
+    /// `MIN_NON_ZERO_CAP`, so its capacity only ever lands on 4, 8, 16, … — it
+    /// cannot stop at 10. Deriving 10 for a 96-byte `HirExpr` therefore bought a
+    /// chunk whose *capacity* reached 16, i.e. a **1,536-byte allocation against
+    /// a 1,024-byte bound**, which is the same class of mistake as counting
+    /// elements in the first place. Rounding down to a power of two makes the
+    /// doubling land exactly on the limit instead of overshooting it.
+    ///
     /// Always at least 1, so an element larger than [`CHUNK_BYTES`] still gets a
     /// chunk of its own rather than a divide-by-zero. Zero-sized types never
     /// allocate, so their chunk size is arbitrary.
+    ///
+    /// One residual: `RawVec`'s minimum non-zero capacity is 4 for elements of
+    /// 1,024 bytes or less, so for an element between `CHUNK_BYTES / 4` and
+    /// `CHUNK_BYTES` the first allocation is 4 elements no matter what this
+    /// says. Nothing in this workspace is in that band (`HirExpr` 96 B,
+    /// `LpirOp` 20 B), and the alternative — `Vec::with_capacity` per chunk —
+    /// costs a full chunk up front for every short-lived `ChunkedVec`.
     pub(crate) const CHUNK_SIZE: usize = {
         let elem = core::mem::size_of::<T>();
         if elem == 0 {
             64
-        } else if CHUNK_BYTES / elem == 0 {
-            1
         } else {
-            CHUNK_BYTES / elem
+            let mut n = 1;
+            while n * 2 * elem <= CHUNK_BYTES {
+                n *= 2;
+            }
+            n
         }
     };
 
@@ -406,6 +424,43 @@ mod tests {
         // An element larger than the whole budget still gets a chunk, not a
         // divide-by-zero.
         assert_eq!(ChunkedVec::<[u8; CHUNK_BYTES * 2]>::CHUNK_SIZE, 1);
+    }
+
+    /// The bound is on the **allocation**, so it has to be asserted against
+    /// `Vec::capacity`, not against the element count.
+    ///
+    /// The first cut of this change derived `CHUNK_BYTES / size_of::<T>()`,
+    /// giving 10 for a 96-byte element. `RawVec` doubles, so capacity went to
+    /// 16 — a 1,536-byte allocation against a 1,024-byte bound. Every test
+    /// above still passed, because they all use `i32`, whose 256 happens to be
+    /// a power of two. An element size that is *not* a convenient divisor is
+    /// the case that matters, so it is the case that gets tested.
+    #[test]
+    fn real_chunk_allocations_stay_within_the_byte_bound() {
+        // Takes a sample value rather than a `Default` bound: `Default` stops
+        // at `[T; 32]`, and the element sizes that matter here are larger.
+        fn check<T: Clone>(label: &str, sample: T) {
+            let mut v: ChunkedVec<T> = ChunkedVec::new();
+            // Three chunks' worth, so at least one chunk is full and sealed.
+            for _ in 0..(ChunkedVec::<T>::CHUNK_SIZE * 3 + 1) {
+                v.push(sample.clone());
+            }
+            for (i, chunk) in v.chunks.iter().enumerate() {
+                let bytes = chunk.capacity() * size_of::<T>();
+                assert!(
+                    bytes <= CHUNK_BYTES,
+                    "{label}: chunk {i} allocates {bytes} B (capacity {}) \
+                     against a {CHUNK_BYTES} B bound",
+                    chunk.capacity(),
+                );
+            }
+        }
+        check("HirExpr-sized (96 B)", [0u8; 96]);
+        check("LpirOp-sized (20 B)", [0u8; 20]);
+        check("12 B", [0u8; 12]);
+        check("HirStmt-sized (40 B)", [0u8; 40]);
+        check("4 B", 0i32);
+        check("1 B", 0u8);
     }
 
     #[test]
