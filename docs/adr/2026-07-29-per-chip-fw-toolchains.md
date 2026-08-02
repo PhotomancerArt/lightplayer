@@ -56,6 +56,19 @@ report on next boot), with setjmp/longjmp as the fuel-trap escape.
      the spike. Unwind-parity on Xtensa is deferred, not rejected — revisit if
      `unwinding` grows windowed-ABI support.
 
+   > **Amended 2026-08-02.** Decision 2 is now moot: the C6 joined the abort
+   > tier, so the chips **converge** rather than diverge and there is no
+   > per-chip panic strategy left to own. The "must not migrate into
+   > `fw-esp32-common`" constraint is trivially satisfied — there is nothing to
+   > migrate. Unwind-parity on Xtensa is not deferred any more; it is off the
+   > table, because the C6 measurement showed the feature costs 25% of a 3 MB
+   > partition and its stack budget never fitted. See
+   > [2026-08-02-rv32-firmwares-are-abort-tier.md](2026-08-02-rv32-firmwares-are-abort-tier.md).
+   >
+   > **Decision 1 stands unchanged.** One crate per SOC with its own
+   > `rust-toolchain.toml` rests on `-Zbuild-std` and the absence of an upstream
+   > Xtensa target — not on unwinding.
+
 ## Consequences
 
 - `scripts/bump-nightly.sh` must skip esp-channel toolchain files or its
@@ -66,7 +79,8 @@ report on next boot), with setjmp/longjmp as the fuel-trap escape.
   split naturally on the fork's rustc version string.
 - The future `fw-esp32-common` crate must build under BOTH toolchains: no
   `unwinding` dependency, no panic-strategy assumptions, no
-  toolchain-version-coupled intrinsics.
+  toolchain-version-coupled intrinsics. *(2026-08-02: now automatic — no crate
+  in the tree has any of these.)*
 - Chip-feature unification across crates (a single crate with `esp32c6` /
   `esp32s3` features) is permanently off the table — the toolchain split
   forces separate crates, which is also why the `esp32c6` cargo feature is

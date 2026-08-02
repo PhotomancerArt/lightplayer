@@ -231,9 +231,12 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 # *control* product, `ShaderNode` produces a *visual* one, and `FixtureNode` is
 # the only runtime that converts between them.
 #
-# `panic-recovery` is absent on purpose: this chip is abort tier
-# (ADR 2026-07-29-per-chip-fw-toolchains), and that feature pulls `unwinding`,
-# which is the C6's tier and has no Xtensa backend.
+# This list used to also carry a note about deliberately omitting
+# `panic-recovery`. That feature no longer exists anywhere: every firmware is
+# abort tier as of ADR 2026-08-02-rv32-firmwares-are-abort-tier. This chip was
+# abort tier from the start (ADR 2026-07-29-per-chip-fw-toolchains), and its
+# `src/recovery/panic_path.rs` — including the stage-before-print ordering and
+# the OOM report shape — is what the C6 adopted.
 #
 # `resolver-payload-cache` is absent on purpose, and it is the one gate this
 # image drops for memory rather than for flash. With it on, the resolver keeps
