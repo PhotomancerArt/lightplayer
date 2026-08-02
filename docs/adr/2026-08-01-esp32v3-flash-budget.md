@@ -202,11 +202,22 @@ was, and this trade moves 64 KiB to the side that binds.
 
 Verified on silicon: the JIT arena's span accounting closes exactly across a
 project swap (`allocs=2 frees=1 spans=1 used=2032`, `largest_free` back to
-`32768 − 2032` unfragmented), so spans are returned, not leaked. An oversized
-shader is refused cleanly — `TooLarge` on the host at real-region scale, with
-the region left whole and the next allocation succeeding; on the device a
-26 KB-GLSL shader fails its node (black fallback, recovery-disabled frame)
-while the board stays up at full frame rate.
+`32768 − 2032` unfragmented), so spans are returned, not leaked.
+
+The `TooLarge` backstop is verified **on the host**, at real-region scale: the
+refusal leaves the region whole and the next allocation succeeds
+(`tests/xt_classic_codemem_corpus.rs`).
+
+⚠️ On the device it was **not** observed, and the reason is worth recording. A
+deliberately oversized shader (26 KB of GLSL, 48,152 B of Xtensa) never reached
+placement: the compile *crashed* twice and `lp-recovery` disabled the
+shader-compile frame, leaving the node on its black fallback while the board
+stayed up at full frame rate. That is the graceful outcome, but it is the
+**heap** limit failing first, not the region limit — more evidence that the
+code region was never what bound large shaders on this chip. A device-side
+`TooLarge` would need a shader that is large in *emitted code* while cheap to
+compile, which nothing realistic is; the `[JIT] fails=` counter added here is
+where it would show up if one ever appeared.
 
 ### Runtime heap, measured on silicon (112,640 B arena)
 
