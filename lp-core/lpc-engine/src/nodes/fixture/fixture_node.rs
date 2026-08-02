@@ -193,14 +193,20 @@ impl FixtureNode {
             .as_ref()
             .is_none_or(|(ver, _)| *ver != mapping_ver);
         if stale {
-            let points = lpc_model::nodes::fixture::generate_mapping_points(&self.mapping, 1, 1)
-                .into_iter()
-                .map(|point| DirectSamplePoint {
-                    channel: point.channel,
-                    x_norm_q16: normalized_f32_to_q16(point.center[0]),
-                    y_norm_q16: normalized_f32_to_q16(point.center[1]),
-                })
-                .collect();
+            let generated = lpc_model::nodes::fixture::generate_mapping_points(&self.mapping, 1, 1);
+            // Build into an exactly-sized Vec rather than
+            // `generated.into_iter().map(..).collect()`. That collect is an
+            // in-place iterator: because `DirectSamplePoint` (12 B) is no
+            // larger than `MappingPoint` (16 B), the collect REUSES the source
+            // buffer and the resulting Vec keeps a 16-B-per-element allocation
+            // forever. Measured as 16 B/LED resident where 12 is enough — 4
+            // B/LED of pure slack on a device where an LED costs ~90 B.
+            let mut points = alloc::vec::Vec::with_capacity(generated.len());
+            points.extend(generated.iter().map(|point| DirectSamplePoint {
+                channel: point.channel,
+                x_norm_q16: normalized_f32_to_q16(point.center[0]),
+                y_norm_q16: normalized_f32_to_q16(point.center[1]),
+            }));
             self.direct_points = Some((mapping_ver, points));
         }
     }

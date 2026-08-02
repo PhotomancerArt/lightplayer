@@ -307,9 +307,10 @@ where it would show up if one ever appeared.
 A loaded project costs ~79 KB (observed directly: `stop_all_projects` took the
 board from 95 KB used to 16 KB used). Beyond that, **≈89.5 B per LED** — and
 only ~21 B/LED of that is `DisplayPipeline`'s three `Vec<u16>` plus
-`dither_overflow`. The other **~68 B/LED is engine-side and scales with
-`render_size`**; it is unattributed and is the single most valuable RAM lead
-this chip has.
+`dither_overflow`. The other ~68 B/LED is engine-side; it was recorded here as
+unattributed and as the single most valuable RAM lead this chip has.
+**It is attributed as of 2026-08-02 — see the amendment below**, which also
+corrects the "scales with `render_size`" reading.
 
 **Practical ceiling: ~240 LEDs comfortable, ~300 at the edge, 400 impossible
 — for a project whose shader is already compiled.**
@@ -412,6 +413,158 @@ quoted for a product claim. Measured 2026-08-02; see
 The LED-count figure is a RAM number, not an RMT one — M4-P3 measured RMT
 refill lag peaking at 20 of 64 words (31 % utilisation) with zero trips at
 240 LEDs.
+
+### Amendment 2026-08-02 — the per-LED cost is attributed
+
+The ~68 B/LED above is no longer a mystery. Attributed with
+`lp-cli profile --collect alloc --mode all`, diffing the live-allocation set of
+`quad-strips-v3` (120 LEDs) against `quad60-v3` (240 LEDs) by demangled
+callsite — a host measurement, no board time:
+
+| B/LED | Owner |
+|------:|-------|
+| 25.6 | resolved `MappingConfig::PathPoints` — `MapSlot<u32, XySlot>`, 24 B per lamp for 8 B of coordinate |
+| 16.0 | `direct_points` (a second copy of the same positions) |
+| 8.0 | graphics `sample_points` (a third copy, in pixel space) |
+| 8.0 | graphics `sample_out` (RGBA16 results) |
+| 6.0 | `OutputNode::control_samples` |
+| 6.0 | runtime buffer bytes (a second copy of the same colours) |
+| **69.6** | **engine-side total, measured in the emulator** |
+| 21.0 | `DisplayPipeline` — absent from the emulator image, known from source |
+
+Reconciliation: 67.5 engine-side (excluding 2.7 B/LED of map2d JSON text held
+in the *emulator's* RAM filesystem, which is flash-resident on silicon) + 21.0
+`DisplayPipeline` = **88.5 B/LED predicted against 89.5 measured**, within ~1 %.
+
+⚠️ **"Scales with `render_size`" was wrong** for the projects these numbers come
+from. Both use `sampling: "direct"`, which allocates per *mapped lamp*, not per
+canvas pixel.
+
+The `render_size` multiplier is real, but it lives on the **`TextureArea`
+sampling path**, and it is now measured too — profiling `examples/fast`
+(`texture_area`, 16×16 canvas, **one** lamp):
+
+| bytes | owner |
+|------:|-------|
+| 1,024 | `ensure_texture_area_mapping` — 256 canvas pixels × 4 B `PixelMappingEntry` |
+| 2,048 | `create_render_target` — 256 × 8 B RGBA16 |
+| **3,072** | **per fixture, for 1 LED** |
+
+So that path costs **12 B per canvas pixel per fixture, independent of how many
+lamps are actually mapped**. `examples/fast` spends 3,072 B on one LED — 34× the
+~90 B a direct-sampled LED costs. Nothing in the authoring surface warns that
+widening `render_size` on a texture-area fixture is a RAM decision. Only one
+project in the tree uses this path today, which is why it does not appear in the
+89.5 B/LED figure.
+
+The shape of the waste is duplication, not any single fat buffer: a lamp's
+position is stored three times and its colour twice. Filed as
+[`docs/debt/per-lamp-data-stored-three-times.md`](../debt/per-lamp-data-stored-three-times.md)
+with a costed pay-down order.
+
+**Taken so far (#285): 13 B/LED on the measured projects.** `DisplayPipeline`
+no longer allocates `prev` when interpolation is off or `dither_overflow` when
+dithering is off; `direct_points` no longer retains a 16-B-per-element
+allocation for 12 B elements. Both are output-identical; the first is proven so
+by a differential test against the previous allocation shape.
+
+⚠️ **The `DisplayPipeline` part is configuration-dependent, and the
+configurations differ.** Surveyed across `examples/` and `projects/`:
+
+| output configuration | who ships it | saving |
+|---|---|---|
+| interpolation off, dithering off | `quad-strips-v3`, `quad60-v3`, `quad-gamma-*`, `shader-oracle` | 6 + 3 = **9 B/LED** |
+| interpolation **on**, dithering off | **every other `examples/` project** | **3 B/LED** |
+| both on (the `DisplayPipelineOptions` default) | nothing on disk | 0 |
+
+`direct_points`' 4 B/LED is unconditional. So the total is **13 B/LED for the
+projects the 89.5 figure was measured on** — an apples-to-apples comparison —
+but only **7 B/LED for a typical example project**, which is the number that
+matters for a user-facing claim. Quote the right one.
+
+Verified in the emulator by re-running the same diff after the change: whole
+image **70.2 → 66.2 B/LED**, with `direct_points` moving 16.0 → 12.0 exactly as
+predicted. The `DisplayPipeline` saving cannot appear there (that type is not in
+the emulator image); it is covered by a unit test asserting both buffers are
+zero-length when their option is off.
+
+> ⚠️ **The post-change figure has NOT been re-measured on silicon.** Predicted
+> ≈76.5 B/LED, but that is arithmetic, not a measurement, and **nothing here
+> revises the ceiling** — the LED-count × shader-size correction above still
+> stands, and a smaller per-LED cost widens the LED axis of that product without
+> making a single-axis ceiling quotable. Quote the measured 89.5 B/LED until a
+> board measurement replaces this note.
+>
+> Two things blocked it, both worth knowing before the next attempt:
+>
+> 1. **The desk classic was in a recovery-red state from another session.** It
+>    reported `last run crashed (oom) … alloc 720 bytes failed`, and the node
+>    was `disabled after 3 crashes`. Clearing that ledger is a power-on-class
+>    wipe which would have destroyed the other session's evidence, so the board
+>    was left exactly as found.
+> 2. **A `load_project` bracket does not capture the per-LED cost.** Measured on
+>    the board: `quad-strips-v3` (120 LEDs) costs **53,052 B** across load
+>    (101,704 → 48,652 B free). But `direct_points`, the graphics sample
+>    buffers, and `DisplayPipeline` are all allocated at *tick*/output-open
+>    time, not load time. The per-LED figure has to come from **steady-state**
+>    free heap with the project actually rendering — which is what the original
+>    18,128 B / 7,384 B two-point measurement did.
+>
+> **The instrumentation is ready** — #281's `[MEM] free= used= largest_free=`
+> per heartbeat is the byte-precision steady-state readout, and this branch adds
+> byte precision to the `load_project`/`stop_all_projects` brackets. What is
+> missing is the second point:
+>
+> ⚠️ **`quad60-v3` did not run on the pre-#288 112,640 B arena** — historical
+> as of #288 landing (see the ✅ below), but recorded because it is what proved
+> the drift had crossed a cliff rather than merely eaten margin. Measured
+> 2026-08-02 on main @ `e2272d0f8` + this branch, from
+> a clean power-on boot (`level=green`): the shader node OOMs before compilation
+> starts, twice, and recovery disables it.
+>
+> ```
+> [RECOVERY] last run crashed (oom): at node:/Quad_60_v3.sh: alloc 240 bytes failed (align 1)
+> [RECOVERY] oom stats: requested=240 align=1 free=548 used=112092
+> [RECOVERY] last run crashed (oom): at node:/Quad_60_v3.sh: alloc 1440 bytes failed (align 8)
+> [RECOVERY] oom stats: requested=1440 align=8 free=2024 used=110616
+> ```
+>
+> `used=112092` of a 112,640 B arena is genuine exhaustion, not fragmentation,
+> and it happens *with* this branch's 13 B/LED reduction applied. So the
+> two-point method has no 240-LED point on this arena, and the per-LED figure
+> stays unmeasured.
+>
+> This is the same drift as the loaded-`used` table above, one step further —
+> far enough to cross the cliff.
+>
+> ✅ **Resolved: PR #288 merged, and `quad60-v3` runs on the +65,536 B
+> reclaim** — `level=green`, 201 s soak, zero OOM lines, `free=67,588`. So on
+> main today the 240-LED row is reproducible again; the OOM above applies only
+> to the 112,640 B arena. `examples/basic` also compiles *and runs* there
+> (183 ms, `[MEM] used=67,412`, `[JIT] used=6,516`), where this ADR previously
+> recorded it OOMing.
+>
+> ⚠️ But the two-point measurement is **still** blocked, for a different reason:
+> `lp-cli upload` cannot establish a clean single-project state (see the defect
+> note below), so `used` after switching projects reads as two projects resident
+> rather than a 120-LED steady state. The per-LED figure therefore stays
+> derived. The blocker is now precisely "reach exactly one loaded project
+> without a reflash".
+>
+> ⚠️ Also observed: **`lp-cli upload` cannot switch a board out of a
+> crash-disabled project.** The deploy acks, `[MEM]` never moves, and the board
+> keeps serving the old project (three attempts, `--wait-timeout` to 90 s). A
+> reflash does not help on its own because the startup project persists and it
+> boots straight back into the OOM loop.
+>
+> ⚠️ **What actually stopped the third attempt: `espflash` wedged.** After two
+> flashes of this image succeeded earlier the same session, the next two both
+> hung at chunk `1/1019` and had to be killed. The chip stayed healthy at ROM
+> level (`espflash board-info` answers normally, correct MAC), but **the app
+> partition may be partially erased, so the board should be replugged and
+> reflashed before it is trusted.** Same family as the S3 wedge in memory
+> `esp32s3-espflash-serial-wedge` — a hung `espflash` is a replug, not a retry.
+> Retrying without a replug reproduced the hang exactly.
 
 ### Radio, if it is ever attempted
 
