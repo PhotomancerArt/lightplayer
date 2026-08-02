@@ -131,3 +131,33 @@ section. Review of any PR touching `lp-xt-*` should check the headers.
 - ~~Formalize the CLA / DCO-with-grant mechanism when the first outside
   contribution to relicensing-sensitive code is proposed.~~ Done ahead of that
   trigger — see `2026-07-31-contributor-license-agreement.md`.
+
+## Addendum (2026-08-01): WLED's license changed, and is not GPL
+
+Several planning docs referring to WLED's ESP32 RMT driver as off-limits
+(the classic-ESP32 bring-up roadmap's M5 brief, `lp-fw/lp-ws281x`'s
+provenance note) describe it loosely as "WLED's GPL shim." That is imprecise
+and, for older code, wrong. Verified from WLED's repo history (via
+Ben Hencke) during roadmap M5's `2026-08-01-1459-rmt-priority-hli` plan:
+
+- WLED was **MIT-licensed from 2016-12-28 to 2024-10-15**, then relicensed to
+  **EUPL** ("Re-license the WLED project from MIT to EUPL (#4194)").
+  Relicensing is not retroactive — revisions before the switch remain MIT.
+- The consult-prohibition in this ADR and `AGENTS.md` (no copying,
+  transliterating, or line-by-line adapting from copyleft sources) applies
+  to WLED's **post-switch EUPL code** the same as it would to GPL: EUPL is
+  copyleft, and neither this ADR's decision nor `AGENTS.md`'s enforcement
+  distinguishes "which copyleft license" — the rule is "no copyleft source,
+  full stop," so the practical prohibition is unchanged by this correction.
+- What changes: a **pre-2024-10-15 MIT revision** of WLED's own code (not
+  NeoPixelBus, which it may have adapted — NeoPixelBus was historically
+  LGPL and needs its own check) is permissively licensed and, per this ADR's
+  rule 2, portable with attribution and a provenance header, unlike GPL/EUPL
+  source. This does not by itself authorize using it — it opens a path that
+  did not previously exist for one specific piece of code.
+- The concrete instance: the classic ESP32's level-4/5 high-priority
+  interrupt vector, parked NO-GO at M5's G1 gate
+  (`2026-08-01-1459-rmt-priority-hli/notes.md`, "G1 COMPLETE"). Its
+  documented reopen ladder now runs a step-zero, per-file provenance check
+  against WLED's MIT-era history before falling back to pure clean-room from
+  Espressif's Apache-licensed `hli_vector.S`.
