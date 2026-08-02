@@ -168,7 +168,7 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
         percent: 50,
       });
       await loader.eraseFlash();
-      assertNoFlashCommunicationWarning(logs, "Device erase");
+      assertEraseCompleted(logs, "Device erase");
       pushProgress(progress, onEvent, {
         label: "Device flash erased",
         completedSteps: 3,
@@ -391,7 +391,29 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
   }
 }
 
-function assertNoFlashCommunicationWarning(logs, context) {
+/// Judge an erase by its OWN outcome, not by the flash-ID probe.
+///
+/// The ID probe reads 0 and prints "Failed to communicate with the flash
+/// chip" on ESP32-C6 rev 2 over USB-Serial-JTAG while real stub traffic
+/// works — established on the bench 2026-07-31 (see f3586b9c8, which moved
+/// the boot-control write to readback verification for this reason). That
+/// commit left the erase path gated on the warning because "there is
+/// nothing to read back after an erase"; it turns out there IS something
+/// to check — esptool announces the chip erase it actually performed.
+///
+/// Yona's walk 2026-08-02: erase logged the benign warning, then "Chip
+/// erase completed successfully in 2.241s", and this gate failed the
+/// operation anyway. So: a completion line is proof and outranks the
+/// warning; without one, the warning is the best explanation we have and
+/// is surfaced; with neither, `eraseFlash()` returned without throwing and
+/// there is no evidence of failure to report.
+function assertEraseCompleted(logs, context) {
+  const completed = logs.some((line) =>
+    line.includes("Chip erase completed successfully")
+  );
+  if (completed) {
+    return;
+  }
   const warning = logs.find((line) =>
     line.includes("Failed to communicate with the flash chip") ||
     line.includes("Flash ID: 0")
