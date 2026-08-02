@@ -174,6 +174,18 @@ const MAX_RUNS: usize = 32;
 /// heartbeat still uses the cheap estimate: a 5-second periodic that can OOM the
 /// board it is monitoring is worse than an approximate number.
 ///
+/// **Multi-region heaps.** Runs are detected by address contiguity, so a second
+/// `esp_alloc` region appears as its own run rather than being merged into a
+/// neighbour — which is what you want, since no single allocation can straddle
+/// regions. Two caveats follow from that: `holes` then counts regions *and*
+/// holes-within-regions without distinguishing them (`esp_alloc::HEAP.stats()`
+/// is the per-region breakdown), and a bigger heap makes [`MAX_RUNS`]
+/// truncation likelier. This is only unsafe to read if two regions are ever
+/// placed *adjacently*, where one run would span both and `largest` would claim
+/// a block no allocation could get. They are not adjacent today: the `dram_seg`
+/// arena ends at or below `0x3FFE_0000` and the SRAM1 tail starts at
+/// `0x3FFF_0000`, ≥64 KiB apart.
+///
 /// Cost is O(free / 8) allocations and the same number of frees. Both stay O(1)
 /// each — allocation always takes the head hole, and the frees go back in
 /// ascending address order so each merges into the front rather than walking the

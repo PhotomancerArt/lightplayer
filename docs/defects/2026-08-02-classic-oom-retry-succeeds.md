@@ -78,6 +78,38 @@ That reframes the defect. It is not "the allocator refused something it could
 serve"; it is "the OOM report is taken too late to describe the failure". The
 class changed accordingly.
 
+### ⚠️ One step above is region-count-dependent; the conclusion is not
+
+PR #288 makes this image's heap **two `esp_alloc` regions** — the `dram_seg`
+arena plus a reclaimed 64 KiB SRAM1 tail, 112,640 → 178,176 B. That matters
+here, so the two halves of the argument are worth separating.
+
+**Region-dependent:** the inference that essentially all free memory was *one
+hole*. It came from `free + used` = 112,636 = `HEAP_SIZE − 4`, and `free()` /
+`used()` sum across regions, so under #288 that identity no longer pins the
+shape — `free=3508` could be 2,000 + 1,508 with neither serving 3,072, which
+would revive "the allocator could not serve it" as a live explanation. Likewise
+`free − largest` stops meaning fragmentation, because two perfectly unfragmented
+regions still cannot serve a request larger than the bigger one.
+
+**This reproduction is single-region and predates #288**: the reported
+`free=3508 used=109128` sums to 112,636, the one-region arena. Under #288 it
+would sum to ~178,172.
+
+**Not region-dependent:** the conclusion itself. `alloc_caps` walks *every*
+region inside a single `alloc()` call and returns null only after all of them
+refuse, so a request that failed has already tried region 2. A retry of the
+identical `Layout` on an unchanged heap walks the same regions in the same order
+and gets the same answer. **A second region cannot make a repeated identical
+request flip from fail to succeed** — so `retry_ok=true` still means the heap
+changed, whatever the region count.
+
+This is exactly why the fix is to stop inferring the shape and measure it:
+`free_list_shape()` walks addresses, so regions and holes both show up as runs,
+and the two regions here are non-adjacent by ≥64 KiB (arena below `0x3FFE_0000`,
+SRAM1 tail at `0x3FFF_0000`) so no run can straddle them. Use
+`esp_alloc::HEAP.stats()` when the per-region split itself is the question.
+
 ### The instrument was also wrong twice
 
 - **Ordering.** `retry_ok` was computed *after* `largest_free_block()`, so the
