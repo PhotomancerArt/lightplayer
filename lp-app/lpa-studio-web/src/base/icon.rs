@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    Activity, Asterisk, Boxes, ChartLine, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot,
-    CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical,
-    Folder, Funnel, Hash, Image, Info, Layers, Lightbulb, Link2, Link2Off, ListMusic, Locate,
-    LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio,
-    Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert,
-    Undo2, Upload, Usb, Waypoints, X, Zap,
+    Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
+    CircleAlert, CircleDot, CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser,
+    Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Layers, Lightbulb, Link2, Link2Off,
+    ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil,
+    Play, Plus, Radio, Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2,
+    TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
 };
 
 #[component]
@@ -60,12 +60,14 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Revert => rsx! { Undo2 { size } },
         StudioIconName::Apply => rsx! { Zap { size } },
         StudioIconName::Settings => rsx! { Settings { size } },
+        StudioIconName::AgentSettings => rsx! { Bot { size } },
         StudioIconName::Filter => rsx! { Funnel { size } },
         StudioIconName::Eraser => rsx! { Eraser { size } },
         StudioIconName::Add => rsx! { Plus { size } },
         StudioIconName::Remove => rsx! { Trash2 { size } },
         StudioIconName::Cancel => rsx! { X { size } },
         StudioIconName::More => rsx! { Ellipsis { size } },
+        StudioIconName::ExternalLink => rsx! { ArrowUpRight { size } },
         StudioIconName::Copy => rsx! { Copy { size } },
         StudioIconName::Download => rsx! { Download { size } },
         StudioIconName::Upload => rsx! { Upload { size } },
@@ -139,6 +141,11 @@ pub enum StudioIconName {
     Apply,
     /// Gear: the console's device-settings popover trigger.
     Settings,
+    /// Bot: the AI/agent-settings trigger. Deliberately distinct from
+    /// [`Self::Settings`] (the gear stays reserved for a future real
+    /// studio-settings surface) and from [`Self::Agent`] (the sparkles
+    /// role marker on the node face's agent section).
+    AgentSettings,
     /// Funnel: marks the console's display-level threshold as a filter.
     Filter,
     /// Eraser: the console's Clear control.
@@ -153,6 +160,8 @@ pub enum StudioIconName {
     Cancel,
     /// Ellipsis: the gallery card menu trigger.
     More,
+    /// Arrow leaving the box: a link that opens in a new tab.
+    ExternalLink,
     /// Hash: wiring-order numbers on the mapping lamp view.
     MapNumbers,
     /// Route: wiring-direction arrows on the mapping lamp view.

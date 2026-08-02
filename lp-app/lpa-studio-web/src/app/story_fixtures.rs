@@ -71,11 +71,12 @@ pub(crate) fn shell_story(
     // view so fixtures stay honest about what the controller carries
     view.console.entries.extend(story_logs);
     rsx! {
+        // Body only: the site chrome above it is `web_app`'s, and has its
+        // own stories (`site_chrome_stories`).
         StudioShell {
             view,
             running,
             on_action: move |_| {},
-            on_settings: move |_| {},
         }
     }
 }

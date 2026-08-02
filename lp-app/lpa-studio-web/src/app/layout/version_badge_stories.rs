@@ -7,7 +7,8 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::layout::version_badge::{
-    ChangelogEntry, VersionBuild, VersionDetails, VersionInfo, VersionSource,
+    BuildChip, ChangelogEntry, VersionBuild, VersionChipPreview, VersionDetails, VersionInfo,
+    VersionSource,
 };
 
 #[story(description = "Deployed build metadata with a recent-updates list.")]
@@ -18,6 +19,21 @@ pub(crate) fn loaded() -> Element {
             changelog: changelog_entries(),
         }
     })
+}
+
+#[story(
+    description = "The header chip across its states: branch, dirty, deployed tag, no-git fallback."
+)]
+pub(crate) fn chip_states() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4",
+            VersionChipPreview { chip: BuildChip::Branch { name: "top-bar-ux-ace649".to_string(), dirty: false } }
+            VersionChipPreview { chip: BuildChip::Branch { name: "claude/settings-provenance-rework-b6680f".to_string(), dirty: true } }
+            VersionChipPreview { chip: BuildChip::Release("2026.08.01-2".to_string()) }
+            VersionChipPreview { chip: BuildChip::DevFallback }
+            VersionChipPreview { chip: BuildChip::Loading }
+        }
+    }
 }
 
 #[story(description = "Local dev build with no version.json present.")]
