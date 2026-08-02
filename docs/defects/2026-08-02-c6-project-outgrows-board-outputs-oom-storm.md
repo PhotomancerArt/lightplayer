@@ -62,3 +62,30 @@ allocation failed while building OOM panic payload: requested=372 align=4 ...
 
 Backtrace: `TypeCtx::type_expr`/`type_call` (lps-glsl typeck) →
 `ChunkedVec::push` → `handle_alloc_error`.
+
+## Isolation
+
+Same 1-channel image built with `memory_fs` (empty fs, no auto-load):
+boots clean, `examples/basic` (1 output) deploys, compiles and renders
+through the 192-word window with zero trips over 1,282 frames. The
+single-channel plan and the compile path are healthy in isolation — the
+defect lives in the boot/load path meeting this board's populated lpfs.
+
+**Attribution caveat (added after restoring the board):** the jig's lpfs
+holds several projects, and after the storms the board came up auto-loading
+`/projects/soft-limit-bench` — 227 KB resident on the healthy 2-channel
+image, with the recovery ledger blaming *its* GLSL compile for the
+stack-overflow crashes (`paths: shader-compile:glsl state=red
+crashCount=4`). The storm boots' auto-load log lines were suppressed
+(level=yellow), so which project was compiling at the 290 KB OOM is not
+proven: candidates are (a) the 2-output "C6 two strip" degrading badly on a
+1-channel board, and (b) soft-limit-bench — near the heap ceiling by
+design — being picked (or fallen back to) at boot. Either way the
+load-path behavior (retry-into-OOM, 53 caught panics, allocator at zero)
+is the defect; reproduce with instrumentation before fixing.
+
+Also observed while reproducing: a bootctl `SKIP_PROJECT_AUTOLOAD` record
+written to `0xe000` with `espflash write-bin` did **not** suppress the next
+boot's auto-load (the storm proceeded). Worth checking whether `write-bin`
+erases the sector before writing — an unerased overwrite ANDs bits and
+corrupts the CRC, which decodes as "boot normally" by design.

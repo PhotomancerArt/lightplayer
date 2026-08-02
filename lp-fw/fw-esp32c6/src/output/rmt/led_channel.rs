@@ -97,11 +97,12 @@ impl<'ch> LedChannel<'ch> {
         let window_words = TX_PLAN.window_words(HARNESS_CHANNEL, BLOCK_WORDS);
 
         // The app's boot line, in harness form: a capture should say which
-        // window the run was measured against, not just that it ran.
+        // window the run was measured against, not just that it ran. No
+        // `{:?}` — `-Zfmt-debug=none` formats Debug to nothing on this crate.
         log::info!(
-            "LedChannel::new: RMT slot {HARNESS_CHANNEL}, {num_leds} LEDs (plan={:?} \
+            "LedChannel::new: RMT slot {HARNESS_CHANNEL}, {num_leds} LEDs (blocks={} \
              window_words={window_words} half_words={})",
-            TX_PLAN.get().map(|plan| *plan.as_array()),
+            TX_PLAN.blocks(HARNESS_CHANNEL),
             window_words / 2,
         );
 
