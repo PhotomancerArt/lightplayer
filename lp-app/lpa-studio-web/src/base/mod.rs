@@ -38,7 +38,7 @@ pub use field_row::FieldRow;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use keyboard::Platform;
-pub use logo_mark::LogoMark;
+pub use logo_mark::{LogoLockup, LogoMark};
 pub use markdown_text::{MarkdownDocs, MarkdownText};
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};

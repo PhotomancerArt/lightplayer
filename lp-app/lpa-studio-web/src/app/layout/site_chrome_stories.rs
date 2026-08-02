@@ -11,7 +11,7 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::layout::site_chrome::{SiteChrome, SiteSection};
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
-use crate::base::LogoMark;
+use crate::base::{LogoLockup, LogoMark};
 
 #[story(description = "Studio section active, dev-branch chip on the right.")]
 pub(crate) fn studio_active() -> Element {
@@ -47,13 +47,20 @@ pub(crate) fn narrow() -> Element {
     )
 }
 
-#[story(description = "The interim logo mark at favicon, bar, and hero sizes.")]
-pub(crate) fn logo_mark_sizes() -> Element {
+#[story(
+    description = "The brand: wide lockup, small mark-only form, and the mark at favicon/bar/hero sizes."
+)]
+pub(crate) fn logo_sizes() -> Element {
     rsx! {
-        div { class: "tw:flex tw:items-center tw:gap-5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4 tw:text-accent",
-            LogoMark { size: 16 }
-            LogoMark { size: 22 }
-            LogoMark { size: 56 }
+        div { class: "tw:grid tw:gap-4 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4",
+            LogoLockup {}
+            LogoLockup { size: 34 }
+            LogoLockup { compact: true }
+            div { class: "tw:flex tw:items-center tw:gap-5 tw:text-heading",
+                LogoMark { size: 16 }
+                LogoMark { size: 22 }
+                LogoMark { size: 56 }
+            }
         }
     }
 }
