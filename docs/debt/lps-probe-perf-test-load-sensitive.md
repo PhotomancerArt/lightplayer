@@ -57,6 +57,10 @@ already recorded in story-capture-pipeline.md).
   measurement from this test**, and note the merge that session carried
   main's lpvm changes (26 files, +1459 lines) — a real regression could
   not be ruled out locally, only by CI.
+  **Resolved same day: `Validate (x64)` passed on CI** (run
+  30766114996), so both local failures were load, not a regression. The
+  cost of the ambiguity was real even so — two gate cycles and a
+  firmware build spent deciding whether to believe a stopwatch.
 
 **Exit criteria** — The default suite contains no load-sensitive
 wall-clock assert: the perf measurement either moves behind an opt-in
