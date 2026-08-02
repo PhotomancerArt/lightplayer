@@ -287,14 +287,19 @@ debug = 1
 inherits = "release"
 panic = "abort"
 
-# ⚠️ RESTORED in this merge, not added. `f07abb731` ("test: parse the embedded
-# stylesheet with lightningcss") deleted these six per-package profile blocks
-# along with several unused [workspace.dependencies] entries. The dep removals
-# are harmless — nothing referenced them — but these are not: `debug`/`strip`
-# on fw-esp32c6 and fw-emu are what make `just decode-backtrace` able to
-# symbolicate a crash report, which is exactly the path the abort tier makes
-# load-bearing, and the three `opt-level = "z"` overrides size-tune the WiFi
-# blob crates against the C6 flash budget.
+# ⚠️ RESTORED, not added. `f07abb731` ("test: parse the embedded stylesheet with
+# lightningcss") deleted six per-package profile blocks its message does not
+# mention. Three of those six were genuinely dead and are NOT restored: the
+# `opt-level = "z"` overrides on esp-phy / esp-radio-rtos-driver /
+# esp-wifi-sys-esp32c6 were no-ops, because `release-esp32` inherits
+# `opt-level = "z"` from `[profile.release]` already. Measured: the image is
+# 2,090,096 B with or without them, to the byte.
+#
+# This one is not dead. Measured by removing it and rebuilding: the ELF goes
+# from 8 `.debug_*` sections to ZERO, so `just decode-backtrace` has nothing to
+# symbolicate against and an abort-tier crash report degrades to bare hex
+# addresses. That report is the entire remaining account of a fault on this
+# chip, so the block is load-bearing precisely because unwinding is gone.
 [profile.release-esp32.package.fw-esp32c6]
 debug = 1
 strip = "none"
@@ -304,15 +309,6 @@ opt-level = "s"
 
 [profile.release-esp32.package.lps-glsl]
 opt-level = "s"
-
-[profile.release-esp32.package.esp-phy]
-opt-level = "z"
-
-[profile.release-esp32.package.esp-radio-rtos-driver]
-opt-level = "z"
-
-[profile.release-esp32.package.esp-wifi-sys-esp32c6]
-opt-level = "z"
 
 # fw-esp32s3: speed-optimized codegen, NOT the workspace's opt-level="z".
 # Measured on silicon 2026-07-31: at "z" the ws281x RX drain path misses the
