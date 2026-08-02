@@ -266,6 +266,8 @@ pub use fw_esp32_common::logger;
 mod output;
 mod recovery;
 mod serial;
+#[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
+mod stress;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::server_loop;
 #[cfg(not(fw_harness))]
@@ -278,7 +280,11 @@ mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 use fw_esp32_common::lp_fs;
 
-#[cfg(all(feature = "radio", not(fw_harness)))]
+#[cfg(all(
+    feature = "radio",
+    not(any(feature = "stress_s2", feature = "stress_s3")),
+    not(fw_harness)
+))]
 use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
 #[cfg(not(fw_harness))]
 use lpfs::lp_path::AsLpPath;
@@ -494,7 +500,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
         &hardware_registry,
     ))));
-    #[cfg(feature = "radio")]
+    #[cfg(all(
+        feature = "radio",
+        not(any(feature = "stress_s2", feature = "stress_s3"))
+    ))]
     {
         let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
             .expect("Failed to initialize ESP-NOW radio");
@@ -505,7 +514,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         );
         hardware_system.add_radio_driver(Box::new(radio_driver));
     }
-    #[cfg(not(feature = "radio"))]
+    // P4 stress builds: the radio stack becomes a load generator instead of a
+    // driver — `esp_radio::wifi::new` can only run once, and the stress tasks
+    // own its controller/interface. See `stress.rs`.
+    #[cfg(any(feature = "stress_s2", feature = "stress_s3"))]
+    stress::start(spawner, wifi);
+    #[cfg(all(
+        not(feature = "radio"),
+        not(any(feature = "stress_s2", feature = "stress_s3"))
+    ))]
     let _ = wifi;
     let hardware_system = Rc::new(hardware_system);
 
