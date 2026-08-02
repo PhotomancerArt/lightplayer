@@ -33,6 +33,8 @@ lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
 schemars = { workspace = true }
 lpc-shared = { path = "../lp-core/lpc-shared" }
+# The bench workload generator emits a map2d document per LED count.
+lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-view = { path = "../lp-core/lpc-view" }
 lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu"] }
@@ -69,7 +71,6 @@ tempfile = "3"
 # lpc-model's schema_gen dev-dep.
 jsonschema = { version = "0.46", default-features = false }
 lpc-engine = { path = "../lp-core/lpc-engine" }
-lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
