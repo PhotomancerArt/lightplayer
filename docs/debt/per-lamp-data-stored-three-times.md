@@ -13,9 +13,10 @@ related:
 ---
 # A lamp's position and its colour are each stored two or three times over
 
-**Shape** — the classic ESP32 spends ≈89.5 B of heap per LED against ~18 KB of
-post-load headroom, and that number — not channel count, not flash — is what
-caps the product claim at low hundreds of LEDs. Attributed on 2026-08-02 with
+**Shape** — the classic ESP32 spends ≈89.5 B of heap per LED, and that number —
+not channel count, not flash — is what caps the product claim. (Post-load
+headroom was ~18 KB of a 112,640 B arena when this was filed; see the
+denominator caveat under Carrying cost.) Attributed on 2026-08-02 with
 `lp-cli profile --collect alloc --mode all`, diffing the live-allocation set of
 `quad-strips-v3` (120 LEDs) against `quad60-v3` (240 LEDs) by callsite:
 
@@ -63,9 +64,15 @@ land with the measurement that motivated it.
 
 **Carrying cost** — 25.6 B/LED for the slot-modelled point list and 6 B/LED for
 the duplicated colour copy is **31.6 B/LED, over a third of the per-LED
-budget**, on the one chip where the budget binds. At ≈76.5 B/LED (post-#282)
-and ~18 KB of headroom, reclaiming it would move the ceiling from roughly 235
-LEDs to roughly 400.
+budget**, on the one chip where the budget binds.
+
+Deliberately not converted into an LED ceiling here. Two things move the
+denominator underneath any such number: the ceiling is
+[LED count × shader size, not LED count alone](../adr/2026-08-01-esp32v3-flash-budget.md),
+and the 112,640 B arena is itself in flux — the JIT code region right-sizing
+(`claude/classic-jit-region-rightsize`) measured **178,176 B** of heap on
+silicon on 2026-08-02, +65,536 B. A per-LED saving is a real saving at any
+arena size; an LED ceiling quoted against a stale arena is just wrong.
 
 ## Paying it down
 
@@ -106,6 +113,6 @@ Three separable steps, cheapest first:
   89.5 B/LED figure — but nothing in the authoring surface tells an author that
   widening `render_size` on a texture-area fixture is a RAM decision. Worth its
   own entry if that path ever ships.
-- **2026-08-02** — 13 B/LED of the 89.5 paid down in #282 (conditional
+- **2026-08-02** — 13 B/LED of the 89.5 paid down in #285 (conditional
   `DisplayPipeline` buffers, 9; `direct_points` right-sizing, 4). The three
   steps above are what remains.
