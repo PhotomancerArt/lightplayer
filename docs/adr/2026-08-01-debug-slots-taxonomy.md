@@ -83,11 +83,16 @@ Panel and Debug both look like "a live value a user manipulates that is not
 in the artifact", and they are not the same thing:
 
 - **Panel is an *exposure* mechanism over any slot.** Anything can be exposed
-  as a panel control — usually a Setting. The authored value is the
-  **default**; the panel writer is a **live override** on top of it. That is
-  precisely why panel state persists to `.lp/state.json` and why `panel.md`
-  says a Control "is NOT a slot": it *fronts* one. A show that was tuned on
-  the panel must come back tuned.
+  as a panel control — usually a Setting — and exposure IS binding: a control
+  fronts a slot **via its bound channel** (`modules.md` R3, binding =
+  publicity; control identity is `(scope, channel)`, never the slot itself).
+  The authored value is the **default**; the panel writer is a **live
+  override** on top of it. That is precisely why *latching* panel state
+  persists to `.lp/state.json` and why `panel.md` says a Control "is NOT a
+  slot": it *fronts* one. A show that was tuned on the panel must come back
+  tuned. (Momentary panel controls — `panel.md` P14 — are session gestures
+  that never persist and are still Panel, not Debug: their fallback is bus
+  resolution, not a shape default.)
 - **Debug is *transient by nature*.** There is no durable value underneath —
   nothing authored to override, nothing to come back to. It is session-only
   and dies on unload/reboot, **deliberately**: a rebooted installation must
@@ -235,8 +240,11 @@ remains the right home for any future genuine event.
   unreachable states.
 - **Model the ephemeral cases as runtime commands** (the shape PR #233 built:
   wire proto 5, `ButtonEvent`, `OutputTestPattern`, per-node runtime state,
-  TTL leases and renewal loops). Rejected: leases only existed because a
-  command has no durable home; a Debug slot has one. The collapse was
+  TTL leases and renewal loops). Rejected for *state with a durable home*:
+  the leases only existed because a command gave this state no home, and a
+  Debug slot provides one. (Liveness leases stay legitimate where no durable
+  home exists — e.g. momentary panel gestures over the wire, the modules
+  roadmap's P9 — that is an event-shaped problem, not this one.) The collapse was
   enormous — no wire variant, no ops, no renewal — and the device-side
   lifetime (survives client death, dies on unload/reboot) is exactly the
   wiring-test semantic we wanted. PR #233 was closed unmerged after its
