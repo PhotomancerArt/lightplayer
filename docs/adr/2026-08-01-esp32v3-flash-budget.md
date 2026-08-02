@@ -515,8 +515,10 @@ zero-length when their option is off.
 > byte precision to the `load_project`/`stop_all_projects` brackets. What is
 > missing is the second point:
 >
-> ⚠️ **`quad60-v3` no longer runs. The 240-LED row above is not currently
-> reproducible.** Measured 2026-08-02 on main @ `e2272d0f8` + this branch, from
+> ⚠️ **`quad60-v3` did not run on the pre-#288 112,640 B arena** — historical
+> as of #288 landing (see the ✅ below), but recorded because it is what proved
+> the drift had crossed a cliff rather than merely eaten margin. Measured
+> 2026-08-02 on main @ `e2272d0f8` + this branch, from
 > a clean power-on boot (`level=green`): the shader node OOMs before compilation
 > starts, twice, and recovery disables it.
 >
@@ -535,12 +537,12 @@ zero-length when their option is off.
 > This is the same drift as the loaded-`used` table above, one step further —
 > far enough to cross the cliff.
 >
-> ✅ **Answered same day: `quad60-v3` runs on the +65,536 B reclaim**
-> (`claude/classic-jit-region-rightsize`, PR #288) — `level=green`, 201 s soak,
-> zero OOM lines, `free=67,588`. The 240-LED row is recoverable, on the arena
-> that will actually ship rather than on the one that OOMs. `examples/basic`
-> also compiles *and runs* there (183 ms, `[MEM] used=67,412`,
-> `[JIT] used=6,516`), where this ADR previously recorded it OOMing.
+> ✅ **Resolved: PR #288 merged, and `quad60-v3` runs on the +65,536 B
+> reclaim** — `level=green`, 201 s soak, zero OOM lines, `free=67,588`. So on
+> main today the 240-LED row is reproducible again; the OOM above applies only
+> to the 112,640 B arena. `examples/basic` also compiles *and runs* there
+> (183 ms, `[MEM] used=67,412`, `[JIT] used=6,516`), where this ADR previously
+> recorded it OOMing.
 >
 > ⚠️ But the two-point measurement is **still** blocked, for a different reason:
 > `lp-cli upload` cannot establish a clean single-project state (see the defect

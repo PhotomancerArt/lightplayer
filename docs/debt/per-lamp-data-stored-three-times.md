@@ -66,13 +66,25 @@ land with the measurement that motivated it.
 the duplicated colour copy is **31.6 B/LED, over a third of the per-LED
 budget**, on the one chip where the budget binds.
 
-Deliberately not converted into an LED ceiling here. Two things move the
-denominator underneath any such number: the ceiling is
+Deliberately not converted into an LED ceiling here. The ceiling is
 [LED count × shader size, not LED count alone](../adr/2026-08-01-esp32v3-flash-budget.md),
-and the 112,640 B arena is itself in flux — the JIT code region right-sizing
-(`claude/classic-jit-region-rightsize`) measured **178,176 B** of heap on
-silicon on 2026-08-02, +65,536 B. A per-LED saving is a real saving at any
-arena size; an LED ceiling quoted against a stale arena is just wrong.
+and the arena moved underneath this entry while it was being written: PR #288
+(JIT code region right-sizing) took the classic from 112,640 B to **178,176 B**.
+A per-LED saving is a real saving at any arena size; an LED ceiling quoted
+against a stale arena is just wrong.
+
+⚠️ **And per-LED is not the dominant term at realistic scale.** Comparing two
+projects with near-identical LED counts but different node counts —
+`examples/basic` (241 LEDs, 1 fixture + 1 output, ~58 KB of project cost) vs
+`quad60-v3` (240 LEDs, 4 + 4, ~100 KB) — puts roughly **14 KB on each
+fixture+output pair**, against ~21 KB of per-LED cost for the whole 240-LED
+project. On a four-channel show, node cost already exceeds LED cost by 2×.
+(Cross-image comparison, so treat 14 KB as approximate; the magnitude is not in
+doubt.) For the real target — **1500 LEDs on four channels** — that is ~78 KB
+gone before a single LED, leaving ~96 KB of the 178,176 B arena, i.e. a budget
+of ~64 B/LED just to fit and less once the compile transient is counted. **The
+per-node cost deserves the same alloc-diff treatment this entry gave per-LED,
+and nobody has done it.**
 
 ## Paying it down
 
