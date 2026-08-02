@@ -21,9 +21,9 @@ use core::cell::{Cell, RefCell};
 use core::time::Duration;
 use std::rc::Rc;
 
-use crate::app::layout::{SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge};
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
+use crate::app::layout::{SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge};
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
 use crate::unsaved_gate;

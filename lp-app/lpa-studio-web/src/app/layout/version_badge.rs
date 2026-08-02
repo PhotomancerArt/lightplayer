@@ -159,7 +159,10 @@ pub(crate) enum BuildChip {
     /// Deployed build: the version tag from `version.json`.
     Release(String),
     /// Dev build with baked git facts: the branch, `±` when dirty.
-    Branch { name: String, dirty: bool },
+    Branch {
+        name: String,
+        dirty: bool,
+    },
     /// Dev build without git facts — today's "dev build" text.
     DevFallback,
 }
@@ -175,7 +178,10 @@ fn build_chip(state: &VersionState, baked: Option<BakedGit>) -> BuildChip {
                 .unwrap_or_else(|| "unknown".to_string()),
         ),
         VersionState::Unavailable => match baked {
-            Some(BakedGit { branch, dirty }) => BuildChip::Branch { name: branch, dirty },
+            Some(BakedGit { branch, dirty }) => BuildChip::Branch {
+                name: branch,
+                dirty,
+            },
             None => BuildChip::DevFallback,
         },
     }
@@ -414,18 +420,21 @@ macro_rules! chip_class_str {
         )
     };
 }
-const CHIP_CLASS: &str =
-    chip_class_str!("tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-subtle-foreground");
+const CHIP_CLASS: &str = chip_class_str!(
+    "tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-subtle-foreground"
+);
 const CHIP_OPEN_CLASS: &str =
     chip_class_str!("tw:border-status-neutral-border tw:bg-card-raised tw:text-subtle-foreground");
 const CHIP_RELEASE_CLASS: &str =
     chip_class_str!("tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-heading");
 const CHIP_RELEASE_OPEN_CLASS: &str =
     chip_class_str!("tw:border-status-neutral-border tw:bg-card-raised tw:text-heading");
-const CHIP_DIRTY_CLASS: &str =
-    chip_class_str!("tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground");
-const CHIP_DIRTY_OPEN_CLASS: &str =
-    chip_class_str!("tw:border-status-warning-border tw:bg-card-raised tw:text-status-warning-foreground");
+const CHIP_DIRTY_CLASS: &str = chip_class_str!(
+    "tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground"
+);
+const CHIP_DIRTY_OPEN_CLASS: &str = chip_class_str!(
+    "tw:border-status-warning-border tw:bg-card-raised tw:text-status-warning-foreground"
+);
 const POPUP_CLASS: &str = "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_74%)] tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 
 /// Fetch and deserialize same-origin static JSON. Any failure (404 in dev,
@@ -525,7 +534,10 @@ mod tests {
             ..VersionInfo::default()
         };
         // A fetched version.json wins even when git facts were baked in.
-        let baked = Some(BakedGit { branch: "feature-x".to_string(), dirty: true });
+        let baked = Some(BakedGit {
+            branch: "feature-x".to_string(),
+            dirty: true,
+        });
         let chip = build_chip(&VersionState::Loaded(info), baked);
         assert_eq!(chip_text(&chip), "2026.07.04-1");
         assert!(matches!(chip, BuildChip::Release(_)));
@@ -533,7 +545,10 @@ mod tests {
 
     #[test]
     fn chip_falls_back_to_the_baked_branch_on_dev_builds() {
-        let baked = Some(BakedGit { branch: "top-bar-ux".to_string(), dirty: false });
+        let baked = Some(BakedGit {
+            branch: "top-bar-ux".to_string(),
+            dirty: false,
+        });
         let chip = build_chip(&VersionState::Unavailable, baked);
         assert_eq!(chip_text(&chip), "top-bar-ux");
         assert_eq!(chip_class(&chip), CHIP_CLASS);
@@ -541,7 +556,10 @@ mod tests {
 
     #[test]
     fn chip_marks_a_dirty_tree() {
-        let baked = Some(BakedGit { branch: "top-bar-ux".to_string(), dirty: true });
+        let baked = Some(BakedGit {
+            branch: "top-bar-ux".to_string(),
+            dirty: true,
+        });
         let chip = build_chip(&VersionState::Unavailable, baked);
         assert_eq!(chip_text(&chip), "top-bar-ux ±");
         assert_eq!(chip_class(&chip), CHIP_DIRTY_CLASS);
