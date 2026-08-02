@@ -49,6 +49,8 @@ espflash = { version = "3.3", default-features = false, features = [
 ] }
 dialoguer = "0.11"
 chrono = "0.4"
+# `firmware package` hashes the merged image for the distribution manifest.
+sha2 = { workspace = true }
 fw-checks = { path = "../lp-fw/fw-checks", features = ["std", "check-shader-compile"] }
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }

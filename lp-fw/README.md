@@ -160,20 +160,32 @@ building from an ELF in the browser. Generate the current browser-flashable
 package with:
 
 ```bash
-just studio-firmware-package-esp32c6
+just studio-firmware-package-esp32c6      # or: -esp32s3
 ```
 
-The recipe builds `fw-esp32c6` with `esp32c6,server` under the `release-esp32`
-profile, then runs `espflash save-image --merge --skip-padding` to emit a merged
-binary image and manifest under:
+Both recipes are thin wrappers over `lp-cli firmware package <build-id>`, which
+reads the variant's **build def** (`lp-fw/builds/<id>.json` — crate, cargo
+target/profile/features, flash size, partition table; see that directory's
+README), runs the build in the crate directory, merges the image with
+`espflash save-image --merge --skip-padding`, and then **extracts** the
+embedded manifest core from what it just built. The emitted `manifest.json` is
+schemaVersion 2: the extracted core verbatim under `core`, plus distribution
+facts (variant id, flash policy, image sizes and SHA-256s). Nothing restates
+the feature list or the wire proto. Packaging re-extracts from the merged image
+and fails hard if it disagrees with the ELF.
 
 ```text
-lp-app/lpa-studio-web/public/firmware/esp32c6/
+target/studio-web-assets/firmware/<build-id>/    # esp32c6-4mb, esp32s3-8mb
 ```
 
+Other subcommands: `lp-cli firmware list` (the defs), `lp-cli firmware build
+<id>` (build only), `lp-cli firmware show <artifact>` (extraction on any
+artifact).
+
 The package is generated output and is gitignored. `just studio-web-build`
-depends on this package so release/static Studio builds have the firmware assets
-available for the browser provisioning flow.
+depends on the C6 package so release/static Studio builds have the firmware
+assets available for the browser provisioning flow; the S3 packages correctly
+but nothing serves it yet (roadmap M5).
 
 ## Workspace Notes
 
