@@ -38,8 +38,8 @@
 //!
 //! ## Panic posture
 //!
-//! Abort tier (ADR `2026-07-29-per-chip-fw-toolchains`), same tier as
-//! fw-esp32s3: `panic=abort` (`.cargo/config.toml`), no `unwinding`, no
+//! Abort tier (ADR `2026-08-02-rv32-firmwares-are-abort-tier`), same tier as
+//! every other firmware: `panic=abort` (`.cargo/config.toml`), no unwinder, no
 //! `.eh_frame`.
 
 #![no_std]

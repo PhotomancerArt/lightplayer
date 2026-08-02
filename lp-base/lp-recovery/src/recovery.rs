@@ -418,9 +418,12 @@ pub fn stage_crash(
 ///
 /// [`stage_crash`] leaves the record *tentative*, and `Recovery::init` throws a
 /// tentative record away on the next boot unless the reset cause was
-/// `WatchdogReset` — a deliberate rule, because on the unwinding tier a
-/// tentative record usually means layer-1 caught the panic and there was never
-/// a crash to report.
+/// `WatchdogReset`. That rule was written for the unwinding tier, where a
+/// tentative record usually meant layer-1 caught the panic and there was never
+/// a crash to report. Nothing unwinds any more (ADR
+/// `2026-08-02-rv32-firmwares-are-abort-tier`), but the rule is kept: it still
+/// correctly discards a record staged by a path that then recovered by some
+/// other route, and the panic handlers now commit explicitly instead.
 ///
 /// That rule makes a tentative record worthless as a breadcrumb for a fault
 /// that kills the chip through some *other* reset path. The classic ESP32 has
@@ -430,11 +433,14 @@ pub fn stage_crash(
 /// there cannot assume it will live long enough to reach
 /// [`finalize_crash_and_reset`].
 ///
-/// So: on the **abort tier only**, where entering the panic handler already
-/// means the boot is over and a reset is certain, commit as the very first act
-/// and print afterwards. Do not call this from an unwinding-tier handler — it
-/// would commit crashes that layer-1 goes on to recover, and every one of them
-/// would be reported as a reboot cause that never happened.
+/// So: entering a panic handler now means the boot is over and a reset is
+/// certain, which makes it safe — and correct — to commit as the very first act
+/// and print afterwards. All three ESP32 panic paths do exactly that.
+///
+/// ⚠️ The precondition is real even though no caller violates it today: this
+/// must only be called where the crash is already terminal. From a handler that
+/// could still recover, it would commit crashes that never happened and report
+/// each as a reboot cause on the next boot.
 pub fn commit_staged_crash() -> bool {
     with_global(|r| r.commit_staged_crash()).is_some()
 }

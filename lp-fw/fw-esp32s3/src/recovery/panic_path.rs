@@ -1,29 +1,30 @@
 //! The abort-tier panic path: print, stage a breadcrumb, reset.
 //!
-//! Per ADR `2026-07-29-per-chip-fw-toolchains` the S3 is **abort tier**. There
-//! is no `unwinding`, no `catch_unwind`, no `.eh_frame`, and therefore no
-//! layer-1 in-process recovery: a panic is terminal for the boot. The only job
-//! left is to make the *next* boot able to say what died, which is what
-//! [`stage_and_reset`] does.
+//! Per ADR `2026-08-02-rv32-firmwares-are-abort-tier` **every** firmware target
+//! is abort tier, this one included. There is no `unwinding`, no
+//! `catch_unwind`, no `.eh_frame`, and therefore no layer-1 in-process
+//! recovery: a panic is terminal for the boot. The only job left is to make the
+//! *next* boot able to say what died, which is what [`stage_and_reset`] does.
 //!
-//! Structurally this is the C6's `panic_handler` minus everything unwinding
-//! needed. Two consequences are worth stating outright, because they are the
-//! parts a reader coming from `fw-esp32c6/src/main.rs` will look for and not
-//! find:
+//! Until 2026-08-02 the C6 was the exception, and this module doc used to
+//! define itself against it: "structurally the C6's `panic_handler` minus
+//! everything unwinding needed". The C6 now runs a near-copy of this file, so
+//! the contrast is gone — but one piece of it is worth keeping, because it
+//! explains an absence a reader may still go looking for:
 //!
-//! **1. No `is_esp_sync_reentrant_lock_panic` guard.** The C6 needs it because
-//! its panic handler *allocates* — it boxes a `PanicPayload` for
-//! `unwinding::begin_panic`. Allocation takes `esp-alloc`'s
-//! [`esp_sync::NonReentrantMutex`], so a panic raised while that lock was held
-//! re-enters it inside the panic handler and panics again ("lock is not
-//! reentrant"), forever. The C6 detects that case by sniffing the panic
-//! location for `esp-sync/src/lib.rs` and bailing straight to reset.
+//! **1. No `is_esp_sync_reentrant_lock_panic` guard**, because this path
+//! allocates nothing. The C6 needed one only because its old handler *allocated*
+//! — boxing a `PanicPayload` for `unwinding::begin_panic` — and allocation takes
+//! `esp-alloc`'s [`esp_sync::NonReentrantMutex`], so a panic raised while that
+//! lock was held re-entered it inside the panic handler and panicked again
+//! ("lock is not reentrant"), forever. (Its guard never worked: the `println!`s
+//! that retake the lock ran first.)
 //!
-//! This path allocates nothing. `lp_recovery::stage_crash` is zero-alloc by
-//! contract; `esp_println` and `critical-section` are both backed by
-//! `esp_sync::RawMutex`, which *is* reentrant (only `NonReentrantMutex::with`
-//! panics); and `esp_hal::system::software_reset` is a lock-free ROM call. So
-//! the specific hazard the C6 guards against cannot arise here.
+//! `lp_recovery::stage_crash` is zero-alloc by contract; `esp_println` and
+//! `critical-section` are both backed by `esp_sync::RawMutex`, which *is*
+//! reentrant (only `NonReentrantMutex::with` panics); and
+//! `esp_hal::system::software_reset` is a lock-free ROM call. So that hazard
+//! cannot arise on any chip now.
 //!
 //! What *can* still arise is a panic raised from inside this handler by some
 //! other route — a user `Display` impl that panics while we format the message
@@ -33,9 +34,9 @@
 //! before the first byte is formatted, so any re-entry at all takes the short
 //! path to reset.
 //!
-//! **2. It always resets; it never hangs.** The C6's `fatal_reset_or_hang`
-//! parks in a `loop {}` when no recovery global is installed, so that a panic
-//! before recovery init does not boot-loop a dev board. The abort tier makes
+//! **2. It always resets; it never hangs.** The C6's old `fatal_reset_or_hang`
+//! parked in a `loop {}` when no recovery global was installed, so that a panic
+//! before recovery init did not boot-loop a dev board. The abort tier makes
 //! the opposite trade: a hung board is indistinguishable from a dead one, and
 //! `lp-recovery`'s incomplete-boot counter already turns a genuine boot loop
 //! into safe mode. Resetting unconditionally means the panic line is printed

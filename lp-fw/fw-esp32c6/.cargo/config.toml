@@ -1,10 +1,34 @@
 [target.'cfg(target_arch = "riscv32")']
-runner    = "espflash flash --chip esp32c6 --monitor --after hard-reset"
+# `--partition-table` and `--flash-size` are not optional, for the same reasons
+# spelled out in fw-esp32s3's and fw-esp32v3's runners — this chip was simply
+# missing them until 2026-08-02. Without `--partition-table`, espflash silently
+# substitutes a DEFAULT table (nvs / phy_init / factory), which drops both the
+# `lpfs` data partition holding user content and the `bootctl` sector; the app
+# still boots from 0x10000, so the loss is silent until something looks for
+# /projects. Without `--flash-size`, espflash defaults the image header's
+# flash-size field to 4MB regardless of the physical chip, and the bootloader
+# validates the partition table against that header rather than the chip.
+#
+# 4mb matches partitions.csv (0x310000 + 0xF0000 = 0x400000) and
+# lp-fw/builds/esp32c6-4mb.json; `flash_size_mirrors_agree_with_the_defs` in
+# lp-cli fails if this drifts from the def.
+runner    = "espflash flash --chip esp32c6 --partition-table partitions.csv --flash-size 4mb --monitor --after hard-reset"
 rustflags = [
   "-C", "link-arg=-Tlinkall.x",
+  # Abort tier (ADR 2026-08-02-rv32-firmwares-are-abort-tier): panic=abort +
+  # the lp-recovery RTC ledger, same posture as fw-esp32s3 and fw-esp32v3.
+  # `-C panic=abort` must be HERE and not only in the profile: the Cargo
+  # profile's `panic` key is silently overridden by the target spec, which is
+  # how the cost of unwinding stayed invisible for months (see
+  # docs/reports/2026-03-13-esp32-unwinding-implementation.md, Problem 6).
+  "-C", "panic=abort",
+
+  # ⚠️ NOT part of the unwinding machinery, and deliberately kept when
+  # `force-unwind-tables` was removed: `lpc-shared`'s `capture_frames_arch`
+  # walks the `s0` frame-pointer chain to build the crash report, and that
+  # report is the whole of what abort-tier recovery can tell you. Dropping this
+  # also means flipping `FRAME_WALKER_PRESENT` in recovery/panic_path.rs.
   "-C", "force-frame-pointers",
-  "-C", "force-unwind-tables=yes",
-  "-C", "panic=unwind",               # Override target's default panic=abort
   "-C", "link-arg=--gc-sections",     # Remove unused sections
   "-C", "link-arg=-znoseparate-code",  # Don't separate code segments (lld syntax: -z<option>)
 
