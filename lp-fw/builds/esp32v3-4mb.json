@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "id": "esp32v3-4mb",
+  "displayName": "LightPlayer classic ESP32 server firmware",
+  "package": "fw-esp32v3",
+  "cargoTarget": "xtensa-esp32-none-elf",
+  "profile": "release-esp32v3",
+  "cargoFeatures": ["esp32", "server"],
+  "flashSizeMb": 4,
+  "partitionsCsv": "lp-fw/fw-esp32v3/partitions.csv",
+  "chip": {
+    "family": "esp32",
+    "name": "esp32"
+  }
+}

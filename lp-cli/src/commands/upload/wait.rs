@@ -156,7 +156,12 @@ fn node_failure_message(delta: &WireTreeDelta) -> Option<String> {
         NodeRuntimeStatus::Error(message) | NodeRuntimeStatus::InitError(message) => {
             Some(message.clone())
         }
-        NodeRuntimeStatus::Created | NodeRuntimeStatus::Ok | NodeRuntimeStatus::Warn(_) => None,
+        // Unsupported is not a failure of the upload: the project loaded,
+        // this build just has no runtime for that kind.
+        NodeRuntimeStatus::Created
+        | NodeRuntimeStatus::Ok
+        | NodeRuntimeStatus::Warn(_)
+        | NodeRuntimeStatus::Unsupported(_) => None,
     }
 }
 

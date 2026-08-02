@@ -25,6 +25,7 @@ fn main() {
     );
 
     emit_build_provenance();
+    emit_partition_facts();
 }
 
 /// Emit build provenance for the wire hello (`ServerHello.fw`):
@@ -67,4 +68,37 @@ fn profile_dir_name() -> Option<String> {
     // out -> <pkg>-<hash> -> build -> <profile>
     let profile = out_dir.parent()?.parent()?.parent()?;
     Some(profile.file_name()?.to_string_lossy().into_owned())
+}
+
+/// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded
+/// firmware manifest's limits come from the same file espflash flashes with —
+/// never a hand-transcribed integer (cf.
+/// docs/debt/firmware-partition-constants-transcribed.md).
+fn emit_partition_facts() {
+    let path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("partitions.csv");
+    let csv = std::fs::read_to_string(&path).expect("read partitions.csv");
+    let size_field = csv
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .map(|line| line.split(',').map(str::trim).collect::<Vec<_>>())
+        .find(|fields| fields.len() >= 5 && fields[1] == "app")
+        .map(|fields| fields[4].to_string())
+        .expect("partitions.csv has an app row");
+    println!(
+        "cargo:rustc-env=LP_FLASH_APP_BYTES={}",
+        parse_partition_size(&size_field)
+    );
+}
+
+fn parse_partition_size(s: &str) -> u64 {
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).expect("hex partition size")
+    } else if let Some(mega) = s.strip_suffix(['M', 'm']) {
+        mega.parse::<u64>().expect("M partition size") * 1024 * 1024
+    } else if let Some(kilo) = s.strip_suffix(['K', 'k']) {
+        kilo.parse::<u64>().expect("K partition size") * 1024
+    } else {
+        s.parse().expect("partition size")
+    }
 }

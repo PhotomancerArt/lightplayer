@@ -43,7 +43,7 @@ use lpc_wire::{
 };
 
 use super::node::node_naming::{file_stem, node_kind_slug, sanitize_node_name, unique_node_name};
-use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu};
+use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu, gate_add_node_menu};
 use super::{
     NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
 };
@@ -63,6 +63,11 @@ pub struct ProjectController {
     /// scope. `None` (no lens / tests) behaves like a device lens for
     /// subscription scope and uses the default probe resolution.
     lens_runtime_kind: Option<crate::RuntimeKind>,
+    /// The lens DEVICE's reported build features, pushed down beside the
+    /// runtime kind. `None` = no device has said otherwise (sim/host lens,
+    /// or a link that is not Ready): the add-node picker then offers every
+    /// kind. Gating only ever narrows when a device affirmatively reports.
+    lens_device_features: Option<Vec<lpc_model::LpFeature>>,
     active_editor_target: Option<ProjectEditorTarget>,
     /// The storage dir (under `/projects/`) the LENS runtime actually
     /// serves the project from. The sim always uses the demo slot, but a
@@ -185,6 +190,7 @@ impl ProjectController {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
             lens_runtime_kind: None,
+            lens_device_features: None,
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
@@ -1546,7 +1552,17 @@ impl ProjectController {
         // address-keyed store so it survives re-renders and remounts.
         for node in &mut nodes {
             self.overlay_node_card_ui(node);
+            // The lens device's gate lands here, on every menu at once —
+            // node views are built deep in `NodeController` where the
+            // session is not visible, so one pass at the top keeps a
+            // playlist's picker honest with the project pane's.
+            self.gate_add_node_menus(node);
         }
+        let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        gate_add_node_menu(
+            &mut root_add_node_menu,
+            self.lens_device_features.as_deref(),
+        );
         // Node dirty covers slot + node-mapped asset edits across the subtree;
         // asset edits whose artifact maps to no node (a shader's `.glsl`) are
         // added on top so they still count toward Save (see `dirty_summary`).
@@ -1576,7 +1592,7 @@ impl ProjectController {
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
-        .with_add_node_menu(add_node_menu(&UiAttachTarget::ProjectRoot))
+        .with_add_node_menu(root_add_node_menu)
         .with_edits_in_flight(self.edits_in_flight())
     }
 
@@ -2041,6 +2057,17 @@ impl ProjectController {
         self.overlay_child_card_ui(&mut node.children);
     }
 
+    /// Apply the lens device's capability gate to a node view's add-node
+    /// picker. Node views are built inside [`NodeController`], which cannot
+    /// see the session; the gate therefore lands here, at the one place
+    /// that knows the lens, so a playlist's "+" agrees with the project
+    /// pane's.
+    fn gate_add_node_menus(&self, node: &mut UiNodeView) {
+        if let Some(menu) = node.add_node_menu.as_mut() {
+            gate_add_node_menu(menu, self.lens_device_features.as_deref());
+        }
+    }
+
     fn overlay_child_card_ui(&self, children: &mut [crate::UiNodeChild]) {
         for child in children {
             if let Some(saved) = self.node_card_ui.get(&child.detail) {
@@ -2360,6 +2387,14 @@ impl ProjectController {
     /// wiring.
     pub fn set_lens_runtime_kind(&mut self, kind: Option<crate::RuntimeKind>) {
         self.lens_runtime_kind = kind;
+    }
+
+    /// Record the lens DEVICE's reported build features (the add-node
+    /// picker's gate). Pushed by the studio controller from the same
+    /// chokepoint as [`Self::set_lens_runtime_kind`]; `None` for a sim/host
+    /// lens or a link that has not reported a hello.
+    pub fn set_lens_device_features(&mut self, features: Option<Vec<lpc_model::LpFeature>>) {
+        self.lens_device_features = features;
     }
 
     /// The runtime-tiered visual probe resolution for the current lens.
