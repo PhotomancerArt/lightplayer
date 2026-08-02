@@ -60,6 +60,14 @@ ws281x_2blocks = []
 # Build (touch src/main.rs first if flipping features):
 #   cargo build --profile release-esp32 --features esp32c6,server,ws281x_telemetry
 ws281x_telemetry = []
+
+# P4 stress-matrix load generators (plan 2026-08-01-1459-rmt-priority-hli) —
+# OFF by default, never shipped. Each spawns a continuous radio-load task
+# beside the running server, replacing the ESP-NOW radio driver registration
+# (esp_radio::wifi::new runs once per boot and the load tasks need what it
+# returns). Use with `ws281x_telemetry`; `touch src/main.rs` after flipping.
+stress_s2 = ["radio"]  # WiFi scan loop (repeated active scans, station mode)
+stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
