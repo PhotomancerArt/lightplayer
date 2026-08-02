@@ -5572,6 +5572,13 @@ name = "lp-ws281x"
 version = "0.1.0"
 
 [[package]]
+name = "lp-ws281x-hli"
+version = "0.1.0"
+dependencies = [
+ "lp-ws281x",
+]
+
+[[package]]
 name = "lp-xt-elf"
 version = "40.0.0"
 dependencies = [
