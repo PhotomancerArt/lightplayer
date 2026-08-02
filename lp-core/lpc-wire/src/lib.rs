@@ -36,7 +36,7 @@ pub use messages::{
     ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
     RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, WireBindingDirection,
     WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireEffectiveBinding,
+    WireEffectiveBinding, WireScopeRef,
 };
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use project::{

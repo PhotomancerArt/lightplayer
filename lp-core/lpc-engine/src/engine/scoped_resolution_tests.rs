@@ -213,3 +213,70 @@ fn probe_values_never_tick_sink_scope_producers() {
         "the root writer is what the probe resolves"
     );
 }
+
+#[test]
+fn probe_lists_same_named_channels_as_distinct_scoped_rows() {
+    // Wire 6: channels list per scope, structured — two scopes using the
+    // same channel name are distinct rows keyed by (scope, name), and the
+    // probe never flattens scope into a display string.
+    let mut h = EngineTestBuilder::new()
+        .shader("holder_a", output("outputs[0]", 0.0))
+        .shader("holder_b", output("outputs[0]", 0.0))
+        .shader("writer_a", output("outputs[0]", 1.0))
+        .shader("writer_b", output("outputs[0]", 9.0))
+        .bind_bus("chan", produced_slot("writer_a", "outputs[0]"))
+        .bind_bus("chan", produced_slot("writer_b", "outputs[0]"))
+        .output_node("out_a")
+        .bind_demand_input("out_a", bus("chan"))
+        .demand_root("out_a")
+        .output_node("out_b")
+        .bind_demand_input("out_b", bus("chan"))
+        .demand_root("out_b")
+        .build();
+
+    let holder_a = h.node("holder_a");
+    let holder_b = h.node("holder_b");
+    let writer_a = h.node("writer_a");
+    let writer_b = h.node("writer_b");
+    let out_a = h.node("out_a");
+    let out_b = h.node("out_b");
+    assign_root_scope(&mut h, &[holder_a, holder_b]);
+    introduce_module_scope(&mut h, holder_a, &[writer_a, out_a]);
+    introduce_module_scope(&mut h, holder_b, &[writer_b, out_b]);
+
+    h.tick(16).expect("tick");
+    let result = h.engine.read_project_binding_graph_probe(
+        &h.registry,
+        BindingGraphProbeRequest {
+            include_values: true,
+        },
+    );
+    let BindingGraphProbeResult::Graph(graph) = result else {
+        panic!("expected graph result");
+    };
+    let rows: alloc::vec::Vec<_> = graph
+        .channels
+        .iter()
+        .filter(|channel| channel.name == "chan")
+        .collect();
+    assert_eq!(rows.len(), 2, "one row per scope: {rows:?}");
+    let scopes: alloc::vec::Vec<_> = rows.iter().map(|row| row.scope).collect();
+    assert!(
+        scopes.contains(&Some(lpc_wire::WireScopeRef::Module { owner: holder_a }))
+            && scopes.contains(&Some(lpc_wire::WireScopeRef::Module { owner: holder_b })),
+        "rows carry structured scopes: {scopes:?}"
+    );
+    for row in rows {
+        let value = row.value.as_ref().expect("value requested");
+        let expected = if row.scope == Some(lpc_wire::WireScopeRef::Module { owner: holder_a }) {
+            1.0
+        } else {
+            9.0
+        };
+        assert_eq!(
+            value.value,
+            Some(lpc_model::LpValue::F32(expected)),
+            "each row resolves in ITS scope"
+        );
+    }
+}

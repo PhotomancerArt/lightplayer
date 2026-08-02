@@ -645,6 +645,7 @@ impl Engine {
     pub(crate) fn resolve_bus_channel_value(
         &mut self,
         registry: &ProjectRegistry,
+        scope: Option<crate::node::ScopeRef>,
         channel: &ChannelName,
     ) -> Result<Production, SessionResolveError> {
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
@@ -670,7 +671,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
         };
-        let scope = host.tree.node_scope(host.tree.root());
+        let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
         let result = session.resolve(
             &mut host,
             &QueryKey::Bus {
@@ -949,16 +950,10 @@ impl ResolveHost for EngineResolveHost<'_> {
     }
 
     fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
-        // Reading scope: a scope INTRODUCER's bus reads face inward — that
-        // is R7's export semantics (a module republishing an inner channel
-        // reads it from the scope it introduces; the root's unscoped reads
-        // are root-scope reads). Every other node reads from the scope it
-        // inhabits. Provider (write-side) classification stays on
-        // `NodeTree::node_scope` — module produces land in the parent
-        // scope per R4.
-        self.tree
-            .scope_introduced_by(node)
-            .or_else(|| self.tree.node_scope(node))
+        // Reading scope (R7 export semantics): introducers read inward,
+        // everyone else reads the scope they inhabit. Write-side provider
+        // classification stays on `NodeTree::node_scope` (R4).
+        self.tree.bus_read_scope(node)
     }
 
     fn providers_for_bus(

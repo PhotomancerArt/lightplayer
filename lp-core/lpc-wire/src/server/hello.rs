@@ -23,6 +23,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 6: structured scope on the probe surface — `WireBusChannel` gains
+///   `scope` (channels list per scope) and `WireBindingEndpoint::Bus`
+///   carries the endpoint's scope; display strings become a client
+///   concern.
 /// - 5: node kind `project` renamed to `module` — `NodeKind::Module`
 ///   serializes as `"Module"` in inventory frames, and `TreePath`
 ///   segments carry `.module` instead of `.project`.
@@ -38,7 +42,7 @@ use serde::{Deserialize, Serialize};
 ///   runtime command channel (playlist activate-entry;
 ///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
 /// - 1: hello handshake introduced.
-pub const WIRE_PROTO_VERSION: u32 = 5;
+pub const WIRE_PROTO_VERSION: u32 = 6;
 
 /// Unsolicited/boot-time server identity and version report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

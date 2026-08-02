@@ -342,32 +342,69 @@ impl<N> RuntimeNodeTree<N> {
         scopes
     }
 
-    /// The channels listed in `scope`: every bus channel named by a
-    /// binding whose owner inhabits it (R3 — a public slot's channel
-    /// exists in the slot's scope; R4 — a module node's own endpoints land
-    /// in its PARENT scope, which is the scope it inhabits). Listing only:
-    /// resolution semantics stay unscoped until the scoped-channel phase.
+    /// The scope a node's bus READS resolve from: scope INTRODUCERS read
+    /// inward (R7 — a module republishing an inner channel reads it from
+    /// the scope it introduces; the root's unscoped reads are root-scope
+    /// reads); every other node reads from the scope it inhabits.
+    pub fn bus_read_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        self.scope_introduced_by(node)
+            .or_else(|| self.node_scope(node))
+    }
+
+    /// The channels listed in `scope` (R3 — a public slot's channel exists
+    /// in the slot's scope): a publishing endpoint lists where the write
+    /// lands (the owner's inhabited scope, R4), a consuming endpoint where
+    /// its resolution starts (the owner's read scope). Listing only —
+    /// resolution is the scoped-key walk.
     pub fn scope_channels(
         &self,
         scope: crate::node::ScopeRef,
     ) -> Vec<(ChannelName, lpc_model::Kind)> {
         let mut channels: Vec<(ChannelName, lpc_model::Kind)> = Vec::new();
         for binding in self.bindings() {
-            if self.scope_of(binding.owner) != Some(scope) {
-                continue;
+            if let crate::dataflow::binding::BindingTarget::BusChannel(channel) = &binding.target {
+                if self.node_scope(binding.owner) == Some(scope)
+                    && !channels.iter().any(|(existing, _)| existing == channel)
+                {
+                    channels.push((channel.clone(), binding.kind));
+                }
             }
-            let named = match (&binding.source, &binding.target) {
-                (crate::dataflow::binding::BindingSource::BusChannel(channel), _) => Some(channel),
-                (_, crate::dataflow::binding::BindingTarget::BusChannel(channel)) => Some(channel),
-                _ => None,
-            };
-            let Some(channel) = named else { continue };
-            if !channels.iter().any(|(existing, _)| existing == channel) {
-                channels.push((channel.clone(), binding.kind));
+            if let crate::dataflow::binding::BindingSource::BusChannel(channel) = &binding.source {
+                if self.bus_read_scope(binding.owner) == Some(scope)
+                    && !channels.iter().any(|(existing, _)| existing == channel)
+                {
+                    channels.push((channel.clone(), binding.kind));
+                }
             }
         }
         channels.sort_by(|(a, _), (b, _)| a.cmp(b));
         channels
+    }
+
+    /// Providers of `channel` whose write lands in `scope` — the LISTING
+    /// counterpart of the shadowing walk, for probes showing one scope's
+    /// wiring.
+    pub fn providers_for_bus_in_scope(
+        &self,
+        scope: crate::node::ScopeRef,
+        channel: &ChannelName,
+    ) -> Vec<(BindingRef, &BindingEntry)> {
+        self.providers_for_bus(channel)
+            .into_iter()
+            .filter(|(_, entry)| self.node_scope(entry.owner) == Some(scope))
+            .collect()
+    }
+
+    /// Consumers of `channel` whose read starts in `scope`.
+    pub fn consumers_for_bus_in_scope(
+        &self,
+        scope: crate::node::ScopeRef,
+        channel: &ChannelName,
+    ) -> Vec<(BindingRef, &BindingEntry)> {
+        self.consumers_for_bus(channel)
+            .into_iter()
+            .filter(|(_, entry)| self.bus_read_scope(entry.owner) == Some(scope))
+            .collect()
     }
 
     /// The bus scope `node` writes into and reads from: its inhabited
