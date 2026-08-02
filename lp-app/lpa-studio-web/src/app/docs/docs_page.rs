@@ -19,10 +19,18 @@ pub fn DocsPage(#[props(default)] initial_page: Option<String>) -> Element {
     let mut current = use_signal(|| page_for(initial_page.as_deref()).slug);
 
     // Follow hash changes (sidebar clicks, back/forward within docs).
+    // Guarded on the current route so a story-book mount never installs
+    // this into the book's own hash navigation.
     #[cfg(target_arch = "wasm32")]
     use_hook(move || {
         use wasm_bindgen::JsCast;
         use wasm_bindgen::closure::Closure;
+        if !matches!(
+            crate::router::current_route(),
+            crate::router::StudioRoute::Docs { .. }
+        ) {
+            return;
+        }
         let closure = Closure::<dyn FnMut()>::new(move || {
             let hash = web_sys::window()
                 .map(|window| window.location().hash().unwrap_or_default())
@@ -38,7 +46,11 @@ pub fn DocsPage(#[props(default)] initial_page: Option<String>) -> Element {
             }
         });
         if let Some(window) = web_sys::window() {
-            window.set_onhashchange(Some(closure.as_ref().unchecked_ref()));
+            // addEventListener, not `onhashchange = …`: the SiteChrome
+            // wrapper installs its own leave-section listener on the same
+            // event, and the two must coexist.
+            let _ = window
+                .add_event_listener_with_callback("hashchange", closure.as_ref().unchecked_ref());
         }
         // Leak deliberately: the page lives for the document's lifetime
         // (route changes out of standalone pages hard-reload).
