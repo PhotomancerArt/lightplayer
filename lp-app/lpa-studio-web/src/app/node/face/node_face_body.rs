@@ -81,6 +81,7 @@ pub fn NodeFaceBody(
                     FixtureFace {
                         face: fixture,
                         detail_initially_open: detail_open_control.is_some(),
+                        node: Some(node.clone()),
                         on_action,
                     }
                     NodeCardDrawers {

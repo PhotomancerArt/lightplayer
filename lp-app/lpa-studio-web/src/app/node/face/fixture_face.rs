@@ -23,9 +23,11 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Maximize2, Minimize2, Pencil, Scan};
 use lpa_studio_core::{
-    UiAction, UiFixtureFace as UiFixtureFaceData, UiProductKind, UiProductPreview,
+    NodeCardDrawer, NodeUiOp, UiAction, UiFixtureFace as UiFixtureFaceData, UiProductKind,
+    UiProductPreview,
 };
 
+use crate::app::node::face::node_ui_action;
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::mapping_asset_editor::MappingAssetEditor;
 use crate::app::node::produced_product_view::{ProductPreview, control_live_lamp_colors};
@@ -45,6 +47,10 @@ pub fn FixtureFace(
     /// Mount with the mapping editor open (stories).
     #[props(default = false)]
     edit_initially_open: bool,
+    /// The node's address path, keying the power readout's open-the-drawer
+    /// tap. Absent (stories) leaves the readout inert.
+    #[props(default = None)]
+    node: Option<String>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let preview = face.preview.clone();
@@ -161,7 +167,7 @@ pub fn FixtureFace(
                     on_action,
                 }
                 if let Some(power) = face.power {
-                    PowerReadout { power }
+                    PowerReadout { power, node, on_action }
                 }
             }
         }
@@ -175,22 +181,50 @@ pub fn FixtureFace(
 /// do not earn chrome (`docs/style/ui.md`). Only the limiting state takes
 /// colour, and it takes `attention` rather than `warning`: shedding current to
 /// stay inside a declared budget is the feature working, not a fault.
+///
+/// The line is also the way TO the budget: tapping it opens the advanced
+/// drawer, where the `power` slot's lamp/budget editor lives. "A budget set
+/// too low dims the show and is corrected in seconds" (the power ADR) only
+/// holds if the person watching "limiting to 62%" can reach the editor from
+/// the readout that told them.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PowerReadout(power: lpa_studio_core::UiFixturePower) -> Element {
+fn PowerReadout(
+    power: lpa_studio_core::UiFixturePower,
+    #[props(default = None)] node: Option<String>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
     let limiting = power.is_limiting();
     let percent = power.percent_of_budget();
+    let tappable = node.is_some() && on_action.is_some();
     // "Estimated" is load-bearing, not hedging: every lamp preset ships
     // datasheet and community figures, and nothing here has met a meter.
-    let title = format!(
+    let mut title = format!(
         "estimated draw from the lamp type's power model — not measured\n{} mA of {} mA budget",
         power.estimated_draw_ma, power.budget_ma
     );
+    if tappable {
+        title.push_str("\nclick to edit the budget (advanced drawer)");
+    }
 
     rsx! {
         div {
-            class: "tw:mt-2 tw:flex tw:items-baseline tw:gap-2 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
+            class: if tappable {
+                "tw:mt-2 tw:flex tw:cursor-pointer tw:items-baseline tw:gap-2 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground tw:hover:text-foreground"
+            } else {
+                "tw:mt-2 tw:flex tw:items-baseline tw:gap-2 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground"
+            },
             title,
+            onclick: move |_| {
+                let (Some(node), Some(handler)) = (node.clone(), on_action) else {
+                    return;
+                };
+                handler.call(node_ui_action(NodeUiOp::SetDrawer {
+                    node,
+                    drawer: NodeCardDrawer::Advanced,
+                    open: true,
+                }));
+            },
             // Nested so the row's gap falls only before the limiting chip —
             // the slash has to butt against the estimate to read as one figure.
             span {
