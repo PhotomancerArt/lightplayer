@@ -9,6 +9,7 @@ related:
   - lp-core/lpc-engine/src/nodes/output/output_node.rs
   - ../adr/2026-08-01-esp32v3-flash-budget.md
   - s3-frame-cost-scales-per-fixture.md
+  - per-frame-optimisations-are-unpriced-in-ram.md
 ---
 # A lamp's position and its colour are each stored two or three times over
 
@@ -43,6 +44,13 @@ derived again into the graphics `sample_points` buffer (8 B/LED).
 **A lamp's colour is stored twice.** `OutputNode::control_samples` is the
 `&mut [u16]` render target; `publish_channel_buffer` then copies it verbatim
 into the runtime buffer's `Vec<u8>` as little-endian pairs. 6 B/LED each.
+
+Sibling of
+[`per-frame-optimisations-are-unpriced-in-ram`](per-frame-optimisations-are-unpriced-in-ram.md),
+and the distinction matters: that entry is about *caches* traded for cycles
+whose byte cost nobody prices. This one is not a cache. Nothing here was added
+to make a frame faster — the duplication falls out of how a lamp is *modelled*,
+and it would cost the same bytes if the engine never cached anything.
 
 **Why it is structural** — the per-lamp slot modelling is not a local choice in
 the fixture node. `MappingConfig::PathPoints` is wire-visible, studio-visible

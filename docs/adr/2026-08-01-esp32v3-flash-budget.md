@@ -254,10 +254,11 @@ the emulator image); it is covered by a unit test asserting both buffers are
 zero-length when their option is off.
 
 > ⚠️ **The post-change figure has NOT been re-measured on silicon.** Predicted
-> ≈76.5 B/LED and a ceiling near 235 LEDs, but **treat the ceiling line above as
-> the current quotable number until a board measurement replaces this note** —
-> the whole point of this ADR is that LED counts are quoted from measured RAM,
-> and 76.5 is arithmetic, not a measurement.
+> ≈76.5 B/LED, but that is arithmetic, not a measurement, and **nothing here
+> revises the ceiling** — the LED-count × shader-size correction above still
+> stands, and a smaller per-LED cost widens the LED axis of that product without
+> making a single-axis ceiling quotable. Quote the measured 89.5 B/LED until a
+> board measurement replaces this note.
 >
 > Two things blocked it, both worth knowing before the next attempt:
 >
