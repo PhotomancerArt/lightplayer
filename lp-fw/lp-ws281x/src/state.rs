@@ -50,6 +50,10 @@ pub const LAG_BUCKETS: usize = 9;
 /// The bucket index [`ChannelState::record_lag`] would file `advanced` under,
 /// for a channel whose half is `half_words` words.
 ///
+/// The same scheme buckets the entry delay
+/// ([`ChannelState::record_entry_delay`]), so the two histograms print with
+/// identical edges and can be read side by side.
+///
 /// `half_words == 0` (an unconfigured channel, which never actually refills)
 /// files everything in the overflow bucket rather than dividing by zero.
 #[inline]
@@ -96,6 +100,23 @@ pub struct ChannelStats {
     pub refill_lag_max: i32,
     /// Distribution of per-refill lag; see [`LAG_BUCKETS`].
     pub lag_hist: [u32; LAG_BUCKETS],
+    /// Largest **entry delay** seen, in words: how far past the threshold
+    /// boundary the transmitter had already run when the handler reached this
+    /// channel.
+    ///
+    /// This is interrupt-to-service latency measured in the only clock the
+    /// driver shares with the wire — one word is one bit, ≈1.25 µs at 800 kHz.
+    /// It is the *other half* of the refill budget from
+    /// [`Self::refill_lag_max`]: the lag counts what the refill itself cost,
+    /// this counts what was spent before the refill started (interrupt
+    /// dispatch, a higher-priority handler, and — with several channels
+    /// flagged in one snapshot — the refills of every lower-numbered channel
+    /// serviced first). `entry_delay_max + refill_lag_max` is an upper bound on
+    /// the worst total occupancy of the deadline, which is one half.
+    pub entry_delay_max: i32,
+    /// Distribution of per-service entry delay, bucketed exactly like
+    /// [`Self::lag_hist`]; see [`LAG_BUCKETS`].
+    pub entry_delay_hist: [u32; LAG_BUCKETS],
 }
 
 impl ChannelStats {
@@ -127,6 +148,30 @@ impl ChannelStats {
     pub const fn lag_over_half(&self) -> u32 {
         self.lag_hist[LAG_BUCKETS - 1]
     }
+
+    /// Services that arrived a whole half or more after their threshold — the
+    /// last entry-delay bucket.
+    ///
+    /// A service in this bucket had already lost the entire deadline before it
+    /// wrote its first word; the frame was truncated whatever the refill cost.
+    pub const fn entry_delay_over_half(&self) -> u32 {
+        self.entry_delay_hist[LAG_BUCKETS - 1]
+    }
+
+    /// Number of services that contributed an entry-delay sample.
+    ///
+    /// Equal to [`Self::refill_lag_count`] in a healthy run — both are recorded
+    /// once per serviced threshold — but derived from the histogram so a
+    /// snapshot torn between the two is self-consistent.
+    pub const fn entry_delay_count(&self) -> u32 {
+        let mut total = 0u32;
+        let mut i = 0;
+        while i < LAG_BUCKETS {
+            total = total.saturating_add(self.entry_delay_hist[i]);
+            i += 1;
+        }
+        total
+    }
 }
 
 /// Everything the interrupt handler needs to know about one channel.
@@ -151,6 +196,19 @@ pub struct ChannelState {
     pub(crate) bit_cursor: AtomicUsize,
     pub(crate) latch_written: AtomicBool,
     pub(crate) frame_complete: AtomicBool,
+    /// The RAM word the currently armed `tx_lim` fires at.
+    ///
+    /// The driver alternates the threshold between `half_words` and
+    /// `ram_words`, and the peripheral raises `tx_thr_event` as the read
+    /// pointer reaches that word (`ram_words` meaning the wrap back to word
+    /// 0). Recording it when it is armed is what lets the handler measure its
+    /// own entry delay: the boundary is where the transmitter *was* when the
+    /// cause appeared, and [`crate::RmtHw::read_pos`] says where it is now.
+    ///
+    /// Written by the driver only — from thread context at `start_frame` and
+    /// from the ISR at each threshold flip, which never overlap on the parts
+    /// this driver targets.
+    pub(crate) threshold_boundary: AtomicUsize,
 
     // --- counters ---
     pub(crate) frames: AtomicUsize,
@@ -161,6 +219,8 @@ pub struct ChannelState {
     pub(crate) refill_lag_count: AtomicI32,
     pub(crate) refill_lag_max: AtomicI32,
     pub(crate) lag_hist: [AtomicU32; LAG_BUCKETS],
+    pub(crate) entry_delay_max: AtomicI32,
+    pub(crate) entry_delay_hist: [AtomicU32; LAG_BUCKETS],
 }
 
 impl ChannelState {
@@ -179,6 +239,7 @@ impl ChannelState {
             bit_cursor: AtomicUsize::new(0),
             latch_written: AtomicBool::new(true),
             frame_complete: AtomicBool::new(true),
+            threshold_boundary: AtomicUsize::new(0),
             frames: AtomicUsize::new(0),
             guard_trips: AtomicUsize::new(0),
             guard_skips: AtomicUsize::new(0),
@@ -187,6 +248,8 @@ impl ChannelState {
             refill_lag_count: AtomicI32::new(0),
             refill_lag_max: AtomicI32::new(0),
             lag_hist: [const { AtomicU32::new(0) }; LAG_BUCKETS],
+            entry_delay_max: AtomicI32::new(0),
+            entry_delay_hist: [const { AtomicU32::new(0) }; LAG_BUCKETS],
         }
     }
 
@@ -220,6 +283,27 @@ impl ChannelState {
             self.refill_lag_max.store(advanced_i32, Relaxed);
         }
         self.lag_hist[lag_bucket(advanced, half_words)].fetch_add(1, Relaxed);
+    }
+
+    /// File one service's **entry delay** into the counters. ISR only.
+    ///
+    /// `delay` is `(read_pos - threshold_boundary) mod ram_words` sampled at
+    /// the top of the channel's service — the words the transmitter got
+    /// through between raising `tx_thr_event` and the handler looking at it.
+    /// See [`ChannelStats::entry_delay_max`] for why that number and the
+    /// refill lag are the two halves of one budget.
+    ///
+    /// Cheaper than [`Self::record_lag`] and the same shape — one division,
+    /// one compare, one increment — and the same single-writer argument (the
+    /// interrupt handler never nests with itself) makes the load/compare/store
+    /// maximum sound.
+    #[inline]
+    pub(crate) fn record_entry_delay(&self, delay: usize, half_words: usize) {
+        let delay_i32 = delay.min(i32::MAX as usize) as i32;
+        if self.entry_delay_max.load(Relaxed) < delay_i32 {
+            self.entry_delay_max.store(delay_i32, Relaxed);
+        }
+        self.entry_delay_hist[lag_bucket(delay, half_words)].fetch_add(1, Relaxed);
     }
 
     /// Store the compiled timing. Thread context only, while idle.
@@ -344,6 +428,13 @@ impl ChannelState {
         for (slot, cell) in lag_hist.iter_mut().zip(self.lag_hist.iter()) {
             *slot = cell.load(Relaxed);
         }
+        let mut entry_delay_hist = [0u32; LAG_BUCKETS];
+        for (slot, cell) in entry_delay_hist
+            .iter_mut()
+            .zip(self.entry_delay_hist.iter())
+        {
+            *slot = cell.load(Relaxed);
+        }
         ChannelStats {
             frames: self.frames.load(Relaxed),
             guard_trips: self.guard_trips.load(Relaxed),
@@ -353,6 +444,8 @@ impl ChannelState {
             refill_lag_count: self.refill_lag_count.load(Relaxed),
             refill_lag_max: self.refill_lag_max.load(Relaxed),
             lag_hist,
+            entry_delay_max: self.entry_delay_max.load(Relaxed),
+            entry_delay_hist,
         }
     }
 
@@ -366,6 +459,10 @@ impl ChannelState {
         self.refill_lag_count.store(0, Relaxed);
         self.refill_lag_max.store(0, Relaxed);
         for cell in self.lag_hist.iter() {
+            cell.store(0, Relaxed);
+        }
+        self.entry_delay_max.store(0, Relaxed);
+        for cell in self.entry_delay_hist.iter() {
             cell.store(0, Relaxed);
         }
     }

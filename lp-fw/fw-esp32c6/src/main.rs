@@ -252,11 +252,13 @@ mod hardware;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
 // extern reference from the JIT builtin table.
+// The app, plus the five harnesses that light a strip. `test_gpio` used to be
+// in this list and drives pins directly, so it only pulled in an output tree
+// nothing in that build touches.
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
     feature = "test_dither",
-    feature = "test_gpio",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_fluid_demo",
@@ -264,6 +266,8 @@ pub use fw_esp32_common::logger;
 mod output;
 mod recovery;
 mod serial;
+#[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
+mod stress;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::server_loop;
 #[cfg(not(fw_harness))]
@@ -278,7 +282,11 @@ mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 use fw_esp32_common::lp_fs;
 
-#[cfg(all(feature = "radio", not(fw_harness)))]
+#[cfg(all(
+    feature = "radio",
+    not(any(feature = "stress_s2", feature = "stress_s3")),
+    not(fw_harness)
+))]
 use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
 #[cfg(not(fw_harness))]
 use lpfs::lp_path::AsLpPath;
@@ -294,7 +302,7 @@ use {
     lpc_hardware::{HardwareSystem, HwRegistry},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
-    output::{Esp32OutputProvider, Esp32RmtWs281xDriver},
+    output::{Esp32C6RmtWs281xDriver, Esp32OutputProvider},
     serial::io_task,
     server_loop::run_server_loop,
     time::Esp32TimeProvider,
@@ -431,10 +439,12 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
     esp_println::println!("[INIT] StreamingMessageRouterTransport created");
 
-    // Initialize RMT peripheral for output
-    // Use 80MHz clock rate (standard for ESP32-C6)
+    // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
+    // with the per-channel divider of 1 gives the 12.5 ns tick
+    // `lp_ws281x::PulseCodes` assumes — the same pair the legacy C6 driver's
+    // `config.rs` encoded and drove strips with since the project started.
     esp_println::println!("[INIT] Initializing RMT peripheral at 80MHz...");
-    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
+    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK)
         .expect("Failed to initialize RMT");
     esp_println::println!("[INIT] RMT peripheral initialized");
 
@@ -491,14 +501,24 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
-    hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(
+    // How many outputs appear is decided in two places and nowhere else: the
+    // board manifest's `/rmt/ws281xK` resources (two on the XIAO C6), and
+    // `output::rmt::c6_rmt::BLOCKS_PER_CHANNEL` = 1, which leaves both of the
+    // chip's RMT TX slots usable. Under the `ws281x_2blocks` feature a channel
+    // takes two blocks, absorbs its neighbour's, and only slot 0 remains;
+    // manifest channel K drives slot K * SLOT_STRIDE and absorbed slots are
+    // never configured.
+    hardware_system.add_ws281x_driver(Box::new(Esp32C6RmtWs281xDriver::new(
         Rc::clone(&hardware_registry),
         rmt,
     )));
     hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
         &hardware_registry,
     ))));
-    #[cfg(feature = "radio")]
+    #[cfg(all(
+        feature = "radio",
+        not(any(feature = "stress_s2", feature = "stress_s3"))
+    ))]
     {
         let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
             .expect("Failed to initialize ESP-NOW radio");
@@ -509,7 +529,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         );
         hardware_system.add_radio_driver(Box::new(radio_driver));
     }
-    #[cfg(not(feature = "radio"))]
+    // P4 stress builds: the radio stack becomes a load generator instead of a
+    // driver — `esp_radio::wifi::new` can only run once, and the stress tasks
+    // own its controller/interface. See `stress.rs`.
+    #[cfg(any(feature = "stress_s2", feature = "stress_s3"))]
+    stress::start(spawner, wifi);
+    #[cfg(all(
+        not(feature = "radio"),
+        not(any(feature = "stress_s2", feature = "stress_s3"))
+    ))]
     let _ = wifi;
     let hardware_system = Rc::new(hardware_system);
 
@@ -551,19 +579,21 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Some(radio_service),
         graphics,
     );
-    // Wire hello payload: compile-time provenance from build.rs, injected
+    // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
-    // plus the boot-time read of the root-stamped device identity.
-    server.set_hello(lpc_wire::ServerHello {
-        proto: lpc_wire::WIRE_PROTO_VERSION,
-        fw: lpc_wire::FwProvenance {
-            package: alloc::string::String::from("fw-esp32c6"),
-            commit: alloc::string::String::from(env!("LP_BUILD_COMMIT")),
-            dirty: env!("LP_BUILD_DIRTY") == "true",
-            profile: alloc::string::String::from(env!("LP_BUILD_PROFILE")),
-        },
-        device_uid,
-    });
+    // plus the boot-time read of the root-stamped device identity. The
+    // hello's CAPABILITY half is derived inside the constructor above from
+    // the engine's gates and the services just injected — never restated
+    // here.
+    server.set_hello_identity(
+        lpc_wire::HelloIdentity::new(
+            "fw-esp32c6",
+            env!("LP_BUILD_COMMIT"),
+            env!("LP_BUILD_DIRTY") == "true",
+            env!("LP_BUILD_PROFILE"),
+        )
+        .with_device_uid(device_uid),
+    );
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

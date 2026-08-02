@@ -20,7 +20,7 @@
 //!   node tree, which is the pane's whole body; repeating it as a slot
 //!   editor in the popup was noise.
 //!
-//! `uid`, `format`, and `nodes` are all `read_only_persisted` in
+//! `uid`, `format`, and `nodes` all carry role `Fixed` in
 //! `lpc_model::ProjectDef`, so the read-only presentation here agrees with
 //! the model rather than merely hiding a writable slot.
 

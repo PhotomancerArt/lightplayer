@@ -64,14 +64,33 @@ impl LpvmEngine for NativeJitEngine {
         })
     }
 
-    fn compile_with_config(
+    /// Q32 always; F32 exactly when this build linked a float lowering for the
+    /// ISA — [`IsaTarget::f32_lowering`] is the float-capability seam, and
+    /// `Unsupported` is what it answers for an Xtensa build without
+    /// `float-f32` (and would answer for any future FPU-less target).
+    ///
+    /// Reading the seam rather than `cfg!(feature = "float-f32")` is what
+    /// keeps this answer true per *target* instead of per *build*: the host
+    /// links both ISAs, and rv32's soft-float path is available there even
+    /// though no rv32 board ships it.
+    fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
+        match mode {
+            lpir::FloatMode::Q32 => true,
+            lpir::FloatMode::F32 => {
+                IsaTarget::native().f32_lowering() != crate::isa::F32Lowering::Unsupported
+            }
+        }
+    }
+
+    fn compile_with_params(
         &self,
         ir: &LpirModule,
         meta: &LpsModuleSig,
-        config: &lpir::CompilerConfig,
+        params: &lpvm::LpvmCompileParams,
     ) -> Result<Self::Module, Self::Error> {
         let mut opts = self.options.clone();
-        opts.config = config.clone();
+        opts.config = params.config.clone();
+        opts.float_mode = params.float_mode;
         let entry_info = build_entry_info(ir, meta, IsaTarget::native())?;
         let (buffer, entry_offsets) =
             compile_module_jit(ir, meta, &self.builtin_table, &opts, IsaTarget::native())?;
@@ -90,14 +109,14 @@ impl LpvmEngine for NativeJitEngine {
         &'a self,
         ir: LpirModule,
         meta: LpsModuleSig,
-        config: lpir::CompilerConfig,
+        params: lpvm::LpvmCompileParams,
     ) -> Option<BoxedLpvmCompileJob<'a, Self::Module, Self::Error>> {
         Some(Box::new(NativeJitCompileJob::new(
             ir,
             meta,
             Arc::clone(&self.builtin_table),
             self.options.clone(),
-            config,
+            params,
             IsaTarget::native(),
         )))
     }

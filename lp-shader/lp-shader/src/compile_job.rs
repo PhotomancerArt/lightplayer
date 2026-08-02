@@ -1,9 +1,9 @@
 use alloc::format;
 use alloc::string::String;
 
-use lpir::{CompilerConfig, LpirModule};
+use lpir::LpirModule;
 use lps_shared::{LpsModuleSig, TextureStorageFormat};
-use lpvm::{LpvmCompileBudget, LpvmCompileStepResult, LpvmEngine};
+use lpvm::{LpvmCompileBudget, LpvmCompileParams, LpvmCompileStepResult, LpvmEngine};
 
 use crate::compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs};
 use crate::error::LpsError;
@@ -62,6 +62,10 @@ enum FrontendState<'src> {
 }
 
 enum ShaderCompileState<'src, 'engine, E: LpvmEngine> {
+    /// The engine cannot compile the requested numeric mode. Rejected at
+    /// construction so the frontend never runs for a compile that cannot
+    /// finish, and reported on the first `step` because `new` returns `Self`.
+    Rejected(String),
     Frontend(FrontendState<'src>),
     Prepare {
         ir: LpirModule,
@@ -82,7 +86,9 @@ pub struct ShaderCompileJob<'src, 'engine, E: LpvmEngine> {
     engine: &'engine E,
     glsl: &'src str,
     output_format: TextureStorageFormat,
-    compiler_config: CompilerConfig,
+    /// Middle-end config plus the numeric mode, handed to the backend as one
+    /// unit — both are per-compile choices (`CompilePxDesc`).
+    params: LpvmCompileParams,
     textures: TextureBindingSpecs,
     state: ShaderCompileState<'src, 'engine, E>,
 }
@@ -92,23 +98,33 @@ where
     E::Module: 'static,
 {
     pub fn new(engine: &'engine E, desc: CompilePxDesc<'src>) -> Self {
-        let state = match desc.frontend {
-            ShaderFrontend::LpsGlsl => {
-                let options = lps_glsl::CompileOptions {
-                    texture_specs: desc.textures.clone(),
-                    texel_fetch_bounds: desc.compiler_config.texture.texel_fetch_bounds,
-                };
-                ShaderCompileState::Frontend(FrontendState::LpsGlsl(lps_glsl::CompileJob::new(
-                    desc.glsl, options,
-                )))
+        let state = if !engine.supports_float_mode(desc.float_mode) {
+            ShaderCompileState::Rejected(format!(
+                "shader requested float_mode={}, which this LPVM engine does not compile",
+                desc.float_mode.as_str()
+            ))
+        } else {
+            match desc.frontend {
+                ShaderFrontend::LpsGlsl => {
+                    let options = lps_glsl::CompileOptions {
+                        texture_specs: desc.textures.clone(),
+                        texel_fetch_bounds: desc.compiler_config.texture.texel_fetch_bounds,
+                    };
+                    ShaderCompileState::Frontend(FrontendState::LpsGlsl(lps_glsl::CompileJob::new(
+                        desc.glsl, options,
+                    )))
+                }
+                ShaderFrontend::Naga => ShaderCompileState::Frontend(FrontendState::Naga),
             }
-            ShaderFrontend::Naga => ShaderCompileState::Frontend(FrontendState::Naga),
         };
         Self {
             engine,
             glsl: desc.glsl,
             output_format: desc.output_format,
-            compiler_config: desc.compiler_config,
+            params: LpvmCompileParams {
+                config: desc.compiler_config,
+                float_mode: desc.float_mode,
+            },
             textures: desc.textures,
             state,
         }
@@ -116,6 +132,7 @@ where
 
     pub fn stage(&self) -> ShaderCompileStage {
         match self.state {
+            ShaderCompileState::Rejected(_) => ShaderCompileStage::Done,
             ShaderCompileState::Frontend(_) => ShaderCompileStage::Frontend,
             ShaderCompileState::Prepare { .. } => ShaderCompileStage::Prepare,
             ShaderCompileState::Backend { .. } => ShaderCompileStage::Backend,
@@ -125,6 +142,7 @@ where
 
     pub fn stage_detail(&self) -> ShaderCompileStageDetail {
         match &self.state {
+            ShaderCompileState::Rejected(_) => ShaderCompileStageDetail::Done,
             ShaderCompileState::Frontend(FrontendState::LpsGlsl(job)) => {
                 ShaderCompileStageDetail::Frontend(job.stage())
             }
@@ -140,6 +158,9 @@ where
     pub fn step(&mut self, budget: ShaderCompileBudget) -> ShaderCompileStepResult {
         let state = core::mem::replace(&mut self.state, ShaderCompileState::Done);
         match state {
+            ShaderCompileState::Rejected(message) => {
+                ShaderCompileStepResult::Failed(LpsError::Validation(message))
+            }
             ShaderCompileState::Frontend(mut frontend) => match &mut frontend {
                 FrontendState::LpsGlsl(job) => {
                     match job.step(lps_glsl::CompileBudget::steps(budget.frontend_steps)) {
@@ -162,7 +183,7 @@ where
                 FrontendState::Naga => match crate::engine::lower_glsl_with_naga(
                     self.glsl,
                     &self.textures,
-                    &self.compiler_config,
+                    &self.params.config,
                 ) {
                     Ok((ir, meta)) => {
                         self.state = ShaderCompileState::Prepare { ir, meta };
@@ -213,11 +234,10 @@ where
                         None
                     };
 
-                if let Some(job) = self.engine.start_compile_job(
-                    ir.clone(),
-                    meta.clone(),
-                    self.compiler_config.clone(),
-                ) {
+                if let Some(job) =
+                    self.engine
+                        .start_compile_job(ir.clone(), meta.clone(), self.params.clone())
+                {
                     self.state = ShaderCompileState::Backend {
                         ir,
                         meta,
@@ -228,10 +248,7 @@ where
                     };
                     ShaderCompileStepResult::Pending
                 } else {
-                    match self
-                        .engine
-                        .compile_with_config(&ir, &meta, &self.compiler_config)
-                    {
+                    match self.engine.compile_with_params(&ir, &meta, &self.params) {
                         Ok(module) => {
                             match LpsPxShader::new(
                                 module,

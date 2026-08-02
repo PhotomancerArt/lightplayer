@@ -13,7 +13,7 @@ compile/execute path to solve build, size, or `no_std` issues.
 - USB/JTAG serial transport.
 - Flash-backed or memory-backed LightPlayer filesystem.
 - `lp-server` hosting on device.
-- LED output through RMT/WS281x drivers.
+- LED output through the shared `lp-ws281x` RMT driver (see below).
 - Root-owned hardware capabilities such as buttons and ESP-NOW radio support.
 - Firmware check and test harness modes behind feature flags.
 
@@ -25,6 +25,30 @@ machinery, and the hardware test harnesses (see
 `docs/adr/2026-07-29-per-chip-fw-toolchains.md` for the seam rules).
 Shared firmware plumbing belongs in `fw-core`. Host-local runtime lifecycle
 belongs in `fw-host`. Browser Studio simulation belongs in `fw-browser`.
+
+## WS281x output
+
+`src/output/rmt/` implements `lp_ws281x::RmtHw` for this chip and registers one
+driver at boot; the sequencing lives in `lp-fw/lp-ws281x` and is shared with
+`fw-esp32s3` and `fw-esp32v3`. The chip has **two RMT TX channels** (48-word
+memory blocks), and both are usable in the shipped configuration:
+
+| Build | Blocks/channel | Usable channels | Window | Refill half |
+| --- | --- | --- | --- | --- |
+| default | 1 | 2 (`/rmt/ws281x0`, `/rmt/ws281x1`) | 48 words | 24 words (~30 µs) |
+| `--features ws281x_2blocks` | 2 | 1 (slot 1 absorbed) | 96 words | 48 words (~60 µs) |
+
+Which one ships is a measurement question (roadmap M5's stress matrix), so it is
+a cargo feature, never an env var — and cargo tracks feature-driven `cfg`
+unreliably here, so `touch src/main.rs` before rebuilding after flipping it.
+`--features ws281x_telemetry` adds a periodic `[WS281X]` counters line per
+channel, in the same field order the classic firmware prints.
+
+Which pins the two channels drive is authored, not fixed: an `Output` node names
+a board label (`ws281x:rmt:D10`) and the driver binds that GPIO when the project
+opens the endpoint. The desk jig used for M5 wires three strips — D10/GPIO18,
+D9/GPIO20, and D8/GPIO19. Only the first two can be RMT channels; D8 is spare
+for a future SPI-class output, since the chip has no third TX channel.
 
 ## Common Commands
 

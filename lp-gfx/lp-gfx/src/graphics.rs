@@ -65,6 +65,30 @@ pub trait LpGraphics: Send + Sync {
         crate::ShaderSemantics::Q32
     }
 
+    /// The [`ShaderSemantics`] tier this backend runs when the *author* asked
+    /// for Float — the shader node's `float_mode` slot set to `Float`.
+    ///
+    /// The sibling of [`Self::native_semantics`], which answers the same
+    /// question for `Fixed`. Two methods rather than one mapping function
+    /// because the answer is a per-backend product decision in both
+    /// directions, stated once where the backend is defined.
+    ///
+    /// The default is `native_semantics()` — correct for any backend with a
+    /// single tier, and deliberately so for two of them: the GPU tier runs
+    /// IEEE f32 whichever mode was authored (its documented latitude, see
+    /// `docs/adr/2026-07-09-preview-fidelity-tiers.md`), and
+    /// [`crate::NullGraphics`] compiles nothing at all, so its answer is
+    /// unreachable. A backend that implements both tiers overrides.
+    ///
+    /// Answering here does **not** promise the compile succeeds: a backend
+    /// whose linked build cannot emit the tier still fails
+    /// [`Self::compile_shader`] with [`GfxError::Backend`]. That is the
+    /// never-silent-fallback rule, not a gap — a board without the float
+    /// backend linked must say so rather than quietly render Fixed.
+    fn float_semantics(&self) -> crate::ShaderSemantics {
+        self.native_semantics()
+    }
+
     /// The GLSL → LPIR frontend this backend compiles visual shaders with.
     ///
     /// Like [`Self::native_semantics`], this is a product decision the host

@@ -47,7 +47,6 @@ impl ButtonDef {
 
 /// Runtime button state published to shader-compatible control maps.
 #[derive(Debug, Clone, Default, PartialEq, Slotted)]
-#[slot(default_policy = "read_only_transient")]
 pub struct ButtonState {
     /// Present for one tick when the button transitions to pressed.
     #[slot(produced, map(key = "u32", value_ref = "lp::control::Message"))]

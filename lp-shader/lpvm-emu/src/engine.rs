@@ -33,6 +33,13 @@ impl LpvmEngine for EmuEngine {
     type Module = EmuModule;
     type Error = CompilerError;
 
+    /// Fixed at construction ([`CompileOptions::float_mode`]); this engine
+    /// does not override `compile_with_params`, so it claims only the mode it
+    /// was built with.
+    fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
+        mode == self.options.float_mode
+    }
+
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         let object = object_bytes_from_ir(ir, &self.options)?;
         let load = alloc::sync::Arc::new(link_object_with_builtins(&object)?);

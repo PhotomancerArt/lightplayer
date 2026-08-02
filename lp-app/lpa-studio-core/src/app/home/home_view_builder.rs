@@ -348,6 +348,7 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         project: sim.project.clone(),
         safe_clamp: None,
         fw: None,
+        hardware: None,
         sim: true,
         console_tail: sim.console_tail.clone(),
         ui: CardUiState::default(),
@@ -412,11 +413,14 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         }),
         _ => None,
     });
-    // hello firmware provenance: Technical evidence for the card's
-    // rich-object detail (Ready links only — a pre-hello link has none)
-    let fw = match &live.link {
-        Some(DeviceState::Ready { hello }) => Some(hello.fw.clone()),
-        _ => None,
+    // hello build + hardware facts: Technical evidence for the card's
+    // rich-object detail (Ready links only — a pre-hello link has none).
+    // Both halves ride the same hello, so they arrive and vanish together.
+    let (fw, hardware) = match &live.link {
+        Some(DeviceState::Ready { hello }) => {
+            (Some(hello.build.clone()), Some(hello.hardware.clone()))
+        }
+        _ => (None, None),
     };
     UiDeviceCard {
         uid: identity.map(|identity| identity.uid.clone()),
@@ -427,6 +431,7 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         state,
         project,
         fw,
+        hardware,
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
         // after they already did it.
@@ -559,6 +564,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         project,
         // remembered only: no live hello, no firmware provenance
         fw: None,
+        hardware: None,
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
@@ -572,7 +578,8 @@ mod tests {
     use std::rc::Rc;
 
     use lpc_history::{DeviceAssociation, PrefixedUid, SyncRelation, UidPrefix};
-    use lpc_wire::{FwProvenance, ServerHello, WIRE_PROTO_VERSION};
+    use lpc_model::LpFeature;
+    use lpc_wire::{BuildFacts, HardwareFacts, ServerHello, WIRE_PROTO_VERSION};
     use lpfs::LpFsMemory;
 
     use crate::app::places::{DeviceIdentity, DeviceSyncState};
@@ -600,11 +607,29 @@ mod tests {
         DeviceState::Ready {
             hello: ServerHello {
                 proto: WIRE_PROTO_VERSION,
-                fw: FwProvenance {
+                build: BuildFacts {
+                    features: vec![
+                        LpFeature::NodeButton,
+                        LpFeature::NodeClock,
+                        LpFeature::NodeFluid,
+                        LpFeature::NodeFixture,
+                        LpFeature::NodePlaylist,
+                        LpFeature::NodeRadio,
+                        LpFeature::NodeShader,
+                        LpFeature::NodeTexture,
+                        LpFeature::SvcButton,
+                        LpFeature::SvcRadioEspnow,
+                        LpFeature::GfxLpvm,
+                    ],
                     package: "fw-esp32c6".to_string(),
                     commit: "abc123456789".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),
+                },
+                hardware: HardwareFacts {
+                    radio: true,
+                    button: true,
+                    board_id: None,
                 },
                 device_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
             },
@@ -853,6 +878,7 @@ mod tests {
                 state: offline.clone(),
                 project: None,
                 fw: None,
+                hardware: None,
                 safe_clamp: None,
                 sim: false,
                 console_tail: Vec::new(),
@@ -865,6 +891,7 @@ mod tests {
                 state: offline,
                 project: None,
                 fw: None,
+                hardware: None,
                 safe_clamp: None,
                 sim: false,
                 console_tail: Vec::new(),

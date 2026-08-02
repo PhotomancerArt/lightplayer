@@ -377,6 +377,50 @@ pub(crate) fn detail_page_dom_z_102() -> Element {
     }
 }
 
+// ---- computed board↔firmware join (roadmap M5) ---------------------------
+
+#[story(
+    description = "Board detail, exact flash fit: the XIAO ESP32-C6 (4 MB) against the 4 MB C6 build. The Firmware block is computed — chip identity ∧ flash fit over the checked-in build defs — and its feature lines are read from the manifest compiled into that image, never authored here."
+)]
+pub(crate) fn firmware_detail_exact_fit() -> Element {
+    rsx! {
+        div { style: "max-width: 1080px;",
+            BoardsCatalogPage {
+                os: HostOs::MacOs,
+                initial_board: Some("seeed/xiao-esp32-c6".to_string()),
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Board detail with headroom and honest gaps: the XIAO ESP32-S3 Plus (16 MB) runs the 8 MB S3 build with 8 MB spare, gains f32 shader math, and lacks the ESP-NOW radio the C6 image carries. Gaps use the driver-warning attention tone — a caveat, not a fault."
+)]
+pub(crate) fn firmware_detail_headroom_and_gaps() -> Element {
+    rsx! {
+        div { style: "max-width: 1080px;",
+            BoardsCatalogPage {
+                os: HostOs::MacOs,
+                initial_board: Some("seeed/xiao-esp32-s3-plus".to_string()),
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Board detail with no firmware: the QuinLED-Dig-Uno is a classic ESP32, and no checked-in build def targets that chip yet. The empty state states the computed reason instead of going silent."
+)]
+pub(crate) fn firmware_detail_no_build() -> Element {
+    rsx! {
+        div { style: "max-width: 1080px;",
+            BoardsCatalogPage {
+                os: HostOs::MacOs,
+                initial_board: Some("quinled/dig-uno".to_string()),
+            }
+        }
+    }
+}
+
 // ---- annotated anatomy ---------------------------------------------------
 
 /// Estimated bbox of an end-anchored pin label (the layout stores anchor +

@@ -2,6 +2,10 @@ import { getPort, releasePort } from "./browser_serial.js";
 
 const ESPTOOL_TRANSPORT_TRACING = false;
 
+// The only `manifest.json` schemaVersion this build reads. Alpha posture is
+// version + refuse: a v1 manifest fails loudly rather than half-decoding.
+const FIRMWARE_MANIFEST_SCHEMA_VERSION = 2;
+
 export function isSupported() {
   return Boolean(globalThis.navigator?.serial && globalThis.fetch);
 }
@@ -512,7 +516,7 @@ function summarizeManifest(manifest, manifestPath) {
   return {
     firmwareId: String(manifest.firmwareId),
     displayName: String(manifest.displayName ?? manifest.firmwareId),
-    targetChip: String(manifest.target?.chip ?? "esp32c6"),
+    targetChip: String(manifest.core?.target?.chip ?? "esp32c6"),
     imageCount: manifest.images.length,
     totalBytes: manifest.images.reduce((total, image) => total + Number(image.sizeBytes ?? 0), 0),
     manifestPath,
@@ -537,8 +541,16 @@ function validateManifest(manifest) {
   if (!manifest || typeof manifest !== "object") {
     throw new Error("Firmware manifest is not a JSON object.");
   }
+  if (manifest.schemaVersion !== FIRMWARE_MANIFEST_SCHEMA_VERSION) {
+    throw new Error(
+      `Firmware manifest has schemaVersion ${manifest.schemaVersion} — this build understands only ${FIRMWARE_MANIFEST_SCHEMA_VERSION}; repackage with \`lp-cli firmware package\`.`,
+    );
+  }
   if (typeof manifest.firmwareId !== "string") {
     throw new Error("Firmware manifest is missing firmwareId.");
+  }
+  if (typeof manifest.core?.target?.chip !== "string") {
+    throw new Error("Firmware manifest is missing the extracted core's target chip.");
   }
   if (!Array.isArray(manifest.images) || manifest.images.length === 0) {
     throw new Error("Firmware manifest does not list any flash images.");

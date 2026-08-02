@@ -76,7 +76,7 @@ enum Cli {
     },
     /// Run a profiling session or compare profiles (`profile diff` is a stub in m0).
     Profile(profile::ProfileCli),
-    /// Inspect firmware build artifacts via their embedded manifest core.
+    /// Build, package and inspect firmware variants.
     Firmware(firmware::FirmwareCli),
     /// Run firmware checks on hardware or firmware targets.
     Fwcheck(fwcheck::FwcheckCli),

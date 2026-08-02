@@ -600,6 +600,15 @@ impl StudioController {
     fn sync_lens_probe_policy(&mut self) {
         let kind = self.pool.lens_session().map(crate::RuntimeSession::kind);
         self.project.set_lens_runtime_kind(kind);
+        // The lens device's reported build, for the add-node picker's gate.
+        // Only a Ready device link answers; a sim lens leaves it `None` and
+        // the picker offers everything.
+        let features = self
+            .pool
+            .lens_session()
+            .and_then(crate::RuntimeSession::device_state)
+            .and_then(|state| state.hello().map(|hello| hello.build.features.clone()));
+        self.project.set_lens_device_features(features);
     }
 
     /// Stamp the lens session's pull-completion time: the next passive pull

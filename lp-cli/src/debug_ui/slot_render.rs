@@ -2,8 +2,8 @@
 
 use eframe::egui;
 use lpc_model::{
-    LpValue, ProductRef, SlotData, SlotMapKey, SlotName, SlotPath, SlotPolicy, SlotShape,
-    SlotShapeId, SlotShapeRegistry, SlotValueShape,
+    LpValue, ProductRef, SlotData, SlotMapKey, SlotName, SlotPath, SlotShape, SlotShapeId,
+    SlotShapeRegistry, SlotValueShape,
 };
 
 use super::format::{
@@ -116,7 +116,7 @@ pub(crate) fn render_top_field_row(
     status: Option<&SlotEditStatusContext<'_>>,
     edit_intents: Option<&mut Vec<SlotEditIntent>>,
 ) -> bool {
-    let Some((shape, data, policy, path)) =
+    let Some((shape, data, writable, path)) =
         top_record_field_info(registry, shape_id, data, field_name)
     else {
         return false;
@@ -126,7 +126,7 @@ pub(crate) fn render_top_field_row(
         registry,
         root.unwrap_or("root"),
         path,
-        policy,
+        writable,
         label,
         shape,
         data,
@@ -154,7 +154,7 @@ fn top_record_field_info<'a>(
     shape_id: SlotShapeId,
     data: &'a SlotData,
     field_name: &str,
-) -> Option<(&'a SlotShape, &'a SlotData, SlotPolicy, SlotPath)> {
+) -> Option<(&'a SlotShape, &'a SlotData, bool, SlotPath)> {
     let shape = resolve_shape(registry, registry.get(&shape_id)?)?;
     let SlotShape::Record { fields, .. } = shape else {
         return None;
@@ -170,7 +170,7 @@ fn top_record_field_info<'a>(
     Some((
         &field.shape,
         child,
-        field.policy,
+        field.is_writable(),
         SlotPath::root().child(field.name.clone()),
     ))
 }
@@ -252,7 +252,7 @@ fn render_slot_shape_rows(
                     registry,
                     root,
                     child_path,
-                    field.policy,
+                    field.is_writable(),
                     field.name.as_str(),
                     &field.shape,
                     child,
@@ -269,7 +269,7 @@ fn render_slot_shape_rows(
             registry,
             root,
             path,
-            SlotPolicy::default(),
+            true,
             "value",
             shape,
             data,
@@ -323,7 +323,7 @@ fn render_slot_shape_rows_filtered(
                     registry,
                     root,
                     child_path,
-                    field.policy,
+                    field.is_writable(),
                     field.name.as_str(),
                     &field.shape,
                     child,
@@ -375,7 +375,7 @@ fn render_slot_shape_rows_filtered(
             registry,
             root,
             path,
-            SlotPolicy::default(),
+            true,
             "value",
             shape,
             data,
@@ -393,7 +393,7 @@ fn render_named_slot_shape_row(
     registry: &SlotShapeRegistry,
     root: &str,
     path: SlotPath,
-    policy: SlotPolicy,
+    writable: bool,
     name: &str,
     shape: &SlotShape,
     data: &SlotData,
@@ -418,7 +418,7 @@ fn render_named_slot_shape_row(
             registry,
             root,
             path,
-            policy,
+            writable,
             name,
             shape,
             data,
@@ -440,7 +440,7 @@ fn render_named_slot_shape_row(
                 ui,
                 root,
                 &path,
-                policy,
+                writable,
                 depth,
                 name,
                 shape,
@@ -465,7 +465,7 @@ fn render_named_slot_shape_row(
                                 registry,
                                 root,
                                 child_path,
-                                field.policy,
+                                field.is_writable(),
                                 field.name.as_str(),
                                 &field.shape,
                                 child,
@@ -493,7 +493,7 @@ fn render_named_slot_shape_row(
                             registry,
                             root,
                             child_path,
-                            policy,
+                            writable,
                             &key_label,
                             value,
                             child,
@@ -520,7 +520,7 @@ fn render_named_slot_shape_row(
                             registry,
                             root,
                             child_path,
-                            policy,
+                            writable,
                             value.variant.as_str(),
                             &variant.shape,
                             &value.data,
@@ -558,7 +558,7 @@ fn render_named_slot_shape_row(
                             registry,
                             root,
                             child_path,
-                            policy,
+                            writable,
                             "some",
                             some,
                             child,
@@ -593,7 +593,7 @@ fn render_value_row(
     ui: &mut egui::Ui,
     root: &str,
     path: &SlotPath,
-    policy: SlotPolicy,
+    writable: bool,
     depth: usize,
     name: &str,
     shape: &SlotValueShape,
@@ -619,7 +619,7 @@ fn render_value_row(
                 ui,
                 root,
                 path,
-                policy,
+                writable,
                 shape,
                 value,
                 selection,
@@ -637,7 +637,7 @@ fn render_value_row(
             ui,
             root,
             path,
-            policy,
+            writable,
             shape,
             value,
             selection.as_deref_mut(),
@@ -655,7 +655,7 @@ fn render_value_cell(
     ui: &mut egui::Ui,
     root: &str,
     path: &SlotPath,
-    policy: SlotPolicy,
+    writable: bool,
     shape: &SlotValueShape,
     value: &LpValue,
     selection: Option<&mut Option<InspectorSelection>>,
@@ -669,9 +669,10 @@ fn render_value_cell(
             render_resource_skeleton(ui, *resource, selection);
         }
         _ => {
-            let rendered_editor = policy.writable && slot_value_editor_supported(shape, value);
+            let rendered_editor = writable && slot_value_editor_supported(shape, value);
             if rendered_editor {
-                if let Some(edited) = render_slot_value_editor(ui, root, path, shape, policy, value)
+                if let Some(edited) =
+                    render_slot_value_editor(ui, root, path, shape, writable, value)
                     && let Some(edit_intents) = edit_intents
                 {
                     edit_intents.push(SlotEditIntent {

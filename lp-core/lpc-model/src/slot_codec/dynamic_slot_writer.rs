@@ -1,10 +1,9 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use crate::slot::SlotPersistence;
 use crate::{
-    SlotAccess, SlotDataAccess, SlotEnumEncoding, SlotFieldShape, SlotMapKey, SlotShape,
-    SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotVariantShape,
+    SlotAccess, SlotDataAccess, SlotDirection, SlotEnumEncoding, SlotFieldShape, SlotMapKey,
+    SlotRole, SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotVariantShape,
 };
 
 use super::{SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter, write_lp_value};
@@ -311,18 +310,21 @@ where
 
 /// Whether one record field is omitted from authored JSON.
 ///
-/// Transient never serializes: a field whose policy persistence is
-/// [`SlotPersistence::Transient`] is omitted together with its whole subtree
-/// (the field's policy governs everything below it), so transient runtime
-/// controls never reach def files regardless of the write path. Structurally
-/// empty fields (none options, empty maps, unit/empty records) are omitted as
-/// well via [`should_omit_field`].
+/// A [`SlotRole::Debug`] field never serializes: it is omitted together with
+/// its whole subtree (the field's role governs everything below it), so
+/// transient runtime controls never reach def files regardless of the write
+/// path. A produced field is omitted too — defensively, since state roots
+/// (the only holders of produced fields today) are never written through
+/// this path in the first place, but direction implies never-serialized
+/// regardless of role (D1). Structurally empty fields (none options, empty
+/// maps, unit/empty records) are omitted as well via [`should_omit_field`].
 fn omit_record_field(
     field: &SlotFieldShape,
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
 ) -> bool {
-    field.policy.persistence == SlotPersistence::Transient
+    field.role == SlotRole::Debug
+        || field.semantics.direction == SlotDirection::Produced
         || should_omit_field(&field.shape, data, registry)
 }
 
@@ -413,7 +415,7 @@ mod tests {
     use crate::{
         LpType, LpValue, Revision, SlotData, SlotMapDyn, SlotName, SlotOptionDyn, SlotRecord,
         SlotVariantShape, WithRevision,
-        slot::shape::{enum_external, field, field_with_policy, map, option, record, unit, value},
+        slot::shape::{enum_external, field, field_with_role, map, option, record, unit, value},
     };
     use alloc::vec;
     use alloc::vec::Vec;
@@ -522,11 +524,7 @@ mod tests {
                 shape_id,
                 record(vec![
                     field("pin", value(LpType::U32)),
-                    field_with_policy(
-                        "rate",
-                        value(LpType::F32),
-                        crate::SlotPolicy::writable_transient(),
-                    ),
+                    field_with_role("rate", value(LpType::F32), crate::SlotRole::Debug),
                 ]),
             )
             .unwrap();
@@ -549,10 +547,10 @@ mod tests {
                 shape_id,
                 record(vec![field(
                     "controls",
-                    record(vec![field_with_policy(
+                    record(vec![field_with_role(
                         "rate",
                         value(LpType::F32),
-                        crate::SlotPolicy::writable_transient(),
+                        crate::SlotRole::Debug,
                     )]),
                 )]),
             )

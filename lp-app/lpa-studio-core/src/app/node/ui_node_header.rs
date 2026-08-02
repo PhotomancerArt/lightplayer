@@ -22,6 +22,14 @@ pub struct UiNodeHeader {
     /// Aggregate dirty-edit summary for this node's subtree (own slots plus
     /// descendant nodes), matching the per-field affordances.
     pub dirty: DirtySummary,
+    /// The node exists in the project but has NO RUNTIME on the device
+    /// running it (its kind is not in that firmware build). The pane
+    /// replaces its whole body with the hazard-striped error treatment:
+    /// params, products and slots all describe a runtime that is not
+    /// there, and showing them invites edits that cannot take effect.
+    /// [`Self::kind`] names the kind in the pane's message;
+    /// [`Self::detail`] carries the engine's own wording for the popover.
+    pub unsupported: bool,
 }
 
 impl UiNodeHeader {
@@ -36,6 +44,7 @@ impl UiNodeHeader {
             summary: None,
             detail: None,
             dirty: DirtySummary::clean(),
+            unsupported: false,
         }
     }
 
@@ -48,6 +57,12 @@ impl UiNodeHeader {
     /// Set the aggregate dirty-edit summary for the node's subtree.
     pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// Mark the node as having no runtime here (see [`Self::unsupported`]).
+    pub fn with_unsupported(mut self, unsupported: bool) -> Self {
+        self.unsupported = unsupported;
         self
     }
 

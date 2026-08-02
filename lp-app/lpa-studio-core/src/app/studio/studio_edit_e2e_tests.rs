@@ -57,8 +57,8 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 
     // Flat-root workspace over the real wire: the project root renders no
     // card (the clock and fixture panes are the top-level entries) and the
-    // root's own slots ride `root_slots` with the `read_only_persisted`
-    // policy on `format`/`nodes` intact; `name` stays editable.
+    // root's own slots ride `root_slots` with the `Fixed` role
+    // on `format`/`nodes` intact; `name` stays editable.
     let editor = project_editor(&snapshot);
     assert_eq!(editor.nodes.len(), 2, "two child panes, no root card");
     let root_slot = |path: &str| {
