@@ -100,8 +100,10 @@ of implementation — code can lag these names during the transition.
   override with **no durable value underneath** (clock `rate`, output
   `test_pattern`). Session-only — it dies on project unload or reboot, so a
   restarted installation never comes up in a debug state. Not a Panel: a
-  panel control *exposes* a slot whose authored value is the default, which
-  is why panel state persists and Debug does not. Never dirty, never saved;
+  panel control *exposes a bound slot via its channel* (authored value =
+  default), which is why latching panel state persists and Debug does not
+  (momentary panel gestures don't persist either, but their fallback is bus
+  resolution, not a shape default). Never dirty, never saved;
   its verb is **Clear**. Declared `#[slot(role = "debug")]`, rendered in the
   node card's own hazard-striped Debug section
   ([ADR](adr/2026-08-01-debug-slots-taxonomy.md)).
