@@ -92,17 +92,6 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 ///    then succeeds still means the *heap changed* — a second region does not
 ///    give a successful retry a second explanation. That inference is safe.
 ///
-/// ⚠️ Separately, and true before this heap had two regions: the value is a
-/// **floor, not a bound**. The bisection assumes "if S fits, so does S-4",
-/// and `HoleList::split_current` refuses a hole outright when the leftover
-/// could not hold a `Hole`, so `alloc(S)` can fail where `alloc(S+4)`
-/// succeeds (186 counterexample pairs in 409,000 host probes — see
-/// `spikes/classic-oom-allocator`). Bisecting a non-monotonic predicate lands
-/// somewhere at or below the true maximum; it never over-reports, because
-/// `fits` only advances on an actual success. A second region makes the
-/// predicate a union of two non-monotonic ones, so the floor may be looser
-/// still.
-///
 /// `linked_list_allocator` exposes no free-list walk, so this asks the allocator
 /// the only question it answers: binary-search the largest size it will accept,
 /// returning each probe immediately. ~17 probes bounded by `free()`, each a
@@ -119,7 +108,9 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 /// Measured on the host against `linked_list_allocator` 0.10.5 — the version
 /// `esp-alloc` 0.10 pins — 186 such size-pairs in 409,000 probes of randomised
 /// heaps. Every value it returns *did* allocate, so it never over-reports; treat
-/// it as a floor and nothing more.
+/// it as a floor and nothing more. With two regions the predicate becomes a
+/// union of two non-monotonic ones — one per region — so the floor may be
+/// looser still.
 ///
 /// When the answer has to be exact, use [`free_list_shape`], which reads the
 /// list instead of guessing at it.
