@@ -116,7 +116,7 @@ version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9698bf0769c641b18618039fe2ebd41eb3541f98433000f64e663fab7cea2c87"
 dependencies = [
- "gimli 0.33.0",
+ "gimli",
 ]
 
 [[package]]
@@ -1394,7 +1394,7 @@ dependencies = [
  "cranelift-control 0.129.1",
  "cranelift-entity 0.129.1",
  "cranelift-isle 0.129.1",
- "gimli 0.33.0",
+ "gimli",
  "hashbrown 0.15.5",
  "libm",
  "log",
@@ -3928,7 +3928,6 @@ dependencies = [
  "lps-builtins",
  "serde_json",
  "tokio",
- "unwinding",
 ]
 
 [[package]]
@@ -4000,7 +3999,6 @@ dependencies = [
  "lpvm",
  "lpvm-native",
  "serde",
- "unwinding",
 ]
 
 [[package]]
@@ -4225,12 +4223,6 @@ dependencies = [
  "wasip2",
  "wasip3",
 ]
-
-[[package]]
-name = "gimli"
-version = "0.32.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
 name = "gimli"
@@ -5642,7 +5634,6 @@ dependencies = [
  "lp-emu-abi",
  "lp-recovery",
  "lpc-shared",
- "unwinding",
 ]
 
 [[package]]
@@ -5960,7 +5951,6 @@ dependencies = [
  "serde",
  "serde_json",
  "spin",
- "unwinding",
 ]
 
 [[package]]
@@ -6338,6 +6328,7 @@ dependencies = [
  "lps-builtin-ids",
  "lps-builtins",
  "lps-builtins-xt-image",
+ "lps-glsl",
  "lps-q32",
  "lps-shared",
  "lpvm",
@@ -9949,15 +9940,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "unwinding"
-version = "0.2.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60612c845ef41699f39dc8c5391f252942c0a88b7d15da672eff0d14101bbd6d"
-dependencies = [
- "gimli 0.32.3",
-]
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10345,7 +10327,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "fxprof-processed-profile",
- "gimli 0.33.0",
+ "gimli",
  "ittapi",
  "libc",
  "log",
@@ -10393,7 +10375,7 @@ dependencies = [
  "cpp_demangle",
  "cranelift-bitset 0.129.1",
  "cranelift-entity 0.129.1",
- "gimli 0.33.0",
+ "gimli",
  "hashbrown 0.15.5",
  "indexmap",
  "log",
@@ -10475,7 +10457,7 @@ dependencies = [
  "cranelift-entity 0.129.1",
  "cranelift-frontend 0.129.1",
  "cranelift-native",
- "gimli 0.33.0",
+ "gimli",
  "itertools 0.14.0",
  "log",
  "object 0.37.3",
@@ -10568,7 +10550,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9130b3ab6fb01be80b27b9a2c84817af29ae8224094f2503d2afa9fea5bf9d00"
 dependencies = [
  "cranelift-codegen 0.129.1",
- "gimli 0.33.0",
+ "gimli",
  "log",
  "object 0.37.3",
  "target-lexicon",
@@ -11110,7 +11092,7 @@ checksum = "1977857998e4dd70d26e2bfc0618a9684a2fb65b1eca174dc13f3b3e9c2159ca"
 dependencies = [
  "cranelift-assembler-x64",
  "cranelift-codegen 0.129.1",
- "gimli 0.33.0",
+ "gimli",
  "regalloc2 0.13.5",
  "smallvec",
  "target-lexicon",
