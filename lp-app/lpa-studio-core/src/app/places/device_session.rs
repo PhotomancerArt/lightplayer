@@ -252,6 +252,7 @@ pub fn registry_entry_for(
         transport: transport.to_string(),
         last_seen_at: now,
         association: None,
+        board_id: None,
     }
 }
 
@@ -276,6 +277,11 @@ pub fn upsert_device_merged(
         }
         if device.transport.is_empty() {
             device.transport = existing.transport;
+        }
+        // The provisioned board sticks across sightings: it changes on
+        // provisioning (or a future hello report), never on sight.
+        if device.board_id.is_none() {
+            device.board_id = existing.board_id;
         }
         if !existing.name.is_empty() {
             device.name = existing.name;
@@ -566,6 +572,7 @@ mod tests {
             name: "Porch sign".to_string(),
             last_seen_at: 50.0,
             association: None,
+            board_id: None,
         }
     }
 

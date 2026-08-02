@@ -164,27 +164,36 @@ fn clamp_percent(clamp: u8) -> u32 {
     (u32::from(clamp) * 100 + 127) / 255
 }
 
-fn default_setup_name(now_secs: Option<f64>) -> String {
+/// The setup form's default device name: `YYYY-MM-DD - <what it is>`.
+///
+/// Sortable date first (the spike's round-2 call: date is how people
+/// organize devices), then the most specific thing we know — the picked
+/// board's product slug, else the detected chip, else a bare fallback.
+/// The name re-derives as the pick changes until the user types.
+fn default_setup_name(now_secs: Option<f64>, discriminator: &str) -> String {
+    format!("{} - {discriminator}", today_stamp(now_secs))
+}
+
+fn today_stamp(now_secs: Option<f64>) -> String {
     #[cfg(target_arch = "wasm32")]
     if now_secs.is_none() {
         let now = js_sys::Date::new_0();
         return format!(
-            "{:04}-{:02}-{:02} {:02}:{:02} LightPlayer",
+            "{:04}-{:02}-{:02}",
             now.get_full_year(),
             now.get_month() + 1,
             now.get_date(),
-            now.get_hours(),
-            now.get_minutes(),
         );
     }
     let secs = now_secs.unwrap_or(0.0) as i64;
     let (year, month, day) = civil_from_days(secs.div_euclid(86_400));
-    let rem = secs.rem_euclid(86_400);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} LightPlayer",
-        rem / 3600,
-        (rem % 3600) / 60,
-    )
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// The `vendor/product` id's product half — what a board contributes to a
+/// device name (`seeed/xiao-esp32-c6` → `xiao-esp32-c6`).
+fn board_slug(board_id: &str) -> &str {
+    board_id.rsplit('/').next().unwrap_or(board_id)
 }
 
 /// Days-since-epoch → civil (y, m, d), Howard Hinnant's algorithm.
@@ -224,7 +233,7 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         onclick: move |_| {
                             on_action.call(UiAction::from_op(
                                 ControllerId::new(DeviceController::NODE_ID),
-                                DeviceOp::ProvisionFirmware { setup_name: None },
+                                DeviceOp::ProvisionFirmware { setup_name: None, board_id: None },
                             ));
                         },
                     }
@@ -295,55 +304,262 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
 }
 
 /// The blank board's SETUP FORM (state-flow model §1-A): the Status tab
-/// IS the form — a prefilled date-default name plus ONE Install button,
-/// no confirm, no separate naming dialog. The name rides the provision
-/// op and stamps at first post-flash contact, so the happy path never
-/// lands on Needs-a-name.
+/// IS the form — the board picker (M5), a prefilled date-default name,
+/// and ONE Install button; no confirm, no separate naming dialog. The
+/// name rides the provision op and stamps at first post-flash contact;
+/// the board choice rides the same op and lands as `/hardware.json`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SetupForm(
-    default_name: String,
+    card_key: String,
+    /// Wall clock for the derived default name.
+    now_secs: Option<f64>,
     /// OtherFirmware wears replacing copy; a blank board installing copy.
     replaces: bool,
+    /// The core-owned board pick (`CardUiState::setup_board`); `None` =
+    /// the generic fallback, which is also the untouched default.
+    setup_board: Option<String>,
+    /// Chip identity from passive/probe evidence — matching boards lead
+    /// and the headline names the chip.
+    detected_chip: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let mut name = use_signal(|| default_name.clone());
+    // `None` until the user types: the name keeps deriving from the pick
+    // (spike round 2), and the first keystroke freezes it.
+    let mut typed_name = use_signal(|| None::<String>);
+    let mut show_all = use_signal(|| false);
     let label = if replaces {
         "Replace with LightPlayer"
     } else {
         "Install firmware"
     };
+
+    let boards = provisionable_boards();
+    let detected = detected_chip.as_deref().map(normalize_chip);
+    // Chip-matching boards lead; the rest follow in the same grid (round 3:
+    // the card may grow — a long grid beats a disclosure nobody opens).
+    let (matching, other): (Vec<&'static lpa_boards::BoardDisplayFile>, Vec<_>) = boards
+        .iter()
+        .partition(|board| detected.as_deref() == Some(normalize_chip(&board.family).as_str()));
+    let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if detected.is_none() {
+        boards.clone()
+    } else {
+        matching.into_iter().chain(other).collect()
+    };
+    // Generic occupies the first cell, so the board capacity is one less;
+    // the overflow cell fills the 12th (4 rows of 3).
+    let capacity = SETUP_TILE_LIMIT - 1;
+    let overflow = ordered.len().saturating_sub(capacity);
+    let shown: Vec<_> = if show_all() || overflow == 0 {
+        ordered
+    } else {
+        ordered.into_iter().take(capacity).collect()
+    };
+
+    let picked = setup_board
+        .as_deref()
+        .and_then(|id| boards.iter().find(|board| board.board_id == id).copied());
+    let discriminator = match (&picked, &detected_chip) {
+        (Some(board), _) => board_slug(&board.board_id).to_string(),
+        (None, Some(chip)) => normalize_chip(chip),
+        (None, None) => "lightplayer".to_string(),
+    };
+    let derived_name = default_setup_name(now_secs, &discriminator);
+    let name_value = typed_name().unwrap_or(derived_name);
+    let submit_board = setup_board.clone();
+    let submit_name = name_value.clone();
+
     rsx! {
-        div { class: "tw:mt-1 tw:grid tw:gap-2",
+        div { class: "tw:mt-1 tw:grid tw:gap-3.5",
             div {
-                label { class: "tw:mb-1 tw:block tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                // The headline carries the chip, replacing the generic
+                // status line AND the old "BOARD detected:" label.
+                p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+                    if let Some(chip) = &detected_chip {
+                        "Set up "
+                        span { style: "color: var(--edge-tint);", "{chip_display(chip)}" }
+                        " device"
+                    } else {
+                        "Set up this device"
+                    }
+                }
+                p { class: "tw:m-0 tw:mt-0.5 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
+                    "Select your board — or install generic and choose later"
+                }
+            }
+            div { class: "tw:grid tw:grid-cols-3 tw:gap-2",
+                // Generic leads: it is the no-decision outcome, and it has
+                // to stay findable as the grid grows (gate round 3).
+                BoardTile {
+                    board: None,
+                    caption: "Generic".to_string(),
+                    selected: setup_board.is_none(),
+                    // Nothing picked yet is the IMPLICIT generic install:
+                    // marked quietly, never as a green choice.
+                    implicit: setup_board.is_none(),
+                    on_action,
+                    card_key: card_key.clone(),
+                }
+                for board in shown {
+                    BoardTile {
+                        board: Some(board.clone()),
+                        caption: board.display_name.clone(),
+                        selected: setup_board.as_deref() == Some(board.board_id.as_str()),
+                        implicit: false,
+                        on_action,
+                        card_key: card_key.clone(),
+                    }
+                }
+                if overflow > 0 && !show_all() {
+                    button {
+                        class: "tw:flex tw:min-h-[4.5rem] tw:items-center tw:justify-center tw:rounded-lg tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:text-xs tw:text-subtle-foreground tw:hover:border-strong tw:hover:text-strong-foreground",
+                        onclick: move |_| show_all.set(true),
+                        "+{overflow} more"
+                    }
+                }
+            }
+            div {
+                label { class: "tw:mb-1 tw:block tw:text-xs tw:font-semibold tw:text-subtle-foreground",
                     "Device name"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
-                    value: "{name}",
-                    oninput: move |event| name.set(event.value()),
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-xs tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    value: "{name_value}",
+                    oninput: move |event| typed_name.set(Some(event.value())),
                 }
             }
-            div {
-                CardSheetButton {
-                    label: "⚡ {label}",
-                    tone: SheetButtonTone::Primary,
-                    onclick: move |_| {
-                        let setup_name = Some(name.read().trim().to_string())
-                            .filter(|value| !value.is_empty());
-                        on_action.call(UiAction::from_op(
-                            ControllerId::new(DeviceController::NODE_ID),
-                            DeviceOp::ProvisionFirmware { setup_name },
-                        ));
-                    },
-                }
-            }
-            p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
-                "About a minute. Progress shows here — you can walk away."
+            CardSheetButton {
+                label: "⚡ {label}",
+                tone: SheetButtonTone::Primary,
+                onclick: move |_| {
+                    let setup_name = Some(submit_name.trim().to_string())
+                        .filter(|value| !value.is_empty());
+                    on_action.call(UiAction::from_op(
+                        ControllerId::new(DeviceController::NODE_ID),
+                        DeviceOp::ProvisionFirmware {
+                            setup_name,
+                            board_id: submit_board.clone(),
+                        },
+                    ));
+                },
             }
         }
     }
+}
+
+/// The grid's ceiling: 4 rows of 3, one of which is Generic and — when
+/// boards overflow — one is the "+N more" cell (gate round 3: the card is
+/// allowed to grow, but not without bound).
+const SETUP_TILE_LIMIT: usize = 11;
+
+/// A chip id as the headline shows it (`esp32c6` → `ESP32-C6`); unknown
+/// shapes pass through uppercased rather than being dropped.
+fn chip_display(chip: &str) -> String {
+    match normalize_chip(chip).as_str() {
+        "esp32c6" => "ESP32-C6".to_string(),
+        "esp32s3" => "ESP32-S3".to_string(),
+        "esp32c3" => "ESP32-C3".to_string(),
+        "esp32" => "ESP32".to_string(),
+        _ => chip.to_ascii_uppercase(),
+    }
+}
+
+/// One tile in the board grid: the board's own drawing over its name.
+/// `board: None` is the generic fallback, drawn as a dashed placeholder.
+///
+/// Selection is core-owned card state, so it survives re-renders and tab
+/// switches. Three visual states, deliberately distinct (gate rounds 2–3):
+/// picked (accent outline + check), the IMPLICIT generic default (quiet
+/// dashed outline — "this is what plain Install does", not a choice), and
+/// unpicked (no chrome until hover).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BoardTile(
+    board: Option<lpa_boards::BoardDisplayFile>,
+    caption: String,
+    selected: bool,
+    /// The unpicked generic cell: outlined quietly, never as a green pick.
+    implicit: bool,
+    on_action: EventHandler<UiAction>,
+    card_key: String,
+) -> Element {
+    let board_id = board.as_ref().map(|board| board.board_id.clone());
+    let class = match (selected, implicit) {
+        (true, false) => {
+            "tw:relative tw:grid tw:justify-items-center tw:gap-1.5 tw:rounded-lg tw:border tw:border-accent tw:bg-transparent tw:px-1 tw:py-2"
+        }
+        (true, true) => {
+            "tw:relative tw:grid tw:justify-items-center tw:gap-1.5 tw:rounded-lg tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:px-1 tw:py-2"
+        }
+        _ => {
+            "tw:relative tw:grid tw:justify-items-center tw:gap-1.5 tw:rounded-lg tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:py-2 tw:hover:border-strong"
+        }
+    };
+    rsx! {
+        button {
+            class,
+            onclick: move |_| {
+                on_action.call(home_action(HomeOp::CardUi(CardUiOp::SelectSetupBoard {
+                    card: card_key.clone(),
+                    board_id: board_id.clone(),
+                })));
+            },
+            if selected && !implicit {
+                span { class: "tw:absolute tw:right-1 tw:top-0.5 tw:text-[0.6rem] tw:font-bold tw:text-accent",
+                    "✓"
+                }
+            }
+            span { class: "lpb-setup-tile-art",
+                if let Some(board) = board {
+                    lpa_boards::BoardDiagram {
+                        board,
+                        mode: lpa_boards::DiagramMode::Plain,
+                        scale: 0.26,
+                        labels: false,
+                    }
+                } else {
+                    span { class: "tw:flex tw:h-8 tw:w-10 tw:items-center tw:justify-center tw:rounded tw:border tw:border-dashed tw:border-border tw:font-mono tw:text-[0.6rem] tw:text-subtle-foreground",
+                        "?"
+                    }
+                }
+            }
+            span {
+                class: if selected && !implicit {
+                    "tw:text-center tw:text-[0.65rem] tw:leading-tight tw:text-strong-foreground"
+                } else {
+                    "tw:text-center tw:text-[0.65rem] tw:leading-tight tw:text-subtle-foreground"
+                },
+                "{caption}"
+            }
+        }
+    }
+}
+
+/// Normalize a chip name for family matching: probe answers say
+/// "ESP32-C6", boot banners say "esp32c6", board families say "esp32c6".
+fn normalize_chip(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// The boards the picker offers: a build this deployment SERVES exists for
+/// the board (`SERVED_FIRMWARE_BUILDS` — flashing is real, not aspirational)
+/// AND its runtime manifest is checked in (the `/hardware.json` write needs
+/// the bytes). Display-only catalog boards stay out until both land.
+fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
+    lpa_boards::all_boards()
+        .iter()
+        .filter(|board| {
+            lpa_boards::runtime_manifest_json(&board.board_id).is_some()
+                && lpa_boards::compatible_builds_for(board)
+                    .iter()
+                    .any(|candidate| {
+                        lpa_link::SERVED_FIRMWARE_BUILDS.contains(&candidate.build.id.as_str())
+                    })
+        })
+        .collect()
 }
 
 /// One roster card: the device (or live sim session) as a tabbed control
@@ -740,9 +956,35 @@ pub(crate) fn DeviceCard(
                 // body (the title bar above is spared) — a heavy op takes
                 // over the card here, never an app-level modal.
                 if let Some(op) = card.ui.op.as_ref() {
-                    {card_op_overlay(op, &card.console_tail, &card_key, on_action)}
+                    {card_op_overlay(op, &card, &card_key, on_action)}
                 }
             }
+        }
+    }
+}
+
+/// "Copy details" on a failed op: the whole failure context — error,
+/// device state, chip, board choice, running build, console tail — as one
+/// pasteable block, for handing to an agent or a bug report.
+///
+/// The failure overlay already SHOWS this material, but showing it and
+/// being able to relay it are different problems: transcribing an error
+/// plus a dozen console lines by hand is where bug reports lose their
+/// evidence.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn CopyDetailsButton(report: String) -> Element {
+    let mut copied = use_signal(|| false);
+    rsx! {
+        button {
+            class: "ux-card-op-copy",
+            r#type: "button",
+            title: "Copy the error, device state, and console tail",
+            onclick: move |_| {
+                crate::clipboard::write_text(&report);
+                copied.set(true);
+            },
+            if copied() { "Copied ✓" } else { "Copy details" }
         }
     }
 }
@@ -756,14 +998,19 @@ pub(crate) fn DeviceCard(
 /// tabs and blurs the body; never an elevated dialog.
 fn card_op_overlay(
     op: &lpa_studio_core::CardOp,
-    tail: &[UiLogEntry],
+    card: &UiDeviceCard,
     card_key: &str,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     use lpa_studio_core::CardOpPhase;
+    let tail = &card.console_tail;
     if let CardOpPhase::Failed { error, exit_label } = &op.phase {
         let card_key = card_key.to_string();
         let exit_label = exit_label.clone();
+        // Built EAGERLY, while the failure's context is still on the card:
+        // the report has to describe the moment it failed, not whatever
+        // the card has drifted to by the time someone clicks.
+        let report = crate::app::home::failure_report::failure_report(card, op);
         return rsx! {
             div { class: "ux-card-op", role: "alert",
                 span { class: "ux-card-op-label ux-card-op-label-failed", "{op.label}" }
@@ -774,7 +1021,10 @@ fn card_op_overlay(
                         div { class: console_line_class(entry.level), "{entry.message}" }
                     }
                 }
-                div { class: "tw:flex tw:justify-end",
+                div { class: "tw:flex tw:items-center tw:justify-between tw:gap-2",
+                    if let Some(report) = report {
+                        CopyDetailsButton { report }
+                    }
                     button {
                         class: "ux-card-op-exit",
                         r#type: "button",
@@ -946,10 +1196,15 @@ fn status_tab_body(
             for line in section.lines.iter() {
                 if line.label == "status" {
                     // the headline: tinted like the edge (the spike's
-                    // status line), never a bare kv row
-                    p { class: "tw:m-0 tw:truncate tw:text-xs tw:font-semibold",
-                        style: "color: var(--edge-tint);",
-                        "{line.value}"
+                    // status line), never a bare kv row. The setup form
+                    // brings its OWN headline naming the chip ("Set up
+                    // ESP32-C6 device"), so a generic "Ready to set up"
+                    // above it would be two lines saying one thing.
+                    if !setup_form {
+                        p { class: "tw:m-0 tw:truncate tw:text-xs tw:font-semibold",
+                            style: "color: var(--edge-tint);",
+                            "{line.value}"
+                        }
                     }
                 } else {
                     // the §3a explain-the-situation line WRAPS — truncating
@@ -980,8 +1235,11 @@ fn status_tab_body(
         }
         if setup_form {
             SetupForm {
-                default_name: default_setup_name(now_secs),
+                card_key: card_key.to_string(),
+                now_secs,
                 replaces: matches!(card.state, RosterCardState::OtherFirmware),
+                setup_board: card.ui.setup_board.clone(),
+                detected_chip: card.detected_chip.clone(),
                 on_action,
             }
         } else if recovery_face {
@@ -1557,7 +1815,10 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware { setup_name: None },
+            DeviceOp::ProvisionFirmware {
+                setup_name: None,
+                board_id: None,
+            },
         )
     } else {
         UiAction::from_op(
@@ -1718,7 +1979,10 @@ pub(super) fn device_affordance_action(
         // without a dialog. Destructive re-flash/erase keep their confirm.
         RosterAffordance::SetUp => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware { setup_name: None },
+            DeviceOp::ProvisionFirmware {
+                setup_name: None,
+                board_id: None,
+            },
         )
         .with_summary(
             "Install LightPlayer firmware on this board — about a minute; \
@@ -1727,7 +1991,10 @@ pub(super) fn device_affordance_action(
         .with_icon("zap"),
         RosterAffordance::UpdateFirmware => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware { setup_name: None },
+            DeviceOp::ProvisionFirmware {
+                setup_name: None,
+                board_id: None,
+            },
         )
         .with_summary(
             "Install this build's firmware over the device's older build — \
@@ -1806,7 +2073,10 @@ fn wire_card_affordance(
             let display = strip_confirmation(
                 UiAction::from_op(
                     ControllerId::new(DeviceController::NODE_ID),
-                    DeviceOp::ProvisionFirmware { setup_name: None },
+                    DeviceOp::ProvisionFirmware {
+                        setup_name: None,
+                        board_id: None,
+                    },
                 )
                 .with_label(RosterAffordance::Troubleshoot.label())
                 .with_summary("Steps to try when the device is not responding.")
@@ -1984,13 +2254,37 @@ fn grow_button_class(push_right: bool) -> &'static str {
 
 #[cfg(test)]
 mod setup_name_tests {
-    use super::default_setup_name;
+    use super::{board_slug, chip_display, default_setup_name};
 
+    /// Sortable date first (gate round 2), then the most specific thing
+    /// known about the device.
     #[test]
     fn a_fixed_story_clock_derives_a_deterministic_utc_name() {
         assert_eq!(
-            default_setup_name(Some(1_800_000_000.0)),
-            "2027-01-15 08:00 LightPlayer"
+            default_setup_name(Some(1_800_000_000.0), "esp32c6"),
+            "2027-01-15 - esp32c6"
         );
+        assert_eq!(
+            default_setup_name(Some(1_800_000_000.0), "xiao-esp32-c6"),
+            "2027-01-15 - xiao-esp32-c6"
+        );
+    }
+
+    /// A board contributes its PRODUCT half — the vendor is noise in a
+    /// device name.
+    #[test]
+    fn board_slug_drops_the_vendor() {
+        assert_eq!(board_slug("seeed/xiao-esp32-c6"), "xiao-esp32-c6");
+        assert_eq!(board_slug("dom-z-102"), "dom-z-102");
+    }
+
+    /// The headline names the chip the way a datasheet does; anything
+    /// unrecognized still shows rather than vanishing.
+    #[test]
+    fn chip_display_is_datasheet_shaped() {
+        assert_eq!(chip_display("esp32c6"), "ESP32-C6");
+        assert_eq!(chip_display("ESP32-S3"), "ESP32-S3");
+        assert_eq!(chip_display("esp32"), "ESP32");
+        assert_eq!(chip_display("rp2040"), "RP2040");
     }
 }

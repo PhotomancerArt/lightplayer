@@ -34,6 +34,10 @@ pub struct UiDeviceCard {
     /// board identity) — the runtime half of the same report. `None`
     /// wherever `fw` is `None`.
     pub hardware: Option<HardwareFacts>,
+    /// Chip identity from passive/probe evidence (M5): the setup form's
+    /// board picker leads with matching boards. Distinct from
+    /// `hardware.board_id` (the device's own post-provision report).
+    pub detected_chip: Option<String>,
     /// Device-level safe-mode output ceiling (0–255) reported by the live
     /// session's heartbeat. A power cycle is the only exit, so the card
     /// must both flag the state AND say how to leave it. `None` when the
