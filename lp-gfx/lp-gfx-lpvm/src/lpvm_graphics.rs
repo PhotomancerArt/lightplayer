@@ -15,7 +15,7 @@ use lp_shader::{
     CompilePxDesc, LpsEngine, LpsSamplePointBuf, LpsSampleRgba16Buf, LpsTextureBuf, TextureBuffer,
 };
 use lps_shared::TextureStorageFormat;
-use lpvm::LpvmEngine;
+use lpvm::{FloatMode, LpvmEngine};
 
 use crate::lpvm_compute_shader::LpvmComputeShader;
 use crate::lpvm_shader::LpvmShader;
@@ -79,10 +79,21 @@ where
         source: &str,
         options: &ShaderCompileOptions,
     ) -> Result<Box<dyn LpShader>, GfxError> {
-        if options.semantics != ShaderSemantics::Q32 {
+        let float_mode = float_mode_for(options.semantics)?;
+        // Ask before compiling. The engine can answer for the ISA and the
+        // features this image linked, and a rejection here names the backend
+        // and the mode; letting the request run would either die deep in
+        // lowering with a message about a Cargo feature, or — on a backend
+        // whose f32 emit path exists but is incomplete — produce a module that
+        // fails later. Never a quiet downgrade to Fixed: a board given the
+        // wrong numerics silently is the failure this refuses
+        // (`docs/adr/2026-07-09-preview-fidelity-tiers.md` §4).
+        if !self.shared.engine.inner().supports_float_mode(float_mode) {
             return Err(GfxError::Backend(format!(
-                "lpvm CPU backend only compiles Q32 semantics; explicit {:?} tier requested",
-                options.semantics
+                "this build's {} backend does not compile {} shaders; \
+                 the shader's float_mode must be Fixed on this device",
+                self.backend_name,
+                options.semantics.name()
             )));
         }
         let cfg = options.to_compiler_config();
@@ -91,7 +102,8 @@ where
             lps_shared::TextureStorageFormat::Rgba16Unorm,
             cfg,
             options.frontend,
-        );
+        )
+        .with_float_mode(float_mode);
         desc.textures = options.textures.clone();
         let px = self
             .shared
@@ -122,6 +134,13 @@ where
 
     fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
         self.frontend
+    }
+
+    /// This backend implements both CPU tiers, so an authored `Float` shader
+    /// asks for [`ShaderSemantics::F32Cpu`] — the request that reaches
+    /// `compile_shader` and either compiles native f32 or is refused there.
+    fn float_semantics(&self) -> ShaderSemantics {
+        ShaderSemantics::F32Cpu
     }
 
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
@@ -277,6 +296,24 @@ where
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
         sample_out_buf_mut(out)?.data_mut().fill(0);
         Ok(())
+    }
+}
+
+/// The LPIR numeric mode a requested [`ShaderSemantics`] tier means for this
+/// CPU backend.
+///
+/// [`ShaderSemantics::F32Gpu`] is not a tier any CPU backend implements, and
+/// it is rejected rather than treated as a synonym for `F32Cpu`: the GPU tier
+/// carries divergence latitude this one does not, so quietly accepting it
+/// would answer a fidelity question nobody asked.
+fn float_mode_for(semantics: ShaderSemantics) -> Result<FloatMode, GfxError> {
+    match semantics {
+        ShaderSemantics::Q32 => Ok(FloatMode::Q32),
+        ShaderSemantics::F32Cpu => Ok(FloatMode::F32),
+        ShaderSemantics::F32Gpu => Err(GfxError::Backend(String::from(
+            "lpvm CPU backend compiles Q32 and F32Cpu semantics; \
+             the explicit F32Gpu tier belongs to an accelerated backend",
+        ))),
     }
 }
 

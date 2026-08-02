@@ -17,4 +17,38 @@ pub enum ShaderSemantics {
     /// IEEE f32 GPU semantics — the preview/non-embedded tier. Conformance is
     /// judged against the f32 interpreter oracle.
     F32Gpu,
+    /// IEEE f32 on a CPU tier — native `f32` executed by the LPVM backend,
+    /// normatively specified in `docs/design/float.md`.
+    ///
+    /// Distinct from [`Self::F32Gpu`] rather than folded into one "float"
+    /// variant because the two have different fidelity contracts: the GPU tier
+    /// carries documented divergence latitude
+    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`), while this tier is
+    /// held to `float.md` exactly. A backend accepts the tiers it implements
+    /// and rejects the rest — a shader must never be told it got one and run
+    /// as the other.
+    ///
+    /// What a request in this tier actually became — hardware FPU or
+    /// soft-float calls — is *reported* by
+    /// [`crate::ShaderCompileStats::float_impl`], not requested
+    /// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`,
+    /// decision 2).
+    F32Cpu,
+}
+
+impl ShaderSemantics {
+    /// Short stable name for messages.
+    ///
+    /// Deliberately used instead of `{:?}` on the paths a firmware image
+    /// links. `Debug` formatting drags `core::fmt` machinery in per call site,
+    /// and the ESP32-C6 pays flash for every byte of it — the same lever that
+    /// made serde the flash problem it was. A `&'static str` costs the string.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Q32 => "q32",
+            Self::F32Gpu => "f32-gpu",
+            Self::F32Cpu => "f32-cpu",
+        }
+    }
 }

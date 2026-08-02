@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 
-use lpir::CompilerConfig;
+use lpir::{CompilerConfig, FloatMode};
 use lps_shared::LpsType;
 
 use crate::compute_abi::{ComputeAbi, ComputeOutputAbi};
@@ -20,17 +20,29 @@ pub struct CompileComputeDesc<'a> {
     pub compiler_config: CompilerConfig,
     /// Expected consumed/produced shader interface.
     pub abi: ComputeAbi,
+    /// Numeric mode this shader compiles in — the compute node's authored
+    /// `float_mode` slot. See [`crate::CompilePxDesc::float_mode`].
+    pub float_mode: FloatMode,
 }
 
 impl<'a> CompileComputeDesc<'a> {
-    /// New compute descriptor with no consumed or produced slots.
+    /// New compute descriptor with no consumed or produced slots, in the
+    /// shipped numeric mode ([`FloatMode::Q32`]).
     #[must_use]
     pub fn new(glsl: &'a str, compiler_config: CompilerConfig) -> Self {
         Self {
             glsl,
             compiler_config,
             abi: ComputeAbi::default(),
+            float_mode: FloatMode::Q32,
         }
+    }
+
+    /// Same descriptor, compiled in `float_mode`.
+    #[must_use]
+    pub fn with_float_mode(mut self, float_mode: FloatMode) -> Self {
+        self.float_mode = float_mode;
+        self
     }
 
     /// Add one uniform-backed consumed value.
