@@ -275,12 +275,39 @@ zero-length when their option is off.
 >    free heap with the project actually rendering — which is what the original
 >    18,128 B / 7,384 B two-point measurement did.
 >
-> **The instrumentation is ready.** #281 landed `[MEM] free= used=
-> largest_free=` per heartbeat on `fw-esp32v3`, which is the byte-precision
-> *steady-state* readout this needs; this branch adds byte precision to the
-> `load_project`/`stop_all_projects` brackets as well. The recipe is: clean
-> boot, load `quad-strips-v3`, read `[MEM] free` once steady, repeat for
-> `quad60-v3`, and difference over the 120-LED step. No KB rounding either side.
+> **The instrumentation is ready** — #281's `[MEM] free= used= largest_free=`
+> per heartbeat is the byte-precision steady-state readout, and this branch adds
+> byte precision to the `load_project`/`stop_all_projects` brackets. What is
+> missing is the second point:
+>
+> ⚠️ **`quad60-v3` no longer runs. The 240-LED row above is not currently
+> reproducible.** Measured 2026-08-02 on main @ `e2272d0f8` + this branch, from
+> a clean power-on boot (`level=green`): the shader node OOMs before compilation
+> starts, twice, and recovery disables it.
+>
+> ```
+> [RECOVERY] last run crashed (oom): at node:/Quad_60_v3.sh: alloc 240 bytes failed (align 1)
+> [RECOVERY] oom stats: requested=240 align=1 free=548 used=112092
+> [RECOVERY] last run crashed (oom): at node:/Quad_60_v3.sh: alloc 1440 bytes failed (align 8)
+> [RECOVERY] oom stats: requested=1440 align=8 free=2024 used=110616
+> ```
+>
+> `used=112092` of a 112,640 B arena is genuine exhaustion, not fragmentation,
+> and it happens *with* this branch's 13 B/LED reduction applied. So the
+> two-point method has no 240-LED point on this arena, and the per-LED figure
+> stays unmeasured.
+>
+> This is the same drift as the loaded-`used` table above, one step further —
+> far enough to cross the cliff. **`quad60-v3` booting is the concrete test for
+> the +65,536 B reclaim** (`claude/classic-jit-region-rightsize`): if it runs
+> there, that is a *measured* LED-ceiling win on the arena that will actually
+> ship, and the two-point measurement becomes possible again.
+>
+> ⚠️ Also observed: **`lp-cli upload` cannot switch a board out of a
+> crash-disabled project.** The deploy acks, `[MEM]` never moves, and the board
+> keeps serving the old project (three attempts, `--wait-timeout` to 90 s). A
+> reflash does not help on its own because the startup project persists and it
+> boots straight back into the OOM loop.
 >
 > ⚠️ **What actually stopped the third attempt: `espflash` wedged.** After two
 > flashes of this image succeeded earlier the same session, the next two both
