@@ -693,6 +693,7 @@ mod tests {
     use lpc_model::{Kind, LpValue, SlotPath, SlotShapeRegistry, Slotted, ValueSlot};
 
     #[derive(Default, Slotted)]
+    #[slot(default_role = "state")]
     struct TestRuntimeState {
         #[slot(produced)]
         pub value: ValueSlot<f32>,

@@ -58,12 +58,25 @@ point of the work, not a side effect.
 | **Settings** | Authored node config | In the artifact; Save/dirty |
 | **Panel** | End-user control surface; fronts any slot (usually a Setting). Authored value = default, panel writer = live override | `.lp/state.json`; never dirty |
 | **Debug** | Transient BY NATURE — diagnostics/authoring overrides, no durable value underneath | Session only; dies on unload/reboot |
-| **State / Outputs** | What the runtime produces | Never authored; direction-implied |
+| **State / Outputs** | What the runtime produces | Never authored; declared `State` role, cross-checked against `direction = Produced` |
+
+**G2 amendment (2026-08-02).** The fourth category was ratified at D1 as
+*direction-implied* — produced state needed no role, because
+`direction = Produced` already made a field read-only and never-serialized.
+Yona rejected that at the final gate: "we don't have an Output/Produced
+policy… my instinct is that it should be explicit." Declaration beats
+inference. `SlotRole::State` now exists and every produced field declares it,
+with `role_matches_direction` rejecting **both** halves of a mismatch — a
+`State` field that is not produced, and (the case that let `TextureState`
+sit unmarked for two months) a produced field that is not `State`. The
+classification is unchanged: `State` + `Produced` resolves exactly as an
+unmarked produced field did. What changed is that the marking is now
+mandatory and machine-checked instead of merely implied.
 
 ### The taxonomy line
 
 **Events → command channel; ephemeral state → Debug slots; produced state →
-direction-implied.**
+the `State` role (direction-checked).**
 
 This is the sentence that makes the three mechanisms one system instead of
 three accidents. Each ephemeral thing gets exactly one home, chosen by what

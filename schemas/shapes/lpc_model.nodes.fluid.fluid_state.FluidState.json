@@ -4,6 +4,7 @@
       {
         "default_bind": "bus:visual.out",
         "name": "output",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },

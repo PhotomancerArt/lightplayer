@@ -4,6 +4,7 @@
       {
         "default_bind": "bus:visual.out",
         "name": "output",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -22,6 +23,7 @@
       },
       {
         "name": "entry_time",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -38,6 +40,7 @@
       },
       {
         "name": "entry_progress",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -54,6 +57,7 @@
       },
       {
         "name": "active_entry",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
