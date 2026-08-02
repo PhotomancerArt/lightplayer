@@ -1997,6 +1997,62 @@ fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
 }
 
 #[test]
+fn the_output_card_gets_a_debug_section_for_test_pattern() {
+    // P5, over the real wire: `OutputDef.test_pattern` is `SlotRole::Debug`,
+    // and NOTHING output-specific exists in the UI layer — the same
+    // role-keyed partition that gives the Clock its Debug section (P3) gives
+    // the output card one, with the toggle in it. `endpoint` stays a Setting.
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let sections = node_sections(&snapshot, "/edit_e2e.show/output.output");
+    assert_eq!(
+        section_slot_labels(&sections, |section| matches!(
+            section,
+            UiNodeSection::DebugSlots(_)
+        )),
+        vec!["Test pattern"],
+        "the output's one Debug field renders in the Debug section"
+    );
+    assert!(
+        !section_slot_labels(&sections, |section| matches!(
+            section,
+            UiNodeSection::ConfigSlots(_)
+        ))
+        .iter()
+        .any(|label| label == "Test pattern"),
+        "a Debug field is never also a Setting row"
+    );
+
+    let test_pattern = find_slot(&snapshot, "test_pattern");
+    assert!(test_pattern.state.debug, "test_pattern is a Debug slot");
+    assert!(
+        test_pattern.state.editable,
+        "a Debug slot is writable — that is the whole point of the toggle"
+    );
+    assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
+    let endpoint = find_slot(&snapshot, "endpoint");
+    assert!(
+        !endpoint.state.debug,
+        "the endpoint is authored config, not debug"
+    );
+}
+
+#[test]
 fn successive_shader_applies_each_reach_the_engine() {
     // Regression: an overlay→overlay body change (second Apply before any
     // Save) must recompile just like the first (base→overlay) one. Observed

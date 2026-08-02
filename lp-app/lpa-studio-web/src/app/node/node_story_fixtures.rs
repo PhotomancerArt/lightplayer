@@ -194,6 +194,89 @@ pub(crate) fn clock_node_view(overrides: usize, debug_open: bool) -> UiNodeView 
     view
 }
 
+/// An Output node card: the hardware-mode Debug case (P5).
+///
+/// `OutputDef.test_pattern` is the first `SlotRole::Debug` **bool**, and the
+/// output card gets its Debug section for free — core partitions by role, so
+/// no output-specific UI exists. The persisted rows (endpoint, driver
+/// options) stay in `Settings`; the one Debug row sits below.
+///
+/// `active` seeds the override: `true` is the pattern lit — the card wears the
+/// `debug 1` marking, the section header offers Clear, and the row carries the
+/// hazard tint. This is the state where the strip on that pin is solid white
+/// and the graph is bypassed entirely.
+pub(crate) fn output_node_view(active: bool, debug_open: bool) -> UiNodeView {
+    let state = if active {
+        UiSlotFieldState::editable()
+            .with_debug(true)
+            .with_dirty(UiNodeDirtyState::Dirty)
+    } else {
+        UiSlotFieldState::editable().with_debug(true)
+    };
+    let mut test_pattern =
+        UiConfigSlot::value("test_pattern", "Test pattern", UiSlotValue::bool(active))
+            .with_address(output_slot_address("test_pattern"))
+            .with_state(state)
+            .with_detail("solid white on every channel");
+    if active {
+        test_pattern = test_pattern.with_edit_entry_address(output_slot_address("test_pattern"));
+    }
+
+    let mut view = UiNodeView::new(
+        UiNodeHeader::new("output", "Output", OUTPUT_NODE)
+            .with_source("output.json")
+            .with_status(UiStatus::good("Running"))
+            .with_summary("ws281x:rmt:D10")
+            .with_debug_overrides(usize::from(active)),
+        vec![UiNodeTab::main(vec![
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value(
+                    "endpoint",
+                    "Endpoint",
+                    UiSlotValue::string("ws281x:rmt:D10"),
+                )
+                .with_address(output_slot_address("endpoint")),
+                UiConfigSlot::value("input", "Input", UiSlotValue::unset()).with_source(
+                    UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:control.out")),
+                ),
+                UiConfigSlot::record(
+                    "options",
+                    "Options",
+                    vec![
+                        UiConfigSlot::value(
+                            "interpolation_enabled",
+                            "Interpolation enabled",
+                            UiSlotValue::bool(true),
+                        ),
+                        UiConfigSlot::value(
+                            "dithering_enabled",
+                            "Dithering enabled",
+                            UiSlotValue::bool(true),
+                        ),
+                    ],
+                ),
+            ]),
+            UiNodeSection::DebugSlots(vec![test_pattern]),
+        ])],
+    )
+    .with_node_id(OUTPUT_NODE);
+    view.card_ui = NodeCardUiState {
+        debug_open,
+        ..NodeCardUiState::default()
+    };
+    view
+}
+
+const OUTPUT_NODE: &str = "/fyeah_sign.show/output.output";
+
+fn output_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse(OUTPUT_NODE).expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
+
 const CLOCK_NODE: &str = "/fyeah_sign.show/clock.clock";
 
 fn clock_slot_address(path: &str) -> ProjectSlotAddress {
