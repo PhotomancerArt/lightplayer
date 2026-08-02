@@ -1,66 +1,52 @@
-//! RMT driver for WS2811/WS2812 LEDs
+//! WS281x output over the ESP32-C6 RMT peripheral, on the shared
+//! [`lp_ws281x`] driver core.
 //!
-//! This module provides a high-level API for controlling WS2811/WS2812 LED strips
-//! using the ESP32 RMT (Remote Control) peripheral.
+//! Three layers, deliberately separated:
 //!
-//! # Overview
+//! * [`c6_rmt`] — the chip. Seven register operations implementing
+//!   [`lp_ws281x::RmtHw`], and the only place in this module that knows an
+//!   ESP32-C6 address.
+//! * [`shared_driver`] — the one [`lp_ws281x::Ws281xDriver`] instance and the
+//!   RMT interrupt trampoline that feeds it, bound at `Priority::max()`, plus
+//!   the optional telemetry tap. All sequencing lives in the core crate,
+//!   tested on the host.
+//! * [`esp32c6_rmt_ws281x_driver`] — the `lpc-hardware` seam: endpoints,
+//!   leases, and open-time pin binding.
 //!
-//! The driver uses a transaction-based API similar to `esp-hal`'s RMT API:
+//! `led_channel` sits beside them for the hardware harnesses, which drive a
+//! strip without a registry; it is compiled only for those builds.
 //!
-//! 1. Create a [`LedChannel`] with [`LedChannel::new()`]
-//! 2. Start a transmission with [`LedChannel::start_transmission()`]
-//! 3. Wait for completion with [`LedTransaction::wait_complete()`]
-//! 4. Reuse the channel for the next transmission
+//! # What this replaced
 //!
-//! # Example
+//! Until roadmap M5/P2 this chip ran a WS281x driver of its own — its own ISR,
+//! its own ping-pong refill over a fixed four-block window, and
+//! `fw-esp32-common`'s `rmt_state` — the ancestor `lp-ws281x` was extracted
+//! from and written to replace. That code is gone: the C6 now runs the same
+//! core as the ESP32-S3 and the classic ESP32, which is what makes a bug fixed
+//! once fixed everywhere, and what gives this chip its second output.
 //!
-//! ```no_run
-//! use esp_hal::rmt::Rmt;
-//! use esp_hal::time::Rate;
-//! use crate::output::LedChannel;
-//!
-//! // Initialize RMT peripheral
-//! let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80))?;
-//!
-//! // Create LED channel for 64 LEDs on GPIO18
-//! let mut channel = LedChannel::new(rmt, peripherals.GPIO18, 64)?;
-//!
-//! // Send RGB data (R, G, B for each LED)
-//! let rgb_data = [255, 0, 0, 0, 255, 0, 0, 0, 255]; // Red, Green, Blue
-//! let tx = channel.start_transmission(&rgb_data);
-//!
-//! // Wait for transmission to complete and get channel back
-//! channel = tx.wait_complete();
-//!
-//! // Send another frame
-//! let rgb_data2 = [0, 255, 255, 255, 0, 255, 255, 255, 0]; // Cyan, Magenta, Yellow
-//! let tx2 = channel.start_transmission(&rgb_data2);
-//! channel = tx2.wait_complete();
-//! ```
-//!
-//! # Architecture
-//!
-//! The driver uses double-buffering to handle long LED strips efficiently:
-//!
-//! - The RMT hardware has a small buffer (192 words = 8 LEDs worth of data)
-//! - While the hardware transmits the first half, the interrupt handler writes the second half
-//! - This allows seamless transmission of strips with hundreds of LEDs
-//!
-//! # Thread Safety
-//!
-//! The driver uses atomic operations to coordinate between the main thread and the interrupt
-//! handler. Multiple channels can be used simultaneously (though currently only channel 0
-//! is supported).
-//!
-//! # Performance
-//!
-//! The interrupt handler is optimized for speed to minimize timing disruption. It performs
-//! minimal work and uses atomic operations for all shared state access.
+//! See ADR `2026-07-31-lp-ws281x-multi-channel-driver-adoption`: new chips
+//! implement [`lp_ws281x::RmtHw`], they do not grow a driver of their own.
 
-mod buffer;
-mod channel;
-mod config;
-mod interrupt;
-pub(crate) use fw_esp32_common::output::rmt_state as state;
+pub mod c6_rmt;
+pub mod shared_driver;
 
-pub use channel::{LedChannel, LedTransaction};
+/// The registry seam needs `lpc-hardware`, which harness builds without the
+/// `server` feature do not pull in — and no harness constructs it in any case,
+/// since they replace the app entrypoint. The two layers below it have no such
+/// dependency and always compile.
+#[cfg(all(not(fw_harness), feature = "lpc-hardware"))]
+pub mod esp32c6_rmt_ws281x_driver;
+
+#[cfg(all(not(fw_harness), feature = "lpc-hardware"))]
+pub use esp32c6_rmt_ws281x_driver::Esp32C6RmtWs281xDriver;
+
+/// The harnesses' single-strip API. `main.rs` compiles this module only for the
+/// app and the five harnesses that light a strip, so `fw_harness` here means
+/// exactly those five: in the shipping image it would be a second way to send
+/// a frame, which is the thing this migration removed.
+#[cfg(fw_harness)]
+pub mod led_channel;
+
+#[cfg(fw_harness)]
+pub use led_channel::LedChannel;

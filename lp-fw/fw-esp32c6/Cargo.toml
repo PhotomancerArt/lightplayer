@@ -34,6 +34,40 @@ radio = [
     "esp-rtos/esp-radio",
 ]  # Root-owned ESP-NOW radio capability
 naga = ["lpa-server/naga"]
+# Two RMT memory blocks per WS281x channel instead of one: 96-word windows
+# halving into 48 words (~60 µs of refill headroom) at the cost of the second
+# output, because channel 0's window absorbs channel 1's block. Off by default
+# — the C6 ships two channels of 24-word halves until the stress matrix says
+# otherwise (roadmap M5, G1). Feature-driven cfg is unreliably tracked: run
+# `touch src/main.rs` after flipping this before rebuilding.
+ws281x_2blocks = []
+
+# Periodic WS281x telemetry over the serial link — OFF by default.
+#
+# The classic's `fw-esp32v3` feature of the same name, ported field for field:
+# one `[WS281X]` line per configured channel every ~10 s from the frame-write
+# path — frames/complete/trips/skips/errors, refills vs the refills an
+# untruncated frame set would have needed, mean/max refill lag with its
+# 9-bucket histogram, and the entry-delay pair. Identical field order on both
+# chips is the point: the stress matrix compares the C6's truncation under a
+# WiFi scan with the classic's, and the same grep has to read both captures.
+#
+# Off by default because the shipping image should not spend serial bandwidth
+# or code space on it; the whole module is `cfg`'d out and the call site
+# becomes an empty `#[inline(always)]` fn, so a release build pays nothing —
+# not even the timer read.
+#
+# Build (touch src/main.rs first if flipping features):
+#   cargo build --profile release-esp32 --features esp32c6,server,ws281x_telemetry
+ws281x_telemetry = []
+
+# P4 stress-matrix load generators (plan 2026-08-01-1459-rmt-priority-hli) —
+# OFF by default, never shipped. Each spawns a continuous radio-load task
+# beside the running server, replacing the ESP-NOW radio driver registration
+# (esp_radio::wifi::new runs once per boot and the load tasks need what it
+# returns). Use with `ws281x_telemetry`; `touch src/main.rs` after flipping.
+stress_s2 = ["radio"]  # WiFi scan loop (repeated active scans, station mode)
+stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
@@ -72,6 +106,9 @@ fw-core = { path = "../fw-core", default-features = false }
 fw-esp32-common = { path = "../fw-esp32-common" }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
+# The portable WS281x driver core. `default-features = false` drops its host
+# `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
+lp-ws281x = { path = "../lp-ws281x", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
 lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [
@@ -119,7 +156,6 @@ lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 
-smart-leds = "0.3"
 embassy-futures = "0.1"
 embedded-io-async = "0.6"
 log = { workspace = true, default-features = false }

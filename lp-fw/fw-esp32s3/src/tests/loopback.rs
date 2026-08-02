@@ -535,9 +535,21 @@ pub fn run(peripherals: Peripherals) -> ! {
         let lag_num = after.refill_lag_sum - soak_before[ch].refill_lag_sum;
         let lag_den = after.refill_lag_count - soak_before[ch].refill_lag_count;
         let (lag_int, lag_frac) = mean_lag_tenths(lag_num, lag_den);
+        // Entry delay — the other half of the refill deadline: how far past its
+        // threshold the transmitter had already run when the handler reached
+        // this channel. `entry_delay_max_words` is the run maximum, not a delta:
+        // a running maximum cannot be differenced, and the soak is the only
+        // sustained four-channel load in this harness anyway.
+        // `entry_delay_over_half` *is* a counter, so it is reported as a delta,
+        // and a non-zero one is a service that lost the whole deadline before
+        // writing a word. Channel order matters here: index order in
+        // `on_interrupt` means ch3's delay carries ch0..2's refills.
+        let entry_over_half =
+            after.entry_delay_over_half() - soak_before[ch].entry_delay_over_half();
         esp_println::println!(
             "E4: MEASURE soak ch={} frames={} mismatches={} guard_trips={} guard_skips={} \
-             errors={} refill_lag_avg_words={}.{} refills={}",
+             errors={} refill_lag_avg_words={}.{} refills={} entry_delay_max_words={} \
+             entry_delay_over_half={}",
             ch,
             SOAK_FRAMES,
             mismatches[ch],
@@ -547,6 +559,8 @@ pub fn run(peripherals: Peripherals) -> ! {
             lag_int,
             lag_frac,
             lag_den,
+            after.entry_delay_max,
+            entry_over_half,
         );
         if mismatches[ch] != 0 || trips != 0 || errors != 0 {
             soak_ok = false;

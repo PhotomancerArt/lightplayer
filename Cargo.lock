@@ -3890,7 +3890,6 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "ser-write-json",
- "smart-leds",
 ]
 
 [[package]]
@@ -3924,6 +3923,7 @@ dependencies = [
  "lp-perf",
  "lp-recovery",
  "lp-shader",
+ "lp-ws281x",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -3938,7 +3938,6 @@ dependencies = [
  "lpvm",
  "lpvm-native",
  "serde",
- "smart-leds",
  "unwinding",
 ]
 
@@ -8062,15 +8061,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rgb"
-version = "0.8.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
-dependencies = [
- "bytemuck",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8788,24 +8778,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "smart-leds"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38dd45fa275f70b4110eac5f5182611ad384f88bb22b68b9a9c3cafd7015290b"
-dependencies = [
- "smart-leds-trait",
-]
-
-[[package]]
-name = "smart-leds-trait"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebf6d833fa93f16a1c1874e62c2aebe8567e5bdd436d59bf543ed258b6f7a8e3"
-dependencies = [
- "rgb",
 ]
 
 [[package]]
