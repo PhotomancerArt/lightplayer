@@ -21,7 +21,6 @@ default = [
     "resolver-payload-cache",
 ]
 # Panic recovery via catch_unwind (embedded targets)
-panic-recovery = ["dep:unwinding"]
 naga = ["lp-shader/naga"]
 std = [
     "lpc-hardware/std",
@@ -72,7 +71,6 @@ resolver-payload-cache = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
-unwinding = { version = "0.2", optional = true, default-features = false, features = ["panic"] }
 serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }
 spin = { workspace = true }

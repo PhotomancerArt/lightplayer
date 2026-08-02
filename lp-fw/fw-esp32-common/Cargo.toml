@@ -32,12 +32,15 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 
 # Server stack (heavy) — only with the `server` feature, mirroring the bin crates.
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, optional = true }
-# ⚠️ No `panic-recovery` here — the panic tier is a CHIP fact and this crate is
-# forbidden from holding chip facts (see the seam rules above). That feature
-# pulls `unwinding`, which has no Xtensa backend, so hard-coding it made this
-# crate unbuildable for any abort-tier chip (`fw-esp32s3`,
-# ADR 2026-07-29-per-chip-fw-toolchains) — a hard `compile_error!`, not a size
-# regression. Chips on the unwind tier list it on their own `lpa-server` line;
+# ⚠️ The `panic-recovery` feature this note used to warn about no longer exists
+# anywhere (ADR 2026-08-02-rv32-firmwares-are-abort-tier), so the specific trap
+# is gone. The RULE it illustrates is the point and still holds: the panic tier
+# is a CHIP fact, and this crate is forbidden from holding chip facts (see the
+# seam rules above). The original incident is the reason to keep the rule
+# visible — hard-coding `panic-recovery` here pulled `unwinding`, which has no
+# Xtensa backend, and made this crate unbuildable for any abort-tier chip. It
+# failed as a hard `compile_error!`, not a size regression. Anything
+# tier-specific belongs on a chip crate's own `lpa-server` line;
 # `fw-esp32c6` already does, so its resolved feature set is unchanged.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }

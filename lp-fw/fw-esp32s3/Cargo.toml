@@ -23,10 +23,11 @@ esp32s3 = [
 #
 # Feature-for-feature this now matches fw-esp32c6's `server`: all eight
 # `lpa-server` node gates and the same `lp-gfx-lpvm` graphics backend. The
-# remaining differences are tier, not capability: no `panic-recovery` (the S3
-# is abort tier) and no `radio` transport (ESP-NOW bring-up on Xtensa is a
-# future milestone). See the dependency section for why each entry is
-# load-bearing.
+# remaining difference is capability, not tier: no `radio` transport (ESP-NOW
+# bring-up on Xtensa is a future milestone). The panic tier used to differ too
+# — the C6 unwound and this chip did not — but every firmware is abort tier
+# now (ADR 2026-08-02-rv32-firmwares-are-abort-tier). See the dependency
+# section for why each entry is load-bearing.
 server = [
     "fw-esp32-common/server",
     "dep:lpa-server",
@@ -191,9 +192,11 @@ fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
 # no button service") instead of loading as a silent placeholder, which is the
 # preferred failure mode until the S3 grows the corresponding drivers.
 #
-# `panic-recovery` is absent on purpose: the S3 is abort tier (`panic = "abort"`
-# + the lp-recovery RTC ledger), and that feature pulls `unwinding`, which is
-# the C6's tier. See src/recovery/.
+# This list used to also carry a note about deliberately omitting
+# `panic-recovery`. That feature no longer exists anywhere: every firmware is
+# abort tier (`panic = "abort"` + the lp-recovery RTC ledger) as of ADR
+# 2026-08-02-rv32-firmwares-are-abort-tier. The S3 got there first, and its
+# `src/recovery/panic_path.rs` is one of the two files the C6 was ported from.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-button",
     "node-radio",

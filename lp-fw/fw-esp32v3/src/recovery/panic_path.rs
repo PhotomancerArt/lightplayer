@@ -1,11 +1,12 @@
 //! The abort-tier panic path: **stage, commit, then** print and reset.
 //!
-//! Per ADR `2026-07-29-per-chip-fw-toolchains` the classic is **abort tier**.
+//! Per ADR `2026-08-02-rv32-firmwares-are-abort-tier` **every** firmware target
+//! is abort tier, the classic included.
 //! There is no `unwinding`, no `catch_unwind`, and therefore no layer-1
 //! in-process recovery: a panic is terminal for the boot. The only job left is
 //! to make the *next* boot able to say what died.
 //!
-//! ## Why the order differs from fw-esp32s3's
+//! ## Why the order differs from fw-esp32s3's (and why fw-esp32c6 copied THIS one)
 //!
 //! fw-esp32s3 prints first and stages afterwards, which is the natural reading
 //! order and costs it nothing — its panic handler runs to completion.
@@ -23,17 +24,19 @@
 //! output, and it is **committed** there rather than left tentative:
 //! `Recovery::init` discards a tentative record on the next boot unless the
 //! reset cause was a watchdog, and this fault is not a watchdog. See
-//! [`lp_recovery::commit_staged_crash`] for why that is sound here and unsound
-//! on the unwinding tier.
+//! [`lp_recovery::commit_staged_crash`]. Committing early was unsound on the
+//! unwinding tier, where a caught panic had to be able to void the breadcrumb;
+//! no target unwinds since 2026-08-02, so it is sound everywhere and
+//! `fw-esp32c6` adopted this ordering rather than the S3's.
 //!
 //! ## Two consequences worth stating outright
 //!
 //! **1. No `is_esp_sync_reentrant_lock_panic` guard**, for the same reason
 //! fw-esp32s3 has none: this path allocates nothing. `lp_recovery::stage_crash`
 //! is zero-alloc by contract, and `esp_println` / `critical-section` are backed
-//! by `esp_sync::RawMutex`, which is reentrant. The hazard the C6 guards
-//! against — boxing a payload for `unwinding::begin_panic` under
-//! `esp-alloc`'s `NonReentrantMutex` — cannot arise. [`PANICKING`] covers the
+//! by `esp_sync::RawMutex`, which is reentrant. The hazard the C6 used to guard
+//! against — boxing a payload for `unwinding::begin_panic` under `esp-alloc`'s
+//! `NonReentrantMutex` — cannot arise on any chip now. [`PANICKING`] covers the
 //! broader case of this handler panicking by some other route.
 //!
 //! **2. It always resets; it never hangs.** A hung board is indistinguishable

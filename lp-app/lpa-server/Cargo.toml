@@ -20,7 +20,6 @@ default = [
     "resolver-payload-cache",
 ]
 # Panic recovery via catch_unwind (shader compilation, node render)
-panic-recovery = ["lpc-engine/panic-recovery"]
 naga = ["lpc-engine/naga"]
 std = [
 	"lpc-hardware/std",

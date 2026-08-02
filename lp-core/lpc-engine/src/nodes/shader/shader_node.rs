@@ -26,7 +26,6 @@ use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
-use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
@@ -162,10 +161,14 @@ impl ShaderNode {
 
         let compile_start_ms = ctx.now_ms();
         lpc_shared::backtrace::set_oom_context("shader node: compile");
-        let compile_result = catch_panic("panic during shader compilation", || {
-            graphics.compile_shader(self.glsl_source.as_str(), &compile_opts)
-        })
-        .and_then(|result| result.map_err(|error| format!("{error}")));
+        // A panic in the compiler is terminal on every target now (ADR
+        // 2026-08-02-rv32-firmwares-are-abort-tier); this used to be wrapped in
+        // `catch_panic`, which only ever caught anything on the C6 and fw-emu.
+        // The `set_oom_context` above is what carries compile attribution into
+        // the crash report instead.
+        let compile_result = graphics
+            .compile_shader(self.glsl_source.as_str(), &compile_opts)
+            .map_err(|error| format!("{error}"));
         lpc_shared::backtrace::clear_oom_context();
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
         lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
@@ -738,35 +741,33 @@ impl RenderNode for ShaderNode {
     }
 }
 
-/// Route an out-of-fuel trap to the node error path.
+/// Route an out-of-fuel trap to the node error path, on every target.
 ///
-/// Under `panic-recovery` (fw-esp32c6 / fw-emu) this is a **panic** —
-/// deliberate, limited panic-as-control-flow per the lpvm-native fuel ADR
-/// (`docs/adr/2026-07-20-lpvm-native-fuel.md`): the render/sample calls
-/// above run inside `catch_node_panic_framed` (`FrameKind::NodeRender`),
-/// and only a **caught panic** records blame in the lp-recovery ledger, so
-/// repeat offenders go yellow → red-gate (the sticky blocked UX is the
-/// retry latch). A plain returned `Err` would record nothing — worse, the
-/// recovery frame's clean completion on the error path would *heal* an
-/// existing yellow. The panic message becomes the node error status.
-/// Non-fuel render errors keep returning plain `Err`.
+/// ## This used to panic, and losing that cost us the retry latch
 ///
-/// Without `panic-recovery` the same message returns as a plain typed
-/// `Err`: the unwinding catcher and the blame ledger only exist on device
-/// targets, and on wasm32 a panic aborts outright (rustc lowers panics to
-/// `unreachable` regardless of the `panic = "unwind"` profile; the
-/// `unwinding` crate is native-only) — a panic here must never reach a
-/// target where panics abort (per-target panic strategy ADR, backfilled in
-/// the sim-fuel plan's P3).
+/// Under the old `panic-recovery` feature (fw-esp32c6 / fw-emu) this raised a
+/// **panic** — deliberate, limited panic-as-control-flow per the lpvm-native
+/// fuel ADR (`docs/adr/2026-07-20-lpvm-native-fuel.md`). The reason was
+/// mechanical: the render/sample calls above run inside
+/// `catch_node_panic_framed`, and only a **caught** panic recorded blame in the
+/// lp-recovery ledger, so a repeat offender went yellow → red-gate and the
+/// sticky "blocked" state was the retry latch for a hung shader.
+///
+/// Nothing catches panics any more (ADR
+/// `2026-08-02-rv32-firmwares-are-abort-tier`), so panicking here would abort
+/// the board instead of latching. The typed `Err` is now the only sound
+/// option — but be clear about what it does **not** do: it records nothing, so
+/// a hung shader reports this error **every frame** rather than being disabled
+/// after the second offense. `fuel_exhausted_shader_errors_without_reboot_or_blame`
+/// in `lp-fw/fw-tests/tests/recovery_emu.rs` pins that, asserting the ledger
+/// stays green.
+///
+/// If the latch is wanted back, the route is a **typed** path into the ledger
+/// from here — not a panic. Note the trap the old comment recorded, which still
+/// applies: the recovery frame's clean completion on an error return would
+/// *heal* an existing yellow, so simply recording blame is not enough on its own.
 fn fuel_exhausted_failure(trap: &lp_gfx::ShaderFuelTrap) -> Result<(), NodeError> {
-    #[cfg(feature = "panic-recovery")]
-    {
-        panic!("{trap}");
-    }
-    #[cfg(not(feature = "panic-recovery"))]
-    {
-        Err(NodeError::msg(format!("{trap}")))
-    }
+    Err(NodeError::msg(format!("{trap}")))
 }
 
 fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform> {
