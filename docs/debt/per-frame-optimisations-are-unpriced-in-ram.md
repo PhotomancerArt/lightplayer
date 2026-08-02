@@ -24,7 +24,7 @@ a 112,640 B arena — is also the part nobody profiles on.
 This is structural, not a bug. Nothing in the workflow makes the byte cost
 of a per-frame cache visible at the moment the trade is made.
 
-**Carrying cost** — #243 cost the classic 8,276 B of per-project heap, about
+**Carrying cost** — #243 cost the classic ~8.3 KB of per-project heap, about
 90 LEDs of a ~240-LED ceiling, and it took a full day of hardware bisecting
 (fourteen build/flash/measure cycles on the one desk board) to attribute,
 because the defect record's candidate list was assembled from plausibility
@@ -47,18 +47,19 @@ burns a hardware session and blocks whatever gate the board was needed for.
 - A cache whose cost is unacceptable on one part can become a removal-only
   Cargo gate (`resolver-payload-cache` is the worked example) rather than a
   revert. Split the cache along the line between *decisions* and *payloads*
-  first: on the resolver, the decisions were 15 ms of the 22 ms for zero
+  first: on the resolver, the decisions were 11 ms of the 24 ms for zero
   bytes, and only the payloads cost RAM.
 
 **Incident log**
 
 - **2026-08-01** — per-channel white-point LUT: classic-only per-project
   growth, found on the bench.
-- **2026-08-01** — #243 persistent resolution: −8,276 B on the classic,
+- **2026-08-01** — #243 persistent resolution: −8,136 B on the classic,
   +54 % fps. Filed as `classic-heap-regression-after-f32-merge`, initially
   misattributed to the three f32 PRs.
 - **2026-08-02** — bisected and gated. The classic now runs decisions-only
-  at 18,220 B / 17 fps, ahead of its pre-#243 18,128 B / 13 fps.
+  at 18,144 B / 16 fps, ahead of its pre-#243 18,128 B / 13 fps; flipping the
+  gate back on costs 8,368 B for 5 fps.
 
 **Exit criteria** — a per-project heap number for a known project on the
 classic (or a faithful emulation of its arena) is produced by something

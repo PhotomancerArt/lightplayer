@@ -146,8 +146,8 @@ out of `.stack`, 504 B.
 > gamma fix cost nothing measurable. It is now behind
 > `lpc-engine/resolver-payload-cache`, which `fw-esp32v3` leaves off. The
 > table above is the pre-regression measurement and **is again current** for
-> the classic image — 120 LEDs measures 18,220 B free today, 92 B better than
-> the 18,128 B row, at 17 fps instead of 13.
+> the classic image — 120 LEDs measures 18,144 B free today, 16 B better than
+> the 18,128 B row, at 16 fps instead of 13.
 >
 > The rows below the table are the part that was wrong for a different reason
 > and is corrected in place: see the per-LED and ceiling paragraphs. Details

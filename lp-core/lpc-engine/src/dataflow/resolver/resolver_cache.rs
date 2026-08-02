@@ -73,11 +73,11 @@ impl ResolverCache {
     /// | | free heap | fps | `tick` |
     /// |---|---|---|---|
     /// | no cache at all (pre-#243) | 18,128 B | 13 | 69 ms |
-    /// | decisions only (`false`) | 18,220 B | 17 | 54 ms |
-    /// | decisions + payloads (`true`) | 9,852 B | 20 | 47 ms |
+    /// | decisions only (`false`) | 18,144 B | 16 | 58 ms |
+    /// | decisions + payloads (`true`) | 9,776 B | 21 | 45 ms |
     ///
-    /// So the decisions buy 15 ms of the 22 ms for no heap, and the payloads
-    /// buy the remaining 7 ms for 8.3 KB. On a part with room that is a good
+    /// So the decisions buy 11 ms of the 24 ms for no heap, and the payloads
+    /// buy the remaining 13 ms for 8,368 B. On a part with room that is a good
     /// trade and stays on; on a part where 8.3 KB is ~90 LEDs of capacity it is
     /// not, and `fw-esp32v3` leaves the `resolver-payload-cache` gate off.
     ///

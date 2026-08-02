@@ -7,7 +7,7 @@ class: capacity-regression
 related:
   - 2026-08-01-classic-rmt-open-fault.md
   - ../adr/2026-08-01-esp32v3-flash-budget.md
-  - ../debt/resolver-payload-cache-costs-ram.md
+  - ../debt/per-frame-optimisations-are-unpriced-in-ram.md
 ---
 # Classic ESP32: per-project heap grew 8,136 B, cutting the LED ceiling by ~90
 
@@ -90,9 +90,9 @@ forwarded by `lpa-server`, defaulting **on**. It splits the cache into the
 two different bargains it had been carrying under one name:
 
 - **decisions** (routes, the query intern table, `static_paths`) — no
-  resident cost, worth 15 ms of the 22 ms;
-- **payloads** (the two value tables) — worth the remaining 7 ms, for
-  8.3 KB.
+  resident cost, worth 11 ms of the 24 ms;
+- **payloads** (the two value tables) — worth the remaining 13 ms, for
+  8,368 B.
 
 `fw-esp32v3` omits the gate. `fw-esp32s3` and `fw-esp32c6` list it, so
 nothing changes for them or for any host build.
@@ -101,9 +101,14 @@ Measured on the DOM-Z-102, `quad-strips-v3`:
 
 | | free heap | fps | `tick` |
 |---|---|---|---|
-| before the cache existed | 18,128 B | 13 | 69 ms |
-| **this change** | **18,220 B** | **17** | **54 ms** |
-| `main` today | 9,852 B | 20 | 47 ms |
+| before the cache existed (`cee3ab922`) | 18,128 B | 13 | 69 ms |
+| **this change** | **18,144 B** | **16** | **58 ms** |
+| the same firmware, gate on | 9,776 B | 21 | 45 ms |
+
+(The last two rows are the same build with one Cargo feature flipped, on
+this branch merged with `main` at `803157992` — so they also carry the
+WS281x runtime block planner, which is why they are a few ms slower and
+~76 B tighter than the `f6b783ec2` A/B the bisect above used.)
 
 The board ends up ahead of where it was before the regression on *both*
 axes, and the shader still compiles on-device in 62 ms with all four RMT
@@ -139,7 +144,7 @@ it surfaced the `retry_ok` anomaly below, which nobody would have looked for.
 
 ## Still open: `examples/basic` does not compile on this board
 
-Reclaiming 8.3 KB does **not** make `examples/basic` (241 LEDs, 4,092 B of
+Reclaiming 8,368 B does **not** make `examples/basic` (241 LEDs, 4,092 B of
 GLSL) compile on the classic, because at first boot the compile happens
 *before* the resolver has cached anything — the reclaimed bytes are not
 available yet. It fails the same way before and after this change, and it

@@ -95,13 +95,13 @@ classic ESP32 (`fw-esp32v3`, 110 KB arena, `projects/test/quad-strips-v3`):
 | | free heap | fps | `tick` |
 |---|---|---|---|
 | before the cache existed | 18,128 B | 13 | 69 ms |
-| gate off (decisions only) | 18,220 B | 17 | 54 ms |
-| gate on (decisions + payloads) | 9,852 B | 20 | 47 ms |
+| gate off (decisions only) | 18,144 B | 16 | 58 ms |
+| gate on (decisions + payloads) | 9,776 B | 21 | 45 ms |
 
-The decisions are 15 ms of the 22 ms for no heap at all; the payloads are the
-remaining 7 ms for 8,276 B. On a part with room that is worth it and the gate
-stays on. On the classic 8,276 B is roughly 90 LEDs of capacity, so
-`fw-esp32v3` leaves it off and takes 17 fps.
+The decisions are 11 ms of the 24 ms for no heap at all; the payloads are the
+remaining 13 ms for 8,368 B. On a part with room that is worth it and the gate
+stays on. On the classic 8,368 B is roughly 90 LEDs of capacity, so
+`fw-esp32v3` leaves it off and takes 16 fps.
 
 Correctness does not depend on the setting — a miss recomputes — and
 `cached_and_uncached_resolution_agree_frame_for_frame` runs the differential
