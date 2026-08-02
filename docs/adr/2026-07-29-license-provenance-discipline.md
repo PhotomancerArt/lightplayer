@@ -137,8 +137,8 @@ section. Review of any PR touching `lp-xt-*` should check the headers.
 Several planning docs referring to WLED's ESP32 RMT driver as off-limits
 (the classic-ESP32 bring-up roadmap's M5 brief, `lp-fw/lp-ws281x`'s
 provenance note) describe it loosely as "WLED's GPL shim." That is imprecise
-and, for older code, wrong. Verified from WLED's repo history (via
-Ben Hencke) during roadmap M5's `2026-08-01-1459-rmt-priority-hli` plan:
+and, for older code, wrong. Following a community tip, verified from WLED's
+own repo history during roadmap M5's `2026-08-01-1459-rmt-priority-hli` plan:
 
 - WLED was **MIT-licensed from 2016-12-28 to 2024-10-15**, then relicensed to
   **EUPL** ("Re-license the WLED project from MIT to EUPL (#4194)").
