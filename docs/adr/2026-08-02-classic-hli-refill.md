@@ -150,7 +150,57 @@ Radio-linked head-to-head (`hli_stress` harness: same boot, same board,
 4×30 LEDs at the baseline ~21 fps pace, WiFi scan cells ≥150 s, level-3
 cells then a live switch to level 4):
 
-<!-- RESULTS-TABLE: filled from .hli-logs/run3-stress-cells.log -->
+Two full runs (run3, and run4 with the selection-mismatch instrument);
+per-cell deltas from the cumulative telemetry. Cell order within each boot:
+L3 idle → L3 scan → live switch → L4 idle → L4 scan.
+
+| cell (run4) | frames/ch | trips (worst ch) | trips (all ch) | entry_max | lag_max | selmis |
+|---|---|---|---|---|---|---|
+| L3, radio idle | 2,267 | 0 (0 %) | 0/0/0/0 | 9 | 20 | n/a |
+| L3, S2 scan | 2,780 | 39 (1.40 %) | 28/4/39/24 | 57 | 26 | n/a |
+| L4, radio idle | 2,269 | 0 (0 %) | 0/0/0/0 | 2 | 3 | 0 |
+| L4, S2 scan | 2,792 | 78 (2.79 %) | 78/22/72/47 | 49 | 4 | 0 |
+
+(run3, uninstrumented, same shape: L3 scan 21–30 trips/ch ≈ 0.8–1.1 %;
+L4 scan 49–87 ≈ 1.8–3.1 %.)
+
+**The honest reading.**
+
+1. Both paths are orders of magnitude below the historical 69 % (the harness
+   drives channels sequentially at the app path's own pace, each with the
+   full 80 µs deadline — the shipping-shaped load, not the experiment repo's
+   worst case). The classic under scan is a ~1–3 % problem in this shape,
+   on either path.
+2. **The success bar ("truncation to ~S3-chip levels, ~1 %") was not met by
+   the level-4 path — and, reproduced across two runs, the level-4 cells
+   truncated 2–3× MORE than the level-3 cells**, despite strictly lighter
+   recorded entry-delay tails (max 49 vs 57, near-empty upper buckets) and
+   12× lower refill lag.
+3. Why the entry histograms cannot explain the trips, on either path: a
+   refill delayed past the deadline ends the frame via the guard, and the
+   handler's end-beats-threshold precedence (both paths, by design) then
+   swallows the late event — its delay is never recorded. The entry-delay
+   instrument is **censored at exactly the deadline**, so trips measure the
+   over-deadline outage population that the histograms structurally miss.
+   Those outages are `rsil 5`-class (nothing below NMI crosses them), which
+   is consistent with level 4 not helping — but not with it measuring
+   *worse*.
+4. The level-4 excess is **unexplained after one instrumented re-measure**
+   (the selection-mismatch counter came back zero: no missed/duplicated
+   event bookkeeping at any serviced entry). Known confound: cell order —
+   the level-4 scan cell always ran ~5 minutes later in the boot, and scan
+   load (AP environment, scan timing) was not controlled across cells. The
+   next experiment, if G2 wants one, is interleaved or order-reversed
+   cells, plus a trip-adjacent delay capture (record the pre-end pending
+   causes) to de-censor the instrument.
+5. **Advisory recommendation to G2: park, do not ship.** The radio-off wins
+   (entry 55 → 0, lag 15 → 3) are real but solve no problem the level-3
+   path measurably has radio-off (zero trips either way); the radio case is
+   the entire point, and there the level-4 path met neither the success bar
+   nor parity. The vector, the contract crate, the host suite, the
+   `rsil 5` ceiling finding and the censoring analysis all remain as
+   assets for a future reopen — which is exactly what "droppable
+   experiment" was designed to leave behind.
 
 ## RAM / flash cost (measured, telemetry build vs telemetry+hli)
 
