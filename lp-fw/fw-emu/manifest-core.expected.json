@@ -1,0 +1,23 @@
+{
+  "lpManifestCore": 1,
+  "package": "fw-emu",
+  "target": {
+    "family": "emu",
+    "chip": "rv32imac",
+    "cargoTarget": "riscv32imac-unknown-none-elf"
+  },
+  "features": [
+    "node.button",
+    "node.clock",
+    "node.fluid",
+    "node.fixture",
+    "node.playlist",
+    "node.radio",
+    "node.shader",
+    "node.texture",
+    "diag.unwind",
+    "gfx.lpvm"
+  ],
+  "limits": {},
+  "wireProto": 4
+}

@@ -17,6 +17,16 @@
 //! - `EXC_LOAD_STORE_ERROR` (cause 3) → **NOT** a known issue as of #194
 //! - anything on `deep_call_chain_20` → genuinely uncovered ground; the GLSL
 //!   corpus cannot reach depth >16, so this is a new finding either way
+//! - `EXC_COPROCESSOR0_DISABLED` (cause 32) on an `f32_*` case → the FPU is not
+//!   armed for this context. Not a compiler finding: see [`fpu::arm`] and M7 D6.
+//!
+//! # Two corpora, two engines, two entry points
+//!
+//! `float-f32` adds the f32 half. It is a separate table and a separate call
+//! because a *word* means something else in `FloatMode::F32` — there, a word is
+//! an IEEE-754 bit pattern rather than Q16.16 — and both runtime entry points
+//! refuse the other mode outright so a mix-up is an error rather than a
+//! plausible wrong number.
 
 use alloc::sync::Arc;
 
@@ -27,30 +37,73 @@ use lpvm_native::native_options::NativeCompileOptions;
 use lpvm_native::rt_jit::{BuiltinTable, NativeJitEngine};
 use lpvm_native::xt_corpus::CASES;
 
-use crate::board::esp32s3::cycle_counter;
+use crate::board::esp32s3::{cycle_counter, fpu};
 
 /// Marker every result line carries, so a transcript can be grepped.
 const TAG: &str = "[XT-JIT]";
 
-pub fn run_all() -> ! {
-    cycle_counter::setup();
+/// Running tallies, threaded through both corpus loops so the final
+/// `RESULT passed=N failed=M` line covers everything that ran.
+struct Tally {
+    passed: u32,
+    failed: u32,
+}
 
-    println!("{TAG} corpus start: {} cases", CASES.len());
-
+fn engine_for(mode: FloatMode) -> NativeJitEngine {
     // Device builtins are compiled into this firmware and resolved by address
     // — no builtins image, unlike the host emulator path.
     let mut table = BuiltinTable::new();
     table.populate();
-    println!("{TAG} builtin table: {} symbols", table.len());
-
     let options = NativeCompileOptions {
-        float_mode: FloatMode::Q32,
+        float_mode: mode,
         ..Default::default()
     };
-    let engine = NativeJitEngine::new(Arc::new(table), options);
+    NativeJitEngine::new(Arc::new(table), options)
+}
 
-    let mut passed = 0u32;
-    let mut failed = 0u32;
+pub fn run_all() -> ! {
+    cycle_counter::setup();
+
+    // Arm coprocessor 0 before any compiled float code runs (M7 D6). Printed
+    // rather than assumed: M6-P1 measured this silicon arriving with every
+    // coprocessor already enabled under the esp-hal boot chain, but the write's
+    // provenance is unpinned, so the transcript should say what was actually
+    // true on the board that produced it.
+    let cpenable = fpu::arm();
+    println!("{TAG} cpenable after arming = {cpenable:#010x}");
+
+    println!("{TAG} corpus start: {} cases", CASES.len());
+
+    let mut tally = Tally {
+        passed: 0,
+        failed: 0,
+    };
+
+    run_q32_cases(&mut tally);
+    #[cfg(feature = "float-f32")]
+    run_f32_cases(&mut tally);
+
+    println!("{TAG} ==================================================");
+    println!(
+        "{TAG} RESULT passed={} failed={}",
+        tally.passed, tally.failed
+    );
+    if tally.failed == 0 {
+        // Deliberately not celebratory: the corpus is a ceiling on what can be
+        // found, and the milestone treats a clean sweep as suspicious until the
+        // hard cases are shown to have really happened.
+        println!("{TAG} all cases matched their goldens — verify the hard cases actually occurred");
+    }
+    println!("{TAG} corpus done");
+
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn run_q32_cases(tally: &mut Tally) {
+    let engine = engine_for(FloatMode::Q32);
+    println!("{TAG} --- Q32 corpus: {} cases ---", CASES.len());
 
     for case in CASES {
         let (ir, sig) = (case.build)();
@@ -60,7 +113,7 @@ pub fn run_all() -> ! {
             Ok(m) => m,
             Err(e) => {
                 println!("{TAG} FAIL {} — compile failed: {e}", case.name);
-                failed += 1;
+                tally.failed += 1;
                 continue;
             }
         };
@@ -77,7 +130,7 @@ pub fn run_all() -> ! {
                 Ok(inst) => inst,
                 Err(e) => {
                     println!("{TAG} FAIL {}#{i} — instantiate failed: {e}", case.name);
-                    failed += 1;
+                    tally.failed += 1;
                     continue;
                 }
             };
@@ -88,14 +141,14 @@ pub fn run_all() -> ! {
                             "{TAG} PASS {}#{i} args={:?} -> {:?}",
                             case.name, inv.args, got
                         );
-                        passed += 1;
+                        tally.passed += 1;
                     } else {
                         // Do NOT adjust the golden to match. See the module doc.
                         println!(
                             "{TAG} FAIL {}#{i} args={:?} expected={:?} got={:?}",
                             case.name, inv.args, inv.golden, got
                         );
-                        failed += 1;
+                        tally.failed += 1;
                     }
                 }
                 Err(e) => {
@@ -105,23 +158,80 @@ pub fn run_all() -> ! {
                         "{TAG} FAIL {}#{i} args={:?} trapped: {e}",
                         case.name, inv.args
                     );
-                    failed += 1;
+                    tally.failed += 1;
                 }
             }
         }
     }
+}
 
-    println!("{TAG} ==================================================");
-    println!("{TAG} RESULT passed={passed} failed={failed}");
-    if failed == 0 {
-        // Deliberately not celebratory: the corpus is a ceiling on what can be
-        // found, and the milestone treats a clean sweep as suspicious until the
-        // hard cases are shown to have really happened.
-        println!("{TAG} all cases matched their goldens — verify the hard cases actually occurred");
-    }
-    println!("{TAG} corpus done");
+/// The f32 half. Values print as hex bit patterns, not as decimals: a wrong
+/// answer here is usually wrong in a *structured* way — a swapped operand, a
+/// sign bit, an exponent off by one, a whole word that never got written — and
+/// hex shows that where a rounded decimal hides it.
+#[cfg(feature = "float-f32")]
+fn run_f32_cases(tally: &mut Tally) {
+    use lpvm_native::xt_corpus::F32_CASES;
 
-    loop {
-        core::hint::spin_loop();
+    let engine = engine_for(FloatMode::F32);
+    println!("{TAG} --- f32 corpus: {} cases ---", F32_CASES.len());
+
+    for case in F32_CASES {
+        let (ir, sig) = (case.build)();
+
+        let t0 = cycle_counter::read();
+        let module = match engine.compile(&ir, &sig) {
+            Ok(m) => m,
+            Err(e) => {
+                println!("{TAG} FAIL {} — compile failed: {e}", case.name);
+                tally.failed += 1;
+                continue;
+            }
+        };
+        let compile_cycles = cycle_counter::read().wrapping_sub(t0);
+        println!(
+            "{TAG} {} compiled in {} us (risk {})",
+            case.name,
+            cycle_counter::cycles_to_us(compile_cycles as u64),
+            case.risk,
+        );
+
+        for (i, inv) in case.invocations.iter().enumerate() {
+            let mut inst = match module.instantiate() {
+                Ok(inst) => inst,
+                Err(e) => {
+                    println!("{TAG} FAIL {}#{i} — instantiate failed: {e}", case.name);
+                    tally.failed += 1;
+                    continue;
+                }
+            };
+            match inst.call_f32_words(case.entry, inv.args) {
+                Ok(got) => {
+                    if got.as_slice() == inv.golden {
+                        println!(
+                            "{TAG} PASS {}#{i} args={:08X?} -> {:08X?}",
+                            case.name, inv.args, got
+                        );
+                        tally.passed += 1;
+                    } else {
+                        // Do NOT adjust the golden to match. See the module doc.
+                        println!(
+                            "{TAG} FAIL {}#{i} args={:08X?} expected={:08X?} got={:08X?}",
+                            case.name, inv.args, inv.golden, got
+                        );
+                        tally.failed += 1;
+                    }
+                }
+                Err(e) => {
+                    // Cause 32 here means the FPU is not armed for this context,
+                    // which is a firmware finding rather than a compiler one.
+                    println!(
+                        "{TAG} FAIL {}#{i} args={:08X?} trapped: {e}",
+                        case.name, inv.args
+                    );
+                    tally.failed += 1;
+                }
+            }
+        }
     }
 }

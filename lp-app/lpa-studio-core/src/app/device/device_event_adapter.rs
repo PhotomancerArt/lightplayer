@@ -18,10 +18,7 @@ use std::rc::Rc;
 use lpa_link::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
 
 use crate::app::server::device_log_line::parse_device_log_line;
-use crate::{
-    UiActivityView, UiLogDraft, UiLogLevel, UiLogOrigin, UiLogSource, UiProgress, UiStatus,
-    UxActivityTarget, UxUpdate, UxUpdateSink,
-};
+use crate::{UiLogDraft, UiLogLevel, UiLogOrigin, UiLogSource, UxUpdate, UxUpdateSink};
 
 /// Map one device event's log line into a console draft.
 fn log_line_draft(line: &str, origin: DeviceLineOrigin) -> UiLogDraft {
@@ -55,16 +52,17 @@ pub(crate) fn console_event_sink(pending: Rc<RefCell<Vec<UiLogDraft>>>) -> Devic
     })
 }
 
-/// The management-operation sink: capture + mirror log lines, drive the
-/// live activity view from progress events — and feed the CARD-OWNED op
-/// flow (state-flow model §2): progress ticks keep it Running with the
-/// live label/percent; a mid-manage device state change (reboot,
-/// re-enumeration — the op's EXPECTED gap) flips it to AwaitingDevice
-/// wearing `awaiting_detail` (I2).
+/// The management-operation sink: capture + mirror log lines, and feed
+/// the CARD-OWNED op flow (state-flow model §2): progress ticks keep it
+/// Running with the live label/percent; a mid-manage device state change
+/// (reboot, re-enumeration — the op's EXPECTED gap) flips it to
+/// AwaitingDevice wearing `awaiting_detail` (I2).
+///
+/// The card flow is the WHOLE narration since the retired step-stack
+/// device pane went away — this sink used to drive a parallel
+/// `UiActivityView` into that pane's Device section as well.
 pub(crate) fn management_event_sink(
     updates: UxUpdateSink,
-    target: UxActivityTarget,
-    activity: Rc<RefCell<UiActivityView>>,
     captured_logs: Rc<RefCell<Vec<UiLogDraft>>>,
     card_op: Rc<RefCell<crate::CardOp>>,
     card_uid: Option<String>,
@@ -96,19 +94,7 @@ pub(crate) fn management_event_sink(
             updates.emit(UxUpdate::Log(draft));
         }
         DeviceEvent::Progress { label, percent } => {
-            {
-                let mut activity = activity.borrow_mut();
-                activity.progress = Some(match percent {
-                    Some(percent) => UiProgress::determinate(&label, u32::from(percent)),
-                    None => UiProgress::indeterminate(&label),
-                });
-            }
             publish_card_op(crate::CardOp::new(format!("{label}…"), percent));
-            updates.emit(UxUpdate::Activity {
-                target: target.clone(),
-                status: UiStatus::working("Managing"),
-                activity: activity.borrow().clone(),
-            });
         }
         DeviceEvent::State { state } => {
             // The device leaving Ready mid-manage is the expected gap;
@@ -157,12 +143,9 @@ mod tests {
             move |update| updates.borrow_mut().push(update)
         });
         let captured = Rc::new(RefCell::new(Vec::new()));
-        let activity = Rc::new(RefCell::new(UiActivityView::new("Flashing firmware")));
         let card_op = Rc::new(RefCell::new(crate::CardOp::new("Flashing firmware…", None)));
         let sink = management_event_sink(
             sink_updates,
-            UxActivityTarget::pane(crate::ControllerId::new("studio|device")),
-            Rc::clone(&activity),
             Rc::clone(&captured),
             Rc::clone(&card_op),
             Some("dev_abc".to_string()),
@@ -180,28 +163,29 @@ mod tests {
 
         assert_eq!(captured.borrow().len(), 1);
         assert_eq!(captured.borrow()[0].source.origin, UiLogOrigin::Link);
-        assert!(activity.borrow().progress.is_some());
-        // progress feeds the card-owned op flow (model §2)
+        // progress feeds the card-owned op flow (model §2) — the ONLY
+        // narration now that the step-stack device pane is gone
         assert_eq!(
             *card_op.borrow(),
             crate::CardOp::new("Writing…", Some(42)),
             "progress ticks keep the flow Running with the live label"
         );
         let updates = updates.borrow();
-        assert!(matches!(updates[0], UxUpdate::Log(_)));
         // The slot alone never reaches the screen mid-op: the op holds
-        // `&mut controller`, so the delta is what moves the card.
+        // `&mut controller`, so the delta is what moves the card. It is
+        // now the ONLY delta — the parallel `Activity` update retired with
+        // the step-stack device pane it patched.
         assert!(
             matches!(
-                &updates[1],
-                UxUpdate::CardOp { uid, op }
-                    if uid.as_deref() == Some("dev_abc")
-                        && *op == crate::CardOp::new("Writing…", Some(42))
+                updates.as_slice(),
+                [
+                    UxUpdate::Log(_),
+                    UxUpdate::CardOp { uid, op },
+                ] if uid.as_deref() == Some("dev_abc")
+                    && *op == crate::CardOp::new("Writing…", Some(42))
             ),
-            "a progress tick publishes the card op, not just the slot: {:?}",
-            updates[1]
+            "a progress tick mirrors the log and publishes the card op: {updates:?}"
         );
-        assert!(matches!(updates[2], UxUpdate::Activity { .. }));
     }
 
     #[test]
@@ -214,8 +198,6 @@ mod tests {
         let card_op = Rc::new(RefCell::new(crate::CardOp::new("Wiping device…", None)));
         let sink = management_event_sink(
             updates,
-            UxActivityTarget::pane(crate::ControllerId::new("studio|device")),
-            Rc::new(RefCell::new(UiActivityView::new("Wiping device"))),
             Rc::new(RefCell::new(Vec::new())),
             Rc::clone(&card_op),
             None,

@@ -1,10 +1,24 @@
 # ADR: Two fidelity tiers — Q32 authoritative, f32 GPU for preview and non-embedded scale
 
-- **Status:** Accepted (user decisions 2026-07-09, GPU-preview roadmap M4)
+- **Status:** Accepted, **partially superseded 2026-08-01** (user decisions
+  2026-07-09, GPU-preview roadmap M4). Decision 1's "single authoritative
+  semantics" clause and its scope clause about ESP32 devices no longer hold;
+  everything else stands. See **Superseded by**.
 - **Date:** 2026-07-09
 - **Deciders:** Photomancer
+- **Supersedes:** None
+- **Superseded by:** `2026-08-01-float-mode-as-a-compiler-parameter.md`, in
+  part only. That ADR retires (a) "Q32 remains the single authoritative
+  semantics" — there are now two, and which applies is a property of the
+  compiled module — and (b) the clause scoping ESP32 devices to Q32, because
+  the ESP32-S3 has an FPU and now executes IEEE f32 natively. It explicitly
+  does **not** retire the preview-fidelity framing, the GPU tier's documented
+  latitude and divergence bounds, decision 4's no-silent-fallback rule (which
+  it extends), decision 3's non-embedded Q32 parity mode, or Q32's status as
+  the default everywhere and the only option on boards without an FPU.
 - **Related:** `2026-07-08-glsl-canonical-builtins.md`,
-  `2026-07-09-gpu-path-forks-at-glsl.md`, `docs/design/q32.md`
+  `2026-07-09-gpu-path-forks-at-glsl.md`, `docs/design/q32.md`,
+  `docs/design/float.md`
 
 ## Context
 
@@ -28,6 +42,15 @@ saturation by design.
 
 1. **Q32 remains the single authoritative semantics.** ESP32 devices, the
    browser-sim editor session, and conformance oracles keep it.
+
+   > **Superseded 2026-08-01** by
+   > `2026-08-01-float-mode-as-a-compiler-parameter.md`. There are now two
+   > authoritative numeric semantics — Q32 (`docs/design/q32.md`) and IEEE f32
+   > (`docs/design/float.md`) — and which one applies is a property of the
+   > compiled module, disclosed by `FloatImpl`. The ESP32-S3 has an FPU and
+   > executes native f32 on silicon as of M7 P5. Q32 stays the **default**
+   > everywhere and the only option on boards without an FPU, which is still
+   > most of them. Points 2–4 below are unaffected.
 2. **f32-on-GPU is the preview and large-scale tier**: Studio gallery
    cards, and the *default* engine for non-embedded lp-servers.
 3. **Non-embedded lp-servers offer a Q32 CPU parity mode**, selectable per

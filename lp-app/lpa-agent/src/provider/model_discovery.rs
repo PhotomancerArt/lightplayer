@@ -10,7 +10,7 @@
 //! its per-provider guidance copy.
 
 use futures_util::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::provider::anthropic::{ANTHROPIC_VERSION, AnthropicConfig};
 use crate::provider::http_transport::{ByteStream, HttpGetTransport, HttpResponse, TransportError};
@@ -22,13 +22,53 @@ use crate::provider::openai_compat::OpenAiCompatConfig;
 const MAX_MODELS_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 /// One discoverable model.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Everything past `id`/`display_name` is metadata some providers publish
+/// and others do not — kept here because it is what makes a 340-model
+/// listing browsable (see `ModelInfo::rank_key` and the settings store's
+/// option building). `None` always means "the provider did not say".
+#[derive(Clone, Debug, PartialEq)]
 pub struct ModelInfo {
     /// The id the provider expects in requests.
     pub id: String,
     /// Human-readable name when the provider supplies one (Anthropic's
     /// `display_name`, OpenRouter's `name`; absent for OpenAI/Ollama).
     pub display_name: Option<String>,
+    /// Published rates, $ per million tokens (OpenRouter's per-token
+    /// `pricing`, converted).
+    pub price: Option<ModelPrice>,
+    /// The provider's published score for coding work (OpenRouter carries
+    /// Artificial Analysis' indices). The ordering signal: without it a
+    /// listing can only be alphabetical, which buries every model worth
+    /// picking under `ai21/…`.
+    pub coding_score: Option<f64>,
+    /// Whether the provider says the model can call tools. The agent is a
+    /// single-tool loop, so an explicit `false` cannot run it at all.
+    pub supports_tools: Option<bool>,
+    /// Publication time (epoch seconds) when the provider gives one.
+    pub created: Option<i64>,
+}
+
+/// Published rates for a model, $ per million tokens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModelPrice {
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
+}
+
+impl ModelInfo {
+    /// A model known only by its id — what a bare OpenAI-style listing
+    /// gives, and the starting point for fixtures.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            display_name: None,
+            price: None,
+            coding_score: None,
+            supports_tools: None,
+            created: None,
+        }
+    }
 }
 
 /// Why a model listing failed, typed for guidance mapping (bad key vs
@@ -112,24 +152,87 @@ async fn fetch_models<T: HttpGetTransport>(
             message: truncated(&text, 300),
         });
     }
-    let page: ModelsPage = serde_json::from_str(&text).map_err(|e| ListModelsError::Parse {
+    parse_models_page(&text)
+}
+
+/// Read a `/models` body into [`ModelInfo`]s, in the order the server gave
+/// them. Public because the local-server connection probe reads the same
+/// bodies and must agree with discovery about what they mean.
+pub fn parse_models_page(text: &str) -> Result<Vec<ModelInfo>, ListModelsError> {
+    let page: ModelsPage = serde_json::from_str(text).map_err(|e| ListModelsError::Parse {
         message: e.to_string(),
     })?;
     Ok(page
         .data
         .into_iter()
         .map(|model| ModelInfo {
-            display_name: model.display_name.or(model.name),
             id: model.id,
+            display_name: model.display_name.or(model.name),
+            price: model.pricing.and_then(parse_price),
+            coding_score: model.benchmarks.and_then(parse_coding_score),
+            supports_tools: model
+                .supported_parameters
+                .map(|parameters| parameters.iter().any(|parameter| parameter == "tools")),
+            created: model.created,
         })
         .collect())
+}
+
+/// OpenRouter prices are per-token decimal strings; everything downstream
+/// speaks $/MTok. A pair is only a price when both halves parse.
+fn parse_price(pricing: WirePricing) -> Option<ModelPrice> {
+    let per_mtok = |raw: Option<String>| -> Option<f64> {
+        let value = raw?.parse::<f64>().ok()?;
+        (value.is_finite() && value >= 0.0).then_some(value * 1_000_000.0)
+    };
+    Some(ModelPrice {
+        input_per_mtok: per_mtok(pricing.prompt)?,
+        output_per_mtok: per_mtok(pricing.completion)?,
+    })
+}
+
+/// The published score for the work this agent does, preferring the coding
+/// index and falling back to the agentic and general ones. `benchmarks`
+/// mixes shapes (`artificial_analysis` is an object of scalars,
+/// `design_arena` an array of per-arena entries), so only the object of
+/// comparable indices is read.
+fn parse_coding_score(benchmarks: WireBenchmarks) -> Option<f64> {
+    let analysis = benchmarks.artificial_analysis?;
+    [
+        analysis.coding_index,
+        analysis.agentic_index,
+        analysis.intelligence_index,
+    ]
+    .into_iter()
+    .flatten()
+    .find(|score| score.is_finite())
 }
 
 /// The listing shape shared by every provider (unknown fields ignored).
 #[derive(Deserialize)]
 struct ModelsPage {
-    #[serde(default)]
+    /// A nullable-but-REQUIRED field, which is the whole distinction:
+    ///
+    /// - `"data": null` — Ollama with nothing pulled answers exactly this.
+    ///   An empty listing, not a failure (and serde's `default` would not
+    ///   have covered it: that applies to a MISSING field, not a null one).
+    /// - no `data` at all — not a models listing. A body like Ollama's
+    ///   native `{"models":[…]}` means the base URL is missing its `/v1`,
+    ///   and saying so beats reporting zero models.
+    ///
+    /// `deserialize_with` rather than a plain `Option` field: serde gives
+    /// `Option` an implicit default, which would silently accept the
+    /// second case as an empty listing.
+    #[serde(deserialize_with = "nullable_model_list")]
     data: Vec<WireModel>,
+}
+
+/// A `data` that must be present but may be null (see [`ModelsPage`]).
+fn nullable_model_list<'de, D>(deserializer: D) -> Result<Vec<WireModel>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<Vec<WireModel>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]
@@ -141,6 +244,42 @@ struct WireModel {
     /// OpenRouter's human-readable name.
     #[serde(default)]
     name: Option<String>,
+    /// OpenRouter's per-token rates.
+    #[serde(default)]
+    pricing: Option<WirePricing>,
+    /// OpenRouter's published quality indices.
+    #[serde(default)]
+    benchmarks: Option<WireBenchmarks>,
+    /// OpenRouter's capability list; `tools` is the one that matters here.
+    #[serde(default)]
+    supported_parameters: Option<Vec<String>>,
+    /// Epoch seconds (OpenAI and OpenRouter).
+    #[serde(default)]
+    created: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct WirePricing {
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    completion: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WireBenchmarks {
+    #[serde(default)]
+    artificial_analysis: Option<WireIndices>,
+}
+
+#[derive(Deserialize)]
+struct WireIndices {
+    #[serde(default)]
+    coding_index: Option<f64>,
+    #[serde(default)]
+    agentic_index: Option<f64>,
+    #[serde(default)]
+    intelligence_index: Option<f64>,
 }
 
 /// Read a body stream to completion, capped at [`MAX_MODELS_BODY_BYTES`].
@@ -210,15 +349,72 @@ mod tests {
             models,
             vec![
                 ModelInfo {
-                    id: "claude-sonnet-5".into(),
                     display_name: Some("Claude Sonnet 5".into()),
+                    ..ModelInfo::new("claude-sonnet-5")
                 },
                 ModelInfo {
-                    id: "claude-haiku-4-5".into(),
                     display_name: Some("Claude Haiku 4.5".into()),
+                    ..ModelInfo::new("claude-haiku-4-5")
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_null_data_list_is_an_empty_listing_not_a_parse_error() {
+        // Ollama with nothing pulled answers exactly this, and serde's
+        // `default` covers a missing field, not an explicit null.
+        let models = parse_models_page(r#"{"object":"list","data":null}"#).expect("empty listing");
+        assert!(models.is_empty());
+    }
+
+    #[test]
+    fn openrouter_metadata_rides_along_for_ranking_and_pricing() {
+        // Field shapes taken from a live openrouter.ai/api/v1/models body:
+        // per-token decimal strings, indices under `artificial_analysis`,
+        // and a sibling `design_arena` ARRAY that must not break the read.
+        let models = parse_models_page(
+            r#"{"data":[{
+                "id":"anthropic/claude-opus-5",
+                "name":"Anthropic: Claude Opus 5",
+                "created":1785190561,
+                "pricing":{"prompt":"0.000005","completion":"0.000025"},
+                "supported_parameters":["tools","max_tokens"],
+                "benchmarks":{
+                    "design_arena":[{"arena":"models","category":"3d","elo":1387}],
+                    "artificial_analysis":{"intelligence_index":60.7,"coding_index":78,"agentic_index":55.3}}
+            },{
+                "id":"some/embedding-only",
+                "supported_parameters":["max_tokens"]
+            }]}"#,
+        )
+        .expect("models");
+        let opus = &models[0];
+        let price = opus.price.expect("pricing");
+        assert!((price.input_per_mtok - 5.0).abs() < 1e-9, "{price:?}");
+        assert!((price.output_per_mtok - 25.0).abs() < 1e-9, "{price:?}");
+        assert_eq!(opus.coding_score, Some(78.0));
+        assert_eq!(opus.supports_tools, Some(true));
+        assert_eq!(opus.created, Some(1785190561));
+        assert_eq!(models[1].supports_tools, Some(false));
+        assert_eq!(models[1].price, None);
+    }
+
+    #[test]
+    fn the_score_falls_back_through_the_published_indices() {
+        let models = parse_models_page(
+            r#"{"data":[
+                {"id":"a","benchmarks":{"artificial_analysis":{"agentic_index":50,"intelligence_index":40}}},
+                {"id":"b","benchmarks":{"artificial_analysis":{"intelligence_index":45}}},
+                {"id":"c","benchmarks":{"design_arena":[{"arena":"models","elo":1300}]}}
+            ]}"#,
+        )
+        .expect("models");
+        assert_eq!(models[0].coding_score, Some(50.0));
+        assert_eq!(models[1].coding_score, Some(45.0));
+        // Per-arena elo is not a comparable index; no score rather than a
+        // number that would sort against a different scale.
+        assert_eq!(models[2].coding_score, None);
     }
 
     #[test]
@@ -282,8 +478,8 @@ mod tests {
         assert_eq!(
             models,
             vec![ModelInfo {
-                id: "anthropic/claude-sonnet-5".into(),
                 display_name: Some("Anthropic: Claude Sonnet 5".into()),
+                ..ModelInfo::new("anthropic/claude-sonnet-5")
             }]
         );
         let requests = transport.requests.borrow();

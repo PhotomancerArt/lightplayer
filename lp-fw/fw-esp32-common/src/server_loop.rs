@@ -214,7 +214,14 @@ pub async fn run_server_loop<T: ServerTransport>(
                     loaded_projects,
                     uptime_ms: current_time.saturating_sub(startup_time),
                     memory,
-                    recovery: lpa_server::recovery_report::current_recovery_status(),
+                    recovery: lpa_server::recovery_report::current_recovery_status().map(
+                        |mut status| {
+                            // The clamp is server state, not recovery-region
+                            // state — stamp it here where both are in scope.
+                            status.output_clamp = server.safe_output_clamp();
+                            status
+                        },
+                    ),
                 },
             );
 

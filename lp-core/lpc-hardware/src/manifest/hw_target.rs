@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum HardwareTarget {
+    /// Classic ESP32 (Xtensa LX6) — `fw-esp32v3`.
+    Esp32,
     Esp32c6,
     Esp32s3,
     Rv32imacEmu,
@@ -13,6 +15,7 @@ pub enum HardwareTarget {
 impl HardwareTarget {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Esp32 => "esp32",
             Self::Esp32c6 => "esp32c6",
             Self::Esp32s3 => "esp32s3",
             Self::Rv32imacEmu => "rv32imac_emu",

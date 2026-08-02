@@ -1,0 +1,14 @@
+# Name,   Type,  SubType, Offset,   Size,     Flags
+# 4 MB table (N4-class modules) — the classic bring-up roadmap's Q7 decision:
+# copy fw-esp32c6's shape verbatim (this chip's flash budget is constrained
+# like the C6's, unlike the S3's 8 MB floor). See
+# ~/.photomancer/planning/lp2025/2026-07-31-1444-classic-esp32-bringup/ for
+# the roadmap; the ADR reference for this table lands with a later milestone
+# (M6), not here.
+#   factory 3 MB  @ 0x010000 .. 0x310000
+#   lpfs    960 KB @ 0x310000 .. 0x400000
+#   end 0x400000 of 0x400000 — no slack
+nvs,      data,  nvs,     0x9000,   0x6000,
+phy_init, data,  phy,     0xf000,   0x1000,
+factory,  app,   factory, 0x10000,  0x300000,
+lpfs,     data,  spiffs,  0x310000, 0xF0000,

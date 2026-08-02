@@ -1,0 +1,26 @@
+{
+  "lpManifestCore": 1,
+  "package": "fw-esp32s3",
+  "target": {
+    "family": "esp32",
+    "chip": "esp32s3",
+    "cargoTarget": "xtensa-esp32s3-none-elf"
+  },
+  "features": [
+    "node.button",
+    "node.clock",
+    "node.fluid",
+    "node.fixture",
+    "node.playlist",
+    "node.radio",
+    "node.shader",
+    "node.texture",
+    "gfx.lpvm",
+    "svc.button",
+    "shader.f32"
+  ],
+  "limits": {
+    "flashAppBytes": 6291456
+  },
+  "wireProto": 4
+}

@@ -2,7 +2,6 @@
 
 use alloc::vec::Vec;
 
-use crate::display_pipeline::lut::{LUT_LEN, build_lut, lut_interpolate};
 use crate::display_pipeline::options::DisplayPipelineOptions;
 use crate::error::DisplayPipelineError;
 use core::cmp;
@@ -32,8 +31,39 @@ pub struct DisplayPipeline {
     has_next: bool,
     prev_current_delta_us: u64,
     dither_overflow: Vec<[i8; 3]>,
-    lut: [[u32; LUT_LEN]; 3],
+    /// Per-channel white point as Q16.16, derived once from
+    /// [`DisplayPipelineOptions::white_point`] (which is immutable for the
+    /// life of the pipeline). See [`white_point_scale`].
+    white_scale: [u32; 3],
     options: DisplayPipelineOptions,
+}
+
+/// White point as a Q16.16 multiplier.
+///
+/// Saturates rather than wrapping: a white point of `NaN` or a negative value
+/// becomes 0 (channel off) instead of an enormous scale, and the `as u32` on a
+/// huge float saturates rather than being UB.
+fn white_point_scale(white_point: f32) -> u32 {
+    if !(white_point > 0.0) {
+        // Also catches NaN, since every NaN comparison is false.
+        return 0;
+    }
+    (white_point * 65536.0 + 0.5) as u32
+}
+
+/// Scale a 16-bit channel value by a Q16.16 white point, rounding to nearest.
+///
+/// Widened to `u64` deliberately. A white point above 1.0 is not physically
+/// meaningful — balancing scales channels *down* — but the previous LUT
+/// implementation permitted it (building a boosted table and clamping at
+/// 65535), so the arithmetic keeps that behaviour rather than quietly
+/// redefining it. At `white_point == 1.0` the `u32` product would fit with
+/// 32,767 to spare; anything above overflows, and one widening multiply is
+/// cheaper than the three heap loads this replaced.
+#[inline]
+fn apply_white_point(value: u32, scale: u32) -> u32 {
+    let value = value.min(65535) as u64;
+    (((value * scale as u64 + 0x8000) >> 16) as u32).min(65535)
 }
 
 impl DisplayPipeline {
@@ -54,10 +84,11 @@ impl DisplayPipeline {
         next.resize(size, 0);
         let mut dither_overflow = Vec::with_capacity(num_leds as usize);
         dither_overflow.resize(num_leds as usize, [0i8; 3]);
-        let mut lut = [[0u32; LUT_LEN]; 3];
-        build_lut(&mut lut[0], options.white_point[0]);
-        build_lut(&mut lut[1], options.white_point[1]);
-        build_lut(&mut lut[2], options.white_point[2]);
+        let white_scale = [
+            white_point_scale(options.white_point[0]),
+            white_point_scale(options.white_point[1]),
+            white_point_scale(options.white_point[2]),
+        ];
         Ok(Self {
             num_leds,
             prev,
@@ -71,7 +102,7 @@ impl DisplayPipeline {
             has_next: false,
             prev_current_delta_us: 1,
             dither_overflow,
-            lut,
+            white_scale,
             options,
         })
     }
@@ -179,7 +210,7 @@ impl DisplayPipeline {
             let r = self.current[i * 3] as u32;
             let g = self.current[i * 3 + 1] as u32;
             let b = self.current[i * 3 + 2] as u32;
-            let (or, og, ob) = self.apply_lut_dither(r, g, b, i);
+            let (or, og, ob) = self.apply_white_point_dither(r, g, b, i);
             out[i * 3] = or;
             out[i * 3 + 1] = og;
             out[i * 3 + 2] = ob;
@@ -201,26 +232,26 @@ impl DisplayPipeline {
             let ir = ((pr * inv_progress16 as u32) + (cr * frame_progress16 as u32)) >> 16;
             let ig = ((pg * inv_progress16 as u32) + (cg * frame_progress16 as u32)) >> 16;
             let ib = ((pb * inv_progress16 as u32) + (cb * frame_progress16 as u32)) >> 16;
-            let (or, og, ob) = self.apply_lut_dither(ir, ig, ib, i);
+            let (or, og, ob) = self.apply_white_point_dither(ir, ig, ib, i);
             out[i * 3] = or;
             out[i * 3 + 1] = og;
             out[i * 3 + 2] = ob;
         }
     }
 
-    fn apply_lut_dither(&mut self, r: u32, g: u32, b: u32, pixel: usize) -> (u8, u8, u8) {
+    fn apply_white_point_dither(&mut self, r: u32, g: u32, b: u32, pixel: usize) -> (u8, u8, u8) {
         let ir = if self.options.lut_enabled {
-            lut_interpolate(r, &self.lut[0])
+            apply_white_point(r, self.white_scale[0])
         } else {
             r
         };
         let ig = if self.options.lut_enabled {
-            lut_interpolate(g, &self.lut[1])
+            apply_white_point(g, self.white_scale[1])
         } else {
             g
         };
         let ib = if self.options.lut_enabled {
-            lut_interpolate(b, &self.lut[2])
+            apply_white_point(b, self.white_scale[2])
         } else {
             b
         };
@@ -269,8 +300,88 @@ mod tests {
         assert!(out[0] > 0 || out[1] > 0 || out[2] > 0);
     }
 
+    /// The 257-entry white-point LUT this arithmetic replaced (deleted from
+    /// production in the same commit), kept here as a migration oracle.
+    ///
+    /// Its formula was `lut[i] = clamp(round((i/256) * white_point * 65535))`
+    /// — a straight line — read back by linear interpolation on the high byte.
+    /// Interpolating between samples of a line reproduces the line, so the
+    /// whole 3,084-byte-per-channel table computed `value * white_point`.
+    /// Keeping it executable rather than as a comment is what lets
+    /// [`white_point_matches_the_lut_it_replaced`] state the behaviour delta as
+    /// a measured number instead of a claim.
+    mod legacy_lut {
+        const LUT_LEN: usize = 257;
+
+        pub fn build(white_point: f32) -> [u32; LUT_LEN] {
+            let mut lut = [0u32; LUT_LEN];
+            for (i, slot) in lut.iter_mut().enumerate() {
+                let normal = (i as f32 / 256.0) * white_point;
+                let rounded = (normal * 65535.0 + 0.5) as i64;
+                *slot = rounded.clamp(0, 65535) as u32;
+            }
+            lut
+        }
+
+        pub fn interpolate(value: u32, lut: &[u32; LUT_LEN]) -> u32 {
+            let value = value.min(65535);
+            let index = (value >> 8) as usize;
+            let alpha = value & 0xFF;
+            let inv_alpha = 0x100 - alpha;
+            (lut[index] * inv_alpha + lut[index.saturating_add(1).min(LUT_LEN - 1)] * alpha) >> 8
+        }
+    }
+
+    /// The multiply reproduces the table it replaced to within 2 counts of
+    /// 65,535, across every input, at every white point that matters.
+    ///
+    /// 2/65535 is a quarter of one ULP at the 8-bit wire the pipeline actually
+    /// drives, so no LED can resolve it. Where the two *do* diverge, the
+    /// multiply is the more correct of the pair: the table was a piecewise
+    /// approximation of a line, and this is the line.
     #[test]
-    fn lut_preserves_linear_midpoint() {
+    fn white_point_matches_the_lut_it_replaced() {
+        for white_point in [1.0f32, 0.9, 0.8, 0.75, 0.5, 0.25, 0.1, 0.0] {
+            let lut = legacy_lut::build(white_point);
+            let scale = white_point_scale(white_point);
+            let worst = (0u32..=65535)
+                .map(|v| apply_white_point(v, scale).abs_diff(legacy_lut::interpolate(v, &lut)))
+                .max()
+                .unwrap();
+            assert!(
+                worst <= 2,
+                "white_point {white_point}: diverged by {worst} counts (max 2)"
+            );
+        }
+    }
+
+    /// A white point of 1.0 must be exactly the identity, not merely close.
+    ///
+    /// This is the overwhelmingly common case — every output node that does not
+    /// deliberately balance its channels — so a systematic off-by-one here
+    /// would dim every strip in the product by one 16-bit count forever.
+    #[test]
+    fn unit_white_point_is_the_identity() {
+        let scale = white_point_scale(1.0);
+        for v in 0u32..=65535 {
+            assert_eq!(apply_white_point(v, scale), v, "not identity at {v}");
+        }
+    }
+
+    /// Degenerate white points must not wrap into an enormous scale.
+    #[test]
+    fn degenerate_white_points_saturate() {
+        assert_eq!(white_point_scale(f32::NAN), 0);
+        assert_eq!(white_point_scale(-1.0), 0);
+        assert_eq!(white_point_scale(0.0), 0);
+        // Above 1.0 boosts and clamps, exactly as the LUT did.
+        let boosted = white_point_scale(2.0);
+        assert_eq!(apply_white_point(20_000, boosted), 40_000);
+        assert_eq!(apply_white_point(65535, boosted), 65535, "must clamp");
+    }
+
+    #[test]
+    fn unit_white_point_preserves_linear_midpoint() {
         let mut opts = DisplayPipelineOptions::default();
         opts.white_point = [1.0, 1.0, 1.0];
         opts.dithering_enabled = false;

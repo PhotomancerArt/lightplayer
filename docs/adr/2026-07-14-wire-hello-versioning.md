@@ -85,10 +85,14 @@ affordance) is `DeviceSession` (device-link M4; see
 `docs/adr/2026-07-15-device-session-model.md`); this ADR fixes the
 contract it consumes.
 
-The Studio firmware manifest records the wire version it would flash
-(`build.wireProto` in `studio-firmware-manifest.mjs` output, extracted
-from the const by the packaging recipe), so "manifest we'd flash" vs
-"device hello" is a pure integer comparison — no ELF parsing.
+The Studio firmware manifest records the wire version it would flash, so
+"manifest we'd flash" vs "device hello" is a pure integer comparison — no
+ELF parsing at comparison time. (Mechanism updated 2026-08-01: it was
+`build.wireProto`, `sed`-extracted from the const by the packaging recipe;
+it is now `core.wireProto` in `manifest.json` schemaVersion 2, extracted
+from the built image's embedded manifest core by `lp-cli firmware package`
+— see `docs/adr/2026-08-01-firmware-manifest-architecture.md`. The
+comparison is unchanged.)
 
 ## Future intent (recorded, not implemented)
 

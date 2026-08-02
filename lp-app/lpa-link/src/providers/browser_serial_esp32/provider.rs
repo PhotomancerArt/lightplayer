@@ -5,6 +5,7 @@ use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::management_request::LinkManagementRequest;
 use crate::provider::management_result::{
     LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest, LinkManagementResult,
+    LinkRawFilesystemReadResult,
 };
 use crate::provider::session::LinkSessionId;
 use crate::providers::browser_serial_esp32::BrowserSerialEsp32Options;
@@ -14,9 +15,9 @@ use crate::providers::browser_serial_esp32::{
 };
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
-    LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
-    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkManagementEventSink,
-    LinkManagementProgress, LinkProvider, LinkSession, LinkSessionStatus,
+    LinkBootControlResult, LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic,
+    LinkDiagnosticSeverity, LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel,
+    LinkManagementEventSink, LinkManagementProgress, LinkProvider, LinkSession, LinkSessionStatus,
 };
 
 const RESET_BAUD_RATE: u32 = 115_200;
@@ -71,7 +72,13 @@ impl BrowserSerialEsp32Provider {
 
         let mut capabilities = LinkCapabilities::esp32_serial_base();
         if self.is_flash_supported() {
-            capabilities = capabilities.with_flash().with_device_erase();
+            capabilities = capabilities
+                .with_flash()
+                .with_device_erase()
+                .with_boot_control()
+                // READ only (M6): restore is M7's, and advertising the write
+                // half early would surface a button that answers `unsupported`.
+                .with_raw_filesystem_read();
         }
         let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(capabilities);
@@ -311,6 +318,67 @@ impl BrowserSerialEsp32Provider {
                 self.extend_session_logs(session_id, logs)?;
                 Ok(LinkManagementResult::ResetRuntime)
             }
+            LinkManagementRequest::SetBootControl { flags } => {
+                let port_id = self.endpoint_port_id(&endpoint_id)?;
+                let result = browser_esp32_flash::write_boot_control_with_events(
+                    port_id,
+                    self.options.esptool_module_path(),
+                    lp_bootctl::BootFlags::from_bits(flags),
+                    events.clone(),
+                )
+                .await?;
+                let logs = result
+                    .logs
+                    .iter()
+                    .map(|message| {
+                        LinkLogEntry::new(
+                            endpoint_id.clone(),
+                            Some(session_id.clone()),
+                            LinkLogLevel::Info,
+                            message.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.extend_session_logs(session_id, logs)?;
+                Ok(LinkManagementResult::SetBootControl(
+                    LinkBootControlResult {
+                        flags,
+                        chip_name: result.chip_name,
+                        logs: result.logs,
+                        progress: map_progress(result.progress),
+                    },
+                ))
+            }
+            LinkManagementRequest::ReadRawFilesystem => {
+                let result = browser_esp32_flash::read_raw_filesystem_with_events(
+                    port_id,
+                    self.options.esptool_module_path(),
+                    events.clone(),
+                )
+                .await?;
+                let logs = result
+                    .logs
+                    .iter()
+                    .map(|message| {
+                        LinkLogEntry::new(
+                            endpoint_id.clone(),
+                            Some(session_id.clone()),
+                            LinkLogLevel::Info,
+                            message.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.extend_session_logs(session_id, logs)?;
+                Ok(LinkManagementResult::ReadRawFilesystem(
+                    LinkRawFilesystemReadResult {
+                        image: result.image,
+                        region: result.region,
+                        chip_name: result.chip_name,
+                        logs: result.logs,
+                        progress: map_progress(result.progress),
+                    },
+                ))
+            }
             LinkManagementRequest::EraseRawFilesystem => {
                 Err(LinkError::unsupported(format!("{:?}", request.operation())))
             }
@@ -368,6 +436,18 @@ impl BrowserSerialEsp32Provider {
             .values()
             .find(|state| state.port_id == port_id)
             .map(|state| state.endpoint.id.clone())
+    }
+
+    /// Session-scoped [`Self::probe_target`], for the connector's
+    /// mode-detection escalation. Releases the app-protocol port first: the
+    /// SYNC handshake needs the wire to itself and reboots the device.
+    pub async fn probe_target_for_session(
+        &self,
+        session_id: &LinkSessionId,
+    ) -> Result<BrowserEsp32ProbeResult, LinkError> {
+        self.release_protocol_if_open(session_id).await?;
+        let port_id = self.session_port_id(session_id)?;
+        browser_esp32_flash::probe_target(port_id, self.options.esptool_module_path()).await
     }
 
     fn session_port_id(&self, session_id: &LinkSessionId) -> Result<u32, LinkError> {

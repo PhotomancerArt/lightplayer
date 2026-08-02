@@ -185,10 +185,14 @@ Adopted by the node pane (P3: selection toggle in `primary`, tabs in
 project name as title, controller actions, node tree as the body; the
 status word, dirty counts, and project stats live in the detail popup,
 and the merged affordance drives the trigger and the header wash).
-**The device pane is the intended third consumer**: its header should map status onto
-`PaneTone`, its detail popup onto `DetailPopover`, and its contextual
-operations onto `UiPaneAction`s the next time device-pane UX work is
-scheduled (Follow-ups).
+~~**The device pane is the intended third consumer**~~ — **superseded
+2026-07-28**: the device pane was DELETED rather than adopted. D43 made
+the grown device CARD the editor's device surface, and the pane's
+step-stack body (`UiStepsView` / `UiViewContent::Stack`) went with it.
+The grammar's third consumer never arrived; `PaneView`, `PaneFrame`, and
+the `UiViewContent` body types the pane shared with the project and bus
+panes are unaffected. See
+`docs/defects/2026-07-28-retired-device-pane-still-reachable.md`.
 
 ## Consequences
 
@@ -235,10 +239,9 @@ scheduled (Follow-ups).
 Per the deferred-decision convention, these are indexed in
 `docs/adr/README.md`.
 
-- **(a) Device-pane adoption.** The device pane still draws pre-grammar
-  chrome. Map it onto `StudioPane` (status → `PaneTone`, popup →
-  `DetailPopover`, operations → `UiPaneAction`). **Revisit when** the next
-  device-pane UX work is scheduled.
+- ~~**(a) Device-pane adoption.**~~ **Closed 2026-07-28 — will not
+  happen.** The pane was deleted instead (D43: the device card is the
+  editor's device surface). Nothing draws pre-grammar chrome now.
 - **(b) Save visibility while scrolling.** The M2 save strip was
   shell-mounted and always visible; the project header that replaced it
   scrolls with the project sidebar, so a long tree can push Save off

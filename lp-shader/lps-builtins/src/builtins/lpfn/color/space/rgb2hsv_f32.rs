@@ -29,7 +29,9 @@
 // the fact keeps the constants out of the float constant pool.
 //
 // Defect: docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
-// Upstream: not yet filed.
+// Upstream: https://github.com/esp-rs/rust/issues/282 — this workaround's
+// expiry. When that closes and the toolchain is pinned past it, the literal
+// form below can come back.
 //
 // `f32::to_bits` is const-evaluated, so these are the same floats the literals
 // were; `hocevar_p_is_bit_identical_to_the_literal_form` pins that, and is the
@@ -43,14 +45,43 @@ const P_W_ELSE: u32 = (-1.0f32 / 3.0).to_bits();
 ///
 /// Split out of `rgb2hsv` only so the constant-pool workaround above can be
 /// tested against the literal form it replaced.
+/// Select one of two `f32` bit patterns and reinterpret, without letting the
+/// pair become a float constant pool.
+///
+/// `f32::from_bits` is a no-op bitcast, so LLVM freely rewrites
+/// `bitcast(select(c, i32 A, i32 B))` into `select(c, float A', float B')` —
+/// and then, judging two constants cheaper as a table, materialises them as a
+/// `[2 x float]` constant-pool entry. That is the exact node the esp Xtensa
+/// backend cannot select, so the integer-bit-pattern workaround silently
+/// undoes itself whenever the optimiser feels like it. It did: the `z` lane
+/// pair was worked around first, the build went green, and the `w` pair
+/// (`-1/3`, `2/3`) failed the same way the moment `fw-esp32s3` compiled this
+/// with a different inlining context (fat LTO, one codegen unit) than the
+/// builtins image did.
+///
+/// `black_box` is what makes the workaround hold rather than hope: the value
+/// is opaque at the bitcast, so no fold reaches back to the constants and no
+/// pair is ever available to pool. The select itself stays in the integer
+/// domain — two `movi`s and a conditional move, no memory reference.
+///
+/// This is a barrier and it does cost the optimiser something. It is confined
+/// to two words in one builtin, and it expires with
+/// <https://github.com/esp-rs/rust/issues/282>: when that closes and the
+/// toolchain is pinned past it, this helper and the constants above both go
+/// and the literal form returns.
+#[inline(always)]
+fn pick_bits(cond: bool, if_true: u32, if_false: u32) -> f32 {
+    f32::from_bits(core::hint::black_box(if cond { if_true } else { if_false }))
+}
+
 #[inline(always)]
 fn hocevar_p(g: f32, b: f32) -> [f32; 4] {
     let g_lt_b = g < b;
     [
         if g_lt_b { b } else { g },
         if g_lt_b { g } else { b },
-        f32::from_bits(if g_lt_b { P_Z_IF } else { P_Z_ELSE }),
-        f32::from_bits(if g_lt_b { P_W_IF } else { P_W_ELSE }),
+        pick_bits(g_lt_b, P_Z_IF, P_Z_ELSE),
+        pick_bits(g_lt_b, P_W_IF, P_W_ELSE),
     ]
 }
 

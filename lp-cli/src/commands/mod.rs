@@ -1,5 +1,6 @@
 pub mod create;
 pub mod dev;
+pub mod firmware;
 pub mod fwcheck;
 pub mod hardware;
 pub mod profile;

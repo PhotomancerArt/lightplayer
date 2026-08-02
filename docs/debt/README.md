@@ -53,7 +53,9 @@ stay in place when retired; the log is the history).
 
 | Entry | Status | Since | Area | Cost in one line |
 | --- | --- | --- | --- | --- |
+| [brightness-applied-before-gamma](brightness-applied-before-gamma.md) | carried | 2026-08-01 | lpc-engine fixture node (value pipeline) | dim gamma-on fixtures collapse to ~1 wire code (30× resolution loss at brightness 38); projects work around it by shipping gamma off |
 | [lps-probe-perf-test-load-sensitive](lps-probe-perf-test-load-sensitive.md) | carried | 2026-08-01 | lps-probe/tests | spurious full-gate reds whenever a dev server or sibling session runs; ~20% wall-clock headroom |
+| [bundled-firmware-chip-unplumbed](bundled-firmware-chip-unplumbed.md) | carried | 2026-07-27 | studio-web roster cards | the "firmware update available" chip is implemented, tested and story-visible, but `bundled_fw` is never supplied in production — the feature never fires |
 | [story-capture-pipeline](story-capture-pipeline.md) | carried | 2026-07-08 | studio-web/story-capture | ~15 min + flake retries per UI change; visual gates block under load |
 | [web-serial-js-untestable](web-serial-js-untestable.md) | carried | 2026-07-10 | lpa-link/browser-serial | JS session/flash layer ships untested; bugs surface only on hardware |
 | [library-format-migration-gap](library-format-migration-gap.md) | carried | 2026-07-08 | studio library/formats + share envelopes | breaking format changes silently invalidate durable authored data (library projects, pasted envelopes); failures surface as per-node parser errors — entry enumerates every surface and what it checks today |
@@ -68,3 +70,5 @@ stay in place when retired; the log is the history).
 | [project-reload-drops-debug-silently](project-reload-drops-debug-silently.md) | carried | 2026-07-04 | lpa-server project lifecycle | the documented recovery path discards every pending edit and Debug override with no return value, event, or notice |
 | [registry-apis-without-production-callers](registry-apis-without-production-callers.md) | carried | 2026-07-04 | lpc-registry project APIs | `discard_overlay` is public, test-only API that duplicates the `MutationOp::Clear` path and silently drifts from it |
 | [save-notice-assumes-header-dispatch](save-notice-assumes-header-dispatch.md) | carried | 2026-07-04 | lpa-studio-core save flow | "no persisted edits to write" is phrased for the gated header path but the asset editors dispatch the same op ungated |
+| [safe-mode-dim-boot-unproven](safe-mode-dim-boot-unproven.md) | retired | 2026-08-01 | fw-esp32c6/bootctl + lpc-engine safe clamp | RETIRED 2026-08-01: dim boot seen on silicon (serial: record found/consumed/clamped 26/255; heartbeat outputClamp; eyes: dim) |
+| [studio-no-reconnect-after-replug](studio-no-reconnect-after-replug.md) | carried | 2026-07-31 | lpa-link/browser-serial + studio device cards | every bootloader-mode op ends on a replug Studio cannot see; the op card waits forever and the user reloads the tab |

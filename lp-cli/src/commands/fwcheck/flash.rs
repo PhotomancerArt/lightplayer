@@ -10,11 +10,11 @@
 
 use std::path::Path;
 
+use crate::client::esp32_probe::usb_port_info_for;
 use anyhow::{Context, Result, bail};
 use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::{FlashData, FlashSettings, Flasher, parse_partition_table};
 use espflash::targets::{Chip, XtalFrequency};
-use serialport::{SerialPortType, UsbPortInfo};
 
 const CHIP: Chip = Chip::Esp32c6;
 const CONNECT_BAUD: u32 = 115_200;
@@ -100,7 +100,7 @@ fn connect(port: &str, after: ResetAfterOperation) -> Result<Flasher> {
         .with_context(|| format!("open serial port {port}"))?;
     Flasher::connect(
         serial,
-        port_info_for(port),
+        usb_port_info_for(port),
         Some(CONNECT_BAUD),
         /* use_stub  */ true,
         /* verify    */ false,
@@ -110,27 +110,6 @@ fn connect(port: &str, after: ResetAfterOperation) -> Result<Flasher> {
         ResetBeforeOperation::DefaultReset,
     )
     .context("espflash connect")
-}
-
-/// Resolve `UsbPortInfo` from the OS port list: espflash picks its reset
-/// strategy by USB PID (USB-Serial-JTAG vs classic DTR/RTS).
-fn port_info_for(port_name: &str) -> UsbPortInfo {
-    serialport::available_ports()
-        .ok()
-        .into_iter()
-        .flatten()
-        .find(|port| port.port_name == port_name)
-        .and_then(|port| match port.port_type {
-            SerialPortType::UsbPort(info) => Some(info),
-            _ => None,
-        })
-        .unwrap_or(UsbPortInfo {
-            vid: 0,
-            pid: 0,
-            serial_number: None,
-            manufacturer: None,
-            product: None,
-        })
 }
 
 struct FlashProgress {

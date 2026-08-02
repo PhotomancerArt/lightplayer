@@ -1,5 +1,11 @@
 //! LPIR [`LpirOp`] → [`VInst`] lowering (M1 subset).
 //!
+//! **This module is the `FloatMode::Q32` half only.** A GLSL `float` here *is*
+//! an integer — Q16.16 in a GPR — and every "float" op below is integer
+//! arithmetic. Native IEEE f32 lowering is [`crate::lower_f32`], behind
+//! `float-f32`; `compile_module` picks between the two on the mode parameter.
+//! See the crate README's float-mode seam section.
+//!
 //! # Q32 op lowering policy
 //!
 //! For each Q32 LPIR op the backend chooses one of four strategies:

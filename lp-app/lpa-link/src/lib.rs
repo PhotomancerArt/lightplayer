@@ -14,8 +14,9 @@ pub mod stream;
 
 #[cfg(feature = "device-session")]
 pub use device_session::{
-    DeviceDeadlines, DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceManageOutcome,
-    DeviceMode, DeviceSession, DeviceSnapshot, DeviceState, DeviceTimers, IncompatibleReason,
+    BootloaderEvidence, DeviceDeadlines, DeviceEvent, DeviceEventSink, DeviceLineOrigin,
+    DeviceLinkMode, DeviceManageOutcome, DeviceMode, DeviceSession, DeviceSnapshot, DeviceState,
+    DeviceTimers, IncompatibleReason,
 };
 #[cfg(feature = "device-session-host")]
 pub use provider::connection::{LinkClientTransport, LinkServerConnection};
@@ -25,6 +26,7 @@ pub use provider::endpoint::LinkEndpoint;
 pub use provider::endpoint::LinkEndpointId;
 pub use provider::endpoint::LinkEndpointStatus;
 pub use provider::error::LinkError;
+pub use provider::flash_region::LinkFlashRegion;
 pub use provider::log::{LinkLogEntry, LinkLogLevel};
 pub use provider::management_event::{
     LinkManagementEvent, LinkManagementEventSink, emit_management_result_events,
@@ -32,8 +34,8 @@ pub use provider::management_event::{
 pub use provider::management_progress::LinkManagementProgress;
 pub use provider::management_request::LinkManagementRequest;
 pub use provider::management_result::{
-    LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest, LinkManagementResult,
-    LinkRawFilesystemEraseResult,
+    LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest,
+    LinkManagementResult, LinkRawFilesystemEraseResult, LinkRawFilesystemReadResult,
 };
 pub use provider::operation::{LinkCapabilities, LinkOperation};
 pub use provider::provider::LinkProvider;

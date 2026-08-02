@@ -68,6 +68,11 @@ its own Cargo feature, all default-on:
 | `node-clock` | `ClockNode` |
 | `node-shader` | `ShaderNode`, `ComputeShaderNode` |
 
+The build's resulting gate set is introspectable:
+`lpc_engine::supported_features()` (`src/features.rs`) derives the enabled
+engine-owned `lpc_model::LpFeature`s from the same `cfg!` facts as the gates
+themselves, for the firmware manifest and `ServerHello` capability reporting.
+
 Gating is **removal-only**: switching one off drops that node kind's runtime
 code and its exclusive dependencies from the build; it never changes what a
 default build (`default-features = true`, the normal host/studio/test build)

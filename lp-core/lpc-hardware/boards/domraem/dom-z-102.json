@@ -1,0 +1,155 @@
+{
+  "id": "domraem/dom-z-102",
+  "target": "esp32",
+  "vendor": "domraem",
+  "product": "DOM-Z-102",
+  "description": "Domraem DOM-Z-102 classic-ESP32 (LX6, rev v3.x, 4 MB flash) 4-output WS281x controller \u2014 the classic bring-up roadmap's desk board and WLED-class deployment exemplar. Data terminals are silkscreened IO18/IO16/IO14/IO2 (top to bottom of the DATA group), verified against a photo of the desk unit; GPIO0=OPT and GPIO1/3=UART are standard-wiring inference, though the UART link itself is hardware-verified through the onboard CH340K bridge (0x1A86:0x7522). An IO12 screw terminal at the top of the right rail drives the onboard relay (product note: \"Relay configuration (to GPIO12)\"; verified against Yona's sketch of the physical board, correcting an earlier IO13 photo misread). It is deliberately omitted here: GPIO12 is the classic ESP32's MTDI strap pin, which selects flash voltage at reset, so driving it has boot implications that need hardware verification before this manifest offers it. The display sidecar draws it non-claimable. GPIO capabilities are listed only for pins the board actually exposes. macOS needs the WCH VCP driver before the CH340K serial port appears at all; see the fw-esp32v3 README.",
+  "board_label": [
+    {
+      "label": "IO18",
+      "gpio": "/gpio/18",
+      "status": "assigned",
+      "note": "data channel 1 (top of the DATA group)"
+    },
+    {
+      "label": "IO16",
+      "gpio": "/gpio/16",
+      "status": "assigned",
+      "note": "data channel 2"
+    },
+    {
+      "label": "IO14",
+      "gpio": "/gpio/14",
+      "status": "assigned",
+      "note": "data channel 3"
+    },
+    {
+      "label": "IO2",
+      "gpio": "/gpio/2",
+      "status": "assigned",
+      "note": "data channel 4 (bottom); classic-ESP32 strapping pin (boot mode); must be low/floating at reset, which a WS281x data line satisfies \u2014 fine as an output once booted"
+    }
+  ],
+  "gpio": [
+    {
+      "address": "/gpio/0",
+      "display_label": "GPIO0",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO0"
+      ],
+      "reserved_reason": "BOOT strapping pin, wired to the board's BOOT button (silkscreen BOOT/RESET, stacked); not exposed as an output terminal"
+    },
+    {
+      "address": "/gpio/1",
+      "display_label": "GPIO1",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO1",
+        "U0TXD"
+      ],
+      "reserved_reason": "UART0 TX into the CH340K bridge \u2014 the host serial link; driving it drops the link"
+    },
+    {
+      "address": "/gpio/2",
+      "display_label": "IO2",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO2",
+        "GPIO2"
+      ]
+    },
+    {
+      "address": "/gpio/3",
+      "display_label": "GPIO3",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO3",
+        "U0RXD"
+      ],
+      "reserved_reason": "UART0 RX from the CH340K bridge \u2014 the host serial link; driving it drops the link"
+    },
+    {
+      "address": "/gpio/14",
+      "display_label": "IO14",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO14",
+        "GPIO14"
+      ]
+    },
+    {
+      "address": "/gpio/16",
+      "display_label": "IO16",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO16",
+        "GPIO16"
+      ]
+    },
+    {
+      "address": "/gpio/18",
+      "display_label": "IO18",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO18",
+        "GPIO18"
+      ]
+    }
+  ],
+  "resource": [
+    {
+      "address": "/rmt/ws281x0",
+      "display_label": "RMT WS281x 0",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x1",
+      "display_label": "RMT WS281x 1",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x2",
+      "display_label": "RMT WS281x 2",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
+      "address": "/rmt/ws281x3",
+      "display_label": "RMT WS281x 3",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    }
+  ]
+}

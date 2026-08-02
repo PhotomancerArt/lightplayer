@@ -284,28 +284,114 @@ fn capture_frames_arch(_buf: &mut [u32]) -> usize {
 // (`lp-xt/lp-xt-emu/src/executor/window.rs`, `save_slot`), which was dual-run
 // against S3 silicon to depth 100 in the Xtensa backport spike.
 
-/// Internal SRAM as the D-bus sees it — SRAM1 `0x3FC8_8000..0x3FCF_0000` plus
-/// SRAM2 `0x3FCF_0000..0x3FD0_0000` (ESP32-S3 TRM, "System and Memory"). Task
-/// stacks live here. PSRAM (`0x3C00_0000..`) is deliberately **not** accepted:
-/// nothing in this firmware puts a stack there, and widening the window only
-/// buys a larger space in which garbage can look valid.
-#[cfg(any(target_arch = "xtensa", test))]
-const S3_DRAM_START: u32 = 0x3FC8_8000;
-#[cfg(any(target_arch = "xtensa", test))]
-const S3_DRAM_END: u32 = 0x3FD0_0000;
+// ---------------------------------------------------------------------------
+// Chip memory windows
+// ---------------------------------------------------------------------------
+//
+// Everything above this point — the window spill, the base-save-area chain,
+// the region-bit restore — is pure windowed-ABI and byte-identical on LX6 and
+// LX7. The only thing that differs between an ESP32-S3 and a classic ESP32 is
+// *where* the six window boundaries sit.
+//
+// They are picked by a cargo feature rather than sniffed at runtime, because a
+// firmware image targets exactly one chip and the wrong window set does not
+// fail loudly. It reports **zero frames** — which `panic_path::print_frames`
+// then renders as "the walk ran and rejected everything", i.e. "the stack was
+// unreadable". That sentence would be confidently wrong; the truth would be
+// "this walker was calibrated for a different chip". A silent miscalibration
+// that reads as a real forensic result is worse than no walker at all, which
+// is why the choice is explicit at the dependency line.
+//
+// `xt-map-esp32-classic` selects the classic ESP32 (LX6); the default is the
+// ESP32-S3 (LX7). A build that enables neither and runs on classic silicon is
+// the failure this comment exists to prevent.
+//
+// Both sets are *compiled* on every Xtensa and host build and only the alias
+// below is cfg'd, so the host test suite bounds-checks the classic constants
+// even though no host build ever selects them. Constants nothing can execute
+// are exactly the kind that rot.
 
-/// Internal SRAM as the I-bus sees it: SRAM0 `0x4037_0000..0x4038_0000` and
-/// SRAM1 `0x4038_0000..0x403E_0000`.
-#[cfg(any(target_arch = "xtensa", test))]
-const S3_IRAM_START: u32 = 0x4037_0000;
-#[cfg(any(target_arch = "xtensa", test))]
-const S3_IRAM_END: u32 = 0x403E_0000;
+// `xt_map` is the window set this build's walker is calibrated for. Plain
+// comments rather than doc comments on purpose: rustfmt sorts these two
+// imports alphabetically, so a `///` here would drift onto whichever arm
+// happens to sort first.
+#[cfg(all(any(target_arch = "xtensa", test), feature = "xt-map-esp32-classic"))]
+use esp32_classic_map as xt_map;
+#[cfg(all(
+    any(target_arch = "xtensa", test),
+    not(feature = "xt-map-esp32-classic")
+))]
+use esp32s3_map as xt_map;
 
-/// External flash through the instruction cache: `0x4200_0000..0x4400_0000`.
+/// ESP32-S3 (LX7) windows — the default.
 #[cfg(any(target_arch = "xtensa", test))]
-const S3_FLASH_START: u32 = 0x4200_0000;
+#[cfg_attr(feature = "xt-map-esp32-classic", allow(dead_code))]
+mod esp32s3_map {
+    /// Internal SRAM as the D-bus sees it — SRAM1 `0x3FC8_8000..0x3FCF_0000`
+    /// plus SRAM2 `0x3FCF_0000..0x3FD0_0000` (ESP32-S3 TRM, "System and
+    /// Memory"). Task stacks live here. PSRAM (`0x3C00_0000..`) is deliberately
+    /// **not** accepted: nothing in this firmware puts a stack there, and
+    /// widening the window only buys a larger space in which garbage can look
+    /// valid.
+    pub const DRAM_START: u32 = 0x3FC8_8000;
+    pub const DRAM_END: u32 = 0x3FD0_0000;
+
+    /// Internal SRAM as the I-bus sees it: SRAM0 `0x4037_0000..0x4038_0000` and
+    /// SRAM1 `0x4038_0000..0x403E_0000`.
+    pub const IRAM_START: u32 = 0x4037_0000;
+    pub const IRAM_END: u32 = 0x403E_0000;
+
+    /// External flash through the instruction cache: `0x4200_0000..0x4400_0000`.
+    pub const FLASH_START: u32 = 0x4200_0000;
+    pub const FLASH_END: u32 = 0x4400_0000;
+}
+
+/// Classic ESP32 (LX6) windows — `fw-esp32v3`.
+///
+/// From the ESP32 TRM §1.3.2, "Embedded Memory" address mapping. Every bound
+/// here is architectural, matching how the S3 set above is derived: these are
+/// the ranges the *silicon* can execute or stack in, not the ranges this
+/// firmware's linker segments happen to occupy. A tighter window would reject
+/// real frames the moment a segment moved.
 #[cfg(any(target_arch = "xtensa", test))]
-const S3_FLASH_END: u32 = 0x4400_0000;
+#[cfg_attr(not(feature = "xt-map-esp32-classic"), allow(dead_code))]
+mod esp32_classic_map {
+    /// Internal SRAM as the D-bus sees it — SRAM2 `0x3FFA_E000..0x3FFE_0000`
+    /// (200 KB) plus SRAM1 `0x3FFE_0000..0x4000_0000` (128 KB). esp-hal's
+    /// `dram_seg` (`0x3FFB_0000..0x3FFE_0000`) sits inside it, and so does the
+    /// `dram2_seg` the JIT's code region overlaps.
+    ///
+    /// RTC fast RAM's D-bus alias (`0x3FF8_0000`, 8 KB — where the recovery
+    /// ledger itself lives) is **not** included: no stack is ever placed there,
+    /// and the walker must not accept a save area inside the very region it is
+    /// about to write a crash record into.
+    pub const DRAM_START: u32 = 0x3FFA_E000;
+    pub const DRAM_END: u32 = 0x4000_0000;
+
+    /// Internal SRAM as the I-bus sees it: SRAM0 `0x4008_0000..0x400A_0000`
+    /// (128 KB) and SRAM1 `0x400A_0000..0x400C_0000` (128 KB).
+    ///
+    /// Both halves matter on this chip. SRAM1's I-bus alias is where
+    /// `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` installs JIT'd
+    /// shader code (`0x400A_1000..0x400B_8000`), so a frame that faulted inside
+    /// a compiled shader lands in this window and is reported rather than
+    /// silently dropped.
+    ///
+    /// Internal ROM (`0x4000_0000..0x4008_0000`, 512 KB across ROM0 and ROM1)
+    /// is excluded for the same reason as on the S3, and the exclusion is
+    /// load-bearing in the same way: a zeroed `a0` restores to `0x4000_0000`,
+    /// and accepting ROM would turn the chain terminator into a plausible
+    /// frame. RTC fast RAM's I-bus alias (`0x400C_0000`, 8 KB) is excluded too
+    /// — nothing here executes from it.
+    pub const IRAM_START: u32 = 0x4008_0000;
+    pub const IRAM_END: u32 = 0x400C_0000;
+
+    /// External flash through the instruction cache: `0x400D_0000..0x40C0_0000`
+    /// (11 MB of IROM). This is where `.text` actually lives on this image, so
+    /// it is the window most frames fall in.
+    pub const FLASH_START: u32 = 0x400D_0000;
+    pub const FLASH_END: u32 = 0x40C0_0000;
+}
 
 /// Bytes in a `CALLn`/`CALLXn` instruction. The saved return address points at
 /// the instruction *after* the call, so reporting `ra - 3` makes `addr2line`
@@ -314,16 +400,17 @@ const S3_FLASH_END: u32 = 0x4400_0000;
 #[cfg(any(target_arch = "xtensa", test))]
 const XT_CALL_INST_BYTES: u32 = 3;
 
-/// Is `pc` inside a range the S3 can execute LightPlayer code from?
+/// Is `pc` inside a range this chip can execute LightPlayer code from?
 ///
-/// Internal ROM (`0x4000_0000..0x4008_0000`) is executable but deliberately
-/// **excluded**: no frame in this firmware returns into ROM, and accepting it
-/// would both widen the garbage-looks-valid window by 512 KB and make a zeroed
-/// `a0` (which the region fix-up turns into `0x4000_0000`) look like a real
-/// frame instead of the chain terminator it is.
+/// Internal ROM is executable on both chips but deliberately **excluded** from
+/// both [`xt_map`] sets: no frame in this firmware returns into ROM, and
+/// accepting it would both widen the garbage-looks-valid window and make a
+/// zeroed `a0` (which the region fix-up turns into `0x4000_0000`) look like a
+/// real frame instead of the chain terminator it is.
 #[cfg(any(target_arch = "xtensa", test))]
-fn is_valid_esp32s3_text(pc: u32) -> bool {
-    (S3_IRAM_START..S3_IRAM_END).contains(&pc) || (S3_FLASH_START..S3_FLASH_END).contains(&pc)
+fn is_valid_xt_text(pc: u32) -> bool {
+    (xt_map::IRAM_START..xt_map::IRAM_END).contains(&pc)
+        || (xt_map::FLASH_START..xt_map::FLASH_END).contains(&pc)
 }
 
 /// Is `sp` a stack pointer we are willing to read a base save area from?
@@ -332,15 +419,15 @@ fn is_valid_esp32s3_text(pc: u32) -> bool {
 /// room below for `[sp-16, sp)`, so a caller that passes this check may read
 /// the save area unconditionally.
 #[cfg(any(target_arch = "xtensa", test))]
-fn is_valid_esp32s3_stack(sp: u32) -> bool {
-    sp % 16 == 0 && (S3_DRAM_START + 16..S3_DRAM_END).contains(&sp)
+fn is_valid_xt_stack(sp: u32) -> bool {
+    sp % 16 == 0 && (xt_map::DRAM_START + 16..xt_map::DRAM_END).contains(&sp)
 }
 
 /// Walk the windowed-ABI base-save-area chain, starting from a frame whose
 /// return address is `ra` and whose stack pointer is `sp`.
 ///
 /// `read_u32` reads a 4-byte-aligned word; it is only ever called for addresses
-/// that already passed [`is_valid_esp32s3_stack`], so implementations may read
+/// that already passed [`is_valid_xt_stack`], so implementations may read
 /// raw memory without further checks. Splitting it out is what lets the host
 /// test suite drive this against a synthetic stack.
 ///
@@ -353,18 +440,19 @@ fn walk_save_area_chain(buf: &mut [u32], ra: u32, sp: u32, read_u32: impl Fn(u32
     let mut count = 0;
 
     while count < buf.len() {
-        // Restore the region bits `CALLn` did not store. Everything the S3
-        // executes — internal SRAM's I-bus alias and the flash cache window —
-        // lives in region 1, so this is a constant. A wrong guess cannot leak
-        // through: the result is bounds-checked immediately below.
+        // Restore the region bits `CALLn` did not store. Everything either
+        // chip executes — internal SRAM's I-bus alias and the flash cache
+        // window — lives in region 1 (`0x4xxx_xxxx`) on both the S3 and the
+        // classic, so this is a constant, not a per-chip fact. A wrong guess
+        // cannot leak through: the result is bounds-checked immediately below.
         let pc = (ra & 0x3FFF_FFFF) | 0x4000_0000;
-        if !is_valid_esp32s3_text(pc) {
+        if !is_valid_xt_text(pc) {
             break;
         }
         buf[count] = pc.saturating_sub(XT_CALL_INST_BYTES);
         count += 1;
 
-        if !is_valid_esp32s3_stack(sp) {
+        if !is_valid_xt_stack(sp) {
             break;
         }
         let next_ra = read_u32(sp - 16);
@@ -375,7 +463,7 @@ fn walk_save_area_chain(buf: &mut [u32], ra: u32, sp: u32, read_u32: impl Fn(u32
         // is used: a save area whose stack pointer is garbage is not a save
         // area, and reporting the return address next to it would be exactly
         // the plausible-looking-garbage failure this walk exists to avoid.
-        if next_sp <= sp || !is_valid_esp32s3_stack(next_sp) {
+        if next_sp <= sp || !is_valid_xt_stack(next_sp) {
             break;
         }
         ra = next_ra;
@@ -395,7 +483,7 @@ fn walk_save_area_chain(buf: &mut [u32], ra: u32, sp: u32, read_u32: impl Fn(u32
 #[cfg(target_arch = "xtensa")]
 pub fn walk_frames_from(buf: &mut [u32], ra: u32, sp: u32) -> usize {
     // SAFETY: `walk_save_area_chain` only calls this for addresses that passed
-    // `is_valid_esp32s3_stack`, i.e. 16-aligned words inside internal SRAM.
+    // `is_valid_xt_stack`, i.e. 16-aligned words inside internal SRAM.
     walk_save_area_chain(buf, ra, sp, |addr| unsafe {
         (addr as *const u32).read_volatile()
     })
@@ -403,7 +491,10 @@ pub fn walk_frames_from(buf: &mut [u32], ra: u32, sp: u32) -> usize {
 
 /// How many nested windowed calls guarantee every live window has spilled.
 ///
-/// The S3 (LX7) has a 64-entry physical register file = 16 `WindowBase` units.
+/// Both supported chips have a 64-entry physical register file = 16
+/// `WindowBase` units (LX7 on the S3, LX6 on the classic — the register file
+/// is one of the things the two cores do *not* differ on, which is why this
+/// depth is not in [`xt_map`]).
 /// Each nested call advances `WindowBase` by its call increment — 1 for
 /// `call4`, 2 for `call8`, 3 for `call12` — and `ENTRY` spills whichever live
 /// frame still owns the units the new frame claims. Sixteen nested calls
@@ -456,7 +547,8 @@ fn force_window_spill() {
     let _ = core::hint::black_box(spill_step(WINDOW_SPILL_DEPTH));
 }
 
-/// Xtensa (ESP32-S3 / LX7) windowed-ABI walk.
+/// Xtensa windowed-ABI walk (LX7 on the ESP32-S3, LX6 on the classic ESP32 —
+/// the walk is identical; only [`xt_map`]'s bounds differ).
 ///
 /// Spills the register windows, then follows the base save-area chain from
 /// this frame's live `a0`/`a1`. Frame 0 is the return address into *this*
@@ -647,7 +739,7 @@ mod tests {
 
         for frame in &buf[..count] {
             assert!(
-                is_valid_esp32s3_text(*frame),
+                is_valid_xt_text(*frame),
                 "reported {frame:#010x}, outside IRAM and the flash cache window",
             );
         }
@@ -711,8 +803,8 @@ mod tests {
 
         // The seed return address is still reportable; nothing is read.
         assert_eq!(walk(&stack, RA_INNER, 0x2000_0000, &mut buf), 1);
-        assert_eq!(walk(&stack, RA_INNER, S3_DRAM_END, &mut buf), 1);
-        assert_eq!(walk(&stack, RA_INNER, S3_DRAM_START, &mut buf), 1);
+        assert_eq!(walk(&stack, RA_INNER, xt_map::DRAM_END, &mut buf), 1);
+        assert_eq!(walk(&stack, RA_INNER, xt_map::DRAM_START, &mut buf), 1);
     }
 
     #[test]
@@ -751,33 +843,105 @@ mod tests {
 
     #[test]
     fn xtensa_text_window_excludes_rom_dram_and_psram() {
-        assert!(is_valid_esp32s3_text(S3_IRAM_START));
-        assert!(is_valid_esp32s3_text(S3_IRAM_END - 4));
-        assert!(is_valid_esp32s3_text(S3_FLASH_START));
-        assert!(is_valid_esp32s3_text(S3_FLASH_END - 4));
+        assert!(is_valid_xt_text(xt_map::IRAM_START));
+        assert!(is_valid_xt_text(xt_map::IRAM_END - 4));
+        assert!(is_valid_xt_text(xt_map::FLASH_START));
+        assert!(is_valid_xt_text(xt_map::FLASH_END - 4));
 
-        assert!(!is_valid_esp32s3_text(0x4000_0000), "internal ROM");
-        assert!(!is_valid_esp32s3_text(S3_IRAM_START - 4));
-        assert!(!is_valid_esp32s3_text(S3_IRAM_END));
-        assert!(!is_valid_esp32s3_text(S3_FLASH_END));
-        assert!(!is_valid_esp32s3_text(0x3FCC_0000), "DRAM");
-        assert!(!is_valid_esp32s3_text(0x3C00_0000), "PSRAM");
+        assert!(!is_valid_xt_text(0x4000_0000), "internal ROM");
+        assert!(!is_valid_xt_text(xt_map::IRAM_START - 4));
+        assert!(!is_valid_xt_text(xt_map::IRAM_END));
+        assert!(!is_valid_xt_text(xt_map::FLASH_END));
+        assert!(!is_valid_xt_text(0x3FCC_0000), "DRAM");
+        assert!(!is_valid_xt_text(0x3C00_0000), "PSRAM");
     }
 
     #[test]
     fn xtensa_stack_window_requires_alignment_and_headroom() {
-        assert!(is_valid_esp32s3_stack(S3_DRAM_START + 16));
-        assert!(is_valid_esp32s3_stack(S3_DRAM_END - 16));
+        assert!(is_valid_xt_stack(xt_map::DRAM_START + 16));
+        assert!(is_valid_xt_stack(xt_map::DRAM_END - 16));
 
         assert!(
-            !is_valid_esp32s3_stack(S3_DRAM_START),
+            !is_valid_xt_stack(xt_map::DRAM_START),
             "no room for [sp-16, sp)"
         );
-        assert!(!is_valid_esp32s3_stack(S3_DRAM_END));
+        assert!(!is_valid_xt_stack(xt_map::DRAM_END));
         assert!(
-            !is_valid_esp32s3_stack(S3_DRAM_START + 20),
+            !is_valid_xt_stack(xt_map::DRAM_START + 20),
             "not 16-aligned"
         );
-        assert!(!is_valid_esp32s3_stack(0));
+        assert!(!is_valid_xt_stack(0));
+    }
+
+    /// Every window is non-empty and correctly ordered.
+    #[test]
+    fn both_chip_maps_are_ordered() {
+        for (name, start, end) in [
+            ("s3 dram", esp32s3_map::DRAM_START, esp32s3_map::DRAM_END),
+            ("s3 iram", esp32s3_map::IRAM_START, esp32s3_map::IRAM_END),
+            ("s3 flash", esp32s3_map::FLASH_START, esp32s3_map::FLASH_END),
+            (
+                "classic dram",
+                esp32_classic_map::DRAM_START,
+                esp32_classic_map::DRAM_END,
+            ),
+            (
+                "classic iram",
+                esp32_classic_map::IRAM_START,
+                esp32_classic_map::IRAM_END,
+            ),
+            (
+                "classic flash",
+                esp32_classic_map::FLASH_START,
+                esp32_classic_map::FLASH_END,
+            ),
+        ] {
+            assert!(start < end, "{name}: empty or inverted window");
+        }
+    }
+
+    /// Running the S3 map on classic silicon rejects **everything** — which is
+    /// the miscalibration that actually happens, and the reason
+    /// `xt-map-esp32-classic` exists.
+    ///
+    /// ⚠️ The converse is NOT true and must not be asserted: the classic's IROM
+    /// window is 11 MB (`0x400D_0000..0x40C0_0000`) and architecturally
+    /// **contains** the S3's IRAM (`0x4037_0000..0x403E_0000`). A build that ran
+    /// the classic map on an S3 would therefore accept some genuine S3 IRAM
+    /// addresses and report a partially-plausible walk. There is no window
+    /// arithmetic that removes that — the address spaces really do overlap — so
+    /// the protection against it is the feature being opt-in and named for one
+    /// chip, not a bound anyone should try to tighten here.
+    #[test]
+    fn the_s3_map_accepts_no_classic_text_address() {
+        for (name, addr) in [
+            ("classic iram start", esp32_classic_map::IRAM_START),
+            ("classic iram end", esp32_classic_map::IRAM_END - 4),
+            ("classic irom start", esp32_classic_map::FLASH_START),
+            ("classic .text (~1.7 MB image)", 0x4020_0000),
+        ] {
+            assert!(
+                !(esp32s3_map::IRAM_START..esp32s3_map::IRAM_END).contains(&addr)
+                    && !(esp32s3_map::FLASH_START..esp32s3_map::FLASH_END).contains(&addr),
+                "{name} ({addr:#010x}) would pass the S3 walker's bounds"
+            );
+        }
+    }
+
+    /// The classic's I-bus window must contain the JIT's code region.
+    ///
+    /// `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` installs compiled
+    /// shader code at I-bus `0x400A_1000..0x400B_8000`. A shader that faults is
+    /// one of the likelier things to want a backtrace for on this chip, and it
+    /// is the one address range that is *not* a linker-placed section — so if
+    /// the JIT region ever moves out from under this window, the walk would drop
+    /// exactly the frames that matter without saying anything.
+    #[test]
+    fn the_classic_iram_window_covers_the_jit_code_region() {
+        const JIT_IBUS_START: u32 = 0x400A_1000;
+        const JIT_IBUS_END: u32 = 0x400B_8000;
+
+        assert!(esp32_classic_map::IRAM_START <= JIT_IBUS_START);
+        assert!(JIT_IBUS_END <= esp32_classic_map::IRAM_END);
     }
 }

@@ -25,6 +25,7 @@ pub mod failure_injection;
 pub mod fake_device_core;
 pub mod fake_device_script;
 pub mod fake_device_stream;
+pub(crate) mod fake_filesystem_image;
 
 pub use failure_injection::FakeFailurePlan;
 pub use fake_device_core::FakeEsp32Device;
