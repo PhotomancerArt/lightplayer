@@ -1,25 +1,24 @@
-# Classic ESP32: per-project heap grew 8,136 B on main, cutting the LED ceiling
+---
+status: fixed
+found: 2026-08-01      # how: hardware-walk
+fixed: this change
+area: lpc-engine (dataflow/resolver) + fw-esp32v3
+class: capacity-regression
+related:
+  - 2026-08-01-classic-rmt-open-fault.md
+  - ../adr/2026-08-01-esp32v3-flash-budget.md
+  - ../debt/resolver-payload-cache-costs-ram.md
+---
+# Classic ESP32: per-project heap grew 8,136 B, cutting the LED ceiling by ~90
 
-- **Date:** 2026-08-01
-- **Status:** OPEN — measured and bracketed, not yet attributed to a single PR
-- **Board:** DOM-Z-102 (classic ESP32 rev v3.1), `fw-esp32v3`
-- **Found by:** M6/M4-P3 re-measurement after merging `origin/main` into
-  `claude/infallible-bose-84a52e`
+**Board:** DOM-Z-102 (classic ESP32 rev v3.1), `fw-esp32v3`, 110 KB arena.
 
 ## Symptom
 
-`projects/test/quad60-v3` (4 channels × 60 = **240 LEDs**) ran on this board
-with 7,384 B of heap to spare before the merge. After merging main it **OOMs**:
-
-```
-cause=oom  "alloc 360 bytes failed"  →  safe mode
-```
-
-The board recovers correctly (the `lp-recovery` ledger attributes it, gates the
-path, and stays reachable at 889 fps) — but the configuration that passed
-M4-P3 no longer fits.
-
-## Measurement
+`projects/test/quad60-v3` (4 × 60 = 240 LEDs) ran with 7,384 B of heap to
+spare at G-M4. After merging `origin/main` into `claude/infallible-bose-84a52e`
+it OOM'd — `cause=oom "alloc 360 bytes failed"` → safe mode — and later failed
+at project *load*.
 
 Identical project (`quad-strips-v3`, 4 × 30 = 120 LEDs), clean boot with
 auto-load, same board:
@@ -27,83 +26,162 @@ auto-load, same board:
 | | pre-merge | merged main | delta |
 |---|---|---|---|
 | free heap | 18,128 B | **9,992 B** | **−8,136 B** |
-| used | 94,508 B | 102,644 B | +8,136 B |
 | fps | 13 | **20** | +54 % |
 | `tick` | 69 ms | 47 ms | −22 ms |
 
-**Idle heap is unchanged** — 102,156 B free before, 102,144 B after, with no
-project loaded. So this is **not** static/`.bss` growth; it is per-project
-allocation. Something the project-load or render path allocates now costs
-~8 KB more, and simultaneously runs ~30 % faster.
+**Idle heap was unchanged** (102,156 B → 102,144 B with no project), so this
+was never static or `.bss` growth. Faster *and* fatter is the signature of
+work being cached rather than recomputed, and that is exactly what it was.
 
-That pairing — faster and fatter — is the signature of work being cached or
-precomputed rather than recomputed per frame.
+## Root cause
 
-## Not the gamma fix
+**PR #243, "resolver persists resolution across frames"** — and nothing else.
+Bisected on silicon 2026-08-02 by merging successive `main` commits into the
+branch tip that measured 18,128 B (`cee3ab922`) and reading the heartbeat:
 
-PR #252 (16-bit gamma) was isolated on identical firmware by flipping
-`gamma_correction` on the same board:
+| point | free heap |
+|---|---|
+| `cee3ab922` (pre-merge tip) | 18,128 B ← reproduces the row above exactly |
+| + main through #241 (`a03ddd7c6`) | 17,928 B |
+| + **#243** (`9eff1d8cd`) | **9,992 B** ← reproduces the other row exactly |
+| + everything through #252 (`c6ca6ef9e`) | 9,992 B |
+| `origin/main` @ `f6b783ec2` | 9,852 B |
 
-| | fps | `tick` | free | used |
-|---|---|---|---|---|
-| gamma **on** | 19 | 49 ms | 6,268 B | 106,368 B |
-| gamma **off** | 20 | 48 ms | 6,264 B | 106,372 B |
+Two points bracketed it; the other twelve merges in the window — including
+all four f32 PRs (#241/#249/#251/#253), the 16-bit gamma (#252) and the
+io_task JSON lift (#245) — cost nothing measurable. The original candidate
+list was wrong: "changes shader codegen" was a plausible story, not evidence.
 
-**4 bytes of heap and ~1 fps** — inside noise. `GAMMA16` is a `const` in
-`.rodata`; it costs flash (image 1,707,792 → 1,720,448 B, which also includes
-main's other changes) and no heap. Gamma is exonerated.
+**The allocation**, measured on the device rather than inferred, for
+`quad-strips-v3` (56 interned queries):
 
-## Candidates
-
-Six PRs merged into main since `08779e059`:
-
-| PR | subject | prior |
+| table | live entries | payload bytes |
 |---|---|---|
-| #249 | f32 native math roadmap | **likely** — changes shader codegen |
-| #251 | f32 probe2 capture | likely |
-| #253 | M8 xtn f32 targets | likely |
-| #250 | hardware board selection | unlikely (UI/metadata) |
-| #236 | boards catalog page M3 | unlikely (UI/metadata) |
-| #252 | 16-bit gamma | **ruled out by measurement** |
+| `structural` (authored-def reads, deep copies) | 27 | 4,606 |
+| `values` (this frame's productions) | 18 | 2,664 |
+| the three index `Vec`s | — | 2,648 |
 
-The three f32 PRs are the natural suspects: hardware-float shader execution
-would plausibly both speed up `tick` and change what the JIT/engine holds
-resident. Note memory `f32-native-math-roadmap` records "+65,680 B for an
-unreachable path" on the S3 — that was *flash*, and this is *heap*, so it is a
-different measurement, not the same one resurfacing.
+≈ 9.9 KB, before `Rc` headers and allocator rounding, where the pre-#243
+resolver held **none** of it between frames. The rest of the difference is
+that a resolver which drops each answer as it is consumed never holds all 56
+answers at once; this one does, by design.
 
-**Not bisected.** Doing so needs a firmware build + flash + upload + read per
-point (~8 min), and `quad-strips-v3` / `quad60-v3` do not exist on main, so
-each point also needs the project copied in. Left for whoever owns the f32
-work rather than guessed at here.
+The regression is not a leak and not a mistake — it is a trade that was
+priced on a part with memory to spare and then shipped to one without.
 
-## Why it matters
+## Not fragmentation — measured, not assumed
 
-The classic's binding constraint is heap, not flash or RMT
-(`docs/adr/2026-08-01-esp32v3-flash-budget.md`). At ≈89.5 B per LED, 8,136 B is
-**~91 LEDs of capacity** — roughly a third of the chip's usable budget, gone
-without a compensating feature on this chip. It moved the measured ceiling from
-"~240 comfortable / ~300 at the edge" to somewhere between 120 and 240.
+The natural reading of "requested 3,072, free 5,304, failed" is a shredded
+heap. It is wrong here. `fw-esp32v3`'s OOM report now carries
+`largest_free`, binary-searched out of the allocator (`largest_free_block`),
+and on this board it tracks `free` to within ~13 bytes at every sample —
+idle, loaded, and at the moment of failure:
 
-The S3 and C6 have the arena to absorb it and will not notice, which is exactly
-why it needs recording here: the classic is the family's canary for per-project
-heap growth, in the same way it was the canary for the per-channel white-point
-LUT.
+```
+allocation failed: requested=3072 align=4 free=2672 used=109964 largest_free=2662
+```
+
+The classic's heap is essentially one block. Its OOMs are exhaustion.
+
+## Fix
+
+`resolver-payload-cache`, a removal-only Cargo gate on `lpc-engine`
+forwarded by `lpa-server`, defaulting **on**. It splits the cache into the
+two different bargains it had been carrying under one name:
+
+- **decisions** (routes, the query intern table, `static_paths`) — no
+  resident cost, worth 15 ms of the 22 ms;
+- **payloads** (the two value tables) — worth the remaining 7 ms, for
+  8.3 KB.
+
+`fw-esp32v3` omits the gate. `fw-esp32s3` and `fw-esp32c6` list it, so
+nothing changes for them or for any host build.
+
+Measured on the DOM-Z-102, `quad-strips-v3`:
+
+| | free heap | fps | `tick` |
+|---|---|---|---|
+| before the cache existed | 18,128 B | 13 | 69 ms |
+| **this change** | **18,220 B** | **17** | **54 ms** |
+| `main` today | 9,852 B | 20 | 47 ms |
+
+The board ends up ahead of where it was before the regression on *both*
+axes, and the shader still compiles on-device in 62 ms with all four RMT
+channels open.
+
+## Regression coverage
+
+`cached_and_uncached_resolution_agree_frame_for_frame`
+(`lpc-engine/src/engine/resolution_persistence_tests.rs`) now runs the same
+scene in three modes — cached, uncached, and decisions-only — and demands
+they agree frame for frame. A shipped mode that is not in the differential
+is an untested mode, and decisions-only is the one most able to go wrong:
+it is the only mode where a hit and a miss can disagree *within* one frame.
+
+There is no automated guard on the heap number itself. The measurement
+needs silicon; see Reproduce below.
+
+## Lesson
+
+A cache is priced in two currencies and this codebase had only been reading
+one of them. #243 was measured, defensible, and a clear win on its own
+terms — nobody wrote down what it cost in bytes because on the S3 and the C6
+nothing noticed. The classic noticed within a day, exactly as it did for the
+per-channel white-point LUT. **The classic is the family's canary for
+per-project heap; a per-frame optimisation that lands without a heap number
+next to its cycle number is unpriced.**
+
+The second lesson is about the report. `free` on a first-fit heap is a sum,
+and a sum cannot answer "will this fit". Adding `largest_free` cost nine
+lines and permanently separates two failure modes with different fixes — and
+it immediately paid for itself twice: it ruled out fragmentation here, and
+it surfaced the `retry_ok` anomaly below, which nobody would have looked for.
+
+## Still open: `examples/basic` does not compile on this board
+
+Reclaiming 8.3 KB does **not** make `examples/basic` (241 LEDs, 4,092 B of
+GLSL) compile on the classic, because at first boot the compile happens
+*before* the resolver has cached anything — the reclaimed bytes are not
+available yet. It fails the same way before and after this change, and it
+also failed at M3 (`7aff9b10e`), so this is not a regression: that shader
+has never compiled on this chip. The M3 proof used `quad-strips-v3`'s
+1,267 B shader, which still works.
+
+The failure is worth its own record because of what the new instrument says
+about it:
+
+```
+allocation failed: requested=3072 align=4 free=3508 used=109128 \
+  largest_free=3495 retry_ok=true context=shader node: compile
+[OOM] RETRY SUCCEEDED: the same 3072-byte request fits now.
+```
+
+`retry_ok=true` means the allocator refused a request it satisfies
+microseconds later, with no intervening free. The frame below it is
+`ChunkedVec<lps_glsl::hir::types::HirExpr>::push` → `RawVec::grow_one`
+inside `TypeCtx::type_call` — the GLSL type checker doubling a chunk while
+type-checking the `psrdnoise` call chain. Whatever the mechanism (a
+first-fit edge at the very bottom of the arena is the leading guess), the
+board is out of memory in every practical sense: 44,488 B of project
+resident plus a ~65 KB compile working set against a 112,640 B arena.
+Filed separately as
+`2026-08-02-classic-oom-retry-succeeds.md`.
 
 ## Reproduce
 
 ```bash
 just build-fw-esp32v3
-espflash flash --chip esp32 --port <port> --partition-table lp-fw/fw-esp32v3/partitions.csv \
-  --flash-size 4mb --baud 921600 --after hard-reset \
-  target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
+cd lp-fw/fw-esp32v3 && espflash flash --chip esp32 --port <port> \
+  --partition-table partitions.csv --flash-size 4mb --baud 921600 \
+  --after hard-reset ../../target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
 espflash erase-region --port <port> 0x310000 0xF0000
-cargo run -p lp-cli -- upload projects/test/quad60-v3 serial:<port>
+espflash reset --port <port>          # power-on class: also voids any path quarantine
+cargo run -p lp-cli -- upload projects/test/quad-strips-v3 serial:<port>
 ```
 
-Read the board's heartbeat `memory` field. To read without reflashing, the fd
-must be held open across `stty` — a bare `stty` then `cat` reopens the port and
-loses the baud:
+Then read `[MEM] free=… used=… largest_free=…`, which `fw-esp32v3` prints
+once per heartbeat. The fd must be held open across `stty` — a bare `stty`
+then `cat` reopens the port and loses the baud:
 
 ```bash
 exec 3<> /dev/cu.wchusbserial1130
@@ -112,16 +190,6 @@ timeout 30 cat <&3 > out.log
 exec 3<&-
 ```
 
-## Update 2026-08-01 (late): the regression compounded
-
-Re-measured during the RMT-priority plan's P4 classic baseline, on a branch
-carrying everything merged through #266: `quad60-v3` (240 LEDs) — which ran
-with 7,384 B free at G-M4 and OOM'd after the f32 merges — **now fails at
-project LOAD**: `alloc 360 bytes failed, free=904, used=111736`. Free heap
-at the failure point dropped from ~7.4 KB to ~0.9 KB, so merges since the
-first measurement (candidates: 16-bit gamma #252, linear brightness #265,
-io_task JSON lift #245) consumed roughly another 6.5 KB of per-project heap.
-Two independent increments now total ~15 KB (~165 LEDs of capacity) against
-the M6 ledger's original numbers. Still unbisected; the classic remains the
-family's canary and the per-LED/per-project heap cost now needs an owner
-before any WLED-class LED-count claim is republished.
+⚠️ Every `espflash` touch costs the ledger two sub-second boots; after a few
+the board latches safe mode and skips auto-load. `espflash reset` is a
+power-on-class ledger wipe, which is the clean way to start a measurement.
