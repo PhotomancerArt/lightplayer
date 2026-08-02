@@ -243,11 +243,19 @@ as it links" is *not* the real ceiling. 110 KB is the setting that keeps
 `.stack` near fw-esp32s3's proven 52,896 B, which the Xtensa windowed ABI's
 large frames and the recursive GLSL parser both want.
 
-The tempting next lever is esp-hal's `dram2_seg` (`0x3FFE_7E30`, 98,768 B) as
-a second `esp_alloc` region. **It overlaps
-`lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT`**
-(`0x3FFE_8000..0x3FFF_F000` D-bus), so any such region must stop below
-`0x3FFE_8000` or the allocator and the JIT will hand out the same bytes.
+That lever has been pulled. esp-hal's `dram2_seg` (`0x3FFE_7E30`, 98,768 B)
+is now a **second `esp_alloc` region** worth 64 KiB, added at boot by
+`add_sram1_heap_region`. It became available on 2026-08-02 when
+`lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` was measured down from
+92 KiB to 32 KiB (`0x3FFE_8000..0x3FFF_0000` D-bus), freeing the rest of the
+segment.
+
+The two must abut without overlapping, or the allocator and the JIT hand out
+the same bytes. That is no longer a rule to remember: the heap span comes from
+`CodeRegion::reclaimable_heap_span()` and const-asserts in `codemem_esp32` pin
+it to the region's end, so a resize that forgets the boundary fails to compile.
+Total heap is `HEAP_SIZE + 65,536` = 178,176 B; see
+`docs/adr/2026-08-01-esp32v3-flash-budget.md`.
 
 ## Flashing
 
