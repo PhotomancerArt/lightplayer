@@ -38,10 +38,18 @@ pub const CAUSE_UNKNOWN: u32 = 5;
 
 /// Fault-request codes (host → guest).
 pub const FAULT_NONE: u32 = 0;
-/// Panic inside nested recovery frames; caught by the engine boundary.
-pub const FAULT_RECOVERED_PANIC: u32 = 1;
+/// Panic inside nested recovery frames, raised through the engine's
+/// `catch_node_panic_framed` wrapper.
+///
+/// Terminal: the guest resets. It was `FAULT_RECOVERED_PANIC` until
+/// 2026-08-02, when the unwind tier was removed and nothing could recover a
+/// panic in-process any more (ADR `2026-08-02-rv32-firmwares-are-abort-tier`).
+/// It remains distinct from [`FAULT_HARD_PANIC`] because it still goes through
+/// the engine wrapper, which is what proves a red-gated path is denied **up
+/// front** — that arm returns [`FAULT_RESULT_GATED`] without raising anything.
+pub const FAULT_FRAMED_PANIC: u32 = 1;
 /// Panic with an OOM-shaped message inside recovery frames (deterministic
-/// stand-in for allocator exhaustion).
+/// stand-in for allocator exhaustion). Terminal, as above.
 pub const FAULT_OOM_PANIC: u32 = 2;
 /// Infinite loop inside recovery frames; host sees fuel exhaustion (the
 /// emulator analog of a hardware-watchdog reset).
@@ -57,7 +65,7 @@ pub const FAULT_CLEAN_CHILD: u32 = 6;
 /// Fault-result codes (guest → host).
 pub const FAULT_RESULT_NONE: u32 = 0;
 pub const FAULT_RESULT_OK: u32 = 1;
-/// The frames ran and returned an error (e.g. a caught panic).
+/// The frames ran and returned a typed error without panicking.
 pub const FAULT_RESULT_ERROR: u32 = 2;
 /// Entry was denied: the path (or a parent) is gated red.
 pub const FAULT_RESULT_GATED: u32 = 3;

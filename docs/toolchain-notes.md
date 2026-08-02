@@ -32,23 +32,28 @@ names `espup update` rather than working around it.
 
 ## Why nightly
 
-Three features used by `fw-esp32c6` and `fw-emu` are unstable:
+Three unstable features are used by `fw-esp32c6` and `fw-emu`:
 
-1. **`#![feature(alloc_error_handler)]`** — Custom OOM handler that panics normally
-   (the default handler uses `nounwind` panic, which `catch_unwind` can't intercept).
-   Used in `fw-esp32c6/src/main.rs`.
+1. **`-Zbuild-std`** — Rebuilds `core` and `alloc` from source with the flash-budget
+   flags below (`optimize_for_size`, `compiler-builtins-mem`). Configured in
+   `fw-esp32c6/.cargo/config.toml`.
 
-2. **`-Zbuild-std`** — Rebuilds `core` and `alloc` from source with `panic = "unwind"`.
-   The pre-built sysroot for `riscv32imac-unknown-none-elf` uses `panic = "abort"`;
-   mixing strategies causes a linker error. Configured in `fw-esp32c6/.cargo/config.toml`.
+2. **`#![feature(alloc_error_handler)]`** — A custom OOM handler, so an allocation
+   failure is reported with the heap counters attached (requested/free/used/
+   `largest_free`/`retry_ok`) instead of arriving through Rust's default handler as
+   a bare "memory allocation of N bytes failed". See
+   `fw-esp32c6/src/recovery/panic_path.rs`.
 
-3. **`#[lang = eh_personality]`** — Provided by the `unwinding` crate to implement the
-   Itanium EH personality routine in `no_std`. This is a lang item, which is unstable.
+3. **`-Zlocation-detail=none` / `-Zfmt-debug=none`** — Flash-budget flags, worth
+   ~155 KB. See `docs/adr/2026-07-28-esp32c6-flash-budget.md`.
 
-All three are needed for OOM recovery via stack unwinding on ESP32 and the RISC-V
-emulator. See `docs/reports/2026-03-13-esp32-unwinding-implementation.md` for details.
+A fourth used to be here — `#[lang = eh_personality]`, provided by the `unwinding`
+crate — and it was the reason the other three existed in the shape they did. All
+firmware targets are abort tier now
+(`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`), so nothing in the tree
+implements a personality routine or rebuilds `core` for `panic = "unwind"`.
 
-## Why the nightly is pinned (and why it's coupled to `unwinding`)
+## Why the nightly is pinned
 
 The toolchain is pinned to a dated nightly (e.g. `nightly-2026-04-27`), **not** a
 rolling `nightly`. The pin lives in three places that must stay in sync:
@@ -65,38 +70,43 @@ rolling `nightly`. The pin lives in three places that must stay in sync:
   out into a subdirectory, so the action can't auto-read the toml; the date is
   passed explicitly).
 
-The reason it's pinned rather than rolling: this is a `-Zbuild-std` project, and the
-[`unwinding`](https://crates.io/crates/unwinding) crate (our `eh_personality`
-provider) is bound to the nightly `core::intrinsics::catch_unwind` ABI. That
-intrinsic changed its return type from an integer to `bool`:
+The reason it is pinned rather than rolling is now the ordinary one: reproducibility.
+A dated nightly means local `just check` and CI see the same clippy set, so a green
+local run is a real signal, and `-Z` flag behaviour does not shift underneath the
+flash budget.
+
+### It used to be pinned for a much sharper reason
+
+Until 2026-08-02 the pin was **ABI-coupled**. The
+[`unwinding`](https://crates.io/crates/unwinding) crate provided our
+`eh_personality` and was bound to the nightly `core::intrinsics::catch_unwind` ABI,
+which changed its return type from an integer to `bool`:
 
 - `unwinding` **0.2.8** expects the integer form (`catch_unwind(...) == 0`).
 - `unwinding` **0.2.9** expects the `bool` form (`if catch_unwind(...) { ... }`).
 
-So the `unwinding` version and the nightly are a matched pair — there is no single
-`unwinding` that builds on both an old and a new nightly. With an unpinned `nightly`,
-CI silently drifts onto a newer toolchain than local dev and the build-std compile
-breaks (`E0308: expected bool, found integer`). Pinning keeps CI reproducible and in
-lockstep with local.
+There was no single `unwinding` that built on both an old and a new nightly, so the
+crate version and the toolchain date were a matched pair, and drifting produced
+`E0308: expected bool, found integer` inside a build-std compile. That is why
+`bump-nightly` carried a speculative-bump-and-revert search.
+
+`unwinding` is gone with the unwind tier
+(`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`). Nothing in the tree is
+coupled to a nightly's internal ABI any more, and a bump is a one-variable change.
 
 ## Bumping the toolchain
 
-Use the helper — it updates both pins, moves `unwinding` only if the new nightly
-requires it, and validates before you commit:
+Use the helper — it updates every pin and validates before you commit:
 
 ```sh
 just bump-nightly 2026-06-01   # pin to a specific dated nightly
 just bump-nightly              # pin to today's nightly (UTC)
 ```
 
-It (1) rewrites the pin in every `rust-toolchain.toml` (root + per-crate) and the
-workflow, (2) runs `just check` with the current `unwinding` (this compiles
-`unwinding` under build-std
-via `clippy-rv32`, and also surfaces any new clippy lints from the newer nightly),
-(3) only if that fails, advances `unwinding` to the latest `0.2.x` and re-checks, and
-(4) leaves everything in the working tree for review — it never commits. If the new
-nightly can't be made to build (e.g. `unwinding` needs a new *major*, or a new lint
-fires), it reports what to try and reverts only the speculative `unwinding` bump.
+It (1) rewrites the pin in every `rust-toolchain.toml` (root + per-crate, skipping
+esp-channel files) and the workflow, (2) runs `just check`, and (3) leaves everything
+in the working tree for review — it never commits. A failure now means a real
+regression (a new clippy lint, genuine breakage), not a version-matching puzzle.
 
 ## Alternatives considered
 
