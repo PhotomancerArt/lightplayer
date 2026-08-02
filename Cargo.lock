@@ -5895,6 +5895,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "jsonschema",
  "libm",
+ "log",
  "lp-collection 1.0.0",
  "lpc-slot-codegen",
  "lpc-slot-macros",

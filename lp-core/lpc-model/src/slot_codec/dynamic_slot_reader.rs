@@ -199,6 +199,19 @@ where
         else {
             return Err(prop.unknown_field(prop.name(), &expected));
         };
+        // D2 (no authored Debug values): a Debug-role field is session-only
+        // and must never adopt an authored def-file value as its base. Warn
+        // and leave `prop` unconsumed — `PropReader::drop` skips its JSON
+        // value — so the field keeps whatever `create_default`/factory value
+        // it already has (alpha posture: warn, don't hard-reject).
+        if fields[index].role == crate::SlotRole::Debug {
+            log::warn!(
+                "ignoring authored value for debug-role field `{}`: Debug slots are \
+                 session-only and never adopt an authored value as their base",
+                fields[index].name.as_str()
+            );
+            continue;
+        }
         let Some(field_data) = record.field_mut(index) else {
             return Err(syntax_error(format!(
                 "record slot is missing field {:?}",
@@ -540,6 +553,45 @@ mod tests {
         assert_eq!(
             record_value(record, 1),
             LpValue::String(String::from("main"))
+        );
+    }
+
+    /// D2 (no authored Debug values): a Debug-role field's authored value is
+    /// ignored on parse — the field keeps its factory default rather than
+    /// adopting the def-file content — and unrelated sibling fields still
+    /// read normally.
+    #[test]
+    fn dynamic_slot_reader_ignores_authored_debug_role_fields() {
+        let shape_id = crate::SlotShapeId::from_static_name("test.DynamicDebugIgnored");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                shape::record(vec![
+                    shape::field("pin", shape::value(LpType::U32)),
+                    shape::field_with_role(
+                        "rate",
+                        shape::value(LpType::F32),
+                        crate::SlotRole::Debug,
+                    ),
+                ]),
+            )
+            .unwrap();
+
+        let object = read_json(&registry, shape_id, r#"{"pin":18,"rate":9.5}"#);
+
+        let SlotDataAccess::Record(record) = object.data() else {
+            panic!("expected record");
+        };
+        assert_eq!(
+            record_value(record, 0),
+            LpValue::U32(18),
+            "sibling field reads normally"
+        );
+        assert_eq!(
+            record_value(record, 1),
+            LpValue::F32(0.0),
+            "authored debug-role value must not become the base; factory default wins"
         );
     }
 

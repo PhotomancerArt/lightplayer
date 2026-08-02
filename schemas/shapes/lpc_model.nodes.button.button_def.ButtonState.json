@@ -3,6 +3,7 @@
     "fields": [
       {
         "name": "down",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -20,6 +21,7 @@
       },
       {
         "name": "held",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -37,6 +39,7 @@
       },
       {
         "name": "up",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
