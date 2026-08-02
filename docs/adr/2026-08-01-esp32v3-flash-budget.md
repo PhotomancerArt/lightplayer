@@ -157,14 +157,63 @@ out of `.stack`, 504 B.
 A loaded project costs ~79 KB (observed directly: `stop_all_projects` took the
 board from 95 KB used to 16 KB used). Beyond that, **≈89.5 B per LED** — and
 only ~21 B/LED of that is `DisplayPipeline`'s three `Vec<u16>` plus
-`dither_overflow`. The other **~68 B/LED is engine-side and scales with
-`render_size`**; it is unattributed and is the single most valuable RAM lead
-this chip has.
+`dither_overflow`. The other ~68 B/LED is engine-side; it was recorded here as
+unattributed and as the single most valuable RAM lead this chip has.
+**It is attributed as of 2026-08-02 — see the amendment below**, which also
+corrects the "scales with `render_size`" reading.
 
 **Practical ceiling: ~240 LEDs comfortable, ~300 at the edge, 400 impossible.**
 For a WLED-class product claim that number matters more than the channel count,
 and it is a RAM number, not an RMT one — M4-P3 measured RMT refill lag peaking
 at 20 of 64 words (31 % utilisation) with zero trips at 240 LEDs.
+
+### Amendment 2026-08-02 — the per-LED cost is attributed
+
+The ~68 B/LED above is no longer a mystery. Attributed with
+`lp-cli profile --collect alloc --mode all`, diffing the live-allocation set of
+`quad-strips-v3` (120 LEDs) against `quad60-v3` (240 LEDs) by demangled
+callsite — a host measurement, no board time:
+
+| B/LED | Owner |
+|------:|-------|
+| 25.6 | resolved `MappingConfig::PathPoints` — `MapSlot<u32, XySlot>`, 24 B per lamp for 8 B of coordinate |
+| 16.0 | `direct_points` (a second copy of the same positions) |
+| 8.0 | graphics `sample_points` (a third copy, in pixel space) |
+| 8.0 | graphics `sample_out` (RGBA16 results) |
+| 6.0 | `OutputNode::control_samples` |
+| 6.0 | runtime buffer bytes (a second copy of the same colours) |
+| **69.6** | **engine-side total, measured in the emulator** |
+| 21.0 | `DisplayPipeline` — absent from the emulator image, known from source |
+
+Reconciliation: 67.5 engine-side (excluding 2.7 B/LED of map2d JSON text held
+in the *emulator's* RAM filesystem, which is flash-resident on silicon) + 21.0
+`DisplayPipeline` = **88.5 B/LED predicted against 89.5 measured**, within ~1 %.
+
+⚠️ **"Scales with `render_size`" was wrong** for the projects these numbers come
+from. Both use `sampling: "direct"`, which allocates per *mapped lamp*, not per
+canvas pixel. The `render_size`-sized allocations — `precomputed:
+Vec<PixelMappingEntry>` at 4 B per canvas pixel plus a W×H×8 B RGBA16 render
+target per fixture — are on the `TextureArea` path only. That path is a real
+multiplier (a 60×4 canvas driving 60 LEDs allocates 240 entries and a 7,680 B
+texture per fixture) and remains **unmeasured**.
+
+The shape of the waste is duplication, not any single fat buffer: a lamp's
+position is stored three times and its colour twice. Filed as
+[`docs/debt/per-lamp-data-stored-three-times.md`](../debt/per-lamp-data-stored-three-times.md)
+with a costed pay-down order.
+
+**Taken so far (#282): 13 B/LED.** `DisplayPipeline` no longer allocates `prev`
+when interpolation is off or `dither_overflow` when dithering is off (9 B/LED
+for outputs configured that way — which is every output in the test projects),
+and `direct_points` no longer retains a 16-B-per-element allocation for 12 B
+elements (4 B/LED, unconditional). Both are output-identical; the first is
+proven so by a differential test against the previous allocation shape.
+
+> ⚠️ **The post-change figure has NOT been re-measured on silicon.** The desk
+> classic was held by another session throughout this work. Predicted ≈76.5
+> B/LED and a ceiling near 235 LEDs, but **treat the ceiling line above as the
+> current quotable number until a board measurement replaces this note** — the
+> whole point of this ADR is that LED counts are quoted from measured RAM.
 
 ### Radio, if it is ever attempted
 
