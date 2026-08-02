@@ -1,8 +1,8 @@
 ---
-status: open      # narrowed 2026-08-02; the allocator is exonerated, the window is not
+status: open      # root cause CONFIRMED on silicon 2026-08-02 (exhaustion); residual is reporting fidelity only
 found: 2026-08-02      # how: hardware-walk
 area: fw-esp32v3 (esp-alloc / linked_list_allocator) + lps-glsl typeck + lp-collection
-class: report-describes-a-later-heap-than-the-failure
+class: report-describes-a-later-heap-than-the-failure  # underlying failure: plain exhaustion
 related:
   - 2026-08-01-classic-heap-regression-after-f32-merge.md
 ---
@@ -182,22 +182,63 @@ single largest allocation alone is 196,608 B — more than even the two-region
 178,176 B heap of #288 — which is why the flash-budget ADR's "17–50 KB shaders
 are unreachable at any region size" survives this change with a wide margin.
 
+## Silicon, 2026-08-02 (late): it was exhaustion, and the arena was the reason
+
+Measured on the DOM-Z-102 by the #288 session, on the reclaimed two-region heap
+(112,640 → 178,176 B) and **without** this PR's `ChunkedVec` fix:
+
+```
+[shader-node] compilation succeeded (node=NodeId(4), elapsed=188ms,
+  lpir_inst_count=586, final_code_size=6516 bytes, float=fixed)
+```
+
+`examples/basic` **compiles on the classic in 188 ms.** The shader was never
+impossible; it needed more arena than the chip had.
+
+**The number that settles it is the peak, not the total: `[MEM] used` reached
+113,968 B during the compile.** That is more than the *entire* 112,640 B arena
+that preceded #288. So the original failure was **genuine exhaustion**, and that
+holds independent of fragmentation, region layout, or how the free list happened
+to be shaped — a heap that never had 113,968 B could not have run this compile
+under any allocator. The `allocator-refuses-a-request-it-can-serve` framing is
+retired for good, not merely unproven.
+
+It also closes the loop on the report's numbers. At the OOM, `used` was 109,128
+of 112,636 usable. Peak demand is 113,968. The compile was ~1.3 KB past what the
+chip could ever supply, so at the instant `alloc(3072)` returned null the heap
+really was short — and the `free=3508` in the report is the state *after*
+something released, which is exactly what "the report describes a later heap"
+predicted.
+
+**The contiguity hazard did not bite**, and the `largest_free`-not-`free` lens is
+why we knew to check: before the compile, `largest_free=67,584` against the
+24,576 B token vector, so one region held it with room. Had the arena side been
+the depleted one, this could have failed with tens of KB "free".
+
+Two limits the measurement does **not** clear, both recorded rather than
+glossed: it shows the shader *compiles*, not that the project runs end to end
+(the deploy did not report it running — separate upload-acks-but-never-activates
+defect, owned by that session); and it does not show that 240 LEDs were
+impossible before the drift in `main`, only that they fail on `main` today and
+work on that branch.
+
 ## Status
 
-- **Fixed:** the `ChunkedVec` element-vs-byte bound; the probe ordering; the
-  `largest_free` overclaim; the missing free-list read.
-- **Open:** what freed memory between the null return and the handler. The
-  corrected report answers it on the next failure — if `holes` is 1 and
-  `retry_ok` is still true, the window is real and the next step is capturing
-  free/used at the failure site (esp-alloc's `alloc-hooks` feature fires a hook
-  with a null pointer at exactly that moment) rather than in the handler.
-- **Unverified on silicon.** Everything above is host measurement and code
-  reading. Whether `examples/basic` now compiles on the DOM-Z-102 is a hardware
-  question: it needs 44,488 B of project resident plus a compile working set
-  against a 112,640 B arena, and removing a 3 KB request does not by itself
-  make that fit. The same project fails identically at M3 (`7aff9b10e`), so no
-  regression is hiding here — that shader has never compiled on the classic.
-  `projects/test/quad-strips-v3`'s 1,267 B shader still compiles in 62 ms.
+- **Root cause: exhaustion.** The compile's peak working set (113,968 B measured)
+  exceeded the arena (112,636 B usable). Fixed by #288's reclaim, not by
+  anything here.
+- **Fixed here:** the `ChunkedVec` element-vs-byte bound and its power-of-two
+  follow-on; the probe ordering; the `largest_free` overclaim; the missing
+  free-list read.
+- **Open, and now reporting-fidelity only:** what released memory between the
+  null return and the handler's first read. It no longer changes the diagnosis —
+  the shortfall is accounted for — but the window is real, and capturing
+  free/used at the failure site (esp-alloc's `alloc-hooks` fires with a null
+  pointer at exactly that moment) rather than in the handler would close it.
+- **`free_list_shape()` is still unexercised on a genuine two-region OOM.**
+  Nothing failed, which is the good outcome. Forcing one needs a *bigger shader*
+  rather than more LEDs, since the token vector scales with source, not LED
+  count.
 
 **Lesson** — "requested < free" is not evidence of fragmentation, `largest_free`
 is not enough to prove the negative either, and a probe that changes the thing
