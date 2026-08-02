@@ -87,7 +87,7 @@ pub(crate) fn export_package_as(target: ExportTarget, form: ExportForm) {
                     }
                 };
                 // the slug already carries its date stamp — no extra prefix
-                if let Err(error) = trigger_download(&format!("{}.zip", target.slug), &bytes) {
+                if let Err(error) = trigger_zip_download(&format!("{}.zip", target.slug), &bytes) {
                     log::warn!("export download of {} failed: {error:?}", target.slug);
                 }
             }
@@ -111,13 +111,26 @@ pub(crate) fn export_package_as(target: ExportTarget, form: ExportForm) {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn export_package_as(_target: ExportTarget, _form: ExportForm) {}
 
+/// Host builds (story capture, view tests) have no browser to download to.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn trigger_zip_download(_file_name: &str, _bytes: &[u8]) -> Result<(), ()> {
+    Ok(())
+}
+
 /// Download a package as a zip (the gallery card's affordance).
 pub(crate) fn export_package_to_download(card: &UiPackageCard) {
     export_package_as(ExportTarget::from(card), ExportForm::Zip);
 }
 
+/// Hand `bytes` to the browser as a named `.zip` download.
+///
+/// Shared with the device filesystem backup, which produces its zip in core
+/// and only needs the browser half.
 #[cfg(target_arch = "wasm32")]
-fn trigger_download(file_name: &str, bytes: &[u8]) -> Result<(), wasm_bindgen::JsValue> {
+pub(crate) fn trigger_zip_download(
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<(), wasm_bindgen::JsValue> {
     use wasm_bindgen::JsCast;
 
     let parts = js_sys::Array::new();

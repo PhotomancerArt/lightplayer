@@ -130,36 +130,34 @@ impl Drop for HostRuntime {
 }
 
 fn create_memory_server() -> LpServer {
-    // Wire hello payload (sans-IO: injected here, never read ambiently by
+    // Wire hello identity (sans-IO: injected here, never read ambiently by
     // the server). Host runtimes carry no git provenance or stamped
     // identity; fake devices script a uid (see `create_memory_server_with`).
     create_memory_server_with(
         LpFsMemory::new(),
-        lpc_wire::ServerHello {
-            proto: lpc_wire::WIRE_PROTO_VERSION,
-            fw: lpc_wire::FwProvenance {
-                package: "fw-host".to_string(),
-                commit: "unknown".to_string(),
-                dirty: false,
-                profile: if cfg!(debug_assertions) {
-                    "debug".to_string()
-                } else {
-                    "release".to_string()
-                },
+        lpc_wire::HelloIdentity::new(
+            "fw-host",
+            "unknown",
+            false,
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
             },
-            device_uid: None,
-        },
+        ),
     )
 }
 
 /// Build the standard in-memory host server over a caller-supplied
-/// filesystem and wire hello.
+/// filesystem and wire hello identity.
 ///
 /// This is the single construction point for "a real `LpServer` over
 /// `LpFsMemory` with virtual ESP32-C6 hardware": `HostRuntime::start_memory`
 /// uses it with empty defaults; `lpa-link`'s fake device seeds `fs` with
-/// scripted project files and scripts the hello's device uid.
-pub fn create_memory_server_with(fs: LpFsMemory, hello: lpc_wire::ServerHello) -> LpServer {
+/// scripted project files and scripts the hello's device uid and proto.
+/// The hello's capability half is the server's own, derived from the
+/// services wired below — a fake device cannot lie about it.
+pub fn create_memory_server_with(fs: LpFsMemory, identity: lpc_wire::HelloIdentity) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
     let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
         HwRegistry::new(default_esp32c6_hardware_manifest()),
@@ -180,7 +178,7 @@ pub fn create_memory_server_with(fs: LpFsMemory, hello: lpc_wire::ServerHello) -
         Some(radio_service),
         graphics,
     );
-    server.set_hello(hello);
+    server.set_hello_identity(identity);
     server
 }
 

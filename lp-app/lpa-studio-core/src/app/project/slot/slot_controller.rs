@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
-use lpc_model::slot::{SlotFieldShapeView, SlotPersistence};
+use lpc_model::slot::{
+    SlotFieldShapeView, SlotPersistence, effective_persistence, effective_writable,
+};
 use lpc_model::{
     LpType, LpValue, ProductRef, Revision, SlotData, SlotDirection, SlotMapKey, SlotMapKeyShape,
-    SlotName, SlotPath, SlotPathSegment, SlotPolicy, SlotSemantics, SlotShapeLookup,
+    SlotName, SlotPath, SlotPathSegment, SlotRole, SlotSemantics, SlotShapeLookup,
     SlotShapeRegistry, SlotShapeView, SlotValueShape, SlotValueShapeView, ValueEditorHint,
 };
 
@@ -77,7 +79,7 @@ impl Default for SlotControllerState {
 /// Slot controllers are recursive. Containers and leaves both get controllers
 /// so future editing, binding, validation, and expansion state have stable
 /// addressable homes. Each controller also retains the latest mirror-derived
-/// value, shape, semantics, and policy facts needed to project node DTOs without
+/// value, shape, semantics, and role facts needed to project node DTOs without
 /// walking the project mirror a second time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SlotController {
@@ -87,7 +89,7 @@ pub struct SlotController {
     body: SlotControllerBody,
     revision: Option<Revision>,
     semantics: SlotSemantics,
-    policy: SlotPolicy,
+    role: SlotRole,
     value_shape: Option<SlotValueShape>,
     source: UiSlotSourceState,
     publish: Option<UiBindingEndpoint>,
@@ -155,7 +157,7 @@ impl SlotController {
             body: SlotControllerBody::Issue,
             revision: None,
             semantics: context.semantics,
-            policy: context.policy,
+            role: context.role,
             value_shape: None,
             source: UiSlotSourceState::Direct,
             publish: None,
@@ -929,30 +931,49 @@ impl SlotController {
     fn context(&self) -> SlotApplyContext {
         SlotApplyContext {
             semantics: self.semantics,
-            policy: self.policy,
+            role: self.role,
         }
     }
 
     fn apply_context(&mut self, context: SlotApplyContext) {
         self.semantics = context.semantics;
-        self.policy = context.policy;
+        self.role = context.role;
     }
 
+    /// Whether a client may request mutation of this slot: the role allows
+    /// it and the slot's direction is not produced (D1 — direction implies
+    /// read-only regardless of role).
+    fn is_writable(&self) -> bool {
+        effective_writable(self.role, self.semantics.direction)
+    }
+
+    /// Whether this slot is "live": a runtime/session value that ordinary
+    /// save/writeback never persists (a `Debug`-role field, or any produced
+    /// field regardless of role).
+    fn is_live(&self) -> bool {
+        effective_persistence(self.role, self.semantics.direction) == SlotPersistence::Transient
+    }
+
+    /// Context for one record field, inheriting from the parent's ambient
+    /// context (`self.context()`) when the field declares neither its own
+    /// semantics nor its own role, else taking the field's own declared
+    /// values directly. Either way the result is safe by construction: a
+    /// produced field is always effectively read-only and live regardless of
+    /// its role (D1, [`Self::is_writable`]/[`Self::is_live`]), so no field
+    /// ever needs a role override to compensate for its direction — a state
+    /// field that leaves everything default inherits `Produced` from the
+    /// `State` root's ambient context ([`SlotApplyContext::for_root`]) and a
+    /// field that declares `#[slot(produced)]` itself carries it directly.
     fn field_context(&self, field: SlotFieldShapeView<'_>) -> SlotApplyContext {
         let semantics = field.semantics();
-        let policy = field.policy();
+        let role = field.role();
         let default_semantics = semantics == SlotSemantics::default();
-        let default_policy = policy == SlotPolicy::default();
-        let mut context =
-            if self.address.root == ProjectSlotRoot::State && default_semantics && default_policy {
-                self.context()
-            } else {
-                SlotApplyContext { semantics, policy }
-            };
-        if context.semantics.direction == SlotDirection::Produced && default_policy {
-            context.policy = SlotPolicy::read_only_transient();
+        let default_role = role == SlotRole::default();
+        if self.address.root == ProjectSlotRoot::State && default_semantics && default_role {
+            self.context()
+        } else {
+            SlotApplyContext { semantics, role }
         }
-        context
     }
 
     fn ui_config_slot_body(&self, edits: &SlotEditJoin<'_>) -> UiConfigSlotBody {
@@ -1104,9 +1125,9 @@ impl SlotController {
             return None;
         };
         Some(if *present {
-            UiSlotOptionality::included(self.policy.writable)
+            UiSlotOptionality::included(self.is_writable())
         } else {
-            UiSlotOptionality::excluded(self.policy.writable)
+            UiSlotOptionality::excluded(self.is_writable())
         })
     }
 
@@ -1169,12 +1190,12 @@ impl SlotController {
     }
 
     fn ui_field_state(&self, edits: &SlotEditJoin<'_>) -> UiSlotFieldState {
-        let mut state = if self.policy.writable {
+        let mut state = if self.is_writable() {
             UiSlotFieldState::editable()
         } else {
             UiSlotFieldState::readonly()
         };
-        state = state.with_live(self.policy.persistence == SlotPersistence::Transient);
+        state = state.with_live(self.is_live());
 
         // Join order: edit buffer (Saving/Error + invalid reason), then the
         // overlay mirror (Dirty), then — for composite slots only — the
@@ -1398,23 +1419,30 @@ impl SlotChildApply<'_> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SlotApplyContext {
     semantics: SlotSemantics,
-    policy: SlotPolicy,
+    role: SlotRole,
 }
 
 impl SlotApplyContext {
+    /// Ambient context for a slot root, inherited by any field beneath it
+    /// that declares neither its own semantics nor its own role (see
+    /// [`SlotController::field_context`]). The `State` root's ambient
+    /// direction is `Produced`, so any state field that leaves both
+    /// undeclared still presents read-only and live: [`effective_writable`]
+    /// and [`effective_persistence`] fold direction in regardless of role
+    /// (D1 — direction implies the constraint, not a stored role).
     fn for_root(root: &ProjectSlotRoot) -> Self {
         match root {
             ProjectSlotRoot::Def => Self {
                 semantics: SlotSemantics::local(),
-                policy: SlotPolicy::writable_persisted(),
+                role: SlotRole::Setting,
             },
             ProjectSlotRoot::State => Self {
                 semantics: SlotSemantics::produced(),
-                policy: SlotPolicy::read_only_transient(),
+                role: SlotRole::Setting,
             },
             ProjectSlotRoot::Other(_) => Self {
                 semantics: SlotSemantics::local(),
-                policy: SlotPolicy::read_only_persisted(),
+                role: SlotRole::Fixed,
             },
         }
     }
@@ -1496,6 +1524,7 @@ fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
         | ValueEditorHint::ControlProduct => UiSlotEditorHint::Auto,
         ValueEditorHint::Dimensions => UiSlotEditorHint::Dimensions,
         ValueEditorHint::Affine2d => UiSlotEditorHint::Affine2d,
+        ValueEditorHint::Power => UiSlotEditorHint::Power,
         ValueEditorHint::Number { min, max, step } => UiSlotEditorHint::Number {
             min: min.map(|value| value.0),
             max: max.map(|value| value.0),

@@ -29,6 +29,7 @@ use crate::{
 
 use super::device_client_io::DeviceClientIo;
 use super::device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
+use super::device_link_mode::DeviceLinkMode;
 use super::device_mode::{ChannelUseGuard, DeviceMode, DeviceModeGuard};
 use super::device_readiness::{BootLineClassifier, HelloGate, gate_first_frame};
 use super::device_snapshot::DeviceSnapshot;
@@ -103,11 +104,13 @@ impl DeviceSession {
     pub fn snapshot(&self) -> DeviceSnapshot {
         let state = self.shared.state();
         let session = self.shared.session.borrow().clone();
+        let link_mode = self.shared.passive_link_mode();
         DeviceSnapshot {
             endpoint_status: DeviceSnapshot::derive_endpoint_status(&state, &session),
             state,
             session,
             recent_lines: self.shared.classifier.borrow().recent_lines().to_vec(),
+            link_mode,
         }
     }
 
@@ -219,6 +222,13 @@ pub(crate) struct DeviceShared {
 }
 
 impl DeviceShared {
+    /// The passive link-mode read: what boot lines and the hello say,
+    /// without probing. See [`DeviceLinkMode::from_boot_lines`].
+    pub(super) fn passive_link_mode(&self) -> DeviceLinkMode {
+        let classifier = self.classifier.borrow();
+        DeviceLinkMode::from_boot_lines(&classifier, self.state().is_ready())
+    }
+
     pub(crate) fn state(&self) -> DeviceState {
         self.state.borrow().clone()
     }

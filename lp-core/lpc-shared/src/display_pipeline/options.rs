@@ -13,7 +13,15 @@ pub struct DisplayPipelineOptions {
     pub interpolation_enabled: bool,
     /// Enable temporal dithering
     pub dithering_enabled: bool,
-    /// Enable white point LUT
+    /// Apply [`Self::white_point`] to each channel.
+    ///
+    /// ⚠️ The name is historical and the wire format is stuck with it. It once
+    /// selected a 257-entry lookup table; that table was measured to compute
+    /// nothing but `value * white_point` and was replaced by the multiply
+    /// (`docs/defects/2026-08-01-classic-rmt-open-fault.md`). What the flag has
+    /// always actually gated is whether the white point is applied **at all** —
+    /// `false` means channels pass through unbalanced, not "balance by a
+    /// cheaper method". Renaming it would break every project file on disk.
     pub lut_enabled: bool,
 }
 

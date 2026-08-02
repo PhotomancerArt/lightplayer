@@ -33,6 +33,7 @@ use crate::provider::management_result::LinkManagementResult;
 use crate::{LinkError, LinkProvider};
 
 use super::device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
+use super::device_link_mode::DeviceLinkMode;
 use super::device_session::DeviceSession;
 use super::device_state::DeviceState;
 
@@ -104,6 +105,68 @@ impl DeviceSession {
         }
         let state = self.shared.drive_readiness().await;
         Ok(DeviceManageOutcome { result, state })
+    }
+
+    /// Escalate to an **authoritative** link-mode determination by asking
+    /// the device directly.
+    ///
+    /// Runs the esptool SYNC handshake, which only a ROM/stub bootloader
+    /// answers. This is the one way to distinguish "in download mode" from
+    /// "not responding": USB-Serial-JTAG parts present identical enumeration
+    /// data in both states, so nothing short of talking to the chip can tell
+    /// them apart.
+    ///
+    /// **This reboots the device.** The handshake drives DTR/RTS to enter
+    /// download mode, and on USB-Serial-JTAG that reset drops USB
+    /// enumeration. It therefore takes [`DeviceMode::Management`] and
+    /// rebuilds the link afterwards, exactly like [`Self::manage`] — never
+    /// call it speculatively on a healthy board. `DeviceLinkMode::App`
+    /// already answers `probe_would_help() == false` for this reason.
+    ///
+    /// A probe that goes unanswered is NOT proof of `Unknown`: a device
+    /// happily running the app ignores SYNC too. So on probe failure this
+    /// reports whatever the rebuilt link's PASSIVE classification says,
+    /// which is the honest answer rather than a guess.
+    ///
+    /// [`DeviceMode::Management`]: super::device_mode::DeviceMode::Management
+    pub async fn probe_link_mode(
+        &self,
+        sink: DeviceEventSink,
+    ) -> Result<DeviceLinkMode, LinkError> {
+        let _mode = self.try_begin_management()?;
+        let session_id = self.shared.session_id();
+        self.shared.release_link().await;
+        let probed = self
+            .shared
+            .connector()
+            .probe_target(&session_id, fold_into_device_events(&sink))
+            .await;
+
+        // The probe rebooted the device whether or not it answered, so the
+        // link must be rebuilt either way before anything can be said about
+        // the device's state.
+        if let Err(error) = self.shared.rebuild_link().await {
+            sink.emit(DeviceEvent::LogLine {
+                line: format!("device link rebuild failed after probe: {error}"),
+                origin: DeviceLineOrigin::Link,
+            });
+            // A probe that answered is still authoritative; the rebuild
+            // failing does not unsay it.
+            return probed.map(DeviceLinkMode::from_sync_probe);
+        }
+        let state = self.shared.drive_readiness().await;
+
+        match probed {
+            Ok(chip_name) => Ok(DeviceLinkMode::from_sync_probe(chip_name)),
+            Err(error) => {
+                sink.emit(DeviceEvent::LogLine {
+                    line: format!("no bootloader answered ({error}); classifying passively"),
+                    origin: DeviceLineOrigin::Link,
+                });
+                let _ = state;
+                Ok(self.shared.passive_link_mode())
+            }
+        }
     }
 
     /// Rebuild the link on the same endpoint and re-run readiness: recovery

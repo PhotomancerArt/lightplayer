@@ -207,6 +207,8 @@ fn readme_lens_card() -> UiDeviceCard {
             name: "evening-glow".to_string(),
         }),
         fw: None,
+        hardware: None,
+        safe_clamp: None,
         sim: true,
         console_tail: vec![
             line(0.0, "engine: project loaded · 241 points"),
@@ -270,6 +272,8 @@ fn readme_home_view() -> UiHomeView {
                 name: "2026-07-04-1102-evening-glow".to_string(),
             }),
             fw: None,
+            hardware: None,
+            safe_clamp: None,
             sim: true,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -284,6 +288,8 @@ fn readme_home_view() -> UiHomeView {
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
+            hardware: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -300,5 +306,6 @@ fn readme_home_view() -> UiHomeView {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     }
 }

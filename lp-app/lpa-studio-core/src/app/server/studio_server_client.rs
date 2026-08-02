@@ -31,6 +31,11 @@ pub struct StudioServerClient {
     client: LpClient<Box<dyn ClientIo>>,
     protocol: String,
     pending_logs: Rc<RefCell<Vec<UiLogDraft>>>,
+    /// The latest heartbeat-reported recovery status. Heartbeats ride
+    /// request outcomes (unsolicited id-0 frames drained during reads), so
+    /// this refreshes on every wire operation — the lens pull cadence while
+    /// editing, the attach sequence on connect.
+    last_recovery: Option<lpc_wire::server::RecoveryStatus>,
 }
 
 impl StudioServerClient {
@@ -40,6 +45,7 @@ impl StudioServerClient {
             client: LpClient::new(io),
             protocol: protocol.into(),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
+            last_recovery: None,
         }
     }
 
@@ -57,6 +63,7 @@ impl StudioServerClient {
             client: LpClient::new(io),
             protocol,
             pending_logs,
+            last_recovery: None,
         })
     }
 
@@ -68,6 +75,7 @@ impl StudioServerClient {
             client: LpClient::new(session.client_io()),
             protocol: connection_protocol(&session.connection().kind),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
+            last_recovery: None,
         }
     }
 
@@ -100,9 +108,9 @@ impl StudioServerClient {
             .iter()
             .find(|project| project.handle == handle)
             .map(|project| project.path.clone());
-        let mut logs = map_client_events(deploy.events);
-        logs.extend(map_client_events(inventory.events));
-        logs.extend(map_client_events(loaded.events));
+        let mut logs = self.absorb_events(deploy.events);
+        logs.extend(self.absorb_events(inventory.events));
+        logs.extend(self.absorb_events(loaded.events));
         logs.extend(self.take_pending_logs());
 
         Ok(LoadedDemoProject {
@@ -117,6 +125,22 @@ impl StudioServerClient {
 
     pub fn take_pending_logs(&mut self) -> Vec<UiLogDraft> {
         core::mem::take(&mut *self.pending_logs.borrow_mut())
+    }
+
+    /// Map side-channel events to console drafts, remembering the latest
+    /// heartbeat-reported recovery status on the way through (the card's
+    /// safe-mode evidence).
+    fn absorb_events(&mut self, events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
+        if let Some(recovery) = latest_recovery(&events) {
+            self.last_recovery = Some(recovery.clone());
+        }
+        map_client_events(events)
+    }
+
+    /// The latest heartbeat-reported recovery status, if any heartbeat has
+    /// arrived on this client yet.
+    pub fn recovery_status(&self) -> Option<&lpc_wire::server::RecoveryStatus> {
+        self.last_recovery.as_ref()
     }
 
     /// Open a library project on the runtime: whole-project replace →
@@ -140,14 +164,14 @@ impl StudioServerClient {
             .await
             .map_err(map_client_error)?;
         let handle = deploy.value;
-        let mut logs = map_client_events(deploy.events);
+        let mut logs = self.absorb_events(deploy.events);
 
         let hash = self
             .client
             .hash_package(storage_id)
             .await
             .map_err(map_client_error)?;
-        logs.extend(map_client_events(hash.events));
+        logs.extend(self.absorb_events(hash.events));
         if hash.value != expected_hash {
             return Err(map_client_error(
                 lpa_client::client_error::ClientError::Protocol(format!(
@@ -164,7 +188,7 @@ impl StudioServerClient {
             .pull_changed_files(storage_id, lpc_model::FsVersion::new(i64::MAX - 1))
             .await
             .map_err(map_client_error)?;
-        logs.extend(map_client_events(version_probe.events));
+        logs.extend(self.absorb_events(version_probe.events));
         let (_, synced_version) = version_probe.value;
 
         let inventory = self
@@ -172,7 +196,7 @@ impl StudioServerClient {
             .project_inventory_read(handle)
             .await
             .map_err(map_client_error)?;
-        logs.extend(map_client_events(inventory.events));
+        logs.extend(self.absorb_events(inventory.events));
 
         // Resolve the server filesystem root by handle (same as the demo
         // path): the library slug is a display identity, not a server path,
@@ -188,7 +212,7 @@ impl StudioServerClient {
             .iter()
             .find(|project| project.handle == handle)
             .map(|project| project.path.clone());
-        logs.extend(map_client_events(loaded.events));
+        logs.extend(self.absorb_events(loaded.events));
         logs.extend(self.take_pending_logs());
 
         Ok(LoadedLibraryProject {
@@ -214,7 +238,7 @@ impl StudioServerClient {
             .await
             .map_err(map_client_error)?;
         let (updates, version) = outcome.value;
-        let mut logs = map_client_events(outcome.events);
+        let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(PulledFiles {
             updates,
@@ -234,7 +258,7 @@ impl StudioServerClient {
             .replace_project_files(project_id, files)
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(outcome.events);
+        let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(logs)
     }
@@ -252,7 +276,7 @@ impl StudioServerClient {
             .fs_write(path, bytes.to_vec())
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(outcome.events);
+        let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(logs)
     }
@@ -267,7 +291,7 @@ impl StudioServerClient {
             .hash_package(project_id)
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(outcome.events);
+        let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok((outcome.value, logs))
     }
@@ -403,7 +427,7 @@ impl StudioServerClient {
             .set_log_level(wire_log_level(level))
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(outcome.events);
+        let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(logs)
     }
@@ -414,7 +438,7 @@ impl StudioServerClient {
             .project_list_loaded()
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(loaded.events);
+        let mut logs = self.absorb_events(loaded.events);
         logs.extend(self.take_pending_logs());
         Ok(LoadedProjectCatalog {
             projects: loaded
@@ -435,9 +459,8 @@ impl StudioServerClient {
             .project_inventory_read(WireProjectHandle::new(choice.handle_id))
             .await
             .map_err(map_client_error)?;
-        self.pending_logs
-            .borrow_mut()
-            .extend(map_client_events(inventory.events));
+        let drafts = self.absorb_events(inventory.events);
+        self.pending_logs.borrow_mut().extend(drafts);
         Ok(LoadedRunningProject {
             fs_root: lpc_model::LpPathBuf::from(choice.project_id.as_str()),
             project_id: choice.project_id,
@@ -457,7 +480,7 @@ impl StudioServerClient {
             .project_read(WireProjectHandle::new(handle_id), request)
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(read.events);
+        let mut logs = self.absorb_events(read.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioProjectRead {
             events: read.value,
@@ -476,7 +499,7 @@ impl StudioServerClient {
             .project_overlay_read(WireProjectHandle::new(handle_id))
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(read.events);
+        let mut logs = self.absorb_events(read.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioOverlayRead {
             overlay: read.value.overlay,
@@ -501,7 +524,7 @@ impl StudioServerClient {
             )
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(response.events);
+        let mut logs = self.absorb_events(response.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioOverlayMutation {
             result: response.value.result,
@@ -560,7 +583,7 @@ impl StudioServerClient {
             .project_node_command(WireProjectHandle::new(handle_id), node, command)
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(response.events);
+        let mut logs = self.absorb_events(response.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioNodeCommand {
             response: response.value,
@@ -573,7 +596,7 @@ impl StudioServerClient {
     /// (`ProjectController::asset_content`).
     pub async fn fs_read(&mut self, path: &lpc_model::LpPath) -> Result<StudioFsRead, UiError> {
         let read = self.client.fs_read(path).await.map_err(map_client_error)?;
-        let mut logs = map_client_events(read.events);
+        let mut logs = self.absorb_events(read.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioFsRead {
             data: read.value,
@@ -593,7 +616,7 @@ impl StudioServerClient {
             .project_create_node(WireProjectHandle::new(handle_id), request)
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(outcome.events);
+        let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioCreateNode {
             response: outcome.value,
@@ -613,7 +636,7 @@ impl StudioServerClient {
             .project_remove_node(WireProjectHandle::new(handle_id), request)
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(outcome.events);
+        let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioRemoveNode {
             response: outcome.value,
@@ -633,7 +656,7 @@ impl StudioServerClient {
             .project_inventory_read(WireProjectHandle::new(handle_id))
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(inventory.events);
+        let mut logs = self.absorb_events(inventory.events);
         logs.extend(self.take_pending_logs());
         Ok((node_def_artifacts(&inventory.value), logs))
     }
@@ -649,7 +672,7 @@ impl StudioServerClient {
             .project_overlay_commit(WireProjectHandle::new(handle_id))
             .await
             .map_err(map_client_error)?;
-        let mut logs = map_client_events(response.events);
+        let mut logs = self.absorb_events(response.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioOverlayCommit {
             result: response.value.result,
@@ -683,7 +706,7 @@ impl StudioServerClient {
             .await
         {
             PullOutcome::Completed { events, observed } => {
-                let mut logs = map_client_events(observed);
+                let mut logs = self.absorb_events(observed);
                 logs.extend(self.take_pending_logs());
                 Ok(StudioProjectReadOutcome::Completed(StudioProjectRead {
                     events,
@@ -763,6 +786,18 @@ fn connection_protocol(kind: &LinkConnectionKind) -> String {
     }
 }
 
+/// The newest heartbeat-reported recovery status in an event batch (the
+/// safe-mode clamp evidence [`StudioServerClient::recovery_status`] keeps).
+fn latest_recovery(events: &[ClientEvent]) -> Option<&lpc_wire::server::RecoveryStatus> {
+    events.iter().rev().find_map(|event| match event {
+        ClientEvent::Heartbeat {
+            recovery: Some(recovery),
+            ..
+        } => Some(recovery),
+        _ => None,
+    })
+}
+
 /// Map side-channel client events to console log drafts.
 ///
 /// Healthy heartbeats are telemetry, not log content: they arrive every
@@ -791,7 +826,7 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
                 UiLogOrigin::Server,
                 format!(
                     "server hello: proto={} package={} commit={} dirty={}",
-                    hello.proto, hello.fw.package, hello.fw.commit, hello.fw.dirty
+                    hello.proto, hello.build.package, hello.build.commit, hello.build.dirty
                 ),
             )),
             ClientEvent::Heartbeat { recovery, .. } => match recovery {
@@ -904,6 +939,19 @@ mod tests {
         ];
 
         assert!(map_client_events(events).is_empty());
+    }
+
+    #[test]
+    fn the_newest_heartbeat_recovery_report_wins_the_batch() {
+        let mut clamped = recovery_status(RecoveryLevelWire::Green, false, None);
+        clamped.output_clamp = Some(26);
+        let events = vec![
+            heartbeat_event(Some(recovery_status(RecoveryLevelWire::Green, false, None))),
+            heartbeat_event(Some(clamped.clone())),
+        ];
+
+        assert_eq!(latest_recovery(&events), Some(&clamped));
+        assert_eq!(latest_recovery(&[]), None);
     }
 
     #[test]
@@ -1030,6 +1078,7 @@ mod tests {
             reset_reason: "power-on".to_string(),
             boot_count: 1,
             safe_mode,
+            output_clamp: None,
             last_crash,
             paths: Vec::new(),
         }

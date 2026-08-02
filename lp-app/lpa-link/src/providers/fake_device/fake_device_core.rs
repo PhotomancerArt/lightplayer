@@ -100,6 +100,17 @@ impl FakeEsp32Device {
         self.lock().reset_current();
     }
 
+    /// The scripted LightPlayer state, when the device is in that boot
+    /// state. Backs the fake raw-filesystem read: the image it returns holds
+    /// the same files the fake server serves, so a backup taken through the
+    /// fake contains what the device actually "has".
+    pub(crate) fn light_player_state(&self) -> Option<FakeLightPlayerState> {
+        match &self.lock().script.boot {
+            FakeBootState::LightPlayer(state) => Some(state.clone()),
+            _ => None,
+        }
+    }
+
     /// Consume the scripted one-shot manage failure, if any.
     pub(crate) fn take_manage_failure(&self) -> Option<String> {
         self.lock().script.manage_failure.take()
@@ -262,11 +273,11 @@ impl FakeDeviceCore {
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
-        let hello = lpc_wire::ServerHello {
-            proto: lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION),
-            fw: lp.provenance.clone(),
-            device_uid: identity.as_ref().map(|identity| identity.uid.clone()),
-        };
+        let hello_identity = lp
+            .provenance
+            .clone()
+            .with_proto(lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION))
+            .with_device_uid(identity.as_ref().map(|identity| identity.uid.clone()));
         let start = HostRuntime::start_with_server(move || {
             let fs = LpFsMemory::new();
             for (relative, bytes) in &files {
@@ -286,7 +297,7 @@ impl FakeDeviceCore {
                     eprintln!("[fake-device] failed to stamp identity: {error}");
                 }
             }
-            let mut server = create_memory_server_with(fs, hello);
+            let mut server = create_memory_server_with(fs, hello_identity);
             if load_at_boot {
                 // the real-hardware shape: firmware auto-resumes its
                 // startup project before serving (fw-esp32c6 boot.rs)

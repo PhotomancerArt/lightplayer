@@ -58,6 +58,32 @@
 ))]
 extern crate alloc;
 
+// The build's self-description, embedded as a scannable blob (extracted by
+// `lp-cli firmware show` and reported on ServerHello in M4). Feature truth
+// comes from the engine's own cfg! derivation; only embedder facts are named
+// here. `flashAppBytes` is parsed from partitions.csv by build.rs.
+#[cfg(feature = "server")]
+lpc_model::lp_embed_manifest_core! {
+    package: env!("CARGO_PKG_NAME"),
+    chip_family: "esp32",
+    chip: "esp32s3",
+    cargo_target: "xtensa-esp32s3-none-elf",
+    profile: env!("LP_BUILD_PROFILE"),
+    commit: env!("LP_BUILD_COMMIT"),
+    dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
+    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+    features: [
+        lpa_server::ENGINE_FEATURE_FRAGMENT,
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::SvcButton),
+        lpc_model::manifest::feature_fragment(
+            cfg!(feature = "float-f32"),
+            lpc_model::LpFeature::ShaderF32,
+        ),
+    ],
+    limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
+}
+
 mod board;
 #[cfg(not(fw_harness))]
 mod flash_storage;
@@ -81,7 +107,7 @@ mod tests;
 
 #[cfg(not(fw_harness))]
 use {
-    alloc::{boxed::Box, rc::Rc, string::String, sync::Arc},
+    alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32s3::init::{init_board, start_runtime},
     core::cell::RefCell,
     flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
@@ -348,16 +374,22 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         None,
         graphics,
     );
-    server.set_hello(lpc_wire::ServerHello {
-        proto: lpc_wire::WIRE_PROTO_VERSION,
-        fw: lpc_wire::FwProvenance {
-            package: String::from("fw-esp32s3"),
-            commit: String::from(env!("LP_BUILD_COMMIT")),
-            dirty: env!("LP_BUILD_DIRTY") == "true",
-            profile: String::from(env!("LP_BUILD_PROFILE")),
-        },
-        device_uid,
-    });
+    server.set_hello_identity(
+        lpc_wire::HelloIdentity::new(
+            "fw-esp32s3",
+            env!("LP_BUILD_COMMIT"),
+            env!("LP_BUILD_DIRTY") == "true",
+            env!("LP_BUILD_PROFILE"),
+        )
+        .with_device_uid(device_uid),
+    );
+    // The one feature the server cannot see: whether the shader engine
+    // linked into THIS image does native f32 math (`float-f32` is a fact of
+    // this crate's Cargo graph, invisible from `Arc<dyn LpGraphics>`).
+    // Same shape as the manifest macro above, which names it the same way.
+    if cfg!(feature = "float-f32") {
+        server.declare_embedder_features(&[lpc_model::LpFeature::ShaderF32]);
+    }
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing

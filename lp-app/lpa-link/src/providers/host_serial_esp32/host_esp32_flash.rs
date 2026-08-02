@@ -16,15 +16,20 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use espflash::command::{Command, CommandType};
 use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::{Flasher, ProgressCallbacks};
 use espflash::targets::Chip;
+use md5::Digest;
 use serde::Deserialize;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 
+use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, BootFlags, encode_record};
+
 use crate::{
-    LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult, LinkFirmwareManifest,
-    LinkManagementEvent, LinkManagementEventSink, LinkManagementProgress,
+    LinkBootControlResult, LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult,
+    LinkFirmwareManifest, LinkFlashRegion, LinkManagementEvent, LinkManagementEventSink,
+    LinkManagementProgress, LinkRawFilesystemReadResult,
 };
 
 /// Chip this provider flashes. The firmware package targets the ESP32-C6
@@ -35,6 +40,12 @@ const TARGET_CHIP: Chip = Chip::Esp32c6;
 /// Baud rate for the espflash connection. 115200 is the ROM/stub default and
 /// matches the browser provider; espflash negotiates faster stub baud itself.
 const CONNECT_BAUD: u32 = 115_200;
+
+/// `ESP_READ_FLASH` packet size and in-flight window. Both are the values the
+/// M1 spike measured on hardware; the stub is already running by the time we
+/// read (`Flasher::connect` uploads it), so this is the fast path.
+const READ_BLOCK_SIZE: u32 = 4096;
+const READ_MAX_IN_FLIGHT: u32 = 1024;
 
 /// Flash firmware from the merged-image manifest at `manifest_path` over the
 /// serial port `port_name`. Emits live progress into `events` and returns the
@@ -113,6 +124,222 @@ pub(super) fn erase_device_flash(
         logs: recorder.logs.clone(),
         progress: recorder.progress.clone(),
     })
+}
+
+/// Write the boot-control sector, instructing the device's next boot.
+///
+/// **One write, not several.** `write_bin_to_flash` issues `FLASH_BEGIN`,
+/// which erases the sectors it is about to write — so splitting the 16-byte
+/// record across two writes would have the second erase the first, leaving a
+/// record that always fails its CRC and a feature that silently never works.
+/// The explicit `erase_region` below is belt-and-braces for the rest of the
+/// sector; integrity of the record itself comes from its magic and CRC.
+pub(super) fn write_boot_control(
+    port_name: &str,
+    flags: BootFlags,
+    events: &LinkManagementEventSink,
+) -> Result<LinkBootControlResult, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    recorder.log(format!(
+        "Writing boot-control record (flags {:#010x})",
+        flags.bits()
+    ));
+
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+
+    recorder.progress(LinkManagementProgress::new("Erasing boot-control sector"));
+    flasher
+        .erase_region(BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE)
+        .map_err(|error| LinkError::other(format!("boot-control erase failed: {error}")))?;
+
+    recorder.progress(LinkManagementProgress::new("Writing boot-control record"));
+    flasher
+        .write_bin_to_flash(BOOTCTL_PARTITION_OFFSET, &encode_record(flags), None)
+        .map_err(|error| LinkError::other(format!("boot-control write failed: {error}")))?;
+    recorder.progress(LinkManagementProgress::new("Writing boot-control record").with_percent(100));
+
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log("Boot-control record written; it applies on the next restart");
+
+    Ok(LinkBootControlResult {
+        flags: flags.bits(),
+        chip_name,
+        logs: recorder.logs.clone(),
+        progress: recorder.progress.clone(),
+    })
+}
+
+/// Read the device's `lpfs` partition back to the host, verbatim.
+///
+/// The region is resolved from the chip the SYNC handshake names, never
+/// hardcoded: the C6 and S3 put `lpfs` in different places, and a backup of
+/// the wrong 960 KB looks exactly like a backup of the right one.
+///
+/// **Default baud, deliberately.** These parts speak USB-Serial-JTAG, where
+/// the baud parameter is meaningless and negotiating a higher one costs real
+/// time — measured on the bench (M1): 3.2 s at the default versus 4.2 s at
+/// 921600 for the same 960 KB. Do not "optimize" this by raising it.
+///
+/// The read is acked per packet, so progress is genuinely per-block rather
+/// than a spinner: 240 packets for a C6's partition.
+pub(super) fn read_raw_filesystem(
+    port_name: &str,
+    events: &LinkManagementEventSink,
+) -> Result<LinkRawFilesystemReadResult, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+    let region = chip_name
+        .as_deref()
+        .and_then(LinkFlashRegion::lpfs_for_chip)
+        .ok_or_else(|| {
+            LinkError::other(format!(
+                "no lpfs partition layout for chip {}",
+                chip_name.as_deref().unwrap_or("(unidentified)")
+            ))
+        })?;
+    recorder.log(format!(
+        "Reading {} bytes of filesystem at {:#x}",
+        region.length, region.offset
+    ));
+
+    let image = read_flash_region(&mut flasher, region, &mut recorder)?;
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log("Filesystem read complete");
+
+    Ok(LinkRawFilesystemReadResult {
+        image,
+        region,
+        chip_name,
+        logs: recorder.logs.clone(),
+        progress: recorder.progress.clone(),
+    })
+}
+
+/// Drive `ESP_READ_FLASH` over an established connection, acking each packet
+/// and reporting progress, and verify the trailing MD5 the device sends.
+///
+/// espflash's own `Flasher::read_flash` writes straight to a file and reports
+/// nothing, neither of which suits a browser-shaped operation whose whole UX
+/// problem is looking hung; this keeps the bytes in memory and narrates.
+fn read_flash_region(
+    flasher: &mut Flasher,
+    region: LinkFlashRegion,
+    recorder: &mut EventRecorder,
+) -> Result<Vec<u8>, LinkError> {
+    let label = "Reading filesystem";
+    recorder.progress(
+        LinkManagementProgress::new(label)
+            .with_steps(0, region.length)
+            .with_percent(0),
+    );
+
+    let connection = flasher.connection();
+    connection
+        .with_timeout(CommandType::ReadFlash.timeout(), |connection| {
+            connection.command(Command::ReadFlash {
+                offset: region.offset,
+                size: region.length,
+                block_size: READ_BLOCK_SIZE,
+                max_in_flight: READ_MAX_IN_FLIGHT,
+            })
+        })
+        .map_err(|error| LinkError::other(format!("filesystem read failed to start: {error}")))?;
+
+    let total = region.length as usize;
+    let mut image: Vec<u8> = Vec::with_capacity(total);
+    while image.len() < total {
+        let chunk = read_vector_response(connection, "filesystem data")?;
+        // A short packet before the end means the device stopped mid-stream;
+        // a silently truncated backup is the worst possible outcome here.
+        if image.len() + chunk.len() < total && chunk.len() < READ_BLOCK_SIZE as usize {
+            return Err(LinkError::other(format!(
+                "filesystem read truncated at {} of {total} bytes",
+                image.len() + chunk.len()
+            )));
+        }
+        image.extend_from_slice(&chunk);
+        // The device waits for the running total before sending more.
+        connection
+            .write_raw(image.len() as u32)
+            .map_err(|error| LinkError::other(format!("filesystem read ack failed: {error}")))?;
+        recorder.progress(
+            LinkManagementProgress::new(label)
+                .with_steps(image.len().min(total) as u32, region.length)
+                .with_percent(((image.len().min(total) as u64 * 100) / total as u64) as u32),
+        );
+    }
+    if image.len() > total {
+        return Err(LinkError::other(format!(
+            "filesystem read returned {} bytes, expected {total}",
+            image.len()
+        )));
+    }
+
+    let digest = read_vector_response(connection, "filesystem digest")?;
+    let mut hasher = md5::Md5::new();
+    hasher.update(&image);
+    if digest != hasher.finalize().as_slice() {
+        return Err(LinkError::other(
+            "filesystem read failed its checksum — the image is not trustworthy",
+        ));
+    }
+    recorder.progress(
+        LinkManagementProgress::new(label)
+            .with_steps(region.length, region.length)
+            .with_percent(100),
+    );
+    Ok(image)
+}
+
+/// One `Vector` response from the flash-read stream.
+fn read_vector_response(
+    connection: &mut espflash::connection::Connection,
+    what: &str,
+) -> Result<Vec<u8>, LinkError> {
+    let response = connection
+        .read_response()
+        .map_err(|error| LinkError::other(format!("{what} read failed: {error}")))?
+        .ok_or_else(|| LinkError::other(format!("{what}: the device stopped responding")))?;
+    match response.value {
+        espflash::connection::CommandResponseValue::Vector(bytes) => Ok(bytes),
+        other => Err(LinkError::other(format!(
+            "{what}: unexpected response {other:?}"
+        ))),
+    }
+}
+
+/// Ask the device whether a ROM/stub bootloader is listening, and which chip
+/// it is.
+///
+/// This is the **authoritative** bootloader-mode test: `connect` performs the
+/// esptool SYNC handshake, which only a bootloader answers. Enumeration data
+/// cannot substitute — USB-Serial-JTAG parts present the same VID/PID in app
+/// mode and download mode.
+///
+/// **It reboots the device.** `connect` drives DTR/RTS to enter download
+/// mode, and on USB-Serial-JTAG that reset drops USB enumeration. Callers
+/// must own the wire exclusively and rebuild the link afterwards; never run
+/// this speculatively against a healthy board.
+///
+/// `Ok(None)` means "answered, but would not name itself" — still a
+/// bootloader. `Err` means nothing answered, which is *not* proof the device
+/// is absent; it may be running the app.
+pub(super) fn probe_target(
+    port_name: &str,
+    events: &LinkManagementEventSink,
+) -> Result<Option<String>, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    recorder.log(format!("Probing {port_name} for a bootloader"));
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log(match &chip_name {
+        Some(name) => format!("Bootloader answered: {name}"),
+        None => "Bootloader answered (chip did not identify itself)".to_string(),
+    });
+    Ok(chip_name)
 }
 
 /// Reboot the device into its application firmware via a hard-reset signal
@@ -293,6 +520,9 @@ impl ProgressCallbacks for ProgressBridge<'_, '_> {
     }
 }
 
+/// The only `manifest.json` schemaVersion this build reads.
+const FIRMWARE_MANIFEST_SCHEMA_VERSION: u32 = 2;
+
 /// A firmware image resolved against the manifest directory.
 #[derive(Debug)]
 struct ResolvedImage {
@@ -318,6 +548,15 @@ fn load_manifest(
             manifest_path.display()
         ))
     })?;
+    if raw.schema_version != FIRMWARE_MANIFEST_SCHEMA_VERSION {
+        return Err(LinkError::other(format!(
+            "firmware manifest {} has schemaVersion {} — this build understands \
+             only {}; repackage with `lp-cli firmware package`",
+            manifest_path.display(),
+            raw.schema_version,
+            FIRMWARE_MANIFEST_SCHEMA_VERSION
+        )));
+    }
     if raw.images.is_empty() {
         return Err(LinkError::other(format!(
             "firmware manifest {} lists no images",
@@ -345,7 +584,7 @@ fn load_manifest(
     let manifest = LinkFirmwareManifest {
         firmware_id: raw.firmware_id,
         display_name: raw.display_name,
-        target_chip: raw.target.chip,
+        target_chip: raw.core.target.chip,
         image_count: raw.images.len() as u32,
         total_bytes,
         manifest_path: Some(manifest_path.display().to_string()),
@@ -362,16 +601,26 @@ fn parse_hex_u32(value: &str) -> Option<u32> {
     u32::from_str_radix(digits, 16).ok()
 }
 
-/// The subset of `manifest.json` (produced by `just
-/// studio-firmware-package-esp32c6`) this provider consumes.
+/// The subset of `manifest.json` (produced by `lp-cli firmware package`) this
+/// provider consumes. schemaVersion 2 only — alpha posture is version +
+/// refuse, so a v1 manifest is an error, never a fallback decode.
 #[derive(Deserialize)]
 struct RawManifest {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
     #[serde(rename = "firmwareId")]
     firmware_id: String,
     #[serde(rename = "displayName")]
     display_name: String,
-    target: RawTarget,
+    /// The manifest core extracted from the image; the chip identity lives
+    /// here because the *build* is what knows it.
+    core: RawCore,
     images: Vec<RawImage>,
+}
+
+#[derive(Deserialize)]
+struct RawCore {
+    target: RawTarget,
 }
 
 #[derive(Deserialize)]
@@ -392,15 +641,29 @@ mod tests {
     use super::*;
 
     const MANIFEST_JSON: &str = r#"{
-        "schemaVersion": 1,
-        "firmwareId": "lightplayer-esp32c6-server",
+        "schemaVersion": 2,
+        "firmwareId": "esp32c6-4mb",
         "displayName": "LightPlayer ESP32-C6 server firmware",
-        "target": { "family": "esp32", "chip": "esp32c6" },
-        "build": { "package": "fw-esp32c6" },
+        "generatedAt": "2026-08-01T12:00:00Z",
+        "core": {
+            "lpManifestCore": 1,
+            "package": "fw-esp32c6",
+            "profile": "release-esp32",
+            "commit": "abc123456789",
+            "dirty": false,
+            "target": {
+                "family": "esp32",
+                "chip": "esp32c6",
+                "cargoTarget": "riscv32imac-unknown-none-elf"
+            },
+            "features": ["node.shader", "gfx.lpvm"],
+            "limits": { "flashAppBytes": 3145728 },
+            "wireProto": 4
+        },
         "flash": { "format": "espflash-merged-image", "address": "0x0" },
         "images": [
             {
-                "path": "fw-esp32c6-server-merged.bin",
+                "path": "fw-esp32c6-merged.bin",
                 "address": "0x0",
                 "sizeBytes": 3022960,
                 "sha256": "abc"
@@ -416,16 +679,30 @@ mod tests {
         std::fs::write(&path, MANIFEST_JSON).unwrap();
 
         let (manifest, images) = load_manifest(path.to_str().unwrap()).unwrap();
-        assert_eq!(manifest.firmware_id, "lightplayer-esp32c6-server");
+        assert_eq!(manifest.firmware_id, "esp32c6-4mb");
         assert_eq!(manifest.target_chip, "esp32c6");
         assert_eq!(manifest.image_count, 1);
         assert_eq!(manifest.total_bytes, 3_022_960);
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].address, 0x0);
-        assert_eq!(
-            images[0].absolute_path,
-            dir.join("fw-esp32c6-server-merged.bin")
-        );
+        assert_eq!(images[0].absolute_path, dir.join("fw-esp32c6-merged.bin"));
+    }
+
+    /// Version + refuse: a v1 manifest is rejected with its version named,
+    /// not decoded on a best-effort basis.
+    #[test]
+    fn refuses_a_v1_manifest() {
+        let dir = std::env::temp_dir().join("lpa-link-manifest-v1-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("manifest.json");
+        std::fs::write(
+            &path,
+            MANIFEST_JSON.replace("\"schemaVersion\": 2", "\"schemaVersion\": 1"),
+        )
+        .unwrap();
+
+        let error = load_manifest(path.to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("schemaVersion 1"), "{error}");
     }
 
     #[test]
@@ -436,9 +713,10 @@ mod tests {
         std::fs::write(
             &path,
             r#"{
+                "schemaVersion": 2,
                 "firmwareId": "x",
                 "displayName": "x",
-                "target": { "chip": "esp32c6" },
+                "core": { "target": { "chip": "esp32c6" } },
                 "images": []
             }"#,
         )

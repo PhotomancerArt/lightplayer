@@ -396,3 +396,31 @@ escalate rather than widening the threshold.
   that has wedged runs since 2026-07-08), and **diff the bytes before
   designing a fix** — this pipeline has now produced several "obviously a
   settling race" diagnoses that the pixels overturned.
+
+- 2026-07-31 — **`just studio-story-pull` was broken, and the guard step's
+  message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and
+  called `process.exit(2)` at *module scope*, so `story-pull.mjs` — which
+  imports `applyRefresh` from it — exited 2 before doing anything. The
+  documented manual fallback for drift has therefore been dead since the two
+  scripts were split, and the CI failure message ("`just studio-story-pull`
+  is the manual fallback") sends you straight into it. Argument parsing now
+  lives inside the `import.meta.url === argv[1]` guard; both the CLI and the
+  import work.
+  Found while chasing a story-job failure on PR #207 that was **neither
+  drift nor a capture crash: it was a wasm compile error.** A new
+  `LinkManagementRequest` variant left a non-exhaustive match in
+  `browser_serial_esp32/provider.rs`, which is feature-gated to wasm — so
+  `just check` and even `cargo check -p lpa-link --all-features` on the host
+  both passed, and `dx build ... [wasm32-unknown-unknown]` failed. This is
+  the [wasm gap](../../docs/debt/README.md) biting through the story job, and
+  it presents *identically* to a wedge: no capture ran, so the
+  `.check-complete` sentinel refused to treat it as drift (correctly), the
+  upload/auto-commit steps skipped, `Capture crash summary` fired, and the
+  guard step announced "unresolved story drift".
+  **Reading the signal:** step conclusions distinguish the three cases, the
+  step *name* does not. Skipped upload steps + fired crash summary means "no
+  usable capture" — which is a build failure at least as often as a wedge.
+  Read the tail of the `Story check` step before assuming a wedge; a
+  compile error is at the top of the step, thousands of lines above the
+  failure line. Local prophylactic for studio-touching changes:
+  `cargo check -p lpa-studio-web --target wasm32-unknown-unknown`.

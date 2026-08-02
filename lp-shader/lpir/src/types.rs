@@ -11,6 +11,21 @@ pub enum FloatMode {
     F32,
 }
 
+impl FloatMode {
+    /// Short stable name for messages.
+    ///
+    /// Used instead of `{:?}` wherever a firmware image links the formatting:
+    /// `Debug` pulls `core::fmt` machinery in per call site, and on the
+    /// ESP32-C6 that is flash the chip does not have to spare.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Q32 => "q32",
+            Self::F32 => "f32",
+        }
+    }
+}
+
 /// LPIR type (width-aware where applicable).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum IrType {

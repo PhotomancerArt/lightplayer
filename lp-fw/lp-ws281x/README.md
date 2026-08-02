@@ -62,6 +62,11 @@ block each: a 48-word block halves into 24 words = one LED, and the classic
 ESP32's 64-word block halves into 32 words = 1⅓ LEDs. A bit cursor makes every
 half size work on every chip, and turns `blocks_per_channel` into a free tuning
 knob — more blocks per channel means fewer channels but a lower interrupt rate.
+Since the board manifest became the sole authority on channel count, the knob
+turns itself: each chip backend computes the plan at driver init from the
+number of declared channels (`BlockPlan::for_channels`, published through a
+`SharedBlockPlan`), so a one-strip board automatically gets the whole buffer
+and the widest refill margin the chip can give.
 
 ### `blocks_per_channel` and the interrupt rate
 
@@ -89,6 +94,39 @@ because the interrupt line is shared, entries routinely carry two, three or four
 channels at once (`on_interrupt` is a single pass over the whole snapshot for
 exactly this reason). The classic ESP32's 64-word blocks give 32-bit halves —
 40 µs — at eight outputs.
+
+#### The classic ESP32 is different, and it is the interesting case
+
+The classic ESP32 has **eight** channels of **64-word** blocks, so the same
+table reads:
+
+| blocks/ch | outputs | window | half | refill deadline | demand per busy output |
+|-----------|---------|--------|------|-----------------|------------------------|
+| 1 | 8 | 64 w | 32 bits | 40 µs | 25 000 refills/s |
+| **2** | **4** | **128 w** | **64 bits** | **80 µs** | **12 500 refills/s** |
+| 4 | 2 | 256 w | 128 bits | 160 µs | 6 250 refills/s |
+
+On the S3 the choice is about deadline margin. On the classic it is about
+**how many outputs work at all**, because that chip has a hard ceiling the
+others do not: its *delivered* interrupt rate flatlines at roughly
+**46–55 k/s regardless of demand** (measured in the experiment repo's
+`sweep_channels` harness; root-caused as ISR throughput saturation, not
+latency — staggering frame starts does not move it). Multiply the demand
+column by the output count and the ceiling picks the winner:
+
+* 1 block → 25 k/s each → saturates at **two** outputs. Measured: truncation
+  begins at the third channel, at every strip length tried, with `lag_max`
+  still comfortable — the giveaway that refills were *missing*, not late.
+  Read `refills` against `refills_wanted`, never `lag_max`, when diagnosing
+  this.
+* 2 blocks → 12.5 k/s each → ~4 outputs, and the margin is thin (50 k demand
+  against a ~48 k ceiling). This is what `fw-esp32v3` ships; whether four
+  channels are genuinely clean is a silicon question, not an arithmetic one.
+
+Note that only slots `0, 2, 4, 6` exist at two blocks each — a backend must
+skip the absorbed slots when it creates channels, not merely when it
+transmits. `fw-esp32v3`'s `output/rmt/v3_rmt.rs::slot_for_index` is the
+worked example.
 
 Measured on an ESP32-S3 at 240 MHz with all four outputs running unequal strips
 (8/16/100/256 LEDs, the `led-lab-esp32s3` firmware in the
@@ -148,6 +186,45 @@ shim rests on, so an average is not enough — an average cannot distinguish
   on the classic ESP32. `ChannelStats::lag_over_half()` reads that bucket.
 - `complete_frames()` — `frames - guard_trips`, the frames that went out whole,
   with the same lower-bound caveat as `guard_trips` (below).
+
+The lag counters only describe what a refill cost **once it started**. The other
+half of the same deadline is the time the `tx_thr_event` spent waiting, and the
+two point at different fixes — entry delay is interrupt architecture (priority,
+masking, a radio driver's handler); refill lag is the refill loop. So the driver
+also samples, at the top of each channel's service:
+
+```
+entry_delay_words = (read_pos(ch) − threshold_boundary(ch)) mod ram_words(ch)
+```
+
+— the words the transmitter got through before the handler arrived, in the same
+1.25 µs units. It is free: it reuses the `read_pos` the half selection needs, and
+the boundary is a value the driver itself armed. Both moduli matter, because a
+service late enough for the pointer to have wrapped reads a `read_pos`
+numerically *below* the boundary, and because the `tx_lim == ram_words`
+threshold fires at word 0 rather than at word `ram_words`
+(`tests/entry_delay.rs` pins both).
+
+- `entry_delay_max` — the worst service of the run, in words.
+  `entry_delay_max + refill_lag_max` is an upper bound on the worst total
+  occupancy of the one-half deadline.
+- `entry_delay_hist` — the same `LAG_BUCKETS` edges as `lag_hist`, so the two
+  print and read side by side. `entry_delay_over_half()` is the overflow bucket:
+  services that had already lost the whole deadline before writing a word.
+  `entry_delay_count()` sums the histogram.
+
+With several channels flagged in one interrupt snapshot, the entry delay of the
+higher-numbered ones includes every earlier channel's refill — which is the cost
+`on_interrupt`'s index-order service actually imposes, now measured rather than
+inferred.
+
+This is the instrument that settled the C6's WiFi-scan truncation: roadmap
+M5's stress matrix (`2026-08-01-1459-rmt-priority-hli`, phase P4) found
+refill lag flat with or without radio load, while the entry-delay histogram's
+delayed-entry population grew two orders of magnitude under scan — the
+truncation is interrupt-to-service latency, not refill work, which is also
+why raising software priority alone (already at `Priority::max()`) had no
+headroom left to give.
 
 `record_lag` deliberately keeps the running maximum with a load/compare/store
 rather than `fetch_max`, and the interrupt handler is the only writer, so

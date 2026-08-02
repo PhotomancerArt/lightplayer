@@ -79,7 +79,7 @@ use esp_hal::time::{Duration, Instant};
 use lp_ws281x::{ChannelTiming, ColorOrder, PulseCodes, PulseItem};
 
 use crate::output::rmt::s3_rmt::{
-    self, BLOCKS_PER_CHANNEL, CHANNEL_WORDS, RAM_BASE, RAM_OFFSET, TX_BLOCKS, TX_CHANNELS,
+    self, BLOCK_WORDS, RAM_BASE, RAM_OFFSET, TX_CHANNELS, TX_PLAN, plan_for_declared,
 };
 use crate::output::rmt::shared_driver::{DRIVER, FRAME_TIMEOUT, RMT_CLOCK, install_isr};
 
@@ -162,6 +162,19 @@ pub fn run(peripherals: Peripherals) -> ! {
     };
     install_isr(&mut rmt);
 
+    // Four channels, one block each — the plan a four-channel manifest gets,
+    // and the shape every expectation below (TRUNC_EXPECT_BITS, refill
+    // counts) was validated against. Published before any configure, as the
+    // app driver does.
+    match plan_for_declared(TX_CHANNELS) {
+        Some(plan) => {
+            if TX_PLAN.init(plan).is_err() {
+                fatal("plan_init");
+            }
+        }
+        None => fatal("plan_none"),
+    }
+
     // Routing option 1: split each pad into a frozen input/output signal pair so
     // the same pin feeds both RMT ends through the GPIO matrix.
     let (rx_sig0, tx_sig0) = Flex::new(peripherals.GPIO4).split();
@@ -174,7 +187,7 @@ pub fn run(peripherals: Peripherals) -> ! {
         .with_idle_output(true)
         .with_idle_output_level(Level::Low)
         .with_carrier_modulation(false)
-        .with_memsize(BLOCKS_PER_CHANNEL);
+        .with_memsize(TX_PLAN.blocks(0));
     // Kept alive for the whole test: dropping one would release that channel's
     // memory block and disconnect its pin.
     let _tx_channels = match (
@@ -214,17 +227,17 @@ pub fn run(peripherals: Peripherals) -> ! {
     };
 
     // --- E1: is the RMT RAM where we think it is? ---------------------------
-    let probe = s3_rmt::probe_ram_address(&TX_BLOCKS, 0, DIRECT_SENTINEL, FIFO_SENTINEL);
+    let probe = s3_rmt::probe_ram_address(0, DIRECT_SENTINEL, FIFO_SENTINEL);
     esp_println::println!(
         "E1: MEASURE rmt_base={:#010x} rmt_ram={:#010x} ram_offset={:#x} \
          channel_words={} blocks_per_channel={} tx_channels={} available_channels={}",
         RAM_BASE - RAM_OFFSET,
         RAM_BASE,
         RAM_OFFSET,
-        CHANNEL_WORDS,
-        BLOCKS_PER_CHANNEL,
+        TX_PLAN.window_words(0, BLOCK_WORDS),
+        TX_PLAN.blocks(0),
         TX_CHANNELS,
-        TX_BLOCKS.available_channels(),
+        TX_PLAN.available_channels(),
     );
     let direct_ok = probe.direct_readback == DIRECT_SENTINEL;
     let fifo_ok = probe.fifo_readback == FIFO_SENTINEL;
@@ -247,7 +260,7 @@ pub fn run(peripherals: Peripherals) -> ! {
     }
 
     for ch in 0..TX_CHANNELS as u8 {
-        if TX_BLOCKS.is_available(ch) {
+        if TX_PLAN.is_available(ch) {
             s3_rmt::enable_tx_interrupts(ch);
         }
     }
@@ -269,7 +282,7 @@ pub fn run(peripherals: Peripherals) -> ! {
         "E4: MEASURE routing option=1_flex_split gpios=4,5,6,7 tx_ch=0-3 rx_ch=4-7 \
          tx_blocks={} rx_blocks={} rx_items_per_channel={} idle_threshold_ticks={} \
          filter_ticks=0 tol_ticks={}",
-        BLOCKS_PER_CHANNEL,
+        TX_PLAN.blocks(0),
         RX_BLOCKS,
         48 * RX_BLOCKS as usize,
         IDLE_THRESHOLD_TICKS,
@@ -535,9 +548,21 @@ pub fn run(peripherals: Peripherals) -> ! {
         let lag_num = after.refill_lag_sum - soak_before[ch].refill_lag_sum;
         let lag_den = after.refill_lag_count - soak_before[ch].refill_lag_count;
         let (lag_int, lag_frac) = mean_lag_tenths(lag_num, lag_den);
+        // Entry delay — the other half of the refill deadline: how far past its
+        // threshold the transmitter had already run when the handler reached
+        // this channel. `entry_delay_max_words` is the run maximum, not a delta:
+        // a running maximum cannot be differenced, and the soak is the only
+        // sustained four-channel load in this harness anyway.
+        // `entry_delay_over_half` *is* a counter, so it is reported as a delta,
+        // and a non-zero one is a service that lost the whole deadline before
+        // writing a word. Channel order matters here: index order in
+        // `on_interrupt` means ch3's delay carries ch0..2's refills.
+        let entry_over_half =
+            after.entry_delay_over_half() - soak_before[ch].entry_delay_over_half();
         esp_println::println!(
             "E4: MEASURE soak ch={} frames={} mismatches={} guard_trips={} guard_skips={} \
-             errors={} refill_lag_avg_words={}.{} refills={}",
+             errors={} refill_lag_avg_words={}.{} refills={} entry_delay_max_words={} \
+             entry_delay_over_half={}",
             ch,
             SOAK_FRAMES,
             mismatches[ch],
@@ -547,6 +572,8 @@ pub fn run(peripherals: Peripherals) -> ! {
             lag_int,
             lag_frac,
             lag_den,
+            after.entry_delay_max,
+            entry_over_half,
         );
         if mismatches[ch] != 0 || trips != 0 || errors != 0 {
             soak_ok = false;

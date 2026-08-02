@@ -1,10 +1,18 @@
 //! Host oracle for the on-device shader render.
 //!
 //! Renders `examples/shader-oracle` through the host LPVM engine and prints the
-//! exact bytes a device's ws281x driver must receive. A `fw-esp32s3` built with
-//! its `frame-dump` feature prints the same bytes off its RMT write path
-//! (`output::rmt::frame_dump`), so the two transcripts can be diffed character
-//! for character.
+//! exact bytes a device's ws281x driver must receive. A `fw-esp32s3` **or**
+//! `fw-esp32v3` built with its `frame-dump` feature prints the same bytes off
+//! its RMT write path (`output::rmt::frame_dump`, ported between the two
+//! firmwares with identical line shapes), so the transcripts can be diffed
+//! character for character.
+//!
+//! Nothing here is chip-specific. The `default_esp32s3_hardware_manifest()`
+//! below is not an S3 assumption to be parameterised: it is simply a manifest
+//! that offers the `D10` endpoint this project's output node names, and an
+//! endpoint chooses a wire, never a colour. `scripts/m4-hardware-walk.sh`
+//! retargets that label per board before uploading (the classic ESP32 has no
+//! `D10` pad) and the pixels are unaffected.
 //!
 //! This is only an oracle because the two sides share *nothing* below the
 //! project file: the host runs LPIR → WASM → wasmtime, the device runs LPIR →
@@ -53,10 +61,10 @@ const PROJECT_NAME: &str = "shader-oracle";
 /// what makes that claim.
 const FRAMES: u32 = 4;
 
-/// Matches `fw-esp32s3`'s `output::rmt::frame_dump::MAX_DUMP_LEDS`, so the
-/// printed dump lines up with the device transcript without slicing either by
-/// hand. Two crates that never link to each other, so this is a transcribed
-/// constant: change one and change the other.
+/// Matches `output::rmt::frame_dump::MAX_DUMP_LEDS` in **both** `fw-esp32s3`
+/// and `fw-esp32v3`, so the printed dump lines up with the device transcript
+/// without slicing either by hand. Three crates that never link to each other,
+/// so this is a transcribed constant: change one and change all three.
 const MAX_DUMP_LEDS: usize = 64;
 
 #[test]
@@ -142,8 +150,8 @@ fn render_project(graphics: Arc<dyn LpGraphics>) -> Vec<u8> {
     first
 }
 
-/// Print the frame in the exact shapes `fw-esp32s3`'s `frame-dump` build
-/// prints, so the device transcript can be diffed against this one directly.
+/// Print the frame in the exact shapes a `frame-dump` device build prints, so
+/// the device transcript can be diffed against this one directly.
 ///
 /// Split across two lines on purpose: the `rgb=` token is alone on the second
 /// one, which is what lets `scripts/m4-hardware-walk.sh` pull it out of both
@@ -213,7 +221,7 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// FNV-1a, matching `fw-esp32s3`'s `frame_dump::frame_checksum`.
+/// FNV-1a, matching `frame_dump::frame_checksum` in both device firmwares.
 fn fnv1a(data: &[u8]) -> u32 {
     let mut hash = 0x811c_9dc5u32;
     for byte in data {

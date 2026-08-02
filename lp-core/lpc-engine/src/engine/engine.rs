@@ -64,6 +64,14 @@ pub struct Engine {
     /// `apply_project_changes` rebuilds bindings from defs and must never
     /// destroy an engaged control.
     panel_writers: crate::dataflow::panel_writers::PanelWriterStore,
+    /// Device-level safe-mode output ceiling, Q16 (`None` = no clamp).
+    ///
+    /// DEVICE state, not project data: set by the embedder (firmware, from a
+    /// consumed boot-control record), never by anything a project can touch.
+    /// That separation is the point — the mechanism that saves a device must
+    /// not be editable by the thing that broke it. Composed into every
+    /// fixture's power scale via `min` in the fixture render.
+    safe_output_clamp_q16: Option<u32>,
     /// The tree shape and resolver epoch as of the last tick, so that a
     /// structural change that forgot to invalidate resolution is caught here
     /// rather than by someone noticing a stale value on a device.
@@ -92,6 +100,7 @@ impl Engine {
             demand_roots: Vec::new(),
             graphics: None,
             panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
+            safe_output_clamp_q16: None,
             #[cfg(debug_assertions)]
             last_structural_check: None,
         }
@@ -330,6 +339,16 @@ impl Engine {
         self.graphics = graphics;
     }
 
+    /// Set (or clear) the device-level safe-mode output ceiling.
+    ///
+    /// `level` is a brightness ceiling out of 255, from the boot-control
+    /// record's clamp bits. Applies to EVERY fixture — including ones with
+    /// no power model — because the clamped project may predate the power
+    /// feature entirely.
+    pub fn set_safe_output_clamp(&mut self, level: Option<u8>) {
+        self.safe_output_clamp_q16 = level.map(|level| (u32::from(level) << 16) / 255);
+    }
+
     pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {
         self.graphics.as_ref()
     }
@@ -354,7 +373,18 @@ impl Engine {
                 node: id,
                 message: format!("runtime state shape registration: {e}"),
             })?;
+        // The runtime is the authority on its own status from the moment it
+        // attaches, not only after some later change: a placeholder
+        // standing in for a gated-out node kind must report `Unsupported`
+        // on the FIRST tree delta the client sees, or the node arrives
+        // looking like a healthy `Created` one. Runtimes that report
+        // nothing (`runtime_status() == None`, the trait default) leave the
+        // entry's status exactly as it was.
+        let attached_status = runtime.runtime_status();
         let entry = self.tree.get_mut(id).ok_or(EngineError::UnknownNode(id))?;
+        if let Some(status) = attached_status {
+            set_entry_status_if_changed(entry, status, frame);
+        }
         entry.set_state(NodeEntryState::Alive(runtime), frame);
         Ok(())
     }
@@ -537,6 +567,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
 
         {
@@ -605,6 +636,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         host.render_node_texture(product, request)
     }
@@ -654,6 +686,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         let result = session.resolve(&mut host, &key);
         self.resolver = resolver_tmp;
@@ -707,6 +740,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         host.render_node_control(product, request, target)
     }
@@ -745,6 +779,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
         let result = session.resolve(
@@ -783,6 +818,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         host.render_node_control_probe(product, request, target, display_layout)
     }
@@ -829,6 +865,7 @@ struct EngineResolveHost<'a> {
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
+    safe_output_clamp_q16: Option<u32>,
 }
 
 impl EngineResolveHost<'_> {
@@ -994,9 +1031,21 @@ impl EngineResolveHost<'_> {
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
-            Ok(ProduceResult::Unsupported) => Err(SessionResolveError::other(format!(
-                "produce: node {node_id:?} does not produce slot {slot:?}"
-            ))),
+            // A gated-out kind produces nothing, so EVERY such node lands
+            // here — and "does not produce slot" reads as an authoring
+            // mistake when the real cause is the build. The node's own
+            // status already names that cause; use it, and leave genuine
+            // wrong-slot diagnostics on real nodes untouched.
+            Ok(ProduceResult::Unsupported) => {
+                let message = match &runtime_status {
+                    NodeRuntimeStatus::Unsupported(cause) => format!(
+                        "produce: {cause} (node {node_id:?} is a placeholder for slot {slot:?})"
+                    ),
+                    _ => format!("produce: node {node_id:?} does not produce slot {slot:?}"),
+                };
+                set_entry_status_if_changed(entry, runtime_status, revision);
+                Err(SessionResolveError::other(message))
+            }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
@@ -1559,6 +1608,7 @@ impl EngineResolveHost<'_> {
                 revision,
                 self.graphics.clone(),
                 self.frame_time_seconds,
+                self.safe_output_clamp_q16,
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
@@ -1654,6 +1704,7 @@ impl EngineResolveHost<'_> {
                 revision,
                 self.graphics.clone(),
                 self.frame_time_seconds,
+                self.safe_output_clamp_q16,
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
@@ -2069,6 +2120,7 @@ pub(crate) fn resolve_with_engine_host(
         button_service,
         radio_service,
         frame_time_seconds: time_s,
+        safe_output_clamp_q16: eng.safe_output_clamp_q16,
     };
     let result = session
         .resolve(&mut host, &key)
@@ -2108,6 +2160,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         button_service,
         radio_service,
         frame_time_seconds: time_s,
+        safe_output_clamp_q16: eng.safe_output_clamp_q16,
     };
     let result = session.resolve(&mut host, &key).and_then(|first| {
         session

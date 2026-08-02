@@ -390,7 +390,7 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
     let DeviceState::Ready { hello } = session.wait_ready().await else {
         panic!("expected Ready before flashing");
     };
-    assert_eq!(hello.fw.commit, "fake-firmware");
+    assert_eq!(hello.build.commit, "fake-firmware");
     let (sink, events) = recording_sink();
 
     let outcome = session
@@ -406,7 +406,7 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
         panic!("expected Ready after flash, got {:?}", outcome.state);
     };
     assert_eq!(
-        hello.fw.commit, FAKE_IMAGE_IDENTITY,
+        hello.build.commit, FAKE_IMAGE_IDENTITY,
         "the rebuilt link's hello carries the flashed image's provenance"
     );
     assert_eq!(session.mode(), DeviceMode::AppProtocol);
@@ -781,4 +781,91 @@ fn recorded_states(events: &Rc<RefCell<Vec<DeviceEvent>>>) -> Vec<DeviceState> {
             _ => None,
         })
         .collect()
+}
+
+#[tokio::test]
+async fn a_ready_session_classifies_as_app_mode_without_probing() {
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.link_mode, DeviceLinkMode::App);
+    assert!(
+        !snapshot.link_mode.probe_would_help(),
+        "probing a healthy device reboots it for nothing"
+    );
+}
+
+#[tokio::test]
+async fn probe_link_mode_is_authoritative_and_carries_chip_identity() {
+    // A device the fake reports a bootloader for: the SYNC handshake answers,
+    // which is the ONLY way to tell "in download mode" from "not responding"
+    // — enumeration data is identical in both states.
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    let mode = session
+        .probe_link_mode(DeviceEventSink::noop())
+        .await
+        .unwrap();
+    assert_eq!(
+        mode,
+        DeviceLinkMode::Bootloader {
+            chip_name: Some("ESP32-C6 (fake)".to_string()),
+            evidence: BootloaderEvidence::SyncHandshake,
+        }
+    );
+    assert!(
+        !mode.probe_would_help(),
+        "an answered probe is final — re-probing only costs another reboot"
+    );
+}
+
+#[tokio::test]
+async fn probe_link_mode_is_refused_while_management_holds_the_wire() {
+    // The probe reboots the device, so it must obey the same exclusivity as
+    // flash/erase rather than racing them on one wire.
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    let guard = session.try_begin_management().unwrap();
+    let error = session
+        .probe_link_mode(DeviceEventSink::noop())
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("management"),
+        "probe should refuse while the wire is held: {error}"
+    );
+    drop(guard);
 }

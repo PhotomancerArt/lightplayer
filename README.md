@@ -110,7 +110,7 @@ For an empty flash and firmware only (no project push), use `just demo-esp32c6-s
    - `just fci-glsl` - Fix, check, build, and test the GLSL compiler.
 
 See `just --list` for all available commands, and [`docs/development.md`](docs/development.md) for
-deeper workflows: hardware manifests, schema generation, GPIO calibration, and on-hardware
+deeper workflows: board manifests, schema generation, GPIO calibration, and on-hardware
 firmware tests.
 
 # Repository Structure
@@ -118,7 +118,7 @@ firmware tests.
 - **`lp-app/`** Browser Studio (Dioxus + WASM): studio UI, server/client, device link, OPFS
   filesystem, browser firmware host
 - **`lp-core/`** Platform core (`lpc-*` crates): rendering engine, data model, wire protocol,
-  registry, hardware manifests
+  registry, board manifests
 - **`lp-shader/`** GLSL compiler: frontend (via naga), LightPlayer IR, backends (native RV32 JIT,
   Cranelift, WASM), Q16.16 fixed-point math, and the filetest suite — see
   [`lp-shader/README.md`](lp-shader/README.md)
@@ -128,11 +128,11 @@ firmware tests.
 - **`lp-emu/`** Architecture-neutral emulator substrate (`lp-emu-core`) and host↔guest ABI
   (`lp-emu-abi`) shared by the architecture emulators
 - **`lp-riscv/`** RISC-V 32-bit emulator, instruction encoding/decoding, and ELF tooling
-- **`lp-cli/`** Developer CLI (projects, dev server, hardware manifests, GPIO calibration); runs
+- **`lp-cli/`** Developer CLI (projects, dev server, board manifests, GPIO calibration); runs
   from a source checkout
 - **`lp-base/`** Foundation crates: collections, filesystem, performance, recovery
 - **`examples/`** Example LightPlayer projects
-- **`schemas/`** Generated JSON Schemas for project/node/hardware files
+- **`schemas/`** Generated JSON Schemas for project/node/board files
 - **`docs/`** Documentation, ADRs, and design notes
 - **`scripts/`** Build scripts and development utilities
 - **`third_party/`** Vendored forks (naga, and friends)

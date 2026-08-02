@@ -6,6 +6,19 @@
 //! [`super::s3_rmt`] respectively — only the mapping from *authored* endpoint
 //! names to hardware.
 //!
+//! # Manifest channel → RMT slot
+//!
+//! The block plan is computed **here, at init, from the manifest**: the
+//! number of declared `/rmt/ws281xK` resources goes through
+//! [`super::s3_rmt::plan_for_declared`] and is published once via
+//! [`super::s3_rmt::TX_PLAN`] before any channel is configured. Four declared
+//! channels (the XIAO S3 Plus) get one block each — manifest index and RMT
+//! slot coincide, as they always did on this chip. Fewer declared channels
+//! get wider windows, so an index maps to the plan's `K`-th available slot
+//! ([`manifest_index_for_slot`] is the inverse) and an absorbed slot is never
+//! handed to `configure_tx` — the same construction as the classic and C6
+//! drivers.
+//!
 //! # Why the pin is bound at `open`, not at construction
 //!
 //! An endpoint is a board label (`ws281x:rmt:D10`), and which label a project
@@ -55,7 +68,7 @@ use lpc_hardware::{
 
 #[cfg(feature = "frame-dump")]
 use crate::output::rmt::frame_dump::{self, FrameDump};
-use crate::output::rmt::s3_rmt::{self, BLOCKS_PER_CHANNEL, TX_BLOCKS, TX_CHANNELS};
+use crate::output::rmt::s3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 use crate::output::rmt::shared_driver::{DRIVER, FRAME_TIMEOUT, install_isr};
 
 const DRIVER_ID: &str = "esp32s3-rmt-ws281x";
@@ -66,6 +79,9 @@ struct ChannelSlot {
     /// The manifest resource backing this channel (`/rmt/ws281xK`), claimed
     /// alongside the GPIO for as long as an output holds it.
     timing: HwAddress,
+    /// The silicon RMT channel the manifest index resolved to (the plan's
+    /// `nth_available(K)`). Everything below `lp_ws281x` speaks this number.
+    rmt_channel: u8,
     /// The configured esp-hal channel. `Option` only because
     /// [`Channel::with_pin`] consumes and returns it; it is `Some` except
     /// inside that swap.
@@ -76,9 +92,10 @@ struct ChannelSlot {
 
 /// The channels, shared between the driver and every output it hands out.
 ///
-/// Indexed by RMT channel number so a slot's position *is* the channel the
-/// backend pokes; a board that declares only some `/rmt/ws281xK` resources
-/// leaves the others `None` rather than shifting the numbering.
+/// Indexed by **manifest** channel `K`, not by RMT slot: a board that declares
+/// only some `/rmt/ws281xK` resources leaves the others `None` rather than
+/// shifting the numbering. Sized by [`TX_CHANNELS`] — the most channels any
+/// plan can offer — with the plan deciding how many entries are ever filled.
 type ChannelTable = Rc<RefCell<[Option<ChannelSlot>; TX_CHANNELS]>>;
 
 /// WS281x driver over the ESP32-S3 RMT, one endpoint per board-labelled GPIO
@@ -89,46 +106,73 @@ pub struct Esp32S3RmtWs281xDriver {
 }
 
 impl Esp32S3RmtWs281xDriver {
-    /// Bind the RMT interrupt and configure one TX channel per `/rmt/ws281xK`
-    /// resource the manifest declares.
+    /// Compute and publish the block plan from the manifest's declared
+    /// channel count, bind the RMT interrupt, and configure one TX channel
+    /// per `/rmt/ws281xK` resource, on the slot the plan gives it.
     ///
-    /// Channels are configured (memory block, divider, idle level) but not
+    /// Channels are configured (memory blocks, divider, idle level) but not
     /// connected to any pin: that happens in [`Ws281xDriver::open`]. A resource
-    /// the chip cannot back — an index past the four TX channels, or one the
-    /// [`BlockPlan`](lp_ws281x::BlockPlan) absorbed into a lower channel — is
-    /// skipped with a log line rather than offered and then failing to open.
+    /// the chip cannot back — an index past the four TX channels, or one whose
+    /// slot the [`BlockPlan`](lp_ws281x::BlockPlan) absorbed — is skipped
+    /// silently at the [`manifest_index_for_slot`] step rather than offered
+    /// and then failing to open.
     pub fn new(registry: Rc<HwRegistry>, mut rmt: Rmt<'static, Blocking>) -> Self {
+        // The plan, once, before the ISR and before any configure: windows
+        // must never change after init (`RmtHw::ram_words` contract).
+        let declared = declared_ws281x_channels(&registry);
+        if let Some(plan) = s3_rmt::plan_for_declared(declared) {
+            if let Err(error) = TX_PLAN.init(plan) {
+                log::error!("Esp32S3RmtWs281xDriver: block plan already published: {error:?}");
+            }
+        }
+
         install_isr(&mut rmt);
 
         let config = TxChannelConfig::default()
             .with_clk_divider(1)
             .with_idle_output(true)
             .with_idle_output_level(Level::Low)
-            .with_carrier_modulation(false)
-            .with_memsize(BLOCKS_PER_CHANNEL);
+            .with_carrier_modulation(false);
+
+        let mut slots: [Option<ChannelSlot>; TX_CHANNELS] = [const { None }; TX_CHANNELS];
 
         // The four creators are distinct types (`ChannelCreator<_, _, K>`), so
-        // they cannot be iterated; each is consumed only when the manifest
-        // declares its timing resource. The count offered therefore comes from
-        // the manifest, bounded by what the chip has.
-        let mut slots: [Option<ChannelSlot>; TX_CHANNELS] = [const { None }; TX_CHANNELS];
-        if declares_timing_resource(&registry, 0) {
-            slots[0] = adopt_channel(0, rmt.channel0.configure_tx(&config));
+        // they cannot be iterated; each is named once and consumed only when
+        // the block plan says its slot owns memory AND the manifest declares
+        // the timing resource that maps to it. An absorbed slot never reaches
+        // `configure_tx`. `memsize` is the slot's own share of the plan.
+        macro_rules! adopt_slot {
+            ($($slot:literal => $creator:ident),+ $(,)?) => {
+                $(
+                    if let Some(index) = manifest_index_for_slot($slot) {
+                        if declares_timing_resource(&registry, index) {
+                            slots[index] = adopt_channel(
+                                index,
+                                $slot,
+                                rmt.$creator.configure_tx(
+                                    &config.with_memsize(TX_PLAN.blocks($slot)),
+                                ),
+                            );
+                        }
+                    }
+                )+
+            };
         }
-        if declares_timing_resource(&registry, 1) {
-            slots[1] = adopt_channel(1, rmt.channel1.configure_tx(&config));
-        }
-        if declares_timing_resource(&registry, 2) {
-            slots[2] = adopt_channel(2, rmt.channel2.configure_tx(&config));
-        }
-        if declares_timing_resource(&registry, 3) {
-            slots[3] = adopt_channel(3, rmt.channel3.configure_tx(&config));
-        }
+        adopt_slot!(
+            0 => channel0,
+            1 => channel1,
+            2 => channel2,
+            3 => channel3,
+        );
 
         log::info!(
-            "Esp32S3RmtWs281xDriver: {} of {} RMT TX channels available for WS281x output",
+            "Esp32S3RmtWs281xDriver: {} WS281x channels for {} declared (plan={:?} \
+             ch0_window_words={} ch0_half_words={})",
             slots.iter().flatten().count(),
-            TX_CHANNELS,
+            declared,
+            TX_PLAN.get().map(|plan| *plan.as_array()),
+            TX_PLAN.window_words(0, BLOCK_WORDS),
+            TX_PLAN.window_words(0, BLOCK_WORDS) / 2,
         );
 
         Self {
@@ -141,11 +185,11 @@ impl Esp32S3RmtWs281xDriver {
         HwEndpointId::for_driver_spec(self.driver_id(), spec)
     }
 
-    /// The lowest RMT channel that is configured, unclaimed, and whose timing
-    /// resource the registry still reports as free.
-    fn free_channel(&self) -> Option<u8> {
+    /// The lowest manifest channel that is configured, unclaimed, and whose
+    /// timing resource the registry still reports as free.
+    fn free_channel(&self) -> Option<usize> {
         let slots = self.channels.borrow();
-        slots.iter().enumerate().find_map(|(ch, slot)| {
+        slots.iter().enumerate().find_map(|(index, slot)| {
             let slot = slot.as_ref()?;
             if slot.in_use
                 || !self
@@ -155,7 +199,7 @@ impl Esp32S3RmtWs281xDriver {
             {
                 return None;
             }
-            Some(ch as u8)
+            Some(index)
         })
     }
 
@@ -198,21 +242,24 @@ impl Esp32S3RmtWs281xDriver {
         })
     }
 
-    /// Connect `gpio` to RMT channel `ch` and arm the channel's wire timing.
+    /// Connect `gpio` to manifest channel `index` and arm its wire timing.
     ///
-    /// Called with the registry lease for both addresses already held.
-    fn bind_channel(&self, ch: u8, gpio: u8) -> Result<(), HardwareEndpointError> {
+    /// Called with the registry lease for both addresses already held. Returns
+    /// the RMT slot the channel actually drives, which is what the output
+    /// handle then talks to.
+    fn bind_channel(&self, index: usize, gpio: u8) -> Result<u8, HardwareEndpointError> {
         let mut slots = self.channels.borrow_mut();
-        let Some(slot) = slots[ch as usize].as_mut() else {
+        let Some(slot) = slots[index].as_mut() else {
             return Err(HardwareEndpointError::Other {
-                message: format!("RMT channel {ch} is not configured"),
+                message: format!("RMT WS281x channel {index} is not configured"),
             });
         };
         let Some(tx) = slot.tx.take() else {
             return Err(HardwareEndpointError::Other {
-                message: format!("RMT channel {ch} has no transmitter"),
+                message: format!("RMT WS281x channel {index} has no transmitter"),
             });
         };
+        let ch = slot.rmt_channel;
 
         // SAFETY: `init_board` drops the concrete HAL GPIO tokens after
         // startup, so the pad has to be recreated here. Exclusivity is the
@@ -227,7 +274,7 @@ impl Esp32S3RmtWs281xDriver {
 
         // Leave the window all-STOP until the first frame prefills it, so a
         // spurious start can only transmit nothing.
-        s3_rmt::clear_ram(&TX_BLOCKS, ch);
+        s3_rmt::clear_ram(ch);
 
         DRIVER
             .configure_default_clock(ch, &ChannelTiming::WS2812)
@@ -235,7 +282,7 @@ impl Esp32S3RmtWs281xDriver {
                 message: format!("RMT channel {ch} timing configuration failed: {error:?}"),
             })?;
         slot.in_use = true;
-        Ok(())
+        Ok(ch)
     }
 }
 
@@ -305,16 +352,16 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             });
         }
 
-        let ch = self
-            .free_channel()
-            .ok_or_else(|| HardwareEndpointError::EndpointUnavailable {
-                endpoint_id: endpoint_id.clone(),
-                reason: format!(
-                    "all {} RMT WS281x channels are in use",
-                    self.offered_channels()
-                ),
-            })?;
-        let timing_address = HwAddress::rmt_ws281x(ch);
+        let index =
+            self.free_channel()
+                .ok_or_else(|| HardwareEndpointError::EndpointUnavailable {
+                    endpoint_id: endpoint_id.clone(),
+                    reason: format!(
+                        "all {} RMT WS281x channels are in use",
+                        self.offered_channels()
+                    ),
+                })?;
+        let timing_address = HwAddress::rmt_ws281x(index as u8);
 
         self.registry
             .ensure_capability(&gpio_address, HwCapability::GpioOutput)?;
@@ -327,13 +374,17 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             vec![gpio_address.clone(), timing_address],
         ))?;
 
-        if let Err(error) = self.bind_channel(ch, gpio) {
-            let _ = self.registry.release(&lease);
-            return Err(error);
-        }
+        let ch = match self.bind_channel(index, gpio) {
+            Ok(ch) => ch,
+            Err(error) => {
+                let _ = self.registry.release(&lease);
+                return Err(error);
+            }
+        };
 
         log::info!(
-            "Esp32S3RmtWs281xDriver::open: endpoint={endpoint_id} gpio={} rmt_ch={ch} bytes={}",
+            "Esp32S3RmtWs281xDriver::open: endpoint={endpoint_id} gpio={} ws281x_ch={index} \
+             rmt_slot={ch} bytes={}",
             gpio_address.as_str(),
             config.byte_count(),
         );
@@ -344,6 +395,7 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             registry: Rc::clone(&self.registry),
             channels: Rc::clone(&self.channels),
             lease: Some(lease),
+            index,
             channel: ch,
             byte_count: config.byte_count(),
             #[cfg(feature = "frame-dump")]
@@ -360,6 +412,9 @@ struct Esp32S3RmtWs281xOutput {
     registry: Rc<HwRegistry>,
     channels: ChannelTable,
     lease: Option<HardwareLease>,
+    /// Manifest channel index — the slot table's key.
+    index: usize,
+    /// RMT slot — what `lp_ws281x` and the register backend address.
     channel: u8,
     byte_count: u32,
     /// Serial transcript of the frames this channel transmitted. Present only
@@ -430,7 +485,7 @@ impl Drop for Esp32S3RmtWs281xOutput {
     /// new open while its transmitter is still running.
     fn drop(&mut self) {
         DRIVER.abort(self.channel);
-        if let Some(slot) = self.channels.borrow_mut()[self.channel as usize].as_mut() {
+        if let Some(slot) = self.channels.borrow_mut()[self.index].as_mut() {
             slot.in_use = false;
         }
         if let Some(lease) = self.lease.take() {
@@ -441,13 +496,39 @@ impl Drop for Esp32S3RmtWs281xOutput {
     }
 }
 
-/// Does the manifest declare `/rmt/ws281x<ch>` with both WS281x capabilities,
-/// and does the block plan leave that channel with memory of its own?
-fn declares_timing_resource(registry: &HwRegistry, ch: u8) -> bool {
-    if !TX_BLOCKS.is_available(ch) {
-        return false;
+/// How many WS281x channels the manifest declares: the highest declared
+/// `/rmt/ws281xK` index plus one, bounded by what the chip has.
+///
+/// Counted as a contiguous prefix would be, but tolerant of a gap: a manifest
+/// declaring only `ws281x1` still yields 2, so the index keeps addressing the
+/// declared resource rather than silently renumbering it.
+fn declared_ws281x_channels(registry: &HwRegistry) -> usize {
+    (0..TX_CHANNELS)
+        .rev()
+        .find(|&index| declares_timing_resource(registry, index))
+        .map_or(0, |index| index + 1)
+}
+
+/// The manifest channel index an RMT slot backs, or `None` when the slot is
+/// absorbed by a lower channel's window (or is past the usable range).
+///
+/// The guard that keeps the channel-creation macro from ever handing an
+/// absorbed slot to `configure_tx`.
+fn manifest_index_for_slot(slot: u8) -> Option<usize> {
+    if slot as usize >= TX_CHANNELS {
+        return None;
     }
-    let address = HwAddress::rmt_ws281x(ch);
+    TX_PLAN.index_of_slot(slot)
+}
+
+/// Does the manifest declare `/rmt/ws281x<index>` with both WS281x
+/// capabilities?
+///
+/// The block-plan half of the question is already answered by
+/// [`manifest_index_for_slot`], which is why there is no `is_available` check
+/// here.
+fn declares_timing_resource(registry: &HwRegistry, index: usize) -> bool {
+    let address = HwAddress::rmt_ws281x(index as u8);
     registry
         .ensure_capability(&address, HwCapability::Rmt)
         .is_ok()
@@ -458,20 +539,26 @@ fn declares_timing_resource(registry: &HwRegistry, ch: u8) -> bool {
 
 /// Turn a freshly configured esp-hal channel into a slot, or log why not.
 fn adopt_channel(
-    ch: u8,
+    index: usize,
+    slot: usize,
     configured: Result<Channel<'static, Blocking, Tx>, esp_hal::rmt::ConfigError>,
 ) -> Option<ChannelSlot> {
+    let ch = slot as u8;
     match configured {
         Ok(tx) => {
             s3_rmt::enable_tx_interrupts(ch);
             Some(ChannelSlot {
-                timing: HwAddress::rmt_ws281x(ch),
+                timing: HwAddress::rmt_ws281x(index as u8),
+                rmt_channel: ch,
                 tx: Some(tx),
                 in_use: false,
             })
         }
         Err(error) => {
-            log::error!("Esp32S3RmtWs281xDriver: RMT channel {ch} configure_tx failed: {error:?}");
+            log::error!(
+                "Esp32S3RmtWs281xDriver: RMT slot {slot} (ws281x{index}) configure_tx failed: \
+                 {error:?}"
+            );
             None
         }
     }

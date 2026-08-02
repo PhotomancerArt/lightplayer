@@ -1,12 +1,27 @@
 //! The project popup's "Project settings" rows.
 //!
-//! Post-mitosis the project's identity (`format` / `uid` / `name`) lives in
-//! the `project.json` container manifest — library-owned workspace metadata,
-//! never authored def slots — so this section renders it read-only from
-//! [`UiProjectManifest`]. Rename happens where the identity lives: the home
-//! gallery's rename, which patches the manifest (`LibraryStore::rename`).
-//! The one root-def row left is the `nodes` map, collapsed to a count (the
-//! map itself is the node tree, which is the pane's whole body).
+//! **Deliberately not the generic `SlotRecordEditor`.** The project's own
+//! identity is not authoring, and the generic slot machinery dresses it as
+//! such: option-presence toggles on `uid`, a full map editor for the
+//! `nodes` table, edit chrome on rows nothing may edit. A demo walk read
+//! that as "the Studio lets you retype your project's uid" — which, until
+//! 2026-07-28, it did.
+//!
+//! Post-mitosis the identity (`format` / `uid` / `name`) no longer lives in
+//! a def at all: it is the `project.json` container manifest — library-owned
+//! workspace metadata, never authored def slots — so this section renders it
+//! read-only from [`UiProjectManifest`]. Rename happens where the identity
+//! lives: the home gallery's rename, which patches the manifest
+//! (`LibraryStore::rename`).
+//!
+//! - **Name / Format / UID** — read-only, from the manifest. UID keeps its
+//!   copy button (identity is the thing you actually want on your clipboard
+//!   when reporting a problem).
+//! - **Nodes** — the one root-def row left, collapsed to a **count**. The
+//!   map itself is the node tree, which is the pane's whole body; repeating
+//!   it as a slot editor in the popup was noise. It carries role `Fixed` in
+//!   `lpc_model::ModuleDef`, so the read-only presentation agrees with the
+//!   model rather than merely hiding a writable slot.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiConfigSlot, UiConfigSlotBody, UiProjectManifest};

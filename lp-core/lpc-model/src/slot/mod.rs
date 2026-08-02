@@ -19,11 +19,11 @@ mod slot_name;
 mod slot_owner;
 mod slot_path;
 mod slot_persistence;
-mod slot_policy;
-mod slot_policy_lookup;
 mod slot_reader;
 mod slot_record_shape;
 mod slot_ref;
+mod slot_role;
+mod slot_role_lookup;
 mod slot_semantics;
 mod slot_shape;
 mod slot_shape_builder;
@@ -70,14 +70,12 @@ pub use slot_mutation::{
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
 pub use slot_path::{SlotPath, SlotPathError, SlotPathSegment};
-pub use slot_persistence::SlotPersistence;
-pub use slot_policy::SlotPolicy;
-pub use slot_policy_lookup::{
-    SlotPolicyResolution, resolve_slot_policy, resolve_slot_policy_and_leaf,
-};
+pub use slot_persistence::{SlotPersistence, effective_persistence};
 pub use slot_reader::{SlotFieldReader, SlotOptionReader, SlotReadContext};
 pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
+pub use slot_role::{SlotRole, effective_writable};
+pub use slot_role_lookup::{SlotRoleResolution, resolve_slot_role};
 pub use slot_semantics::SlotSemantics;
 pub use slot_shape::{
     SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError,
@@ -91,7 +89,7 @@ pub use slot_value::{
 pub mod shape {
     pub use super::slot_shape_builder::{
         custom, enum_external, enum_tagged, enum_with_encoding, field, field_with_dataflow,
-        field_with_policy, field_with_semantics, field_with_semantics_and_policy, id, leaf, map,
+        field_with_role, field_with_semantics, field_with_semantics_and_role, id, leaf, map,
         option, record, reference, unit, value, variant,
     };
 }

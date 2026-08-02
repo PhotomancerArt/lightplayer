@@ -44,7 +44,7 @@ pub struct HostSerialEsp32Options {
     pub reset_after_open: bool,
     pub line_observer: Option<Arc<dyn SerialLineObserver>>,
     /// Path to the firmware package `manifest.json` (the artifact of
-    /// `just studio-firmware-package-esp32c6`). `FlashFirmware` fails with a
+    /// `lp-cli firmware package <id>`). `FlashFirmware` fails with a
     /// configuration error when unset; the host has no meaningful
     /// cwd-relative default, so the embedder locates the package.
     pub firmware_manifest_path: Option<String>,
@@ -158,6 +158,33 @@ impl HostSerialEsp32Provider {
         Ok(core::mem::take(&mut *lines))
     }
 
+    /// Ask whether a bootloader is listening on this session's port, and
+    /// which chip it is.
+    ///
+    /// Not capability-gated: probing is a *question*, not an operation on
+    /// the device, and the answer is what tells callers which operations are
+    /// available at all. It still needs exclusive ownership of the wire,
+    /// because the SYNC handshake reboots the device.
+    pub async fn probe_target(
+        &self,
+        session_id: &LinkSessionId,
+        events: LinkManagementEventSink,
+    ) -> Result<Option<String>, LinkError> {
+        let port_name = self.session_port(session_id)?;
+        self.release_transport_if_open(session_id).await?;
+        host_esp32_flash::probe_target(&port_name, &events)
+    }
+
+    /// Resolve a session's port without gating on a capability.
+    fn session_port(&self, session_id: &LinkSessionId) -> Result<String, LinkError> {
+        let state = self.state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        Ok(session.port_name.clone())
+    }
+
     /// Capability-gate a management request and resolve the session's port.
     fn session_manage_port(
         &self,
@@ -255,6 +282,20 @@ impl HostSerialEsp32Provider {
                 let logs = host_esp32_flash::reset_runtime(&port_name, &events)?;
                 self.extend_session_logs(session_id, &logs)?;
                 Ok(LinkManagementResult::ResetRuntime)
+            }
+            LinkManagementRequest::SetBootControl { flags } => {
+                let result = host_esp32_flash::write_boot_control(
+                    &port_name,
+                    lp_bootctl::BootFlags::from_bits(flags),
+                    &events,
+                )?;
+                self.extend_session_logs(session_id, &result.logs)?;
+                Ok(LinkManagementResult::SetBootControl(result))
+            }
+            LinkManagementRequest::ReadRawFilesystem => {
+                let result = host_esp32_flash::read_raw_filesystem(&port_name, &events)?;
+                self.extend_session_logs(session_id, &result.logs)?;
+                Ok(LinkManagementResult::ReadRawFilesystem(result))
             }
             LinkManagementRequest::EraseRawFilesystem => {
                 Err(LinkError::unsupported(format!("{:?}", request.operation())))
@@ -473,7 +514,11 @@ fn upsert_port_endpoint(
     let endpoint = LinkEndpoint::new(endpoint_id.clone(), kind, label).with_capabilities(
         LinkCapabilities::esp32_serial_base()
             .with_flash()
-            .with_device_erase(),
+            .with_device_erase()
+            .with_boot_control()
+            // READ only (M6). The write half is M7's; advertising it now
+            // would let the UI offer an operation that answers `unsupported`.
+            .with_raw_filesystem_read(),
     );
 
     if let Some(existing) = state
@@ -574,10 +619,13 @@ fn sanitize_endpoint_part(value: &str) -> String {
 }
 
 pub fn is_likely_esp32_serial_port(port_name: &str) -> bool {
+    // `usbserial` (not `tty.usbserial`) so the macOS `cu.*` twins and
+    // WCH-bridged boards (`cu.wchusbserial*`, classic ESP32 dev kits with a
+    // CH340) match too, not just the FTDI/CP210x `tty.usbserial*` form.
     port_name.contains("usbmodem")
         || port_name.contains("ttyUSB")
         || port_name.contains("ttyACM")
-        || port_name.contains("tty.usbserial")
+        || port_name.contains("usbserial")
 }
 
 /// Prefer macOS call-out (`/dev/cu.*`) devices over their `/dev/tty.*` twins.

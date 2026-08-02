@@ -1,7 +1,7 @@
 //! Dedicated node-authoring semantics on the project registry.
 //!
 //! `create_node` and `remove_node` are the operations the `ModuleDef.nodes`
-//! `read_only_persisted` policy promises: node creation and removal never
+//! `Fixed` role promises: node creation and removal never
 //! arrive as raw slot edits, they arrive here. Both address the node through
 //! a [`NodeAttachSite`] — either the policy-locked project `nodes` map (the
 //! dedicated-op bypass applies **only** to that site) or any writable
@@ -203,9 +203,9 @@ impl ProjectRegistry {
                         ),
                     ));
                 };
-                // The dedicated-op policy bypass applies only to the
+                // The dedicated-op role bypass applies only to the
                 // `ProjectNodes` site; slot sites take the standard check.
-                if !resolution.policy.writable {
+                if !resolution.is_writable() {
                     return Err(reject(
                         MutationRejectionReason::NotWritable,
                         format!("attach slot {path} is not writable"),
@@ -418,8 +418,8 @@ impl ProjectRegistry {
     /// The site must resolve in the **effective** inventory. Everything is
     /// validated before anything is staged; a rejection leaves the overlay
     /// and inventory untouched. The `ProjectNodes` site bypasses the `nodes`
-    /// map's `read_only_persisted` policy (the dedicated-op contract); slot
-    /// sites take the standard writable-policy check.
+    /// map's `Fixed` role (the dedicated-op contract); slot sites take the
+    /// standard writable check.
     pub fn remove_node(
         &mut self,
         fs: &dyn LpFs,
@@ -446,7 +446,7 @@ impl ProjectRegistry {
 
         // Stage the entry removal through the singular mutation path: it is
         // deliberately unvalidated (the dedicated-op bypass of the `nodes`
-        // map's read_only_persisted policy), normalizes an overlay-only entry
+        // map's `Fixed` role), normalizes an overlay-only entry
         // away instead of storing a no-op edit, and re-derives the effective
         // inventory. `PutSlotEdit` cannot fail on that path.
         let removal = self
@@ -573,9 +573,9 @@ impl ProjectRegistry {
                         ),
                     ));
                 };
-                // The dedicated-op policy bypass applies only to the
+                // The dedicated-op role bypass applies only to the
                 // `ProjectNodes` site; slot sites take the standard check.
-                if !resolution.policy.writable {
+                if !resolution.is_writable() {
                     return Err(reject(
                         MutationRejectionReason::NotWritable,
                         format!("remove slot {path} is not writable"),

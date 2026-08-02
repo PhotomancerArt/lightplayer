@@ -22,7 +22,7 @@ pub struct ModuleDef {
     ///
     /// Read-only through mutations: node create/remove arrive as dedicated
     /// project operations, never as raw slot edits under this map.
-    #[slot(policy = "read_only_persisted")]
+    #[slot(role = "fixed")]
     pub nodes: MapSlot<String, NodeInvocationSlot>,
     /// Authored slot bindings on the module node itself, like any node —
     /// this is where R7's contention pick ("two writers on `visual.out` =
@@ -139,8 +139,8 @@ mod tests {
     }
 
     #[test]
-    fn module_def_nodes_are_read_only_persisted() {
-        use crate::{SlotPolicy, SlotShape, StaticSlotShape};
+    fn module_def_nodes_are_fixed() {
+        use crate::{SlotRole, SlotShape, StaticSlotShape};
 
         let SlotShape::Record { fields, .. } = crate::ModuleDef::slot_shape() else {
             panic!("module def shape must be a record");
@@ -149,7 +149,7 @@ mod tests {
             .iter()
             .find(|field| field.name.as_str() == "nodes")
             .expect("nodes field");
-        assert_eq!(nodes.policy, SlotPolicy::read_only_persisted());
+        assert_eq!(nodes.role, SlotRole::Fixed);
     }
 
     #[test]

@@ -13,7 +13,8 @@ pub use lpa_link::{
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
-    ControlSampleSpan, LpValue, Revision, SlotMapKey, SlotPath, SlotPathSegment,
+    ControlSampleSpan, LampType, LpFeature, LpValue, NodeKind, Revision, SlotMapKey, SlotPath,
+    SlotPathSegment,
 };
 
 pub mod app;
@@ -34,8 +35,9 @@ pub use app::agent::{
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
-    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployTarget,
-    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
+    BootloaderEntryFlow, ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp,
+    DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
+    RecoveryInstructions, RecoveryStep, UiDeviceBackup,
 };
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, HOME_NODE_ID,

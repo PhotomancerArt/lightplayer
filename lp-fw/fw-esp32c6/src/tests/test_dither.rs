@@ -11,7 +11,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use esp_hal::rmt::Rmt;
-use esp_hal::time::Rate;
 use log::info;
 use lpc_shared::{DisplayPipeline, DisplayPipelineOptions};
 
@@ -40,7 +39,8 @@ pub async fn run_dithering_test(_: embassy_executor::Spawner) -> ! {
 
     info!("DisplayPipeline test mode starting...");
 
-    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).expect("Failed to initialize RMT");
+    let rmt = Rmt::new(rmt_peripheral, crate::output::rmt::shared_driver::RMT_CLOCK)
+        .expect("Failed to initialize RMT");
     let pin = gpio18;
 
     const NUM_LEDS: usize = 256;

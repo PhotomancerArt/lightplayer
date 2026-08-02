@@ -127,8 +127,10 @@ impl ComputeShaderNode {
             .graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
         // Compute shaders always lower through lps-glsl
-        // (`LpsEngine::compile_compute_desc`) at the Q32 tier — there is no
-        // frontend or semantics choice here.
+        // (`LpsEngine::compile_compute_desc`) — there is no frontend choice
+        // here, and no `ShaderSemantics` tier either: the numeric mode rides
+        // the descriptor, taken from the def's authored `float_mode` slot by
+        // `compute_desc_from_model_def`.
         let compiler_config = lpir::CompilerConfig::default();
         let desc = match compute_desc_from_model_def(
             self.glsl_source.as_str(),
