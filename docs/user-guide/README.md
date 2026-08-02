@@ -6,8 +6,9 @@ instead.
 
 Each article teaches the *why* behind one part of making LED art look good:
 short, concrete, and written for people who think in scenes and fixtures,
-not in code. The guide is plain markdown for now; how it gets published is
-a separate, later decision.
+not in code. These pages render in-app at `#/docs` (each article needs a
+manifest entry in `lp-app/lpa-studio-web/src/app/docs/mod.rs`); richer,
+interactive docs are a separate, later initiative.
 
 ## Articles
 

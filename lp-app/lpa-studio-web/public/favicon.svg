@@ -1,0 +1,13 @@
+<!-- The interim LightPlayer mark (see src/base/logo_mark.rs — keep in sync).
+     Placeholder until the human-designed logo lands. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="5.5" y="5.5" width="21" height="21" rx="2.4" fill="none" stroke="#7be0b2" stroke-width="1.7"/>
+  <g fill="#7be0b2" opacity="0.75">
+    <rect x="3.2" y="8" width="2.3" height="4.6" rx="1"/>
+    <rect x="3.2" y="19.4" width="2.3" height="4.6" rx="1"/>
+    <rect x="26.5" y="8" width="2.3" height="4.6" rx="1"/>
+    <rect x="26.5" y="19.4" width="2.3" height="4.6" rx="1"/>
+  </g>
+  <circle cx="16" cy="16" r="7.6" fill="none" stroke="#7be0b2" stroke-width="1.5"/>
+  <path d="M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z" fill="#7be0b2"/>
+</svg>

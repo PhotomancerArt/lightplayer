@@ -4,6 +4,8 @@ pub(crate) mod local_store_banner_stories;
 pub mod pane_frame;
 pub mod rich_object_pane;
 pub mod site_chrome;
+#[cfg(feature = "stories")]
+pub(crate) mod site_chrome_stories;
 pub mod studio_pane;
 #[cfg(feature = "stories")]
 pub(crate) mod studio_pane_stories;
