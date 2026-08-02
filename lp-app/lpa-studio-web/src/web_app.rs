@@ -823,4 +823,76 @@ mod tests {
 
         assert_eq!(console_line(&entry), "[device/fw_core::server] boot ok");
     }
+
+    /// `style.css` is `include_str!`'d as raw bytes and injected into a
+    /// `<style>` tag — nothing in the build ever PARSES it, and a browser
+    /// silently discards every rule after a syntax error. A single dropped
+    /// `}` in a merge once deleted the whole debug treatment while `just
+    /// check`, `just test` and all 11 CI jobs stayed green; only a human
+    /// looking at the screen caught it (2026-08-02).
+    ///
+    /// This is the cheapest possible backstop: balanced delimiters outside
+    /// strings and comments. It is not a CSS validator — it is the check
+    /// that would have caught that class of silent, total style loss.
+    #[test]
+    fn embedded_stylesheet_has_balanced_delimiters() {
+        #[derive(Clone, Copy, PartialEq)]
+        enum Ctx {
+            Code,
+            Comment,
+            SingleQuote,
+            DoubleQuote,
+        }
+
+        let mut ctx = Ctx::Code;
+        let mut depth = 0i32;
+        let mut line = 1usize;
+        let mut opened_at: Vec<usize> = Vec::new();
+        let bytes: Vec<char> = STYLE.chars().collect();
+        let mut index = 0usize;
+
+        while index < bytes.len() {
+            let ch = bytes[index];
+            let next = bytes.get(index + 1).copied();
+            if ch == '\n' {
+                line += 1;
+            }
+            match ctx {
+                Ctx::Code => match ch {
+                    '/' if next == Some('*') => {
+                        ctx = Ctx::Comment;
+                        index += 1;
+                    }
+                    '\'' => ctx = Ctx::SingleQuote,
+                    '"' => ctx = Ctx::DoubleQuote,
+                    '{' => {
+                        depth += 1;
+                        opened_at.push(line);
+                    }
+                    '}' => {
+                        depth -= 1;
+                        assert!(depth >= 0, "unmatched `}}` at style.css:{line}");
+                        opened_at.pop();
+                    }
+                    _ => {}
+                },
+                Ctx::Comment if ch == '*' && next == Some('/') => {
+                    ctx = Ctx::Code;
+                    index += 1;
+                }
+                Ctx::SingleQuote if ch == '\'' => ctx = Ctx::Code,
+                Ctx::DoubleQuote if ch == '"' => ctx = Ctx::Code,
+                _ => {}
+            }
+            index += 1;
+        }
+
+        assert_eq!(
+            depth,
+            0,
+            "style.css has {depth} unclosed block(s); innermost opened at line {:?}. \
+             Every rule after it is silently DISCARDED by the browser.",
+            opened_at.last()
+        );
+    }
 }
