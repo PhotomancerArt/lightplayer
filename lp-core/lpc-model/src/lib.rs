@@ -47,6 +47,7 @@ pub mod artifact;
 pub mod feature;
 pub mod hardware_endpoint_spec;
 pub mod manifest;
+pub mod measurement;
 pub mod nodes;
 pub mod product;
 pub mod products;
@@ -100,6 +101,10 @@ pub use hardware_endpoint_spec::{HardwareEndpointSpecError, HwEndpointSpec};
 pub use lpfs::fs_event::FsVersion;
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use manifest::{ManifestCore, ManifestTarget};
+pub use measurement::{
+    MEASUREMENT_DEFAULT_MARGIN, MEASUREMENT_METRIC_LEDS_MAX_SAFE, MEASUREMENT_METRIC_VERSION,
+    MeasurementRecord,
+};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
