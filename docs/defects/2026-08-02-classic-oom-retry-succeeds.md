@@ -150,8 +150,37 @@ have asked for 6,144 B with 3,072 B still live beside it for the copy. The
 collection whose job was to avoid the largest allocation in the compiler was
 making it.
 
-`CHUNK_BYTES = 1024` replaces it, with the element count derived per type
-(`HirExpr` → 10 per chunk, 960 B). The 3,072-byte request no longer exists.
+`CHUNK_BYTES = 1024` replaces it, rounded **down to a power of two** because the
+last chunk is a `Vec` grown by pushing and `RawVec` doubles — deriving
+`CHUNK_BYTES / 96` = 10 gave a chunk whose *capacity* reached 16, i.e. a
+1,536-byte allocation against a 1,024-byte bound, the same mistake one layer
+down. `HirExpr` gets 8 per chunk (768 B). The 3,072-byte request no longer
+exists.
+
+### But `ChunkedVec` was not the biggest allocation — the lexer is
+
+Measured with a counting global allocator over a real `lps_glsl::compile`
+(`spikes/glsl-compile-working-set`): for `examples/basic`, peak heap is
+156,972 B on a 64-bit host and the **largest single allocation is 24,576 B**.
+`lps_glsl::lex` on its own returns the same 24,576 B, so the token vector owns
+it — a plain doubling `Vec<Token>`, not chunked at all.
+
+`Token` is **12 bytes on `riscv32imac` and on the 64-bit host alike**, so unlike
+the peak figure this one transfers to the device unchanged. `examples/basic` asks
+the classic's allocator for a single **24,576-byte block: 22 % of the 112,640 B
+arena, and 8× the 3,072-byte request that OOM'd.**
+
+So the backtrace was accurate but unrepresentative — it landed on `ChunkedVec`
+because that is what happened to fail, not because it was the largest claim on
+the heap. The token vector is the bigger contiguous-allocation risk and is
+untouched here; chunking it, or lexing on demand, is the obvious next lever and
+is deliberately left out of this change.
+
+Peak also scales **linearly** with source, ~38 B per byte of GLSL on the real
+shader and ~94 B/B on an expression-dense synthetic sweep. At 17 KB of GLSL the
+single largest allocation alone is 196,608 B — more than even the two-region
+178,176 B heap of #288 — which is why the flash-budget ADR's "17–50 KB shaders
+are unreachable at any region size" survives this change with a wide margin.
 
 ## Status
 
