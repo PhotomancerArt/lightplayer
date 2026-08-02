@@ -39,6 +39,6 @@ pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use keyboard::Platform;
 pub use logo_mark::LogoMark;
-pub use markdown_text::MarkdownText;
+pub use markdown_text::{MarkdownDocs, MarkdownText};
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};

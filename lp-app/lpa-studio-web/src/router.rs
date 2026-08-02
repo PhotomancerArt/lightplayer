@@ -93,6 +93,11 @@ pub(crate) enum StudioRoute {
     /// The standalone board display-def editor (project-free; edits
     /// `.display.json` sidecars with localStorage autosave).
     BoardEditor,
+    /// The in-app docs section (compiled-in `docs/user-guide/` articles).
+    /// `page` deep-links one article by slug; `None` (and any unknown
+    /// slug — the page's concern, not the router's) lands on the guide's
+    /// landing article.
+    Docs { page: Option<String> },
 }
 
 #[cfg_attr(
@@ -136,6 +141,12 @@ impl StudioRoute {
                     }
                 }
             }
+            Some("docs") => {
+                let rest: Vec<&str> = segments.collect();
+                StudioRoute::Docs {
+                    page: (rest.len() == 1).then(|| rest[0].to_string()),
+                }
+            }
             Some("stories") => {
                 let rest: Vec<&str> = segments.collect();
                 StudioRoute::Stories {
@@ -159,6 +170,8 @@ impl StudioRoute {
             StudioRoute::Boards { board: None } => "#/boards".to_string(),
             StudioRoute::Boards { board: Some(board) } => format!("#/boards/{board}"),
             StudioRoute::BoardEditor => "#/boards/edit".to_string(),
+            StudioRoute::Docs { page: None } => "#/docs".to_string(),
+            StudioRoute::Docs { page: Some(page) } => format!("#/docs/{page}"),
         }
     }
 
@@ -395,6 +408,10 @@ mod tests {
                 board: Some("domraem/dom-z-102".to_string()),
             },
             StudioRoute::BoardEditor,
+            StudioRoute::Docs { page: None },
+            StudioRoute::Docs {
+                page: Some("brightness-and-smooth-fades".to_string()),
+            },
         ];
         for route in routes {
             assert_eq!(StudioRoute::parse(&route.hash()), route, "{route:?}");
@@ -427,6 +444,18 @@ mod tests {
             StudioRoute::Home
         );
         assert_eq!(StudioRoute::parse("#/project/prj_abc"), StudioRoute::Home);
+    }
+
+    #[test]
+    fn docs_junk_depth_reads_as_the_landing_page() {
+        assert_eq!(
+            StudioRoute::parse("#/docs/a/b"),
+            StudioRoute::Docs { page: None }
+        );
+        assert_eq!(
+            StudioRoute::parse("#/docs/"),
+            StudioRoute::Docs { page: None }
+        );
     }
 
     #[test]
