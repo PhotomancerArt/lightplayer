@@ -202,15 +202,8 @@ cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift", bran
 cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-module = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-object = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-cranelift-reader = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-cranelift-control = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-
-# regalloc2 - fork (ChunkedVec for OOM mitigation, feature-gating ION allocator)
-regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "lightplayer", default-features = false, features = ["std"] }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
-lp-bootctl = { path = "lp-base/lp-bootctl", default-features = false }
 
 # Common dependencies
 
@@ -221,7 +214,6 @@ anyhow = { version = "1.0.100", default-features = false }
 log = { version = "0.4", default-features = false }
 regex = "1.9.1"
 glob = "0.3.3"
-object = { version = "0.37.3", default-features = false, features = ['read_core', 'elf'] }
 critical-section = { version = "1.2.0", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
@@ -295,6 +287,14 @@ debug = 1
 inherits = "release"
 panic = "abort"
 
+# ⚠️ RESTORED in this merge, not added. `f07abb731` ("test: parse the embedded
+# stylesheet with lightningcss") deleted these six per-package profile blocks
+# along with several unused [workspace.dependencies] entries. The dep removals
+# are harmless — nothing referenced them — but these are not: `debug`/`strip`
+# on fw-esp32c6 and fw-emu are what make `just decode-backtrace` able to
+# symbolicate a crash report, which is exactly the path the abort tier makes
+# load-bearing, and the three `opt-level = "z"` overrides size-tune the WiFi
+# blob crates against the C6 flash budget.
 [profile.release-esp32.package.fw-esp32c6]
 debug = 1
 strip = "none"
@@ -350,6 +350,7 @@ codegen-units = 4
 # builder in the test harness — the profile alone never did anything.
 panic = "abort"
 
+# Also restored — see the note on the release-esp32 blocks above.
 [profile.release-emu.package.fw-emu]
 debug = 1
 

@@ -1,8 +1,10 @@
 # C6: a project declaring more outputs than the board offers ends in an OOM panic storm
 
 - **Date:** 2026-08-02
-- **Status:** OPEN — observed during the runtime-block-plan hardware smoke
-  (PR #276); not a regression of that PR, but made far more reachable by it.
+- **Status:** OPEN, but **half of it is now unreachable** — see "What the
+  unwinding teardown closed" below. Originally observed during the
+  runtime-block-plan hardware smoke (PR #276); not a regression of that PR, but
+  made far more reachable by it.
 - **Board:** desk C6 jig (XIAO ESP32-C6, MAC `a0:f2:62:87:b4:8c`), `fw-esp32c6`
   with `ws281x_telemetry`
 - **Repro:** board manifest declaring **1** WS281x channel (temporary
@@ -89,3 +91,27 @@ written to `0xe000` with `espflash write-bin` did **not** suppress the next
 boot's auto-load (the storm proceeded). Worth checking whether `write-bin`
 erases the sector before writing — an unerased overwrite ANDs bits and
 corrupts the CRC, which decodes as "boot normally" by design.
+
+## What the unwinding teardown closed (2026-08-02)
+
+The **storm shape** described above cannot happen any more. "3 OOMs and 53
+caught panics in a single boot (unwind is caught, the load path retries, the
+heap never recovers — final OOMs report `free=0 used=0`, i.e. a wrecked
+allocator)" required a catcher: each panic was caught in-process, control
+returned, and the load path went round again. With the unwind tier removed
+(ADR `2026-08-02-rv32-firmwares-are-abort-tier`) the first OOM stages a
+breadcrumb, commits it, prints a report that now includes `largest_free` and
+`retry_ok`, and resets. There is no 53rd panic because there is no 2nd.
+
+The ledger-blamed *stack-overflow* crashes in the attribution caveat are also
+explained by that ADR rather than by this defect: unwinding one panic needed
+~41 KB of stack on a chip with ~34 KB, so a caught panic overflowed the stack
+by construction.
+
+**What remains open is the real question**, and it is the one PR #280 re-scoped
+this defect to: heap headroom when auto-loading an oversized project at boot
+(`soft-limit-bench` is 227 KB resident on a 300 KB heap). That is unaffected by
+the teardown. What changed is the failure mode — a clean single reset with a
+diagnostic OOM report, instead of a panic storm that wrecked the allocator
+before anyone could read it — which should make reproducing it considerably
+easier.
