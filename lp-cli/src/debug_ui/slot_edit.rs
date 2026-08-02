@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use eframe::egui;
-use lpc_model::{LpValue, SlotPath, SlotPolicy, SlotValueShape, ValueEditorHint};
+use lpc_model::{LpValue, SlotPath, SlotValueShape, ValueEditorHint};
 
 /// Stable UI key for a slot mutation target.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -67,10 +67,10 @@ pub(crate) fn render_slot_value_editor(
     root: &str,
     path: &SlotPath,
     shape: &SlotValueShape,
-    policy: SlotPolicy,
+    writable: bool,
     value: &LpValue,
 ) -> Option<LpValue> {
-    if !policy.writable {
+    if !writable {
         return None;
     }
 

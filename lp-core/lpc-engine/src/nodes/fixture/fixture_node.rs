@@ -537,7 +537,7 @@ fn ensure_path_exists_in_fixture_def_shape(
     let shape = shapes
         .get_shape(lpc_model::nodes::FixtureDef::SHAPE_ID)
         .ok_or_else(|| NodeError::msg("FixtureDef slot shape is not registered"))?;
-    if lpc_model::resolve_slot_policy(shape, shapes, slot).is_none() {
+    if lpc_model::resolve_slot_role(shape, shapes, slot).is_none() {
         return Err(NodeError::msg(alloc::format!(
             "fixture def path {slot} does not exist in the FixtureDef shape"
         )));

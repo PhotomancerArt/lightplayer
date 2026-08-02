@@ -27,14 +27,14 @@ use crate::{
     UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
     UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
-use lpc_model::slot::SlotPersistence;
+use lpc_model::slot::{SlotPersistence, effective_persistence};
 use lpc_model::{
     ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
     MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
-    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
-    SlotPath, SlotPathSegment, SlotPolicy, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
-    TreePath, glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_policy,
-    starter_for_kind,
+    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotDirection, SlotEdit,
+    SlotMapKey, SlotPath, SlotPathSegment, SlotRole, SlotShapeId, SlotShapeLookup,
+    SlotShapeRegistry, TreePath, glsl_type_for_lp_type, resolve_artifact_specifier,
+    resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -1192,11 +1192,12 @@ impl ProjectController {
     }
 
     /// Classify the persistence governing an edit entry's path through the
-    /// retained shapes (`lpc_model::resolve_slot_policy`). The walk is
+    /// retained shapes (`lpc_model::resolve_slot_role`). The walk is
     /// shape-only, so it classifies paths with no surviving slot row —
-    /// removed map entries — exactly like paths that still have data.
-    /// Unresolvable entries (unknown node/shape/path) classify as the default
-    /// policy's bucket (persisted).
+    /// removed map entries — exactly like paths that still have data. A
+    /// produced field (e.g. under the `State` root) always classifies as
+    /// transient regardless of its role (D1). Unresolvable entries (unknown
+    /// node/shape/path) classify as the default role's bucket (persisted).
     fn resolve_edit_persistence(&self, address: &ProjectSlotAddress) -> SlotPersistence {
         self.node(&address.node)
             .and_then(|node| {
@@ -1204,10 +1205,13 @@ impl ProjectController {
                 let shape = self
                     .slot_shapes
                     .get_shape(*self.root_shape_ids.get(&key)?)?;
-                let policy = resolve_slot_policy(shape, &self.slot_shapes, &address.path)?;
-                Some(policy.persistence)
+                let resolution = resolve_slot_role(shape, &self.slot_shapes, &address.path)?;
+                Some(effective_persistence(resolution.role, resolution.direction))
             })
-            .unwrap_or(SlotPolicy::default().persistence)
+            .unwrap_or(effective_persistence(
+                SlotRole::default(),
+                SlotDirection::default(),
+            ))
     }
 
     /// Entry keys of `artifact`'s `entries` map that carry pending overlay
@@ -4920,8 +4924,8 @@ mod tests {
     use lpc_model::{
         ControlExtent, ControlProduct, LpType, LpValue, NodeId, ProductKind, ProductRef, Revision,
         SlotData, SlotEnum, SlotEnumEncoding, SlotFieldShape, SlotMapDyn, SlotMapKey,
-        SlotMapKeyShape, SlotMeta, SlotName, SlotOptionDyn, SlotPath, SlotRecord, SlotShape,
-        SlotShapeId, SlotVariantShape, TreePath, VisualProduct, WithRevision,
+        SlotMapKeyShape, SlotMeta, SlotName, SlotOptionDyn, SlotPath, SlotRecord, SlotRole,
+        SlotShape, SlotShapeId, SlotVariantShape, TreePath, VisualProduct, WithRevision,
     };
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
@@ -7847,8 +7851,9 @@ mod tests {
     }
 
     /// A ready project with an applied view whose def root has a persisted
-    /// `brightness` (default policy) and a transient `rate` control, plus the
-    /// def-artifact map a connect-time inventory read would have installed.
+    /// `brightness` (default role) and a `Debug`-role `rate` control, plus
+    /// the def-artifact map a connect-time inventory read would have
+    /// installed.
     fn editable_project_with_scripted_client(
         responses: Vec<WireServerMessage>,
     ) -> (
@@ -7878,7 +7883,7 @@ mod tests {
         view.slots.registry = Default::default();
         let def_shape = SlotShapeId::new(500);
         let mut rate = SlotFieldShape::new("rate", SlotShape::value(LpType::F32)).unwrap();
-        rate.policy = lpc_model::SlotPolicy::writable_transient();
+        rate.role = SlotRole::Debug;
         view.slots
             .registry
             .register_dynamic_shape(
