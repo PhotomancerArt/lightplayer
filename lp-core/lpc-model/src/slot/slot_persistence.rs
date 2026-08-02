@@ -47,8 +47,9 @@ impl SlotPersistence {
 }
 
 /// Derive the persistence classification governing a field carrying `role`
-/// and `direction`: transient unless the role persists (not [`SlotRole::Debug`])
-/// and the direction does not imply a produced (never-serialized) field.
+/// and `direction`: transient unless the role persists (neither
+/// [`SlotRole::Debug`] nor [`SlotRole::State`]) and the direction does not
+/// imply a produced (never-serialized) field.
 pub fn effective_persistence(role: SlotRole, direction: SlotDirection) -> SlotPersistence {
     if role.is_persisted() && direction != SlotDirection::Produced {
         SlotPersistence::Persisted
@@ -83,6 +84,20 @@ mod tests {
         );
         assert_eq!(
             effective_persistence(SlotRole::Fixed, SlotDirection::Produced),
+            SlotPersistence::Transient
+        );
+    }
+
+    /// The G2 amendment renames what direction implied; it must not move the
+    /// classification of a produced field.
+    #[test]
+    fn state_role_classifies_exactly_like_an_unmarked_produced_field() {
+        assert_eq!(
+            effective_persistence(SlotRole::State, SlotDirection::Produced),
+            effective_persistence(SlotRole::Setting, SlotDirection::Produced),
+        );
+        assert_eq!(
+            effective_persistence(SlotRole::State, SlotDirection::Produced),
             SlotPersistence::Transient
         );
     }

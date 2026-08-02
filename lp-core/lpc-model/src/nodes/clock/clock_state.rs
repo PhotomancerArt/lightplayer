@@ -2,6 +2,7 @@ use crate::{Slotted, ValueSlot};
 
 /// Runtime state exposed by the clock node.
 #[derive(Slotted)]
+#[slot(default_role = "state")]
 pub struct ClockState {
     /// Clock time in seconds after rate and scrub offset are applied.
     #[slot(produced, default_bind = "bus:time")]

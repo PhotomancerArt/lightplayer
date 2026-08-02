@@ -1972,13 +1972,23 @@ mod tests {
         // what an edit is. The studio classifies through
         // `effective_persistence(role, direction)`, where a produced path is
         // transient whatever its role (D1); retention must therefore ask the
-        // same question. Asking `role == Debug` alone would drop a produced
-        // path's entry at commit while the studio still believed it held a
-        // live override — a Debug value that vanishes with no Clear.
+        // same question. Asking `role == Debug` alone would drop such an
+        // entry at commit while the studio still believed it held a live
+        // override — a value that vanishes with no Clear.
+        //
+        // The probe is a `State`/produced field. Since the G2 amendment made
+        // the produced role explicit, `State` + `Produced` is the *only* legal
+        // spelling of a produced field — and it is a SECOND role that
+        // classifies transient, which is exactly what "not role alone" means.
+        // (The original probe here was `Debug` + `Produced`; that pairing is
+        // now rejected at shape registration by `role_matches_direction`, so
+        // the divergence it guarded against is unrepresentable rather than
+        // merely handled.)
         let mut shapes = SlotShapeRegistry::default();
         shapes.replace_shape(
             ClockDef::SHAPE_ID,
             clock_shape_with(|rate| {
+                rate.role = lpc_model::SlotRole::State;
                 rate.semantics = lpc_model::SlotSemantics::produced();
             }),
         );
