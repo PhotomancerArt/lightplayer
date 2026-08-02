@@ -81,9 +81,13 @@ async fn main(spawner: Spawner) {
     let peripherals =
         esp_hal::init(esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max()));
 
-    // Baud-divisor fix, exactly as the probe entrypoint: esp-println writes
-    // UART0's FIFO but never programs the divisor, and init() just reclocked.
-    let _uart0 = esp_hal::uart::Uart::new(peripherals.UART0, esp_hal::uart::Config::default())
+    // Baud-divisor fix, as the probe entrypoint — but at the desk workflow's
+    // 921600 (the probe's 115200 default cost this harness its first capture:
+    // the CH340 at the wrong baud reads as pure 0x80/0x00 framing garbage).
+    // 921_600 = lpc_model::DEFAULT_SERIAL_BAUD_RATE, spelled literally: the
+    // harness build does not link lpc-model.
+    let uart_config = esp_hal::uart::Config::default().with_baudrate(921_600);
+    let _uart0 = esp_hal::uart::Uart::new(peripherals.UART0, uart_config)
         .expect("uart0 config")
         .with_tx(peripherals.GPIO1)
         .with_rx(peripherals.GPIO3);
