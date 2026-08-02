@@ -519,3 +519,69 @@ fn r7_authored_export_and_root_module_runtime() {
         "the root wears a live module runtime"
     );
 }
+
+#[test]
+fn panel_writer_survives_apply_project_changes() {
+    // The side-store's reason to exist: apply_project_changes rebuilds
+    // ALL bindings from defs (clear + re-register), and an engaged panel
+    // writer must ride through untouched — still engaged, still winning.
+    let fs = project_fs();
+    let rt = load(&fs);
+    let (mut engine, mut registry) = rt.into_parts();
+    let root_scope = engine
+        .tree()
+        .node_scope(engine.tree().root())
+        .expect("root scope");
+    let channel = lpc_model::ChannelName(String::from("time"));
+    engine.panel_write(root_scope, channel.clone(), lpc_model::LpValue::F32(42.0));
+
+    fs.write_file(
+        "/clock.json".as_path(),
+        br#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#,
+    )
+    .expect("rewrite clock");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/clock.json"),
+            kind: FsEventKind::Modify,
+        }],
+        current_revision(),
+        &ParseCtx { shapes: &shapes },
+    );
+    engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply");
+
+    assert!(
+        engine.panel_writers().get(root_scope, &channel).is_some(),
+        "the engaged writer survives the binding rebuild"
+    );
+    let winners = engine
+        .tree()
+        .providers_for_bus_in_scope(root_scope, &channel);
+    // The authored clock target still exists in the tree…
+    assert!(!winners.is_empty());
+    // …but the probe's value read (the resolve path) still answers with
+    // the engaged value.
+    let result = engine.read_project_binding_graph_probe(
+        &registry,
+        lpc_wire::BindingGraphProbeRequest {
+            include_values: true,
+        },
+    );
+    let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+        panic!("expected graph result");
+    };
+    let row = graph
+        .channels
+        .iter()
+        .find(|row| row.name == "time" && !row.scope.is_none())
+        .expect("scoped time row");
+    assert_eq!(
+        row.value.as_ref().and_then(|value| value.value.clone()),
+        Some(lpc_model::LpValue::F32(42.0)),
+        "the panel value still wins after apply"
+    );
+}

@@ -60,6 +60,10 @@ pub struct Engine {
     services: EngineServices,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
+    /// Engaged panel writers (panel.md P1–P4). A side store on purpose:
+    /// `apply_project_changes` rebuilds bindings from defs and must never
+    /// destroy an engaged control.
+    panel_writers: crate::dataflow::panel_writers::PanelWriterStore,
     /// The tree shape and resolver epoch as of the last tick, so that a
     /// structural change that forgot to invalidate resolution is caught here
     /// rather than by someone noticing a stale value on a device.
@@ -87,6 +91,7 @@ impl Engine {
             services,
             demand_roots: Vec::new(),
             graphics: None,
+            panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
             #[cfg(debug_assertions)]
             last_structural_check: None,
         }
@@ -265,6 +270,47 @@ impl Engine {
     }
 
     /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
+    /// Engage (or update) a panel writer (panel.md P1/P2): latched until
+    /// an explicit clear, landing in `scope` at panel priority. Changes
+    /// the winning provider set, so cached routes are invalidated.
+    pub fn panel_write(
+        &mut self,
+        scope: crate::node::ScopeRef,
+        channel: lpc_model::ChannelName,
+        value: lpc_model::LpValue,
+    ) {
+        self.panel_writers.set(scope, channel, value, self.revision);
+        self.resolver.invalidate_structure();
+    }
+
+    /// Clear one engaged panel writer (panel.md P3). Returns whether
+    /// anything was engaged.
+    pub fn panel_clear(
+        &mut self,
+        scope: crate::node::ScopeRef,
+        channel: &lpc_model::ChannelName,
+    ) -> bool {
+        let cleared = self.panel_writers.clear(scope, channel);
+        if cleared {
+            self.resolver.invalidate_structure();
+        }
+        cleared
+    }
+
+    /// Clear every engaged writer in `scope`; returns the count.
+    pub fn panel_clear_scope(&mut self, scope: crate::node::ScopeRef) -> usize {
+        let cleared = self.panel_writers.clear_scope(scope);
+        if cleared > 0 {
+            self.resolver.invalidate_structure();
+        }
+        cleared
+    }
+
+    /// The engaged panel writers (probes, persistence).
+    pub fn panel_writers(&self) -> &crate::dataflow::panel_writers::PanelWriterStore {
+        &self.panel_writers
+    }
+
     pub fn set_graphics(&mut self, graphics: Option<Arc<dyn LpGraphics>>) {
         self.graphics = graphics;
     }
@@ -458,6 +504,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -525,6 +572,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -573,6 +621,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -625,6 +674,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -662,6 +712,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -699,6 +750,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -713,9 +765,38 @@ impl Engine {
 }
 
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
+/// The synthetic provider an engaged panel writer contributes: a literal
+/// source at panel priority, owned by the scope's introducing node. The
+/// binding ref uses a sentinel index — panel writers live in the side
+/// store, never in any node's binding set.
+fn panel_provider(
+    tree: &RuntimeNodeTree<Box<dyn NodeRuntime>>,
+    scope: crate::node::ScopeRef,
+    channel: &lpc_model::ChannelName,
+    writer: &crate::dataflow::panel_writers::PanelWriter,
+) -> (BindingRef, crate::dataflow::binding::BindingEntry) {
+    let kind = tree
+        .bus_channels()
+        .find(|(name, _)| *name == channel)
+        .map(|(_, kind)| kind)
+        .unwrap_or(lpc_model::Kind::Ratio);
+    (
+        BindingRef::new(scope.owner(), usize::MAX),
+        crate::dataflow::binding::BindingEntry {
+            source: crate::dataflow::binding::BindingSource::Literal(writer.value.clone()),
+            target: crate::dataflow::binding::BindingTarget::BusChannel(channel.clone()),
+            priority: crate::dataflow::binding::BindingPriority::panel(),
+            kind,
+            version: writer.written_at,
+            owner: scope.owner(),
+        },
+    )
+}
+
 struct EngineResolveHost<'a> {
     tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     registry: &'a ProjectRegistry,
+    panel_writers: &'a crate::dataflow::panel_writers::PanelWriterStore,
     producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -961,11 +1042,37 @@ impl ResolveHost for EngineResolveHost<'_> {
         scope: Option<crate::node::ScopeRef>,
         channel: &lpc_model::ChannelName,
     ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
-        self.tree
-            .providers_for_bus_read(scope, channel)
-            .into_iter()
-            .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
-            .collect()
+        // The R5 walk with the panel overlay (panel.md P4): at each scope,
+        // an engaged panel writer REPLACES the scope's provider set —
+        // including for ByKey merge channels, where max priority wins
+        // rather than merging — and an engaged scope counts as "has a
+        // writer" for shadowing even when nothing authored writes there.
+        let Some(mut scope) = scope else {
+            return self
+                .tree
+                .providers_for_bus_read(None, channel)
+                .into_iter()
+                .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+                .collect();
+        };
+        loop {
+            if let Some(writer) = self.panel_writers.get(scope, channel) {
+                return alloc::vec![panel_provider(self.tree, scope, channel, writer)];
+            }
+            let candidates: Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> = self
+                .tree
+                .providers_for_bus_in_scope(scope, channel)
+                .into_iter()
+                .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+                .collect();
+            if !candidates.is_empty() {
+                return candidates;
+            }
+            match self.tree.parent_scope(scope) {
+                Some(parent) => scope = parent,
+                None => return Vec::new(),
+            }
+        }
     }
 
     fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
@@ -1929,6 +2036,7 @@ pub(crate) fn resolve_with_engine_host(
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         registry,
+        panel_writers: &eng.panel_writers,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -1967,6 +2075,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         registry,
+        panel_writers: &eng.panel_writers,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
