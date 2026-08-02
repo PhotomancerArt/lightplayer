@@ -47,9 +47,9 @@ pub struct ShaderNode {
     source_revision: Revision,
     glsl_source: String,
     consumed_slots: MapSlot<String, ShaderSlotDef>,
-    /// Authored numeric mode. Stored so a change flips `needs_compile`; the
-    /// compiler does not consume it yet — native f32 codegen lands in the
-    /// f32 roadmap's M7/M9.
+    /// Authored numeric mode, and the compile request it produces. A change
+    /// flips `needs_compile`; [`semantics_for`] turns it into the
+    /// [`lp_gfx::ShaderSemantics`] tier the backend is asked for.
     float_mode: ValueSlot<FloatMode>,
     visual_uniforms: Vec<VisualUniform>,
     config_accessors: Option<ShaderConfigAccessors>,
@@ -146,13 +146,18 @@ impl ShaderNode {
         self.needs_compile = false;
         lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
+        // The authored numeric mode picks which of the backend's two tier
+        // answers applies; the backend states both (fidelity-tiers ADR). On a
+        // CPU backend that is Q32 vs F32Cpu; on the GPU tier both answer
+        // F32Gpu, which is that tier's documented latitude rather than a
+        // dropped request. A backend that cannot honour the tier it named
+        // fails `compile_shader`, and the error lands on this node's status
+        // through the keep-last-good path below.
+        let semantics = semantics_for(graphics, *self.float_mode.value());
         let compile_opts = ShaderCompileOptions {
-            // Visual shaders run on the tier and GLSL frontend the host
-            // selected when it constructed the backend (fidelity-tiers ADR)
-            // — Q32 on CPU backends, F32Gpu on the GPU tier.
-            semantics: graphics.native_semantics(),
+            semantics,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
-            ..ShaderCompileOptions::new(graphics.native_semantics(), graphics.glsl_frontend())
+            ..ShaderCompileOptions::new(semantics, graphics.glsl_frontend())
         };
 
         let compile_start_ms = ctx.now_ms();
@@ -348,6 +353,24 @@ impl NodeRuntime for ShaderNode {
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
         Some(self)
+    }
+}
+
+/// The semantics tier to request for a shader authored in `float_mode`.
+///
+/// Both answers come from the backend rather than from a table here: which
+/// tier a backend runs for Fixed and which for Float are its own product
+/// decisions, stated once where it is defined
+/// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`). This
+/// function exists so the two shader node kinds cannot disagree about how the
+/// slot maps.
+pub(super) fn semantics_for(
+    graphics: &dyn lp_gfx::LpGraphics,
+    float_mode: FloatMode,
+) -> lp_gfx::ShaderSemantics {
+    match float_mode {
+        FloatMode::Fixed => graphics.native_semantics(),
+        FloatMode::Float => graphics.float_semantics(),
     }
 }
 
@@ -1460,10 +1483,128 @@ mod tests {
         );
     }
 
+    /// The authored `float_mode` slot decides which tier the node asks the
+    /// backend for — the plumbing this whole seam exists to provide.
+    ///
+    /// Asserted on the *request* rather than the rendered output because the
+    /// request is the part that used to be missing: before this, every shader
+    /// compiled at `native_semantics()` and the slot reached nothing but the
+    /// recompile latch. A stub backend records what it was asked.
+    #[test]
+    fn the_authored_float_mode_picks_the_requested_semantics_tier() {
+        for (float_mode, expected) in [
+            (FloatMode::Fixed, lp_gfx::ShaderSemantics::Q32),
+            (FloatMode::Float, lp_gfx::ShaderSemantics::F32Cpu),
+        ] {
+            let graphics = Arc::new(CountingGraphics::new());
+            let def = ShaderDef {
+                float_mode: ValueSlot::new(float_mode),
+                ..ShaderDef::default()
+            };
+            let mut node = ShaderNode::new(
+                NodeId::new(1),
+                def,
+                shader_asset_text(DEMO_GLSL, Revision::new(1)),
+            );
+            let mut ctx = crate::node::RenderContext::new(
+                NodeId::new(1),
+                Revision::new(1),
+                Some(graphics.clone()),
+                None,
+                0.0,
+            );
+            let request = crate::products::visual::RenderTextureRequest {
+                width: 4,
+                height: 4,
+                format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                time_seconds: 0.0,
+            };
+            let mut texture = graphics.create_render_target(4, 4).expect("texture");
+            node.render_texture_into(
+                VisualProduct::new(NodeId::new(1), 0),
+                &request,
+                &mut texture,
+                &mut ctx,
+            )
+            .expect("render");
+
+            assert_eq!(
+                graphics.last_semantics(),
+                Some(expected),
+                "float_mode={float_mode:?} must request {expected:?}"
+            );
+        }
+    }
+
+    /// A Float shader on a backend that cannot compile it goes to the node's
+    /// error status and renders black — never a silent Q32 render.
+    ///
+    /// This is the C6 case, and the whole reason the tier request is explicit:
+    /// a board given different numerics than the author asked for, with no
+    /// signal, is the failure `2026-07-09-preview-fidelity-tiers.md` §4
+    /// forbids. Here the real `TargetLpvmGraphics` does the refusing — the
+    /// host engine is Q32-only, exactly like a device image without the float
+    /// backend linked.
+    #[test]
+    fn a_float_shader_on_a_fixed_only_backend_errors_instead_of_rendering_fixed() {
+        let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
+        let def = ShaderDef {
+            float_mode: ValueSlot::new(FloatMode::Float),
+            ..ShaderDef::default()
+        };
+        let mut node = ShaderNode::new(
+            NodeId::new(1),
+            def,
+            shader_asset_text(DEMO_GLSL, Revision::new(1)),
+        );
+        let mut ctx = crate::node::RenderContext::new(
+            NodeId::new(1),
+            Revision::new(1),
+            Some(graphics.clone()),
+            None,
+            0.0,
+        );
+        let request = crate::products::visual::RenderTextureRequest {
+            width: 4,
+            height: 4,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.0,
+        };
+        let mut texture = graphics.create_render_target(4, 4).expect("texture");
+        node.render_texture_into(
+            VisualProduct::new(NodeId::new(1), 0),
+            &request,
+            &mut texture,
+            &mut ctx,
+        )
+        .expect("the fallback render itself succeeds");
+
+        let error = node
+            .compilation_error()
+            .expect("a Float request this backend cannot honour must be reported");
+        assert!(error.contains("float_mode"), "{error}");
+        assert!(matches!(
+            node.runtime_status(),
+            Some(NodeRuntimeStatus::Error(_))
+        ));
+        assert!(
+            graphics
+                .read_back(&texture)
+                .expect("read back")
+                .bytes()
+                .iter()
+                .all(|byte| *byte == 0),
+            "no program compiled, so the target is cleared rather than rendered in Fixed"
+        );
+    }
+
     struct CountingGraphics {
         inner: TargetLpvmGraphics,
         compile_count: AtomicU32,
         fail_compile: AtomicBool,
+        /// The tier of the last compile request, so a test can assert what the
+        /// node *asked for* rather than only what came back.
+        last_semantics: core::sync::atomic::AtomicU8,
     }
 
     impl CountingGraphics {
@@ -1472,6 +1613,7 @@ mod tests {
                 inner: TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
                 compile_count: AtomicU32::new(0),
                 fail_compile: AtomicBool::new(false),
+                last_semantics: core::sync::atomic::AtomicU8::new(u8::MAX),
             }
         }
 
@@ -1488,6 +1630,15 @@ mod tests {
         fn compile_count(&self) -> u32 {
             self.compile_count.load(Ordering::Relaxed)
         }
+
+        fn last_semantics(&self) -> Option<lp_gfx::ShaderSemantics> {
+            match self.last_semantics.load(Ordering::Relaxed) {
+                0 => Some(lp_gfx::ShaderSemantics::Q32),
+                1 => Some(lp_gfx::ShaderSemantics::F32Cpu),
+                2 => Some(lp_gfx::ShaderSemantics::F32Gpu),
+                _ => None,
+            }
+        }
     }
 
     impl LpGraphics for CountingGraphics {
@@ -1496,6 +1647,14 @@ mod tests {
             _source: &str,
             _options: &ShaderCompileOptions,
         ) -> Result<Box<dyn LpShader>, GfxError> {
+            self.last_semantics.store(
+                match _options.semantics {
+                    lp_gfx::ShaderSemantics::Q32 => 0,
+                    lp_gfx::ShaderSemantics::F32Cpu => 1,
+                    lp_gfx::ShaderSemantics::F32Gpu => 2,
+                },
+                Ordering::Relaxed,
+            );
             let count = self.compile_count.fetch_add(1, Ordering::Relaxed) + 1;
             if self.fail_compile.load(Ordering::Relaxed) {
                 return Err(GfxError::Compile(String::from("test compile failure")));
@@ -1511,6 +1670,15 @@ mod tests {
 
         fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
             self.inner.glsl_frontend()
+        }
+
+        /// Forwarded like `glsl_frontend`: this stub counts and fails compiles,
+        /// it does not redefine which tiers a CPU backend offers. Without the
+        /// forward it would inherit the one-tier default and quietly answer
+        /// Q32 for a Float request — which is precisely the bug the tier
+        /// request exists to prevent, so the stub must not model it.
+        fn float_semantics(&self) -> lp_gfx::ShaderSemantics {
+            self.inner.float_semantics()
         }
 
         fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {

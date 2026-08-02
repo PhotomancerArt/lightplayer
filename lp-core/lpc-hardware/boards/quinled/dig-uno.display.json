@@ -5,34 +5,135 @@
   "soc": "ESP32",
   "family": "esp32",
   "flash": "4 MB",
+  "flash_mb": 4,
   "price_usd": 32.0,
   "tier": "bronze",
-  "capabilities": ["level shifter", "fuse", "screw terminals", "2 LED ports", "5-24 V input"],
-  "blurb": "Purpose-built LED controller: fused, level-shifted, screw terminals. The clean permanent-install choice.",
+  "capabilities": [
+    "level shifter",
+    "fuse",
+    "screw terminals",
+    "2 LED ports",
+    "5-24 V input"
+  ],
+  "blurb": "LED controller with fuse, level shifter, and screw terminals; 5-24 V input.",
   "purchase_urls": [
-    { "label": "quinled.info", "href": "https://quinled.info/pre-assembled-quinled-dig-uno/" }
+    {
+      "label": "quinled.info",
+      "href": "https://quinled.info/pre-assembled-quinled-dig-uno/"
+    }
   ],
   "hw": {
     "width": 150,
-    "module": { "x": 44, "y": 10, "w": 62, "h": 58, "label": "ESP32", "antenna": true },
-    "usb": [ { "x": 64, "label": "USB" } ],
+    "module": {
+      "x": 44,
+      "y": 10,
+      "w": 62,
+      "h": 58,
+      "label": "ESP32",
+      "antenna": true
+    },
+    "usb": [
+      {
+        "x": 64,
+        "label": "USB"
+      }
+    ],
     "terminals": [
-      { "label": "V+", "role": "pwr5", "caps": [ { "text": "5-24V", "kind": "pwr" } ] },
-      { "label": "GND", "role": "gnd" },
-      { "label": "LED1", "role": "io", "gpio": 16, "caps": [ { "text": "level-shift", "kind": "note" } ] },
-      { "label": "LED2", "role": "io", "gpio": 3, "caps": [ { "text": "level-shift", "kind": "note" } ] }
+      {
+        "label": "V+",
+        "role": "pwr5",
+        "caps": [
+          {
+            "text": "5-24V",
+            "kind": "pwr"
+          }
+        ]
+      },
+      {
+        "label": "GND",
+        "role": "gnd"
+      },
+      {
+        "label": "LED1",
+        "role": "io",
+        "gpio": 16,
+        "caps": [
+          {
+            "text": "level-shift",
+            "kind": "note"
+          }
+        ]
+      },
+      {
+        "label": "LED2",
+        "role": "io",
+        "gpio": 3,
+        "caps": [
+          {
+            "text": "level-shift",
+            "kind": "note"
+          }
+        ]
+      }
     ],
     "left": [
-      { "label": "Q1", "role": "io", "gpio": 1 },
-      { "label": "Q2", "role": "io", "gpio": 2 },
-      { "label": "Q4", "role": "io", "gpio": 4, "caps": [ { "text": "Touch0", "kind": "touch" } ] },
-      { "label": "GND", "role": "gnd" }
+      {
+        "label": "Q1",
+        "role": "io",
+        "gpio": 1
+      },
+      {
+        "label": "Q2",
+        "role": "io",
+        "gpio": 2
+      },
+      {
+        "label": "Q4",
+        "role": "io",
+        "gpio": 4,
+        "caps": [
+          {
+            "text": "Touch0",
+            "kind": "touch"
+          }
+        ]
+      },
+      {
+        "label": "GND",
+        "role": "gnd"
+      }
     ],
     "right": [
-      { "label": "3V3", "role": "pwr3" },
-      { "label": "15", "role": "io", "gpio": 15, "caps": [ { "text": "ADC2_3", "kind": "adc" } ] },
-      { "label": "12", "role": "strap", "gpio": 12, "caps": [ { "text": "strap", "kind": "strap" } ] },
-      { "label": "GND", "role": "gnd" }
+      {
+        "label": "3V3",
+        "role": "pwr3"
+      },
+      {
+        "label": "15",
+        "role": "io",
+        "gpio": 15,
+        "caps": [
+          {
+            "text": "ADC2_3",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "12",
+        "role": "strap",
+        "gpio": 12,
+        "caps": [
+          {
+            "text": "strap",
+            "kind": "strap"
+          }
+        ]
+      },
+      {
+        "label": "GND",
+        "role": "gnd"
+      }
     ]
   }
 }

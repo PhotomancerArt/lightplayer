@@ -13,7 +13,8 @@ pub use lpa_link::{
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
-    ControlSampleSpan, LpValue, Revision, SlotMapKey, SlotPath, SlotPathSegment,
+    ControlSampleSpan, LpFeature, LpValue, NodeKind, Revision, SlotMapKey, SlotPath,
+    SlotPathSegment,
 };
 
 pub mod app;

@@ -5,60 +5,540 @@
   "soc": "ESP32",
   "family": "esp32",
   "flash": "4 MB",
+  "flash_mb": 4,
   "price_usd": 10.0,
   "tier": "bronze",
-  "capabilities": ["Wi-Fi", "BT classic", "everywhere"],
-  "blurb": "The classic WROOM-32 board. Millions exist; clones vary. The board classic-ESP32 support will target.",
+  "capabilities": [
+    "Wi-Fi",
+    "BT classic",
+    "everywhere"
+  ],
+  "blurb": "The classic WROOM-32 development board, widely produced and widely cloned.",
   "purchase_urls": [
-    { "label": "Espressif", "href": "https://www.espressif.com/en/products/devkits/esp32-devkitc" },
-    { "label": "AliExpress", "href": "https://www.aliexpress.com/w/wholesale-esp32-devkitc.html" }
+    {
+      "label": "Espressif",
+      "href": "https://www.espressif.com/en/products/devkits/esp32-devkitc"
+    },
+    {
+      "label": "AliExpress",
+      "href": "https://www.aliexpress.com/w/wholesale-esp32-devkitc.html"
+    }
   ],
   "hw": {
     "width": 116,
-    "module": { "x": 18, "y": 8, "w": 80, "h": 70, "label": "WROOM-32", "antenna": true },
-    "usb": [ { "x": 42, "label": "USB" } ],
-    "buttons": [ { "x": 26, "y": -20, "label": "EN" }, { "x": 90, "y": -20, "label": "BOOT" } ],
+    "module": {
+      "x": 18,
+      "y": 8,
+      "w": 80,
+      "h": 70,
+      "label": "WROOM-32",
+      "antenna": true
+    },
+    "usb": [
+      {
+        "x": 42,
+        "label": "USB"
+      }
+    ],
+    "buttons": [
+      {
+        "x": 26,
+        "y": -20,
+        "label": "EN"
+      },
+      {
+        "x": 90,
+        "y": -20,
+        "label": "BOOT"
+      }
+    ],
     "left": [
-      { "label": "3V3", "role": "pwr3" },
-      { "label": "EN", "role": "ctl" },
-      { "label": "36", "role": "io-in", "gpio": 36, "caps": [ { "text": "ADC1_0", "kind": "adc" }, { "text": "SensVP", "kind": "adc" }, { "text": "in-only", "kind": "warn" } ] },
-      { "label": "39", "role": "io-in", "gpio": 39, "caps": [ { "text": "ADC1_3", "kind": "adc" }, { "text": "SensVN", "kind": "adc" }, { "text": "in-only", "kind": "warn" } ] },
-      { "label": "34", "role": "io-in", "gpio": 34, "caps": [ { "text": "ADC1_6", "kind": "adc" }, { "text": "in-only", "kind": "warn" } ] },
-      { "label": "35", "role": "io-in", "gpio": 35, "caps": [ { "text": "ADC1_7", "kind": "adc" }, { "text": "in-only", "kind": "warn" } ] },
-      { "label": "32", "role": "io", "gpio": 32, "caps": [ { "text": "ADC1_4", "kind": "adc" }, { "text": "Touch9", "kind": "touch" }, { "text": "XTAL32", "kind": "warn" } ] },
-      { "label": "33", "role": "io", "gpio": 33, "caps": [ { "text": "ADC1_5", "kind": "adc" }, { "text": "Touch8", "kind": "touch" }, { "text": "XTAL32", "kind": "warn" } ] },
-      { "label": "25", "role": "io", "gpio": 25, "caps": [ { "text": "DAC1", "kind": "dac" }, { "text": "ADC2_8", "kind": "adc" } ] },
-      { "label": "26", "role": "io", "gpio": 26, "caps": [ { "text": "DAC2", "kind": "dac" }, { "text": "ADC2_9", "kind": "adc" } ] },
-      { "label": "27", "role": "io", "gpio": 27, "caps": [ { "text": "ADC2_7", "kind": "adc" }, { "text": "Touch7", "kind": "touch" } ] },
-      { "label": "14", "role": "io", "gpio": 14, "caps": [ { "text": "ADC2_6", "kind": "adc" }, { "text": "Touch6", "kind": "touch" }, { "text": "HSPI_CLK", "kind": "spi" } ] },
-      { "label": "12", "role": "strap", "gpio": 12, "caps": [ { "text": "ADC2_5", "kind": "adc" }, { "text": "Touch5", "kind": "touch" }, { "text": "HSPI_MISO", "kind": "spi" } ] },
-      { "label": "GND", "role": "gnd" },
-      { "label": "13", "role": "io", "gpio": 13, "caps": [ { "text": "ADC2_4", "kind": "adc" }, { "text": "Touch4", "kind": "touch" }, { "text": "HSPI_MOSI", "kind": "spi" } ] },
-      { "label": "SD2", "role": "rsvd", "gpio": 9, "caps": [ { "text": "flash", "kind": "warn" } ] },
-      { "label": "SD3", "role": "rsvd", "gpio": 10, "caps": [ { "text": "flash", "kind": "warn" } ] },
-      { "label": "CMD", "role": "rsvd", "gpio": 11, "caps": [ { "text": "flash", "kind": "warn" } ] },
-      { "label": "5V", "role": "pwr5" }
+      {
+        "label": "3V3",
+        "role": "pwr3"
+      },
+      {
+        "label": "EN",
+        "role": "ctl"
+      },
+      {
+        "label": "36",
+        "role": "io-in",
+        "gpio": 36,
+        "caps": [
+          {
+            "text": "ADC1_0",
+            "kind": "adc"
+          },
+          {
+            "text": "SensVP",
+            "kind": "adc"
+          },
+          {
+            "text": "in-only",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "39",
+        "role": "io-in",
+        "gpio": 39,
+        "caps": [
+          {
+            "text": "ADC1_3",
+            "kind": "adc"
+          },
+          {
+            "text": "SensVN",
+            "kind": "adc"
+          },
+          {
+            "text": "in-only",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "34",
+        "role": "io-in",
+        "gpio": 34,
+        "caps": [
+          {
+            "text": "ADC1_6",
+            "kind": "adc"
+          },
+          {
+            "text": "in-only",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "35",
+        "role": "io-in",
+        "gpio": 35,
+        "caps": [
+          {
+            "text": "ADC1_7",
+            "kind": "adc"
+          },
+          {
+            "text": "in-only",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "32",
+        "role": "io",
+        "gpio": 32,
+        "caps": [
+          {
+            "text": "ADC1_4",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch9",
+            "kind": "touch"
+          },
+          {
+            "text": "XTAL32",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "33",
+        "role": "io",
+        "gpio": 33,
+        "caps": [
+          {
+            "text": "ADC1_5",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch8",
+            "kind": "touch"
+          },
+          {
+            "text": "XTAL32",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "25",
+        "role": "io",
+        "gpio": 25,
+        "caps": [
+          {
+            "text": "DAC1",
+            "kind": "dac"
+          },
+          {
+            "text": "ADC2_8",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "26",
+        "role": "io",
+        "gpio": 26,
+        "caps": [
+          {
+            "text": "DAC2",
+            "kind": "dac"
+          },
+          {
+            "text": "ADC2_9",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "27",
+        "role": "io",
+        "gpio": 27,
+        "caps": [
+          {
+            "text": "ADC2_7",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch7",
+            "kind": "touch"
+          }
+        ]
+      },
+      {
+        "label": "14",
+        "role": "io",
+        "gpio": 14,
+        "caps": [
+          {
+            "text": "ADC2_6",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch6",
+            "kind": "touch"
+          },
+          {
+            "text": "HSPI_CLK",
+            "kind": "spi"
+          }
+        ]
+      },
+      {
+        "label": "12",
+        "role": "strap",
+        "gpio": 12,
+        "caps": [
+          {
+            "text": "ADC2_5",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch5",
+            "kind": "touch"
+          },
+          {
+            "text": "HSPI_MISO",
+            "kind": "spi"
+          }
+        ]
+      },
+      {
+        "label": "GND",
+        "role": "gnd"
+      },
+      {
+        "label": "13",
+        "role": "io",
+        "gpio": 13,
+        "caps": [
+          {
+            "text": "ADC2_4",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch4",
+            "kind": "touch"
+          },
+          {
+            "text": "HSPI_MOSI",
+            "kind": "spi"
+          }
+        ]
+      },
+      {
+        "label": "SD2",
+        "role": "rsvd",
+        "gpio": 9,
+        "caps": [
+          {
+            "text": "flash",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "SD3",
+        "role": "rsvd",
+        "gpio": 10,
+        "caps": [
+          {
+            "text": "flash",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "CMD",
+        "role": "rsvd",
+        "gpio": 11,
+        "caps": [
+          {
+            "text": "flash",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "5V",
+        "role": "pwr5"
+      }
     ],
     "right": [
-      { "label": "GND", "role": "gnd" },
-      { "label": "23", "role": "io", "gpio": 23, "caps": [ { "text": "VSPI_MOSI", "kind": "spi" } ] },
-      { "label": "22", "role": "io", "gpio": 22, "caps": [ { "text": "SCL", "kind": "i2c" } ] },
-      { "label": "TX0", "role": "io", "gpio": 1, "caps": [ { "text": "U0_TXD", "kind": "uart" } ] },
-      { "label": "RX0", "role": "io", "gpio": 3, "caps": [ { "text": "U0_RXD", "kind": "uart" } ] },
-      { "label": "21", "role": "io", "gpio": 21, "caps": [ { "text": "SDA", "kind": "i2c" } ] },
-      { "label": "GND", "role": "gnd" },
-      { "label": "19", "role": "io", "gpio": 19, "caps": [ { "text": "VSPI_MISO", "kind": "spi" } ] },
-      { "label": "18", "role": "io", "gpio": 18, "caps": [ { "text": "VSPI_CLK", "kind": "spi" } ] },
-      { "label": "5", "role": "strap", "gpio": 5, "caps": [ { "text": "VSPI_CS", "kind": "spi" }, { "text": "strap", "kind": "strap" } ] },
-      { "label": "17", "role": "io", "gpio": 17, "caps": [ { "text": "U2_TXD", "kind": "uart" } ] },
-      { "label": "16", "role": "io", "gpio": 16, "caps": [ { "text": "U2_RXD", "kind": "uart" } ] },
-      { "label": "4", "role": "io", "gpio": 4, "caps": [ { "text": "ADC2_0", "kind": "adc" }, { "text": "Touch0", "kind": "touch" } ] },
-      { "label": "0", "role": "strap", "gpio": 0, "caps": [ { "text": "ADC2_1", "kind": "adc" }, { "text": "Touch1", "kind": "touch" }, { "text": "BOOT", "kind": "strap" } ] },
-      { "label": "2", "role": "strap", "gpio": 2, "caps": [ { "text": "ADC2_2", "kind": "adc" }, { "text": "Touch2", "kind": "touch" }, { "text": "strap", "kind": "strap" } ] },
-      { "label": "15", "role": "strap", "gpio": 15, "caps": [ { "text": "ADC2_3", "kind": "adc" }, { "text": "Touch3", "kind": "touch" }, { "text": "HSPI_CS", "kind": "spi" } ] },
-      { "label": "SD1", "role": "rsvd", "gpio": 8, "caps": [ { "text": "flash", "kind": "warn" } ] },
-      { "label": "SD0", "role": "rsvd", "gpio": 7, "caps": [ { "text": "flash", "kind": "warn" } ] },
-      { "label": "CLK", "role": "rsvd", "gpio": 6, "caps": [ { "text": "flash", "kind": "warn" } ] }
+      {
+        "label": "GND",
+        "role": "gnd"
+      },
+      {
+        "label": "23",
+        "role": "io",
+        "gpio": 23,
+        "caps": [
+          {
+            "text": "VSPI_MOSI",
+            "kind": "spi"
+          }
+        ]
+      },
+      {
+        "label": "22",
+        "role": "io",
+        "gpio": 22,
+        "caps": [
+          {
+            "text": "SCL",
+            "kind": "i2c"
+          }
+        ]
+      },
+      {
+        "label": "TX0",
+        "role": "io",
+        "gpio": 1,
+        "caps": [
+          {
+            "text": "U0_TXD",
+            "kind": "uart"
+          }
+        ]
+      },
+      {
+        "label": "RX0",
+        "role": "io",
+        "gpio": 3,
+        "caps": [
+          {
+            "text": "U0_RXD",
+            "kind": "uart"
+          }
+        ]
+      },
+      {
+        "label": "21",
+        "role": "io",
+        "gpio": 21,
+        "caps": [
+          {
+            "text": "SDA",
+            "kind": "i2c"
+          }
+        ]
+      },
+      {
+        "label": "GND",
+        "role": "gnd"
+      },
+      {
+        "label": "19",
+        "role": "io",
+        "gpio": 19,
+        "caps": [
+          {
+            "text": "VSPI_MISO",
+            "kind": "spi"
+          }
+        ]
+      },
+      {
+        "label": "18",
+        "role": "io",
+        "gpio": 18,
+        "caps": [
+          {
+            "text": "VSPI_CLK",
+            "kind": "spi"
+          }
+        ]
+      },
+      {
+        "label": "5",
+        "role": "strap",
+        "gpio": 5,
+        "caps": [
+          {
+            "text": "VSPI_CS",
+            "kind": "spi"
+          },
+          {
+            "text": "strap",
+            "kind": "strap"
+          }
+        ]
+      },
+      {
+        "label": "17",
+        "role": "io",
+        "gpio": 17,
+        "caps": [
+          {
+            "text": "U2_TXD",
+            "kind": "uart"
+          }
+        ]
+      },
+      {
+        "label": "16",
+        "role": "io",
+        "gpio": 16,
+        "caps": [
+          {
+            "text": "U2_RXD",
+            "kind": "uart"
+          }
+        ]
+      },
+      {
+        "label": "4",
+        "role": "io",
+        "gpio": 4,
+        "caps": [
+          {
+            "text": "ADC2_0",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch0",
+            "kind": "touch"
+          }
+        ]
+      },
+      {
+        "label": "0",
+        "role": "strap",
+        "gpio": 0,
+        "caps": [
+          {
+            "text": "ADC2_1",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch1",
+            "kind": "touch"
+          },
+          {
+            "text": "BOOT",
+            "kind": "strap"
+          }
+        ]
+      },
+      {
+        "label": "2",
+        "role": "strap",
+        "gpio": 2,
+        "caps": [
+          {
+            "text": "ADC2_2",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch2",
+            "kind": "touch"
+          },
+          {
+            "text": "strap",
+            "kind": "strap"
+          }
+        ]
+      },
+      {
+        "label": "15",
+        "role": "strap",
+        "gpio": 15,
+        "caps": [
+          {
+            "text": "ADC2_3",
+            "kind": "adc"
+          },
+          {
+            "text": "Touch3",
+            "kind": "touch"
+          },
+          {
+            "text": "HSPI_CS",
+            "kind": "spi"
+          }
+        ]
+      },
+      {
+        "label": "SD1",
+        "role": "rsvd",
+        "gpio": 8,
+        "caps": [
+          {
+            "text": "flash",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "SD0",
+        "role": "rsvd",
+        "gpio": 7,
+        "caps": [
+          {
+            "text": "flash",
+            "kind": "warn"
+          }
+        ]
+      },
+      {
+        "label": "CLK",
+        "role": "rsvd",
+        "gpio": 6,
+        "caps": [
+          {
+            "text": "flash",
+            "kind": "warn"
+          }
+        ]
+      }
     ]
   }
 }

@@ -282,6 +282,24 @@
       ],
       "type": "object"
     },
+    "FirmwarePin": {
+      "description": "One pinned board↔firmware exception. The reason is required: an exception\nwith no stated cause is indistinguishable from the hand-authored\ncompatibility tables the computed join replaces.",
+      "properties": {
+        "build_id": {
+          "description": "Build id, i.e. the stem of a `lp-fw/builds/<id>.json` build def.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why this board deviates from the computed result.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "build_id",
+        "reason"
+      ],
+      "type": "object"
+    },
     "NoteOs": {
       "description": "The OS a note applies to.",
       "enum": [
@@ -455,11 +473,35 @@
       "type": "string"
     },
     "family": {
-      "description": "Filter family for the provisioning picker: \"esp32\", \"esp32s3\",\n\"esp32c6\". Kept a plain string so display data never gates on firmware\ntarget enums.",
+      "description": "The chip this board carries, in **espflash spelling**: \"esp32\",\n\"esp32c6\", \"esp32s3\". Kept a plain string so display data never gates\non firmware target enums, but the vocabulary is not free-form — it is\nthe same identity a build def's `chip.name` states, and the\nboard↔build join (`compatible_builds`) matches on it exactly. It\ndoubles as the catalog's SoC filter key.",
       "type": "string"
     },
+    "firmware_allow": {
+      "description": "Firmware builds this board runs even though the computed join says\notherwise (it relaxes the flash-fit rule only — chip identity is\nnever overridable). Empty on every normal board: hand-listing\nboard→firmware is forbidden, so each entry states its reason.",
+      "items": {
+        "$ref": "#/$defs/FirmwarePin"
+      },
+      "type": "array"
+    },
+    "firmware_deny": {
+      "description": "Firmware builds this board must never be offered even though the\ncomputed join matches. Empty on every normal board.",
+      "items": {
+        "$ref": "#/$defs/FirmwarePin"
+      },
+      "type": "array"
+    },
     "flash": {
+      "description": "Flash size as written on the datasheet, e.g. \"8 MB\".",
       "type": "string"
+    },
+    "flash_mb": {
+      "description": "The same flash size as a number of megabytes, for the board↔build\njoin (a build's `flashSizeMb` must fit). Omit when the flash size is\nnot verified — a board with no `flash_mb` matches no build, which is\nthe honest outcome (boards/README.md: omit what you cannot verify).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "hw": {
       "$ref": "#/$defs/BoardDrawing"

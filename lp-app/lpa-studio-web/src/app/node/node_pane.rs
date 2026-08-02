@@ -59,6 +59,12 @@ pub fn NodePane(
     // pins that composition.
     let tone = affordance_pane_tone(view.header.affordance(), view.header.status.kind);
     let surface_class = pane_surface_tint_class(dirty_tint, dirty);
+    // "Not supported on this device": there is no runtime here, so the pane
+    // shows NO body — params, products and slots would all describe
+    // something that does not exist, and editing them could not take
+    // effect. The whole body region becomes hazard-striped red instead.
+    let unsupported = view.header.unsupported;
+    let unsupported_kind = view.header.kind.clone();
     let header = view.header.clone();
     let title = view.header.title.clone();
     let tabs = view.tabs.clone();
@@ -121,7 +127,9 @@ pub fn NodePane(
                                 "{kind_label}"
                             }
                         }
-                        if tabs.len() > 1 {
+                        // No runtime here, no tabs: every tab is a view
+                        // onto state this build does not have.
+                        if !unsupported && tabs.len() > 1 {
                             NodeTabs {
                                 tabs: tabs.clone(),
                                 active_index,
@@ -137,55 +145,59 @@ pub fn NodePane(
                         }
                     },
                     body: rsx! {
-                        if !issues.is_empty() {
-                            ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
-                                for issue in issues.clone() {
-                                    li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
+                        if unsupported {
+                            NodeUnsupportedBody { kind: unsupported_kind.clone() }
+                        } else {
+                            if !issues.is_empty() {
+                                ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
+                                    for issue in issues.clone() {
+                                        li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
+                                    }
                                 }
                             }
-                        }
-                        if let Some(face) = face.clone() {
-                            NodeFaceBody {
-                                face,
-                                node: face_node.clone(),
-                                card_ui: face_card_ui.clone(),
-                                sections: face_sections.clone(),
-                                detail_open_control: face_detail_open_control.clone(),
-                                platform: face_platform,
-                                add_node_menu: add_node_menu.clone(),
-                                pending_edits: pending_edits.clone(),
-                                dirty_tint,
-                                on_action,
-                            }
-                        } else {
-                            match active_body {
-                                Some(UiNodeTabBody::Sections(sections)) => rsx! {
-                                    div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
-                                        for (index, section) in sections.into_iter().enumerate() {
-                                            NodeSection {
-                                                section,
-                                                first: index == 0,
-                                                focus_action: focus_action.clone(),
-                                                node: section_node.clone(),
-                                                debug_open,
-                                                on_action,
-                                                pending_edits: pending_edits.clone(),
-                                                dirty_tint,
+                            if let Some(face) = face.clone() {
+                                NodeFaceBody {
+                                    face,
+                                    node: face_node.clone(),
+                                    card_ui: face_card_ui.clone(),
+                                    sections: face_sections.clone(),
+                                    detail_open_control: face_detail_open_control.clone(),
+                                    platform: face_platform,
+                                    add_node_menu: add_node_menu.clone(),
+                                    pending_edits: pending_edits.clone(),
+                                    dirty_tint,
+                                    on_action,
+                                }
+                            } else {
+                                match active_body {
+                                    Some(UiNodeTabBody::Sections(sections)) => rsx! {
+                                        div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
+                                            for (index, section) in sections.into_iter().enumerate() {
+                                                NodeSection {
+                                                    section,
+                                                    first: index == 0,
+                                                    focus_action: focus_action.clone(),
+                                                    node: section_node.clone(),
+                                                    debug_open,
+                                                    on_action,
+                                                    pending_edits: pending_edits.clone(),
+                                                    dirty_tint,
+                                                }
                                             }
                                         }
-                                    }
-                                },
-                                Some(UiNodeTabBody::Text { title, body }) => rsx! {
-                                    section { class: "tw:grid tw:min-w-0 tw:gap-2",
-                                        h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
-                                        pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
-                                            code { "{body}" }
+                                    },
+                                    Some(UiNodeTabBody::Text { title, body }) => rsx! {
+                                        section { class: "tw:grid tw:min-w-0 tw:gap-2",
+                                            h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
+                                            pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                                                code { "{body}" }
+                                            }
                                         }
-                                    }
-                                },
-                                None => rsx! {
-                                    p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
-                                },
+                                    },
+                                    None => rsx! {
+                                        p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
+                                    },
+                                }
                             }
                         }
                     },
@@ -202,6 +214,48 @@ pub fn NodePane(
                     pending_edits,
                     dirty_tint,
                 }
+            }
+        }
+    }
+}
+
+/// The whole body of a node whose kind has no runtime on this device.
+///
+/// This REPLACES the node's body rather than dimming it. A node with no
+/// runtime has no live params, products or slots — rendering them (even
+/// ghosted) shows state that does not exist and invites edits that cannot
+/// take effect. And it usually means the project does not work on this
+/// device at all, so the body region wears the error family with diagonal
+/// hazard stripes: the surface itself says "this is not ordinary content",
+/// which no amount of tinted text inside a normal body can.
+///
+/// Deliberately NOT a bordered block inside the body — a box drawn inside
+/// the pane's own box reads as one more section among many. `-mx-4 -mb-4`
+/// bleeds this to the pane's edges (the pane's `overflow-hidden` clips it
+/// into the rounded corners), so the treatment IS the body.
+///
+/// One headline and one link, generously spaced. The engine's detailed
+/// message ("node kind Fluid is not included in this firmware build") stays
+/// in the detail popover: it names a build, and the person reading this
+/// needs to know which BOARD to use.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeUnsupportedBody(
+    /// The node's human kind label, as the header and the picker spell it.
+    kind: String,
+) -> Element {
+    rsx! {
+        div {
+            class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0 tw:justify-items-center tw:gap-4 tw:border-t tw:border-status-error-border tw:bg-status-error-bg tw:bg-[image:var(--studio-status-error-stripes)] tw:px-6 tw:py-12 tw:text-center",
+            p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-status-error-foreground",
+                "{kind} node isn't supported on this device."
+            }
+            // The hash router's route listener hard-reloads into the boards
+            // catalog, so a plain anchor is the whole mechanism.
+            a {
+                class: "tw:text-xs tw:font-bold tw:text-status-error-foreground tw:underline tw:underline-offset-4 tw:opacity-80 tw:transition-opacity tw:hover:opacity-100",
+                href: "#/boards",
+                "See supported boards"
             }
         }
     }

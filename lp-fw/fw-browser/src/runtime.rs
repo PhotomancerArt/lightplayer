@@ -143,23 +143,19 @@ impl BrowserFirmwareRuntime {
             Some(radio_service),
             graphics,
         );
-        // Wire hello payload (sans-IO: injected here). Browser runtimes carry
-        // no git provenance or stamped identity; fake devices script a uid in
-        // M3.
-        server.set_hello(lpc_wire::ServerHello {
-            proto: lpc_wire::WIRE_PROTO_VERSION,
-            fw: lpc_wire::FwProvenance {
-                package: "fw-browser".to_string(),
-                commit: "unknown".to_string(),
-                dirty: false,
-                profile: if cfg!(debug_assertions) {
-                    "debug".to_string()
-                } else {
-                    "release".to_string()
-                },
+        // Wire hello identity (sans-IO: injected here). Browser runtimes
+        // carry no git provenance or stamped identity; the hello's
+        // capability half comes from the constructor above.
+        server.set_hello_identity(lpc_wire::HelloIdentity::new(
+            "fw-browser",
+            "unknown",
+            false,
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
             },
-            device_uid: None,
-        });
+        ));
 
         let mut transport = BrowserServerTransport::new();
         // Wire hello: queued before anything else so it flushes as the first

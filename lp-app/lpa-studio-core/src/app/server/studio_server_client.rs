@@ -784,7 +784,7 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
                 UiLogOrigin::Server,
                 format!(
                     "server hello: proto={} package={} commit={} dirty={}",
-                    hello.proto, hello.fw.package, hello.fw.commit, hello.fw.dirty
+                    hello.proto, hello.build.package, hello.build.commit, hello.build.dirty
                 ),
             )),
             ClientEvent::Heartbeat { recovery, .. } => match recovery {

@@ -39,6 +39,13 @@ ServerHello {
 }
 ```
 
+(Payload reshaped 2026-08-01, wire proto 5: `fw: FwProvenance` is gone —
+its four fields moved onto `build: BuildFacts` beside the build's
+`LpFeature` list, joined by `hardware: HardwareFacts`. The delivery
+contract, the bump rule, and the no-negotiation posture below are
+unchanged; capability reporting is orthogonal to versioning. See
+`docs/adr/2026-08-01-capability-reporting-on-hello.md`.)
+
 It is delivered two ways, both mandatory for every lpa-server embedder:
 
 - **Unsolicited**: as the first id-0 frame the server loop sends when it
@@ -108,8 +115,9 @@ comparison is unchanged.)
 
 ## Consequences
 
-- lpc-wire carries `WIRE_PROTO_VERSION`, `ServerHello`, `FwProvenance`,
-  `ServerMsgBody::Hello`, `ClientRequest::Hello`.
+- lpc-wire carries `WIRE_PROTO_VERSION`, `ServerHello`, `FwProvenance`
+  (renamed to `BuildFacts` and given a feature list in 2026-08-01's
+  capability reshape), `ServerMsgBody::Hello`, `ClientRequest::Hello`.
 - All three embedders (fw-esp32, fw-host, fw-browser) inject provenance
   and emit the boot hello; fw-esp32's comes from `build.rs`-captured git
   state (`LP_BUILD_COMMIT`/`LP_BUILD_DIRTY`/`LP_BUILD_PROFILE`, falling

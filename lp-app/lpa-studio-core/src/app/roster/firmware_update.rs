@@ -5,10 +5,10 @@
 //! bundled-manifest commit (`core.commit` in Studio's packaged
 //! `firmware/<build-id>/manifest.json`, schemaVersion 2 — the commit the
 //! image reports about *itself*) vs the device hello's
-//! [`FwProvenance::commit`], both short git commits produced the same way
+//! [`BuildFacts::commit`], both short git commits produced the same way
 //! (`git rev-parse --short=12`).
 
-use lpc_wire::FwProvenance;
+use lpc_wire::BuildFacts;
 
 /// Sentinel both producers emit when git was unavailable at build time.
 const UNKNOWN_COMMIT: &str = "unknown";
@@ -31,7 +31,7 @@ pub struct BundledFirmware {
 impl BundledFirmware {
     /// Whether this bundled image should be offered over the running
     /// firmware (see [`firmware_update_available`]).
-    pub fn update_available(&self, device_fw: &FwProvenance) -> bool {
+    pub fn update_available(&self, device_fw: &BuildFacts) -> bool {
         firmware_update_available(&self.commit, self.dirty, device_fw)
     }
 }
@@ -41,13 +41,13 @@ impl BundledFirmware {
 ///
 /// Suppressed whenever the comparison would be a guess:
 /// - either side built from a dirty tree (`bundled_dirty` /
-///   [`FwProvenance::dirty`]) — dev builds drift constantly and the
+///   [`BuildFacts::dirty`]) — dev builds drift constantly and the
 ///   commit no longer names the bits;
 /// - either commit is `"unknown"` or empty (git absent at build time).
 pub fn firmware_update_available(
     bundled_commit: &str,
     bundled_dirty: bool,
-    device_fw: &FwProvenance,
+    device_fw: &BuildFacts,
 ) -> bool {
     if bundled_dirty || device_fw.dirty {
         return false;
@@ -118,8 +118,9 @@ mod tests {
         ));
     }
 
-    fn device(commit: &str, dirty: bool) -> FwProvenance {
-        FwProvenance {
+    fn device(commit: &str, dirty: bool) -> BuildFacts {
+        BuildFacts {
+            features: Vec::new(),
             package: "fw-esp32c6".to_string(),
             commit: commit.to_string(),
             dirty,

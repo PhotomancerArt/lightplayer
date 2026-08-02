@@ -74,6 +74,16 @@ impl LpvmEngine for NativeEmuEngine {
     type Module = NativeEmuModule;
     type Error = NativeError;
 
+    /// This engine's numeric mode is fixed at construction
+    /// ([`NativeCompileOptions::float_mode`]) and it does not override
+    /// `compile_with_params`, so the honest answer is "the mode I was built
+    /// with". Filetests build one engine per target, which is exactly that
+    /// shape; a caller wanting both modes builds two engines or uses the JIT
+    /// engine, which does take the mode per call.
+    fn supports_float_mode(&self, mode: lpir::FloatMode) -> bool {
+        mode == self.options.float_mode
+    }
+
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         // 1. Compile module.
         let mut opts = self.options.clone();

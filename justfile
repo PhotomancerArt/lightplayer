@@ -973,6 +973,9 @@ fw-manifest-check-esp32c6:
 fw-manifest-check-esp32s3:
     node scripts/extract-fw-manifest.mjs {{ fw_esp32s3_elf }} --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -
 
+fw-manifest-check-esp32v3:
+    node scripts/extract-fw-manifest.mjs {{ fw_esp32v3_elf }} --stable | diff -u lp-fw/fw-esp32v3/manifest-core.expected.json -
+
 fw-manifest-check-emu: build-fw-emu
     node scripts/extract-fw-manifest.mjs target/{{ rv32_target }}/release/fw-emu --stable | diff -u lp-fw/fw-emu/manifest-core.expected.json -
 

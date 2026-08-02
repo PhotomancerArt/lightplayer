@@ -31,15 +31,18 @@ Chip facts arrive by injection instead:
 
 `boot`, `server_loop`, `transport`, `time`, `logger`, `jit_fns` (the JIT
 host-log symbol), `lp_fs` (littlefs-backed `LpFs`), `hardware::manifest_loader`,
-`output::provider` (trait-driven output provider), `output::rmt_state` (lock-free
-RMT channel state consumed by chip-side interrupt handlers), `serial::shared_serial`.
+`output::provider` (trait-driven output provider), `serial::shared_serial`.
+
+`output::rmt_state` used to sit beside the provider; it went away with its only
+consumer when `fw-esp32c6` moved onto `lp-ws281x` (2026-08-01). Per-channel RMT
+state is `lp_ws281x::ChannelState` now, shared by all three chips.
 
 The heavy server stack (`lpa-server`, `lpc-model`, `lpc-wire`, `lpfs`,
 `lp-recovery`) is behind the `server` feature, mirroring the bin crates.
 
-Deliberately NOT here: RMT buffer fill code (`fw-esp32c6/src/output/rmt/`) —
-its pulse codes and buffer geometry are chip constants that must stay
-const-folded in the interrupt hot path; app orchestration
+Deliberately NOT here: RMT register code (`fw-*/src/output/rmt/`) — each chip's
+`RmtHw` impl is chip constants that must stay const-folded in the interrupt hot
+path, while the refill sequencing above it is `lp-fw/lp-ws281x`; app orchestration
 (`boot_firmware`/`FirmwareApp`) — deferred until a second chip crate exists to
 shape the abstraction.
 
