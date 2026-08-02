@@ -45,6 +45,9 @@ pub fn recovery_status_from_snapshot(snapshot: &RecoverySnapshot) -> RecoverySta
         reset_reason: snapshot.reset_cause.as_str().to_string(),
         boot_count: snapshot.boot_count,
         safe_mode: snapshot.safe_mode,
+        // The clamp is server state, not recovery-region state; the
+        // heartbeat assembly fills it in (see fw server_loop).
+        output_clamp: None,
         last_crash,
         paths,
     }

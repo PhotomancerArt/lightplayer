@@ -2,7 +2,15 @@ use dioxus::prelude::*;
 
 use crate::stories::story::StoryDescriptor;
 
-pub const DEFAULT_STORY_ID: &str = "studio/layout/studio-shell/simulator-idle";
+/// The story the book opens on, and the fallback for an unknown route.
+///
+/// Must name a story that actually exists — see the guard in
+/// `story_book::StoryBook`, which falls back to the first registered
+/// story rather than blanking the page if this ever goes stale. It did:
+/// the previous default (`studio/layout/studio-shell/simulator-idle`)
+/// retired with the step-stack device pane, and the storybook rendered
+/// an empty body, so capture discovered ZERO stories.
+pub const DEFAULT_STORY_ID: &str = "studio/home/home-gallery/populated";
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/story_registry.generated.rs"));

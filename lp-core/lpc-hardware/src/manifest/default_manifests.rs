@@ -7,6 +7,7 @@ use crate::{
 
 const XIAO_ESP32_C6_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-c6.json");
 const XIAO_ESP32_S3_PLUS_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-s3-plus.json");
+const DOM_Z_102_JSON: &str = include_str!("../../boards/domraem/dom-z-102.json");
 
 pub fn default_esp32c6_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
@@ -40,6 +41,22 @@ pub fn default_esp32s3_hardware_manifest() -> HwManifest {
     HardwareManifestFile::read_json(XIAO_ESP32_S3_PLUS_JSON)
         .and_then(|manifest| manifest.to_manifest())
         .expect("checked-in seeed/xiao-esp32-s3-plus hardware manifest must parse")
+}
+
+/// Compiled-in board profile for `fw-esp32v3` (classic ESP32, LX6).
+///
+/// The DOM-Z-102 — the classic bring-up roadmap's desk board and its
+/// WLED-class deployment exemplar — rather than a bare devkit: the roadmap's
+/// Q5-as-amended decision (see the plan's notes.md, 2026-07-31). Data
+/// channels LED1-4 = GPIO 18/16/14/2, matching the board silkscreen and the
+/// display sidecar authored from a photo of the desk unit. Like the S3
+/// profile above, deliberately incomplete: only pins the board exposes are
+/// listed, and UART0's GPIO1/3 are reserved because they ARE the host link
+/// (CH340K bridge — no separate USB-Serial-JTAG on this chip).
+pub fn default_esp32v3_hardware_manifest() -> HwManifest {
+    HardwareManifestFile::read_json(DOM_Z_102_JSON)
+        .and_then(|manifest| manifest.to_manifest())
+        .expect("checked-in domraem/dom-z-102 hardware manifest must parse")
 }
 
 /// Emulator manifest: XIAO ESP32-C6 pin map, board D-labels for endpoint specs,
@@ -128,6 +145,41 @@ mod tests {
         // GPIO19/20 are USB-Serial-JTAG D-/D+. They are listed only so a
         // driver cannot claim them: on this board that costs a physical replug.
         for pin in [0, 19, 20] {
+            assert!(
+                manifest
+                    .resource(&HwAddress::gpio(pin))
+                    .and_then(|resource| resource.reserved_reason())
+                    .is_some(),
+                "gpio{pin} must be reserved"
+            );
+        }
+    }
+
+    #[test]
+    fn default_esp32v3_manifest_loads_checked_in_board_profile() {
+        let manifest = default_esp32v3_hardware_manifest();
+
+        assert_eq!(manifest.board_id(), "domraem/dom-z-102");
+        assert_eq!(manifest.target(), Some(HardwareTarget::Esp32));
+        // The four silkscreened data channels, LED1-4.
+        for pin in [18, 16, 14, 2] {
+            assert!(
+                manifest.resource(&HwAddress::gpio(pin)).is_some(),
+                "gpio{pin} (a LED data channel) must be declared"
+            );
+        }
+        // Four RMT resources — the count the classic ws281x backend offers
+        // (ADR 2026-07-31-lp-ws281x-multi-channel-driver-adoption: channel
+        // count comes from here, never from driver logic).
+        for channel in 0..4 {
+            assert!(
+                manifest.resource(&HwAddress::rmt_ws281x(channel)).is_some(),
+                "/rmt/ws281x{channel} must be declared"
+            );
+        }
+        // GPIO1/3 are UART0 through the CH340K bridge — the host link — and
+        // GPIO0 is the OPT/boot button; all reserved so no driver claims them.
+        for pin in [0, 1, 3] {
             assert!(
                 manifest
                     .resource(&HwAddress::gpio(pin))

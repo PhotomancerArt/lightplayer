@@ -8,7 +8,6 @@ use lpa_link::{
     DeviceState, LinkManagementRequest, LinkManagementResult, LinkProvider, LinkProviderKind,
 };
 
-use crate::app::device::device_controller::DeviceRuntimeEvidence;
 use crate::app::device::device_event_adapter::management_event_sink;
 use crate::app::device::link_ux::management_result_logs;
 use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployTarget, DeviceOpenOutcome};
@@ -28,8 +27,8 @@ use crate::{
     ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
     ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
     UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
-    UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
-    UxUpdate, UxUpdateSink,
+    UiPaneView, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate,
+    UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -140,6 +139,14 @@ pub struct StudioController {
     /// card). One slot because the pool holds one hardware session; this
     /// grows into a per-identity map with the pool.
     device_card_op: Option<(Option<String>, Rc<RefCell<crate::CardOp>>)>,
+    /// The most recent finished device filesystem backup, carried on the
+    /// home view until the shell downloads it. Kept (rather than emitted and
+    /// forgotten) because the view is a full snapshot; `device_backup_seq` is
+    /// what stops a re-render from re-downloading it.
+    device_backup: Option<crate::UiDeviceBackup>,
+    /// Session-monotonic backup counter. Never reset — the shell compares it
+    /// against the last one it acted on.
+    device_backup_seq: u64,
     /// When the last sim crash auto-reboot ran (`None` = never). Epoch
     /// seconds on the injected clock; the flap guard: a second crash
     /// within [`SIM_CRASH_REBOOT_GUARD_SECS`] stays Failed for manual
@@ -217,6 +224,8 @@ impl StudioController {
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
             device_card_op: None,
+            device_backup: None,
+            device_backup_seq: 0,
             sim_crash_reboot_at: None,
             random: Rc::new(clock_fallback_random),
             settings: crate::app::settings::SettingsStore::default(),
@@ -509,11 +518,6 @@ impl StudioController {
             .and_then(crate::RuntimeSession::device_state)
     }
 
-    /// Whether the attached runtime is real hardware.
-    fn is_hardware_attached(&self) -> bool {
-        self.pool.device_session().is_some()
-    }
-
     /// The live hardware [`lpa_link::DeviceSession`], when one is attached
     /// (test stubs have none).
     fn hardware_session(&self) -> Option<&lpa_link::DeviceSession> {
@@ -534,23 +538,6 @@ impl StudioController {
             .link_session()?
             .provider_kind
             .transport_label()
-    }
-
-    /// The pool-derived runtime evidence the device pane renders from.
-    /// The server-protocol slice is the DEVICE session's when hardware is
-    /// attached (the pane is about hardware), the lens session's otherwise
-    /// (the "Running in the simulator" ambient line).
-    fn device_runtime_evidence(&self) -> DeviceRuntimeEvidence {
-        let server_state = match self.pool.device_session() {
-            Some(device) => device.server_state().clone(),
-            None => self.server_snapshot().state,
-        };
-        DeviceRuntimeEvidence {
-            is_hardware: self.is_hardware_attached(),
-            is_sim: self.pool.sim_session().is_some(),
-            device_state: self.device_state(),
-            server_state,
-        }
     }
 
     /// The delay before the next passive tick: the MINIMUM over sessions
@@ -706,11 +693,6 @@ impl StudioController {
                 .with_device_sync(self.device_sync().cloned())
                 .with_settings(self.settings.ui_view());
         }
-        let device_view = self.device.view(
-            &self.device_runtime_evidence(),
-            self.device_sync(),
-            self.usual_device_line(),
-        );
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
         let mut project_pane = self.project.view(self.has_lightplayer_state());
@@ -727,7 +709,7 @@ impl StudioController {
             UiViewContent::ProjectEditor(editor) => editor.dirty,
             _ => crate::DirtySummary::clean(),
         };
-        let panes = vec![project_pane, self.bus_pane(), device_view];
+        let panes = vec![project_pane, self.bus_pane()];
         UiStudioView::new(panes, self.console_view())
             .with_lens(self.lens_runtime())
             .with_open_project(
@@ -769,10 +751,20 @@ impl StudioController {
     /// The LENS session's card (D43): the grown control panel the editor
     /// docks as its right-side pane. The same construction the gallery
     /// roster uses — one derivation, both scales.
+    ///
+    /// TOTAL over a live lens session: whenever the pool has a lens the
+    /// editor gets a card. The shell has no other device surface, so a
+    /// `None` here is a hole in the right column — which is exactly how
+    /// the retired step-stack pane stayed reachable (defect
+    /// `docs/defects/2026-07-28-retired-device-pane-still-reachable.md`).
+    /// Unplugging therefore FADES the card ("Seen …/Reconnect") instead of
+    /// removing it; the lens and the project are left alone, so a flaky
+    /// cable never yanks anyone out of their editor.
     fn lens_device_card(&self) -> Option<crate::UiDeviceCard> {
         let session = self.pool.lens_session()?;
         let evidence = self.home_pool_evidence();
         let card = if session.is_sim() {
+            // the sim's evidence exists exactly while its session does
             evidence
                 .sim
                 .as_ref()
@@ -781,9 +773,41 @@ impl StudioController {
             evidence
                 .devices
                 .first()
-                .and_then(crate::app::home::home_view_builder::live_device_card)
+                .map(crate::app::home::home_view_builder::device_card_from_live_evidence)
+                .map(|card| self.with_remembered_sighting(card))
         };
         card.map(|card| self.overlay_card_ui(card))
+    }
+
+    /// Live evidence carries no registry entry, so an Offline derivation
+    /// from it has no sighting ("Not seen yet" — wrong for a board that
+    /// answered a second ago). Borrow the remembered card's `last_seen_at`
+    /// so the unplugged lens reads "Seen …", the same words the gallery
+    /// uses for the same device.
+    fn with_remembered_sighting(&self, mut card: crate::UiDeviceCard) -> crate::UiDeviceCard {
+        let crate::RosterCardState::Offline {
+            last_seen_at: None, ..
+        } = &card.state
+        else {
+            return card;
+        };
+        let Some(uid) = card.uid.clone() else {
+            return card;
+        };
+        let seen = self.home_inputs.as_ref().and_then(|inputs| {
+            inputs
+                .devices
+                .iter()
+                .find(|remembered| remembered.uid.as_deref() == Some(uid.as_str()))
+                .and_then(|remembered| match remembered.state {
+                    crate::RosterCardState::Offline { last_seen_at } => last_seen_at,
+                    _ => None,
+                })
+        });
+        if seen.is_some() {
+            card.state = crate::RosterCardState::Offline { last_seen_at: seen };
+        }
+        card
     }
 
     /// The lens's runtime binding for the view (SDI: the URL is the
@@ -840,6 +864,7 @@ impl StudioController {
             .into_iter()
             .map(|card| self.overlay_card_ui(card))
             .collect();
+        view.backup = self.device_backup.clone();
         Some(view)
     }
 
@@ -890,6 +915,11 @@ impl StudioController {
                 .device_session()
                 .map(|session| session.console_tail().iter().cloned().collect())
                 .unwrap_or_default(),
+            op_in_flight: self.device_card_op.is_some(),
+            recovery: self
+                .pool
+                .device_session()
+                .and_then(|session| session.recovery_status().cloned()),
         };
         let sim = self
             .pool
@@ -1588,19 +1618,6 @@ impl StudioController {
 
     /// Where the open project usually lives: the registered device whose
     /// association points at it, for the pane's disconnected state (D23).
-    fn usual_device_line(&self) -> Option<String> {
-        let slug = self.project.active_library_slug()?;
-        let inputs = self.home_inputs.as_ref()?;
-        inputs.devices.iter().find_map(|device| {
-            let offline = matches!(device.state, crate::RosterCardState::Offline { .. });
-            let holds_it = device
-                .project
-                .as_ref()
-                .is_some_and(|chip| chip.name == slug);
-            (offline && holds_it).then(|| format!("Usually on {}.", device.name))
-        })
-    }
-
     /// Resolve a slug-or-uid key to a concrete push target from a fresh
     /// library snapshot.
     async fn resolve_deploy_target(&mut self, key: &str) -> Result<DeployTarget, UiError> {
@@ -2066,6 +2083,11 @@ impl StudioController {
             }
             DeviceOp::WipeProject => self.wipe_project().await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
+            DeviceOp::BootSafeOnce => self.boot_safe_once(updates).await,
+            DeviceOp::BackUpFilesystem => self.back_up_filesystem(updates).await,
+            DeviceOp::ProbeBootloaderMode { card_key, flow } => {
+                self.probe_bootloader_mode(card_key, flow).await
+            }
             DeviceOp::RefreshConnections => {
                 // Drop the session (no provider close) + catalog refresh.
                 self.device.refresh_provider_catalog();
@@ -2077,15 +2099,6 @@ impl StudioController {
                 self.open_provider_link_only(provider_id, updates).await
             }
             DeviceOp::OpenProvider { provider_id } => {
-                if provider_id != LinkProviderKind::BrowserSerialEsp32 {
-                    emit_activity(
-                        &updates,
-                        device_section_target(DeviceController::SECTION_DEVICE),
-                        "Opening device",
-                        "Opening",
-                        format!("Opening {}", provider_id.label()),
-                    );
-                }
                 let outcome = self.device.open_provider(provider_id).await;
                 self.settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
                     .await
@@ -2094,13 +2107,6 @@ impl StudioController {
                 provider_id,
                 endpoint_id,
             } => {
-                emit_activity(
-                    &updates,
-                    device_section_target(DeviceController::SECTION_DEVICE),
-                    "Opening device session",
-                    "Connecting",
-                    "Opening device endpoint",
-                );
                 let outcome = self.device.connect_endpoint(provider_id, endpoint_id).await;
                 self.settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
                     .await
@@ -2309,11 +2315,11 @@ impl StudioController {
     ) -> UiResult {
         match outcome {
             Ok(DeviceOpenOutcome::Opened) => {
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 Ok(UiNotices::new())
             }
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
@@ -2325,15 +2331,37 @@ impl StudioController {
                 // M6: the ladder's honest ending lives on the CARD
                 // (PortHeld/Unresponsive flow states → card evidence);
                 // nothing toasts, nothing errors.
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 self.mark_dirty();
                 Ok(UiNotices::new())
             }
             Err(error) => {
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 Err(error)
             }
         }
+    }
+
+    /// Clear a kind's pool slot after a connect ended without a session.
+    ///
+    /// `remove_kind` alone drops the lens ID with the session but leaves
+    /// the MIRROR dressed — `project.state` stays `Ready`, so the shell
+    /// keeps rendering panes for an editor with nothing behind it and no
+    /// lens card. Quiescing first is the pairing every other teardown
+    /// path uses (`teardown_crashed_sim`, `detach_lens`,
+    /// `open_provider_link_only`); it returns the user to the gallery,
+    /// which is the honest reading of "the connect ended with no
+    /// session". Defect
+    /// `docs/defects/2026-07-28-retired-device-pane-still-reachable.md`.
+    fn clear_connect_slot(&mut self, kind: crate::RuntimeKind) {
+        if self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.kind() == kind)
+        {
+            self.quiesce_lens();
+        }
+        self.pool.remove_kind(kind);
     }
 
     /// Install a connected payload into the pool under the capacity
@@ -2748,13 +2776,6 @@ impl StudioController {
         }
         // No sim yet: start the simulator runtime. A device session stays
         // attached throughout — only the SIM slot is touched on failure.
-        emit_activity(
-            &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
-            "Starting simulator",
-            "Opening",
-            "Starting the simulator runtime",
-        );
         let outcome = self
             .device
             .open_provider(LinkProviderKind::BrowserWorker)
@@ -2797,7 +2818,7 @@ impl StudioController {
             .ok_or_else(|| UiError::MissingSession("no pending package to open".to_string()))?;
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
+            UxActivityTarget::pane(ProjectController::NODE_ID),
             "Opening project",
             "Opening",
             "Pushing the project to the simulator",
@@ -3199,13 +3220,6 @@ impl StudioController {
         if let Ok(session) = self.pool.device_session_mut() {
             session.disconnect_server();
         }
-        emit_activity(
-            &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
-            "Opening device for flashing",
-            "Opening",
-            "Opening device without attaching LightPlayer",
-        );
         let outcome = self.device.open_provider(provider_id).await;
         match outcome {
             Ok(DeviceOpenOutcome::Opened) => {
@@ -3278,13 +3292,6 @@ impl StudioController {
             if let Some(session) = self.pool.session_mut(id) {
                 session.disconnect_server();
             }
-            emit_activity(
-                &updates,
-                device_section_target(DeviceController::SECTION_DEVICE),
-                "Reopening device",
-                "Connecting",
-                "Resetting device before server connect",
-            );
             let result = {
                 let session = self
                     .pool
@@ -3311,19 +3318,8 @@ impl StudioController {
     /// session being attached, never "the lens" — the lens may be on the
     /// OTHER session while a device reconnects under an open sim project.
     async fn attach_runtime(&mut self, id: crate::RuntimeId, updates: UxUpdateSink) -> UiResult {
-        emit_activity(
-            &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
-            "Connecting LightPlayer",
-            "Connecting",
-            "Opening server protocol",
-        );
-        let server_updates = retarget_activity_updates(
-            updates.clone(),
-            device_section_target(DeviceController::SECTION_DEVICE),
-        );
         let (is_sim, attach_result) = match self.pool.session_mut(id) {
-            Some(session) => (session.is_sim(), session.attach_server(server_updates)),
+            Some(session) => (session.is_sim(), session.attach_server(updates.clone())),
             None => (
                 false,
                 Err(UiError::MissingSession(
@@ -3350,7 +3346,7 @@ impl StudioController {
                 }
                 emit_activity(
                     &updates,
-                    device_section_target(DeviceController::SECTION_DEVICE),
+                    UxActivityTarget::pane(ProjectController::NODE_ID),
                     "Checking running projects",
                     "Checking",
                     "Checking server response",
@@ -3368,7 +3364,7 @@ impl StudioController {
                     self.connect_running_project_if_available(updates.clone())
                         .await
                 } else {
-                    self.probe_server_readiness(id, updates.clone()).await
+                    self.probe_server_readiness(id).await
                 };
                 let auto_connect = match probe {
                     Ok(auto_connect) => auto_connect,
@@ -3468,7 +3464,7 @@ impl StudioController {
     async fn connect_running_project(&mut self, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
+            UxActivityTarget::pane(ProjectController::NODE_ID),
             "Connecting project",
             "Connecting",
             "Checking loaded projects",
@@ -3517,15 +3513,7 @@ impl StudioController {
     async fn probe_server_readiness(
         &mut self,
         id: crate::RuntimeId,
-        updates: UxUpdateSink,
     ) -> Result<AutoProjectConnect, UiError> {
-        emit_activity(
-            &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
-            "Checking device",
-            "Checking",
-            "Checking server response",
-        );
         let catalog = {
             let server = self
                 .pool
@@ -3546,7 +3534,7 @@ impl StudioController {
     ) -> Result<AutoProjectConnect, UiError> {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
+            UxActivityTarget::pane(ProjectController::NODE_ID),
             "Checking running projects",
             "Checking",
             "Checking loaded projects",
@@ -3579,7 +3567,7 @@ impl StudioController {
     async fn connect_loaded_project(&mut self, handle_id: u32, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
+            UxActivityTarget::pane(ProjectController::NODE_ID),
             "Connecting project",
             "Connecting",
             "Loading project shape",
@@ -3613,7 +3601,7 @@ impl StudioController {
     async fn load_demo_project(&mut self, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
+            UxActivityTarget::pane(ProjectController::NODE_ID),
             "Loading demo project",
             "Loading",
             "Uploading demo project",
@@ -4000,7 +3988,11 @@ impl StudioController {
                 degrade_subject: "device reset",
                 server_reconnect_failed_notice: "Device reset; reconnect after it finishes booting",
                 // a runtime reset reboots the device; the project survives.
+                // Reset/erase/boot-control all leave the device able to come
+                // back by itself.
+                awaits_manual_replug: false,
                 severs_lens: false,
+                result_sink: None,
             },
             updates,
         )
@@ -4012,21 +4004,38 @@ impl StudioController {
         updates: UxUpdateSink,
         setup_name: Option<String>,
     ) -> UiResult {
+        // A flash performed while the chip sits in ROM download mode is a
+        // different flow, and the difference is the ENDING: the board does
+        // not boot the image it was just given until it is physically
+        // replugged. The shape follows the device's actual state rather
+        // than which button was pressed, because that is what determines
+        // whether waiting for a reattach is sensible.
+        let from_recovery = self.device_is_in_recovery_mode();
         let mut outcome = self
             .run_device_management(
                 ManagementFlowSpec {
                     request: LinkManagementRequest::FlashFirmware,
                     progress_label: "Flashing firmware",
-                    reconnect_detail: "Waiting for firmware boot",
+                    reconnect_detail: if from_recovery {
+                        "Unplug the board and plug it back in to start it"
+                    } else {
+                        "Waiting for firmware boot"
+                    },
                     failed_exit_label: "Back to set up",
                     record_captured_logs_on_success: false,
                     done_notice: provision_notice,
                     degrade_subject: "firmware flashed",
-                    server_reconnect_failed_notice:
-                        "Firmware flashed; reconnect the server after the device finishes booting",
+                    server_reconnect_failed_notice: if from_recovery {
+                        "Firmware flashed. Unplug the board and plug it back in — \
+                         it will not start on its own from recovery mode."
+                    } else {
+                        "Firmware flashed; reconnect the server after the device finishes booting"
+                    },
+                    awaits_manual_replug: from_recovery,
                     // a flash reboots into new firmware; the stored project
                     // survives and reloads on reattach.
                     severs_lens: false,
+                    result_sink: None,
                 },
                 updates,
             )
@@ -4093,6 +4102,213 @@ impl StudioController {
         )))
     }
 
+    /// Ask the device whether a bootloader is listening, and fold the answer
+    /// into the card's open bootloader-entry sheet.
+    ///
+    /// This is the step that makes the ritual's confirmation real. Without
+    /// it the sheet can show steps and then never resolve, which is worse
+    /// than showing nothing: the user has no way to tell a failed attempt
+    /// from a dead board, which is the exact confusion the flow exists to
+    /// remove.
+    ///
+    /// The probe REBOOTS the device, so it runs only here — on the user's
+    /// explicit "I've done that", which is itself the signal that a replug
+    /// just happened.
+    async fn probe_bootloader_mode(
+        &mut self,
+        card_key: String,
+        flow: crate::BootloaderEntryFlow,
+    ) -> UiResult {
+        use crate::CardUiOp;
+
+        // Show the waiting state first: the probe takes seconds (reset,
+        // sync, re-enumerate) and a frozen sheet reads as a hang.
+        let waiting = flow.begin_waiting();
+        self.apply_card_ui_op(CardUiOp::OpenSheet {
+            card: card_key.clone(),
+            sheet: crate::CardSheet::BootloaderEntry(waiting.clone()),
+        });
+
+        let Some(session) = self.hardware_session() else {
+            return Err(UiError::MissingSession(
+                "no hardware device session to probe".to_string(),
+            ));
+        };
+        let probed = session
+            .probe_link_mode(lpa_link::DeviceEventSink::noop())
+            .await;
+
+        let settled = match probed {
+            Ok(mode) if mode.is_bootloader() => {
+                let chip_name = match &mode {
+                    lpa_link::DeviceLinkMode::Bootloader { chip_name, .. } => chip_name.clone(),
+                    _ => None,
+                };
+                waiting.on_probe_answered(chip_name)
+            }
+            // Reached the device but it is not in bootloader mode, OR the
+            // probe itself failed. Both mean "that attempt did not land" —
+            // NOT "the device is broken", since an app-mode device ignores
+            // the handshake too.
+            Ok(_) | Err(_) => waiting.on_probe_unanswered(),
+        };
+        self.apply_card_ui_op(CardUiOp::OpenSheet {
+            card: card_key,
+            sheet: crate::CardSheet::BootloaderEntry(settled.clone()),
+        });
+
+        Ok(if settled.is_confirmed() {
+            UiNotices::new().with_notice(UiNotice::info("Device is in recovery mode"))
+        } else {
+            UiNotices::new()
+        })
+    }
+
+    /// Whether the managed device is currently sitting in ROM download
+    /// mode — the state whose flash needs a manual replug to take effect.
+    fn device_is_in_recovery_mode(&self) -> bool {
+        self.hardware_session().is_some_and(|session| {
+            matches!(session.snapshot().state, lpa_link::DeviceState::Bootloader)
+        })
+    }
+
+    /// Write the boot-control record so the next restart skips project
+    /// auto-load.
+    ///
+    /// Deliberately gentler than [`Self::reset_to_blank`]: nothing is erased,
+    /// so the lens is not severed and the user keeps their project. The
+    /// device consumes the record as it boots, so this affects exactly one
+    /// restart.
+    async fn boot_safe_once(&mut self, updates: UxUpdateSink) -> UiResult {
+        // From app mode the record is written and the device reboots into
+        // its firmware by itself. From RECOVERY mode it cannot: the
+        // manually-entered download mode latches until power-on reset
+        // (bench-confirmed 2026-07-31), so the ending is the replug
+        // instruction — the same physics as the recovery flash.
+        let from_recovery = self.device_is_in_recovery_mode();
+        self.run_device_management(
+            ManagementFlowSpec {
+                request: LinkManagementRequest::start_safe_mode(),
+                progress_label: "Arming safe mode",
+                reconnect_detail: if from_recovery {
+                    "Unplug the board and plug it back in to start it"
+                } else {
+                    "Restarting in safe mode — if it doesn't reconnect in a \
+                     few seconds, unplug the board and plug it back in"
+                },
+                failed_exit_label: "Back to device",
+                record_captured_logs_on_success: false,
+                done_notice: boot_safe_once_notice,
+                degrade_subject: "safe mode armed",
+                server_reconnect_failed_notice: if from_recovery {
+                    "Safe mode armed. Unplug the board and plug it back in — \
+                     it will start dim, or with nothing loaded on older \
+                     firmware."
+                } else {
+                    "Safe mode armed. If the board doesn't reconnect on its \
+                     own, unplug it and plug it back in."
+                },
+                // ALWAYS the awaiting ending, both modes (bench 2026-07-31):
+                // from app mode the board normally returns by itself and a
+                // successful reattach clears the op — but when the reattach
+                // misses (USB re-enumeration races the rebuild), a bare
+                // "Not seen yet" offline card with no guidance is the worst
+                // of the endings. An instruction that self-clears on success
+                // costs nothing when the happy path lands.
+                awaits_manual_replug: true,
+                // Nothing is erased — the project is still on the device and
+                // the editor's lens stays valid.
+                severs_lens: false,
+                result_sink: None,
+            },
+            updates,
+        )
+        .await
+    }
+
+    /// Read the device's filesystem over the bootloader and publish a ZIP of
+    /// it for the shell to download.
+    ///
+    /// This is the operation that makes the originating failure survivable —
+    /// the user's work comes off the board BEFORE anything destructive
+    /// happens to it — so it deliberately reads like the gentle ops: nothing
+    /// is erased, the lens is not severed, and a device in recovery mode is
+    /// told it needs a replug rather than being reported as a failure.
+    async fn back_up_filesystem(&mut self, updates: UxUpdateSink) -> UiResult {
+        let from_recovery = self.device_is_in_recovery_mode();
+        let device_label = self
+            .device_sync()
+            .and_then(|sync| sync.identity.as_ref())
+            .map(|identity| identity.name.clone());
+        let sink: Rc<RefCell<Option<LinkManagementResult>>> = Rc::new(RefCell::new(None));
+        let mut outcome = self
+            .run_device_management(
+                ManagementFlowSpec {
+                    request: LinkManagementRequest::ReadRawFilesystem,
+                    progress_label: "Backing up",
+                    reconnect_detail: if from_recovery {
+                        "Unplug the board and plug it back in to start it"
+                    } else {
+                        "Waiting for device boot"
+                    },
+                    failed_exit_label: "Back to device",
+                    record_captured_logs_on_success: false,
+                    done_notice: |_| UiNotice::info("Backup read from the device"),
+                    degrade_subject: "device backed up",
+                    server_reconnect_failed_notice: if from_recovery {
+                        "Backup taken. Unplug the board and plug it back in — \
+                         it will not start on its own from recovery mode."
+                    } else {
+                        "Backup taken; reconnect after the device finishes booting"
+                    },
+                    awaits_manual_replug: from_recovery,
+                    // A read writes nothing: the project is still on the
+                    // device and a lens on it stays valid.
+                    severs_lens: false,
+                    result_sink: Some(Rc::clone(&sink)),
+                },
+                updates,
+            )
+            .await?;
+
+        let read = match sink.borrow_mut().take() {
+            Some(LinkManagementResult::ReadRawFilesystem(read)) => read,
+            // The provider answered something else entirely — a dispatch
+            // bug, not a device problem. Say so rather than pretending.
+            _ => {
+                return Err(UiError::Link(
+                    "the filesystem read returned no image".to_string(),
+                ));
+            }
+        };
+        let archive = crate::app::device::filesystem_backup::build_backup_archive(
+            &read.image,
+            &crate::app::device::BackupSource {
+                chip: read.chip_name.clone(),
+                partition_offset: read.region.offset,
+                partition_length: read.region.length,
+                device_label,
+            },
+            (self.now_secs)(),
+        )
+        .map_err(|error| UiError::Link(error.to_string()))?;
+
+        self.device_backup_seq += 1;
+        let file_count = archive.manifest.file_count;
+        outcome = outcome.with_notice(UiNotice::info(format!(
+            "Backed up {file_count} file(s) to {}",
+            archive.file_name
+        )));
+        self.device_backup = Some(crate::UiDeviceBackup {
+            seq: self.device_backup_seq,
+            file_name: archive.file_name,
+            bytes: Rc::from(archive.bytes),
+            file_count,
+        });
+        self.mark_dirty();
+        Ok(outcome)
+    }
+
     async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
         self.run_device_management(
             ManagementFlowSpec {
@@ -4107,7 +4323,11 @@ impl StudioController {
                     "Device wiped; reconnect after the device finishes booting",
                 // a wipe erases the flash — the project is gone; a lens on
                 // this device is severed and the app returns to the gallery.
+                // Reset/erase/boot-control all leave the device able to come
+                // back by itself.
+                awaits_manual_replug: false,
                 severs_lens: true,
+                result_sink: None,
             },
             updates,
         )
@@ -4165,11 +4385,6 @@ impl StudioController {
             session.set_operation(Some(spec.progress_label.to_string()));
         }
         let captured_logs = Rc::new(RefCell::new(Vec::new()));
-        let target = device_section_target(DeviceController::SECTION_DEVICE);
-        let activity = Rc::new(RefCell::new(
-            UiActivityView::new(spec.progress_label)
-                .with_progress(UiProgress::indeterminate(spec.progress_label)),
-        ));
         // MOUNT THE OVERLAY BEFORE THE WORK STARTS. The op slot went in
         // just above, and only a full view build carries it onto a card
         // (`overlay_card_ui`) — but everything below holds `&mut self`
@@ -4179,15 +4394,8 @@ impl StudioController {
         // minute-long install look like a dead button.
         self.mark_dirty();
         updates.emit(UxUpdate::View(self.view()));
-        updates.emit(UxUpdate::Activity {
-            target: target.clone(),
-            status: UiStatus::working("Managing"),
-            activity: activity.borrow().clone(),
-        });
         let event_sink = management_event_sink(
             updates.clone(),
-            target,
-            Rc::clone(&activity),
             Rc::clone(&captured_logs),
             Rc::clone(&card_op),
             managed_uid_for_events.clone(),
@@ -4207,7 +4415,9 @@ impl StudioController {
                     ));
                 }
             };
-            session.manage(spec.request, event_sink).await
+            // Cloned so the spec stays whole: the reattach half below still
+            // needs its copy for `reattach_failure_op`.
+            session.manage(spec.request.clone(), event_sink).await
         };
         // The manage half settled (either way): session replaces unblock
         // and the card's operation narration clears.
@@ -4235,13 +4445,11 @@ impl StudioController {
         self.record_logs(management_result_logs(&management.result));
 
         let mut outcome = UiNotices::new().with_notice((spec.done_notice)(&management.result));
-        emit_activity(
-            &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
-            "Reconnecting device",
-            "Connecting",
-            spec.reconnect_detail,
-        );
+        // Hand the raw result on AFTER the log replay and the notice, so the
+        // move costs nothing (a filesystem image is ~1 MB).
+        if let Some(sink) = &spec.result_sink {
+            *sink.borrow_mut() = Some(management.result);
+        }
         // The reattach half is the op's AwaitingDevice phase (I2) — the
         // overlay stays up, narrating the expected gap. It is a LONG
         // phase (the board reboots and re-enumerates), so the delta goes
@@ -4253,14 +4461,54 @@ impl StudioController {
             op: card_op.borrow().clone(),
         });
         self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
         // The link was already rebuilt inside `manage`; what remains is the
         // server reattach + post-attach sequence on the managed session.
         match self.attach_runtime(device_id, updates).await {
             Ok(mut attach_outcome) => {
                 outcome.notices.append(&mut attach_outcome.notices);
-                // Landed (I3): the flow ends; the card re-derives and its
-                // Status tab announces what's next.
-                self.device_card_op = None;
+                if spec.awaits_manual_replug && self.device_is_in_recovery_mode() {
+                    // Attached — but the board landed back in the BOOTLOADER.
+                    // A C6 over USB-Serial-JTAG re-enters download mode on
+                    // the post-write RTS reset (bench, 2026-07-31), so the
+                    // reattach "succeeds" into a recovery session and the
+                    // old clear-on-Ok dropped the user on the recovery card,
+                    // which advises installing the firmware they may have
+                    // JUST installed. For an op that only finishes when the
+                    // board really boots, this ending is the replug
+                    // instruction, same as the reattach-miss arm below.
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Info,
+                        UiLogOrigin::Studio,
+                        format!(
+                            "{} — the board stays in the bootloader until replugged",
+                            spec.degrade_subject
+                        ),
+                    ));
+                    *card_op.borrow_mut() = reattach_failure_op(&spec, "");
+                    outcome =
+                        outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
+                } else {
+                    // Landed (I3): the flow ends; the card re-derives and its
+                    // Status tab announces what's next.
+                    self.device_card_op = None;
+                }
+            }
+            // The device was never going to come back by itself. Stay in
+            // the AwaitingDevice phase with the instruction that ends it,
+            // rather than calling a successful flash a failure and marking
+            // the session failed for doing exactly what it must do.
+            Err(_) if spec.awaits_manual_replug => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "{} — waiting for the board to be replugged",
+                        spec.degrade_subject
+                    ),
+                ));
+                *card_op.borrow_mut() = reattach_failure_op(&spec, "");
+                outcome = outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
             }
             Err(error) => {
                 self.push_log(UiLogDraft::new(
@@ -4276,11 +4524,7 @@ impl StudioController {
                 }
                 // Failed reattach renders on the card too (I4) — with the
                 // same single exit, not a silent fall-through.
-                *card_op.borrow_mut() = crate::CardOp::failed(
-                    format!("{} — reconnect failed", spec.degrade_subject),
-                    error.to_string(),
-                    spec.failed_exit_label,
-                );
+                *card_op.borrow_mut() = reattach_failure_op(&spec, &error.to_string());
                 outcome = outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
             }
         }
@@ -4555,23 +4799,6 @@ fn emit_activity(
     });
 }
 
-fn device_section_target(section_id: &'static str) -> UxActivityTarget {
-    UxActivityTarget::stack_section(DeviceController::NODE_ID, section_id)
-}
-
-fn retarget_activity_updates(updates: UxUpdateSink, target: UxActivityTarget) -> UxUpdateSink {
-    UxUpdateSink::new(move |update| match update {
-        UxUpdate::Activity {
-            status, activity, ..
-        } => updates.emit(UxUpdate::Activity {
-            target: target.clone(),
-            status,
-            activity,
-        }),
-        update => updates.emit(update),
-    })
-}
-
 fn view_actions(view: &UiStudioView) -> Vec<UiAction> {
     let mut actions = Vec::new();
     for pane in &view.panes {
@@ -4583,17 +4810,7 @@ fn view_actions(view: &UiStudioView) -> Vec<UiAction> {
 
 fn body_actions(body: &UiViewContent) -> Vec<UiAction> {
     match body {
-        UiViewContent::Stack(stack) => stack
-            .sections
-            .iter()
-            .flat_map(|section| {
-                let mut actions = section.actions.clone();
-                actions.extend(body_actions(&section.body));
-                actions
-            })
-            .collect(),
-        UiViewContent::Empty
-        | UiViewContent::Text(_)
+        UiViewContent::Text(_)
         | UiViewContent::Progress(_)
         | UiViewContent::Activity(_)
         | UiViewContent::Issue(_)
@@ -4626,6 +4843,27 @@ fn project_tree_item_actions(
 /// wipe): the link request plus the notice/log wording that differs between
 /// them. Everything else — quiesce, capture, manage, reopen, reattach,
 /// degrade — is shared in `StudioController::run_device_management`.
+/// What the card shows when the post-operation reattach does not land.
+///
+/// Two different situations wear the same error: a device that FAILED to come
+/// back, and a device that was never going to. A board flashed from ROM
+/// download mode does not boot the new image until it is physically
+/// replugged, so treating its non-return as a failure reports a successful
+/// flash as a failure — on the one path a user in recovery actually takes.
+fn reattach_failure_op(spec: &ManagementFlowSpec, error: &str) -> crate::CardOp {
+    if spec.awaits_manual_replug {
+        // Not failed: awaiting the one action that finishes the job, with
+        // the instruction itself as the narration.
+        crate::CardOp::awaiting(spec.reconnect_detail)
+    } else {
+        crate::CardOp::failed(
+            format!("{} — reconnect failed", spec.degrade_subject),
+            error.to_string(),
+            spec.failed_exit_label,
+        )
+    }
+}
+
 struct ManagementFlowSpec {
     request: LinkManagementRequest,
     /// Activity label while the management operation runs.
@@ -4645,6 +4883,16 @@ struct ManagementFlowSpec {
     /// reset" → "device reset but serial reopen failed: …".
     degrade_subject: &'static str,
     server_reconnect_failed_notice: &'static str,
+    /// The device will NOT come back on its own — the user has to unplug
+    /// and replug it — so a failed reattach is the EXPECTED ending, not a
+    /// failure.
+    ///
+    /// True for a flash performed while the chip sits in ROM download mode:
+    /// it does not boot the freshly written image without a power cycle.
+    /// Without this the flow flashes successfully, waits for a device that
+    /// cannot return, and then reports the success as a failure — which is
+    /// exactly the path a user in recovery takes.
+    awaits_manual_replug: bool,
     /// The op takes the project WITH it (a destructive wipe): when the
     /// editor lens sits on the managed device, fully quiesce it — detach
     /// the lens so the app returns to the gallery — and say so, rather than
@@ -4652,6 +4900,10 @@ struct ManagementFlowSpec {
     /// project on the device, so its lens only resets its live edit-state
     /// and stays put to reload after the reattach (device-lifecycle P3).
     severs_lens: bool,
+    /// Where the raw management result lands for flows whose outcome is more
+    /// than a notice — the filesystem backup needs the image bytes. `None`
+    /// everywhere else, and the result is MOVED in (it can be a megabyte).
+    result_sink: Option<Rc<RefCell<Option<LinkManagementResult>>>>,
 }
 
 fn provision_notice(result: &LinkManagementResult) -> UiNotice {
@@ -4661,6 +4913,19 @@ fn provision_notice(result: &LinkManagementResult) -> UiNotice {
         }
         _ => UiNotice::info("Firmware flashed"),
     }
+}
+
+fn boot_safe_once_notice(result: &LinkManagementResult) -> UiNotice {
+    let label = match result {
+        LinkManagementResult::SetBootControl(result) => {
+            result.chip_name.as_deref().unwrap_or("This device")
+        }
+        _ => "This device",
+    };
+    UiNotice::info(format!(
+        "{label} will start once in safe mode — dim, or with nothing loaded \
+         on older firmware. The restart after that is normal."
+    ))
 }
 
 fn reset_notice(result: &LinkManagementResult) -> UiNotice {
@@ -4700,11 +4965,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::core::status::UiStatusKind;
     use crate::{
         ConnectFlowState, ControllerId, ProjectController, ProjectEditorOp, ProjectEditorTarget,
         ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTarget, ProjectState,
-        ProjectSyncPhase, ServerFailureKind, ServerState, StudioServerClient, UiIssue,
+        ProjectSyncPhase, ServerState, StudioServerClient,
     };
 
     #[test]
@@ -4836,8 +5100,8 @@ mod tests {
         studio.set_agent_models_fetcher(|_config| {
             Box::pin(async {
                 Ok(vec![ModelInfo {
-                    id: "claude-sonnet-5".to_string(),
                     display_name: Some("Claude Sonnet 5".to_string()),
+                    ..ModelInfo::new("claude-sonnet-5".to_string())
                 }])
             })
         });
@@ -4921,8 +5185,8 @@ mod tests {
         studio.set_agent_models_fetcher(|_config| {
             Box::pin(async {
                 Ok(vec![ModelInfo {
-                    id: "claude-haiku-4".to_string(),
                     display_name: Some("Claude Haiku 4".to_string()),
+                    ..ModelInfo::new("claude-haiku-4".to_string())
                 }])
             })
         });
@@ -5053,8 +5317,12 @@ mod tests {
         );
     }
 
+    /// The reflash escalation, pinned where it renders now: the LENS
+    /// CARD. The retired step-stack pane carried a status label and an
+    /// Issue-bodied Device section for this; the card's state derivation
+    /// and its Danger tab carry it since D43.
     #[test]
-    fn incompatible_device_surfaces_reflash_affordance_in_the_pane() {
+    fn incompatible_device_surfaces_the_reflash_state_on_the_card() {
         use lpa_link::{DeviceState, IncompatibleReason};
 
         let mut studio = connected_studio();
@@ -5062,33 +5330,16 @@ mod tests {
             reason: IncompatibleReason::NoHello,
         });
 
-        let view = studio.view();
-        let device_pane = view
-            .panes
-            .iter()
-            .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
-            .expect("device pane");
-        assert_eq!(device_pane.status.kind, UiStatusKind::Attention);
-        assert_eq!(device_pane.status.label, "Reflash needed");
+        let card = studio
+            .view()
+            .lens_card
+            .expect("the editor's device surface is the lens card");
+        assert_eq!(card.state, crate::RosterCardState::NeedsFirmwareUpdate);
         // The ONE affordance: reflash (explicit, never automatic).
-        let actions = view_actions(&view);
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware { setup_name: None })
-        )));
-        // The device section explains the incompatibility as an issue.
-        let UiViewContent::Stack(stack) = &device_pane.body else {
-            panic!("device pane renders a stack");
-        };
-        let device_section = stack
-            .sections
-            .iter()
-            .find(|section| section.id == DeviceController::SECTION_DEVICE)
-            .expect("device section");
-        assert!(matches!(
-            &device_section.body,
-            UiViewContent::Issue(issue) if issue.message.contains("reflash the firmware")
-        ));
+        assert_eq!(
+            card.state.affordance(),
+            Some(crate::RosterAffordance::UpdateFirmware),
+        );
     }
 
     #[test]
@@ -5382,96 +5633,55 @@ mod tests {
     }
 
     #[test]
-    fn no_firmware_marks_the_device_pane_ready_to_flash() {
+    fn no_firmware_marks_the_lens_card_ready_to_set_up() {
         // an open project whose device link answers without firmware:
-        // the pane escalates to the flash affordance (the dialog's Blank
-        // state is the full wizard; the pane mirrors the status)
+        // the CARD escalates to the flash affordance
         let mut studio = connected_studio();
-        studio.set_server_state_for_test(ServerState::Failed {
-            issue: UiIssue::new("No LightPlayer firmware detected."),
-            kind: ServerFailureKind::NoFirmware,
-        });
+        studio.set_stub_device_for_test(lpa_link::DeviceState::BlankFlash);
 
-        let view = studio.view();
-        let device_pane = view
-            .panes
-            .iter()
-            .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
-            .expect("device pane");
-        assert_eq!(device_pane.status.kind, UiStatusKind::Attention);
-        assert_eq!(device_pane.status.label, "Ready to flash");
-        let actions = view_actions(&view);
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware { setup_name: None })
-        )));
+        let card = studio.view().lens_card.expect("lens card");
+        assert_eq!(card.state, crate::RosterCardState::ReadyToSetUp);
+        assert_eq!(
+            card.state.affordance(),
+            Some(crate::RosterAffordance::SetUp),
+        );
     }
 
     #[test]
-    fn loaded_project_gets_project_pane() {
+    fn loaded_project_gets_project_and_bus_panes_plus_the_lens_card() {
         let studio = connected_studio();
 
         let view = studio.view();
-        let actions = view_actions(&view);
 
-        assert_eq!(view.panes.len(), 3);
+        // The editor is project + bus, with the device surface docked as
+        // the lens CARD. The retired step-stack device pane was the
+        // third pane; it is gone.
+        assert_eq!(view.panes.len(), 2);
         assert_eq!(view.panes[0].node_id.as_str(), ProjectController::NODE_ID);
         assert_eq!(view.panes[1].node_id.as_str(), "bus");
-        assert_eq!(view.panes[2].node_id.as_str(), DeviceController::NODE_ID);
-        // D23: the pane is about hardware — one device section plus the
-        // visually separate firmware section; the wizard steps are gone
-        assert_eq!(device_section_ids(&view), vec!["device", "firmware"]);
+        assert!(view.lens_card.is_some());
+        assert!(
+            !view
+                .panes
+                .iter()
+                .any(|pane| pane.node_id.as_str() == DeviceController::NODE_ID),
+            "no device pane"
+        );
+
+        // The wizard's project steps stayed gone through the deletion.
+        let actions = view_actions(&view);
         assert!(!actions.iter().any(|action| matches!(
             action.op_as::<ProjectOp>(),
             Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
         )));
-        // the pane keeps only the session verb (M8′: pushing lives on
-        // the cards)
-        assert!(
-            actions.iter().any(|action| matches!(
-                action.op_as::<DeviceOp>(),
-                Some(DeviceOp::DisconnectDevice)
-            ))
-        );
-    }
-
-    #[test]
-    fn device_pane_offers_firmware_ops_separately() {
-        let studio = connected_studio();
-
-        let actions = view_actions(&studio.view());
-
-        // firmware ops live in their own section (D15), away from deploy
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware { setup_name: None })
-        )));
+        // …and so did its connect plumbing. Firmware/erase/disconnect are
+        // no longer PANE actions: the card's Danger tab carries flash and
+        // erase (`DeployOp::EraseDevice` runs the same `reset_to_blank`).
         assert!(
             actions
                 .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
-        );
-        // the wizard's connect plumbing is gone
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ConnectLightPlayer | DeviceOp::OpenProvider { .. })
-        )));
-    }
-
-    #[test]
-    fn loaded_project_keeps_management_recovery_actions_visible() {
-        let studio = connected_studio();
-
-        let actions = view_actions(&studio.view());
-        // recovery stays reachable from the editor's firmware section
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware { setup_name: None })
-        )));
-        assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+                .all(|action| action.op_as::<DeviceOp>().is_none()),
+            "the editor's panes carry no device ops at all now"
         );
     }
 
@@ -5799,19 +6009,17 @@ mod tests {
         ));
     }
 
+    /// The M6 ladder ending, pinned at the surface that carries it now:
+    /// the CARD. This used to assert an "Opening device session" activity
+    /// landing in the retired step-stack pane's Device section — pane
+    /// shape, not behaviour. The ladder contract is unchanged: soft
+    /// ending, no toast, no issue chip, honest Not-responding card.
     #[test]
-    fn failed_link_dispatch_emits_final_failed_view_after_activity() {
+    fn failed_link_dispatch_ends_soft_on_the_card() {
         let mut studio = StudioController::with_link_registry_for_test(
             || 0.0,
             registry_with_fake_connect_error("Failed to open serial port."),
         );
-        let updates = Rc::new(RefCell::new(Vec::new()));
-        let sink = UxUpdateSink::new({
-            let updates = Rc::clone(&updates);
-            move |update| {
-                updates.borrow_mut().push(update);
-            }
-        });
         let action = UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
             DeviceOp::ConnectEndpoint {
@@ -5820,27 +6028,12 @@ mod tests {
             },
         );
 
-        let result = drive(studio.dispatch_with_updates(action, sink));
+        let result = drive(studio.dispatch_with_updates(action, UxUpdateSink::noop()));
 
         // M6: the ladder ends SOFT — no error, no toast, no issue chip.
         // The honest ending is the card's Not-responding state.
         let notices = result.expect("ladder endings are soft");
         assert!(notices.notices.is_empty(), "no toast from the ladder");
-        assert!(updates.borrow().iter().any(|update| {
-            matches!(
-                update,
-                UxUpdate::Activity {
-                    target: UxActivityTarget::StackSection {
-                        pane_node_id,
-                        section_id,
-                    },
-                    activity,
-                    ..
-                } if pane_node_id.as_str() == DeviceController::NODE_ID
-                    && section_id == DeviceController::SECTION_DEVICE
-                    && activity.title == "Opening device session"
-            )
-        }));
         assert!(matches!(
             studio.device_flow_state_for_test(),
             ConnectFlowState::Unresponsive { .. }
@@ -5859,34 +6052,120 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------
+    // The lens-card invariant (D43)
+    //
+    // The editor layout has exactly ONE device surface. Nothing pinned
+    // that before, which is how a device-gone hole stayed invisible long
+    // enough for the shell to keep falling back to the retired
+    // step-stack pane — defect
+    // docs/defects/2026-07-28-retired-device-pane-still-reachable.md.
+    // -----------------------------------------------------------------
+
+    /// Panes render ⇒ the editor is open ⇒ a lens card exists. Held
+    /// across every state the lens can reach while the pane layout is up.
     #[test]
-    fn retarget_activity_updates_rewrites_activity_target() {
-        let updates = Rc::new(RefCell::new(Vec::new()));
-        let sink = UxUpdateSink::new({
-            let updates = Rc::clone(&updates);
-            move |update| {
-                updates.borrow_mut().push(update);
+    fn panes_never_render_without_a_lens_card() {
+        use lpa_link::DeviceState;
+
+        fn assert_invariant(studio: &StudioController, what: &str) {
+            let view = studio.view();
+            if view.panes.is_empty() {
+                return;
             }
-        });
-        let target = UxActivityTarget::stack_section(
-            DeviceController::NODE_ID,
-            DeviceController::SECTION_DEVICE,
+            assert!(
+                view.lens_card.is_some(),
+                "{what}: panes render with no lens card — the editor's right column has no \
+                 device surface"
+            );
+        }
+
+        let mut studio = connected_studio();
+        assert_invariant(&studio, "live device lens");
+
+        for state in [
+            DeviceState::Booting,
+            DeviceState::BlankFlash,
+            DeviceState::Bootloader,
+            DeviceState::ForeignFirmware,
+            DeviceState::Gone,
+        ] {
+            studio.set_stub_device_for_test(state.clone());
+            assert_invariant(&studio, &format!("device lens, link {state:?}"));
+        }
+
+        let mut studio = connected_studio();
+        studio.set_stub_sim_for_test();
+        assert_invariant(&studio, "sim lens");
+    }
+
+    /// Unplugging mid-project FADES the card; it never removes it, and it
+    /// never touches the editor. Yona 2026-07-28: a flaky cable must not
+    /// yank anyone out of their work, so the lens and the project stay.
+    #[test]
+    fn an_unplugged_lens_fades_to_an_offline_card_and_keeps_the_editor() {
+        use lpa_link::DeviceState;
+
+        let mut studio = connected_studio();
+        studio.set_stub_device_for_test(DeviceState::Gone);
+
+        let view = studio.view();
+        assert!(view.home.is_none(), "the editor stays open");
+        assert!(!view.panes.is_empty(), "the pane layout stays up");
+        let card = view.lens_card.expect("the unplugged lens keeps its card");
+        assert!(
+            matches!(card.state, crate::RosterCardState::Offline { .. }),
+            "the card reads offline, not gone: {:?}",
+            card.state
         );
-        let retargeted = retarget_activity_updates(sink, target.clone());
+        assert_eq!(
+            card.state.affordance(),
+            Some(crate::RosterAffordance::Reconnect),
+            "the way back is on the card"
+        );
+        assert!(
+            studio.pool.lens_session().is_some(),
+            "the lens is untouched — the session is still the editor's"
+        );
+    }
 
-        retargeted.emit(UxUpdate::Activity {
-            target: UxActivityTarget::pane("studio|server"),
-            status: UiStatus::working("Connecting"),
-            activity: UiActivityView::new("Connecting ESP32 server"),
-        });
+    /// A connect that ends WITHOUT a session must not leave the mirror
+    /// dressed: when the ladder's soft ending clears the slot the lens
+    /// sits on, the project quiesces and the gallery comes back. The old
+    /// `remove_kind`-only teardown left `project.state` Ready with no
+    /// lens, which is the second path into the retired pane.
+    #[test]
+    fn a_soft_connect_ending_on_the_lens_kind_returns_to_the_gallery() {
+        let mut studio = StudioController::with_link_registry_for_test(
+            || 0.0,
+            registry_with_fake_connect_error("Failed to open serial port."),
+        );
+        studio.set_stub_device_for_test(
+            crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+        );
+        studio
+            .project
+            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        assert!(!studio.view().panes.is_empty(), "the editor is open");
 
-        assert!(matches!(
-            updates.borrow().as_slice(),
-            [UxUpdate::Activity {
-                target: actual_target,
-                ..
-            }] if *actual_target == target
-        ));
+        let action = UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ConnectEndpoint {
+                provider_id: LinkProviderKind::Fake,
+                endpoint_id: LinkEndpointId::new("fake-runtime"),
+            },
+        );
+        drive(studio.dispatch_with_updates(action, UxUpdateSink::noop())).expect("soft ending");
+
+        let view = studio.view();
+        assert!(
+            studio.pool.lens_session().is_none(),
+            "the lens went with its session"
+        );
+        assert!(
+            view.panes.is_empty() && view.home.is_some(),
+            "the mirror quiesced with the session — the gallery shows"
+        );
     }
 
     fn connected_studio() -> StudioController {
@@ -5971,22 +6250,6 @@ mod tests {
             )),
         );
         view
-    }
-
-    fn device_section_ids(view: &UiStudioView) -> Vec<&str> {
-        let device_pane = view
-            .panes
-            .iter()
-            .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
-            .expect("device pane should exist");
-        let UiViewContent::Stack(stack) = &device_pane.body else {
-            panic!("device pane should render stack");
-        };
-        stack
-            .sections
-            .iter()
-            .map(|section| section.id.as_str())
-            .collect()
     }
 
     fn registry_with_fake_connect_error(message: impl Into<String>) -> LinkProviderRegistry {
@@ -6137,5 +6400,56 @@ mod tests {
 
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
+    }
+}
+
+#[cfg(test)]
+mod reattach_failure_tests {
+    use super::*;
+    use crate::CardOp;
+
+    fn spec(awaits_manual_replug: bool) -> ManagementFlowSpec {
+        ManagementFlowSpec {
+            request: LinkManagementRequest::FlashFirmware,
+            progress_label: "Flashing firmware",
+            reconnect_detail: "Unplug the board and plug it back in to start it",
+            failed_exit_label: "Back to set up",
+            record_captured_logs_on_success: false,
+            done_notice: provision_notice,
+            degrade_subject: "firmware flashed",
+            server_reconnect_failed_notice: "Firmware flashed.",
+            awaits_manual_replug,
+            severs_lens: false,
+            result_sink: None,
+        }
+    }
+
+    #[test]
+    fn a_device_that_cannot_return_is_awaited_not_failed() {
+        // The board was flashed from ROM download mode: it does not boot the
+        // new image until a human power-cycles it. Reporting that as a
+        // failure calls a successful flash a failure, on the one path a user
+        // in recovery actually takes.
+        let op = reattach_failure_op(&spec(true), "device did not come back");
+        assert_eq!(
+            op,
+            CardOp::awaiting("Unplug the board and plug it back in to start it"),
+            "the ending must be the instruction that finishes the job"
+        );
+    }
+
+    #[test]
+    fn a_device_that_should_have_returned_still_fails_loudly() {
+        // The ordinary case must keep its Failed render and its single exit
+        // (model §2 I4) — tolerating THIS would hide real breakage.
+        let op = reattach_failure_op(&spec(false), "serial reopen failed");
+        assert_eq!(
+            op,
+            CardOp::failed(
+                "firmware flashed — reconnect failed".to_string(),
+                "serial reopen failed".to_string(),
+                "Back to set up",
+            )
+        );
     }
 }

@@ -9,9 +9,8 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::project::ProjectPane;
 use crate::app::story_fixtures::{
-    device_project_empty_view, device_project_selection_view, project_editor_fixture,
-    project_ready_state, project_ready_view, project_sync_failed_view, project_syncing_view,
-    project_view, shell_story, studio_log,
+    project_editor_fixture, project_ready_state, project_ready_view, project_sync_failed_view,
+    project_syncing_view, project_view, shell_story, studio_log,
 };
 use crate::core::PaneView;
 
@@ -22,32 +21,6 @@ pub(crate) fn project_pane() -> Element {
         PaneView {
             view,
             primary: false,
-            running: false,
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story]
-pub(crate) fn device_project_empty() -> Element {
-    let view = device_project_empty_view();
-    rsx! {
-        PaneView {
-            view,
-            primary: true,
-            running: false,
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story]
-pub(crate) fn device_project_selection() -> Element {
-    let view = device_project_selection_view();
-    rsx! {
-        PaneView {
-            view,
-            primary: true,
             running: false,
             on_action: move |_| {},
         }

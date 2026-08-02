@@ -386,7 +386,7 @@ fn run_float_binop(
     a: f32,
     b: f32,
 ) -> u32 {
-    let mut fb = FunctionBuilder::new("f", &[IrType::F32, IrType::F32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
     let x = fb.add_param(IrType::F32);
     let y = fb.add_param(IrType::F32);
     let out = fb.alloc_vreg(IrType::F32);
@@ -403,7 +403,7 @@ fn run_float_compare(
     a: f32,
     b: f32,
 ) -> u32 {
-    let mut fb = FunctionBuilder::new("f", &[IrType::F32, IrType::F32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::I32]);
     let x = fb.add_param(IrType::F32);
     let y = fb.add_param(IrType::F32);
     let out = fb.alloc_vreg(IrType::I32);
@@ -598,7 +598,7 @@ fn itof_signed_and_unsigned_through_the_pipeline() {
         (false, 0xFFFF_FFFF, 4294967296.0),
         (false, 7, 7.0),
     ] {
-        let mut fb = FunctionBuilder::new("f", &[IrType::I32]);
+        let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
         let x = fb.add_param(IrType::I32);
         let out = fb.alloc_vreg(IrType::F32);
         fb.push(if signed {
@@ -630,7 +630,7 @@ fn itof_signed_and_unsigned_through_the_pipeline() {
 #[test]
 fn floats_cross_a_guest_call_in_address_registers() {
     // g(a, b) = a * b + a; f(a, b) = g(a, b) - b
-    let mut cb = FunctionBuilder::new("g", &[IrType::F32, IrType::F32]);
+    let mut cb = FunctionBuilder::new("g", &[IrType::F32]);
     let ga = cb.add_param(IrType::F32);
     let gb = cb.add_param(IrType::F32);
     let prod = cb.alloc_vreg(IrType::F32);
@@ -648,7 +648,7 @@ fn floats_cross_a_guest_call_in_address_registers() {
     cb.push_return(&[gout]);
     let g = cb.finish();
 
-    let mut fb = FunctionBuilder::new("f", &[IrType::F32, IrType::F32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
     let a = fb.add_param(IrType::F32);
     let b = fb.add_param(IrType::F32);
     let called = fb.alloc_vreg(IrType::F32);
@@ -693,6 +693,94 @@ fn floats_cross_a_guest_call_in_address_registers() {
     let (a, b) = (3.0f32, 0.5f32);
     let got = expect_ok(run_f32(&ir, &sig, "f", &[0, bits(a), bits(b)]));
     assert_eq!(f32::from_bits(got), a * b + a - b);
+}
+
+/// A float parameter the body **writes to** is read back from the float file at
+/// every later boundary, not from the address register it arrived in.
+///
+/// LPIR is not SSA: `float f(float x) { x = x + 1.0; … }` redefines the
+/// parameter's own vreg, and that write lands in the FR shadow while the
+/// incoming AR keeps the caller's argument. Lowering used to shortcut a
+/// parameter at a call-argument or return boundary straight to that AR, so the
+/// write was silently discarded — the caller's value came back out. This is
+/// `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`, and
+/// it took the `lps-glsl` frontend (the only one that reuses the parameter
+/// vreg) plus Xtensa plus f32 to observe.
+///
+/// Both boundaries are covered: `bump` returns its reassigned parameter, and
+/// `forward` passes its own reassigned parameter on as a call argument.
+#[test]
+fn a_reassigned_float_parameter_is_read_back_from_the_float_file() {
+    // bump(x) { x = x + 1.0; return x; }   -- write, then the return boundary
+    let mut bb = FunctionBuilder::new("bump", &[IrType::F32]);
+    let bx = bb.add_param(IrType::F32);
+    let one = bb.alloc_vreg(IrType::F32);
+    bb.push(LpirOp::FconstF32 {
+        dst: one,
+        value: 1.0,
+    });
+    bb.push(LpirOp::Fadd {
+        dst: bx,
+        lhs: bx,
+        rhs: one,
+    });
+    bb.push_return(&[bx]);
+    let bump = bb.finish();
+
+    // forward(x) { x = x * 2.0; return bump(x); }  -- write, then the call
+    // argument boundary. Doubling rather than adding keeps the two writes
+    // distinguishable: any value but 12.0 out of forward(5.0) says which
+    // boundary dropped which write.
+    let mut fb = FunctionBuilder::new("forward", &[IrType::F32]);
+    let fx = fb.add_param(IrType::F32);
+    let two = fb.alloc_vreg(IrType::F32);
+    let called = fb.alloc_vreg(IrType::F32);
+    fb.push(LpirOp::FconstF32 {
+        dst: two,
+        value: 2.0,
+    });
+    fb.push(LpirOp::Fmul {
+        dst: fx,
+        lhs: fx,
+        rhs: two,
+    });
+    fb.push_call(
+        lpir::CalleeRef::Local(FuncId(0)),
+        &[lpir::VMCTX_VREG, fx],
+        &[called],
+    );
+    fb.push_return(&[called]);
+    let forward = fb.finish();
+
+    let ir = LpirModule {
+        imports: vec![],
+        functions: VecMap::from([(FuncId(0), bump), (FuncId(1), forward)]),
+    };
+    let sig = LpsModuleSig {
+        functions: vec![
+            LpsFnSig {
+                name: "bump".to_string(),
+                parameters: vec![float_param("x")],
+                return_type: LpsType::Float,
+                kind: LpsFnKind::UserDefined,
+            },
+            LpsFnSig {
+                name: "forward".to_string(),
+                parameters: vec![float_param("x")],
+                return_type: LpsType::Float,
+                kind: LpsFnKind::UserDefined,
+            },
+        ],
+        uniforms_type: None,
+        globals_type: None,
+        ..Default::default()
+    };
+
+    let x = 5.0f32;
+    let got = expect_ok(run_f32(&ir, &sig, "bump", &[0, bits(x)]));
+    assert_eq!(f32::from_bits(got), x + 1.0, "return boundary");
+    let got = expect_ok(run_f32(&ir, &sig, "forward", &[0, bits(x)]));
+    assert_eq!(f32::from_bits(got), x * 2.0 + 1.0, "call-argument boundary");
 }
 
 // ---------------------------------------------------------------------------
@@ -752,7 +840,7 @@ fn float_spill_pressure_beyond_the_float_pool() {
 fn both_register_pools_saturated_simultaneously() {
     let n_int = 14i32;
     let n_flt = 20;
-    let mut fb = FunctionBuilder::new("f", &[IrType::I32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
     let k = fb.add_param(IrType::I32);
 
     let one = fb.alloc_vreg(IrType::F32);
@@ -872,7 +960,7 @@ fn float_recursion_at_depth_100_preserves_every_live_value() {
     //
     // Every level holds `a`, `b` and the integer `n` live across its recursive
     // call, so 100 frames of them are in flight at the deepest point.
-    let mut cb = FunctionBuilder::new("rec", &[IrType::I32, IrType::F32, IrType::F32]);
+    let mut cb = FunctionBuilder::new("rec", &[IrType::F32]);
     let n = cb.add_param(IrType::I32);
     let a = cb.add_param(IrType::F32);
     let b = cb.add_param(IrType::F32);
@@ -949,7 +1037,7 @@ fn float_recursion_at_depth_100_preserves_every_live_value() {
     cb.push_return(&[out]);
     let rec = cb.finish();
 
-    let mut fb = FunctionBuilder::new("f", &[IrType::I32, IrType::F32, IrType::F32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
     let fn_ = fb.add_param(IrType::I32);
     let fa = fb.add_param(IrType::F32);
     let fb_ = fb.add_param(IrType::F32);
@@ -1013,7 +1101,7 @@ fn float_recursion_at_depth_100_preserves_every_live_value() {
 /// passes and the float one fails, the finding is precise.
 #[test]
 fn integer_recursion_at_depth_100_is_the_control() {
-    let mut cb = FunctionBuilder::new("rec", &[IrType::I32, IrType::I32, IrType::I32]);
+    let mut cb = FunctionBuilder::new("rec", &[IrType::I32]);
     let n = cb.add_param(IrType::I32);
     let a = cb.add_param(IrType::I32);
     let b = cb.add_param(IrType::I32);
@@ -1092,7 +1180,7 @@ fn integer_recursion_at_depth_100_is_the_control() {
     cb.push_return(&[out]);
     let rec = cb.finish();
 
-    let mut fb = FunctionBuilder::new("f", &[IrType::I32, IrType::I32, IrType::I32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::I32]);
     let fn_ = fb.add_param(IrType::I32);
     let fa = fb.add_param(IrType::I32);
     let fb_ = fb.add_param(IrType::I32);
@@ -1156,7 +1244,7 @@ fn integer_recursion_at_depth_100_is_the_control() {
 /// EXCCAUSE 32.
 #[test]
 fn unarmed_float_code_faults_with_a_coprocessor_trap() {
-    let mut fb = FunctionBuilder::new("f", &[IrType::F32, IrType::F32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
     let x = fb.add_param(IrType::F32);
     let y = fb.add_param(IrType::F32);
     let out = fb.alloc_vreg(IrType::F32);
@@ -1213,7 +1301,7 @@ fn a_builtin_routed_float_op_resolves_and_runs() {
         return;
     };
 
-    let mut fb = FunctionBuilder::new("f", &[IrType::F32, IrType::F32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
     let x = fb.add_param(IrType::F32);
     let _y = fb.add_param(IrType::F32);
     let out = fb.alloc_vreg(IrType::F32);
@@ -1255,7 +1343,7 @@ fn a_builtin_routed_float_op_resolves_and_runs() {
 fn a_float_function_has_the_same_frame_shape_as_before() {
     use lp_xt_inst::{Inst, NullaryOp, decode};
 
-    let mut fb = FunctionBuilder::new("f", &[IrType::F32, IrType::F32]);
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
     let x = fb.add_param(IrType::F32);
     let y = fb.add_param(IrType::F32);
     let out = fb.alloc_vreg(IrType::F32);

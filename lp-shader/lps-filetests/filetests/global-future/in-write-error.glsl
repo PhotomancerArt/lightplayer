@@ -27,6 +27,7 @@ float test_edge_in_write_error_read() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_in_write_error_read() ~= 1.0
 
 int test_edge_in_write_error_int() {
@@ -38,6 +39,7 @@ int test_edge_in_write_error_int() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_in_write_error_int() == 10
 
 vec2 test_edge_in_write_error_vec2() {
@@ -49,6 +51,7 @@ vec2 test_edge_in_write_error_vec2() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_in_write_error_vec3() {
@@ -60,6 +63,7 @@ vec3 test_edge_in_write_error_vec3() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_edge_in_write_error_vec4() {
@@ -71,6 +75,7 @@ vec4 test_edge_in_write_error_vec4() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_edge_in_write_error_calculations() {
@@ -90,6 +95,7 @@ float test_edge_in_write_error_calculations() {
 // @unsupported(wgpu.f32)
 // @unimplemented(wasm.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
@@ -110,4 +116,5 @@ vec4 test_edge_in_write_error_vertex_processing() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)

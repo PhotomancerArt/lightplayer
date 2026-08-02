@@ -278,9 +278,25 @@ label:has(> input:not(:disabled)) {
    stays visible — you always know whose sheet this is) and spares the
    tint edge. One at a time; clicking the backdrop dismisses. */
 
+/* Grid stack (2026-07-31): the below-the-header wrapper stacks the tab
+   content, the sheet, and the op overlay in ONE grid cell, so the region
+   is as tall as the tallest of them and a sheet can grow the card. The
+   old absolute overlays needed a hand-maintained per-sheet min-height
+   table — a recurring clipping-bug class, now deleted. */
+
+.ux-card-stack {
+    position: relative;
+    display: grid;
+}
+
+.ux-card-stack > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+}
+
 .ux-card-sheet {
-    position: absolute;
-    inset: 0;
+    /* In-flow grid item: contributes height instead of clipping. The
+       z-index still layers it over the content cell. */
     z-index: 6;
     display: grid;
     place-items: center;
@@ -401,8 +417,7 @@ label:has(> input:not(:disabled)) {
    and the same console tail, shown as a technical terminal. */
 
 .ux-card-op {
-    position: absolute;
-    inset: 0;
+    /* In-flow grid-stack item, same as .ux-card-sheet above. */
     z-index: 5;
     display: flex;
     flex-direction: column;
@@ -465,9 +480,28 @@ label:has(> input:not(:disabled)) {
     100% { left: 100%; }
 }
 
+/* Safe-mode callout: the device booted with the recovery output clamp.
+   Warning family (device condition), NOT the node language's unsaved
+   yellow; sits above the card's tab body so every tab shows it. */
+.ux-safe-mode-callout {
+    display: grid;
+    gap: 2px;
+    margin: 6px 8px 0;
+    padding: 6px 10px;
+    background: var(--studio-status-warning-bg);
+    border: 1px solid var(--studio-status-warning-border);
+    border-radius: 4px;
+    color: var(--studio-status-warning-text);
+}
+
 .ux-card-op-term {
     flex: 1;
     min-height: 0;
+    /* The grid-stack made the op overlay content-sized (2026-07-31): a
+       flex:1 + overflow scroller only scrolls when its parent is bounded,
+       and the parent no longer is. Unbounded streams own their cap now —
+       without this, a flash's terminal grows the card by its whole log. */
+    max-height: 220px;
     margin: 0;
     overflow-y: auto;
     padding: 8px 10px;
@@ -490,6 +524,17 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-color-text-muted);
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* The error line is the one thing the user must read IN FULL — the tail
+   lines above stay one-line-ellipsized like a console, but ellipsizing the
+   failure reason hid the actionable half of an esptool warning on the bench
+   ("Boot-control write failed: Flash…", 2026-07-31). */
+.ux-card-op-term > .ux-console-line-error {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .ux-card-op-term > .ux-console-line-warn {
@@ -3628,4 +3673,589 @@ label:has(> input:not(:disabled)) {
 .lpb-cat-buy:hover {
     color: var(--studio-color-text-strong);
     border-color: var(--studio-status-bound-border);
+}
+
+/* ---- board editor (#/boards/edit, lpa-board-editor) -------------------- */
+
+.lpb-ed-page {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 18px 22px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.lpb-ed-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.lpb-ed-header h1 {
+    font-size: 16px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--studio-color-text-strong);
+    font-family: inherit;
+    margin: 0;
+}
+
+.lpb-ed-source {
+    font-family: var(--studio-font-mono);
+    font-size: 11.5px;
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-ed-dirty {
+    color: var(--studio-status-attention-text);
+}
+
+.lpb-ed-spacer {
+    flex: 1;
+}
+
+.lpb-ed-btn {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    padding: 4px 10px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.lpb-ed-btn:hover {
+    color: var(--studio-color-text-strong);
+    border-color: var(--studio-status-bound-border);
+}
+
+.lpb-ed-btn[aria-pressed="true"] {
+    color: var(--studio-status-bound-text);
+    border-color: var(--studio-status-bound-border);
+    background: var(--studio-status-bound-bg);
+}
+
+.lpb-ed-btn--save {
+    color: var(--studio-status-bound-text);
+    border-color: var(--studio-status-bound-border);
+}
+
+/* The list-add CTA: a full-width, row-height slot where the next row will
+   appear — dashed to read as "empty row", violet to read as an action. */
+.lpb-ed-add-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 30px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--studio-status-bound-text);
+    background: none;
+    border: 1px dashed var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    cursor: pointer;
+}
+
+.lpb-ed-add-row:hover {
+    background: var(--studio-status-bound-bg);
+    border-color: var(--studio-status-bound-border);
+}
+
+.lpb-ed-error {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--studio-status-attention-border);
+    background: var(--studio-status-attention-bg);
+    color: var(--studio-status-attention-text);
+    border-radius: var(--studio-radius-sm);
+    padding: 8px 12px;
+    font-size: 12px;
+}
+
+.lpb-ed-paste {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.lpb-ed-paste-text {
+    min-height: 140px;
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    resize: vertical;
+}
+
+.lpb-ed-paste-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.lpb-ed-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
+    gap: 16px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .lpb-ed-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.lpb-ed-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+
+.lpb-ed-side {
+    position: sticky;
+    top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+}
+
+.lpb-ed-section {
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.lpb-ed-section h2 {
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-dim);
+    font-family: var(--studio-font-mono);
+    border: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.lpb-ed-section h3 {
+    font-size: 10.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-dim);
+    font-family: var(--studio-font-mono);
+    margin: 4px 0 0;
+}
+
+.lpb-ed-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.lpb-ed-count {
+    font-family: var(--studio-font-mono);
+    font-size: 10.5px;
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-ed-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+}
+
+.lpb-ed-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.lpb-ed-field label {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-ed-field--wide {
+    width: 100%;
+}
+
+.lpb-ed-field--num {
+    width: 90px;
+}
+
+.lpb-ed-field--num input {
+    width: 100%;
+}
+
+.lpb-ed-input {
+    font-size: 12px;
+    color: var(--studio-color-text-strong);
+    background: var(--studio-color-terminal);
+    border: 1px solid var(--studio-color-border);
+    border-radius: var(--studio-radius-sm);
+    padding: 4px 8px;
+    min-width: 0;
+}
+
+.lpb-ed-input:focus {
+    outline: none;
+    border-color: var(--studio-status-bound-border);
+}
+
+.lpb-ed-input--mono {
+    font-family: var(--studio-font-mono);
+    font-size: 11.5px;
+}
+
+.lpb-ed-input--gpio {
+    width: 46px;
+    text-align: center;
+}
+
+.lpb-ed-textarea {
+    min-height: 54px;
+    resize: vertical;
+    width: 100%;
+}
+
+.lpb-ed-select {
+    font-size: 11.5px;
+    font-family: var(--studio-font-mono);
+    color: var(--studio-color-text-muted);
+    background: var(--studio-color-terminal);
+    border: 1px solid var(--studio-color-border);
+    border-radius: var(--studio-radius-sm);
+    padding: 3px 6px;
+}
+
+.lpb-ed-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+    cursor: pointer;
+}
+
+.lpb-ed-chiprow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.lpb-ed-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--studio-font-mono);
+    font-size: 10.5px;
+    color: var(--studio-color-text-muted);
+    background: var(--studio-color-terminal);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-pill);
+    padding: 2px 4px 2px 8px;
+}
+
+.lpb-ed-chip--warn {
+    border-color: var(--studio-status-attention-border);
+    color: var(--studio-status-attention-text);
+}
+
+.lpb-ed-chip--strap {
+    border-color: var(--studio-status-attention-border);
+}
+
+.lpb-ed-chip-x {
+    font-size: 11px;
+    line-height: 1;
+    color: var(--studio-color-text-dim);
+    background: none;
+    border: 0;
+    padding: 1px 4px;
+    cursor: pointer;
+    border-radius: var(--studio-radius-sm);
+}
+
+.lpb-ed-chip-x:hover {
+    color: var(--studio-status-attention-text);
+}
+
+.lpb-ed-chip-add {
+    width: 110px;
+    font-size: 11px;
+}
+
+.lpb-ed-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lpb-ed-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.lpb-ed-row-label {
+    width: 130px;
+}
+
+.lpb-ed-row-grow {
+    flex: 1;
+    min-width: 180px;
+}
+
+/* The pin list is a table: one shared grid template per section so columns
+   align, row separators instead of per-row card borders, inputs quiet until
+   hovered/focused. */
+.lpb-ed-pins {
+    display: flex;
+    flex-direction: column;
+}
+
+.lpb-ed-pin {
+    display: grid;
+    grid-template-columns: 26px 76px 88px 74px 48px minmax(180px, 1fr) 24px;
+    gap: 6px;
+    align-items: center;
+    min-height: 32px;
+    padding: 1px 2px;
+    border-bottom: 1px solid var(--studio-color-border);
+}
+
+.lpb-ed-pins--terminals .lpb-ed-pin {
+    grid-template-columns: 26px 76px 88px 48px minmax(180px, 1fr) 24px;
+}
+
+.lpb-ed-pin--head {
+    min-height: 22px;
+    border-bottom: 1px solid var(--studio-color-border-strong);
+}
+
+.lpb-ed-pin--head span {
+    font-family: var(--studio-font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-ed-pin:not(.lpb-ed-pin--head):hover {
+    background: var(--studio-color-terminal);
+}
+
+.lpb-ed-pin .lpb-ed-input,
+.lpb-ed-pin .lpb-ed-select {
+    width: 100%;
+    background: transparent;
+    border-color: transparent;
+}
+
+.lpb-ed-pin:hover .lpb-ed-input,
+.lpb-ed-pin:hover .lpb-ed-select {
+    border-color: var(--studio-color-border);
+}
+
+.lpb-ed-pin .lpb-ed-input:focus {
+    border-color: var(--studio-status-bound-border);
+    background: var(--studio-color-terminal);
+}
+
+.lpb-ed-pin .lpb-ed-field--num {
+    width: auto;
+}
+
+.lpb-ed-pin .lpb-ed-caps {
+    min-width: 0;
+}
+
+.lpb-ed-pins .lpb-ed-add-row {
+    margin-top: 6px;
+}
+
+.lpb-ed-pin-order {
+    display: flex;
+    flex-direction: column;
+}
+
+.lpb-ed-order-btn {
+    font-size: 7px;
+    line-height: 1.2;
+    color: var(--studio-color-text-dim);
+    background: none;
+    border: 0;
+    padding: 0 3px;
+    cursor: pointer;
+}
+
+.lpb-ed-order-btn:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+.lpb-ed-order-btn:not(:disabled):hover {
+    color: var(--studio-color-text-strong);
+}
+
+.lpb-ed-pin-label {
+    width: 64px;
+}
+
+.lpb-ed-caps {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    flex: 1;
+    min-width: 200px;
+}
+
+.lpb-ed-cap-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.lpb-ed-cap-draft {
+    width: 92px;
+    font-size: 10.5px;
+    padding: 2px 6px;
+}
+
+.lpb-ed-preview-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.lpb-ed-seg {
+    display: inline-flex;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    overflow: hidden;
+}
+
+.lpb-ed-seg-btn {
+    font-family: var(--studio-font-mono);
+    font-size: 10.5px;
+    color: var(--studio-color-text-dim);
+    background: none;
+    border: 0;
+    padding: 3px 9px;
+    cursor: pointer;
+}
+
+.lpb-ed-seg .lpb-ed-seg-btn + .lpb-ed-seg-btn {
+    border-left: 1px solid var(--studio-color-border);
+}
+
+.lpb-ed-seg-btn[aria-pressed="true"] {
+    color: var(--studio-status-bound-text);
+    background: var(--studio-status-bound-bg);
+}
+
+.lpb-ed-sample-note {
+    font-size: 10.5px;
+    color: var(--studio-color-text-dim);
+    font-style: italic;
+}
+
+.lpb-ed-figure {
+    background: var(--studio-color-terminal);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 10px;
+    padding: 14px;
+    overflow: auto;
+}
+
+.lpb-ed-lint-count {
+    font-family: var(--studio-font-mono);
+    font-size: 10.5px;
+    border-radius: var(--studio-radius-pill);
+    padding: 1px 8px;
+    border: 1px solid var(--studio-color-border-strong);
+}
+
+.lpb-ed-lint-count--error {
+    color: var(--studio-status-attention-text);
+    border-color: var(--studio-status-attention-border);
+    background: var(--studio-status-attention-bg);
+}
+
+.lpb-ed-lint-count--warn {
+    color: var(--studio-color-text-muted);
+}
+
+.lpb-ed-lint-count--clean {
+    color: var(--studio-status-live-text);
+    border-color: var(--studio-status-live-border);
+    background: var(--studio-status-live-bg);
+}
+
+.lpb-ed-lint-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.lpb-ed-lint-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpb-ed-lint-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--studio-color-border-strong);
+    transform: translateY(-1px);
+}
+
+.lpb-ed-lint-item--error .lpb-ed-lint-dot {
+    background: var(--studio-status-attention-text);
+}
+
+.lpb-ed-lint-item--error {
+    color: var(--studio-color-text-strong);
+}
+
+.lpb-ed-lint-item--warn .lpb-ed-lint-dot {
+    background: var(--studio-status-attention-border);
+}
+
+.lpb-ed-lint-item--info {
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-ed-hidden-input {
+    display: none;
 }

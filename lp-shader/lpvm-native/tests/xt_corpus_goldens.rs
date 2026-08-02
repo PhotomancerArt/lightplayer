@@ -24,6 +24,28 @@ use lpvm_native::native_options::NativeCompileOptions;
 use lpvm_native::rt_emu::NativeEmuEngine;
 use lpvm_native::xt_corpus::{CASES, XtCase};
 
+/// True when the Xtensa base image was embedded at build time; otherwise print
+/// a loud note naming `what` and let the caller return.
+///
+/// **Every** test here that builds a `NativeEmuEngine` for Xtensa must call
+/// this first — the engine cannot skip on its own. `lps_builtins_xt_image`
+/// embeds an empty slice when the gitignored image is absent, which is a
+/// first-class "unavailable" state, but only for consumers that *ask*; the ones
+/// that do not get `Internal("Xtensa builtins image is empty or was not found
+/// at build time")` out of `compile()`, which reads as a codegen failure a long
+/// way from its cause. See
+/// `docs/defects/2026-08-01-xt-builtins-image-strands-just-test.md`.
+fn image_available(what: &str) -> bool {
+    if lps_builtins_xt_image::is_available() {
+        return true;
+    }
+    eprintln!(
+        "SKIP: Xtensa builtins image absent — cannot confirm {what}. Build with {} (needs the esp toolchain)",
+        lps_builtins_xt_image::BUILD_COMMAND
+    );
+    false
+}
+
 fn engine() -> NativeEmuEngine {
     let opts = NativeCompileOptions {
         float_mode: FloatMode::Q32,
@@ -67,11 +89,7 @@ fn every_corpus_golden_holds_on_the_emulator() {
     // `XtCase::needs_builtins` still marks which cases *call* a builtin, which
     // is what the device side cares about — on hardware, builtins come from
     // `lps_builtins::jit_builtin_code_ptr` and need no image at all.
-    if !lps_builtins_xt_image::is_available() {
-        eprintln!(
-            "SKIP: Xtensa builtins image absent — cannot confirm goldens. Build with {} (needs the esp toolchain)",
-            lps_builtins_xt_image::BUILD_COMMAND
-        );
+    if !image_available("goldens") {
         return;
     }
 
@@ -181,4 +199,169 @@ fn case_names_are_unique() {
     names.sort_unstable();
     names.dedup();
     assert_eq!(before, names.len(), "duplicate case name in the corpus");
+}
+
+// ===========================================================================
+// The native-f32 half (M7 P5)
+// ===========================================================================
+//
+// Same contract, same ordering rule: these goldens are confirmed here, on the
+// emulator, **before** the ESP32-S3 harness runs the identical
+// `lpvm_native::xt_corpus::F32_CASES` on silicon. A device disagreement is a
+// finding to triage, never a reason to edit a golden.
+//
+// `emu` implies `float-f32` (nothing on the host is flash-constrained, so the
+// gate has no job here), which is why these need no extra feature of their own.
+
+use lpvm_native::xt_corpus::{F32_CASES, XtF32Case};
+
+fn f32_engine(isa: IsaTarget) -> NativeEmuEngine {
+    let opts = NativeCompileOptions {
+        float_mode: FloatMode::F32,
+        ..Default::default()
+    };
+    NativeEmuEngine::new_for_isa(opts, isa)
+}
+
+/// Run every invocation of one f32 case on `isa`, returning the count checked.
+///
+/// Invoked through `call_f32_words`, not `call_q32`: in F32 mode a word is an
+/// IEEE bit pattern, and both entry points refuse the other mode outright so a
+/// mix-up is a message rather than a wrong value.
+fn check_f32_case(case: &XtF32Case, isa: IsaTarget) -> usize {
+    let (ir, sig) = (case.build)();
+    let engine = f32_engine(isa);
+    let module = engine
+        .compile(&ir, &sig)
+        .unwrap_or_else(|e| panic!("[{}] {isa:?} f32 compile failed: {e}", case.name));
+
+    let mut checked = 0;
+    for (i, inv) in case.invocations.iter().enumerate() {
+        let mut inst = module
+            .instantiate()
+            .unwrap_or_else(|e| panic!("[{}] instantiate failed: {e}", case.name));
+        let got = inst
+            .call_f32_words(case.entry, inv.args)
+            .unwrap_or_else(|e| panic!("[{}] {isa:?} invocation {i} trapped: {e}", case.name));
+        assert_eq!(
+            got, inv.golden,
+            "[{}] invocation {i} (risk {}) args={:?}: {isa:?} disagrees with the \
+             committed golden.\n\
+             expected {:08X?}\n\
+             got      {:08X?}\n\
+             This is an EMITTER or EMULATOR bug — do not edit the golden to match.",
+            case.name, case.risk, inv.args, inv.golden, got,
+        );
+        checked += 1;
+    }
+    checked
+}
+
+#[test]
+fn every_f32_corpus_golden_holds_on_the_emulator() {
+    // Same image gate as the Q32 half, and additionally: the image must carry
+    // the f32 builtin family, or `f32_builtin_floor` cannot resolve. That is no
+    // longer opt-in (see scripts/build-builtins-xt.sh), so an image without it
+    // is a stale artifact rather than a configuration.
+    if !image_available("f32 goldens") {
+        return;
+    }
+
+    let mut checked = 0;
+    for case in F32_CASES {
+        checked += check_f32_case(case, IsaTarget::Xtensa);
+    }
+
+    eprintln!("xt f32 corpus: {checked} invocations confirmed on lp-xt-emu");
+    assert!(checked > 0, "no f32 corpus invocations ran");
+}
+
+/// Every f32 case must also hold on **rv32**, exactly as the Q32 half does, and
+/// for the same reason: it proves the hand-built LPIR modules are well-formed
+/// rather than accidentally Xtensa-shaped.
+///
+/// It is a stronger check here than there. rv32 reaches these values through
+/// M9's **soft float** — `compiler_builtins` symbols, no FPU — while Xtensa
+/// runs real `add.s`/`mul.s` on hardware. Agreement across two entirely
+/// different implementations of binary32 is what `docs/design/float.md`'s
+/// *Guaranteed* class asserts, and every value in this corpus was chosen to sit
+/// in that class (see the table's header note on the two exceptions).
+#[test]
+fn every_f32_corpus_golden_also_holds_on_rv32() {
+    assert!(
+        lps_builtins_emu_image_available(),
+        "rv32 builtins base image missing — run `just build-rv32-builtins` \
+         (or use `just test`, which depends on it). NOT skipping: that would \
+         remove the cross-ISA check precisely where it matters."
+    );
+    let mut checked = 0;
+    for case in F32_CASES {
+        checked += check_f32_case(case, IsaTarget::Rv32imac);
+    }
+    eprintln!("xt f32 corpus: {checked} invocations also confirmed on rv32");
+}
+
+/// The f32 corpus must actually cover the risks P5 enumerated. Without this a
+/// case could be quietly dropped and the device transcript would still look
+/// clean — the same hole `corpus_covers_every_enumerated_risk` closes for Q32.
+#[test]
+fn f32_corpus_covers_every_enumerated_risk() {
+    let mut seen: Vec<&str> = F32_CASES
+        .iter()
+        .map(|c| c.risk.split(':').next().unwrap_or(""))
+        .collect();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(
+        seen,
+        ["F1", "F2", "F3", "F4", "F5", "F6"],
+        "the f32 corpus must cover all 6 enumerated f32 risks; got {seen:?}"
+    );
+}
+
+/// Names are how a hardware transcript is read, and the two tables share one
+/// transcript — so a name may not collide *across* them either.
+#[test]
+fn f32_case_names_are_unique_and_distinct_from_the_q32_ones() {
+    let mut names: Vec<&str> = F32_CASES
+        .iter()
+        .map(|c| c.name)
+        .chain(CASES.iter().map(|c| c.name))
+        .collect();
+    let before = names.len();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(
+        before,
+        names.len(),
+        "duplicate case name across the Q32 and f32 corpora"
+    );
+}
+
+/// The mode guard is real on the runtime the device uses, not just on the
+/// emulator: a Q32 module must refuse `call_f32_words`.
+///
+/// `1.0f32`'s bit pattern read as Q16.16 is 16257.0 — plausible, wrong, and
+/// silent. That is why both entry points check rather than coerce.
+#[test]
+fn a_q32_module_refuses_the_f32_entry_point() {
+    // Compiling for Xtensa needs the base image, so this gate is not optional
+    // even though the assertion below is about a mode check and not about code
+    // generation. Without it this test is the one that turns an absent image
+    // into a red suite — see `image_available`.
+    if !image_available("the Q32/f32 entry-point guard") {
+        return;
+    }
+    let case = &CASES[0];
+    let (ir, sig) = (case.build)();
+    let engine = engine();
+    let module = engine.compile(&ir, &sig).expect("q32 compile");
+    let mut inst = module.instantiate().expect("instantiate");
+    let err = inst
+        .call_f32_words(case.entry, &[0])
+        .expect_err("a Q32 module must not accept f32 words");
+    assert!(
+        err.to_string().contains("FloatMode::F32"),
+        "the refusal must name the mode; got: {err}"
+    );
 }

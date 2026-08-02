@@ -78,6 +78,15 @@ pub fn App() -> Element {
         };
     }
 
+    // The board display-def editor: same standalone-page pattern.
+    if matches!(router::current_route(), StudioRoute::BoardEditor) {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            lpa_board_editor::BoardEditorPage {}
+        };
+    }
+
     // The boards catalog: same standalone-page pattern. The detected OS
     // drives per-bridge driver warnings (plan D5) — detected here at the
     // platform edge; lpa-boards stays platform-blind.
@@ -296,6 +305,7 @@ pub fn App() -> Element {
         let settings_tx = handle.tx.clone();
         spawn(async move {
             if let Some(host) = crate::settings_io::fetch_dev_settings().await {
+                crate::settings_io::remember_host_layer(&host);
                 settings_tx.send(StudioCommand::Settings(SettingsCommand::HostLayerLoaded(
                     host,
                 )));
@@ -406,11 +416,12 @@ pub fn App() -> Element {
                 }
                 StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
-                | StudioRoute::Boards { .. } => {
-                    // the story book, mapping editor, and boards catalog
-                    // mount on fresh page loads only (their early returns
-                    // in App run before any hooks); reload to keep the
-                    // hook order sound
+                | StudioRoute::Boards { .. }
+                | StudioRoute::BoardEditor => {
+                    // the story book, mapping editor, boards catalog, and
+                    // board editor mount on fresh page loads only (their
+                    // early returns in App run before any hooks); reload to
+                    // keep the hook order sound
                     router::hard_reload();
                 }
             }
@@ -474,7 +485,8 @@ pub fn App() -> Element {
                 StudioRoute::Home
                 | StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
-                | StudioRoute::Boards { .. } => {}
+                | StudioRoute::Boards { .. }
+                | StudioRoute::BoardEditor => {}
             }
             // D32 auto-connect (M6): the load-time attach sweep — queued
             // AFTER the route dispatch, so a `#/device/<uid>` reload's own

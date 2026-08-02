@@ -31,17 +31,18 @@
 
 #![no_std]
 #![no_main]
-// `rsr.ccount` in board::esp32s3::cycle_counter — Xtensa inline asm is still
-// behind this gate upstream. Scoped to harness builds so the app path keeps a
-// clean feature set.
-#![cfg_attr(fw_harness, feature(asm_experimental_arch))]
-#![cfg_attr(
-    fw_harness,
-    allow(
-        unstable_features,
-        reason = "asm_experimental_arch is required to read Xtensa's CCOUNT \
-                  cycle counter; harness builds only"
-    )
+// Xtensa asm is still unstable upstream, and two modules need it:
+// `board::esp32s3::cycle_counter` (`rsr.ccount`, harness-only) and
+// `board::esp32s3::fpu` (`wsr.cpenable`, **both** paths). It was scoped to
+// `fw_harness` while only the former existed; arming the FPU is app-path work
+// (M7 D6 / P5), and no safe wrapper for `CPENABLE` exists — xtensa-lx 0.13
+// exposes interrupts and the timer, and neither it nor esp-hal 1.1.1 touches
+// the register at all. So the gate is unconditional now, deliberately.
+#![feature(asm_experimental_arch)]
+#![allow(
+    unstable_features,
+    reason = "asm_experimental_arch is required for Xtensa's CPENABLE (arming \
+              the FPU for compiled float code) and CCOUNT (cycle counter)"
 )]
 
 // The JIT harness allocates (JIT buffers, module tables); the app path is the
@@ -56,6 +57,32 @@
     feature = "test_button"
 ))]
 extern crate alloc;
+
+// The build's self-description, embedded as a scannable blob (extracted by
+// `lp-cli firmware show` and reported on ServerHello in M4). Feature truth
+// comes from the engine's own cfg! derivation; only embedder facts are named
+// here. `flashAppBytes` is parsed from partitions.csv by build.rs.
+#[cfg(feature = "server")]
+lpc_model::lp_embed_manifest_core! {
+    package: env!("CARGO_PKG_NAME"),
+    chip_family: "esp32",
+    chip: "esp32s3",
+    cargo_target: "xtensa-esp32s3-none-elf",
+    profile: env!("LP_BUILD_PROFILE"),
+    commit: env!("LP_BUILD_COMMIT"),
+    dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
+    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+    features: [
+        lpa_server::ENGINE_FEATURE_FRAGMENT,
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::SvcButton),
+        lpc_model::manifest::feature_fragment(
+            cfg!(feature = "float-f32"),
+            lpc_model::LpFeature::ShaderF32,
+        ),
+    ],
+    limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
+}
 
 mod board;
 #[cfg(not(fw_harness))]

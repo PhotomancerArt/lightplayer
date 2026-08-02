@@ -21,6 +21,7 @@ void test_out_writeonly_float() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_float() == 0.0
 
 void test_out_writeonly_int() {
@@ -32,6 +33,7 @@ void test_out_writeonly_int() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_int() == 0.0
 
 void test_out_writeonly_uint() {
@@ -43,6 +45,7 @@ void test_out_writeonly_uint() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_uint() == 0.0
 
 void test_out_writeonly_bool() {
@@ -54,6 +57,7 @@ void test_out_writeonly_bool() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_bool() == 0.0
 
 void test_out_writeonly_vec2() {
@@ -65,6 +69,7 @@ void test_out_writeonly_vec2() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_vec2() == 0.0
 
 void test_out_writeonly_vec3() {
@@ -76,6 +81,7 @@ void test_out_writeonly_vec3() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_vec3() == 0.0
 
 void test_out_writeonly_vec4() {
@@ -87,6 +93,7 @@ void test_out_writeonly_vec4() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_vec4() == 0.0
 
 void test_out_writeonly_calculations() {
@@ -103,6 +110,7 @@ void test_out_writeonly_calculations() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_calculations() == 0.0
 
 void test_out_writeonly_fragment_output() {
@@ -120,4 +128,5 @@ void test_out_writeonly_fragment_output() {
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_out_writeonly_fragment_output() == 0.0

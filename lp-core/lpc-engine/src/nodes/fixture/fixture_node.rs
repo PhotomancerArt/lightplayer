@@ -15,7 +15,7 @@ use lpc_model::{
 };
 use lps_q32::q32::{Q32, ToQ32};
 
-use crate::nodes::fixture::gamma::apply_gamma;
+use crate::nodes::fixture::gamma::apply_gamma16;
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators, mapping_from_map2d_doc,
@@ -579,8 +579,22 @@ impl ControlNode for FixtureNode {
             );
         }
 
-        let mut power = if settings.power.is_limited() {
-            PowerPass::limited(self.power_scale_q16)
+        // The device-level safe clamp composes with the fixture's own budget
+        // scale by `min` — ceilings compose; neither can boost. It applies to
+        // EVERY fixture, budgeted or not: the project being clamped may
+        // predate the power feature entirely, and safe mode must dim it
+        // anyway.
+        let budget_scale = if settings.power.is_limited() {
+            self.power_scale_q16
+        } else {
+            power_limit::UNITY_SCALE_Q16
+        };
+        let effective_scale = budget_scale.min(
+            ctx.safe_output_clamp_q16()
+                .unwrap_or(power_limit::UNITY_SCALE_Q16),
+        );
+        let mut power = if effective_scale < power_limit::UNITY_SCALE_Q16 {
+            PowerPass::limited(effective_scale)
         } else {
             PowerPass::unlimited()
         };
@@ -903,14 +917,24 @@ fn render_direct_fixture_control(
         if base + 3 > expected_samples {
             continue;
         }
-        let mut r = apply_brightness_unorm16(rgba[0], settings.brightness, brightness);
-        let mut g = apply_brightness_unorm16(rgba[1], settings.brightness, brightness);
-        let mut b = apply_brightness_unorm16(rgba[2], settings.brightness, brightness);
-        if settings.gamma_correction {
-            r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-            g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-            b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
-        }
+        let r = encode_fixture_channel(
+            rgba[0],
+            settings.gamma_correction,
+            settings.brightness,
+            brightness,
+        );
+        let g = encode_fixture_channel(
+            rgba[1],
+            settings.gamma_correction,
+            settings.brightness,
+            brightness,
+        );
+        let b = encode_fixture_channel(
+            rgba[2],
+            settings.gamma_correction,
+            settings.brightness,
+            brightness,
+        );
         // After gamma, never before. See `power_limit`.
         let r = power.channel(r);
         let g = power.channel(g);
@@ -1088,17 +1112,35 @@ fn finalize_fixture_rgb(
     brightness: Q32,
     gamma_correction: bool,
 ) -> [u16; 3] {
-    let mut r = apply_brightness_unorm16(r, brightness_u8, brightness);
-    let mut g = apply_brightness_unorm16(g, brightness_u8, brightness);
-    let mut b = apply_brightness_unorm16(b, brightness_u8, brightness);
-    if gamma_correction {
-        r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-        g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-        b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
-    }
+    let r = encode_fixture_channel(r, gamma_correction, brightness_u8, brightness);
+    let g = encode_fixture_channel(g, gamma_correction, brightness_u8, brightness);
+    let b = encode_fixture_channel(b, gamma_correction, brightness_u8, brightness);
     ordered_rgb_u16(color_order, r, g, b)
 }
 
+/// Perceptual u16 sample → wire-linear u16, minus power limiting.
+///
+/// Gamma (when enabled) is the perceptual→linear encode; brightness is a
+/// linear light scale, so it must land after the encode — brightness `s`
+/// then emits `s` of the photons and keeps `s` of the wire's 256 codes.
+/// Applied before the encode it would be raised to the 2.8 power on its way
+/// to the wire (`(s·c)^γ = s^γ·c^γ`), starving the 8-bit output at dim
+/// settings. See `docs/design/brightness-gamma-dithering.md`.
+fn encode_fixture_channel(
+    value: u16,
+    gamma_correction: bool,
+    brightness_u8: u8,
+    brightness: Q32,
+) -> u16 {
+    let linear = if gamma_correction {
+        apply_gamma16(value)
+    } else {
+        value
+    };
+    apply_brightness_unorm16(linear, brightness_u8, brightness)
+}
+
+/// Linear-domain brightness multiply on a post-gamma u16 duty value.
 fn apply_brightness_unorm16(value: u16, brightness_u8: u8, brightness: Q32) -> u16 {
     if brightness_u8 == u8::MAX {
         return value;
@@ -1303,19 +1345,37 @@ fn render_fixture_control_target(
             break;
         }
 
-        let r_q = accumulators.r[channel_idx] * brightness;
-        let g_q = accumulators.g[channel_idx] * brightness;
-        let b_q = accumulators.b[channel_idx] * brightness;
-
-        let mut r = r_q.to_u16_saturating();
-        let mut g = g_q.to_u16_saturating();
-        let mut b = b_q.to_u16_saturating();
-
-        if gamma_correction {
-            r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-            g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-            b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
-        }
+        let (r, g, b) = if gamma_correction {
+            // Encode first, then brightness as a linear multiply on the u16
+            // duty values — see `encode_fixture_channel`.
+            (
+                apply_brightness_unorm16(
+                    apply_gamma16(accumulators.r[channel_idx].to_u16_saturating()),
+                    brightness_u8,
+                    brightness,
+                ),
+                apply_brightness_unorm16(
+                    apply_gamma16(accumulators.g[channel_idx].to_u16_saturating()),
+                    brightness_u8,
+                    brightness,
+                ),
+                apply_brightness_unorm16(
+                    apply_gamma16(accumulators.b[channel_idx].to_u16_saturating()),
+                    brightness_u8,
+                    brightness,
+                ),
+            )
+        } else {
+            // Identity encode: the multiply commutes, so the scale stays in
+            // the higher-precision Q32 domain, bit-for-bit the historical
+            // math (asserted by
+            // `gamma_off_accumulator_output_is_bit_identical_to_the_historical_math`).
+            (
+                (accumulators.r[channel_idx] * brightness).to_u16_saturating(),
+                (accumulators.g[channel_idx] * brightness).to_u16_saturating(),
+                (accumulators.b[channel_idx] * brightness).to_u16_saturating(),
+            )
+        };
 
         // After gamma, never before: scaling gamma's input sheds roughly the
         // square of what was intended. See `power_limit`.
@@ -1659,6 +1719,144 @@ mod tests {
             }
         }
         TextureRenderProduct::new(width, height, format, pixels).map_err(err_ctx("solid texture"))
+    }
+
+    /// A ticked engine holding one directly-sampled two-lamp fixture fed by
+    /// [`FixtureExpectedSampleProducer`], with NO power budget — so anything
+    /// that scales its output came from somewhere else.
+    #[cfg(feature = "node-shader")]
+    fn direct_sampled_fixture_engine() -> (Engine, ProjectRegistry, lpc_model::NodeId) {
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let spine = test_placeholder_spine();
+
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").unwrap(),
+                lpc_model::NodeName::parse("shader").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                frame,
+            )
+            .unwrap();
+
+        let out_path = shader_output_path();
+        engine
+            .attach_runtime_node(
+                sh_id,
+                Box::new(FixtureExpectedSampleProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    expected_points: vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
+                    colors: vec![[1000, 2000, 3000, u16::MAX], [4000, 5000, 6000, u16::MAX]],
+                    expected_width: 4,
+                    expected_height: 4,
+                }),
+                frame,
+            )
+            .unwrap();
+
+        // Two lamps: center + right edge (the retired 2-ring construction's
+        // exact resolved positions).
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::Direct,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path,
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+
+        engine.add_demand_root(fix_id);
+        engine.tick(&registry, 10).unwrap();
+        (engine, registry, fix_id)
+    }
+
+    /// Render the two-lamp fixture's six unorm16 channels.
+    #[cfg(feature = "node-shader")]
+    fn render_fixture_samples(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        fix_id: lpc_model::NodeId,
+    ) -> Vec<u16> {
+        let extent = ControlExtent::new(1, 6);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        engine
+            .render_control_for_test(
+                registry,
+                ControlProduct::new(fix_id, 0, extent),
+                &request,
+                target,
+            )
+            .expect("control render");
+        samples
     }
 
     fn bind_fixture_def_defaults(engine: &mut Engine, fix_id: lpc_model::NodeId, frame: Revision) {
@@ -2403,129 +2601,43 @@ mod tests {
     #[test]
     #[cfg(feature = "node-shader")]
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
-        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
-        let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
-        let frame = Revision::new(1);
-        let root = engine.tree().root();
-        let spine = test_placeholder_spine();
+        let (mut engine, registry, fix_id) = direct_sampled_fixture_engine();
 
-        let sh_id = engine
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("sh").unwrap(),
-                lpc_model::NodeName::parse("shader").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine.clone(),
-                frame,
-            )
-            .unwrap();
+        assert_eq!(
+            render_fixture_samples(&mut engine, &registry, fix_id),
+            vec![1000u16, 2000, 3000, 4000, 5000, 6000]
+        );
+    }
 
-        let out_path = shader_output_path();
-        engine
-            .attach_runtime_node(
-                sh_id,
-                Box::new(FixtureExpectedSampleProducer {
-                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
-                    expected_points: vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
-                    colors: vec![[1000, 2000, 3000, u16::MAX], [4000, 5000, 6000, u16::MAX]],
-                    expected_width: 4,
-                    expected_height: 4,
-                }),
-                frame,
-            )
-            .unwrap();
+    /// The device-level safe clamp reaches the wire: a fixture with no power
+    /// budget of its own still emits scaled samples while the clamp is set,
+    /// and unscaled ones once it is cleared.
+    ///
+    /// This is the render-level proof for `Engine::set_safe_output_clamp`.
+    /// The clamp is what makes a boot-control safe-mode restart *dim* rather
+    /// than merely project-less, so "the setter stores a number" is not the
+    /// property worth pinning — "the samples come out smaller" is.
+    #[test]
+    #[cfg(feature = "node-shader")]
+    fn safe_output_clamp_scales_emitted_samples_and_clearing_restores_them() {
+        let (mut engine, registry, fix_id) = direct_sampled_fixture_engine();
 
-        // Two lamps: center + right edge (the retired 2-ring construction's
-        // exact resolved positions).
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
-            2.0,
+        // 128/255 of full, as the boot-control record's clamp bits express
+        // it: q16 = (128 << 16) / 255 = 32896, applied as (v * q16) >> 16.
+        engine.set_safe_output_clamp(Some(128));
+        assert_eq!(
+            render_fixture_samples(&mut engine, &registry, fix_id),
+            vec![501u16, 1003, 1505, 2007, 2509, 3011],
+            "a clamped fixture must emit scaled samples even with no power budget"
         );
 
-        let fix_id = engine
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("fx").unwrap(),
-                lpc_model::NodeName::parse("fixture").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine,
-                frame,
-            )
-            .unwrap();
-
-        engine
-            .attach_runtime_node(
-                fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    mapping,
-                    FixtureSamplingConfig::Direct,
-                    frame,
-                )),
-                frame,
-            )
-            .unwrap();
-        bind_fixture_def_defaults(&mut engine, fix_id, frame);
-        engine
-            .add_binding(
-                BindingDraft {
-                    source: BindingSource::ProducedSlot {
-                        node: sh_id,
-                        slot: out_path,
-                    },
-                    target: BindingTarget::ConsumedSlot {
-                        node: fix_id,
-                        slot: fixture_input_path(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: fix_id,
-                },
-                frame,
-            )
-            .unwrap();
-        engine
-            .add_binding(
-                BindingDraft {
-                    source: BindingSource::Literal(LpValue::F32(0.0)),
-                    target: BindingTarget::ConsumedSlot {
-                        node: fix_id,
-                        slot: default_demand_input_path(),
-                    },
-                    priority: BindingPriority::new(0),
-                    kind: Kind::Color,
-                    owner: fix_id,
-                },
-                frame,
-            )
-            .unwrap();
-
-        engine.add_demand_root(fix_id);
-        engine.tick(&registry, 10).unwrap();
-
-        let extent = ControlExtent::new(1, 6);
-        let request = ControlRenderRequest::unorm16(extent);
-        let mut samples = vec![0u16; extent.sample_count() as usize];
-        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
-        engine
-            .render_control_for_test(
-                &registry,
-                ControlProduct::new(fix_id, 0, extent),
-                &request,
-                target,
-            )
-            .expect("control render");
-
-        assert_eq!(samples, vec![1000u16, 2000, 3000, 4000, 5000, 6000]);
+        // One-shot by design: the record is consumed at boot, so clearing the
+        // clamp has to restore full output without re-loading the project.
+        engine.set_safe_output_clamp(None);
+        assert_eq!(
+            render_fixture_samples(&mut engine, &registry, fix_id),
+            vec![1000u16, 2000, 3000, 4000, 5000, 6000]
+        );
     }
 
     #[test]
@@ -2592,5 +2704,111 @@ mod tests {
         // the shape check instead of silently reading as "absent".
         let wrong = SlotPath::parse("mapping.path_points.sample_diameter").unwrap();
         assert!(ensure_path_exists_in_fixture_def_shape(&shapes, &wrong).is_err());
+    }
+
+    /// One lamp through `render_fixture_control_target`, returning the
+    /// written RGB samples and the power pass that saw them.
+    fn run_control_target(
+        acc: Q32,
+        brightness_u8: u8,
+        gamma_correction: bool,
+    ) -> ([u16; 3], PowerPass) {
+        let accumulators = ChannelAccumulators {
+            r: vec![acc],
+            g: vec![acc],
+            b: vec![acc],
+            max_channel: 0,
+        };
+        let extent = ControlExtent::new(1, 3);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; 3];
+        let mut power = PowerPass::limited(power_limit::UNITY_SCALE_Q16);
+        render_fixture_control_target(
+            &request,
+            ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples),
+            &accumulators,
+            ColorOrder::Rgb,
+            brightness_u8,
+            gamma_correction,
+            &mut power,
+        )
+        .unwrap();
+        ([samples[0], samples[1], samples[2]], power)
+    }
+
+    /// Moving brightness to the linear side must not move a single bit for
+    /// gamma-off fixtures: with the identity encode a constant multiply
+    /// commutes, and the accumulator path keeps it in the Q32 domain,
+    /// bit-for-bit the pre-reorder math. Every shipped test project runs
+    /// gamma-off, so this is what keeps them byte-stable.
+    #[test]
+    fn gamma_off_accumulator_output_is_bit_identical_to_the_historical_math() {
+        let accs = [
+            Q32::ZERO,
+            Q32(1),
+            Q32(16384), // 0.25
+            Q32(32768), // 0.5
+            Q32(65535), // one raw count under 1.0
+            Q32::ONE,   // exactly 1.0 — the saturation edge
+            Q32(90000), // accumulation overshoot, saturates
+        ];
+        for brightness_u8 in [0u8, 1, 38, 64, 127, 128, 254, 255] {
+            let brightness = brightness_u8.to_q32() / 255.to_q32();
+            for acc in accs {
+                let ([r, g, b], _) = run_control_target(acc, brightness_u8, false);
+                let expected = (acc * brightness).to_u16_saturating();
+                assert_eq!(
+                    [r, g, b],
+                    [expected; 3],
+                    "acc {acc:?} brightness {brightness_u8}"
+                );
+            }
+        }
+    }
+
+    /// With gamma off the encode is the identity, so the u16 sample paths
+    /// (direct sampling, diagnostics) reduce to exactly the historical
+    /// brightness multiply — the reorder is invisible there too.
+    #[test]
+    fn gamma_off_u16_encode_is_exactly_the_brightness_multiply() {
+        let brightness = 91u8.to_q32() / 255.to_q32();
+        for v in [0u16, 1, 255, 9766, 32768, 65534, 65535] {
+            assert_eq!(
+                encode_fixture_channel(v, false, 91, brightness),
+                apply_brightness_unorm16(v, 91, brightness)
+            );
+        }
+    }
+
+    /// Brightness is a linear light scale applied after the encode: slider
+    /// 38/255 on full-white content must land near 38 of the wire's 256
+    /// codes. The pre-reorder pipeline pushed the same request through
+    /// `(s·c)^2.8` and delivered 1 code — the "dark with a few sparkling
+    /// pixels" bench symptom.
+    #[test]
+    fn gamma_on_brightness_scales_linear_light_after_the_encode() {
+        let ([r, g, b], _) = run_control_target(Q32::ONE, 38, true);
+        assert_eq!([r >> 8, g >> 8, b >> 8], [38; 3]);
+
+        // The old ordering, recomputed explicitly: brightness ahead of the
+        // encode is raised to the 2.8 power on its way to the wire.
+        let brightness = 38u8.to_q32() / 255.to_q32();
+        let old = apply_gamma16((Q32::ONE * brightness).to_u16_saturating());
+        assert_eq!(old >> 8, 1);
+    }
+
+    /// The power budget must see the duty that will actually be emitted, so
+    /// brightness lands before demand accumulation.
+    #[test]
+    fn power_demand_sees_post_brightness_duty() {
+        let ([r, g, b], power) = run_control_target(Q32::ONE, 128, false);
+        assert_eq!(
+            power.demand8(),
+            u32::from(r >> 8) + u32::from(g >> 8) + u32::from(b >> 8)
+        );
+        assert!(
+            power.demand8() < 3 * 255,
+            "full white at half brightness must not demand full duty"
+        );
     }
 }

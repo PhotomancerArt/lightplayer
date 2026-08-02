@@ -565,7 +565,23 @@ impl NativeEmuInstance {
         // consumers render that the way they render wasm and interp, which also
         // have no guest cost model. `InstructionCount` is real and is honoured.
         let report_cycles = matches!(cycle_model, CycleModel::InstructionCount);
-        let mut emu = Emulator::with_profile(BoardProfile::esp32s3()).with_log_level(log_level);
+        // `with_boot_cpenable`: on this path `rt_emu` *is* the firmware, so it
+        // owes compiled float code an armed coprocessor 0. `Cpu::new()` leaves
+        // `CPENABLE` clear deliberately — arming is a property of the execution
+        // *context*, which firmware owns — and staging a call resets the CPU,
+        // which is why this is a declared boot value rather than a write to
+        // `emu.cpu` before entering. The device counterpart is `fw-esp32s3`'s
+        // `board::esp32s3::fpu::arm()`, called from board init (M7 D6).
+        //
+        // Unconditional, not `if float_mode == F32`, for the same reason board
+        // init is: firmware arms once at boot and does not consult the mode a
+        // shader happens to be compiled in. The unarmed failure mode keeps its
+        // own negative control in
+        // `tests/xt_pipeline_f32.rs::unarmed_float_code_faults_with_a_coprocessor_trap`,
+        // which builds its own emulator and never comes through here.
+        let mut emu = Emulator::with_profile(BoardProfile::esp32s3())
+            .with_log_level(log_level)
+            .with_boot_cpenable(lp_xt_emu::cpu::CPENABLE_FPU);
         emu.set_cycle_model(CycleModel::InstructionCount);
         // Same rationale as rv32's call-instruction limit: in-guest fuel is the
         // real limiter, and this stays the hard backstop for fuel-off compiles.
