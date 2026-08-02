@@ -4,10 +4,6 @@
       {
         "default_bind": "bus:control.out",
         "name": "output",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -26,10 +22,6 @@
       },
       {
         "name": "estimated_draw_ma",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -46,10 +38,6 @@
       },
       {
         "name": "power_scale",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -66,10 +54,6 @@
       },
       {
         "name": "power_budget_ma",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },

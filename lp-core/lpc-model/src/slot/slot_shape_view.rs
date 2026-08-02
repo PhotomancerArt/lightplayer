@@ -1,7 +1,7 @@
 //! Borrowed shape views over static descriptors or dynamic owned shapes.
 
 use crate::{
-    LpType, SlotFieldShape, SlotMapKeyShape, SlotName, SlotPolicy, SlotSemantics, SlotShape,
+    LpType, SlotFieldShape, SlotMapKeyShape, SlotName, SlotRole, SlotSemantics, SlotShape,
     SlotShapeId, SlotVariantShape,
 };
 use alloc::vec::Vec;
@@ -230,11 +230,18 @@ impl<'a> SlotFieldShapeView<'a> {
         }
     }
 
-    pub fn policy(self) -> SlotPolicy {
+    pub fn role(self) -> SlotRole {
         match self {
-            Self::Static(field) => field.policy,
-            Self::Dynamic(field) => field.policy,
+            Self::Static(field) => field.role,
+            Self::Dynamic(field) => field.role,
         }
+    }
+
+    /// Whether a client may request mutation of this field: the role allows
+    /// it and the field's own declared direction is not produced (D1 —
+    /// direction implies read-only regardless of role).
+    pub fn is_writable(self) -> bool {
+        crate::slot::effective_writable(self.role(), self.semantics().direction)
     }
 }
 
@@ -276,7 +283,7 @@ mod tests {
         name: "enabled",
         shape: &BOOL_SHAPE,
         semantics: SlotSemantics::new(SlotDirection::Local, SlotMerge::Latest),
-        policy: SlotPolicy::writable_persisted(),
+        role: SlotRole::Setting,
         default_bind: None,
     }];
     static RECORD: StaticSlotShapeDescriptor = StaticSlotShapeDescriptor::Record {

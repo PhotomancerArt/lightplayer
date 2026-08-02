@@ -2,7 +2,7 @@ use alloc::vec;
 
 use crate::{
     FieldSlot, FieldSlotMut, LpType, OrderedF32, Revision, SlotDataAccess, SlotDataAccessMut,
-    SlotMapValueAccessMut, SlotMeta, SlotPolicy, SlotRecordAccess, SlotRecordAccessMut, SlotShape,
+    SlotMapValueAccessMut, SlotMeta, SlotRecordAccess, SlotRecordAccessMut, SlotRole, SlotShape,
     SlotShapeId, SlotValueShape, StaticLpType, StaticSlotFieldShape, StaticSlotMeta,
     StaticSlotShapeDescriptor, StaticSlotValueShape, StaticValueEditorHint, ValueEditorHint,
     ValueSlot,
@@ -13,8 +13,9 @@ const FRAME_SECONDS_60HZ: f32 = 1.0 / 60.0;
 /// Transient user controls for the project clock.
 ///
 /// Clock controls live in authored node-def slot data so the UI can mutate them
-/// through the same path as ordinary config. Their slot policy marks them as
-/// writable and transient: they are runtime controls, not durable defaults.
+/// through the same path as ordinary config. Their slot role marks them as
+/// `Debug`: writable but never persisted, since they are runtime controls,
+/// not durable defaults.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClockControls {
     pub running: ValueSlot<bool>,
@@ -42,7 +43,7 @@ impl FieldSlot for ClockControls {
                         name: "running",
                         shape: running_shape,
                         semantics: crate::SlotSemantics::local(),
-                        policy: SlotPolicy::writable_transient(),
+                        role: SlotRole::Debug,
                         default_bind: None,
                     },
                     StaticSlotFieldShape {
@@ -51,7 +52,7 @@ impl FieldSlot for ClockControls {
                             shape: static_clock_rate_shape(),
                         },
                         semantics: crate::SlotSemantics::local(),
-                        policy: SlotPolicy::writable_transient(),
+                        role: SlotRole::Debug,
                         default_bind: None,
                     },
                     StaticSlotFieldShape {
@@ -60,7 +61,7 @@ impl FieldSlot for ClockControls {
                             shape: static_clock_scrub_offset_shape(),
                         },
                         semantics: crate::SlotSemantics::local(),
-                        policy: SlotPolicy::writable_transient(),
+                        role: SlotRole::Debug,
                         default_bind: None,
                     },
                 ],
@@ -72,20 +73,20 @@ impl FieldSlot for ClockControls {
         SlotShape::Record {
             meta: SlotMeta::empty(),
             fields: vec![
-                crate::slot::shape::field_with_policy(
+                crate::slot::shape::field_with_role(
                     "running",
                     ValueSlot::<bool>::slot_field_shape(),
-                    SlotPolicy::writable_transient(),
+                    SlotRole::Debug,
                 ),
-                crate::slot::shape::field_with_policy(
+                crate::slot::shape::field_with_role(
                     "rate",
                     SlotShape::leaf(clock_rate_shape()),
-                    SlotPolicy::writable_transient(),
+                    SlotRole::Debug,
                 ),
-                crate::slot::shape::field_with_policy(
+                crate::slot::shape::field_with_role(
                     "scrub_offset_seconds",
                     SlotShape::leaf(clock_scrub_offset_shape()),
-                    SlotPolicy::writable_transient(),
+                    SlotRole::Debug,
                 ),
             ],
         }
@@ -197,17 +198,16 @@ const fn static_clock_scrub_offset_shape() -> StaticSlotValueShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::slot::SlotPersistence;
 
     #[test]
-    fn clock_controls_fields_are_writable_transient() {
+    fn clock_controls_fields_have_debug_role() {
         let SlotShape::Record { fields, .. } = ClockControls::slot_field_shape() else {
             panic!("record shape");
         };
         assert_eq!(fields.len(), 3);
         for field in fields {
-            assert!(field.policy.writable);
-            assert_eq!(field.policy.persistence, SlotPersistence::Transient);
+            assert_eq!(field.role, SlotRole::Debug);
+            assert!(field.is_writable());
         }
     }
 }

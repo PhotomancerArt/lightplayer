@@ -27,7 +27,7 @@ pub struct ProjectDef {
     ///
     /// Read-only through mutations: only the loader format gate and the
     /// (future) offline upgrader own this value.
-    #[slot(policy = "read_only_persisted")]
+    #[slot(role = "fixed")]
     pub format: OptionSlot<ValueSlot<u32>>,
     /// Stable project identity (`prj_…`, base-62), minted by the library
     /// when a project enters it. Travels with the files: parity checks,
@@ -38,7 +38,7 @@ pub struct ProjectDef {
     /// with its source). Editing it in place would silently reassign a
     /// project's history and device associations, so no surface may offer
     /// it — the constraint lives here rather than in each view.
-    #[slot(policy = "read_only_persisted")]
+    #[slot(role = "fixed")]
     pub uid: OptionSlot<ValueSlot<String>>,
     /// Human-readable project name — the one authored field of the root's
     /// identity, and the Studio project pane's title.
@@ -48,7 +48,7 @@ pub struct ProjectDef {
     /// Read-only through mutations: node create/remove will arrive as
     /// dedicated project operations (Studio authoring M2), never as raw
     /// slot edits under this map.
-    #[slot(policy = "read_only_persisted")]
+    #[slot(role = "fixed")]
     pub nodes: MapSlot<String, NodeInvocationSlot>,
 }
 
@@ -160,22 +160,22 @@ mod tests {
     }
 
     #[test]
-    fn project_def_format_and_nodes_are_read_only_persisted_name_writable() {
-        use crate::{SlotPolicy, SlotShape, StaticSlotShape};
+    fn project_def_format_and_nodes_are_fixed_name_is_setting() {
+        use crate::{SlotRole, SlotShape, StaticSlotShape};
 
         let SlotShape::Record { fields, .. } = crate::ProjectDef::slot_shape() else {
             panic!("project def shape must be a record");
         };
-        let policy = |name: &str| {
+        let role = |name: &str| {
             fields
                 .iter()
                 .find(|field| field.name.as_str() == name)
                 .unwrap_or_else(|| panic!("{name} field"))
-                .policy
+                .role
         };
-        assert_eq!(policy("format"), SlotPolicy::read_only_persisted());
-        assert_eq!(policy("nodes"), SlotPolicy::read_only_persisted());
-        assert_eq!(policy("name"), SlotPolicy::writable_persisted());
+        assert_eq!(role("format"), SlotRole::Fixed);
+        assert_eq!(role("nodes"), SlotRole::Fixed);
+        assert_eq!(role("name"), SlotRole::Setting);
     }
 
     fn registry() -> SlotShapeRegistry {

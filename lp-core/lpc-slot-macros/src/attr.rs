@@ -5,7 +5,7 @@ use syn::{
 
 pub(crate) struct ContainerAttrs {
     pub(crate) shape_id: Option<LitStr>,
-    pub(crate) default_policy: Option<SlotPolicyAttr>,
+    pub(crate) default_role: Option<SlotRoleAttr>,
     pub(crate) enum_encoding: Option<EnumEncodingAttr>,
     pub(crate) rename_all: Option<RenameAllAttr>,
 }
@@ -15,7 +15,7 @@ pub(crate) struct FieldAttrs {
     pub(crate) shape: FieldShapeAttr,
     pub(crate) direction: FieldDirectionAttr,
     pub(crate) merge: FieldMergeAttr,
-    pub(crate) policy: Option<SlotPolicyAttr>,
+    pub(crate) role: Option<SlotRoleAttr>,
     pub(crate) default_bind: Option<LitStr>,
 }
 
@@ -48,11 +48,10 @@ pub(crate) enum FieldMergeAttr {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SlotPolicyAttr {
-    ReadOnlyPersisted,
-    WritablePersisted,
-    ReadOnlyTransient,
-    WritableTransient,
+pub(crate) enum SlotRoleAttr {
+    Setting,
+    Fixed,
+    Debug,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -69,7 +68,7 @@ pub(crate) enum RenameAllAttr {
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
     let mut parsed = ContainerAttrs {
         shape_id: None,
-        default_policy: None,
+        default_role: None,
         enum_encoding: None,
         rename_all: None,
     };
@@ -79,10 +78,10 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
                 let value = meta.value()?;
                 parsed.shape_id = Some(value.parse()?);
                 Ok(())
-            } else if meta.path.is_ident("default_policy") {
+            } else if meta.path.is_ident("default_role") {
                 let value = meta.value()?;
                 let value: LitStr = value.parse()?;
-                parsed.default_policy = Some(parse_policy(&value)?);
+                parsed.default_role = Some(parse_role(&value)?);
                 Ok(())
             } else if meta.path.is_ident("enum_encoding") {
                 let value = meta.value()?;
@@ -111,7 +110,7 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
     let mut shape = None;
     let mut direction = FieldDirectionAttr::Local;
     let mut merge = FieldMergeAttr::Latest;
-    let mut policy = None;
+    let mut role = None;
     let mut default_bind: Option<LitStr> = None;
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
@@ -161,10 +160,10 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                 let value: LitStr = value.parse()?;
                 merge = parse_merge(&value)?;
                 Ok(())
-            } else if meta.path.is_ident("policy") {
+            } else if meta.path.is_ident("role") {
                 let value = meta.value()?;
                 let value: LitStr = value.parse()?;
-                policy = Some(parse_policy(&value)?);
+                role = Some(parse_role(&value)?);
                 Ok(())
             } else if meta.path.is_ident("option_ref") {
                 let value = meta.value()?;
@@ -189,7 +188,7 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
         shape: shape.unwrap_or(FieldShapeAttr::Infer),
         direction,
         merge,
-        policy,
+        role,
         default_bind,
     })
 }
@@ -419,32 +418,12 @@ pub(crate) fn field_semantics_tokens(
     }
 }
 
-pub(crate) fn field_policy_tokens(policy: SlotPolicyAttr) -> TokenStream {
-    match policy {
-        SlotPolicyAttr::ReadOnlyPersisted => {
-            quote::quote! { ::lpc_model::SlotPolicy::read_only_persisted() }
-        }
-        SlotPolicyAttr::WritablePersisted => {
-            quote::quote! { ::lpc_model::SlotPolicy::writable_persisted() }
-        }
-        SlotPolicyAttr::ReadOnlyTransient => {
-            quote::quote! { ::lpc_model::SlotPolicy::read_only_transient() }
-        }
-        SlotPolicyAttr::WritableTransient => {
-            quote::quote! { ::lpc_model::SlotPolicy::writable_transient() }
-        }
+pub(crate) fn field_role_tokens(role: SlotRoleAttr) -> TokenStream {
+    match role {
+        SlotRoleAttr::Setting => quote::quote! { ::lpc_model::SlotRole::Setting },
+        SlotRoleAttr::Fixed => quote::quote! { ::lpc_model::SlotRole::Fixed },
+        SlotRoleAttr::Debug => quote::quote! { ::lpc_model::SlotRole::Debug },
     }
-}
-
-/// Whether a field with this policy omits its dynamic mut-access arm.
-///
-/// Only read-only **transient** fields (produced state) drop mut access: they
-/// are never authored, so nothing legitimate writes them dynamically. A
-/// read-only **persisted** field is still authored JSON — the dynamic reader
-/// must be able to deserialize it — and its write protection is mutate-time
-/// policy enforcement (`resolve_slot_policy`), not a codec-level hole.
-pub(crate) fn policy_is_read_only_transient(policy: SlotPolicyAttr) -> bool {
-    matches!(policy, SlotPolicyAttr::ReadOnlyTransient)
 }
 
 fn slot_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {
@@ -522,15 +501,14 @@ fn parse_merge(value: &LitStr) -> Result<FieldMergeAttr> {
     }
 }
 
-fn parse_policy(value: &LitStr) -> Result<SlotPolicyAttr> {
+fn parse_role(value: &LitStr) -> Result<SlotRoleAttr> {
     match value.value().as_str() {
-        "read_only_persisted" => Ok(SlotPolicyAttr::ReadOnlyPersisted),
-        "writable_persisted" => Ok(SlotPolicyAttr::WritablePersisted),
-        "read_only_transient" => Ok(SlotPolicyAttr::ReadOnlyTransient),
-        "writable_transient" => Ok(SlotPolicyAttr::WritableTransient),
+        "setting" => Ok(SlotRoleAttr::Setting),
+        "fixed" => Ok(SlotRoleAttr::Fixed),
+        "debug" => Ok(SlotRoleAttr::Debug),
         _ => Err(syn::Error::new_spanned(
             value,
-            "unsupported slot policy; expected \"read_only_persisted\", \"writable_persisted\", \"read_only_transient\", or \"writable_transient\"",
+            "unsupported slot role; expected \"setting\", \"fixed\", or \"debug\"",
         )),
     }
 }

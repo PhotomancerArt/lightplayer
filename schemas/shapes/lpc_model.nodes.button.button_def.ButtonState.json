@@ -3,10 +3,6 @@
     "fields": [
       {
         "name": "down",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -24,10 +20,6 @@
       },
       {
         "name": "held",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -45,10 +37,6 @@
       },
       {
         "name": "up",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
