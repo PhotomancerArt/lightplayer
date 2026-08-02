@@ -298,10 +298,21 @@ zero-length when their option is off.
 > stays unmeasured.
 >
 > This is the same drift as the loaded-`used` table above, one step further —
-> far enough to cross the cliff. **`quad60-v3` booting is the concrete test for
-> the +65,536 B reclaim** (`claude/classic-jit-region-rightsize`): if it runs
-> there, that is a *measured* LED-ceiling win on the arena that will actually
-> ship, and the two-point measurement becomes possible again.
+> far enough to cross the cliff.
+>
+> ✅ **Answered same day: `quad60-v3` runs on the +65,536 B reclaim**
+> (`claude/classic-jit-region-rightsize`, PR #288) — `level=green`, 201 s soak,
+> zero OOM lines, `free=67,588`. The 240-LED row is recoverable, on the arena
+> that will actually ship rather than on the one that OOMs. `examples/basic`
+> also compiles *and runs* there (183 ms, `[MEM] used=67,412`,
+> `[JIT] used=6,516`), where this ADR previously recorded it OOMing.
+>
+> ⚠️ But the two-point measurement is **still** blocked, for a different reason:
+> `lp-cli upload` cannot establish a clean single-project state (see the defect
+> note below), so `used` after switching projects reads as two projects resident
+> rather than a 120-LED steady state. The per-LED figure therefore stays
+> derived. The blocker is now precisely "reach exactly one loaded project
+> without a reflash".
 >
 > ⚠️ Also observed: **`lp-cli upload` cannot switch a board out of a
 > crash-disabled project.** The deploy acks, `[MEM]` never moves, and the board
