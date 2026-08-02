@@ -356,11 +356,31 @@ this chip has.
 > attribution is the place to check whether any per-LED cost is one big buffer
 > rather than many small ones; if it is, this arithmetic does not apply.
 >
-> The more important consequence is the **other** axis. The binding constraint
-> was never LED count alone but LED count × shader size, via the ~65 KB compile
-> working set — and 64 KiB of new heap lands squarely on it. Whether
-> `examples/basic` (241 LEDs, 4,092 B GLSL) now compiles on-device, where it
-> previously OOM'd, is the single measurement most worth taking next.
+> **The other axis moved too, and this one is measured as well.** The binding
+> constraint was never LED count alone but LED count × shader size, via the
+> compile working set. `examples/basic` (4,092 B of GLSL) is the shader this
+> ADR recorded as OOMing on-device. **It now compiles**, in 188 ms:
+>
+> ```
+> [shader-node] compilation succeeded (node=NodeId(4), elapsed=188ms,
+>   lpir_inst_count=586, lpir_func_count=12, lpir_import_count=7,
+>   final_inst_count=1629, final_code_size=6516 bytes, float=fixed)
+> ```
+>
+> `final_code_size=6516` and `lpir_func_count=12` are exactly what
+> `tests/xt_classic_codemem_corpus.rs` predicts for this shader — the host
+> instrument reproducing the device a third time.
+>
+> The decisive number is the peak: **`[MEM] used` reached 113,968 B during the
+> compile, which exceeds the entire 112,640 B arena that preceded this change.**
+> That is not an argument that the old heap was tight; it is proof it could not
+> have done this at all. Zero OOM or crash lines throughout.
+>
+> ⚠️ Scope of the claim: what is measured is that the *shader compiles*. The
+> deploy did not report the project as running afterwards — a separate,
+> already-filed defect where `lp-cli upload` acks a project that never
+> activates — so this is not a claim that `examples/basic` runs end to end at
+> 241 LEDs. The compile is the step that used to OOM, and it no longer does.
 
 That qualifier is the correction. Every row in the table above is a
 *steady-state* number, read once the shader is resident, and steady state is
