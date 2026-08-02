@@ -4,7 +4,8 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
     clock_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
-    node_delete_pane_action, playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
+    node_delete_pane_action, output_node_view, playlist_node_view, playlist_pending_edits,
+    unsaved_dirty_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -184,6 +185,24 @@ pub(crate) fn debug_section_vs_unsaved() -> Element {
             NodePane { view: clock_node_view(2, true), on_action: move |_| {} }
             NodePane { view: unsaved, on_action: move |_| {} }
         }
+    }
+}
+
+#[story(
+    description = "The P5 proof case, hardware mode: an Output card whose one Debug field is `test_pattern`. Expanded with the override ACTIVE — the strip on `ws281x:rmt:D10` is solid white and the engine skips the graph resolve entirely for this output. The card wears the `debug 1` marking, the striped header offers Clear, and the row carries the hazard tint; endpoint and driver options stay above under `Settings`. Nothing here is output-specific UI: the section is derived from `SlotRole::Debug` (P1) by the same partition that produces the Clock's (P3)."
+)]
+pub(crate) fn output_debug_test_pattern_active() -> Element {
+    rsx! {
+        NodePane { view: output_node_view(true, true), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "The same Output card at rest, collapsed: one Debug field, nothing overridden, so no count, no Clear, no card marking — but the header still reads as debug territory. The live default for a hardware output nobody is probing."
+)]
+pub(crate) fn output_debug_test_pattern_idle() -> Element {
+    rsx! {
+        NodePane { view: output_node_view(false, false), on_action: move |_| {} }
     }
 }
 
