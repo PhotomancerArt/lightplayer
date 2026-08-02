@@ -202,18 +202,39 @@ position is stored three times and its colour twice. Filed as
 [`docs/debt/per-lamp-data-stored-three-times.md`](../debt/per-lamp-data-stored-three-times.md)
 with a costed pay-down order.
 
-**Taken so far (#282): 13 B/LED.** `DisplayPipeline` no longer allocates `prev`
-when interpolation is off or `dither_overflow` when dithering is off (9 B/LED
-for outputs configured that way — which is every output in the test projects),
-and `direct_points` no longer retains a 16-B-per-element allocation for 12 B
-elements (4 B/LED, unconditional). Both are output-identical; the first is
-proven so by a differential test against the previous allocation shape.
+**Taken so far (#285): 13 B/LED on the measured projects.** `DisplayPipeline`
+no longer allocates `prev` when interpolation is off or `dither_overflow` when
+dithering is off; `direct_points` no longer retains a 16-B-per-element
+allocation for 12 B elements. Both are output-identical; the first is proven so
+by a differential test against the previous allocation shape.
+
+⚠️ **The `DisplayPipeline` part is configuration-dependent, and the
+configurations differ.** Surveyed across `examples/` and `projects/`:
+
+| output configuration | who ships it | saving |
+|---|---|---|
+| interpolation off, dithering off | `quad-strips-v3`, `quad60-v3`, `quad-gamma-*`, `shader-oracle` | 6 + 3 = **9 B/LED** |
+| interpolation **on**, dithering off | **every other `examples/` project** | **3 B/LED** |
+| both on (the `DisplayPipelineOptions` default) | nothing on disk | 0 |
+
+`direct_points`' 4 B/LED is unconditional. So the total is **13 B/LED for the
+projects the 89.5 figure was measured on** — an apples-to-apples comparison —
+but only **7 B/LED for a typical example project**, which is the number that
+matters for a user-facing claim. Quote the right one.
+
+Verified in the emulator by re-running the same diff after the change: whole
+image **70.2 → 66.2 B/LED**, with `direct_points` moving 16.0 → 12.0 exactly as
+predicted. The `DisplayPipeline` saving cannot appear there (that type is not in
+the emulator image); it is covered by a unit test asserting both buffers are
+zero-length when their option is off.
 
 > ⚠️ **The post-change figure has NOT been re-measured on silicon.** The desk
-> classic was held by another session throughout this work. Predicted ≈76.5
-> B/LED and a ceiling near 235 LEDs, but **treat the ceiling line above as the
-> current quotable number until a board measurement replaces this note** — the
-> whole point of this ADR is that LED counts are quoted from measured RAM.
+> classic was held by another session's `espflash flash --monitor` throughout
+> this work and was not touched. Predicted ≈76.5 B/LED and a ceiling near 235
+> LEDs, but **treat the ceiling line above as the current quotable number until
+> a board measurement replaces this note** — the whole point of this ADR is that
+> LED counts are quoted from measured RAM, and 76.5 is arithmetic, not a
+> measurement.
 
 ### Radio, if it is ever attempted
 
