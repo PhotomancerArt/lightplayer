@@ -69,7 +69,7 @@ install-rv32-target:
         echo "Target {{ rv32_target }} already installed"; \
     fi
 
-# Pin the nightly toolchain + ABI-coupled `unwinding` in lockstep and validate (date defaults to today UTC; see docs/toolchain-notes.md)
+# Pin the nightly toolchain and validate (date defaults to today UTC; see docs/toolchain-notes.md)
 bump-nightly date="":
     scripts/bump-nightly.sh {{ date }}
 
