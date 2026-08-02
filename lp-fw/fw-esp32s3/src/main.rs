@@ -107,7 +107,7 @@ mod tests;
 
 #[cfg(not(fw_harness))]
 use {
-    alloc::{boxed::Box, rc::Rc, string::String, sync::Arc},
+    alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32s3::init::{init_board, start_runtime},
     core::cell::RefCell,
     flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
