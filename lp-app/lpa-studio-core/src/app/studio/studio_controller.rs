@@ -929,6 +929,9 @@ impl StudioController {
                 .pool
                 .device_session()
                 .and_then(|session| session.recovery_status().cloned()),
+            detected_chip: self
+                .hardware_session()
+                .and_then(|session| session.snapshot().detected_chip),
         };
         let sim = self
             .pool

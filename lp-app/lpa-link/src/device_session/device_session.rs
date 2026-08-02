@@ -105,12 +105,25 @@ impl DeviceSession {
         let state = self.shared.state();
         let session = self.shared.session.borrow().clone();
         let link_mode = self.shared.passive_link_mode();
+        let detected_chip = match &link_mode {
+            super::device_link_mode::DeviceLinkMode::Bootloader {
+                chip_name: Some(chip),
+                ..
+            } => Some(chip.clone()),
+            _ => self
+                .shared
+                .classifier
+                .borrow()
+                .detected_chip()
+                .map(str::to_string),
+        };
         DeviceSnapshot {
             endpoint_status: DeviceSnapshot::derive_endpoint_status(&state, &session),
             state,
             session,
             recent_lines: self.shared.classifier.borrow().recent_lines().to_vec(),
             link_mode,
+            detected_chip,
         }
     }
 
