@@ -4004,6 +4004,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-ws281x",
+ "lp-ws281x-hli",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",

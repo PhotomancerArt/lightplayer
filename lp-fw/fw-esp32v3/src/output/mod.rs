@@ -9,5 +9,7 @@
 
 pub mod rmt;
 
+#[cfg(feature = "server")]
 pub use fw_esp32_common::output::provider::Esp32OutputProvider;
+#[cfg(feature = "server")]
 pub use rmt::Esp32V3RmtWs281xDriver;

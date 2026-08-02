@@ -220,9 +220,9 @@ impl Default for HliChannel {
 pub struct HliBank {
     /// Address of the RMT `INT_ST` register (`raw & ena` — causes this
     /// firmware never enabled cannot appear).
-    pub int_st_addr: AtomicU32,
+    pub int_st_addr: AtomicUsize,
     /// Address of the RMT `INT_CLR` register (write-1-to-clear).
-    pub int_clr_addr: AtomicU32,
+    pub int_clr_addr: AtomicUsize,
     /// Union of every entry's three cause masks: the causes this handler owns.
     /// Everything pending under this mask is acknowledged in one write at
     /// entry, whether or not the channel is active — storm safety for a
@@ -240,8 +240,8 @@ impl HliBank {
     /// fill it in.
     pub const fn new() -> Self {
         Self {
-            int_st_addr: AtomicU32::new(0),
-            int_clr_addr: AtomicU32::new(0),
+            int_st_addr: AtomicUsize::new(0),
+            int_clr_addr: AtomicUsize::new(0),
             all_mask: AtomicU32::new(0),
             isr_entries: AtomicU32::new(0),
             channels: [const { HliChannel::new() }; HLI_CHANNELS],

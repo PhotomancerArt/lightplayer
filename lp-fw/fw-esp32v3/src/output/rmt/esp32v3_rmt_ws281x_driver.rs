@@ -69,6 +69,15 @@ use lpc_hardware::{
     Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
 
+// The refill path behind this seam is feature-selected: the shipping level-3
+// driver, or the level-4 experiment (`hli_refill`). Both expose the same
+// four names with the same shapes, and everything else in this file — the
+// endpoint vocabulary, the manifest→slot mapping, the timeout policy — is
+// deliberately identical between the two, so a stress comparison measures
+// the interrupt path and nothing else.
+#[cfg(feature = "hli_refill")]
+use crate::output::rmt::hli::app::{DRIVER, FRAME_TIMEOUT, install_isr, report_telemetry_if_due};
+#[cfg(not(feature = "hli_refill"))]
 use crate::output::rmt::shared_driver::{
     DRIVER, FRAME_TIMEOUT, install_isr, report_telemetry_if_due,
 };

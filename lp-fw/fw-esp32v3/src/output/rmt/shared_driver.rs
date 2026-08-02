@@ -18,6 +18,19 @@
 //! `ChannelState` each costs a few hundred bytes of `.bss` and keeps a
 //! channel number meaning the same thing everywhere.
 
+// Under the HLI experiment the endpoint layer swaps in `hli::app`'s
+// equivalents, leaving this level-3 driver compiled but idle in a binary
+// crate — which is exactly what dead-code analysis flags. The experiment is
+// additive-only; the shipping build (feature off) keeps full lint coverage.
+#![cfg_attr(
+    feature = "hli_refill",
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the endpoint layer swaps in hli::app; this driver idles"
+    )
+)]
+
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use esp_hal::interrupt::{InterruptHandler, Priority};

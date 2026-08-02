@@ -638,7 +638,7 @@ clippy-fw-esp32v3:
     # The two non-default entrypoints in main.rs. Neither is reachable from
     # the default build, so linting only the defaults would leave both
     # completely uncovered — the same way 13 fw-esp32 harnesses once rotted.
-    for feats in "esp32" "esp32,radio_ram_probe"; do
+    for feats in "esp32" "esp32,radio_ram_probe" "esp32,hli_stress"; do
       echo "clippy: --no-default-features --features $feats"
       cargo clippy --profile release-esp32v3 --no-default-features --features "$feats" -- --no-deps -D warnings
     done
@@ -647,8 +647,13 @@ clippy-fw-esp32v3:
     # than a `--no-default-features` one. Linted for the same reason the two
     # entrypoints above are: a diagnostic build nothing compiles is a
     # diagnostic build that has rotted by the time someone reaches for it.
-    echo "clippy: --features ws281x_telemetry"
-    cargo clippy --profile release-esp32v3 --features ws281x_telemetry -- --no-deps -D warnings
+    # `hli_refill,ws281x_telemetry` is the HLI experiment's measurement image
+    # (level-4 refill swapped in under the same endpoint layer) — additive
+    # too, and the exact configuration its silicon numbers come from.
+    for feats in "ws281x_telemetry" "hli_refill,ws281x_telemetry"; do
+      echo "clippy: --features $feats"
+      cargo clippy --profile release-esp32v3 --features "$feats" -- --no-deps -D warnings
+    done
 
 
 # `features` is a comma-separated list added to the defaults — for the app path

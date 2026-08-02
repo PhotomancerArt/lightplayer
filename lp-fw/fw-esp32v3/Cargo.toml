@@ -110,6 +110,40 @@ ws281x_telemetry = []
 # clippy recipe leans on — it is just a pointlessly large image.
 radio_ram_probe = ["dep:esp-radio", "dep:esp-rtos", "esp-rtos/esp-radio", "esp-rtos/esp-alloc"]
 
+# ⚠️ EXPERIMENT (plan 2026-08-01-1459-rmt-priority-hli, P5 reopened as an
+# overnight experiment; ADR docs/adr/2026-08-02-classic-hli-refill.md): service
+# the RMT refill from a hand-written **level-4** Xtensa vector instead of the
+# level-3 esp-hal handler, so the refill escapes every `rsil 3`-class masked
+# window (embassy/PriorityLock critical sections, time spent inside level ≤ 3
+# handlers). It does NOT escape `esp-sync`'s `rsil 5` critical sections — that
+# measured boundary is the experiment's subject.
+#
+# OFF by default; the shipping image must be untouched with the feature off
+# (size-check + byte-count are the proof). Additive to the server build:
+#   cargo build --profile release-esp32v3 --features hli_refill,ws281x_telemetry
+# (touch src/main.rs after flipping features — stale-binary lesson.)
+hli_refill = ["dep:lp-ws281x-hli"]
+
+# The HLI stress harness: REPLACES the entrypoint (like `radio_ram_probe`) with
+# a radio-linked head-to-head cell schedule — the same board, same boot, driving
+# four RMT channels while a WiFi scan loop generates load, first on the shipping
+# level-3 driver, then switched live onto the level-4 vector. The shipping
+# server does not fit beside the radio on this chip (M6), which is why this is
+# a harness and not a server feature. Build:
+#   cargo build --profile release-esp32v3 --no-default-features \
+#       --features esp32,hli_stress
+hli_stress = [
+    "dep:lp-ws281x-hli",
+    "dep:lp-ws281x",
+    "dep:esp-radio",
+    "dep:esp-rtos",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+    "dep:embassy-executor",
+    "dep:embassy-time",
+    "ws281x_telemetry",
+]
+
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
 # (proven on classic ESP32 silicon 2026-07-28, FINDINGS.md C1 PASS) — the
@@ -179,6 +213,13 @@ fw-core = { path = "../fw-core", default-features = false, optional = true }
 # here: `src/output/` also needs `lpc-hardware`, `alloc` and the common
 # provider, none of which the bare hello / radio-probe entrypoints link.
 lp-ws281x = { path = "../lp-ws281x", default-features = false, optional = true }
+
+# The HLI experiment's contract crate: the `repr(C)` state the level-4 vector
+# reads (asm offsets derived via `offset_of!`, so they cannot drift) and the
+# host-tested reference model the thread-side start path runs. Optional and
+# pulled in only by `hli_refill` / `hli_stress`; the shipping image never
+# links it.
+lp-ws281x-hli = { path = "../lp-ws281x-hli", optional = true }
 
 # Async runtime for `serial::io_task`. Mirrors fw-esp32s3's set.
 embassy-executor = { version = "0.10.0", optional = true }
