@@ -56,7 +56,7 @@ holds the full context.
 | Host-process `lpa-server` stdout capture into the Studio console (terminal-only today) | `2026-07-05-studio-logging-model` | Host-process workflow needs in-console server logs |
 | Console filter persistence and text search (session-only, no search today) | `2026-07-05-studio-logging-model` | Console usage patterns make refiltering per session annoying |
 | Per-item overlay gating (fetch-full-on-change assumes small overlays) | `2026-07-04-studio-editing-model` (a) | Measured overlay fetch cost matters |
-| Singular `ProjectRegistry::mutate` bypasses policy/type validation (only `mutate_batch` enforces) | `2026-07-04-studio-editing-model` (d) | Any new caller of `mutate` |
+| ~~Singular `ProjectRegistry::mutate` bypasses policy/type validation (only `mutate_batch` enforces)~~ — **closed 2026-08-01**: `mutate` now runs the same `validate_mutation`; the bypass survives only as the crate-private `stage_dedicated_op` the node-authoring ops use to write `Fixed` containers | `2026-07-04-studio-editing-model` (d) | Closed |
 | Alternative dirty modes (touched-mode / deliberate value pinning) — minimal-diff normalization fixed dirty to "differs from saved" | `2026-07-04-studio-editing-model` (f) | A concrete pinning/touched-mode use case appears |
 | Device-pane adoption of the pane grammar (`StudioPane`/`DetailPopover`/`UiPaneAction`) | `2026-07-05-studio-pane-grammar` (a) | Next device-pane UX work |
 | Save visibility while scrolling (project header scrolls with the sidebar; the strip was always visible) | `2026-07-05-studio-pane-grammar` (b) | The M2a UX gate or later use flags losing always-visible Save |
@@ -106,7 +106,7 @@ holds the full context.
 | Playlist strip evolutions: timeline view, cue-trigger UI, autoplay-to-cue controls | `2026-07-26-node-card-faces` | Playlist interaction work resumes |
 | Fixture mapping editor drawer (face's planned custom drawer; fixture has only advanced today) | `2026-07-26-node-card-faces` | Fixture mapping UX work begins |
 | Hardware placard-follow walk under a live trigger (the rest of the refinement round — live knob values, friendly titles, entry-thumb warming, knob keyboard a11y, activate-by-click, drawer-state re-home — landed 2026-07-27, PR #158) | `2026-07-26-node-card-faces` | The next hardware walk |
-| Sim button press / debug pokes adopt the runtime command channel as new `WireNodeCommand` variants | `2026-07-27-runtime-node-command-channel` | Sim-button UX or runtime debug tooling work begins |
+| ~~Sim button press / debug pokes adopt the runtime command channel as new `WireNodeCommand` variants~~ — **obsolete 2026-08-01** (`2026-08-01-debug-slots-taxonomy`): button input is punted to the input initiative (record/replay needs source-level injection), and debug pokes are Debug slots, not commands. The channel stays the right home for genuine events | `2026-07-27-runtime-node-command-channel` | Obsolete |
 | Cache-friendly prompt shape: the per-turn system prompt embeds the current shader source ahead of the cache prefix, so staged edits invalidate the cache (measured; live sessions read ~0 cached tokens) | `2026-07-25-studio-shader-agent-architecture` (2026-07-27 addendum) | Next agent round — P0; redesign + eval re-measure, not a blind fix |
 | Pre-4.6 Anthropic thinking shape (`enabled` + `budget_tokens`; current `adaptive` shape 400s on Sonnet/Haiku 4.5) | `2026-07-25-studio-shader-agent-architecture` (2026-07-27 addendum) | An older Anthropic model is configured deliberately |
 | OpenRouter reasoning opt-in (`reasoning: {}` request field, provider-gated) | `2026-07-25-studio-shader-agent-architecture` (2026-07-27 addendum) | OpenRouter thinking visibility is asked for |
@@ -127,6 +127,9 @@ holds the full context.
 | Float→int through the soft-float ABI (`__fixsfsi`/`__fixunssfsi` are skipped because the ABI leaves out-of-range and NaN undefined) | `2026-07-31-soft-float-via-compiler-builtins` | The C6 harness's probe data shows the ROM matching `compiler_builtins` at those edges |
 | Xtensa `F32Lowering` arm (`Unsupported` today — the S3 has an FPU, so soft float would be the wrong default) | `2026-07-31-soft-float-via-compiler-builtins` | The Xtensa FPU emulator and emitter land (roadmap M6/M7) |
 | Soft-float performance measurement on the C6 (nothing here says how slow Float mode is) | `2026-07-31-soft-float-via-compiler-builtins` | A perf surface exists to show it (roadmap D3) |
+| `Debug` naming re-check (ratified as provisional — the corpus is all diagnostics, but the clock's `rate`/`scrub_offset_seconds` read as transport) | `2026-08-01-debug-slots-taxonomy` (a) | The clock's transport controls move to a transport surface |
+| Debug indication on preview/play surfaces (D8 covered the workspace only; a running installation in test-pattern mode shows nothing outside the editor) | `2026-08-01-debug-slots-taxonomy` (b) | The panels/play-mode work defines its own chrome |
+| `TEST_PATTERN_RGB` is full white — the max-current case on long strips, deliberate for pin discovery | `2026-08-01-debug-slots-taxonomy` (c) | Someone runs it on a long strip and wants it dimmer |
 
 ## Relationship To Shared Planning
 

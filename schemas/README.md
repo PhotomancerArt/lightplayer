@@ -31,8 +31,9 @@ and `SlotRole::Debug` fields (session-only diagnostics, e.g. the clock's
 `controls.*`) are omitted from the JSON Schema entirely even though the
 reader still accepts (and now warns-and-ignores) an authored value there —
 the dump still carries their role, since it describes the model, not what a
-def file may validly author. A future offline upgrader (Studio/desktop; the device never
-upgrades) will consume shape dumps and fixture files, not JSON Schemas.
+def file may validly author. A future offline upgrader (Studio/desktop; the
+device never upgrades) will consume shape dumps and fixture files, not JSON
+Schemas.
 
 ## Regenerating and CI
 

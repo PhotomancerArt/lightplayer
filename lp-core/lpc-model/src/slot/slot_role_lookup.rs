@@ -8,7 +8,8 @@
 
 use crate::{
     LpType, SlotDirection, SlotPath, SlotPathSegment, SlotRole, SlotSemantics, SlotShapeLookup,
-    SlotShapeView, slot::effective_writable,
+    SlotShapeView,
+    slot::{SlotPersistence, effective_persistence, effective_writable},
 };
 
 /// Role, governing direction, and leaf value type resolved for one slot path.
@@ -33,6 +34,18 @@ impl SlotRoleResolution {
     /// regardless of role).
     pub fn is_writable(&self) -> bool {
         effective_writable(self.role, self.direction)
+    }
+
+    /// The persistence classification governing this path
+    /// ([`effective_persistence`] of its role and direction).
+    ///
+    /// This is the **one** classifier both sides of an edit's life must
+    /// consult — the studio for display/dirty accounting, the registry for
+    /// commit retention — so a Debug override and an authored edit can never
+    /// swap places between client and server. Paths that resolve in no shape
+    /// take [`SlotPersistence::for_unresolved_edit`] instead.
+    pub fn persistence(&self) -> SlotPersistence {
+        effective_persistence(self.role, self.direction)
     }
 }
 
