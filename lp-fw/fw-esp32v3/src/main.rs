@@ -356,12 +356,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // and it costs the board its output rather than its boot, so it is logged
     // and not fatal.
     //
-    // How many outputs appear is decided in two places and nowhere else: the
-    // board manifest's `/rmt/ws281xK` resources (four on the DOM-Z-102), and
-    // `output::rmt::v3_rmt::BLOCKS_PER_CHANNEL` = 2, which turns the chip's
-    // eight RMT slots into four usable ones (0/2/4/6 — a two-block channel
-    // absorbs its neighbour's memory). Manifest channel K drives slot
-    // K * SLOT_STRIDE; absorbed slots are never configured.
+    // How many outputs appear is decided in one place: the board manifest's
+    // `/rmt/ws281xK` resources (four on the DOM-Z-102). The RMT block plan
+    // follows from that count at driver init — four declared channels get two
+    // 64-word blocks each (slots 0/2/4/6, the same split the old compile-time
+    // constant produced), fewer get wider windows. See
+    // `output::rmt::v3_rmt::plan_for_declared`; absorbed slots are never
+    // configured.
     match esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK) {
         Ok(rmt) => {
             hardware_system.add_ws281x_driver(Box::new(Esp32V3RmtWs281xDriver::new(

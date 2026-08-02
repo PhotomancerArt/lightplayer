@@ -113,28 +113,31 @@ sequencing stays in `lp-ws281x`, whose host suite (`cargo test -p lp-ws281x`)
 is the regression net; this crate adds no trait surface
 (ADR `2026-07-31-lp-ws281x-multi-channel-driver-adoption`).
 
-### Two blocks per channel, and where the four outputs come from
+### The block plan, and where the four outputs come from
 
-`BLOCKS_PER_CHANNEL = 2` (a compile-time constant in `v3_rmt.rs`, not a
-config surface). The classic has eight RMT channels of 64 words each; a
-channel that takes two blocks **absorbs its neighbour's**, so exactly four
-slots — `0, 2, 4, 6` — own memory, with 128-word windows halving into
-64-word (80 µs) refill deadlines.
+The RMT block plan is **computed at driver init from the board manifest's
+declared `/rmt/ws281xK` count** (`v3_rmt::plan_for_declared`): each declared
+channel gets `floor(8 / count)` of the chip's eight 64-word blocks, capped at
+four (`tx_lim` is 9 bits — a 512-word window cannot be expressed). The
+DOM-Z-102's four declared channels get two blocks each — slots `0, 2, 4, 6`
+own memory, with 128-word windows halving into 64-word (80 µs) refill
+deadlines, the exact split the old `BLOCKS_PER_CHANNEL = 2` constant
+produced. A one-channel manifest gets a 256-word window (160 µs deadlines).
 
-That is not a taste call. The classic's *delivered* interrupt rate saturates
-around 48 k/s regardless of demand (experiment `findings.md` §12 — this is the
-root cause of the equal-start truncation defect, and staggering does not fix
-it). At one block per channel each busy output demands 25 k refills/s, so the
-chip runs out at **two**. Two blocks halves the demand to 12.5 k/s and should
-reach four — but 4 × 12.5 k = 50 k against a ~48 k ceiling is *marginal
-arithmetic, not a measurement*. Validating it on silicon is M4-P3.
+Two blocks for four outputs is not a taste call. The classic's *delivered*
+interrupt rate saturates around 48 k/s regardless of demand (experiment
+`findings.md` §12 — this is the root cause of the equal-start truncation
+defect, and staggering does not fix it). At one block per channel each busy
+output demands 25 k refills/s, so the chip runs out at **two**. Two blocks
+halves the demand to 12.5 k/s and reaches four — validated on silicon at
+G-M4, re-baselined with telemetry in the RMT-priority plan's P4.
 
 **Absorbed slots are skipped by construction.** Manifest channel `K`
-(`/rmt/ws281xK`) resolves to RMT slot `K * SLOT_STRIDE` via
-`v3_rmt::slot_for_index`, and the channel-creation loop only ever hands
-esp-hal a slot that owns memory. The experiment harness did *not* do this —
-it kept asking for channels 0,1,2,3 and got `MemoryBlockNotAvailable` for the
-odd ones, which is why its `BLOCKS_PER_CHANNEL=2` configuration never ran.
+(`/rmt/ws281xK`) resolves to the plan's `K`-th available slot, and the
+channel-creation loop only ever hands esp-hal a slot that owns memory. The
+experiment harness did *not* do this — it kept asking for channels 0,1,2,3
+and got `MemoryBlockNotAvailable` for the odd ones, which is why its
+two-block configuration never ran.
 
 Channel **count** comes from the board manifest and nowhere else: the
 DOM-Z-102 declares four `/rmt/ws281xK` resources, and the endpoints offered
