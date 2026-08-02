@@ -86,6 +86,8 @@ pub enum ValueEditorHint {
     Xy,
     Dimensions,
     Affine2d,
+    /// Lamp type + supply budget pair (`FixturePower`-shaped struct).
+    Power,
     Resource,
     RuntimeBufferResource,
     VisualProduct,

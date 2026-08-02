@@ -46,6 +46,7 @@
     --tw-default-transition-duration: 150ms;
     --tw-default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     --tw-color-background: var(--studio-color-bg);
+    --tw-color-foreground: var(--studio-color-text);
     --tw-color-card: var(--studio-color-surface);
     --tw-color-card-subtle: var(--studio-color-surface-subtle);
     --tw-color-card-muted: var(--studio-color-surface-muted);
@@ -2158,6 +2159,13 @@
     &:hover {
       @media (hover: hover) {
         color: var(--tw-color-accent);
+      }
+    }
+  }
+  .tw\:hover\:text-foreground {
+    &:hover {
+      @media (hover: hover) {
+        color: var(--tw-color-foreground);
       }
     }
   }

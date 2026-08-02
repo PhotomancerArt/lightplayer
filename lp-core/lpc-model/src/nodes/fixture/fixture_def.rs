@@ -41,7 +41,9 @@ pub struct FixtureDef {
     pub brightness: OptionSlot<ValueSlot<Brightness>>,
     /// Enable gamma correction.
     pub gamma_correction: OptionSlot<ValueSlot<bool>>,
-    /// Lamp type and supply budget. Absent means output is never limited.
+    /// Lamp type and supply budget. Absent means the default guard applies
+    /// ([`FixturePower::default`], 1000 mA); a stated budget of zero is the
+    /// explicit unlimited opt-out.
     pub power: OptionSlot<ValueSlot<FixturePower>>,
 }
 

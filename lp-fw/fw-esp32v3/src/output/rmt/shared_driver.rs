@@ -8,15 +8,17 @@
 //! second layer of per-channel state — which is why this module holds a
 //! `static` and the endpoint-facing driver holds none.
 //!
-//! `Ws281xDriver::with_blocks` is `const` and every field of `ChannelState` is
+//! `Ws281xDriver::new` is `const` and every field of `ChannelState` is
 //! an atomic, so this needs neither `static mut` nor a `StaticCell`: the
-//! handler and thread context share a `&'static`.
+//! handler and thread context share a `&'static`. The memory-block plan the
+//! backend reads is published at driver init through
+//! [`super::v3_rmt::TX_PLAN`], before the interrupt is installed and before
+//! any channel is configured.
 //!
 //! Note the driver is sized to [`TX_CHANNELS`] = 8, the chip's RMT slot count,
-//! not to the four outputs this build offers. The absorbed slots simply never
-//! get configured (see [`super::v3_rmt::slot_for_index`]); giving them a
-//! `ChannelState` each costs a few hundred bytes of `.bss` and keeps a
-//! channel number meaning the same thing everywhere.
+//! not to the outputs the plan offers. The absorbed slots simply never get
+//! configured; giving them a `ChannelState` each costs a few hundred bytes of
+//! `.bss` and keeps a channel number meaning the same thing everywhere.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -25,7 +27,7 @@ use esp_hal::rmt::Rmt;
 use esp_hal::time::{Duration, Rate};
 use lp_ws281x::Ws281xDriver;
 
-use super::v3_rmt::{TX_BLOCKS, TX_CHANNELS, V3Rmt};
+use super::v3_rmt::{TX_CHANNELS, V3Rmt};
 
 /// RMT source clock. The classic ESP32's RMT runs off APB, and esp-hal's
 /// classic `validate_clock` accepts **only** the source frequency itself
@@ -40,8 +42,7 @@ pub const RMT_CLOCK: Rate = Rate::from_mhz(80);
 pub const FRAME_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// The driver, shared between thread context and the interrupt handler.
-pub static DRIVER: Ws281xDriver<V3Rmt, TX_CHANNELS> =
-    Ws281xDriver::with_blocks(V3Rmt::new(TX_BLOCKS), TX_BLOCKS);
+pub static DRIVER: Ws281xDriver<V3Rmt, TX_CHANNELS> = Ws281xDriver::new(V3Rmt::new());
 
 /// Set once the RMT interrupt handler has been bound.
 ///
