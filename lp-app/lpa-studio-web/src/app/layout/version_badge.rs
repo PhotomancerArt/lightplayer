@@ -412,7 +412,8 @@ fn VersionDetailRow(label: &'static str, value: String, href: Option<String>) ->
 macro_rules! chip_class_str {
     ($tone:literal) => {
         concat!(
-            "tw:inline-flex tw:h-7 tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer ",
+            "tw:inline-flex tw:h-7 tw:max-w-[360px] tw:min-w-0 tw:cursor-pointer ",
+            "tw:max-[1100px]:max-w-[220px] ",
             "tw:items-center tw:gap-1.5 tw:rounded-full tw:border tw:px-2.5 ",
             "tw:max-[640px]:gap-0 tw:max-[640px]:px-2 ",
             "tw:font-mono tw:text-[0.65rem] tw:font-bold ",

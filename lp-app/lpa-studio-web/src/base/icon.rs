@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    Activity, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight, CircleAlert,
-    CircleDot, CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag,
-    FlaskConical, Folder, Funnel, Hash, Image, Info, Layers, Lightbulb, Link2, Link2Off, ListMusic,
-    Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Play, Plus,
-    Radio, Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2,
+    Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
+    CircleAlert, CircleDot, CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser,
+    Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Layers, Lightbulb, Link2, Link2Off,
+    ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil,
+    Play, Plus, Radio, Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2,
     TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
 };
 
@@ -67,6 +67,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Remove => rsx! { Trash2 { size } },
         StudioIconName::Cancel => rsx! { X { size } },
         StudioIconName::More => rsx! { Ellipsis { size } },
+        StudioIconName::ExternalLink => rsx! { ArrowUpRight { size } },
         StudioIconName::Copy => rsx! { Copy { size } },
         StudioIconName::Download => rsx! { Download { size } },
         StudioIconName::Upload => rsx! { Upload { size } },
@@ -159,6 +160,8 @@ pub enum StudioIconName {
     Cancel,
     /// Ellipsis: the gallery card menu trigger.
     More,
+    /// Arrow leaving the box: a link that opens in a new tab.
+    ExternalLink,
     /// Hash: wiring-order numbers on the mapping lamp view.
     MapNumbers,
     /// Route: wiring-direction arrows on the mapping lamp view.

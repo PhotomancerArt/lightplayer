@@ -19,7 +19,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::UiAction;
 
-use crate::base::{IconMenuButton, IconMenuTone, LogoMark, StudioIconName};
+use crate::base::{IconMenuButton, IconMenuTone, LogoLockup, StudioIcon, StudioIconName};
 
 /// Which nav tab renders as the current section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,14 +46,7 @@ pub fn SiteChrome(
     rsx! {
         header { class: "tw:mb-[18px] tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
             // Brand lockup — inert by design (see module docs).
-            span {
-                class: "tw:flex tw:flex-none tw:cursor-default tw:items-center tw:gap-2 tw:text-accent",
-                title: "LightPlayer",
-                LogoMark { size: 22 }
-                span { class: "tw:text-[12.5px] tw:font-bold tw:text-strong-foreground tw:max-[520px]:hidden",
-                    "LightPlayer"
-                }
-            }
+            LogoLockup {}
             nav { class: "tw:flex tw:items-center tw:gap-1",
                 NavTab {
                     label: "Studio",
@@ -124,7 +117,10 @@ fn NavTab(
 }
 
 /// Overflow menu for the standalone authoring tools — deliberately not nav
-/// tabs (they are project-free editors, not destinations).
+/// tabs (they are project-free editors, not destinations). Each entry is a
+/// card: what the tool is, not just its name, since these are surfaces
+/// most people meet rarely. They open in a new tab so the studio session
+/// behind them keeps running.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ToolsMenu() -> Element {
@@ -134,24 +130,58 @@ fn ToolsMenu() -> Element {
             icon_size: 15,
             label: "Tools".to_string(),
             title: "Tools".to_string(),
-            tone: IconMenuTone::Neutral,
+            tone: IconMenuTone::Quiet,
             popup_class: TOOLS_POPUP_CLASS.to_string(),
-            ToolsMenuLink { label: "Mapping editor", href: "#/mapping" }
-            ToolsMenuLink { label: "Board editor", href: "#/boards/edit" }
+            span { class: "tw:px-1.5 tw:pt-0.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                "Tools"
+            }
+            ToolCard {
+                icon: StudioIconName::MapArrows,
+                title: "Mapping editor",
+                detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
+                href: "#/mapping",
+            }
+            ToolCard {
+                icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
+                title: "Board editor",
+                detail: "Draw and edit the board diagrams behind the catalog.",
+                href: "#/boards/edit",
+            }
         }
     }
 }
 
+/// One tool card: glyph, name, one line of what it is, and the
+/// opens-in-a-new-tab marker.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ToolsMenuLink(label: &'static str, href: &'static str) -> Element {
+fn ToolCard(
+    icon: StudioIconName,
+    title: &'static str,
+    detail: &'static str,
+    href: &'static str,
+) -> Element {
     rsx! {
         a {
-            class: "tw:rounded-sm tw:px-2 tw:py-1.5 tw:text-xs tw:font-bold tw:text-muted-foreground tw:no-underline tw:hover:bg-card-raised tw:hover:text-strong-foreground",
+            class: TOOL_CARD_CLASS,
             href: "{href}",
-            "{label}"
+            target: "_blank",
+            rel: "noopener noreferrer",
+            span { class: "tw:mt-0.5 tw:flex tw:h-7 tw:w-7 tw:flex-none tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:text-accent",
+                StudioIcon { name: icon, size: 15 }
+            }
+            span { class: "tw:grid tw:min-w-0 tw:gap-0.5",
+                span { class: "tw:text-xs tw:font-bold tw:text-strong-foreground", "{title}" }
+                span { class: "tw:text-[11px] tw:leading-snug tw:text-dim-foreground", "{detail}" }
+            }
+            span { class: "tw:mt-0.5 tw:flex-none tw:self-start tw:text-subtle-foreground",
+                StudioIcon { name: StudioIconName::ExternalLink, size: 13 }
+            }
         }
     }
 }
 
-const TOOLS_POPUP_CLASS: &str = "tw:grid tw:w-[200px] tw:gap-0.5 tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+const TOOLS_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// Rows are cards, not text links: fixed three-column grid so the title and
+/// detail wrap inside their own column instead of around the glyphs.
+const TOOL_CARD_CLASS: &str = "tw:grid tw:grid-cols-[auto_minmax(0,1fr)_auto] tw:items-start tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:px-2 tw:py-2 tw:no-underline tw:transition-colors tw:hover:border-border tw:hover:bg-card-raised";
