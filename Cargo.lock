@@ -3866,7 +3866,6 @@ dependencies = [
  "lps-builtins",
  "serde_json",
  "tokio",
- "unwinding",
 ]
 
 [[package]]
@@ -5535,7 +5534,6 @@ dependencies = [
  "lp-emu-abi",
  "lp-recovery",
  "lpc-shared",
- "unwinding",
 ]
 
 [[package]]
