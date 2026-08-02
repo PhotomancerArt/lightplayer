@@ -889,12 +889,11 @@ impl LpvmInstance for NativeEmuInstance {
         self.last_guest_cycle_count = None;
         self.refresh_vmctx_header();
 
-        if self.module.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeEmuInstance::call_render_texture requires FloatMode::Q32",
-            ))));
-        }
-
+        // No float-mode guard: the entry's own ABI is integers only (guest
+        // pointer, width, height), and the mode-dependent half — decoding the
+        // Q16.16 pixel walk into whatever an F32 lane holds — lives in the
+        // synthesised body (`lp-shader`'s `Q16CoordDecoder`), which compiled
+        // for this module's mode.
         let entry = self.resolve_render_texture(fn_name)?;
         let ir_func = self
             .module
@@ -946,12 +945,8 @@ impl LpvmInstance for NativeEmuInstance {
         self.last_guest_cycle_count = None;
         self.refresh_vmctx_header();
 
-        if self.module.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeEmuInstance::call_render_samples requires FloatMode::Q32",
-            ))));
-        }
-
+        // See `call_render_texture`: `points` stays Q16.16 and `out` stays
+        // RGBA16 in both modes, so this boundary is mode-independent.
         let entry = self.resolve_render_samples(fn_name)?;
         let ir_func = self
             .module
@@ -1222,7 +1217,7 @@ mod tests {
 
     use lp_shader::synth::synthesise_render_texture;
     use lpir::builder::FunctionBuilder;
-    use lpir::{FuncId, IrType, LpirModule, LpirOp};
+    use lpir::{FloatMode, FuncId, IrType, LpirModule, LpirOp};
     use lps_shared::{
         FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureStorageFormat,
     };
@@ -1364,9 +1359,14 @@ mod tests {
     fn render_texture_trap_reports_offending_pixel_index() {
         let k = 2u32; // pixel (2, 0) of a 4x1 texture
         let (mut ir, mut meta) = render_module_spinning_at(k as i32 * Q_ONE + Q_HALF);
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
 
         let engine = NativeEmuEngine::new(NativeCompileOptions::default());
         let module = engine.compile(&ir, &meta).expect("compile");
@@ -1416,9 +1416,14 @@ mod tests {
 
     fn bounded_render_bytes(fuel: bool) -> Vec<u8> {
         let (mut ir, mut meta) = bounded_render_module();
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         let options = NativeCompileOptions {
             fuel,
             ..NativeCompileOptions::default()
