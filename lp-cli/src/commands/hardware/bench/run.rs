@@ -38,6 +38,16 @@ use super::workload::BenchWorkload;
 /// nothing is left behind either).
 pub const BENCH_PROJECT_ID: &str = "soft-limit-bench";
 
+/// Decoy project deployed once before the ramp. It sorts lexically BEFORE
+/// [`BENCH_PROJECT_ID`], so a crash-reboot's lexical-first auto-load picks
+/// this 3-LED idle project instead of re-loading the killer workload — the
+/// boot loop observed on the first real C6 bench (auto-load killer -> OOM ->
+/// cascading panic, ladder never quarantined) cannot recur.
+pub const BENCH_IDLE_PROJECT_ID: &str = "aaa-bench-idle";
+
+/// LED count of the decoy. Small enough to be loadable in any post-OOM state.
+const IDLE_LEDS: u32 = 3;
+
 /// How long a deployed workload gets to render its first frame. Generous: on
 /// a cold cache the device compiles the shader first.
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -68,11 +78,11 @@ const HEARTBEAT_POLL: Duration = Duration::from_millis(500);
 /// How recent the ledger's OOM has to be to explain *this* step's death.
 ///
 /// One boot ago is the expected answer: the crash is committed on the boot
-/// after it happened. Two is allowed because the crash boot re-loads the same
-/// killer project, so an intervening safe-mode boot can slip in before the
-/// bench reconnects. Anything older is a crash from an earlier step and
-/// explains nothing.
-const OOM_MAX_BOOTS_AGO: u32 = 2;
+/// after it happened. But the crash boot re-loads the same killer project,
+/// which crash-loops until the recovery ladder quarantines it (observed: 2-3
+/// extra crash boots on the C6), so the window covers the ladder. Anything
+/// older is a crash from an earlier step and explains nothing.
+const OOM_MAX_BOOTS_AGO: u32 = 5;
 
 /// Console line prefix the firmware prints with the OOM byte counts. The
 /// numbers never reach the wire (only the cause does), so this is the only
@@ -158,6 +168,11 @@ async fn run_bench_async(plan: BenchPlan) -> Result<BenchOutcome> {
         hello.proto
     );
 
+    {
+        let mut client = LpClient::new(session.client_io());
+        deploy_idle_decoy(&mut client, &plan.endpoint).await?;
+    }
+
     let result = ramp(&session, &plan).await;
     let _ = session.close().await;
 
@@ -223,7 +238,7 @@ async fn ramp(session: &DeviceSession, plan: &BenchPlan) -> Result<(Vec<BenchSte
             }
             Err(candidate) => {
                 println!("lost the device ({candidate:#})");
-                let verdict = confirm_death(session, &candidate).await?;
+                let verdict = confirm_death(session, &plan.port, &candidate).await?;
                 client = LpClient::new(session.client_io());
                 match verdict {
                     DeathVerdict::Oom { boots_ago } => {
@@ -248,6 +263,31 @@ async fn ramp(session: &DeviceSession, plan: &BenchPlan) -> Result<(Vec<BenchSte
             }
         }
     }
+}
+
+/// Deploy the decoy (see [`BENCH_IDLE_PROJECT_ID`]) and prove it runs — it
+/// is what every crash-reboot will auto-load for the rest of the run.
+async fn deploy_idle_decoy<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    endpoint: &HwEndpointSpec,
+) -> Result<()> {
+    let workload = BenchWorkload {
+        led_count: IDLE_LEDS,
+        endpoint: endpoint.clone(),
+    };
+    let files: Vec<ProjectDeployFile> = workload
+        .files()?
+        .into_iter()
+        .map(|file| ProjectDeployFile::new(file.name, file.contents.into_bytes()))
+        .collect();
+    let handle = client
+        .deploy_project_files(BENCH_IDLE_PROJECT_ID, files)
+        .await
+        .map_err(|error| anyhow!("{error}"))
+        .context("deploying the idle decoy")?
+        .into_value();
+    wait_for_project_running(client, handle, RUN_TIMEOUT).await?;
+    Ok(())
 }
 
 /// One step: deploy, wait for a frame, settle. Any failure is a candidate
@@ -308,14 +348,33 @@ async fn settle<Io: ClientIo>(
     let deadline = tokio::time::Instant::now() + SETTLE;
     let mut observed = Settle::default();
 
+    // A busy device streaming console + rendering can miss one response
+    // deadline without being dead (observed live: a single 10 s timeout at
+    // 400 LEDs on a board that was rendering at 28 fps). Only consecutive
+    // failures count as a candidate death.
+    const MAX_CONSECUTIVE_POLL_FAILURES: u32 = 3;
+    let mut poll_failures = 0u32;
+
     while tokio::time::Instant::now() < deadline {
         tokio::time::sleep(SETTLE_POLL).await;
-        let events = client
-            .project_read(handle, runtime_request())
-            .await
-            .map_err(|error| anyhow!("{error}"))
-            .context("polling runtime status while settling")?
-            .into_value();
+        let events = match client.project_read(handle, runtime_request()).await {
+            Ok(response) => {
+                poll_failures = 0;
+                response.into_value()
+            }
+            Err(error) => {
+                poll_failures += 1;
+                if poll_failures >= MAX_CONSECUTIVE_POLL_FAILURES {
+                    return Err(anyhow!("{error}")).context(format!(
+                        "polling runtime status while settling                          ({poll_failures} consecutive failures)"
+                    ));
+                }
+                eprintln!(
+                    "       settle poll failure {poll_failures}/{MAX_CONSECUTIVE_POLL_FAILURES}                      (tolerated): {error}"
+                );
+                continue;
+            }
+        };
 
         for event in events {
             match event {
@@ -358,8 +417,38 @@ enum DeathVerdict {
 }
 
 /// Reconnect after a candidate death and ask the device what happened.
-async fn confirm_death(session: &DeviceSession, candidate: &anyhow::Error) -> Result<DeathVerdict> {
-    reconnect(session)
+///
+/// The whole exchange retries: between our reconnect and our question the
+/// device may crash again (it auto-loads the killer project until the
+/// recovery ladder quarantines it — 2-3 boots on the C6), which surfaces as
+/// a transport timeout mid-query. Each cycle waits out one more boot.
+async fn confirm_death(
+    session: &DeviceSession,
+    port: &str,
+    candidate: &anyhow::Error,
+) -> Result<DeathVerdict> {
+    const CONFIRM_CYCLES: u32 = 5;
+    let mut last: Option<anyhow::Error> = None;
+    for cycle in 1..=CONFIRM_CYCLES {
+        match confirm_death_once(session, port, candidate).await {
+            Ok(verdict) => return Ok(verdict),
+            Err(error) => {
+                eprintln!("       death-confirmation cycle {cycle}/{CONFIRM_CYCLES}: {error:#}");
+                last = Some(error);
+            }
+        }
+    }
+    Err(last.unwrap()).with_context(|| {
+        format!("confirming a candidate death after {CONFIRM_CYCLES} cycles: {candidate:#}")
+    })
+}
+
+async fn confirm_death_once(
+    session: &DeviceSession,
+    port: &str,
+    candidate: &anyhow::Error,
+) -> Result<DeathVerdict> {
+    reconnect(session, port)
         .await
         .with_context(|| format!("recovering from a candidate death: {candidate:#}"))?;
 
@@ -396,9 +485,17 @@ async fn confirm_death(session: &DeviceSession, candidate: &anyhow::Error) -> Re
 
 /// Rebuild the link, retrying: a board that just OOMed auto-loads the same
 /// project on the next boot and can take a few boots to reach safe mode.
-async fn reconnect(session: &DeviceSession) -> Result<()> {
+///
+/// A native-USB chip that crashes hard also drops OFF the bus and
+/// re-enumerates seconds later — observed on the first real XIAO-C6 bench:
+/// the port path vanished (`No such file or directory`) and returned after
+/// the naive retries were spent. So before each attempt, wait for the port
+/// path to exist again (bounded), and never burn an attempt on a
+/// still-absent device file.
+async fn reconnect(session: &DeviceSession, port: &str) -> Result<()> {
     let mut last = String::new();
     for attempt in 1..=RECONNECT_ATTEMPTS {
+        wait_for_port_path(port).await;
         match session.reconnect().await {
             Ok(state) if state.is_ready() => return Ok(()),
             Ok(state) => {
@@ -411,6 +508,22 @@ async fn reconnect(session: &DeviceSession) -> Result<()> {
         eprintln!("       reconnect attempt {attempt}/{RECONNECT_ATTEMPTS}: {last}");
     }
     bail!("the device did not come back after {RECONNECT_ATTEMPTS} reconnects: {last}")
+}
+
+/// Poll (bounded) for a serial device file to re-appear after a USB
+/// re-enumeration. Returns regardless once the bound is spent — the caller's
+/// reconnect produces the real error message if the device stayed gone.
+async fn wait_for_port_path(port: &str) {
+    const REENUMERATION_BOUND: std::time::Duration = std::time::Duration::from_secs(30);
+    const POLL: std::time::Duration = std::time::Duration::from_millis(500);
+    let deadline = std::time::Instant::now() + REENUMERATION_BOUND;
+    while !std::path::Path::new(port).exists() {
+        if std::time::Instant::now() >= deadline {
+            eprintln!("       {port} still absent after {REENUMERATION_BOUND:?}");
+            return;
+        }
+        tokio::time::sleep(POLL).await;
+    }
 }
 
 /// Poll cheap requests until a heartbeat arrives; heartbeats are unsolicited
