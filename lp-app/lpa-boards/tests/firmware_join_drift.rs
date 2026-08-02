@@ -20,23 +20,18 @@ use lpa_boards::{
 /// Empty means the board runs nothing today — `expected_no_build_reason`
 /// records why.
 const EXPECTED_COMPATIBILITY: &[(&str, &[&str])] = &[
-    ("domraem/dom-z-102", &[]),
+    ("domraem/dom-z-102", &["esp32v3-4mb"]),
     ("espressif/esp32-c6-devkitc-1", &["esp32c6-4mb"]),
-    ("espressif/esp32-devkitc-v4", &[]),
+    ("espressif/esp32-devkitc-v4", &["esp32v3-4mb"]),
     ("espressif/esp32-s3-devkitc-1", &["esp32s3-8mb"]),
-    ("quinled/dig-uno", &[]),
+    ("quinled/dig-uno", &["esp32v3-4mb"]),
     ("seeed/xiao-esp32-c6", &["esp32c6-4mb"]),
     ("seeed/xiao-esp32-s3-plus", &["esp32s3-8mb"]),
 ];
 
-/// Why the boards above run nothing. Every one of them is a classic ESP32
-/// awaiting the `fw-esp32v3` build def (PR #239) — when it lands, this list
-/// empties and `EXPECTED_COMPATIBILITY` gains `esp32v3-*` entries.
-const EXPECTED_NO_BUILD: &[(&str, NoBuildReason)] = &[
-    ("domraem/dom-z-102", NoBuildReason::NoBuildForChip),
-    ("espressif/esp32-devkitc-v4", NoBuildReason::NoBuildForChip),
-    ("quinled/dig-uno", NoBuildReason::NoBuildForChip),
-];
+/// Why a board runs nothing. Empty since `fw-esp32v3`'s build def landed:
+/// every checked-in board now computes at least one compatible build.
+const EXPECTED_NO_BUILD: &[(&str, NoBuildReason)] = &[];
 
 fn builds_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lp-fw/builds")
