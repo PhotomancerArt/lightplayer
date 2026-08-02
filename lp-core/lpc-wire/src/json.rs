@@ -218,6 +218,7 @@ mod ser_write_json_tests {
                     reset_reason: "watchdog-reset".to_string(),
                     boot_count: 4,
                     safe_mode: false,
+                    output_clamp: None,
                     last_crash: Some(crate::server::CrashSummaryWire {
                         cause: "watchdog".to_string(),
                         path: "boot/node:nodes/fire".to_string(),

@@ -1,0 +1,36 @@
+[build]
+target = "xtensa-esp32-none-elf"
+
+[target.xtensa-esp32-none-elf]
+# `--partition-table` and `--flash-size` are not optional, mirroring
+# fw-esp32s3's runner comment: without `--partition-table`, espflash silently
+# substitutes a default table whose factory partition is 1 MB; without
+# `--flash-size`, espflash defaults the image header's flash-size field to
+# 4 MB regardless of the physical chip; the bootloader validates the
+# partition table against that header, not the chip. This board's table
+# genuinely is the 4 MB shape (see `partitions.csv`), so `--flash-size 4mb`
+# should match, but naming it explicitly still guards against a mis-flashed
+# board reporting a confusing "partition invalid" boot-loop instead of espflash
+# refusing up front.
+runner = "espflash flash --chip esp32 --partition-table partitions.csv --flash-size 4mb --monitor --after hard-reset"
+rustflags = [
+  # The Xtensa target links through xtensa-esp32-elf-gcc (GNU ld), so linker
+  # scripts are passed with -Wl, same as the S3's xtensa-esp32s3-elf-gcc path.
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+
+  # Abort-tier posture (ADR 2026-07-29-per-chip-fw-toolchains), mirroring
+  # fw-esp32s3: panic=abort, no unwinding, no __eh_frame machinery. P1 does
+  # not yet carry the lp-recovery RTC ledger fw-esp32s3 pairs this with (see
+  # src/main.rs) — the panic handler here is print-and-reset only — but the
+  # compiler-level posture is the same so a later phase can add the ledger
+  # without an ABI-level rewrite.
+  "-C", "panic=abort",
+]
+
+[env]
+ESP_LOG = "info"
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem", "optimize_for_size"]

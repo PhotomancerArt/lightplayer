@@ -52,7 +52,10 @@ pub fn handle_fwcheck(cli: FwcheckCli) -> Result<()> {
             Ok(())
         }
         FwcheckCommand::Port(args) => {
-            println!("{}", port::resolve_esp32_port(args.port.as_deref())?);
+            println!(
+                "{}",
+                port::resolve_esp32_port(args.port.as_deref(), args.chip.as_deref())?
+            );
             Ok(())
         }
         FwcheckCommand::Run(args) => run_check(args),
@@ -92,7 +95,9 @@ fn run_esp32c6(check: FwCheckConfig, args: &FwcheckRunArgs) -> Result<()> {
         );
     }
     let root = std::env::current_dir().context("current directory")?;
-    let port = port::resolve_esp32_port(args.port.as_deref())?;
+    // This runner is C6-specific, so the chip filter is implied: with several
+    // boards on the desk, resolution probes for the C6 instead of bailing.
+    let port = port::resolve_esp32_port(args.port.as_deref(), Some("esp32c6"))?;
     let trace = trace_dir::create_trace_dir("esp32c6", check.trace_slug, args.note.as_deref())?;
     let features = features_for_esp32(check);
     let style = Style::detect();
@@ -138,7 +143,7 @@ fn run_esp32c6_demo(args: &FwcheckDemoArgs) -> Result<()> {
     let project_dir = resolve_project_dir(&root, &args.project)?;
     let (project_uid, _project_name) = validation::validate_local_project(&project_dir)?;
     let project_slug = slug_from_project_dir(&project_dir);
-    let port = port::resolve_esp32_port(args.port.as_deref())?;
+    let port = port::resolve_esp32_port(args.port.as_deref(), Some("esp32c6"))?;
     let trace = trace_dir::create_trace_dir(
         "esp32c6",
         &format!("demo-{project_slug}"),

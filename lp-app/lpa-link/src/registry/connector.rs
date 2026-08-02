@@ -62,6 +62,45 @@ impl LinkConnector {
             _ => None,
         }
     }
+
+    /// Ask whether a ROM/stub bootloader is listening, and which chip it is.
+    ///
+    /// **Reboots the device** — the esptool SYNC handshake drives DTR/RTS to
+    /// enter download mode, and on USB-Serial-JTAG that reset drops USB
+    /// enumeration. Callers must hold the wire exclusively and rebuild
+    /// afterwards; `DeviceSession::probe_link_mode` does both.
+    ///
+    /// `Ok(None)` = a bootloader answered but did not name its chip.
+    /// `Err` = nothing answered, which does NOT prove the device is absent —
+    /// it may simply be running the app.
+    ///
+    /// Providers with no bootloader concept (sim runtimes, host processes)
+    /// report this as unsupported rather than pretending to answer.
+    pub(crate) async fn probe_target(
+        &self,
+        session_id: &LinkSessionId,
+        events: LinkManagementEventSink,
+    ) -> Result<Option<String>, LinkError> {
+        // Only the host provider surfaces probe progress as management
+        // events; the browser provider collects its logs into the probe
+        // result, and the rest have no bootloader to probe. Which arms exist
+        // is feature-dependent, so bind it unconditionally.
+        let _ = &events;
+        match self {
+            Self::Fake(provider) => provider.probe_target(session_id).await,
+            #[cfg(feature = "host-process")]
+            Self::HostProcess(_) => Err(LinkError::unsupported("probe_target")),
+            #[cfg(feature = "host-serial-esp32")]
+            Self::HostSerialEsp32(provider) => provider.probe_target(session_id, events).await,
+            #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+            Self::BrowserWorker(_) => Err(LinkError::unsupported("probe_target")),
+            #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+            Self::BrowserSerialEsp32(provider) => provider
+                .probe_target_for_session(session_id)
+                .await
+                .map(|result| result.chip_name),
+        }
+    }
 }
 
 impl LinkProvider for LinkConnector {

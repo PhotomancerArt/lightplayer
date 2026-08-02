@@ -5,7 +5,14 @@
 #   factory 6 MB  @ 0x010000 .. 0x610000
 #   lpfs    1.5 MB @ 0x610000 .. 0x790000
 #   end 0x790000 of 0x800000 — 448 KB slack
-nvs,      data,  nvs,     0x9000,   0x6000,
+#
+# bootctl carries a flash-persisted instruction to the next boot (lp-bootctl),
+# carved from nvs exactly as on the C6: the LOW region (nvs/bootctl/phy_init)
+# is identical on every board, so lp-bootctl's hardcoded offset holds even
+# though the tables diverge above 0x10000 per the S3's 8 MB floor.
+# See docs/adr/2026-07-30-boot-control-sector.md.
+nvs,      data,  nvs,     0x9000,   0x5000,
+bootctl,  data,  undefined, 0xe000, 0x1000,
 phy_init, data,  phy,     0xf000,   0x1000,
 factory,  app,   factory, 0x10000,  0x600000,
 lpfs,     data,  spiffs,  0x610000, 0x180000,

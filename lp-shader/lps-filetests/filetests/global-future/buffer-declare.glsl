@@ -36,6 +36,7 @@ float test_declare_buffer_array() {
 // as the @unsupported entries above, not an f32-specific failure.
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_buffer_array() ~= 66.0
 
 vec4 test_declare_buffer_structured() {
@@ -54,6 +55,7 @@ vec4 test_declare_buffer_structured() {
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_buffer_structured() ~= vec4(2.0, 2.0, 2.0, 4.0)
 
 mat4 test_declare_buffer_matrix() {
@@ -70,6 +72,7 @@ mat4 test_declare_buffer_matrix() {
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_buffer_matrix() ~= mat4(2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0)
 
 int test_declare_buffer_int_array() {
@@ -87,6 +90,7 @@ int test_declare_buffer_int_array() {
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_buffer_int_array() == 60
 
 float test_declare_buffer_single() {
@@ -105,4 +109,5 @@ float test_declare_buffer_single() {
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // @unsupported(rv32lpn.f32)
+// @unsupported(xtlpn.f32)
 // run: test_declare_buffer_single() ~= 5.14

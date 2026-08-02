@@ -5,13 +5,16 @@
 //!
 //! # Where this sits in the value chain
 //!
-//! `brightness -> gamma -> POWER SCALE -> colour order`
+//! `gamma -> brightness -> POWER SCALE -> colour order`
 //!
 //! The scale lands **after** gamma, and that ordering is load-bearing. Gamma is
 //! nonlinear: scaling its *input* by `s` changes the emitted duty by roughly
 //! `s^2.2`, so a scale meant to shed 20% would shed nearly half. Applied after
 //! gamma, emitted duty is linear in `s`, which is what lets a scale derived
-//! from the budget actually land on it.
+//! from the budget actually land on it. Brightness — itself a linear
+//! post-gamma scale for the same physical reason — lands *before* the power
+//! pass, so the accumulated demand is the duty the frame actually asks to
+//! emit.
 //!
 //! # Demand, not emission
 //!
@@ -78,7 +81,8 @@ impl PowerPass {
 
     /// Record one channel's demand and return its limited value.
     ///
-    /// Call with the post-gamma value, immediately before writing it out.
+    /// Call with the post-gamma, post-brightness value, immediately before
+    /// writing it out.
     #[inline]
     pub(crate) fn channel(&mut self, value: u16) -> u16 {
         if !self.enabled {

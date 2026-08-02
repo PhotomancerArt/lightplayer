@@ -408,6 +408,14 @@ impl RuntimeSession {
             .unwrap_or_default()
     }
 
+    /// The latest heartbeat-reported recovery status from this session's
+    /// attached client (safe-mode clamp evidence for the device card).
+    pub fn recovery_status(&self) -> Option<&lpc_wire::server::RecoveryStatus> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::recovery_status)
+    }
+
     /// Drain device-console lines buffered by this session's event sink
     /// (device sessions; the sim buffers nothing here).
     pub fn take_device_console_logs(&mut self) -> Vec<UiLogDraft> {

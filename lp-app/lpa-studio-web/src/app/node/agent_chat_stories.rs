@@ -430,14 +430,17 @@ fn model_chip_populated() -> Element {
             UiModelOption {
                 id: "claude-sonnet-5".to_string(),
                 label: Some("Claude Sonnet 5".to_string()),
+                detail: None,
             },
             UiModelOption {
                 id: "claude-haiku-4".to_string(),
                 label: Some("Claude Haiku 4".to_string()),
+                detail: None,
             },
             UiModelOption {
                 id: "claude-opus-5".to_string(),
                 label: Some("Claude Opus 5".to_string()),
+                detail: None,
             },
         ],
         loading: false,
