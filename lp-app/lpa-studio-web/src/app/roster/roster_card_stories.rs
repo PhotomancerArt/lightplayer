@@ -634,7 +634,7 @@ fn op_overlay_awaiting_device() -> Element {
 }
 
 #[story(
-    description = "The op flow's Failed phase (state-flow model §2 I4): the error in the terminal and ONE exit to the nearest stable state — no in-place Retry, no silent fallback, no refresh."
+    description = "The op flow's Failed phase (state-flow model §2 I4): the error in the terminal and ONE exit to the nearest stable state — no in-place Retry, no silent fallback, no refresh. \"Copy details\" puts the whole context (error, device state, chip, board choice, running build, console tail) on the clipboard for an agent or a bug report; it sits quieter than the exit, which stays the one way out."
 )]
 fn op_overlay_failed() -> Element {
     sheet(vec![rsx! {

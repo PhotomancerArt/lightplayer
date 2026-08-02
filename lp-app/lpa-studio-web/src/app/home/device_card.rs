@@ -956,9 +956,35 @@ pub(crate) fn DeviceCard(
                 // body (the title bar above is spared) — a heavy op takes
                 // over the card here, never an app-level modal.
                 if let Some(op) = card.ui.op.as_ref() {
-                    {card_op_overlay(op, &card.console_tail, &card_key, on_action)}
+                    {card_op_overlay(op, &card, &card_key, on_action)}
                 }
             }
+        }
+    }
+}
+
+/// "Copy details" on a failed op: the whole failure context — error,
+/// device state, chip, board choice, running build, console tail — as one
+/// pasteable block, for handing to an agent or a bug report.
+///
+/// The failure overlay already SHOWS this material, but showing it and
+/// being able to relay it are different problems: transcribing an error
+/// plus a dozen console lines by hand is where bug reports lose their
+/// evidence.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn CopyDetailsButton(report: String) -> Element {
+    let mut copied = use_signal(|| false);
+    rsx! {
+        button {
+            class: "ux-card-op-copy",
+            r#type: "button",
+            title: "Copy the error, device state, and console tail",
+            onclick: move |_| {
+                crate::clipboard::write_text(&report);
+                copied.set(true);
+            },
+            if copied() { "Copied ✓" } else { "Copy details" }
         }
     }
 }
@@ -972,14 +998,19 @@ pub(crate) fn DeviceCard(
 /// tabs and blurs the body; never an elevated dialog.
 fn card_op_overlay(
     op: &lpa_studio_core::CardOp,
-    tail: &[UiLogEntry],
+    card: &UiDeviceCard,
     card_key: &str,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     use lpa_studio_core::CardOpPhase;
+    let tail = &card.console_tail;
     if let CardOpPhase::Failed { error, exit_label } = &op.phase {
         let card_key = card_key.to_string();
         let exit_label = exit_label.clone();
+        // Built EAGERLY, while the failure's context is still on the card:
+        // the report has to describe the moment it failed, not whatever
+        // the card has drifted to by the time someone clicks.
+        let report = crate::app::home::failure_report::failure_report(card, op);
         return rsx! {
             div { class: "ux-card-op", role: "alert",
                 span { class: "ux-card-op-label ux-card-op-label-failed", "{op.label}" }
@@ -990,7 +1021,10 @@ fn card_op_overlay(
                         div { class: console_line_class(entry.level), "{entry.message}" }
                     }
                 }
-                div { class: "tw:flex tw:justify-end",
+                div { class: "tw:flex tw:items-center tw:justify-between tw:gap-2",
+                    if let Some(report) = report {
+                        CopyDetailsButton { report }
+                    }
                     button {
                         class: "ux-card-op-exit",
                         r#type: "button",
@@ -2220,13 +2254,37 @@ fn grow_button_class(push_right: bool) -> &'static str {
 
 #[cfg(test)]
 mod setup_name_tests {
-    use super::default_setup_name;
+    use super::{board_slug, chip_display, default_setup_name};
 
+    /// Sortable date first (gate round 2), then the most specific thing
+    /// known about the device.
     #[test]
     fn a_fixed_story_clock_derives_a_deterministic_utc_name() {
         assert_eq!(
-            default_setup_name(Some(1_800_000_000.0)),
-            "2027-01-15 08:00 LightPlayer"
+            default_setup_name(Some(1_800_000_000.0), "esp32c6"),
+            "2027-01-15 - esp32c6"
         );
+        assert_eq!(
+            default_setup_name(Some(1_800_000_000.0), "xiao-esp32-c6"),
+            "2027-01-15 - xiao-esp32-c6"
+        );
+    }
+
+    /// A board contributes its PRODUCT half — the vendor is noise in a
+    /// device name.
+    #[test]
+    fn board_slug_drops_the_vendor() {
+        assert_eq!(board_slug("seeed/xiao-esp32-c6"), "xiao-esp32-c6");
+        assert_eq!(board_slug("dom-z-102"), "dom-z-102");
+    }
+
+    /// The headline names the chip the way a datasheet does; anything
+    /// unrecognized still shows rather than vanishing.
+    #[test]
+    fn chip_display_is_datasheet_shaped() {
+        assert_eq!(chip_display("esp32c6"), "ESP32-C6");
+        assert_eq!(chip_display("ESP32-S3"), "ESP32-S3");
+        assert_eq!(chip_display("esp32"), "ESP32");
+        assert_eq!(chip_display("rp2040"), "RP2040");
     }
 }
