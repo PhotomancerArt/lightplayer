@@ -275,11 +275,12 @@ zero-length when their option is off.
 >    free heap with the project actually rendering — which is what the original
 >    18,128 B / 7,384 B two-point measurement did.
 >
-> Byte-precision `[mem]` logging was added on this branch so the next attempt
-> can difference the two points without ±8 B/LED of KB rounding. What is still
-> missing is a byte-precision *steady-state* readout: the heartbeat carries
-> `free_bytes` on the wire but every display of it (CLI and `[mem]` logs) is
-> KB-granular.
+> **The next attempt is otherwise unblocked.** #281 landed `[MEM] free= used=
+> largest_free=` per heartbeat on `fw-esp32v3`, which is the byte-precision
+> *steady-state* readout this needs; this branch adds byte precision to the
+> `load_project`/`stop_all_projects` brackets as well. So the recipe is: clean
+> boot, load `quad-strips-v3`, read `[MEM] free` once steady, repeat for
+> `quad60-v3`, and difference over the 120-LED step. No KB rounding either side.
 
 ### Radio, if it is ever attempted
 
