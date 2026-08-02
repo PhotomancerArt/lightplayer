@@ -293,7 +293,7 @@ impl<'a> WalkState<'a> {
                     self.walk_region(child)?;
                     if idx > 0 {
                         if let Some(anchor) = region_first_vinst(self.tree, child) {
-                            self.boundary_reload_before(anchor);
+                            self.boundary_reload_before(anchor)?;
                         }
                     }
                 }
@@ -311,7 +311,7 @@ impl<'a> WalkState<'a> {
                     // then_body's. Placing these reloads inside the else path
                     // prevents them from executing in the fallthrough path.
                     if let Some(anchor) = region_first_vinst(self.tree, *else_body) {
-                        self.boundary_reload_before(anchor);
+                        self.boundary_reload_before(anchor)?;
                     }
                 }
                 self.walk_region(*then_body)?;
@@ -319,7 +319,7 @@ impl<'a> WalkState<'a> {
                 // head's. Placing reloads inside the fallthrough path prevents
                 // them from clobbering the BrIf condition register.
                 if let Some(anchor) = region_first_vinst(self.tree, *then_body) {
-                    self.boundary_reload_before(anchor);
+                    self.boundary_reload_before(anchor)?;
                 }
                 self.walk_region(*head)?;
                 Ok(())
@@ -328,7 +328,7 @@ impl<'a> WalkState<'a> {
                 if *body != REGION_ID_NONE {
                     self.walk_region(*body)?;
                     if let Some(anchor) = region_first_vinst(self.tree, *body) {
-                        self.boundary_reload_before(anchor);
+                        self.boundary_reload_before(anchor)?;
                     }
                 }
                 Ok(())
@@ -369,14 +369,14 @@ impl<'a> WalkState<'a> {
                             continue;
                         }
                         if defs_in_loop.contains(vreg) {
-                            self.spill.get_or_assign(vreg, self.classes.of(vreg));
+                            self.spill.get_or_assign(vreg, self.classes.of(vreg))?;
                             self.loop_carried.insert(vreg);
                         }
                     }
 
                     self.walk_region(*body)?;
                     if let Some(anchor) = region_first_vinst(self.tree, *body) {
-                        self.boundary_reload_before(anchor);
+                        self.boundary_reload_before(anchor)?;
                     }
                 }
                 self.walk_region(*header)?;
@@ -458,7 +458,7 @@ impl<'a> WalkState<'a> {
     /// and insert a RELOAD edit (slot → reg) before `anchor`. The preceding
     /// region's backward walk will see the spill slot and direct its def there;
     /// the reload fills the register expected by the following region.
-    fn boundary_reload_before(&mut self, anchor: u16) {
+    fn boundary_reload_before(&mut self, anchor: u16) -> Result<(), AllocError> {
         // Snapshot into a fixed buffer (pool holds at most 32 hardware regs)
         // so the loop can mutate pool/spill/edits without a heap allocation
         // per region boundary.
@@ -473,7 +473,7 @@ impl<'a> WalkState<'a> {
         for &(preg, vreg) in &occupied[..n] {
             // The slot's class is the register's class: this reload writes
             // back into the same file the value was spilled from.
-            let slot = self.spill.get_or_assign(vreg, preg.class);
+            let slot = self.spill.get_or_assign(vreg, preg.class)?;
             self.edits.push((
                 EditPoint::Before(anchor),
                 Edit::Move {
@@ -483,6 +483,7 @@ impl<'a> WalkState<'a> {
             ));
             self.pool.free(preg);
         }
+        Ok(())
     }
 
     fn finish(mut self) -> Result<AllocOutput, AllocError> {
@@ -716,7 +717,7 @@ fn process_generic(
                 // copies a value rather than converting it.
                 let evicted = pool.alloc_fixed(preg, *src);
                 if let Some(evicted_vreg) = evicted {
-                    let slot = spill.get_or_assign(evicted_vreg, preg.class);
+                    let slot = spill.get_or_assign(evicted_vreg, preg.class)?;
                     edits.push((
                         EditPoint::After(inst_idx_u16),
                         Edit::Move {
@@ -844,11 +845,18 @@ fn process_generic(
 
         let class = classes.of(use_vreg);
         let alloc = if is_sret_ret {
-            let slot = spill.get_or_assign(use_vreg, class);
-            if let Some(preg) = pool.home(use_vreg) {
-                pool.free(preg);
+            match spill.get_or_assign(use_vreg, class) {
+                Ok(slot) => {
+                    if let Some(preg) = pool.home(use_vreg) {
+                        pool.free(preg);
+                    }
+                    Alloc::Stack(slot)
+                }
+                Err(e) => {
+                    alloc_err.get_or_insert(e);
+                    Alloc::None
+                }
             }
-            Alloc::Stack(slot)
         } else {
             match alloc_use(
                 use_vreg,
@@ -925,7 +933,7 @@ fn alloc_use(
             spill,
             edits,
             trace,
-        );
+        )?;
         Ok(Alloc::reg(new_preg))
     } else {
         let (new_preg, evicted) = pool
@@ -939,7 +947,7 @@ fn alloc_use(
             spill,
             edits,
             trace,
-        );
+        )?;
         TracePush::push_with(trace, || TraceEntry {
             vinst_idx: inst_idx,
             vinst_mnemonic: String::from("alloc"),
@@ -958,11 +966,11 @@ fn handle_eviction(
     spill: &mut SpillAlloc,
     edits: &mut Vec<(EditPoint, Edit)>,
     trace: &mut TraceSink,
-) {
+) -> Result<(), AllocError> {
     if let Some(evicted_vreg) = evicted {
         // The evicted value was living in `preg`, so its slot holds a value of
         // `preg`'s class by construction.
-        let slot = spill.get_or_assign(evicted_vreg, preg.class);
+        let slot = spill.get_or_assign(evicted_vreg, preg.class)?;
         // Emit a reload-after (regalloc2 style): the evicted vreg's DEF will
         // write directly to its spill slot.  After the current instruction
         // finishes, we reload the spilled value back into the register so it
@@ -981,6 +989,7 @@ fn handle_eviction(
             register_state: String::new(),
         });
     }
+    Ok(())
 }
 
 /// 3-step call handling algorithm.
@@ -1170,7 +1179,7 @@ fn process_call(
         }));
     }
     for (preg, vreg) in clobbered.iter() {
-        let slot = spill.get_or_assign(*vreg, preg.class);
+        let slot = spill.get_or_assign(*vreg, preg.class)?;
         pool.evict(*preg);
         clobbered_pregs.push(*preg);
         after_restores.push((
@@ -1255,7 +1264,7 @@ fn process_call(
                 .alloc(arg_vreg, arg_class)
                 .ok_or(AllocError::OutOfRegisters)?;
             if let Some(ev) = evicted {
-                let ev_slot = spill.get_or_assign(ev, new_preg.class);
+                let ev_slot = spill.get_or_assign(ev, new_preg.class)?;
                 if !ret_value_pool_regs.contains(&new_preg) {
                     after_restores.push((
                         EditPoint::After(inst_idx_u16),
@@ -1290,7 +1299,7 @@ fn process_call(
                 .alloc(arg_vreg, arg_class)
                 .ok_or(AllocError::OutOfRegisters)?;
             if let Some(ev) = evicted {
-                let ev_slot = spill.get_or_assign(ev, new_preg.class);
+                let ev_slot = spill.get_or_assign(ev, new_preg.class)?;
                 if !ret_value_pool_regs.contains(&new_preg) {
                     after_restores.push((
                         EditPoint::After(inst_idx_u16),
@@ -1392,7 +1401,7 @@ fn process_call(
         allocs[alloc_idx] = match home {
             Some(pool_reg) if !staged_over => Alloc::reg(pool_reg),
             Some(pool_reg) => {
-                let slot = spill.get_or_assign(arg_vreg, pool_reg.class);
+                let slot = spill.get_or_assign(arg_vreg, pool_reg.class)?;
                 before_arg_moves.push((
                     EditPoint::Before(inst_idx_u16),
                     Edit::Move {
