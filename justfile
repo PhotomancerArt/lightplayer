@@ -649,6 +649,12 @@ clippy-fw-esp32v3:
     # diagnostic build that has rotted by the time someone reaches for it.
     echo "clippy: --features ws281x_telemetry"
     cargo clippy --profile release-esp32v3 --features ws281x_telemetry -- --no-deps -D warnings
+    # `frame-dump` is additive for the same reason and gets the same treatment.
+    # It is the M7 FINAL-gate instrument (`scripts/m4-hardware-walk.sh --chip
+    # esp32`), reached only when someone is already debugging a pixel
+    # mismatch — precisely the moment a rotted diagnostic costs the most.
+    echo "clippy: --features frame-dump"
+    cargo clippy --profile release-esp32v3 --features frame-dump -- --no-deps -D warnings
 
 
 # `features` is a comma-separated list added to the defaults — for the app path
@@ -675,14 +681,61 @@ build-fw-esp32s3 features="":
 # the crate selects the Xtensa target, the linker flags and the espflash
 # runner, and cargo reads that file from the CWD upward — invoking from the
 # repo root would silently build for the host.
-build-fw-esp32v3:
+#
+# `features` is a comma-separated list ADDED to the defaults, same contract as
+# `build-fw-esp32s3`: today that means `frame-dump` and `ws281x_telemetry`, the
+# two additive diagnostics. The harness-style entrypoints (`radio_ram_probe`)
+# are not passed this way — they REPLACE the entrypoint and need
+# `--no-default-features`, so they have their own invocations.
+build-fw-esp32v3 features="":
     #!/usr/bin/env bash
     set -euo pipefail
     GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd {{ fw_esp32v3_dir }} && cargo build --profile release-esp32v3
+    args=(build --profile release-esp32v3)
+    if [[ -n "{{ features }}" ]]; then
+      args+=(--features "{{ features }}")
+      # Feature flips do not always retrigger the cfg-dependent codegen on this
+      # crate (the roadmap's stale-binary lesson; the Cargo.toml feature blocks
+      # carry the same warning). Touching the crate root is the cheap guarantee
+      # that `--features frame-dump` produces an image that actually has it.
+      touch {{ fw_esp32v3_dir }}/src/main.rs
+    fi
+    cd {{ fw_esp32v3_dir }} && cargo "${args[@]}"
+
+# Flash fw-esp32v3 to a connected classic ESP32 and open the serial monitor.
+#
+# ⚠️ ALWAYS pass the port. The desk classic is a DOM-Z-102 whose CH340K bridge
+# enumerates as /dev/cu.wchusbserial* with a trailing number that is only stable
+# per physical hub location, and several boards are usually on the desk bus at
+# once. Verify with `espflash board-info --port <port>` (`Chip type: esp32`) or
+# let `cargo run -q -p lp-cli -- fwcheck port --chip esp32` pick by probing.
+#
+# `--monitor-baud 921600` is not optional: `board::esp32v3::init` programs
+# UART0 at 921600 (lpc_model::DEFAULT_SERIAL_BAUD_RATE), and espflash's monitor
+# otherwise reads at 115200 and shows garbage. The ROM's own boot banner really
+# is 115200 and will look garbled in this monitor — that part is cosmetic.
+#
+# ⚠️ `espflash monitor` on its own stub-halts this board. Attach the monitor via
+# `flash --monitor`, as this recipe does, or hold the fd open by hand
+# (`exec 3<> $port; stty -f $port 921600 raw -echo clocal; cat <&3`).
+#
+# The optional second argument is passed straight to `build-fw-esp32v3`. The one
+# that matters is `frame-dump`, which makes the board print every transmitted
+# frame — `scripts/m4-hardware-walk.sh --chip esp32` flashes with it because an
+# LED cannot be diffed against a host render:
+#
+#   just flash-fw-esp32v3 /dev/cu.wchusbserial1140 frame-dump
+flash-fw-esp32v3 port="" features="": (build-fw-esp32v3 features)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32v3_elf }}
 
 # Print the directory to prepend to PATH so the chip's xtensa-*-elf-gcc
 # resolves, or fail with the fix. Prints NOTHING when the toolchain is already

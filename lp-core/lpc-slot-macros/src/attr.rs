@@ -52,6 +52,7 @@ pub(crate) enum SlotRoleAttr {
     Setting,
     Fixed,
     Debug,
+    State,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -423,6 +424,38 @@ pub(crate) fn field_role_tokens(role: SlotRoleAttr) -> TokenStream {
         SlotRoleAttr::Setting => quote::quote! { ::lpc_model::SlotRole::Setting },
         SlotRoleAttr::Fixed => quote::quote! { ::lpc_model::SlotRole::Fixed },
         SlotRoleAttr::Debug => quote::quote! { ::lpc_model::SlotRole::Debug },
+        SlotRoleAttr::State => quote::quote! { ::lpc_model::SlotRole::State },
+    }
+}
+
+/// Reject a field whose declared role and direction contradict each other.
+///
+/// `role = "state"` and `#[slot(produced)]` are two spellings of one fact and
+/// the model requires both (G2 amendment to the debug-slots taxonomy ADR:
+/// declaration beats inference, so an unmarked produced state record must be
+/// impossible). Both halves are statically visible here, so both are compile
+/// errors; runtime-assembled shapes get the same check from
+/// `SlotShape::validate_role_direction` at registration.
+pub(crate) fn check_role_direction(
+    role: Option<SlotRoleAttr>,
+    direction: FieldDirectionAttr,
+    span: proc_macro2::Span,
+) -> Result<()> {
+    let is_state = role == Some(SlotRoleAttr::State);
+    let is_produced = direction == FieldDirectionAttr::Produced;
+    match (is_state, is_produced) {
+        (true, false) => Err(syn::Error::new(
+            span,
+            "slot role \"state\" marks runtime-produced state, so the field \
+             must also declare #[slot(produced)]",
+        )),
+        (false, true) => Err(syn::Error::new(
+            span,
+            "a #[slot(produced)] field must declare role = \"state\" (or sit \
+             in a container with default_role = \"state\"): produced runtime \
+             state is a declared role, not an inference from direction",
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -506,9 +539,10 @@ fn parse_role(value: &LitStr) -> Result<SlotRoleAttr> {
         "setting" => Ok(SlotRoleAttr::Setting),
         "fixed" => Ok(SlotRoleAttr::Fixed),
         "debug" => Ok(SlotRoleAttr::Debug),
+        "state" => Ok(SlotRoleAttr::State),
         _ => Err(syn::Error::new_spanned(
             value,
-            "unsupported slot role; expected \"setting\", \"fixed\", or \"debug\"",
+            "unsupported slot role; expected \"setting\", \"fixed\", \"debug\", or \"state\"",
         )),
     }
 }

@@ -62,6 +62,11 @@ block each: a 48-word block halves into 24 words = one LED, and the classic
 ESP32's 64-word block halves into 32 words = 1⅓ LEDs. A bit cursor makes every
 half size work on every chip, and turns `blocks_per_channel` into a free tuning
 knob — more blocks per channel means fewer channels but a lower interrupt rate.
+Since the board manifest became the sole authority on channel count, the knob
+turns itself: each chip backend computes the plan at driver init from the
+number of declared channels (`BlockPlan::for_channels`, published through a
+`SharedBlockPlan`), so a one-strip board automatically gets the whole buffer
+and the widest refill margin the chip can give.
 
 ### `blocks_per_channel` and the interrupt rate
 

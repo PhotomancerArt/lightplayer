@@ -9,7 +9,8 @@ use crate::UiAction;
 /// edit-state join `DirtySummary` counting uses, so the list length per
 /// [`UiPendingEditPhase`] equals the summary's bucket counts by construction
 /// (one entry per buffer/overlay address, never per slot row — a removed map
-/// entry with no surviving row is still listed). Entries carry the saved
+/// entry with no surviving row is still listed; a Debug override counts in no
+/// bucket and is likewise listed nowhere). Entries carry the saved
 /// (base) value they replace where the mirror knows it ([`Self::old_value`]
 /// — editing-model ADR follow-up (b), display half).
 #[derive(Clone, Debug, PartialEq)]
@@ -93,12 +94,14 @@ pub enum UiPendingEditKind {
 
 /// Save-panel section for a pending edit — the entry-level mirror of the
 /// [`crate::DirtySummary`] buckets.
+///
+/// There is no live/transient section (D7): a Debug override is not dirty, so
+/// it never reaches the change list at all — the controller drops entries
+/// whose summary is clean.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiPendingEditPhase {
     /// Written to project files on save.
     Persisted,
-    /// Live-only (transient persistence); survives save as a pending edit.
-    Live,
     /// The buffered edit failed (rejected or transport error).
     Failed {
         /// Human-readable rejection or transport reason.

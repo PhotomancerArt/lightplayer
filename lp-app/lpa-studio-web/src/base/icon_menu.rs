@@ -60,6 +60,7 @@ pub(crate) fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
         IconMenuTone::Good => "ux-popover-chrome-good",
         IconMenuTone::Working => "ux-popover-chrome-working",
         IconMenuTone::Live => "ux-popover-chrome-live",
+        IconMenuTone::Debug => "ux-popover-chrome-debug",
         IconMenuTone::Warning => "ux-popover-chrome-warning",
         IconMenuTone::Attention => "ux-popover-chrome-attention",
         IconMenuTone::Error => "ux-popover-chrome-error",
@@ -76,6 +77,10 @@ pub enum IconMenuTone {
     Working,
     /// Live-only (transient) edit state, blue.
     Live,
+    /// **Debug** territory (D9): attention-orange + hazard stripes. Distinct
+    /// from [`Self::Attention`] (flat orange = device health) and from
+    /// [`Self::Live`] (blue = live values). Look defined in `style.css`.
+    Debug,
     /// Unsaved/edit state, yellow (node vocabulary).
     Warning,
     /// Health-attention state, orange (device/roster vocabulary).
@@ -133,6 +138,9 @@ fn icon_menu_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Live, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-border tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground tw:transition-colors tw:hover:border-status-live-foreground"
         }
+        (IconMenuTone::Debug, _) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:p-0 tw:transition-colors lp-debug-icon-chrome"
+        }
         (IconMenuTone::Warning, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground tw:transition-colors tw:hover:border-status-warning-foreground"
         }
@@ -174,6 +182,9 @@ fn icon_menu_hover_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Live, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-foreground tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground tw:transition-colors"
         }
+        (IconMenuTone::Debug, _) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:p-0 tw:transition-colors lp-debug-icon-chrome lp-debug-icon-chrome--hover"
+        }
         (IconMenuTone::Warning, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-foreground tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground tw:transition-colors"
         }
@@ -208,6 +219,9 @@ fn icon_menu_open_class(tone: IconMenuTone) -> &'static str {
         }
         IconMenuTone::Live => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-border tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground"
+        }
+        IconMenuTone::Debug => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:p-0 tw:transition-colors lp-debug-icon-chrome"
         }
         IconMenuTone::Warning => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground"

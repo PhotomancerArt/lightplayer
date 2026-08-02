@@ -818,17 +818,34 @@ mod tests {
         );
 
         // Mutate the overlay at revision 9; the next read must report it.
-        let fs = lpfs::LpFsMemory::new();
+        // `mutate` validates like the batch path (W9), so the edit must be a
+        // real one: load a minimal project root and stage a value on `name`,
+        // ProjectDef's one writable authored field.
+        let mut fs = lpfs::LpFsMemory::new();
+        fs.write_file_mut(
+            lpfs::LpPath::new("/project.json"),
+            br#"{"kind": "Project", "format": 2}"#,
+        )
+        .expect("write project root");
         let ctx = lpc_registry::ParseCtx {
             shapes: h.engine.slot_shapes(),
         };
+        h.registry
+            .load_root(
+                &fs,
+                lpfs::LpPath::new("/project.json"),
+                Revision::new(8),
+                &ctx,
+            )
+            .expect("load project root");
         h.registry
             .mutate(
                 &fs,
                 lpc_model::MutationOp::PutSlotEdit {
                     artifact: lpc_model::ArtifactLocation::file("/project.json"),
-                    edit: lpc_model::SlotEdit::ensure_present(
-                        lpc_model::SlotPath::parse("nodes[clock]").expect("slot path"),
+                    edit: lpc_model::SlotEdit::assign_value(
+                        lpc_model::SlotPath::parse("name.some").expect("slot path"),
+                        lpc_model::LpValue::String(alloc::string::String::from("overlay probe")),
                     ),
                 },
                 Revision::new(9),

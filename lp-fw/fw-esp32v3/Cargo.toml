@@ -96,6 +96,29 @@ server = [
 #   cargo build --profile release-esp32v3 --features ws281x_telemetry
 ws281x_telemetry = []
 
+# Print every transmitted WS281x frame to the serial log: one full hex dump per
+# channel after open/resize, then a periodic checksum and lit-LED count. This is
+# what `scripts/m4-hardware-walk.sh --chip esp32` diffs against the host oracle
+# — the M7 FINAL-gate criterion "renders bit-exactly vs the host oracle", which
+# no earlier classic milestone measured (they measured timing and capacity).
+#
+# A byte-for-byte port of fw-esp32s3's feature of the same name, including its
+# emitted line shapes: the walk script and
+# `lp-app/lpa-server/tests/shader_oracle_frame.rs` must not need a per-chip
+# branch. See `src/output/rmt/frame_dump.rs`.
+#
+# Opt-in because hex-formatting frames costs render time and floods the serial
+# link the transport runs on — and on this chip that link is a real 921600-baud
+# UART0 wire, not the S3's USB-Serial-JTAG, so the volume discipline is tighter
+# rather than looser. Deliberately NOT a `test_*` feature: it decorates the app
+# path rather than replacing it, so a frame-dump build is the real firmware plus
+# a transcript. Additive and orthogonal to `ws281x_telemetry`.
+#
+# Build (touch src/main.rs first if flipping features — same caveat the probe
+# features above carry):
+#   cargo build --profile release-esp32v3 --features frame-dump
+frame-dump = []
+
 # M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
 # heap deltas at each stage. Build:
 #   cargo build --profile release-esp32v3 --no-default-features \
@@ -211,6 +234,14 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 # `panic-recovery` is absent on purpose: this chip is abort tier
 # (ADR 2026-07-29-per-chip-fw-toolchains), and that feature pulls `unwinding`,
 # which is the C6's tier and has no Xtensa backend.
+#
+# `resolver-payload-cache` is absent on purpose, and it is the one gate this
+# image drops for memory rather than for flash. With it on, the resolver keeps
+# every resolved slot payload resident: 8,368 B on `quad-strips-v3`, which on a
+# 110 KB arena is ~90 LEDs of capacity, in exchange for 13 ms of frame time.
+# Off, the route and intern caches still run — 58 ms/frame here against 69 ms
+# before any of it existed, so most of the speed survives.
+# `docs/defects/2026-08-01-classic-heap-regression-after-f32-merge.md`.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-shader",
     "node-fixture",

@@ -43,7 +43,6 @@ pub(crate) fn NodeDetailPopover(
         .filter(|edit| edit.node_path == header.path)
         .collect();
     let unsaved_entries = entries_in(&own_edits, PendingEditBucket::Persisted);
-    let live_entries = entries_in(&own_edits, PendingEditBucket::Live);
     let failed_entries = entries_in(&own_edits, PendingEditBucket::Failed);
     // The header path is the node address the copy op needs; a header
     // whose path does not parse (never in production) simply offers no
@@ -93,14 +92,6 @@ pub(crate) fn NodeDetailPopover(
                     meta: dirty.persisted.to_string(),
                     tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
                     PendingEditList { entries: unsaved_entries, on_action: forward }
-                }
-            }
-            if dirty.transient > 0 {
-                DetailSection {
-                    title: "Live (transient)",
-                    meta: dirty.transient.to_string(),
-                    tint: bucket_section_tint(PendingEditBucket::Live, dirty.transient),
-                    PendingEditList { entries: live_entries, on_action: forward }
                 }
             }
             if dirty.failed > 0 {

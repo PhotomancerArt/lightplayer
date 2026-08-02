@@ -6,7 +6,8 @@
 //! plus overlay mirror keep the DTO value stable until the server acks.
 
 use lpa_studio_core::{
-    ControllerId, LpValue, ProjectController, ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction,
+    ControllerId, LpValue, NodeClearDebugOp, ProjectController, ProjectNodeAddress,
+    ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction,
 };
 
 /// Build the `SetValue` action a field dispatches on input.
@@ -17,12 +18,37 @@ pub(crate) fn slot_set_value_action(address: ProjectSlotAddress, value: LpValue)
     )
 }
 
-/// Build the per-slot revert action (labelled "Reset" on live rows).
+/// Build the per-slot revert action for a persisted (unsaved) edit.
 pub(crate) fn slot_revert_action(address: ProjectSlotAddress) -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         SlotEditOp::Revert { address },
     )
+}
+
+/// Build the per-value **Clear** action for a debug (live-only) override
+/// (D7): the same `RemoveSlotEdit` mechanism as revert, under the verb debug
+/// values use — for a Debug slot the authored default IS the shape default.
+pub(crate) fn slot_clear_action(address: ProjectSlotAddress) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::Clear { address },
+    )
+}
+
+/// Build the **per-node** Clear action ([`NodeClearDebugOp`], D7's node
+/// scope): every Debug override under one node's subtree goes, persisted
+/// edits stay. The Debug section header is its only entry point — a node's
+/// debug territory owns its own reset.
+///
+/// `None` when the card's path is not a parsable node address (story
+/// fixtures with stand-in paths), so the header simply renders no Clear.
+pub(crate) fn node_clear_debug_action(node: &str) -> Option<UiAction> {
+    let node = ProjectNodeAddress::parse(node).ok()?;
+    Some(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        NodeClearDebugOp { node },
+    ))
 }
 
 /// Build the structural add gesture (map entry add, option on, enum variant

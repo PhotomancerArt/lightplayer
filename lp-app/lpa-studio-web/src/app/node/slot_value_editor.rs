@@ -2,10 +2,10 @@
 //!
 //! Every scalar, vector, and matrix value kind resolves to an editor when
 //! the slot is editable and addressed, and the specialized hints (`Xy`,
-//! `Dimensions`, `Affine2d`) resolve to their rich editors (M4). Composite
-//! bodies (`Array`, `Struct`, `Enum`) stay with the composite gesture
-//! machinery (M3 P4); `Resource` and `Product` references are explicitly
-//! read-only displays.
+//! `Dimensions`, `Affine2d`, `Power`) resolve to their rich editors (M4).
+//! Composite bodies (`Array`, `Struct`, `Enum`) stay with the composite
+//! gesture machinery (M3 P4) unless a specialized hint claims the struct;
+//! `Resource` and `Product` references are explicitly read-only displays.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -14,9 +14,10 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::slot_dimensions_field::dimensions_parts;
+use crate::app::node::slot_power_field::power_parts;
 use crate::app::node::{
     Affine2dSlotField, BoolSlotField, DimensionsSlotField, DropdownSlotField, FloatSlotField,
-    IntSlotField, MatrixSlotField, SliderSlotField, StringSlotField, UIntSlotField,
+    IntSlotField, MatrixSlotField, PowerSlotField, SliderSlotField, StringSlotField, UIntSlotField,
     VectorSlotField, XySlotField,
 };
 
@@ -62,6 +63,15 @@ pub fn SlotValueEditor(
                 on_action,
                 NumberBounds::default(),
             ),
+        },
+        UiSlotEditorHint::Power => match &value.kind {
+            kind if power_parts(kind).is_some() => {
+                let kind = kind.clone();
+                rsx! {
+                    PowerSlotField { kind, state, address, on_action }
+                }
+            }
+            _ => fallback_value(value, state),
         },
         UiSlotEditorHint::Affine2d => match value.kind.clone() {
             kind @ UiSlotValueKind::Mat3x3(_) => rsx! {
