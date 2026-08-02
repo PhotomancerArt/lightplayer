@@ -96,6 +96,22 @@
   .lockup .word { font-size: 13px; font-weight: 700; letter-spacing: .01em; color: var(--strong); }
   .lockup .word .lite { color: var(--heading); font-weight: 600; }
 
+  /* rejected-concepts strip (kept small for contrast) */
+  .rejrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; max-width: 1400px; }
+  .rejchip {
+    appearance: none; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border-muted); background: var(--surface-muted); border-radius: 8px;
+    padding: 6px 10px; color: var(--dim); font: 500 11px/1.3 var(--sans); text-align: left;
+  }
+  .rejchip:hover { border-color: var(--border-strong); color: var(--subtle); }
+  .rejchip[aria-pressed=true] { border-color: var(--accent-border); }
+  .rejchip svg { color: var(--subtle); flex: none; }
+  .rejchip b { color: var(--subtle); font-weight: 700; margin-right: 2px; }
+  .rejnote { font-size: 11.5px; color: var(--dim); max-width: 1400px; margin: 10px 0 0;
+    padding: 9px 12px; border: 1px solid var(--border-muted); border-radius: 8px;
+    background: var(--surface-muted); line-height: 1.55; }
+  .rejnote b { color: var(--subtle); }
+
   /* ================= section 2 · bar concepts ====================== */
   .barwrap { max-width: 1400px; margin-bottom: 26px; }
   .barwrap .cap { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
@@ -392,6 +408,20 @@
         M13.3 18.3h3.2v.8h-3.2z
         M13.7 19.7h2.4v.8h-2.4z"/>
     </symbol>
+    <!-- marks I/J · play ⊃ pixel: E's WS2812 inside the play triangle.
+         square package knocked out; lens (and pads, J) added back -->
+    <symbol id="mark-i" viewBox="0 0 32 32">
+      <path fill="currentColor" fill-rule="evenodd" d="M8.6 7.4v17.2c0 1.4 1.5 2.27 2.72 1.57l14.9-8.6a1.81 1.81 0 0 0 0-3.14l-14.9-8.6C10.1 5.13 8.6 6 8.6 7.4z
+        M12.1 12.8h6v6h-6z
+        M13 15.8a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0-4.2 0z"/>
+    </symbol>
+    <symbol id="mark-j" viewBox="0 0 32 32">
+      <path fill="currentColor" fill-rule="evenodd" d="M8.6 7.4v17.2c0 1.4 1.5 2.27 2.72 1.57l14.9-8.6a1.81 1.81 0 0 0 0-3.14l-14.9-8.6C10.1 5.13 8.6 6 8.6 7.4z
+        M12.1 12.8h6v6h-6z
+        M13.15 15.8a1.95 1.95 0 1 0 3.9 0a1.95 1.95 0 1 0-3.9 0z
+        M12.4 13.1h1.1v1.1h-1.1z M16.7 13.1h1.1v1.1h-1.1z
+        M12.4 17.4h1.1v1.1h-1.1z M16.7 17.4h1.1v1.1h-1.1z"/>
+    </symbol>
 
     <!-- small ui glyphs -->
     <symbol id="i-branch" viewBox="0 0 16 16">
@@ -485,61 +515,15 @@
 </div>
 
 <!-- ==================== 1 · logo marks ==================== -->
-<h2 id="s1"><span class="n">1</span> Interim logo marks — circuit board × play</h2>
-<p class="sub">Two families: <b>A–E</b> put the play inside a circuit element; <b>F–H</b> invert it —
-  the play button is the container and the circuit element is knocked out of it.
-  Each shown at favicon (16), bar (22) and hero (56) sizes,
-  plus the wordmark lockup. Click a card to use that mark in every bar below.
-  All are single-color <b>currentColor</b> SVGs — they inherit the teal accent, recolor for
-  free, and can ship in-repo like the board diagrams do.</p>
+<h2 id="s1"><span class="n">1</span> Interim logo marks — the pixel in the play</h2>
+<p class="sub">Converged direction: <b>E's WS2812 pixel, inside the play triangle</b> — a solid play with
+  the pixel knocked out of it (true holes; any background shows through). <b>I</b> is package + lens;
+  <b>J</b> adds E's corner pads. E kept for comparison. Each at favicon (16), bar (22) and hero (56)
+  sizes. Click a card to use that mark in every bar below.</p>
 <div class="markgrid" id="markgrid">
-  <div class="markcard" data-mark="a" role="button" aria-pressed="true">
-    <span class="mname">A · Chip</span>
-    <span class="mdesc">An IC package with the play triangle as its die. Reads "hardware product" instantly; very stable at 16px.</span>
-    <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-a"/></svg>
-      <svg width="22" height="22"><use href="#mark-a"/></svg>
-      <svg width="56" height="56"><use href="#mark-a"/></svg>
-    </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-a"/></svg>
-      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
-  </div>
-  <div class="markcard" data-mark="b" role="button" aria-pressed="false">
-    <span class="mname">B · Trace</span>
-    <span class="mdesc">Signal enters a via, plays, continues out — the play button as a component on a routed net.</span>
-    <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-b"/></svg>
-      <svg width="22" height="22"><use href="#mark-b"/></svg>
-      <svg width="56" height="56"><use href="#mark-b"/></svg>
-    </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-b"/></svg>
-      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
-  </div>
-  <div class="markcard" data-mark="c" role="button" aria-pressed="false">
-    <span class="mname">C · Nodes</span>
-    <span class="mdesc">Three nodes wired together imply the play triangle — LightPlayer literally is a node graph. Most conceptual.</span>
-    <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-c"/></svg>
-      <svg width="22" height="22"><use href="#mark-c"/></svg>
-      <svg width="56" height="56"><use href="#mark-c"/></svg>
-    </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-c"/></svg>
-      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
-  </div>
-  <div class="markcard" data-mark="d" role="button" aria-pressed="false">
-    <span class="mname">D · Via</span>
-    <span class="mdesc">A plated via ring with four pads, play inside. Badge-like: works as favicon, avatar, sticker.</span>
-    <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-d"/></svg>
-      <svg width="22" height="22"><use href="#mark-d"/></svg>
-      <svg width="56" height="56"><use href="#mark-d"/></svg>
-    </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-d"/></svg>
-      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
-  </div>
   <div class="markcard" data-mark="e" role="button" aria-pressed="false">
-    <span class="mname">E · Pixel</span>
-    <span class="mdesc">A WS2812 addressable-LED package — corner pads, lens, play in the lens. The most "LED" of the five; busiest at 16px.</span>
+    <span class="mname">E · Pixel (reference)</span>
+    <span class="mdesc">The original: a WS2812 package with the play in its lens. Kept for comparison with I/J below.</span>
     <div class="markrow">
       <svg class="fav" width="16" height="16"><use href="#mark-e"/></svg>
       <svg width="22" height="22"><use href="#mark-e"/></svg>
@@ -548,46 +532,46 @@
     <div class="lockup"><svg width="20" height="20"><use href="#mark-e"/></svg>
       <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
   </div>
-  <div class="markcard" data-mark="f" role="button" aria-pressed="false">
-    <span class="mname">F · Play ⊃ chip</span>
-    <span class="mdesc">Inverted: a solid play button with an IC (body + pins) knocked out of it. True holes — the background shows through.</span>
+  <div class="markcard" data-mark="i" role="button" aria-pressed="true">
+    <span class="mname">I · Play ⊃ pixel</span>
+    <span class="mdesc">The pixel in the triangle: square package knocked out of a solid play, lens floating inside. Cleanest at 16px.</span>
     <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-f"/></svg>
-      <svg width="22" height="22"><use href="#mark-f"/></svg>
-      <svg width="56" height="56"><use href="#mark-f"/></svg>
+      <svg class="fav" width="16" height="16"><use href="#mark-i"/></svg>
+      <svg width="22" height="22"><use href="#mark-i"/></svg>
+      <svg width="56" height="56"><use href="#mark-i"/></svg>
     </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-f"/></svg>
+    <div class="lockup"><svg width="20" height="20"><use href="#mark-i"/></svg>
       <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
   </div>
-  <div class="markcard" data-mark="g" role="button" aria-pressed="false">
-    <span class="mname">G · Play ⊃ LED</span>
-    <span class="mdesc">Inverted: a 5mm LED — dome, flange, two legs — knocked out of the play. The most "this thing drives LEDs".</span>
+  <div class="markcard" data-mark="j" role="button" aria-pressed="false">
+    <span class="mname">J · Play ⊃ pixel + pads</span>
+    <span class="mdesc">Same, plus E's four corner pads — more faithful WS2812, slightly busier at favicon size.</span>
     <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-g"/></svg>
-      <svg width="22" height="22"><use href="#mark-g"/></svg>
-      <svg width="56" height="56"><use href="#mark-g"/></svg>
+      <svg class="fav" width="16" height="16"><use href="#mark-j"/></svg>
+      <svg width="22" height="22"><use href="#mark-j"/></svg>
+      <svg width="56" height="56"><use href="#mark-j"/></svg>
     </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-g"/></svg>
-      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
-  </div>
-  <div class="markcard" data-mark="h" role="button" aria-pressed="false">
-    <span class="mname">H · Play ⊃ bulb</span>
-    <span class="mdesc">Inverted: a light bulb knocked out of the play — the obvious read: "press play, light happens".</span>
-    <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-h"/></svg>
-      <svg width="22" height="22"><use href="#mark-h"/></svg>
-      <svg width="56" height="56"><use href="#mark-h"/></svg>
-    </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-h"/></svg>
+    <div class="lockup"><svg width="20" height="20"><use href="#mark-j"/></svg>
       <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
   </div>
 </div>
+<div class="rejrow">
+  <button class="rejchip" data-mark="a"><svg width="18" height="18"><use href="#mark-a"/></svg><span><b>A · Chip</b> play-in-IC — strong but generic "hardware"</span></button>
+  <button class="rejchip" data-mark="b"><svg width="18" height="18"><use href="#mark-b"/></svg><span><b>B · Trace</b> routed net — reads "amplifier"</span></button>
+  <button class="rejchip" data-mark="c"><svg width="18" height="18"><use href="#mark-c"/></svg><span><b>C · Nodes</b> node graph — conceptual, weak at 16px</span></button>
+  <button class="rejchip" data-mark="d"><svg width="18" height="18"><use href="#mark-d"/></svg><span><b>D · Via</b> badge ring — pleasant, says little</span></button>
+  <button class="rejchip" data-mark="f"><svg width="18" height="18"><use href="#mark-f"/></svg><span><b>F · Play ⊃ chip</b> — pins mush at small sizes</span></button>
+  <button class="rejchip" data-mark="g"><svg width="18" height="18"><use href="#mark-g"/></svg><span><b>G · Play ⊃ LED</b> — 5mm silhouette too intricate</span></button>
+  <button class="rejchip" data-mark="h"><svg width="18" height="18"><use href="#mark-h"/></svg><span><b>H · Play ⊃ bulb</b> — obvious but skeuomorphic-generic</span></button>
+</div>
 
 <!-- ==================== 2 · bar concepts ==================== -->
-<h2 id="s2"><span class="n">2</span> Bar concepts</h2>
-<p class="sub">Five structures. All react to the <b>Context</b> / <b>Build</b> / <b>Brand</b> /
-  <b>Mark</b> controls above (concept 0 is a frozen reproduction of today's bar).
-  In every new concept the brand lockup is <b>inert</b> — home is the Studio nav item.</p>
+<h2 id="s2"><span class="n">2</span> The bar — chosen: A · section tabs</h2>
+<p class="sub">Converged on <b>A</b>: brand (inert) · Studio / Boards / Docs tabs · branch chip +
+  labeled <b>AI</b> pill (bot icon) on the right · hairline under the bar. Reacts to the
+  <b>Context</b> / <b>Build</b> / <b>Brand</b> / <b>Mark</b> controls above; concept 0 kept
+  as the frozen baseline. The 390px frame shows the narrow story: the brand word yields
+  first, the branch chip truncates harder, the AI pill keeps its label.</p>
 
 <!-- concept 0 -->
 <div class="barwrap">
@@ -610,14 +594,14 @@
   </div>
 </div>
 
-<!-- concept A -->
+<!-- concept A — the winner -->
 <div class="barwrap">
-  <p class="cap"><span class="cname">A · Section tabs</span>
-    <span class="cnote">brand (inert) · Studio / Boards / Docs links with accent underline · branch chip + AI + info on the right · hairline under the bar</span></p>
+  <p class="cap"><span class="cname">A · Section tabs (chosen)</span>
+    <span class="cnote">home is the Studio tab, not the logo · one chrome for the whole app</span></p>
   <div class="appframe">
     <div class="bar hairline" data-concept="A">
       <span class="brand inert" title="LightPlayer">
-        <svg width="22" height="22" class="markslot"><use href="#mark-a"/></svg>
+        <svg width="22" height="22" class="markslot"><use href="#mark-i"/></svg>
         <span class="word brandword">LightPlayer</span>
       </span>
       <span class="navrow">
@@ -627,7 +611,7 @@
       </span>
       <span class="rside">
         <button class="vchip" title="Build info"></button>
-        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-sparkles"/></svg></button>
+        <button class="ailabelbtn" title="AI settings"><svg width="13" height="13"><use href="#i-bot"/></svg> AI</button>
       </span>
     </div>
     <div class="page"><div class="peek">
@@ -638,102 +622,40 @@
   </div>
 </div>
 
-<!-- concept B -->
-<div class="barwrap">
-  <p class="cap"><span class="cname">B · Pills right</span>
-    <span class="cnote">brand left, everything else gathered right: segmented pill nav (the settings-popover provider idiom) then the status cluster · no hairline, floats like today</span></p>
+<!-- concept A at phone width -->
+<div class="barwrap" style="max-width: 390px">
+  <p class="cap"><span class="cname">A @ 390px</span>
+    <span class="cnote">brand word hidden, chip truncates, AI keeps its label</span></p>
   <div class="appframe">
-    <div class="bar" data-concept="B">
-      <span class="brand inert">
-        <svg width="22" height="22" class="markslot"><use href="#mark-a"/></svg>
-        <span class="word brandword">LightPlayer</span>
+    <div class="bar hairline" data-concept="A" style="padding: 10px 14px; gap: 10px">
+      <span class="brand inert" title="LightPlayer">
+        <svg width="22" height="22" class="markslot"><use href="#mark-i"/></svg>
       </span>
-      <span class="rside">
-        <span class="pillnav">
-          <button class="navpill" data-nav="studio">Studio</button>
-          <button class="navpill" data-nav="boards">Boards</button>
-          <button class="navpill" data-nav="docs">Docs</button>
-        </span>
-        <button class="vchip" title="Build info"></button>
-        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-sparkles"/></svg></button>
+      <span class="navrow">
+        <button class="navlink" data-nav="studio">Studio</button>
+        <button class="navlink" data-nav="boards">Boards</button>
+        <button class="navlink" data-nav="docs">Docs</button>
+      </span>
+      <span class="rside" style="gap: 6px">
+        <button class="vchip" style="max-width: 84px" title="Build info"></button>
+        <button class="ailabelbtn" title="AI settings"><svg width="13" height="13"><use href="#i-bot"/></svg> AI</button>
       </span>
     </div>
-    <div class="page"><div class="peek">
+    <div class="page" style="padding: 12px 14px 0"><div class="peek">
       <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
       <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
-      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
     </div></div>
   </div>
 </div>
 
-<!-- concept C -->
-<div class="barwrap">
-  <p class="cap"><span class="cname">C · Breadcrumb</span>
-    <span class="cnote">the bar says where you <b>are</b>: mark + "Studio ▸ chromatic-pulse" · the root crumb is a menu of sections (click it) · deep contexts get wayfinding for free</span></p>
-  <div class="appframe">
-    <div class="bar hairline" data-concept="C">
-      <span class="brand inert"><svg width="22" height="22" class="markslot"><use href="#mark-a"/></svg></span>
-      <span class="crumbs" style="position:relative">
-        <button class="root" id="crumbroot">
-          <span class="rootlabel">Studio</span> <span class="chev">▼</span>
-        </button>
-        <span class="sep crumbleafsep">▸</span>
-        <span class="leaf crumbleaf">chromatic-pulse</span>
-        <span class="popmenu" id="crumbmenu" hidden>
-          <button class="mi" data-nav="studio"><svg width="14" height="14"><use href="#i-home"/></svg> Studio <span class="k">gallery</span></button>
-          <button class="mi" data-nav="boards"><svg width="14" height="14"><use href="#i-board"/></svg> Boards</button>
-          <button class="mi" data-nav="docs"><svg width="14" height="14"><use href="#i-book"/></svg> Docs</button>
-        </span>
-      </span>
-      <span class="rside">
-        <button class="vchip" title="Build info"></button>
-        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-sparkles"/></svg></button>
-      </span>
-    </div>
-    <div class="page"><div class="peek">
-      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
-      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
-      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
-    </div></div>
-  </div>
-</div>
-
-<!-- concept D -->
-<div class="barwrap">
-  <p class="cap"><span class="cname">D · Mark menu</span>
-    <span class="cnote">closest to today's minimalism: the mark is a button opening the full site menu (sections + tools + GitHub — click it) · wordmark only on home · nav costs zero width</span></p>
-  <div class="appframe">
-    <div class="bar" data-concept="D">
-      <span style="position:relative; display:inline-flex">
-        <button class="markbtn" id="markmenubtn" aria-expanded="false">
-          <svg width="22" height="22" class="markslot"><use href="#mark-a"/></svg>
-          <span class="chev">▼</span>
-        </button>
-        <span class="popmenu" id="markmenu" hidden style="top:calc(100% + 4px)">
-          <button class="mi" data-nav="studio"><svg width="14" height="14"><use href="#i-home"/></svg> Studio <span class="k">gallery</span></button>
-          <button class="mi" data-nav="boards"><svg width="14" height="14"><use href="#i-board"/></svg> Boards</button>
-          <button class="mi" data-nav="docs"><svg width="14" height="14"><use href="#i-book"/></svg> Docs</button>
-          <span class="div"></span>
-          <button class="mi"><svg width="14" height="14"><use href="#i-map"/></svg> Mapping editor</button>
-          <button class="mi"><svg width="14" height="14"><use href="#i-board"/></svg> Board editor</button>
-          <span class="div"></span>
-          <button class="mi"><svg width="14" height="14"><use href="#i-github"/></svg> light-player/lightplayer</button>
-        </span>
-      </span>
-      <span class="brand inert"><span class="word brandword">LightPlayer</span></span>
-      <span class="leaf dimmed dctx" style="font:600 12px/1 var(--sans); color:var(--subtle)"></span>
-      <span class="rside">
-        <button class="vchip" title="Build info"></button>
-        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-sparkles"/></svg></button>
-      </span>
-    </div>
-    <div class="page"><div class="peek">
-      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
-      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
-      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
-    </div></div>
-  </div>
-</div>
+<p class="rejnote"><b>Rejected structures</b> (were concepts B–D):
+  <b>B · pills right</b> — segmented pill nav gathered right; crowds the status cluster and
+  fights the chips for the same corner.
+  <b>C · breadcrumb</b> — "Studio ▸ project" wayfinding; lovely in a project but hides the
+  sibling sections behind a menu click.
+  <b>D · mark menu</b> — all nav in a popover under the logo; zero width but makes navigation
+  <i>less</i> discoverable, the opposite of this round's goal. The project-name breadcrumb idea
+  from C may return <i>inside</i> the Studio tab later.</p>
 
 <!-- ==================== 3 · in context ==================== -->
 <h2 id="s3"><span class="n">3</span> One chrome across the whole app</h2>
@@ -753,7 +675,7 @@
         <button class="navlink">Docs</button>
       </span>
       <span class="rside"><button class="vchip" title="Build info"></button>
-        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-sparkles"/></svg></button></span>
+        <button class="ailabelbtn" style="padding:4px 9px" title="AI settings"><svg width="12" height="12"><use href="#i-bot"/></svg> AI</button></span>
     </div>
     <div class="body"><div class="peek" style="opacity:.8; mask-image:none; padding-bottom:0">
       <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
@@ -771,7 +693,7 @@
         <button class="navlink">Docs</button>
       </span>
       <span class="rside"><button class="vchip" title="Build info"></button>
-        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-sparkles"/></svg></button></span>
+        <button class="ailabelbtn" style="padding:4px 9px" title="AI settings"><svg width="12" height="12"><use href="#i-bot"/></svg> AI</button></span>
     </div>
     <div class="body"><div class="brow">
       <div class="bmini">
@@ -809,7 +731,7 @@
         <button class="navlink active">Docs</button>
       </span>
       <span class="rside"><button class="vchip" title="Build info"></button>
-        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-sparkles"/></svg></button></span>
+        <button class="ailabelbtn" style="padding:4px 9px" title="AI settings"><svg width="12" height="12"><use href="#i-bot"/></svg> AI</button></span>
     </div>
     <div class="body"><div class="docsplit">
       <nav class="docnav">
@@ -861,9 +783,11 @@
 
 <!-- ==================== 5 · AI settings trigger ==================== -->
 <h2 id="s5"><span class="n">5</span> AI settings trigger</h2>
-<p class="sub">The popover content stays as-is (provider / key / model); only the trigger changes.
-  Violet is the existing "bound / system" color — it reads as "agent", never as status. The gear
-  is freed up for a future real studio-settings surface.</p>
+<p class="sub"><b>Chosen: the labeled pill, bot icon</b> (live in the bars above). The popover content
+  stays as-is (provider / key / model); only the trigger changes. Violet is the existing
+  "bound / system" color — reads as "agent", never as status; the gear is freed for a future real
+  studio-settings surface. The label survives down to ~360px (see the 390px bar in §2); below
+  that it drops to icon-only.</p>
 <div class="aigrid">
   <div class="aiv"><span class="lbl">today: neutral gear, label says "Studio settings"</span>
     <span class="row"><button class="iconbtn" title="Studio settings"><svg width="15" height="15"><use href="#i-gear"/></svg></button></span></div>
@@ -878,7 +802,7 @@
 </div>
 
 <script>
-  const state = { ctx: "home", build: "branch", brand: "lp", mark: "a" };
+  const state = { ctx: "home", build: "branch", brand: "lp", mark: "i" };
 
   const BUILDS = {
     branch:     { cls: "",        icon: "#i-branch", text: "top-bar-ux-ace649" },
@@ -887,17 +811,16 @@
     dirty:      { cls: "dirty",   icon: "#i-branch", text: "top-bar-ux-ace649 ±" },
   };
   const CTX_SECTION = { home: "studio", project: "studio", boards: "boards", docs: "docs" };
-  const CTX_LEAF = { home: null, project: "chromatic-pulse", boards: null, docs: null };
-  const CTX_ROOT = { home: "Studio", project: "Studio", boards: "Boards", docs: "Docs" };
   const MARK_NAMES = { a: "A · Chip", b: "B · Trace", c: "C · Nodes", d: "D · Via", e: "E · Pixel",
-    f: "F · Play ⊃ chip", g: "G · Play ⊃ LED", h: "H · Play ⊃ bulb" };
+    f: "F · Play ⊃ chip", g: "G · Play ⊃ LED", h: "H · Play ⊃ bulb",
+    i: "I · Play ⊃ pixel", j: "J · Play ⊃ pixel + pads" };
 
   function render() {
     // controls pressed state
     document.querySelectorAll("[data-ctx]").forEach(b => b.setAttribute("aria-pressed", b.dataset.ctx === state.ctx));
     document.querySelectorAll("[data-build]").forEach(b => b.setAttribute("aria-pressed", b.dataset.build === state.build));
     document.querySelectorAll("[data-brand]").forEach(b => b.setAttribute("aria-pressed", b.dataset.brand === state.brand));
-    document.querySelectorAll(".markcard").forEach(c => c.setAttribute("aria-pressed", c.dataset.mark === state.mark));
+    document.querySelectorAll(".markcard, .rejchip").forEach(c => c.setAttribute("aria-pressed", c.dataset.mark === state.mark));
     document.getElementById("markpick").textContent = MARK_NAMES[state.mark];
 
     // marks everywhere
@@ -914,17 +837,6 @@
       el.classList.toggle("active", el.dataset.nav === section);
     });
 
-    // concept C breadcrumb
-    document.querySelector("#crumbroot .rootlabel").textContent = CTX_ROOT[state.ctx];
-    const leaf = CTX_LEAF[state.ctx];
-    document.querySelector(".crumbleaf").textContent = leaf ?? "";
-    document.querySelector(".crumbleafsep").hidden = !leaf;
-    document.querySelector(".crumbleaf").hidden = !leaf;
-
-    // concept D context label
-    const dctx = { home: "", project: "▸ chromatic-pulse", boards: "▸ Boards", docs: "▸ Docs" }[state.ctx];
-    document.querySelector(".dctx").textContent = dctx;
-
     // version chips (all reactive bars — not the frozen concept-0 bar)
     const build = BUILDS[state.build];
     document.querySelectorAll(".bar[data-concept] .vchip, .ctxcard .vchip").forEach(chip => {
@@ -937,33 +849,13 @@
   document.querySelectorAll("[data-ctx]").forEach(b => b.onclick = () => { state.ctx = b.dataset.ctx; render(); });
   document.querySelectorAll("[data-build]").forEach(b => b.onclick = () => { state.build = b.dataset.build; render(); });
   document.querySelectorAll("[data-brand]").forEach(b => b.onclick = () => { state.brand = b.dataset.brand; render(); });
-  document.querySelectorAll(".markcard").forEach(c => c.onclick = () => { state.mark = c.dataset.mark; render(); });
+  document.querySelectorAll(".markcard, .rejchip").forEach(c => c.onclick = () => { state.mark = c.dataset.mark; render(); });
 
   // clicking a nav item switches context (so the bars feel navigable)
   const NAV_CTX = { studio: "home", boards: "boards", docs: "docs" };
   document.querySelectorAll("[data-nav]").forEach(el => el.addEventListener("click", () => {
     state.ctx = NAV_CTX[el.dataset.nav]; render();
-    document.getElementById("crumbmenu").hidden = true;
-    document.getElementById("markmenu").hidden = true;
-    document.getElementById("markmenubtn").setAttribute("aria-expanded", "false");
   }));
-
-  // popover toggles (concepts C + D)
-  document.getElementById("crumbroot").addEventListener("click", e => {
-    e.stopPropagation();
-    const m = document.getElementById("crumbmenu"); m.hidden = !m.hidden;
-  });
-  document.getElementById("markmenubtn").addEventListener("click", e => {
-    e.stopPropagation();
-    const m = document.getElementById("markmenu");
-    m.hidden = !m.hidden;
-    document.getElementById("markmenubtn").setAttribute("aria-expanded", String(!m.hidden));
-  });
-  document.addEventListener("click", () => {
-    document.getElementById("crumbmenu").hidden = true;
-    document.getElementById("markmenu").hidden = true;
-    document.getElementById("markmenubtn").setAttribute("aria-expanded", "false");
-  });
 
   // live clock node in the docs mini
   setInterval(() => {
