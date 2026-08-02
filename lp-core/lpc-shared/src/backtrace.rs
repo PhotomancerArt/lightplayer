@@ -373,9 +373,17 @@ mod esp32_classic_map {
     ///
     /// Both halves matter on this chip. SRAM1's I-bus alias is where
     /// `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` installs JIT'd
-    /// shader code (`0x400A_1000..0x400B_8000`), so a frame that faulted inside
-    /// a compiled shader lands in this window and is reported rather than
-    /// silently dropped.
+    /// shader code (`0x400B_0000..0x400B_8000` as of 2026-08-02, when the
+    /// region was measured down from 92 KiB to 32 KiB and the remainder became
+    /// heap), so a frame that faulted inside a compiled shader lands in this
+    /// window and is reported rather than silently dropped.
+    ///
+    /// The window is deliberately the *whole* SRAM1 alias rather than the JIT
+    /// region's exact bounds: this crate cannot see `lpvm-native`, and a walker
+    /// that tracked the region's precise address would need editing every time
+    /// the region were resized — silently dropping shader frames until someone
+    /// noticed. Accepting all of SRAM1 costs nothing (nothing else executes
+    /// there) and cannot go stale.
     ///
     /// Internal ROM (`0x4000_0000..0x4008_0000`, 512 KB across ROM0 and ROM1)
     /// is excluded for the same reason as on the S3, and the exclusion is
@@ -931,17 +939,33 @@ mod tests {
     /// The classic's I-bus window must contain the JIT's code region.
     ///
     /// `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` installs compiled
-    /// shader code at I-bus `0x400A_1000..0x400B_8000`. A shader that faults is
-    /// one of the likelier things to want a backtrace for on this chip, and it
-    /// is the one address range that is *not* a linker-placed section — so if
-    /// the JIT region ever moves out from under this window, the walk would drop
-    /// exactly the frames that matter without saying anything.
+    /// shader code into SRAM1's I-bus alias. A shader that faults is one of the
+    /// likelier things to want a backtrace for on this chip, and it is the one
+    /// address range that is *not* a linker-placed section — so if the JIT
+    /// region ever moved out from under this window, the walk would drop exactly
+    /// the frames that matter without saying anything.
+    ///
+    /// The region is carved from D-bus `0x3FFE_8000..0x4000_0000`, and the
+    /// word-mirrored alias (`iram = 0x400B_FFFC − (dram − 0x3FFE_0000)`) maps
+    /// that whole span into `0x400A_0000..0x400B_8000`. So rather than pin
+    /// today's region bounds — which this crate cannot import and which moved
+    /// once already (92 KiB → 32 KiB on 2026-08-02) — this asserts the window
+    /// covers **every** address the region could occupy at any size. That
+    /// holds for any future resize without an edit here.
     #[test]
     fn the_classic_iram_window_covers_the_jit_code_region() {
-        const JIT_IBUS_START: u32 = 0x400A_1000;
-        const JIT_IBUS_END: u32 = 0x400B_8000;
+        // Images of the two ends of the D-bus span the region is carved from.
+        const MIRROR_TOP: u32 = 0x400B_FFFC;
+        const DRAM_BASE: u32 = 0x3FFE_0000;
+        const CARVE_DBUS_START: u32 = 0x3FFE_8000;
+        const CARVE_DBUS_END: u32 = 0x4000_0000;
 
-        assert!(esp32_classic_map::IRAM_START <= JIT_IBUS_START);
-        assert!(JIT_IBUS_END <= esp32_classic_map::IRAM_END);
+        let widest_start = MIRROR_TOP - (CARVE_DBUS_END - 4 - DRAM_BASE);
+        let widest_end = MIRROR_TOP - (CARVE_DBUS_START - DRAM_BASE) + 4;
+        assert_eq!(widest_start, 0x400A_0000);
+        assert_eq!(widest_end, 0x400B_8000);
+
+        assert!(esp32_classic_map::IRAM_START <= widest_start);
+        assert!(widest_end <= esp32_classic_map::IRAM_END);
     }
 }
