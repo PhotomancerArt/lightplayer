@@ -65,6 +65,56 @@ const FRAME_WALKER_PRESENT: bool = true;
 /// recursing forever — `no_std` has no double-panic detection of its own.
 static PANICKING: AtomicBool = AtomicBool::new(false);
 
+/// The biggest single allocation the heap could satisfy **right now**, in bytes.
+///
+/// `esp_alloc::HEAP.free()` is the *sum* of the free list. On a linked-list
+/// first-fit heap — which is what `esp-alloc` defaults to, and this image does
+/// not override — that number says nothing about whether any one request can be
+/// served. "requested=3072 free=5304 → failed" is not a contradiction; it is the
+/// signature of a fragmented heap, and without this figure the two failure modes
+/// are indistinguishable from the report. `free - largest` is the amount of
+/// memory the board owns but cannot hand out in one piece.
+///
+/// `linked_list_allocator` exposes no free-list walk, so this asks the allocator
+/// the only question it answers: binary-search the largest size it will accept,
+/// returning each probe immediately. ~17 probes bounded by `free()`, each a
+/// first-fit walk — microseconds, and only on paths that already decided to
+/// spend time reporting.
+///
+/// ⚠️ `alloc::alloc::alloc` is deliberately the raw entry point: it returns null
+/// on failure. The `handle_alloc_error` wrappers are what route into
+/// [`stage_oom_and_reset`], so probing through them from inside that function
+/// would recurse.
+pub fn largest_free_block() -> usize {
+    /// Ignore differences below this; a 4-byte-precise answer costs probes and
+    /// tells no one anything the rounded one does not.
+    const GRANULARITY: usize = 16;
+
+    // `free()` bounds the answer from above: no single block can exceed the sum
+    // of every block.
+    let mut too_big = esp_alloc::HEAP.free() + 1;
+    let mut fits = 0usize;
+
+    while too_big - fits > GRANULARITY {
+        let mid = fits + (too_big - fits) / 2;
+        let Ok(layout) = core::alloc::Layout::from_size_align(mid, 4) else {
+            break;
+        };
+        // SAFETY: `mid > 0` (the loop condition keeps `mid` above `fits >= 0`
+        // by at least GRANULARITY/2), and the pointer is freed with the same
+        // layout it was allocated with, immediately, before anything else runs.
+        let ptr = unsafe { alloc::alloc::alloc(layout) };
+        if ptr.is_null() {
+            too_big = mid;
+        } else {
+            unsafe { alloc::alloc::dealloc(ptr, layout) };
+            fits = mid;
+        }
+    }
+
+    fits
+}
+
 /// Stage a breadcrumb into the RTC ledger, commit it, report on serial, reset.
 /// Never returns, and never hangs.
 pub fn stage_and_reset(info: &core::panic::PanicInfo) -> ! {
@@ -151,6 +201,11 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
     // matters because we are here precisely because allocation is failing.
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
+    // Before the ledger write, because it is the number that decides which bug
+    // this is — see `largest_free_block`. Allocating here is safe: the request
+    // that failed has already released the allocator's lock, and interrupts are
+    // masked, so nothing can be mid-allocation underneath us.
+    let largest = largest_free_block();
 
     let mut frames = [0u32; MAX_FRAMES];
     let count = capture_frames(&mut frames);
@@ -179,13 +234,24 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
 
     esp_println::println!("\n\n====================== OOM ======================");
     esp_println::println!(
-        "allocation failed: requested={} align={} free={} used={} context={}",
+        "allocation failed: requested={} align={} free={} used={} largest_free={} context={}",
         layout.size(),
         layout.align(),
         free,
         used,
+        largest,
         lpc_shared::backtrace::oom_context().unwrap_or("<unset>"),
     );
+    // Spelled out rather than left as arithmetic for the reader: this is the
+    // line that distinguishes "the board is full" from "the board is shredded".
+    if largest < layout.size() && free >= layout.size() {
+        esp_println::println!(
+            "[OOM] FRAGMENTED: {} bytes free but the largest single block is {} — {} bytes unusable",
+            free,
+            largest,
+            free.saturating_sub(largest),
+        );
+    }
     print_frames(&frames[..count]);
     if !staged {
         esp_println::println!("[RECOVERY] no ledger installed; this OOM will not be reported");
