@@ -4,6 +4,7 @@ pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_card;
 pub(crate) mod example_card;
+pub(crate) mod failure_report;
 pub(crate) mod gallery_paste;
 pub(crate) mod gallery_preview;
 pub mod home_gallery;

@@ -42,6 +42,7 @@
     --tw-radius-xs: var(--studio-radius-xs);
     --tw-radius-sm: var(--studio-radius-sm);
     --tw-radius-md: var(--studio-radius-md);
+    --tw-radius-lg: 0.5rem;
     --tw-animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     --tw-default-transition-duration: 150ms;
     --tw-default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
@@ -130,11 +131,17 @@
   .tw\:top-0 {
     top: calc(var(--tw-spacing) * 0);
   }
+  .tw\:top-0\.5 {
+    top: calc(var(--tw-spacing) * 0.5);
+  }
   .tw\:top-1\.5 {
     top: calc(var(--tw-spacing) * 1.5);
   }
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
+  }
+  .tw\:right-1 {
+    right: calc(var(--tw-spacing) * 1);
   }
   .tw\:right-1\.5 {
     right: calc(var(--tw-spacing) * 1.5);
@@ -186,6 +193,9 @@
   }
   .tw\:-mt-4 {
     margin-top: calc(var(--tw-spacing) * -4);
+  }
+  .tw\:mt-0\.5 {
+    margin-top: calc(var(--tw-spacing) * 0.5);
   }
   .tw\:mt-1 {
     margin-top: calc(var(--tw-spacing) * 1);
@@ -403,6 +413,9 @@
   .tw\:min-h-96 {
     min-height: calc(var(--tw-spacing) * 96);
   }
+  .tw\:min-h-\[4\.5rem\] {
+    min-height: 4.5rem;
+  }
   .tw\:min-h-\[46px\] {
     min-height: 46px;
   }
@@ -489,6 +502,9 @@
   }
   .tw\:w-64 {
     width: calc(var(--tw-spacing) * 64);
+  }
+  .tw\:w-72 {
+    width: calc(var(--tw-spacing) * 72);
   }
   .tw\:w-96 {
     width: calc(var(--tw-spacing) * 96);
@@ -927,6 +943,9 @@
   }
   .tw\:rounded-full {
     border-radius: calc(infinity * 1px);
+  }
+  .tw\:rounded-lg {
+    border-radius: var(--tw-radius-lg);
   }
   .tw\:rounded-md {
     border-radius: var(--tw-radius-md);
@@ -1520,6 +1539,9 @@
   }
   .tw\:text-\[0\.64rem\] {
     font-size: 0.64rem;
+  }
+  .tw\:text-\[0\.65rem\] {
+    font-size: 0.65rem;
   }
   .tw\:text-\[0\.66rem\] {
     font-size: 0.66rem;
