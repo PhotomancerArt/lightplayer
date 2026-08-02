@@ -515,15 +515,14 @@
 </div>
 
 <!-- ==================== 1 · logo marks ==================== -->
-<h2 id="s1"><span class="n">1</span> Interim logo marks — the pixel in the play</h2>
-<p class="sub">Converged direction: <b>E's WS2812 pixel, inside the play triangle</b> — a solid play with
-  the pixel knocked out of it (true holes; any background shows through). <b>I</b> is package + lens;
-  <b>J</b> adds E's corner pads. E kept for comparison. Each at favicon (16), bar (22) and hero (56)
-  sizes. Click a card to use that mark in every bar below.</p>
+<h2 id="s1"><span class="n">1</span> Interim logo mark — chosen: E · Pixel</h2>
+<p class="sub"><b>Decision: E ships as the interim mark</b> — a WS2812 package, corner pads, lens, play
+  in the lens — until the human-designed logo (in progress) lands. Shown at favicon (16), bar (22)
+  and hero (56) sizes. The explored alternates below remain clickable for comparison.</p>
 <div class="markgrid" id="markgrid">
-  <div class="markcard" data-mark="e" role="button" aria-pressed="false">
-    <span class="mname">E · Pixel (reference)</span>
-    <span class="mdesc">The original: a WS2812 package with the play in its lens. Kept for comparison with I/J below.</span>
+  <div class="markcard" data-mark="e" role="button" aria-pressed="true">
+    <span class="mname">E · Pixel (chosen interim)</span>
+    <span class="mdesc">A WS2812 addressable-LED package — corner pads, lens, play in the lens. Placeholder until the real logo arrives.</span>
     <div class="markrow">
       <svg class="fav" width="16" height="16"><use href="#mark-e"/></svg>
       <svg width="22" height="22"><use href="#mark-e"/></svg>
@@ -532,30 +531,10 @@
     <div class="lockup"><svg width="20" height="20"><use href="#mark-e"/></svg>
       <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
   </div>
-  <div class="markcard" data-mark="i" role="button" aria-pressed="true">
-    <span class="mname">I · Play ⊃ pixel</span>
-    <span class="mdesc">The pixel in the triangle: square package knocked out of a solid play, lens floating inside. Cleanest at 16px.</span>
-    <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-i"/></svg>
-      <svg width="22" height="22"><use href="#mark-i"/></svg>
-      <svg width="56" height="56"><use href="#mark-i"/></svg>
-    </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-i"/></svg>
-      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
-  </div>
-  <div class="markcard" data-mark="j" role="button" aria-pressed="false">
-    <span class="mname">J · Play ⊃ pixel + pads</span>
-    <span class="mdesc">Same, plus E's four corner pads — more faithful WS2812, slightly busier at favicon size.</span>
-    <div class="markrow">
-      <svg class="fav" width="16" height="16"><use href="#mark-j"/></svg>
-      <svg width="22" height="22"><use href="#mark-j"/></svg>
-      <svg width="56" height="56"><use href="#mark-j"/></svg>
-    </div>
-    <div class="lockup"><svg width="20" height="20"><use href="#mark-j"/></svg>
-      <span class="word">LightPlayer <span class="lite">Studio</span></span></div>
-  </div>
 </div>
 <div class="rejrow">
+  <button class="rejchip" data-mark="i"><svg width="18" height="18"><use href="#mark-i"/></svg><span><b>I · Play ⊃ pixel</b> inverted knockout — close second, E preferred</span></button>
+  <button class="rejchip" data-mark="j"><svg width="18" height="18"><use href="#mark-j"/></svg><span><b>J · Play ⊃ pixel + pads</b> — busier I, same verdict</span></button>
   <button class="rejchip" data-mark="a"><svg width="18" height="18"><use href="#mark-a"/></svg><span><b>A · Chip</b> play-in-IC — strong but generic "hardware"</span></button>
   <button class="rejchip" data-mark="b"><svg width="18" height="18"><use href="#mark-b"/></svg><span><b>B · Trace</b> routed net — reads "amplifier"</span></button>
   <button class="rejchip" data-mark="c"><svg width="18" height="18"><use href="#mark-c"/></svg><span><b>C · Nodes</b> node graph — conceptual, weak at 16px</span></button>
@@ -568,10 +547,10 @@
 <!-- ==================== 2 · bar concepts ==================== -->
 <h2 id="s2"><span class="n">2</span> The bar — chosen: A · section tabs</h2>
 <p class="sub">Converged on <b>A</b>: brand (inert) · Studio / Boards / Docs tabs · branch chip +
-  labeled <b>AI</b> pill (bot icon) on the right · hairline under the bar. Reacts to the
+  bot icon chip (no label) on the right · hairline under the bar. Reacts to the
   <b>Context</b> / <b>Build</b> / <b>Brand</b> / <b>Mark</b> controls above; concept 0 kept
   as the frozen baseline. The 390px frame shows the narrow story: the brand word yields
-  first, the branch chip truncates harder, the AI pill keeps its label.</p>
+  first, the branch chip truncates harder, the bot chip is already minimal.</p>
 
 <!-- concept 0 -->
 <div class="barwrap">
@@ -611,7 +590,7 @@
       </span>
       <span class="rside">
         <button class="vchip" title="Build info"></button>
-        <button class="ailabelbtn" title="AI settings"><svg width="13" height="13"><use href="#i-bot"/></svg> AI</button>
+        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
       </span>
     </div>
     <div class="page"><div class="peek">
@@ -625,7 +604,7 @@
 <!-- concept A at phone width -->
 <div class="barwrap" style="max-width: 390px">
   <p class="cap"><span class="cname">A @ 390px</span>
-    <span class="cnote">brand word hidden, chip truncates, AI keeps its label</span></p>
+    <span class="cnote">brand word hidden, chip truncates, bot chip unchanged</span></p>
   <div class="appframe">
     <div class="bar hairline" data-concept="A" style="padding: 10px 14px; gap: 10px">
       <span class="brand inert" title="LightPlayer">
@@ -638,7 +617,7 @@
       </span>
       <span class="rside" style="gap: 6px">
         <button class="vchip" style="max-width: 84px" title="Build info"></button>
-        <button class="ailabelbtn" title="AI settings"><svg width="13" height="13"><use href="#i-bot"/></svg> AI</button>
+        <button class="iconbtn ai" title="AI settings"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
       </span>
     </div>
     <div class="page" style="padding: 12px 14px 0"><div class="peek">
@@ -675,7 +654,7 @@
         <button class="navlink">Docs</button>
       </span>
       <span class="rside"><button class="vchip" title="Build info"></button>
-        <button class="ailabelbtn" style="padding:4px 9px" title="AI settings"><svg width="12" height="12"><use href="#i-bot"/></svg> AI</button></span>
+        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-bot"/></svg></button></span>
     </div>
     <div class="body"><div class="peek" style="opacity:.8; mask-image:none; padding-bottom:0">
       <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
@@ -693,7 +672,7 @@
         <button class="navlink">Docs</button>
       </span>
       <span class="rside"><button class="vchip" title="Build info"></button>
-        <button class="ailabelbtn" style="padding:4px 9px" title="AI settings"><svg width="12" height="12"><use href="#i-bot"/></svg> AI</button></span>
+        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-bot"/></svg></button></span>
     </div>
     <div class="body"><div class="brow">
       <div class="bmini">
@@ -731,7 +710,7 @@
         <button class="navlink active">Docs</button>
       </span>
       <span class="rside"><button class="vchip" title="Build info"></button>
-        <button class="ailabelbtn" style="padding:4px 9px" title="AI settings"><svg width="12" height="12"><use href="#i-bot"/></svg> AI</button></span>
+        <button class="iconbtn ai" style="width:25px;height:25px" title="AI settings"><svg width="14" height="14"><use href="#i-bot"/></svg></button></span>
     </div>
     <div class="body"><div class="docsplit">
       <nav class="docnav">
@@ -783,11 +762,10 @@
 
 <!-- ==================== 5 · AI settings trigger ==================== -->
 <h2 id="s5"><span class="n">5</span> AI settings trigger</h2>
-<p class="sub"><b>Chosen: the labeled pill, bot icon</b> (live in the bars above). The popover content
-  stays as-is (provider / key / model); only the trigger changes. Violet is the existing
+<p class="sub"><b>Chosen: the bot icon, violet family, no label</b> (live in the bars above). The popover
+  content stays as-is (provider / key / model); only the trigger changes. Violet is the existing
   "bound / system" color — reads as "agent", never as status; the gear is freed for a future real
-  studio-settings surface. The label survives down to ~360px (see the 390px bar in §2); below
-  that it drops to icon-only.</p>
+  studio-settings surface.</p>
 <div class="aigrid">
   <div class="aiv"><span class="lbl">today: neutral gear, label says "Studio settings"</span>
     <span class="row"><button class="iconbtn" title="Studio settings"><svg width="15" height="15"><use href="#i-gear"/></svg></button></span></div>
@@ -802,7 +780,7 @@
 </div>
 
 <script>
-  const state = { ctx: "home", build: "branch", brand: "lp", mark: "i" };
+  const state = { ctx: "home", build: "branch", brand: "lp", mark: "e" };
 
   const BUILDS = {
     branch:     { cls: "",        icon: "#i-branch", text: "top-bar-ux-ace649" },
