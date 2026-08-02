@@ -5,8 +5,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{
-    CalleeRef, FuncId, IrFunction, IrType, LpirModule, LpirOp, builder::FunctionBuilder,
-    lpir_module::VMCTX_VREG,
+    CalleeRef, FloatMode, FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg,
+    builder::FunctionBuilder, lpir_module::VMCTX_VREG,
 };
 use lps_shared::{
     FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureStorageFormat,
@@ -30,12 +30,79 @@ pub fn render_texture_fn_name(format: TextureStorageFormat) -> &'static str {
     }
 }
 
+/// Fixed-point scale of the frame boundary: a coordinate word is Q16.16.
+pub(crate) const Q_FRACTION_BITS: u32 = 16;
+
+/// Decodes a Q16.16 coordinate word into an [`IrType::F32`] lane.
+///
+/// The frame boundary is fixed-point **in both numeric modes**: the host packs
+/// `points` as Q16.16 pairs and reads `out` back as RGBA16, and those buffers
+/// are an interchange format shared with fixtures and outputs, so they stay
+/// Q16.16 whatever the shader interior compiles to. What changes with
+/// `float_mode` is what an F32 *lane* holds:
+///
+/// - [`FloatMode::Q32`] — the lane **is** the Q16.16 word, so the decode is the
+///   reinterpret [`LpirOp::FfromI32Bits`] and costs nothing. Emission here is
+///   byte-identical to what this synth produced before f32 existed.
+/// - [`FloatMode::F32`] — the lane is IEEE binary32, so the word is converted
+///   numerically: `ItofS` then a multiply by `2^-16`. Both steps are
+///   Guaranteed-class per `docs/design/float.md` §3 (int→float is correctly
+///   rounded; `2^-16` is exactly representable, so the multiply is exact for
+///   every coordinate below 2^24 in Q16.16 units), which makes the decode
+///   bit-identical across every f32 target rather than target-defined.
+///
+/// The scale constant is loop-invariant, so [`Self::new`] hoists it: build the
+/// decoder before entering the render loop and call [`Self::decode`] inside it.
+pub(crate) struct Q16CoordDecoder {
+    /// `None` in Q32 mode (nothing to hoist); the `2^-16` constant in Float mode.
+    scale: Option<VReg>,
+}
+
+impl Q16CoordDecoder {
+    /// Emit the mode's loop-invariant setup. In Q32 mode this emits nothing and
+    /// allocates no vreg, which is what keeps Q32 codegen unchanged.
+    pub(crate) fn new(fb: &mut FunctionBuilder, float_mode: FloatMode) -> Self {
+        let scale = match float_mode {
+            FloatMode::Q32 => None,
+            FloatMode::F32 => {
+                let v = fb.alloc_vreg(IrType::F32);
+                fb.push(LpirOp::FconstF32 {
+                    dst: v,
+                    value: 1.0 / ((1u32 << Q_FRACTION_BITS) as f32),
+                });
+                Some(v)
+            }
+        };
+        Self { scale }
+    }
+
+    /// Decode one Q16.16 word held in `src` (an [`IrType::I32`] vreg) and return
+    /// the [`IrType::F32`] vreg holding the coordinate.
+    pub(crate) fn decode(&self, fb: &mut FunctionBuilder, src: VReg) -> VReg {
+        let dst = fb.alloc_vreg(IrType::F32);
+        match self.scale {
+            None => fb.push(LpirOp::FfromI32Bits { dst, src }),
+            Some(scale) => {
+                let whole = fb.alloc_vreg(IrType::F32);
+                fb.push(LpirOp::ItofS { dst: whole, src });
+                fb.push(LpirOp::Fmul {
+                    dst,
+                    lhs: whole,
+                    rhs: scale,
+                });
+            }
+        }
+        dst
+    }
+}
+
 /// Append `__render_texture_<format>` to `module` and `meta` in lockstep; returns the function name.
 pub fn synthesise_render_texture(
     module: &mut LpirModule,
     meta: &mut LpsModuleSig,
     render_fn_index: usize,
     format: TextureStorageFormat,
+    float_mode: FloatMode,
 ) -> Result<String, SynthError> {
     let render_sig = meta
         .functions
@@ -91,6 +158,9 @@ pub fn synthesise_render_texture(
         dst: fuel_budget,
         value: DEFAULT_INVOCATION_FUEL as i32,
     });
+    // Hoisted out of both loops: the pixel walk stays in Q16.16 (`Q_HALF` +
+    // `Q_ONE` steps) in every mode, and only the hand-off to `render` differs.
+    let coords = Q16CoordDecoder::new(&mut fb, float_mode);
 
     let pos_x = fb.alloc_vreg(IrType::I32);
     let x = fb.alloc_vreg(IrType::I32);
@@ -149,16 +219,8 @@ pub fn synthesise_render_texture(
                 emit_globals_reset(&mut fb, meta);
             }
 
-            let pos_x_f = fb.alloc_vreg(IrType::F32);
-            let pos_y_f = fb.alloc_vreg(IrType::F32);
-            fb.push(LpirOp::FfromI32Bits {
-                dst: pos_x_f,
-                src: pos_x,
-            });
-            fb.push(LpirOp::FfromI32Bits {
-                dst: pos_y_f,
-                src: pos_y,
-            });
+            let pos_x_f = coords.decode(&mut fb, pos_x);
+            let pos_y_f = coords.decode(&mut fb, pos_y);
 
             let color: Vec<_> = (0..channels).map(|_| fb.alloc_vreg(IrType::F32)).collect();
             fb.push_call(
@@ -299,9 +361,14 @@ mod tests {
     fn synth_rgba16_appends_function_and_sig_in_lockstep() {
         let (mut ir, mut meta) = make_stub_render_module(LpsType::Vec4);
         let n_before = ir.functions.len();
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         assert_eq!(name, "__render_texture_rgba16");
         assert_eq!(ir.functions.len(), n_before + 1);
         assert_eq!(meta.functions.len(), n_before + 1);
@@ -313,8 +380,14 @@ mod tests {
     #[test]
     fn synth_r16_picks_correct_name_and_arity() {
         let (mut ir, mut meta) = make_stub_render_module(LpsType::Float);
-        let name = synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::R16Unorm)
-            .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::R16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         assert_eq!(name, "__render_texture_r16");
         let synth_fn = ir
             .functions
@@ -328,9 +401,14 @@ mod tests {
     #[test]
     fn synth_signature_passes_phase_2_validator() {
         let (mut ir, mut meta) = make_stub_render_module(LpsType::Vec4);
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         let synth_ir = ir
             .functions
             .values()
@@ -344,8 +422,14 @@ mod tests {
     #[test]
     fn synth_body_uses_fto_unorm16_per_channel() {
         let (mut ir, mut meta) = make_stub_render_module(LpsType::Float);
-        let name = synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::R16Unorm)
-            .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::R16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         let synth_fn = ir
             .functions
             .values()
@@ -376,9 +460,14 @@ mod tests {
     #[test]
     fn synthesised_body_calls_render_once_inliner_unintegrated() {
         let (mut ir, mut meta) = make_stub_render_module(LpsType::Vec4);
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         let synth_fn = ir
             .functions
             .values()
@@ -405,9 +494,14 @@ mod tests {
     #[test]
     fn synth_body_arms_per_invocation_fuel_before_render_call() {
         let (mut ir, mut meta) = make_stub_render_module(LpsType::Vec4);
-        let name =
-            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
-                .expect("synth");
+        let name = synthesise_render_texture(
+            &mut ir,
+            &mut meta,
+            0,
+            TextureStorageFormat::Rgba16Unorm,
+            FloatMode::Q32,
+        )
+        .expect("synth");
         let synth_fn = ir
             .functions
             .values()

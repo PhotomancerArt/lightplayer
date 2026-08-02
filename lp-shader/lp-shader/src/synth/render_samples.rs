@@ -5,12 +5,15 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpir::{
-    CalleeRef, IrType, LpirModule, LpirOp, builder::FunctionBuilder, lpir_module::VMCTX_VREG,
+    CalleeRef, FloatMode, IrType, LpirModule, LpirOp, builder::FunctionBuilder,
+    lpir_module::VMCTX_VREG,
 };
 use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
 use lpvm::{DEFAULT_INVOCATION_FUEL, VMCTX_OFFSET_FUEL};
 
-use super::render_texture::{SynthError, append_local_function, emit_globals_reset};
+use super::render_texture::{
+    Q16CoordDecoder, SynthError, append_local_function, emit_globals_reset,
+};
 
 pub const RENDER_SAMPLES_RGBA16_FN: &str = "__render_samples_rgba16";
 
@@ -19,6 +22,7 @@ pub fn synthesise_render_samples_rgba16(
     module: &mut LpirModule,
     meta: &mut LpsModuleSig,
     render_fn_index: usize,
+    float_mode: FloatMode,
 ) -> Result<String, SynthError> {
     let render_sig = meta
         .functions
@@ -63,6 +67,9 @@ pub fn synthesise_render_samples_rgba16(
         dst: fuel_budget,
         value: DEFAULT_INVOCATION_FUEL as i32,
     });
+    // Hoisted out of the sample loop: `points` is Q16.16 in every mode, and
+    // only the hand-off to `render` differs. See `Q16CoordDecoder`.
+    let coords = Q16CoordDecoder::new(&mut fb, float_mode);
 
     fb.push_loop();
     {
@@ -118,16 +125,8 @@ pub fn synthesise_render_samples_rgba16(
             offset: 4,
         });
 
-        let pos_x_f = fb.alloc_vreg(IrType::F32);
-        let pos_y_f = fb.alloc_vreg(IrType::F32);
-        fb.push(LpirOp::FfromI32Bits {
-            dst: pos_x_f,
-            src: pos_x,
-        });
-        fb.push(LpirOp::FfromI32Bits {
-            dst: pos_y_f,
-            src: pos_y,
-        });
+        let pos_x_f = coords.decode(&mut fb, pos_x);
+        let pos_y_f = coords.decode(&mut fb, pos_y);
 
         let color: Vec<_> = (0..4).map(|_| fb.alloc_vreg(IrType::F32)).collect();
         fb.push_call(
@@ -211,7 +210,8 @@ mod tests {
     #[test]
     fn synth_body_arms_per_invocation_fuel_before_render_call() {
         let (mut ir, mut meta) = make_stub_render_module();
-        let name = synthesise_render_samples_rgba16(&mut ir, &mut meta, 0).expect("synth");
+        let name =
+            synthesise_render_samples_rgba16(&mut ir, &mut meta, 0, FloatMode::Q32).expect("synth");
         let synth_fn = ir
             .functions
             .values()
@@ -260,6 +260,83 @@ mod tests {
             )),
             "DEFAULT_INVOCATION_FUEL constant must be materialised"
         );
+    }
+
+    /// The Q32 wrapper is *unchanged* by f32 existing: its coordinate decode is
+    /// still the single reinterpret, and no scale constant is materialised.
+    ///
+    /// Asserted on the IR rather than on rendered pixels because that is where
+    /// "Q32 stays bit-identical" is actually decided — a stray extra op here
+    /// would move every Q32 filetest snapshot downstream.
+    #[test]
+    fn q32_decodes_points_with_a_bare_reinterpret() {
+        let (mut ir, mut meta) = make_stub_render_module();
+        let name =
+            synthesise_render_samples_rgba16(&mut ir, &mut meta, 0, FloatMode::Q32).expect("synth");
+        let body = synth_body(&ir, &name);
+
+        assert_eq!(
+            body.iter()
+                .filter(|op| matches!(op, LpirOp::FfromI32Bits { .. }))
+                .count(),
+            2,
+            "one reinterpret per coordinate"
+        );
+        assert!(
+            !body
+                .iter()
+                .any(|op| matches!(op, LpirOp::ItofS { .. } | LpirOp::FconstF32 { .. })),
+            "Q32 must not gain a numeric conversion or a scale constant"
+        );
+    }
+
+    /// Float mode converts instead of reinterpreting: `points` is still Q16.16,
+    /// so each coordinate becomes `ItofS(word) * 2^-16` against one hoisted
+    /// constant. Reinterpreting here is the defect
+    /// (`docs/defects/2026-08-02-f32-shader-cannot-render-a-frame.md`).
+    #[test]
+    fn f32_decodes_points_by_scaling_the_fixed_point_word() {
+        let (mut ir, mut meta) = make_stub_render_module();
+        let name =
+            synthesise_render_samples_rgba16(&mut ir, &mut meta, 0, FloatMode::F32).expect("synth");
+        let body = synth_body(&ir, &name);
+
+        assert!(
+            !body
+                .iter()
+                .any(|op| matches!(op, LpirOp::FfromI32Bits { .. })),
+            "a bit reinterpret of a Q16.16 word is meaningless in Float mode"
+        );
+        assert_eq!(
+            body.iter()
+                .filter(|op| matches!(op, LpirOp::ItofS { .. }))
+                .count(),
+            2,
+            "one int→float conversion per coordinate"
+        );
+        let scales: Vec<f32> = body
+            .iter()
+            .filter_map(|op| match op {
+                LpirOp::FconstF32 { value, .. } => Some(*value),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            scales,
+            alloc::vec![1.0 / 65536.0],
+            "exactly one hoisted 2^-16 scale, shared by both coordinates"
+        );
+    }
+
+    fn synth_body(ir: &LpirModule, name: &str) -> Vec<LpirOp> {
+        ir.functions
+            .values()
+            .find(|f| f.name == name)
+            .expect("synth fn")
+            .body
+            .iter()
+            .cloned()
+            .collect()
     }
 
     fn make_stub_render_module() -> (LpirModule, LpsModuleSig) {
