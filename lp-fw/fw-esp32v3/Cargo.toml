@@ -96,6 +96,29 @@ server = [
 #   cargo build --profile release-esp32v3 --features ws281x_telemetry
 ws281x_telemetry = []
 
+# Print every transmitted WS281x frame to the serial log: one full hex dump per
+# channel after open/resize, then a periodic checksum and lit-LED count. This is
+# what `scripts/m4-hardware-walk.sh --chip esp32` diffs against the host oracle
+# — the M7 FINAL-gate criterion "renders bit-exactly vs the host oracle", which
+# no earlier classic milestone measured (they measured timing and capacity).
+#
+# A byte-for-byte port of fw-esp32s3's feature of the same name, including its
+# emitted line shapes: the walk script and
+# `lp-app/lpa-server/tests/shader_oracle_frame.rs` must not need a per-chip
+# branch. See `src/output/rmt/frame_dump.rs`.
+#
+# Opt-in because hex-formatting frames costs render time and floods the serial
+# link the transport runs on — and on this chip that link is a real 921600-baud
+# UART0 wire, not the S3's USB-Serial-JTAG, so the volume discipline is tighter
+# rather than looser. Deliberately NOT a `test_*` feature: it decorates the app
+# path rather than replacing it, so a frame-dump build is the real firmware plus
+# a transcript. Additive and orthogonal to `ws281x_telemetry`.
+#
+# Build (touch src/main.rs first if flipping features — same caveat the probe
+# features above carry):
+#   cargo build --profile release-esp32v3 --features frame-dump
+frame-dump = []
+
 # M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
 # heap deltas at each stage. Build:
 #   cargo build --profile release-esp32v3 --no-default-features \

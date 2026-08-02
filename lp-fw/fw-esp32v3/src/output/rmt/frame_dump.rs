@@ -2,26 +2,51 @@
 //!
 //! An LED strip is not a measuring instrument: it shows that *something*
 //! rendered, never *which bytes*. So this module decorates the RMT output's
-//! write path with the same transcript the M3/M4 `SerialReadoutWs281xDriver`
-//! printed before real output existed — and for the same reason. The M4
-//! hardware walk (`scripts/m4-hardware-walk.sh`) diffs these lines against a
-//! host render byte for byte, which is how "the S3's Xtensa JIT renders
-//! correctly" is a claim with a number attached rather than a photograph.
+//! write path with a transcript of what actually went to the wire. The M7
+//! hardware walk (`scripts/m4-hardware-walk.sh --chip esp32`) diffs these lines
+//! against a host render byte for byte, which is how "the classic's Xtensa JIT
+//! renders correctly" is a claim with a number attached rather than a
+//! photograph.
+//!
+//! That claim is worth more on this chip than on any other in the family. M1's
+//! whole premise was a per-chip memory-model divergence — the classic's heap
+//! has no I-bus view, so compiled shader code is installed through a
+//! word-mirrored D-bus walk into a fixed SRAM1 region
+//! (`lpvm_native::codemem_esp32`) rather than executed where it was built.
+//! "The pixels match" is exactly the property that install path could break
+//! quietly, so it deserves evidence rather than inference.
+//!
+//! # A byte-for-byte port of `fw-esp32s3`'s module
+//!
+//! This is `lp-fw/fw-esp32s3/src/output/rmt/frame_dump.rs`, and the **emitted
+//! line shapes are identical to it on purpose**. `scripts/m4-hardware-walk.sh`
+//! greps for `[OUT] dump` and for the `rgb=` token, and
+//! `lp-app/lpa-server/tests/shader_oracle_frame.rs` mirrors them on the host —
+//! neither has, or should need, a per-chip branch. Changing a format string
+//! here without changing it in all four places breaks the comparison silently,
+//! which is the worst way for a correctness gate to fail. Duplicated rather
+//! than shared because the two firmwares are separate crates under separate
+//! toolchains with no common chip-side library; the constants below and the
+//! host test's copies are transcribed constants, same as the S3's already are.
 //!
 //! ## Why it is a cargo feature and not a runtime flag
 //!
 //! Hex-formatting every frame costs time on the render path and bandwidth on
-//! the USB-Serial-JTAG link the transport also runs on. A runtime flag would
-//! still compile the formatting in and still branch on it per frame. `cfg`
-//! means an app build that did not ask for the readout contains none of this —
-//! no formatter, no checksum, not even the counter — which is the only version
-//! of "opt-in" worth the observability.
+//! the serial link the transport also runs on. A runtime flag would still
+//! compile the formatting in and still branch on it per frame. `cfg` means an
+//! app build that did not ask for the readout contains none of this — no
+//! formatter, no checksum, not even the counter — which is the only version of
+//! "opt-in" worth the observability.
 //!
 //! ## Volume
 //!
-//! A full pixel dump every frame would drown the link (256 LEDs × 60 fps ≈
-//! 46 KB/s of hex before framing), and that link is the same one the host is
-//! talking to. So:
+//! The classic has **less** link budget to spend than the S3, not more: this
+//! chip has no USB-Serial-JTAG peripheral, so the host link is UART0 through a
+//! CH340K bridge at 921600 baud (see `board::esp32v3::init`) — a real wire at
+//! roughly 90 KB/s, shared with `serial::io_task`'s protocol traffic. A full
+//! pixel dump every frame would drown it (256 LEDs × 60 fps ≈ 46 KB/s of hex
+//! before framing). So the rates are the S3's, and are a ceiling here rather
+//! than a compromise:
 //!
 //! - **One full hex dump** per output channel, on the first frame after open or
 //!   after a resize, capped at [`MAX_DUMP_LEDS`]. That proves the pixel path
@@ -32,17 +57,11 @@
 //!   changing" from "rendering the same frame forever" from "not rendering" —
 //!   the three states a walk actually needs to tell apart.
 //!
-//! The line shapes are load-bearing, not cosmetic: `scripts/m4-hardware-walk.sh`
-//! greps for `[OUT] dump` and for the `rgb=` token, and
-//! `lp-app/lpa-server/tests/shader_oracle_frame.rs` mirrors them on the host so
-//! the two transcripts line up without either side being sliced by hand.
-//!
-//! ⚠️ There is a **third** copy: `lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs`
-//! is a byte-for-byte port of this module, so the classic ESP32's M7 gate can
-//! reuse the same walk script and the same host comparator with no per-chip
-//! branch. Two firmwares under separate toolchains with no shared chip-side
-//! library, so the duplication is deliberate — but a format string changed here
-//! and not there silently breaks the classic's gate.
+//! Independent of `ws281x_telemetry`, which shares this module's call-site
+//! pattern (decorate the frame-write path, never the ISR; compile to nothing
+//! when off) but answers a different question — that one is about the RMT
+//! refill budget, this one is about pixel values. Either, both or neither can
+//! be enabled; they print different tags and never interleave within a line.
 
 use lpc_hardware::HwEndpointId;
 
