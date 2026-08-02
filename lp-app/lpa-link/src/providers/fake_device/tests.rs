@@ -160,7 +160,7 @@ async fn light_player_state_speaks_real_frames_through_the_real_transport() {
     // unsolicited boot hello is also observed by the client wrapper.
     let hello = client.hello().await.unwrap();
     assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION);
-    assert_eq!(hello.fw.package, "fw-esp32c6");
+    assert_eq!(hello.build.package, "fw-esp32c6");
     assert_eq!(hello.device_uid.as_deref(), Some("dev_fakefakefakefak0"));
 
     let projects = client.project_list_available().await.unwrap();

@@ -39,6 +39,13 @@ ServerHello {
 }
 ```
 
+(Payload reshaped 2026-08-01, wire proto 5: `fw: FwProvenance` is gone —
+its four fields moved onto `build: BuildFacts` beside the build's
+`LpFeature` list, joined by `hardware: HardwareFacts`. The delivery
+contract, the bump rule, and the no-negotiation posture below are
+unchanged; capability reporting is orthogonal to versioning. See
+`docs/adr/2026-08-01-capability-reporting-on-hello.md`.)
+
 It is delivered two ways, both mandatory for every lpa-server embedder:
 
 - **Unsolicited**: as the first id-0 frame the server loop sends when it
@@ -85,10 +92,14 @@ affordance) is `DeviceSession` (device-link M4; see
 `docs/adr/2026-07-15-device-session-model.md`); this ADR fixes the
 contract it consumes.
 
-The Studio firmware manifest records the wire version it would flash
-(`build.wireProto` in `studio-firmware-manifest.mjs` output, extracted
-from the const by the packaging recipe), so "manifest we'd flash" vs
-"device hello" is a pure integer comparison — no ELF parsing.
+The Studio firmware manifest records the wire version it would flash, so
+"manifest we'd flash" vs "device hello" is a pure integer comparison — no
+ELF parsing at comparison time. (Mechanism updated 2026-08-01: it was
+`build.wireProto`, `sed`-extracted from the const by the packaging recipe;
+it is now `core.wireProto` in `manifest.json` schemaVersion 2, extracted
+from the built image's embedded manifest core by `lp-cli firmware package`
+— see `docs/adr/2026-08-01-firmware-manifest-architecture.md`. The
+comparison is unchanged.)
 
 ## Future intent (recorded, not implemented)
 
@@ -104,8 +115,9 @@ from the const by the packaging recipe), so "manifest we'd flash" vs
 
 ## Consequences
 
-- lpc-wire carries `WIRE_PROTO_VERSION`, `ServerHello`, `FwProvenance`,
-  `ServerMsgBody::Hello`, `ClientRequest::Hello`.
+- lpc-wire carries `WIRE_PROTO_VERSION`, `ServerHello`, `FwProvenance`
+  (renamed to `BuildFacts` and given a feature list in 2026-08-01's
+  capability reshape), `ServerMsgBody::Hello`, `ClientRequest::Hello`.
 - All three embedders (fw-esp32, fw-host, fw-browser) inject provenance
   and emit the boot hello; fw-esp32's comes from `build.rs`-captured git
   state (`LP_BUILD_COMMIT`/`LP_BUILD_DIRTY`/`LP_BUILD_PROFILE`, falling

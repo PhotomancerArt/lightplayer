@@ -293,6 +293,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
 
         let half = state.half_words.load(Relaxed);
         self.hw.set_tx_threshold(ch, half as u16);
+        state.threshold_boundary.store(half, Relaxed);
         self.hw.start_tx(ch);
         Ok(())
     }
@@ -424,10 +425,11 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     ///
     /// Channels are served in index order, which means the highest-numbered
     /// channel of a coincident group waits for all the others' refills. That
-    /// cost is measurable — it is exactly what
-    /// [`ChannelStats::refill_lag_sum`] records — and it is the reason the
-    /// deadline budget in the crate README is stated per *group* rather than
-    /// per channel.
+    /// cost is measurable — it lands in that channel's
+    /// [`ChannelStats::entry_delay_max`], which is sampled per channel at the
+    /// top of its own service and therefore includes every earlier channel's
+    /// refill — and it is the reason the deadline budget in the crate README is
+    /// stated per *group* rather than per channel.
     pub fn on_interrupt(&self) {
         let flags = self.hw.take_interrupts();
         #[cfg(feature = "test_hooks")]
@@ -522,8 +524,23 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         state.frame_complete.store(true, Release);
     }
 
-    /// Handle `tx_thr_event`: plant the guard, refill the free half, flip the
-    /// threshold, and record how far the read pointer moved meanwhile.
+    /// Handle `tx_thr_event`: measure the entry delay, plant the guard, refill
+    /// the free half, flip the threshold, and record how far the read pointer
+    /// moved meanwhile.
+    ///
+    /// The two measurements split the one deadline — a ping-pong half — into
+    /// the part spent *getting here* and the part spent *doing the work*:
+    ///
+    /// * [`ChannelStats::entry_delay_max`] is `(read_pos - boundary) mod
+    ///   ram_words` at the top of this function, i.e. interrupt-to-service
+    ///   latency in 1.25 µs units. It costs nothing extra to obtain — it reuses
+    ///   the `read_pos` the half selection already needs.
+    /// * [`ChannelStats::refill_lag_max`] is the advance across the refill
+    ///   itself.
+    ///
+    /// Which of the two dominates is the whole question when a chip starts
+    /// truncating frames: entry delay says the handler could not get in, refill
+    /// lag says it could not get out.
     fn refill(&self, ch: u8, state: &ChannelState) {
         if state.is_complete() {
             return;
@@ -535,6 +552,21 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         }
 
         let pos_before = self.hw.read_pos(ch) as usize;
+
+        // Entry delay, before anything else is done with this channel: the
+        // words the transmitter got through between raising `tx_thr_event` at
+        // the armed boundary and this handler arriving.
+        //
+        // The threshold alternates between `half` and `ram`, and the `ram` one
+        // fires as the pointer returns to word 0 — so reducing it mod `ram`
+        // turns the armed value into the word the event actually fired at, and
+        // keeps `ram - boundary` in range for the subtraction. The outer
+        // modulus is the one that carries weight: a service late enough for the
+        // pointer to have wrapped past the boundary reads a `read_pos`
+        // numerically *below* it, for a delay that is positive.
+        let boundary = state.threshold_boundary.load(Relaxed) % ram;
+        state.record_entry_delay((pos_before + ram - boundary) % ram, half);
+
         let in_second_half = pos_before >= half;
 
         // The transmitter is inside one half; the other one is free.
@@ -547,6 +579,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         // Flip the threshold first: the next event must be armed before the
         // refill, which is the long part of this handler.
         self.hw.set_tx_threshold(ch, next_threshold as u16);
+        state.threshold_boundary.store(next_threshold, Relaxed);
 
         if pos_before == guard_slot {
             // The read pointer has not passed the slot yet — writing a STOP

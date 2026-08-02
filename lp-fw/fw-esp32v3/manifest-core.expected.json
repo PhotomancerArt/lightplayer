@@ -1,0 +1,18 @@
+{
+  "lpManifestCore": 1,
+  "package": "fw-esp32v3",
+  "target": {
+    "family": "esp32",
+    "chip": "esp32",
+    "cargoTarget": "xtensa-esp32-none-elf"
+  },
+  "features": [
+    "node.fixture",
+    "node.shader",
+    "gfx.lpvm"
+  ],
+  "limits": {
+    "flashAppBytes": 3145728
+  },
+  "wireProto": 5
+}

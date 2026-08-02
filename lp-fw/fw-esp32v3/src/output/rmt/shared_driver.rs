@@ -178,10 +178,16 @@ pub mod telemetry {
             let wanted_per_frame = state.total_bits().div_ceil(half) as u64;
             let (lag_int, lag_tenths) =
                 mean_lag_tenths(stats.refill_lag_sum, stats.refill_lag_count);
+            // `entry_max`/`entry_hist` are appended, never inserted: P4's
+            // matrix scripts grep the earlier fields by position, and the
+            // pre-existing prefix must keep matching old captures so runs
+            // before and after this change stay comparable. Entry delay vs
+            // refill lag split one deadline into "getting in" vs "getting
+            // out" — see lp-ws281x's driver docs.
             esp_println::println!(
                 "[WS281X] t_ms={} ch={} half={} frames={} complete={} trips={} skips={} \
                  errors={} refills={} wanted={} lag_avg={}.{} lag_max={} over_half={} \
-                 hist={}",
+                 hist={} entry_max={} entry_hist={}",
                 now_ms,
                 ch,
                 half,
@@ -197,6 +203,8 @@ pub mod telemetry {
                 stats.refill_lag_max,
                 stats.lag_over_half(),
                 HistFmt(stats.lag_hist),
+                stats.entry_delay_max,
+                HistFmt(stats.entry_delay_hist),
             );
         }
     }

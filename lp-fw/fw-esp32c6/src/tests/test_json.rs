@@ -31,7 +31,7 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
         init_board();
     start_runtime(timg0, _sw_int);
 
-    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
+    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, crate::output::rmt::shared_driver::RMT_CLOCK)
         .expect("RMT init");
     let mut channel = LedChannel::new(rmt, gpio18, 1).expect("LED channel");
 

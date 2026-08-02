@@ -7,7 +7,13 @@
 
 #[cfg(any(not(fw_harness), feature = "test_button"))]
 pub mod button;
-#[cfg(all(feature = "radio", any(not(fw_harness), feature = "test_espnow")))]
+// The radio *driver* is compiled out of P4 stress builds: there the radio
+// stack belongs to the load generators in `stress.rs` instead.
+#[cfg(all(
+    feature = "radio",
+    not(any(feature = "stress_s2", feature = "stress_s3")),
+    any(not(fw_harness), feature = "test_espnow")
+))]
 pub mod espnow_radio_driver;
 #[cfg(not(fw_harness))]
 pub use fw_esp32_common::hardware::manifest_loader;

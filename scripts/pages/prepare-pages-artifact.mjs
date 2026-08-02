@@ -43,7 +43,7 @@ const configs = {
       "pkg/fw_browser.js",
       "pkg/fw_browser_bg.wasm",
       "lpa-link/browser_esp32_device_controller.js",
-      "firmware/esp32c6/manifest.json",
+      "firmware/esp32c6-4mb/manifest.json",
       // The committed CodeMirror bundle (the code editor hard-fails without
       // it — index.html loads it with a plain <script> tag, so it is
       // invisible to dx's asset graph and must ride the entries list above).

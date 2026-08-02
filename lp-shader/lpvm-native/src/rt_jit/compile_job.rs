@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
-use lpir::{CompilerConfig, LpirModule};
+use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{LpvmCompileBudget, LpvmCompileJob, LpvmCompileStepResult};
+use lpvm::{LpvmCompileBudget, LpvmCompileJob, LpvmCompileParams, LpvmCompileStepResult};
 
 use crate::compile::{NativeCompileBudget, NativeCompileJob, NativeCompileStepResult};
 use crate::error::NativeError;
@@ -33,10 +33,11 @@ impl NativeJitCompileJob {
         meta: LpsModuleSig,
         builtin_table: Arc<BuiltinTable>,
         mut options: NativeCompileOptions,
-        config: CompilerConfig,
+        params: LpvmCompileParams,
         isa: IsaTarget,
     ) -> Self {
-        options.config = config;
+        options.config = params.config;
+        options.float_mode = params.float_mode;
         // Build entry info before handing `ir` to the backend so the module
         // is moved, not cloned — the backend job owns the only IR copy.
         let entry_info = build_entry_info(&ir, &meta, isa)

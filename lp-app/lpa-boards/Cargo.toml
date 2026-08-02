@@ -15,6 +15,9 @@ schema-gen = ["dep:schemars"]
 diagram = ["dep:dioxus"]
 
 [dependencies]
+# The feature registry the board↔build join reports against. Data only — the
+# join reads checked-in manifest-core fixtures, never firmware.
+lpc-model = { path = "../../lp-core/lpc-model" }
 # Component-library feature set (no renderer, no launch): the consuming app
 # picks the platform.
 dioxus = { version = "0.7", default-features = false, features = ["lib"], optional = true }

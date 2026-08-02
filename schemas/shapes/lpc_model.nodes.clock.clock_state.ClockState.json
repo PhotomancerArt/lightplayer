@@ -4,10 +4,6 @@
       {
         "default_bind": "bus:time",
         "name": "seconds",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
@@ -24,10 +20,6 @@
       },
       {
         "name": "delta_seconds",
-        "policy": {
-          "persistence": "transient",
-          "writable": false
-        },
         "semantics": {
           "direction": "produced"
         },
