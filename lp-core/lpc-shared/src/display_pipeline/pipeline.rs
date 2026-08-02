@@ -18,8 +18,17 @@ use super::dither::dither_step;
 const LOW_GRAY_THRESHOLD: u32 = 65535 / 20;
 
 /// Triple-buffered display pipeline. 16-bit in, 8-bit out.
+///
+/// "Triple" is conditional. `prev` only ever has its CONTENTS read by
+/// [`Self::render_interpolated`], and `dither_overflow` only by the dithering
+/// branch of [`Self::apply_white_point_dither`]. Both are gated on options
+/// that are fixed for the life of the pipeline, so when an option is off its
+/// buffer is left empty rather than allocated — 6 B/LED for `prev`, 3 B/LED
+/// for `dither_overflow`, on a device where a whole LED costs ~90 B. See
+/// [`Self::rotate_frames`] for why skipping the swap is output-identical.
 pub struct DisplayPipeline {
     num_leds: u32,
+    /// Empty unless `options.interpolation_enabled`.
     prev: Vec<u16>,
     current: Vec<u16>,
     next: Vec<u16>,
@@ -30,12 +39,23 @@ pub struct DisplayPipeline {
     has_current: bool,
     has_next: bool,
     prev_current_delta_us: u64,
+    /// Empty unless `options.dithering_enabled`.
     dither_overflow: Vec<[i8; 3]>,
     /// Per-channel white point as Q16.16, derived once from
     /// [`DisplayPipelineOptions::white_point`] (which is immutable for the
     /// life of the pipeline). See [`white_point_scale`].
     white_scale: [u32; 3],
     options: DisplayPipelineOptions,
+    /// Test-only: forces the three-buffer rotation even with interpolation
+    /// off, so `ReferencePipeline` can reproduce the pre-change behaviour as
+    /// a bit-identity oracle. Never set in production builds.
+    #[cfg(test)]
+    force_three_buffer_rotation: bool,
+    /// Test-only: counts `render_interpolated` calls, so the differential test
+    /// can assert it actually exercised the interpolating path instead of
+    /// silently proving nothing.
+    #[cfg(test)]
+    interpolated_renders: u32,
 }
 
 /// White point as a Q16.16 multiplier.
@@ -76,14 +96,20 @@ impl DisplayPipeline {
             return Err(DisplayPipelineError::AllocationFailed { num_leds: 0 });
         }
         let size = (num_leds as usize) * 3;
-        let mut prev = Vec::with_capacity(size);
+        let prev_size = if options.interpolation_enabled { size } else { 0 };
+        let overflow_size = if options.dithering_enabled {
+            num_leds as usize
+        } else {
+            0
+        };
+        let mut prev = Vec::with_capacity(prev_size);
         let mut current = Vec::with_capacity(size);
         let mut next = Vec::with_capacity(size);
-        prev.resize(size, 0);
+        prev.resize(prev_size, 0);
         current.resize(size, 0);
         next.resize(size, 0);
-        let mut dither_overflow = Vec::with_capacity(num_leds as usize);
-        dither_overflow.resize(num_leds as usize, [0i8; 3]);
+        let mut dither_overflow = Vec::with_capacity(overflow_size);
+        dither_overflow.resize(overflow_size, [0i8; 3]);
         let white_scale = [
             white_point_scale(options.white_point[0]),
             white_point_scale(options.white_point[1]),
@@ -104,6 +130,10 @@ impl DisplayPipeline {
             dither_overflow,
             white_scale,
             options,
+            #[cfg(test)]
+            force_three_buffer_rotation: false,
+            #[cfg(test)]
+            interpolated_renders: 0,
         })
     }
 
@@ -113,10 +143,16 @@ impl DisplayPipeline {
             return;
         }
         let size = (num_leds as usize) * 3;
-        self.prev.resize(size, 0);
+        // Keep the disabled-option buffers empty across a resize; `new` decided
+        // they are never read for this pipeline's options.
+        if self.options.interpolation_enabled {
+            self.prev.resize(size, 0);
+        }
         self.current.resize(size, 0);
         self.next.resize(size, 0);
-        self.dither_overflow.resize(num_leds as usize, [0i8; 3]);
+        if self.options.dithering_enabled {
+            self.dither_overflow.resize(num_leds as usize, [0i8; 3]);
+        }
         self.num_leds = num_leds;
         self.has_prev = false;
         self.has_current = false;
@@ -133,7 +169,25 @@ impl DisplayPipeline {
     /// loops that interleave ticks with `write_frame` calls.
     fn rotate_frames(&mut self) {
         if self.has_current {
-            core::mem::swap(&mut self.prev, &mut self.current);
+            // With interpolation off, `prev` is empty and its contents are
+            // dead: `render_interpolated` is the only reader and `tick` gates
+            // every call to it on `interpolation_enabled`. Skipping the swap
+            // leaves `current`'s buffer in hand to be recycled by the swap
+            // below, turning this into a two-buffer rotation.
+            //
+            // Every timestamp and flag below is still maintained exactly as in
+            // the three-buffer case — `prev_ts`, `has_prev` and
+            // `prev_current_delta_us` feed `tick`'s frame-age decisions even
+            // when no interpolation happens, so they are NOT interpolation
+            // bookkeeping and must not be gated.
+            #[cfg(test)]
+            let keep_prev_buffer =
+                self.options.interpolation_enabled || self.force_three_buffer_rotation;
+            #[cfg(not(test))]
+            let keep_prev_buffer = self.options.interpolation_enabled;
+            if keep_prev_buffer {
+                core::mem::swap(&mut self.prev, &mut self.current);
+            }
             self.prev_ts = self.current_ts;
             self.has_prev = true;
             self.has_current = false;
@@ -218,6 +272,10 @@ impl DisplayPipeline {
     }
 
     fn render_interpolated(&mut self, now_us: u64, out: &mut [u8]) {
+        #[cfg(test)]
+        {
+            self.interpolated_renders += 1;
+        }
         let frame_progress_us = now_us.saturating_sub(self.prev_ts);
         let frame_progress16 = ((frame_progress_us << 16) / self.prev_current_delta_us) as u16;
         let inv_progress16 = 0xFFFF - frame_progress16;
@@ -257,7 +315,11 @@ impl DisplayPipeline {
         };
         // Shared luminance dithering for low-gray grayscale disabled for now:
         // was causing colored light to appear monochrome; grayscale check was insufficient
-        let use_shared_luma = false;
+        //
+        // `&& dithering_enabled` is load-bearing if this is ever switched back
+        // on: `dither_overflow` is only allocated when dithering is enabled, so
+        // the indexing below would panic on an empty buffer without it.
+        let use_shared_luma = false && self.options.dithering_enabled;
 
         if use_shared_luma {
             let lum = (ir + ig + ib) / 3;
@@ -279,9 +341,185 @@ impl DisplayPipeline {
     }
 }
 
+/// Reference pipeline reproducing the pre-change allocation behaviour: all
+/// three frame buffers and the dither carry always present, and the
+/// unconditional three-buffer rotation.
+///
+/// SCOPE — this is a wrapper around the real [`DisplayPipeline`], not an
+/// independent reimplementation. It therefore proves exactly one thing: that
+/// making `prev`/`dither_overflow` conditional and skipping the `prev` swap
+/// does not change output. It CANNOT catch a regression in code the two share
+/// — white-point scaling, `dither_step`, the interpolation arithmetic — because
+/// a mutation there moves both sides equally. Those are covered by the
+/// value-path tests below (`white_point_matches_the_lut_it_replaced`,
+/// `unit_white_point_is_the_identity`, the `dither` module's tests).
+///
+/// Verified to have teeth: removing the `prev` swap while interpolation is
+/// enabled fails this test at step 1.
+#[cfg(test)]
+struct ReferencePipeline {
+    inner: DisplayPipeline,
+}
+
+#[cfg(test)]
+impl ReferencePipeline {
+    fn new(num_leds: u32, options: DisplayPipelineOptions) -> Self {
+        let mut inner = DisplayPipeline::new(num_leds, options).expect("reference pipeline");
+        // Force the pre-change allocation shape: all three frame buffers and
+        // the dither carry always present, regardless of options.
+        let size = (num_leds as usize) * 3;
+        inner.prev.resize(size, 0);
+        inner.dither_overflow.resize(num_leds as usize, [0i8; 3]);
+        inner.force_three_buffer_rotation = true;
+        Self { inner }
+    }
+
+    fn write_frame(&mut self, ts_us: u64, data: &[u16]) {
+        self.inner.write_frame(ts_us, data);
+    }
+
+    fn tick(&mut self, now_us: u64, out: &mut [u8]) {
+        self.inner.tick(now_us, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
+
+    /// Deterministic xorshift — no rand dependency in a no_std crate.
+    fn lcg(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    /// The bit-identity proof for the conditional-buffer change: for every
+    /// combination of the options that gate `prev` and `dither_overflow`,
+    /// drive a randomized frame/tick sequence through both the reference
+    /// three-buffer pipeline and the real one, and require byte-identical
+    /// output on every tick.
+    #[test]
+    fn conditional_buffers_are_bit_identical_to_three_buffer_reference() {
+        const NUM_LEDS: u32 = 37;
+        let size = (NUM_LEDS as usize) * 3;
+
+        for interpolation_enabled in [false, true] {
+            for dithering_enabled in [false, true] {
+                for lut_enabled in [false, true] {
+                    let options = DisplayPipelineOptions {
+                        white_point: [0.9, 1.0, 0.75],
+                        interpolation_enabled,
+                        dithering_enabled,
+                        lut_enabled,
+                    };
+                    let mut reference = ReferencePipeline::new(NUM_LEDS, options.clone());
+                    let mut actual =
+                        DisplayPipeline::new(NUM_LEDS, options.clone()).expect("pipeline");
+
+                    let mut state = 0x2026_0802_u64;
+                    let mut frame = vec![0u16; size];
+                    let mut ref_out = vec![0u8; size];
+                    let mut act_out = vec![0u8; size];
+
+                    // Frames are stamped in the future relative to the tick
+                    // that follows them — the same ordering the ESP32 provider
+                    // produces, and the only one under which `tick` reaches
+                    // `render_interpolated` (it needs
+                    // `now_us - prev_ts < prev_current_delta_us`). A pattern
+                    // that ticks past each frame's timestamp silently never
+                    // interpolates, which would make this whole test vacuous.
+                    const INTERVAL_US: u64 = 20_000;
+                    for step in 0..200u64 {
+                        for sample in frame.iter_mut() {
+                            *sample = (lcg(&mut state) & 0xFFFF) as u16;
+                        }
+                        let frame_ts = step * INTERVAL_US;
+                        reference.write_frame(frame_ts, &frame);
+                        actual.write_frame(frame_ts, &frame);
+
+                        // Tick inside the interval just before `frame_ts`, and
+                        // occasionally well past it so the stale-frame
+                        // catch-up branch is covered too.
+                        let now_us = if step % 7 == 6 {
+                            frame_ts + INTERVAL_US * 3
+                        } else {
+                            frame_ts.saturating_sub(INTERVAL_US / 2)
+                        };
+                        reference.tick(now_us, &mut ref_out);
+                        actual.tick(now_us, &mut act_out);
+                        assert_eq!(
+                            ref_out, act_out,
+                            "output diverged at step {step} with \
+                             interpolation={interpolation_enabled} \
+                             dithering={dithering_enabled} lut={lut_enabled}"
+                        );
+                    }
+
+                    // The test is only meaningful if the interpolating path
+                    // actually ran when it was enabled.
+                    if interpolation_enabled {
+                        assert!(
+                            actual.interpolated_renders > 0
+                                && reference.inner.interpolated_renders > 0,
+                            "interpolation enabled but render_interpolated never ran — \
+                             the differential proves nothing"
+                        );
+                    } else {
+                        assert_eq!(
+                            actual.interpolated_renders, 0,
+                            "interpolation disabled but render_interpolated ran"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The saving is the point: assert the buffers really are absent, so a
+    /// future refactor that quietly reallocates them fails here rather than
+    /// silently costing 9 B/LED again.
+    #[test]
+    fn disabled_options_do_not_allocate_their_buffers() {
+        let opts = DisplayPipelineOptions {
+            white_point: [1.0, 1.0, 1.0],
+            interpolation_enabled: false,
+            dithering_enabled: false,
+            lut_enabled: true,
+        };
+        let mut pipeline = DisplayPipeline::new(100, opts).expect("pipeline");
+        assert_eq!(pipeline.prev.len(), 0, "prev allocated with interpolation off");
+        assert_eq!(
+            pipeline.dither_overflow.len(),
+            0,
+            "dither carry allocated with dithering off"
+        );
+        // A resize must not reintroduce them.
+        pipeline.resize(200);
+        assert_eq!(pipeline.prev.len(), 0, "resize reallocated prev");
+        assert_eq!(
+            pipeline.dither_overflow.len(),
+            0,
+            "resize reallocated dither carry"
+        );
+        assert_eq!(pipeline.current.len(), 600);
+        assert_eq!(pipeline.next.len(), 600);
+    }
+
+    #[test]
+    fn enabled_options_still_allocate_their_buffers() {
+        let opts = DisplayPipelineOptions {
+            white_point: [1.0, 1.0, 1.0],
+            interpolation_enabled: true,
+            dithering_enabled: true,
+            lut_enabled: true,
+        };
+        let pipeline = DisplayPipeline::new(100, opts).expect("pipeline");
+        assert_eq!(pipeline.prev.len(), 300);
+        assert_eq!(pipeline.dither_overflow.len(), 100);
+    }
 
     #[test]
     fn new_creates_pipeline() {
