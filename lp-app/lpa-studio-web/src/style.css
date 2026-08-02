@@ -4389,3 +4389,19 @@ label:has(> input:not(:disabled)) {
 .lpb-ed-hidden-input {
     display: none;
 }
+
+/* Setup-form board tiles: every board drawing gets the SAME art box, so a
+   tall devkit and a stubby XIAO share a baseline. The renderer sizes its
+   SVG from the board's own geometry, so the clamp has to live here rather
+   than in a per-board `scale`. */
+.lpb-setup-tile-art {
+    height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lpb-setup-tile-art svg {
+    max-height: 46px;
+    width: auto;
+}
