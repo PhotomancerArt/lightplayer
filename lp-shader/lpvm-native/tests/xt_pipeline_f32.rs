@@ -695,6 +695,94 @@ fn floats_cross_a_guest_call_in_address_registers() {
     assert_eq!(f32::from_bits(got), a * b + a - b);
 }
 
+/// A float parameter the body **writes to** is read back from the float file at
+/// every later boundary, not from the address register it arrived in.
+///
+/// LPIR is not SSA: `float f(float x) { x = x + 1.0; … }` redefines the
+/// parameter's own vreg, and that write lands in the FR shadow while the
+/// incoming AR keeps the caller's argument. Lowering used to shortcut a
+/// parameter at a call-argument or return boundary straight to that AR, so the
+/// write was silently discarded — the caller's value came back out. This is
+/// `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`, and
+/// it took the `lps-glsl` frontend (the only one that reuses the parameter
+/// vreg) plus Xtensa plus f32 to observe.
+///
+/// Both boundaries are covered: `bump` returns its reassigned parameter, and
+/// `forward` passes its own reassigned parameter on as a call argument.
+#[test]
+fn a_reassigned_float_parameter_is_read_back_from_the_float_file() {
+    // bump(x) { x = x + 1.0; return x; }   -- write, then the return boundary
+    let mut bb = FunctionBuilder::new("bump", &[IrType::F32]);
+    let bx = bb.add_param(IrType::F32);
+    let one = bb.alloc_vreg(IrType::F32);
+    bb.push(LpirOp::FconstF32 {
+        dst: one,
+        value: 1.0,
+    });
+    bb.push(LpirOp::Fadd {
+        dst: bx,
+        lhs: bx,
+        rhs: one,
+    });
+    bb.push_return(&[bx]);
+    let bump = bb.finish();
+
+    // forward(x) { x = x * 2.0; return bump(x); }  -- write, then the call
+    // argument boundary. Doubling rather than adding keeps the two writes
+    // distinguishable: any value but 12.0 out of forward(5.0) says which
+    // boundary dropped which write.
+    let mut fb = FunctionBuilder::new("forward", &[IrType::F32]);
+    let fx = fb.add_param(IrType::F32);
+    let two = fb.alloc_vreg(IrType::F32);
+    let called = fb.alloc_vreg(IrType::F32);
+    fb.push(LpirOp::FconstF32 {
+        dst: two,
+        value: 2.0,
+    });
+    fb.push(LpirOp::Fmul {
+        dst: fx,
+        lhs: fx,
+        rhs: two,
+    });
+    fb.push_call(
+        lpir::CalleeRef::Local(FuncId(0)),
+        &[lpir::VMCTX_VREG, fx],
+        &[called],
+    );
+    fb.push_return(&[called]);
+    let forward = fb.finish();
+
+    let ir = LpirModule {
+        imports: vec![],
+        functions: VecMap::from([(FuncId(0), bump), (FuncId(1), forward)]),
+    };
+    let sig = LpsModuleSig {
+        functions: vec![
+            LpsFnSig {
+                name: "bump".to_string(),
+                parameters: vec![float_param("x")],
+                return_type: LpsType::Float,
+                kind: LpsFnKind::UserDefined,
+            },
+            LpsFnSig {
+                name: "forward".to_string(),
+                parameters: vec![float_param("x")],
+                return_type: LpsType::Float,
+                kind: LpsFnKind::UserDefined,
+            },
+        ],
+        uniforms_type: None,
+        globals_type: None,
+        ..Default::default()
+    };
+
+    let x = 5.0f32;
+    let got = expect_ok(run_f32(&ir, &sig, "bump", &[0, bits(x)]));
+    assert_eq!(f32::from_bits(got), x + 1.0, "return boundary");
+    let got = expect_ok(run_f32(&ir, &sig, "forward", &[0, bits(x)]));
+    assert_eq!(f32::from_bits(got), x * 2.0 + 1.0, "call-argument boundary");
+}
+
 // ---------------------------------------------------------------------------
 // Register pressure — the counterpart to `spill_pressure_beyond_the_12_reg_pool`
 // ---------------------------------------------------------------------------

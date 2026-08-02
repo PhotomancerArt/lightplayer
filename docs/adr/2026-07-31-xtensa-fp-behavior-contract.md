@@ -222,26 +222,40 @@ Stated, not implied away:
 
 - **LX6 (classic ESP32) FPU** — untouched (plan Q5, future work).
 - **Cycle/timing behavior** — out of scope repo-wide.
-- `divn.s` off the sequence envelope — 149/1 536 round-1 probe rows
-  (operand shapes no sequence produces); round-2 grids
-  (`helpers::probe2`, 7 073 probes) are built, fingerprint-pinned, and
-  queued behind a board replug.
+- `divn.s` off the sequence envelope — **measured 2026-08-01, and it is worse
+  than the round-1 number suggested.** Round 2 (`helpers::probe2`, 7 073
+  probes) ran on the same board: the fit reproduces **4 985 / 6 897**
+  off-envelope rows (72.3%), against 90.3% on the grid it was fitted to, with
+  the class region at `A − 384 ∈ 0..5` weakest at 41.7%. Still not a
+  correctness problem — these are operand shapes no divide or sqrt sequence
+  produces, and the model stays exact on all 272 end-to-end sequence rows and
+  every family vector — but the limit is now quantified rather than assumed.
+  **Anything that emits `divn.s` sequences directly (inline divide/sqrt) needs
+  a re-fit first.** Counts pinned in `tests/fp_silicon_replay.rs`.
 - Non-default FCR.RM for ops other than `add.s`/`sub.s`/`mul.s` (refused).
 - `maddn.s`/`divn.s` under non-default FCR.RM (refused; probes ran at RNE).
 - FSR of the estimates on zero inputs in isolation (P1's `0x400` is
   attributable to its `mkdadj` probe; the family data pins `mkdadj` as the
   Z-flag source and the emulator models the estimates flag-free).
-- NaN payload priority when the *accumulator* carries a distinctive payload
-  (probe grids staged only canonical NaNs there; the chosen acc-first order
-  is pinned by sequence behavior, and the round-2 `MaddNan` grids will close
-  it).
+- ~~NaN payload priority when the *accumulator* carries a distinctive
+  payload.~~ **Closed 2026-08-01.** The round-2 `MaddNan`/`MaddnNan`/`DivnNan`
+  grids staged four distinct payloads in every operand position: **176/176
+  rows exact**, results and flags. Acc-first was previously *inferred* from
+  sequence behaviour; it is now measured, and the model was already right.
+  The row in the behaviour table above therefore stands on measurement rather
+  than inference.
 - `CPENABLE`'s boot-time arming provenance (ROM vs 2nd-stage bootloader).
 
-None of these block M7: the sequence envelope and the measured-surface rows
-above are what the emitter actually produces. `probe2` is the closing item
-for a future desk session, not a blocker — it is already built, wired into
-`just fwtest-xt-fp-esp32s3 <port> helpers`, and fingerprint-pinned
-(`0x67c29b75`) so it cannot silently drift before it runs.
+None of these blocked M7, which shipped and ran on silicon (27/27). The
+sequence envelope and the measured-surface rows above are what the emitter
+actually produces.
+
+**`probe2` has now run** (2026-08-01, `tests/fixtures/fp/captures/helpers2.txt`,
+fingerprint `0x67c29b75`). It closed the accumulator-NaN item outright and
+converted the `divn.s` item from an estimate into a pinned number — the two
+outcomes are recorded separately above because they point in opposite
+directions, and summarising them as "probe2 done" would lose the half that
+constrains future work.
 
 ## 11. Alternatives considered
 

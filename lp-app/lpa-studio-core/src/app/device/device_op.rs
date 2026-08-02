@@ -1,3 +1,4 @@
+use super::bootloader_entry_flow::BootloaderEntryFlow;
 use core::any::Any;
 use core::time::Duration;
 
@@ -51,6 +52,39 @@ pub enum DeviceOp {
     /// stays; the board lands on Connected-empty.
     WipeProject,
     ResetToBlank,
+    /// Write the boot-control record so the device's NEXT restart comes up
+    /// without loading a project (`lp-bootctl`).
+    ///
+    /// The escape for a project that stops its own device from running —
+    /// too bright, too power-hungry, or hanging the watchdog. Nothing is
+    /// erased and the instruction is one-shot: the device consumes it as it
+    /// boots, so the restart after that is normal again. That is why this is
+    /// NOT destructive and does not sever a lens, unlike `ResetToBlank`.
+    BootSafeOnce,
+    /// Read the device's filesystem partition over the bootloader and hand
+    /// the user a ZIP of it.
+    ///
+    /// The rescue that has to happen BEFORE anything destructive: it works
+    /// on a board that cannot boot, because the bytes come off through the
+    /// ROM/stub bootloader rather than through the running server. Nothing
+    /// is written, so this is not destructive — but it does own the wire and
+    /// reboot the device, like every other management operation.
+    BackUpFilesystem,
+    /// Ask the device whether a bootloader is listening, and fold the answer
+    /// into the card's open bootloader-entry sheet.
+    ///
+    /// This is what makes the ritual's confirmation real. The passive
+    /// classifier CANNOT answer it: a board already in download mode printed
+    /// its ROM banner before Studio ever attached, so silence is the normal
+    /// case rather than evidence. Only the SYNC handshake can say.
+    ///
+    /// User-triggered, never automatic — the handshake reboots the device.
+    /// The user pressing "I've done that" IS the edge signal that a replug
+    /// happened, which is exactly when probing is worth its cost.
+    ProbeBootloaderMode {
+        card_key: String,
+        flow: BootloaderEntryFlow,
+    },
     DisconnectDevice,
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
     /// editor when the lens is on the sim, close the provider session
@@ -120,6 +154,24 @@ impl ControllerOp for DeviceOp {
                 "This will write LightPlayer firmware to the selected ESP32. Continue?",
                 "Flash firmware",
             )),
+            Self::BootSafeOnce => ActionMeta::new(
+                "Start in safe mode",
+                "Have this device start once in safe mode — dim, or with \
+                 nothing loaded on older firmware — so a project that stops \
+                 it from running can be fixed.",
+                ActionPriority::Secondary,
+            ),
+            Self::BackUpFilesystem => ActionMeta::new(
+                "Download a backup",
+                "Copy everything on this device to a ZIP on your computer — \
+                 works even if the board will not start.",
+                ActionPriority::Secondary,
+            ),
+            Self::ProbeBootloaderMode { .. } => ActionMeta::new(
+                "Check the device",
+                "Ask the device whether it is listening in recovery mode.",
+                ActionPriority::Primary,
+            ),
             Self::WipeProject => ActionMeta::new(
                 "Wipe project",
                 "Delete the device's project storage; firmware stays.",
@@ -128,8 +180,13 @@ impl ControllerOp for DeviceOp {
             .destructive()
             .with_confirmation(ActionConfirmation::new(
                 "Wipe the project",
-                "Studio can't read this content, so it can't be backed up — \
-                 wiping deletes it for good and leaves the board empty.",
+                // This used to say the content "can't be backed up". Since
+                // M6 that is false: a raw filesystem backup does not need
+                // Studio to understand the content, only to read the bytes.
+                // Pointing at the way out is the honest gate.
+                "Studio can't read this content, and wiping deletes it for \
+                 good. Download a backup first if you might want it — that \
+                 works even on content Studio can't open.",
                 "Wipe",
             )),
             Self::ResetToBlank => ActionMeta::new(
@@ -186,6 +243,9 @@ impl ControllerOp for DeviceOp {
             | Self::ProvisionFirmware { .. }
             | Self::WipeProject
             | Self::ResetToBlank
+            | Self::BootSafeOnce
+            | Self::BackUpFilesystem
+            | Self::ProbeBootloaderMode { .. }
             | Self::DisconnectDevice
             | Self::StopSimulator
             | Self::RefreshConnections => ActionClass::Recovery,
@@ -239,6 +299,7 @@ mod tests {
             DeviceOp::ResetDevice,
             DeviceOp::ProvisionFirmware { setup_name: None },
             DeviceOp::ResetToBlank,
+            DeviceOp::BackUpFilesystem,
             DeviceOp::DisconnectDevice,
             DeviceOp::StopSimulator,
             DeviceOp::RefreshConnections,

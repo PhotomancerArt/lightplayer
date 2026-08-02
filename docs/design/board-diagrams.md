@@ -19,7 +19,7 @@ rev 5, PR #222, two visual gates).
 | **Rail** | The stack of rows on a left/right board edge. Rails extend outward from the pads. |
 | **Band** | Horizontal strip above/below the rails holding rows for top/bottom-edge pins (screw terminals etc.), which can't have vertical rows. |
 | **Leader** | Elbow line connecting a top/bottom pad to its band row. |
-| **Pad** | The pin's physical marker on the board edge, colored by role. |
+| **Pad** | The pin's physical marker on the board edge, colored by role. Two styles via `pad_style`: the flat header/solder pad (default) and the **screw terminal** — a square block with a screw head, matching the band's terminal drawing, for boards whose rail pins are screw blocks (DIN-rail controllers like the DOM-Z-102). |
 | **Label** | The pin's name, silkscreen-style *inside* the board edge, colored by role. Keeps outside cells left-aligned into columns. |
 
 The annotated-anatomy story (`studio/boards/board-diagram/anatomy` in the
@@ -36,7 +36,8 @@ home for these numbers.
 |---|---|
 | Row height / pin pitch | `1.00u` |
 | Cell height | `0.78u` |
-| Pad | `0.62u × 0.45u` |
+| Pad (header) | `0.62u × 0.45u` |
+| Pad (screw) | `0.62u × 0.62u` square + screw circle `r = 0.34 ×` pad width |
 | Cell font | `0.50u` |
 | Cell gap | `0.22u` |
 
