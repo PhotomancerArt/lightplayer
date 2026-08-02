@@ -288,7 +288,7 @@ where it would show up if one ever appeared.
 |---|---|---|
 | idle, no project | 102,156 B | 10,484 B |
 | `quad-strips-v3` (4 × 30 = 120 LEDs) | 18,128 B | 94,508 B |
-| `quad60-v3` (4 × 60 = 240 LEDs) | **7,384 B** | 105,256 B |
+| `quad60-v3` (4 × 60 = 240 LEDs) | **7,384 B** ⚠️ stale — OOMs on `main` today | 105,256 B |
 | `quad-equal100-v3` (4 × 100 = 400 LEDs) | — | **OOM** |
 
 > **Amended 2026-08-02 — attributed, gated, and re-measured.** The 8,136 B of
@@ -314,15 +314,38 @@ this chip has.
 **Practical ceiling: ~240 LEDs comfortable, ~300 at the edge, 400 impossible
 — for a project whose shader is already compiled.**
 
-> **Amended 2026-08-02 — the ceiling moves up with the reclaimed 64 KiB.** At
-> ≈89.5 B per LED, 65,536 B of new heap is **≈730 LEDs** of headroom on the
-> steady-state axis, so the 400-LED row that OOM'd is now expected to fit with
-> room, and the steady-state ceiling is no longer the interesting limit.
+> **Amended 2026-08-02 — 240 LEDs went from impossible to working, measured.**
 >
-> ⚠️ These are *derived*, not measured — the arithmetic above the amendment
-> stands, but nobody has run 400 LEDs on the two-region image yet. Do not quote
-> a new LED number for a product claim until someone does; measure and replace
-> this paragraph.
+> This is no longer arithmetic. `quad60-v3` (4 × 60 = 240 LEDs) **OOMs on
+> current `main`**: two boots, two allocation failures inside the shader node,
+> then recovery disables the node and the board sits at `level=red`. It never
+> reaches the shader compile. The second failure reports `free=548
+> used=112,092` of the 112,640 B arena — genuinely exhausted, not fragmented.
+> (Measured with PR #285's 13 B/LED reduction already applied; it OOMs anyway.)
+>
+> On the two-region image the same project, from the same startup state, runs:
+>
+> | | `main` (112,640 B) | reclaimed (178,176 B) |
+> |---|---|---|
+> | outcome | **OOM ×2 → node disabled, `level=red`** | runs, `level=green` |
+> | `used` | 112,092 (exhausted) | 110,588 |
+> | `free` | 548 | **67,588** |
+> | shader | never compiled | compiled, `[JIT] used=2032 fails=0` |
+>
+> Power-on boot, `bootCount=1`, `safeMode=false`, 14.3 fps, 201 s soak with
+> zero OOM or crash lines and the heap flat to within 4 B. `used=110,588` is
+> what makes the failure on the old arena inevitable: it needed more than the
+> 112,640 B arena could hold once anything else was resident.
+>
+> ⚠️ **The `quad60-v3 → 7,384 B free` row in the table above is therefore
+> stale** — it is not currently reproducible on `main`, in the same direction
+> as the loaded-`used` drift recorded earlier. That is the row a 240-LED
+> product claim rests on, so treat this amendment as replacing it.
+>
+> The wider ceiling is still *derived*: at ≈89.5 B/LED, 65,536 B is ≈730 LEDs
+> of headroom, which suggests the 400-LED row should now fit. **Nobody has run
+> 400.** Do not quote a number above 240 for a product claim until someone
+> does.
 >
 > ⚠️ The division also assumes the per-LED allocations are individually small
 > enough to land in whichever region has room. **A second region cannot serve a
