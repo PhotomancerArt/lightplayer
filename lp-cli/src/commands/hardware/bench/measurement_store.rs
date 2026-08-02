@@ -1,10 +1,11 @@
 //! The checked-in measurement store: `measurements/<build-id>/<board-id>.json`.
 //!
 //! Records are machine-written by `lp-cli hardware bench` and read by tooling
-//! and (via `include_str!`) the studio catalog. This module is the read side:
-//! it resolves paths, parses records, and refuses ones whose stored facts
-//! disagree with each other or with where they are filed — the drift guard
-//! that keeps a hand-edited record from passing as a measurement.
+//! and (via `include_str!`) the studio catalog. This module resolves paths,
+//! parses records, and refuses ones whose stored facts disagree with each
+//! other or with where they are filed — the drift guard that keeps a
+//! hand-edited record from passing as a measurement. [`write_record`] is the
+//! single write path, and the bench command is its only caller.
 //!
 //! See `measurements/README.md` for the record fields and the staleness
 //! posture.
@@ -24,13 +25,52 @@ pub struct StoredMeasurement {
     pub path: PathBuf,
 }
 
+/// The store directory inside a repo checkout.
+pub fn store_root(repo_root: &Path) -> PathBuf {
+    repo_root.join(MEASUREMENTS_DIR)
+}
+
 /// Path of the record for one (build × board) pair. The board id's `/` becomes
 /// `-` so each build's records are one flat directory.
 pub fn record_path(repo_root: &Path, build_id: &str, board_id: &str) -> PathBuf {
-    repo_root
-        .join(MEASUREMENTS_DIR)
+    record_path_in(&store_root(repo_root), build_id, board_id)
+}
+
+/// [`record_path`] against an explicit store root — the seam the bench's
+/// `--out` writes through.
+pub fn record_path_in(store_root: &Path, build_id: &str, board_id: &str) -> PathBuf {
+    store_root
         .join(build_id)
         .join(format!("{}.json", board_file_stem(board_id)))
+}
+
+/// Write `record` into the store at `store_root`, returning where it landed.
+///
+/// The only write path in the repo: records are produced by a bench run, not
+/// typed. The derivation is re-checked here so a caller that built a record by
+/// hand cannot file one the loader would later refuse.
+pub fn write_record(store_root: &Path, record: &MeasurementRecord) -> Result<PathBuf> {
+    if !record.limit_is_derived() {
+        bail!(
+            "refusing to write a record whose limitLeds ({}) is not floor({} * {})",
+            record.limit_leds,
+            record.raw_boundary_leds,
+            record.margin
+        );
+    }
+
+    let path = record_path_in(store_root, &record.build_id, &record.board_id);
+    let dir = path
+        .parent()
+        .with_context(|| format!("{} has no parent directory", path.display()))?;
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("creating measurement directory {}", dir.display()))?;
+
+    let mut json =
+        serde_json::to_string_pretty(record).context("serializing measurement record")?;
+    json.push('\n');
+    std::fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
 }
 
 /// The file stem a board id is stored under (`seeed/xiao-esp32-c6` →
@@ -162,7 +202,7 @@ mod tests {
     #[test]
     fn loads_a_written_record() {
         let repo = TempDir::new().unwrap();
-        let record = write_record(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6", 250);
+        let record = store_a_record(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6", 250);
 
         let loaded = load_record(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6")
             .unwrap()
@@ -191,11 +231,11 @@ mod tests {
     #[test]
     fn rejects_a_hand_edited_limit() {
         let repo = TempDir::new().unwrap();
-        write_record(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6", 250);
+        store_a_record(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6", 250);
         let path = record_path(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6");
         let edited = std::fs::read_to_string(&path)
             .unwrap()
-            .replace("\"limitLeds\":200", "\"limitLeds\":250");
+            .replace("\"limitLeds\": 200", "\"limitLeds\": 250");
         std::fs::write(&path, edited).unwrap();
 
         let error = load_records(repo.path()).unwrap_err().to_string();
@@ -205,7 +245,7 @@ mod tests {
     #[test]
     fn rejects_a_record_filed_under_the_wrong_pair() {
         let repo = TempDir::new().unwrap();
-        write_record(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6", 250);
+        store_a_record(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6", 250);
         let path = record_path(repo.path(), "esp32c6-4mb", "seeed/xiao-esp32-c6");
         let moved = path.with_file_name("domraem-dom-z-102.json");
         std::fs::rename(&path, &moved).unwrap();
@@ -214,13 +254,48 @@ mod tests {
         assert!(error.contains("boardId"), "{error}");
     }
 
-    fn write_record(
+    /// The write side files a record where the read side looks for it, and a
+    /// rerun of a pair replaces its record rather than accumulating.
+    #[test]
+    fn writing_a_record_files_it_where_the_loader_looks() {
+        let repo = TempDir::new().unwrap();
+        store_a_record(repo.path(), "esp32s3-8mb", "seeed/xiao-esp32-s3-plus", 400);
+        assert!(record_path(repo.path(), "esp32s3-8mb", "seeed/xiao-esp32-s3-plus").exists());
+
+        store_a_record(repo.path(), "esp32s3-8mb", "seeed/xiao-esp32-s3-plus", 410);
+        let all = load_records(repo.path()).unwrap();
+        assert_eq!(all.len(), 1, "a rerun replaces the pair's record");
+        assert_eq!(all[0].record.raw_boundary_leds, 410);
+    }
+
+    /// A record whose limit was tampered with never reaches the store.
+    #[test]
+    fn refuses_to_write_an_underived_limit() {
+        let repo = TempDir::new().unwrap();
+        let mut record = a_record("esp32c6-4mb", "seeed/xiao-esp32-c6", 250);
+        record.limit_leds = 250;
+
+        let error = write_record(&store_root(repo.path()), &record)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("limitLeds"), "{error}");
+    }
+
+    /// A record stored the way the bench stores it — through the real write
+    /// path, so every read-side test is reading real output.
+    fn store_a_record(
         repo_root: &Path,
         build_id: &str,
         board_id: &str,
         raw_boundary_leds: u32,
     ) -> MeasurementRecord {
-        let record = MeasurementRecord::new_leds_max_safe(
+        let record = a_record(build_id, board_id, raw_boundary_leds);
+        write_record(&store_root(repo_root), &record).unwrap();
+        record
+    }
+
+    fn a_record(build_id: &str, board_id: &str, raw_boundary_leds: u32) -> MeasurementRecord {
+        MeasurementRecord::new_leds_max_safe(
             build_id,
             board_id,
             raw_boundary_leds,
@@ -229,10 +304,6 @@ mod tests {
             "5466346",
             false,
             1,
-        );
-        let path = record_path(repo_root, build_id, board_id);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, serde_json::to_string(&record).unwrap()).unwrap();
-        record
+        )
     }
 }
