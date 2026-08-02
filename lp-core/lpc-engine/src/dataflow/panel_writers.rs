@@ -37,6 +37,13 @@ pub struct PanelWriter {
 #[derive(Debug, Default)]
 pub struct PanelWriterStore {
     writers: VecMap<(ScopeRef, ChannelName), PanelWriter>,
+    /// Monotonic count of mutations (set / clear / despawn).
+    ///
+    /// Persistence throttles on this rather than on the writer set
+    /// itself: a clear followed by a re-write inside one window leaves an
+    /// identical-looking map, and comparing `(len, newest revision)` gets
+    /// that wrong. A counter cannot.
+    mutations: u64,
 }
 
 impl PanelWriterStore {
@@ -61,6 +68,7 @@ impl PanelWriterStore {
                 expires_at_ms,
             },
         );
+        self.mutations = self.mutations.saturating_add(1);
     }
 
     /// Despawn every momentary writer whose deadline has passed (a dropped
@@ -80,6 +88,9 @@ impl PanelWriterStore {
         for key in expired {
             self.writers.remove(&key);
         }
+        if count > 0 {
+            self.mutations = self.mutations.saturating_add(1);
+        }
         count
     }
 
@@ -88,12 +99,19 @@ impl PanelWriterStore {
     pub fn clear_all(&mut self) -> usize {
         let count = self.writers.len();
         self.writers = VecMap::new();
+        if count > 0 {
+            self.mutations = self.mutations.saturating_add(1);
+        }
         count
     }
 
     /// Clear one writer. Returns true when something was engaged.
     pub fn clear(&mut self, scope: ScopeRef, channel: &ChannelName) -> bool {
-        self.writers.remove(&(scope, channel.clone())).is_some()
+        let cleared = self.writers.remove(&(scope, channel.clone())).is_some();
+        if cleared {
+            self.mutations = self.mutations.saturating_add(1);
+        }
+        cleared
     }
 
     /// Clear every writer in `scope`. Returns the number cleared.
@@ -107,6 +125,9 @@ impl PanelWriterStore {
         let cleared = keys.len();
         for key in keys {
             self.writers.remove(&key);
+        }
+        if cleared > 0 {
+            self.mutations = self.mutations.saturating_add(1);
         }
         cleared
     }
@@ -127,5 +148,10 @@ impl PanelWriterStore {
 
     pub fn len(&self) -> usize {
         self.writers.len()
+    }
+
+    /// Mutations since construction — the persistence dirty signal.
+    pub fn mutations(&self) -> u64 {
+        self.mutations
     }
 }
