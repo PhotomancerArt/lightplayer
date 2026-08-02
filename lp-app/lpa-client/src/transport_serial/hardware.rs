@@ -44,7 +44,9 @@ fn serial_thread_loop(
     options: HardwareSerialOptions,
 ) {
     if options.reset_after_open {
-        if let Err(e) = reset_after_open(stream.as_mut()) {
+        let style = detect_reset_style(&stream_label);
+        log::debug!("Serial thread: resetting {stream_label} via {style:?}");
+        if let Err(e) = reset_after_open(stream.as_mut(), style) {
             log::error!("Serial thread: Failed to reset device after opening {stream_label}: {e}");
             drop(server_tx);
             return;
@@ -170,26 +172,95 @@ fn serial_thread_loop(
     log::debug!("Serial thread: Exiting");
 }
 
-/// The USB-JTAG-serial reset dance espflash performs after flashing an
+/// How the DTR/RTS lines reach the chip's reset, which decides the dance.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SerialResetStyle {
+    /// Espressif native USB-Serial-JTAG (C6, S3): the peripheral interprets
+    /// DTR/RTS *patterns*; there are no real EN/IO0 wires.
+    UsbSerialJtag,
+    /// External USB-UART bridge (CH340/CP210x class — the classic ESP32's
+    /// only option): DTR/RTS drive the standard two-transistor EN/IO0
+    /// auto-reset circuit, so the run-mode reset is a plain EN pulse with
+    /// IO0 left high.
+    UartBridge,
+}
+
+/// Pick the reset dance from the port's USB vendor id. Espressif's native
+/// USB-Serial-JTAG enumerates as VID 0x303A; anything else on a real port is
+/// an external UART bridge (the desk classic's CH340K is 0x1A86). Streams
+/// whose label is not a native port (fakes, tests) fall back to the JTAG
+/// dance — the pre-existing behavior, and harmless where no pins exist.
+fn detect_reset_style(port_name: &str) -> SerialResetStyle {
+    const ESPRESSIF_VID: u16 = 0x303A;
+    let Ok(ports) = serialport::available_ports() else {
+        return SerialResetStyle::UsbSerialJtag;
+    };
+    for port in ports {
+        if port.port_name == port_name {
+            if let serialport::SerialPortType::UsbPort(info) = &port.port_type {
+                if info.vid != ESPRESSIF_VID {
+                    return SerialResetStyle::UartBridge;
+                }
+            }
+            break;
+        }
+    }
+    SerialResetStyle::UsbSerialJtag
+}
+
+/// Reset the device after opening the port, per [`SerialResetStyle`].
+///
+/// `UsbSerialJtag` is the dance espflash performs after flashing an
 /// ESP32-C6, expressed as single-pin [`DeviceByteStream::set_signals`] writes
 /// so the pin-write sequence is identical to the pre-seam code.
 ///
-/// Before the final release (the RTS falling edge that actually reboots the
-/// chip), any pending input is discarded: a previously RUNNING device flushes
-/// its buffered TX — heartbeat `M!` frames included — into the freshly
-/// opened port, and delivering those to the readiness gate misclassifies the
-/// boot as `Incompatible { FrameBeforeHello }` (found on hardware, M5
+/// `UartBridge` is espflash's classic run-mode reset: DTR deasserted (IO0
+/// high — this must NOT be the bootloader entry), RTS asserted to hold EN
+/// low, then released. Without this arm, a CH340-bridged classic ESP32 was
+/// never reset at all — the client attached to a still-running device whose
+/// unsolicited hello had gone out minutes earlier, and the readiness gate
+/// misclassified the session as `Incompatible { FrameBeforeHello }` (found
+/// on the DOM-Z-102, classic bring-up M3).
+///
+/// In both arms, pending input is discarded before the edge that reboots the
+/// chip: a previously RUNNING device flushes its buffered TX — heartbeat
+/// `M!` frames included — into the freshly opened port, and delivering those
+/// to the readiness gate misclassifies the boot (found on hardware, M5
 /// smoke). Bytes that arrive before the reset takes effect are not boot
-/// output; everything after the falling edge is.
-fn reset_after_open(stream: &mut dyn DeviceByteStream) -> Result<(), ByteStreamError> {
-    stream.set_signals(Some(false), None)?;
-    thread::sleep(Duration::from_millis(100));
-    stream.set_signals(None, Some(true))?;
-    stream.set_signals(Some(false), None)?;
-    stream.set_signals(None, Some(true))?;
-    thread::sleep(Duration::from_millis(100));
-    discard_stale_input(stream)?;
-    stream.set_signals(None, Some(false))?;
+/// output; everything after the edge is.
+fn reset_after_open(
+    stream: &mut dyn DeviceByteStream,
+    style: SerialResetStyle,
+) -> Result<(), ByteStreamError> {
+    match style {
+        SerialResetStyle::UsbSerialJtag => {
+            stream.set_signals(Some(false), None)?;
+            thread::sleep(Duration::from_millis(100));
+            stream.set_signals(None, Some(true))?;
+            stream.set_signals(Some(false), None)?;
+            stream.set_signals(None, Some(true))?;
+            thread::sleep(Duration::from_millis(100));
+            discard_stale_input(stream)?;
+            stream.set_signals(None, Some(false))?;
+        }
+        SerialResetStyle::UartBridge => {
+            // Every step writes BOTH lines, which on unix goes through one
+            // whole-status ioctl — the WCH CH34x macOS driver ignores the
+            // single-bit calls entirely (see SerialPortByteStream). The
+            // (true,true) pass-through mirrors espflash's UnixTightReset:
+            // both-asserted is the transistor pair's neutral state, so the
+            // sequence never crosses (dtr asserted, rts released), which
+            // would select the ROM bootloader.
+            stream.set_signals(Some(false), Some(false))?;
+            stream.set_signals(Some(true), Some(true))?;
+            // EN low, IO0 high: chip held in reset.
+            stream.set_signals(Some(false), Some(true))?;
+            thread::sleep(Duration::from_millis(100));
+            discard_stale_input(stream)?;
+            // Release EN with IO0 still high: the chip boots the app.
+            stream.set_signals(Some(false), Some(false))?;
+        }
+    }
     Ok(())
 }
 

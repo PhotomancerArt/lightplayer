@@ -102,6 +102,20 @@ pub struct Target {
 /// run that first exercised it (`@lpfn`/`@glsl` builtin imports still resolve to
 /// the Q32 builtin ids, so any file calling one produces an invalid module).
 ///
+/// `xtn.f32` / `xtlpn.f32` are the **hardware-FPU** targets (roadmap M8): the
+/// same `lpvm-native` backend on `IsaTarget::Xtensa` in `FloatMode::F32`,
+/// emitting real `add.s`/`mul.s` on the LX7's float register file and executing
+/// them in `lp-xt-emu`. They need no new match arm anywhere — the compile path
+/// is already parameterised by `(isa, float_mode)` and the F32 execution path
+/// goes through the typed `LpvmInstance::call` that `wasm.f32` and the rv32 f32
+/// targets already use.
+///
+/// Like their Q32 siblings they are **not** in [`DEFAULT_TARGETS`], and for the
+/// same reason: they need the Xtensa builtins image, a cross-target artifact
+/// that requires the esp toolchain and is absent on a fresh clone. Defaulting
+/// the f32 pair while `xtn.q32` stays on demand would be an inconsistency, not
+/// a decision.
+///
 /// `rv32n.f32` / `rv32lpn.f32` are the **soft-float** rv32 targets (roadmap M9):
 /// the same `lpvm-native` backend, compiled in `FloatMode::F32`, where every
 /// float op is a call to `__addsf3` and friends inside `lp-riscv-emu`. Also
@@ -186,6 +200,20 @@ pub const ALL_TARGETS: &[Target] = &[
         backend: Backend::Rv32fa,
         float_mode: FloatMode::F32,
         isa: Isa::Riscv32,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Xtfa,
+        float_mode: FloatMode::F32,
+        isa: Isa::Xtensa,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Lp,
+        backend: Backend::Xtfa,
+        float_mode: FloatMode::F32,
+        isa: Isa::Xtensa,
         exec_mode: ExecMode::Emulator,
     },
 ];

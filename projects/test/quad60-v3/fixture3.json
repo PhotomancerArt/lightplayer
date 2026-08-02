@@ -1,0 +1,41 @@
+{
+  "kind": "Fixture",
+  "render_size": {
+    "width": 60,
+    "height": 4
+  },
+  "bindings": {
+    "input": {
+      "source": "bus:visual.out"
+    },
+    "output": {
+      "target": "bus:control.out/ch3"
+    }
+  },
+  "sampling": "direct",
+  "diagnostic_mode": "off",
+  "mapping": {
+    "kind": "Map2d",
+    "source": "fixture3.map2d.json"
+  },
+  "color_order": "rgb",
+  "transform": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "brightness": 38,
+  "gamma_correction": false
+}

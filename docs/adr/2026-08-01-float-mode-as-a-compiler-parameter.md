@@ -107,6 +107,20 @@ no measured gain. Lowering emits the transfers (rather than regalloc or the
 emitter) so that the ABI is **visible in the VInst dump** and a filetest can read
 it.
 
+**A float parameter therefore has two vregs, and only one of them is ever
+current.** It arrives precolored to an AR, and a vreg has a single register
+class for life, so the body computes on a *shadow* vreg in the float file that
+the entry `wfr` fills. The invariant this ADR originally left unwritten is that
+**after that transfer the shadow is the parameter's only home**: LPIR is not SSA
+and a GLSL value parameter is a mutable local, so a body that assigns to its own
+parameter writes the shadow while the incoming AR keeps the caller's argument.
+Lowering read that stale AR at call-argument and return boundaries as a
+one-instruction saving until
+`docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md` — a
+function returning its modified parameter returned the argument untouched, on
+the `lps-glsl` frontend only, because Naga's copies parameters into fresh locals
+and never builds the shape.
+
 **The Float ABI hooks stay empty on purpose** (D3). Because floats never occupy
 an ABI argument *slot*, `call_arg_reg(Float, …)`, `direct_ret_reg(Float, …)`,
 `direct_ret_reg_count(Float)` and `lpir_call_arg_target(Float, …)` return
@@ -271,6 +285,12 @@ Stated rather than implied away:
   viability for f32 is a flash-budget and LX6-probe question, not an SRAM one —
   the earlier "it cannot fit" conclusion was an artifact of the emulator memory
   model corrected in `2026-08-01-host-emulator-models-flash.md`.
-- **`divn.s` off the sequence envelope**, non-RNE rounding modes beyond
-  add/sub/mul, and acc-NaN payload priority — recorded gaps from M6-P6, accepted
-  at G2 as unreachable by emitted code.
+- **`divn.s` off the sequence envelope.** Measured 2026-08-01 by M6's second
+  probe round: the model reproduces 4 985/6 897 off-envelope probes (72.3%),
+  weakest at 41.7% in the class region. Unreachable by emitted code, so it does
+  not affect anything M7 ships — but it raises the bar on the inline
+  divide/sqrt follow-up above, which would need a re-fit of that model before
+  it could be attempted.
+- Non-RNE rounding modes beyond add/sub/mul — refused loudly, by decision.
+- *(Acc-NaN payload priority was on this list and is now closed — the
+  second probe round measured it exactly, 176/176.)*

@@ -208,6 +208,7 @@ fn readme_lens_card() -> UiDeviceCard {
         }),
         fw: None,
         hardware: None,
+        safe_clamp: None,
         sim: true,
         console_tail: vec![
             line(0.0, "engine: project loaded · 241 points"),
@@ -272,6 +273,7 @@ fn readme_home_view() -> UiHomeView {
             }),
             fw: None,
             hardware: None,
+            safe_clamp: None,
             sim: true,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -287,6 +289,7 @@ fn readme_home_view() -> UiHomeView {
             }),
             fw: None,
             hardware: None,
+            safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),
             ui: Default::default(),
@@ -303,5 +306,6 @@ fn readme_home_view() -> UiHomeView {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     }
 }

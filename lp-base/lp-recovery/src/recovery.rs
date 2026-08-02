@@ -78,6 +78,12 @@ pub trait RecoveryHandle {
         oom: Option<OomStats>,
     );
     fn clear_tentative_crash(&mut self);
+    /// Promote the staged record to committed **without** resetting.
+    ///
+    /// For abort-tier panic handlers that cannot trust themselves to survive
+    /// long enough to reach [`RecoveryHandle::finalize_crash_and_reset`]. See
+    /// the free function [`commit_staged_crash`] for the full argument.
+    fn commit_staged_crash(&mut self);
     /// A panic was caught in-process (layer 1): void the staged record AND
     /// feed the crash into the blame ledger so repeated in-process crashes
     /// gate their path exactly like reboot-causing ones.
@@ -264,6 +270,13 @@ impl<B: RecoveryBackend> RecoveryHandle for Recovery<B> {
         self.backend.region().crash_mut().clear_tentative();
     }
 
+    fn commit_staged_crash(&mut self) {
+        let region = self.backend.region();
+        if region.crash().is_tentative() {
+            region.crash_mut().finalize();
+        }
+    }
+
     fn record_recovered_crash(&mut self) {
         let region = self.backend.region();
         // Blame the staged record's path (snapshotted at panic time, before
@@ -400,6 +413,32 @@ pub fn stage_crash(
     with_global(|r| r.stage_crash(cause, msg, location, pcs, oom)).is_some()
 }
 
+/// Commit the staged crash record **without** resetting. Returns `false` if no
+/// global is installed (or it was busy).
+///
+/// [`stage_crash`] leaves the record *tentative*, and `Recovery::init` throws a
+/// tentative record away on the next boot unless the reset cause was
+/// `WatchdogReset` — a deliberate rule, because on the unwinding tier a
+/// tentative record usually means layer-1 caught the panic and there was never
+/// a crash to report.
+///
+/// That rule makes a tentative record worthless as a breadcrumb for a fault
+/// that kills the chip through some *other* reset path. The classic ESP32 has
+/// exactly that fault: `docs/defects/2026-08-01-classic-rmt-open-fault.md`
+/// records a fault in the WS281x open path that resets the board in well under
+/// a millisecond, mid-`println!`, with no watchdog involved. A panic handler
+/// there cannot assume it will live long enough to reach
+/// [`finalize_crash_and_reset`].
+///
+/// So: on the **abort tier only**, where entering the panic handler already
+/// means the boot is over and a reset is certain, commit as the very first act
+/// and print afterwards. Do not call this from an unwinding-tier handler — it
+/// would commit crashes that layer-1 goes on to recover, and every one of them
+/// would be reported as a reboot cause that never happened.
+pub fn commit_staged_crash() -> bool {
+    with_global(|r| r.commit_staged_crash()).is_some()
+}
+
 /// Void a staged (tentative) crash after layer-1 recovery caught the panic.
 pub fn clear_tentative_crash() {
     with_global(|r| r.clear_tentative_crash());
@@ -474,6 +513,52 @@ mod tests {
         assert_eq!(crash.boots_ago, 1);
         assert_eq!(crash.path_display().to_string(), "boot/node:nodes/fire");
         assert!(assessment.prior_boot_complete);
+    }
+
+    /// The classic-ESP32 panic path's contract: a record committed *before* the
+    /// handler prints survives a reset that never reaches
+    /// `finalize_crash_and_reset` and is not a watchdog.
+    ///
+    /// This is the whole reason the classic's WS281x fault can be named at all —
+    /// it dies mid-`println!` after ~5 characters, so anything that depends on
+    /// the handler running to completion is lost. Contrast
+    /// [`stale_tentative_crash_is_cleared_on_normal_boot`]: without the commit,
+    /// this exact sequence reports nothing.
+    #[test]
+    fn committed_crash_survives_a_reset_the_handler_never_completed() {
+        let (mut recovery, _) = boot_fresh();
+        recovery.mark_boot_complete();
+        let _f = recovery
+            .enter_frame(FrameKind::NodeRender, "nodes/out")
+            .unwrap();
+        recovery.stage_crash(
+            CrashCause::Panic,
+            &"died opening rmt",
+            Some(("rmt.rs", 553)),
+            &[0x400d_1234],
+            None,
+        );
+        recovery.commit_staged_crash();
+        // The handler dies here — no finalize, no reset request. The chip
+        // resets through some other path and reports it as a plain software
+        // reset (NOT a watchdog).
+        let (_recovery, assessment) = InMemoryBackend::reboot(recovery, ResetCause::SoftwareReset);
+
+        let crash = assessment.prior_crash.expect("crash reported");
+        assert_eq!(crash.cause, CrashCause::Panic);
+        assert_eq!(crash.msg.as_str(), "died opening rmt (at rmt.rs:553)");
+        assert_eq!(crash.boots_ago, 1);
+    }
+
+    #[test]
+    fn committing_nothing_stages_nothing() {
+        let (mut recovery, _) = boot_fresh();
+        recovery.mark_boot_complete();
+        // No staged record: commit must not synthesize one the way
+        // `finalize_crash_and_reset` deliberately does.
+        recovery.commit_staged_crash();
+        let (_recovery, assessment) = InMemoryBackend::reboot(recovery, ResetCause::SoftwareReset);
+        assert!(assessment.prior_crash.is_none());
     }
 
     #[test]
