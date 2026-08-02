@@ -205,6 +205,14 @@ impl FixtureNode {
         }
     }
 
+    /// Pull def-synced mapping parameters, invalidating the derived caches
+    /// only when the mapping actually changed.
+    ///
+    /// `MappingConfig`'s `PartialEq` compares slot revisions as well as slot
+    /// values, so `sync_mapping_config_from_def` must not write a slot it is
+    /// not changing: a revision-only difference reads as a changed mapping and
+    /// rebuilds the precomputed pixel table (a full `width * height` entry
+    /// allocation) on every frame.
     fn sync_mapping_from_def(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut next = self.mapping.clone();
         sync_mapping_config_from_def(&mut next, ctx)?;
@@ -489,7 +497,14 @@ fn sync_mapping_config_from_def(
             else {
                 return Ok(());
             };
-            sample_diameter.set(next_sample_diameter);
+            // Only stamp a slot revision when the value actually moved.
+            // `ValueSlot::set` records `current_revision()` unconditionally and
+            // slot equality includes that revision, so an unconditional set
+            // makes the rebuilt config compare unequal to the identical stored
+            // one on every frame — see `sync_mapping_from_def`.
+            if sample_diameter.value() != &next_sample_diameter {
+                sample_diameter.set(next_sample_diameter);
+            }
             // PointList paths carry no def-synced parameters (positions are
             // resolved data); only the sample diameter tracks the def.
             let _ = paths;
@@ -1886,6 +1901,16 @@ mod tests {
             "gamma_correction.some",
             LpValue::Bool(false),
         );
+        // Bound so the mapping def-sync path is live in tests. Left unbound it
+        // reads as absent, `sync_mapping_config_from_def` returns early, and
+        // every test walks past the write it is supposed to exercise.
+        bind_fixture_def_slot(
+            engine,
+            fix_id,
+            frame,
+            MAPPING_SAMPLE_DIAMETER_DEF_PATH,
+            LpValue::F32(2.0),
+        );
     }
 
     fn bind_fixture_def_slot(
@@ -2596,6 +2621,70 @@ mod tests {
         };
         assert_eq!(*revision, known_revision);
         assert_eq!(bytes, &[255, 255, 0, 0, 0, 0]);
+    }
+
+    /// Read the fixture's current display-layout revision. That revision is
+    /// keyed on `mapping_version`, so it is the observable face of the
+    /// fixture's mapping-derived caches.
+    #[cfg(feature = "node-shader")]
+    fn fixture_display_layout_revision(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        product: ControlProduct,
+    ) -> Revision {
+        let results = read_probe_results(
+            engine,
+            registry,
+            ProjectReadRequest {
+                since: None,
+                queries: vec![],
+                probes: vec![ProjectProbeRequest::ControlProduct(
+                    ControlProductProbeRequest {
+                        product,
+                        sample_format: WireChannelSampleFormat::U16,
+                        display_layout: ControlDisplayLayoutRead::Always,
+                    },
+                )],
+            },
+        );
+        let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+            display_layout:
+                ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(layout)),
+            ..
+        }) = &results[0]
+        else {
+            panic!("expected fixture control preview with layout");
+        };
+        layout.revision
+    }
+
+    /// Ticking a fixture whose mapping did not change must not invalidate the
+    /// caches derived from it.
+    ///
+    /// `sync_mapping_config_from_def` re-reads the def-synced sample diameter
+    /// every frame. When that read writes the slot unconditionally it stamps a
+    /// fresh slot revision, the rebuilt `MappingConfig` compares unequal to the
+    /// stored one (slot equality includes the revision), and `mapping_version`
+    /// advances — throwing away the precomputed pixel table and reallocating a
+    /// full `width * height` entry mapping on the render hot path, every frame.
+    /// The display-layout revision keys on the same `mapping_version`, so an
+    /// advance here is that churn.
+    #[test]
+    #[cfg(feature = "node-shader")]
+    fn steady_state_ticks_do_not_invalidate_the_fixture_mapping_caches() {
+        let (mut engine, registry, fix_id) = direct_sampled_fixture_engine();
+        let product = ControlProduct::new(fix_id, 0, ControlExtent::new(1, 6));
+
+        let first = fixture_display_layout_revision(&mut engine, &registry, product);
+        for _ in 0..3 {
+            engine.tick(&registry, 10).expect("tick");
+        }
+        let after_ticks = fixture_display_layout_revision(&mut engine, &registry, product);
+
+        assert_eq!(
+            first, after_ticks,
+            "an unchanged mapping bumped its version across steady-state ticks"
+        );
     }
 
     #[test]
