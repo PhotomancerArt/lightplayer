@@ -280,3 +280,167 @@ fn probe_lists_same_named_channels_as_distinct_scoped_rows() {
         );
     }
 }
+
+#[test]
+fn panel_writer_engages_shadows_and_clears() {
+    // panel.md P1-P4 at the resolution seam: engage -> the in-scope
+    // consumer resolves the panel value while an outer-scope consumer is
+    // unaffected; an engaged OUTER scope is inherited by a writerless
+    // inner scope (P5 shadowing composes); clear -> authored wiring again.
+    let mut h = EngineTestBuilder::new()
+        .shader("holder", output("outputs[0]", 0.0))
+        .shader("root_writer", output("outputs[0]", 0.25))
+        .bind_bus("chan", produced_slot("root_writer", "outputs[0]"))
+        .output_node("root_reader")
+        .bind_demand_input("root_reader", bus("chan"))
+        .demand_root("root_reader")
+        .output_node("inner_reader")
+        .bind_demand_input("inner_reader", bus("chan"))
+        .demand_root("inner_reader")
+        .build();
+
+    let holder = h.node("holder");
+    let root_writer = h.node("root_writer");
+    let root_reader = h.node("root_reader");
+    let inner_reader = h.node("inner_reader");
+    let root_scope = assign_root_scope(&mut h, &[root_writer, root_reader]);
+    let inner_scope = introduce_module_scope(&mut h, holder, &[inner_reader]);
+
+    // Untouched: authored wiring; the writerless inner scope inherits it.
+    h.tick(16).expect("tick");
+    assert_eq!(h.output_f32("root_reader"), Some(0.25));
+    assert_eq!(h.output_f32("inner_reader"), Some(0.25));
+
+    // Engage in the INNER scope: its reader detaches; root unaffected.
+    h.engine.panel_write(
+        inner_scope,
+        lpc_model::ChannelName(alloc::string::String::from("chan")),
+        lpc_model::LpValue::F32(0.9),
+    );
+    h.tick(16).expect("tick");
+    assert_eq!(
+        h.output_f32("inner_reader"),
+        Some(0.9),
+        "engaged scope reads its panel writer"
+    );
+    assert_eq!(
+        h.output_f32("root_reader"),
+        Some(0.25),
+        "outer scope unaffected by an inner engage"
+    );
+
+    // Engage ROOT instead: the writerless inner scope inherits the panel
+    // writer through the same shadowing walk.
+    assert!(h.engine.panel_clear(
+        inner_scope,
+        &lpc_model::ChannelName(alloc::string::String::from("chan"))
+    ));
+    h.engine.panel_write(
+        root_scope,
+        lpc_model::ChannelName(alloc::string::String::from("chan")),
+        lpc_model::LpValue::F32(0.6),
+    );
+    h.tick(16).expect("tick");
+    assert_eq!(h.output_f32("root_reader"), Some(0.6));
+    assert_eq!(
+        h.output_f32("inner_reader"),
+        Some(0.6),
+        "a writerless scope inherits the enclosing panel writer"
+    );
+
+    // Clear: authored wiring returns everywhere.
+    assert!(h.engine.panel_clear(
+        root_scope,
+        &lpc_model::ChannelName(alloc::string::String::from("chan"))
+    ));
+    h.tick(16).expect("tick");
+    assert_eq!(h.output_f32("root_reader"), Some(0.25));
+    assert_eq!(h.output_f32("inner_reader"), Some(0.25));
+}
+
+#[test]
+fn engaged_panel_writer_replaces_the_scopes_provider_set() {
+    // The settled ByKey decision: an engaged panel writer REPLACES the
+    // scope's provider set (max priority wins) — pinned at the host seam
+    // both merge expansion and single-select read, so map-kinded (ByKey)
+    // channels shadow instead of merging the panel value into authored
+    // providers.
+    let mut h = EngineTestBuilder::new()
+        .shader("writer_a", output("outputs[0]", 0.25))
+        .shader("writer_b", output("outputs[0]", 0.75))
+        .bind_bus("chan", produced_slot("writer_a", "outputs[0]"))
+        .bind_bus("chan", produced_slot("writer_b", "outputs[0]"))
+        .output_node("reader")
+        .bind_demand_input("reader", bus("chan"))
+        .demand_root("reader")
+        .build();
+
+    let writer_a = h.node("writer_a");
+    let writer_b = h.node("writer_b");
+    let reader = h.node("reader");
+    let root_scope = assign_root_scope(&mut h, &[writer_a, writer_b, reader]);
+
+    h.engine.panel_write(
+        root_scope,
+        lpc_model::ChannelName(alloc::string::String::from("chan")),
+        lpc_model::LpValue::F32(0.5),
+    );
+    h.tick(16).expect("tick");
+    // Two authored providers would be AMBIGUOUS (equal priority) — the
+    // panel writer replacing the set is what makes this resolve at all.
+    assert_eq!(
+        h.output_f32("reader"),
+        Some(0.5),
+        "the engaged writer replaces the provider set outright"
+    );
+}
+
+#[test]
+fn probe_reports_engaged_writers_with_panel_origin() {
+    // The probe host (the site that is easy to miss) must see the panel
+    // overlay: the engaged value resolves in the probe's value read AND
+    // surfaces as a Panel-origin provider row for the UI's engaged state.
+    let mut h = EngineTestBuilder::new()
+        .shader("writer", output("outputs[0]", 0.25))
+        .bind_bus("chan", produced_slot("writer", "outputs[0]"))
+        .output_node("reader")
+        .bind_demand_input("reader", bus("chan"))
+        .demand_root("reader")
+        .build();
+    let writer = h.node("writer");
+    let reader = h.node("reader");
+    let root_scope = assign_root_scope(&mut h, &[writer, reader]);
+    h.engine.panel_write(
+        root_scope,
+        lpc_model::ChannelName(alloc::string::String::from("chan")),
+        lpc_model::LpValue::F32(0.9),
+    );
+    h.tick(16).expect("tick");
+
+    let result = h.engine.read_project_binding_graph_probe(
+        &h.registry,
+        BindingGraphProbeRequest {
+            include_values: true,
+        },
+    );
+    let BindingGraphProbeResult::Graph(graph) = result else {
+        panic!("expected graph result");
+    };
+    let channel = graph
+        .channels
+        .iter()
+        .find(|channel| channel.name == "chan")
+        .expect("channel listed");
+    let value = channel.value.as_ref().expect("value requested");
+    assert_eq!(
+        value.value,
+        Some(lpc_model::LpValue::F32(0.9)),
+        "the probe's value read sees the panel overlay"
+    );
+    let first = &graph.bindings[channel.providers[0] as usize];
+    assert_eq!(
+        first.origin,
+        lpc_wire::WireBindingOrigin::Panel,
+        "the engaged writer leads the provider list with Panel origin"
+    );
+}

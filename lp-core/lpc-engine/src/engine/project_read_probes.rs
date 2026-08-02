@@ -146,6 +146,32 @@ impl Engine {
                     .collect(),
             };
             for (name, kind) in scope_channels {
+                // An engaged panel writer surfaces as a provider row with
+                // Panel origin — synthesized here (it lives in the side
+                // store, not in any node's binding set) so the UI can
+                // render engaged state from the same graph it already
+                // reads.
+                let panel_row = scope.and_then(|scope| {
+                    self.panel_writers()
+                        .get(scope, &name)
+                        .map(|writer| WireEffectiveBinding {
+                            owner: scope.owner(),
+                            node: scope.owner(),
+                            slot: None,
+                            direction: WireBindingDirection::Publishes,
+                            endpoint: WireBindingEndpoint::Literal {
+                                value: writer.value.clone(),
+                            },
+                            origin: WireBindingOrigin::Panel,
+                            priority: BindingPriority::panel().as_i32(),
+                            kind,
+                        })
+                });
+                let panel_index = panel_row.map(|row| {
+                    let index = bindings.len() as u32;
+                    bindings.push(row);
+                    index
+                });
                 let mut providers = match scope {
                     Some(scope) => self.tree().providers_for_bus_in_scope(scope, &name),
                     None => self.tree().providers_for_bus(&name),
@@ -155,9 +181,13 @@ impl Engine {
                 providers.sort_by_key(|(binding_ref, entry)| {
                     (core::cmp::Reverse(entry.priority), *binding_ref)
                 });
-                let providers = providers
-                    .iter()
-                    .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied())
+                let providers: Vec<u32> = panel_index
+                    .into_iter()
+                    .chain(
+                        providers
+                            .iter()
+                            .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied()),
+                    )
                     .collect();
                 let consumers = match scope {
                     Some(scope) => self.tree().consumers_for_bus_in_scope(scope, &name),
@@ -347,6 +377,8 @@ fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
 fn wire_binding_origin(priority: BindingPriority) -> WireBindingOrigin {
     if priority == BindingPriority::default_fallback() {
         WireBindingOrigin::Default
+    } else if priority == BindingPriority::panel() {
+        WireBindingOrigin::Panel
     } else {
         WireBindingOrigin::Authored
     }

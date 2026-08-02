@@ -139,6 +139,8 @@ pub enum WireBindingEndpoint {
 pub enum WireBindingOrigin {
     /// Authored in project data.
     Authored,
+    /// An engaged panel writer (lazy runtime state, never authored).
+    Panel,
     /// Materialized from default binding policy (fallback priority).
     Default,
 }

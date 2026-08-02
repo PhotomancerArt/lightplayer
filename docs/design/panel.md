@@ -90,6 +90,10 @@ the same channel until cleared. Across scopes, ordinary writer-shadowing
 applies: an engaged writer in an inner scope shadows outer writers for
 that subtree — touching detaches, clearing re-attaches.
 
+> Status: implemented 2026-08-02 (engine writer store at panel priority,
+> replacing the scope's provider set — max-priority-wins holds on ByKey
+> merge channels too; survives `apply_project_changes` by construction).
+
 ### P5 — Takeover: jump, by default
 
 Grabbing a channel that authored dataflow is actively moving acquires it

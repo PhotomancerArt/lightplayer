@@ -81,7 +81,7 @@ fn runtime_spine_tick_context_resolve_bus_query() {
     let mut node = ProduceProbeNode {
         query: QueryKey::Bus {
             scope: None,
-            channel: channel,
+            channel,
         },
         last: None,
     };

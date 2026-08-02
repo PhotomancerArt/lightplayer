@@ -987,7 +987,7 @@ mod tests {
         let mut node = QueryResolvingNode {
             query: QueryKey::Bus {
                 scope: None,
-                channel: channel,
+                channel,
             },
             resolved_value: None,
         };
