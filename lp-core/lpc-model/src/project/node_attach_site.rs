@@ -13,7 +13,7 @@ use crate::{ArtifactLocation, SlotPath};
 ///
 /// Two site families exist today:
 ///
-/// - the project root's `nodes` map, which is `read_only_persisted` for
+/// - the project root's `nodes` map, whose role is `Fixed` (read-only) for
 ///   generic slot edits and reachable **only** through dedicated node
 ///   operations, and
 /// - any writable [`crate::NodeInvocationSlot`]-shaped slot in another

@@ -1,4 +1,13 @@
-pub const DEFAULT_ESP32C6_FIRMWARE_MANIFEST_PATH: &str = "./firmware/esp32c6/manifest.json";
+/// The one firmware build the Studio site serves today. `esp32c6-4mb` is a
+/// build-def id (`lp-fw/builds/`), and the packaged directory is named after
+/// it, so a per-build path is `./firmware/<build id>/manifest.json`.
+///
+/// Per-build selection belongs to the provisioning picker, which does not
+/// exist yet (board-selection roadmap M5). When it lands it must not grow its
+/// own compatibility table: `lpa_boards::compatible_builds_for(board)` returns
+/// the runnable builds for a chosen board, best fit first, and this constant
+/// is the generic fallback for "no board chosen".
+pub const DEFAULT_ESP32C6_FIRMWARE_MANIFEST_PATH: &str = "./firmware/esp32c6-4mb/manifest.json";
 pub const DEFAULT_ESPTOOL_MODULE_PATH: &str = "https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm";
 
 #[derive(Clone, Debug, Eq, PartialEq)]

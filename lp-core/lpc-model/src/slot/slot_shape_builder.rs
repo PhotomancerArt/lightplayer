@@ -5,7 +5,7 @@
 //! underlying types remain explicit and serializable.
 
 use crate::{
-    LpType, SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotPolicy, SlotSemantics,
+    LpType, SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotRole, SlotSemantics,
     SlotShape, SlotShapeId, SlotValueShape, SlotVariantShape,
 };
 use alloc::boxed::Box;
@@ -89,12 +89,12 @@ pub fn field(name: &str, shape: SlotShape) -> SlotFieldShape {
     SlotFieldShape::new(name, shape).expect("valid static slot field name")
 }
 
-/// Build one record field with explicit tooling and mutation policy.
+/// Build one record field with an explicit editing/persistence role.
 ///
 /// This panics for invalid names because these names are authored in Rust
 /// source.
-pub fn field_with_policy(name: &str, shape: SlotShape, policy: SlotPolicy) -> SlotFieldShape {
-    SlotFieldShape::with_policy(name, shape, policy).expect("valid static slot field name")
+pub fn field_with_role(name: &str, shape: SlotShape, role: SlotRole) -> SlotFieldShape {
+    SlotFieldShape::with_role(name, shape, role).expect("valid static slot field name")
 }
 
 /// Build one record field with explicit dataflow semantics.
@@ -109,17 +109,17 @@ pub fn field_with_semantics(
     SlotFieldShape::with_semantics(name, shape, semantics).expect("valid static slot field name")
 }
 
-/// Build one record field with explicit dataflow semantics and policy.
+/// Build one record field with explicit dataflow semantics and role.
 ///
 /// This panics for invalid names because these names are authored in Rust
 /// source.
-pub fn field_with_semantics_and_policy(
+pub fn field_with_semantics_and_role(
     name: &str,
     shape: SlotShape,
     semantics: SlotSemantics,
-    policy: SlotPolicy,
+    role: SlotRole,
 ) -> SlotFieldShape {
-    SlotFieldShape::with_semantics_and_policy(name, shape, semantics, policy)
+    SlotFieldShape::with_semantics_and_role(name, shape, semantics, role)
         .expect("valid static slot field name")
 }
 
@@ -129,10 +129,10 @@ pub fn field_with_dataflow(
     name: &str,
     shape: SlotShape,
     semantics: SlotSemantics,
-    policy: SlotPolicy,
+    role: SlotRole,
     default_bind: Option<&str>,
 ) -> SlotFieldShape {
-    let mut field = SlotFieldShape::with_semantics_and_policy(name, shape, semantics, policy)
+    let mut field = SlotFieldShape::with_semantics_and_role(name, shape, semantics, role)
         .expect("valid static slot field name");
     field.default_bind = default_bind.map(ToString::to_string);
     field

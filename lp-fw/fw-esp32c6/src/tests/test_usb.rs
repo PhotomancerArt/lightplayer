@@ -11,7 +11,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use embedded_io_async::{Read, Write};
-use esp_hal::{rmt::Rmt, time::Rate, usb_serial_jtag::UsbSerialJtag};
+use esp_hal::{rmt::Rmt, usb_serial_jtag::UsbSerialJtag};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::output::LedChannel;
@@ -164,7 +164,8 @@ pub async fn run_usb_test(spawner: embassy_executor::Spawner) -> ! {
     start_runtime(timg0, sw_int);
 
     // Initialize RMT driver for LED blinking
-    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).expect("Failed to initialize RMT");
+    let rmt = Rmt::new(rmt_peripheral, crate::output::rmt::shared_driver::RMT_CLOCK)
+        .expect("Failed to initialize RMT");
     let pin = gpio18;
     const NUM_LEDS: usize = 1; // Only need first LED for blinking
     let mut channel =

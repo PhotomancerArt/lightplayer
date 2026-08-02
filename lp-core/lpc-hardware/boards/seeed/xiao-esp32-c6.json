@@ -326,6 +326,14 @@
       ]
     },
     {
+      "address": "/rmt/ws281x1",
+      "display_label": "RMT WS281x 1",
+      "capabilities": [
+        "rmt",
+        "ws281x-output"
+      ]
+    },
+    {
       "address": "/radio/0",
       "display_label": "ESP-NOW Radio 0",
       "capabilities": [

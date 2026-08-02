@@ -259,6 +259,7 @@ mod tests {
             state,
             project: None,
             fw: None,
+            hardware: None,
             safe_clamp: None,
             sim: false,
             console_tail: Vec::new(),

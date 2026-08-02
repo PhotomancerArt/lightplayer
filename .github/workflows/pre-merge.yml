@@ -429,6 +429,11 @@ jobs:
       - name: Check esp32v3 image size
         run: cd lp2025 && just fw-esp32v3-size-check
 
+      # The image just built must describe itself correctly: extract the
+      # embedded manifest core and diff against the checked-in expectation.
+      - name: Check esp32v3 embedded manifest
+        run: cd lp2025 && just fw-manifest-check-esp32v3
+
       # The lint gate for this crate. Nothing else in CI lints it —
       # `clippy-host` excludes it, because it cross-compiles for Xtensa under
       # a different toolchain.

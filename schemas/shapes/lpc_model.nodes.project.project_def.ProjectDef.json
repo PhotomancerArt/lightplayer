@@ -3,9 +3,7 @@
     "fields": [
       {
         "name": "format",
-        "policy": {
-          "writable": false
-        },
+        "role": "fixed",
         "shape": {
           "option": {
             "meta": {},
@@ -24,9 +22,7 @@
       },
       {
         "name": "uid",
-        "policy": {
-          "writable": false
-        },
+        "role": "fixed",
         "shape": {
           "option": {
             "meta": {},
@@ -63,9 +59,7 @@
       },
       {
         "name": "nodes",
-        "policy": {
-          "writable": false
-        },
+        "role": "fixed",
         "shape": {
           "map": {
             "key": "string",

@@ -63,6 +63,27 @@
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 extern crate alloc;
 
+// The build's self-description, embedded as a scannable blob (extracted by
+// `lp-cli firmware show`, reported on ServerHello). Feature truth comes from
+// the engine's own cfg! derivation; only embedder facts are named here.
+// `flashAppBytes` is parsed from partitions.csv by build.rs.
+#[cfg(feature = "server")]
+lpc_model::lp_embed_manifest_core! {
+    package: env!("CARGO_PKG_NAME"),
+    chip_family: "esp32",
+    chip: "esp32",
+    cargo_target: "xtensa-esp32-none-elf",
+    profile: env!("LP_BUILD_PROFILE"),
+    commit: env!("LP_BUILD_COMMIT"),
+    dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
+    wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+    features: [
+        lpa_server::ENGINE_FEATURE_FRAGMENT,
+        lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
+    ],
+    limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
+}
+
 // `board::esp32v3::init` is the server path's sole `esp_hal::init` call site.
 // The hello/probe entrypoint at the bottom of this file keeps its own inline
 // init on purpose: it needs the `WIFI` peripheral that `init_board` does not
@@ -80,7 +101,7 @@ mod serial;
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
 use {
-    alloc::{boxed::Box, rc::Rc, string::String, sync::Arc},
+    alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32v3::init::{init_board, start_runtime},
     core::cell::RefCell,
     flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
@@ -408,16 +429,18 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         None,
         graphics,
     );
-    server.set_hello(lpc_wire::ServerHello {
-        proto: lpc_wire::WIRE_PROTO_VERSION,
-        fw: lpc_wire::FwProvenance {
-            package: String::from("fw-esp32v3"),
-            commit: String::from(env!("LP_BUILD_COMMIT")),
-            dirty: env!("LP_BUILD_DIRTY") == "true",
-            profile: String::from(env!("LP_BUILD_PROFILE")),
-        },
-        device_uid,
-    });
+    // Identity only — capabilities (build.features, hardware facts) are
+    // computed inside the constructor from the engine's gates and the
+    // services just injected — never restated here.
+    server.set_hello_identity(
+        lpc_wire::HelloIdentity::new(
+            "fw-esp32v3",
+            env!("LP_BUILD_COMMIT"),
+            env!("LP_BUILD_DIRTY") == "true",
+            env!("LP_BUILD_PROFILE"),
+        )
+        .with_device_uid(device_uid),
+    );
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing

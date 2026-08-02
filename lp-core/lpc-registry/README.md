@@ -17,10 +17,10 @@ commands individually (`MutationRejectionReason`) while the rest of the batch
 proceeds:
 
 - `UnknownArtifact` / `UnknownSlotPath` — the target does not resolve;
-- `NotWritable` — the governing `SlotPolicy` is not writable;
+- `NotWritable` — the governing `SlotRole` is not writable;
 - `TypeMismatch` — an `AssignValue` whose value does not match the leaf type.
 
-Policy resolution is shape-only (`lpc-model`'s `resolve_slot_policy`), so
+Role resolution is shape-only (`lpc-model`'s `resolve_slot_role`), so
 edits validate at paths where no data exists yet (missing map entries,
 inactive enum variants). `RemoveSlotEdit` is allowed regardless of
 writability — it only removes pending overlay state.
@@ -34,8 +34,8 @@ wire-facing caller and any new caller must route through the same validation
 `create_node` / `remove_node` (`registry/node_authoring.rs`) are the
 dedicated node-lifecycle operations behind the `CreateNode` / `RemoveNode`
 wire commands (`docs/adr/2026-07-27-node-authoring-operations.md`). They are
-the sanctioned path around the `nodes` map's `read_only_persisted` policy:
-generic slot gestures on the map stay rejected, while the ops validate
+the sanctioned path around the `nodes` map's `Fixed` role: generic slot
+gestures on the map stay rejected, while the ops validate
 everything up front and then act atomically.
 
 - `create_node` **commits immediately**: it writes asset and def files

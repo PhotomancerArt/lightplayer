@@ -111,3 +111,17 @@ stty -f /dev/cu.wchusbserial1130 921600 raw -echo clocal
 timeout 30 cat <&3 > out.log
 exec 3<&-
 ```
+
+## Update 2026-08-01 (late): the regression compounded
+
+Re-measured during the RMT-priority plan's P4 classic baseline, on a branch
+carrying everything merged through #266: `quad60-v3` (240 LEDs) — which ran
+with 7,384 B free at G-M4 and OOM'd after the f32 merges — **now fails at
+project LOAD**: `alloc 360 bytes failed, free=904, used=111736`. Free heap
+at the failure point dropped from ~7.4 KB to ~0.9 KB, so merges since the
+first measurement (candidates: 16-bit gamma #252, linear brightness #265,
+io_task JSON lift #245) consumed roughly another 6.5 KB of per-project heap.
+Two independent increments now total ~15 KB (~165 LEDs of capacity) against
+the M6 ledger's original numbers. Still unbisected; the classic remains the
+family's canary and the per-LED/per-project heap cost now needs an owner
+before any WLED-class LED-count claim is republished.
