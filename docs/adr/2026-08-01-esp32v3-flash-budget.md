@@ -140,19 +140,18 @@ out of `.stack`, 504 B.
 | `quad60-v3` (4 × 60 = 240 LEDs) | **7,384 B** | 105,256 B |
 | `quad-equal100-v3` (4 × 100 = 400 LEDs) | — | **OOM** |
 
-> ⚠️ **These numbers are from commit `08779e059` and have already moved.**
-> Re-measured after merging `origin/main` (2026-08-01, same board, same
-> projects): per-project heap grew **8,136 B** — 120 LEDs now leaves 9,992 B
-> free, and **240 LEDs OOMs where it previously ran**. Idle heap is unchanged,
-> so it is per-project allocation, not static growth; `tick` simultaneously
-> dropped 69 ms → 47 ms. The 16-bit gamma fix (#252) is ruled out by direct
-> measurement (4 bytes). See
-> `docs/defects/2026-08-01-classic-heap-regression-after-f32-merge.md`.
+> **Amended 2026-08-02 — attributed, gated, and re-measured.** The 8,136 B of
+> per-project growth seen after merging `origin/main` was **PR #243**
+> (persistent resolution), bisected on this board; the f32 PRs and the 16-bit
+> gamma fix cost nothing measurable. It is now behind
+> `lpc-engine/resolver-payload-cache`, which `fw-esp32v3` leaves off. The
+> table above is the pre-regression measurement and **is again current** for
+> the classic image — 120 LEDs measures 18,144 B free today, 16 B better than
+> the 18,128 B row, at 16 fps instead of 13.
 >
-> The **method and the shape of the conclusion stand** — heap binds, flash does
-> not, and LED counts must be quoted from RAM. The **absolute ceiling below is
-> optimistic by roughly 91 LEDs** until that regression is attributed and
-> either accepted or reversed.
+> The rows below the table are the part that was wrong for a different reason
+> and is corrected in place: see the per-LED and ceiling paragraphs. Details
+> in `docs/defects/2026-08-01-classic-heap-regression-after-f32-merge.md`.
 
 A loaded project costs ~79 KB (observed directly: `stop_all_projects` took the
 board from 95 KB used to 16 KB used). Beyond that, **≈89.5 B per LED** — and
@@ -162,10 +161,23 @@ unattributed and as the single most valuable RAM lead this chip has.
 **It is attributed as of 2026-08-02 — see the amendment below**, which also
 corrects the "scales with `render_size`" reading.
 
-**Practical ceiling: ~240 LEDs comfortable, ~300 at the edge, 400 impossible.**
-For a WLED-class product claim that number matters more than the channel count,
-and it is a RAM number, not an RMT one — M4-P3 measured RMT refill lag peaking
-at 20 of 64 words (31 % utilisation) with zero trips at 240 LEDs.
+**Practical ceiling: ~240 LEDs comfortable, ~300 at the edge, 400 impossible
+— for a project whose shader is already compiled.**
+
+That qualifier is the correction. Every row in the table above is a
+*steady-state* number, read once the shader is resident, and steady state is
+not the peak. Compiling GLSL on-device is a transient of tens of KB on top of
+the resident project: `examples/basic` (241 LEDs, 4,092 B of GLSL) needs
+44,488 B resident **plus ~65 KB of compile working set** against a 112,640 B
+arena, and OOMs — while `quad-strips-v3`'s 1,267 B shader compiles in 62 ms
+with room to spare. So the binding constraint on this chip is not LED count
+alone but **LED count × shader size**, and no single-axis ceiling can be
+quoted for a product claim. Measured 2026-08-02; see
+`docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
+
+The LED-count figure is a RAM number, not an RMT one — M4-P3 measured RMT
+refill lag peaking at 20 of 64 words (31 % utilisation) with zero trips at
+240 LEDs.
 
 ### Amendment 2026-08-02 — the per-LED cost is attributed
 
