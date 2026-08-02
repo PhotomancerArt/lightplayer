@@ -104,38 +104,55 @@ producing node's status is `Unsupported`, the `ProduceResult::Unsupported`
 arm reports the build gap by name. Genuine wrong-slot diagnostics on real
 nodes are unchanged, word for word.
 
-### Studio: "Not on this device" — warning family, and an EMPTY node body
+### Studio: the node's whole body becomes a hazard-striped "not supported"
 
 `Unsupported` maps to a new `ProjectNodeStatusTone::Disabled` carrying the
-label **"Not on this device"**, projected onto `UiStatusKind::Warning`. It
-therefore collapses into the attention class through the ordinary
-affordance merge and announces itself on the tree row exactly like any
-other warning. Never violet (reserved for bound), and no new
-`UiStatusKind`: a variant of its own would have dragged `PaneTone`,
-`DetailSectionTint`, six exhaustive matches and a new CSS token family
-along for one status.
+label **"Not on this device"**, projected onto `UiStatusKind::Error`. Never
+violet (reserved for bound), and no new `UiStatusKind`: a variant of its own
+would have dragged `PaneTone`, `DetailSectionTint`, six exhaustive matches
+and a new CSS token family along for one status.
 
 The node's pane renders **no body at all** — not its params, not its
-products, not its slots, and not its tab strip. In their place sits a
-warning-family empty state with the status headline and the engine's own
-reason. A node with no runtime has no live state, so rendering its body
-would show values that do not exist and invite edits that could not take
-effect. `ProjectNodeStatusTone::Disabled` stays a tone of its own (rather
-than plain `Warning`) precisely to carry that second bit:
-`is_unsupported()` is what the pane keys the empty state off.
+products, not its slots, and not its tab strip. The entire body region
+below the header, bled to the pane's edges, *becomes* the message: the
+error background under diagonal hazard stripes
+(`--studio-status-error-stripes`, new beside the error family in
+`style.css`), one sentence — "**Fluid node isn't supported on this
+device.**" — and a link to the boards catalog (`#/boards`, a plain anchor;
+the router's existing route listener hard-reloads into that page). Nothing
+else. A node with no runtime has no live state, so rendering its body would
+show values that do not exist and invite edits that could not take effect;
+and the engine's build-level wording ("node kind Fluid is not included in
+this firmware build") stays in the detail popover, because the person
+reading the pane needs to know which BOARD to use, not which Cargo features
+were on. `ProjectNodeStatusTone::Disabled` stays a tone of its own (rather
+than plain `Error`) precisely to carry that second bit: `is_unsupported()`
+is what the pane keys the empty body off — a broken *shader* is also `Error`
+and must still show its slots so you can fix it.
 
-**This is the G1 gate outcome, and it reverses the first attempt.** The
-original build treated the status as quiet: `UiStatusKind::Neutral`, an
-`Info` affordance, and the node's normal body ghosted to ~55–60% opacity —
-reasoning that "nothing is broken, so nothing should shout". Rejected at
-the gate. Two things were wrong with it. The ghosted body still showed
-content, which read as a working node behind a scrim rather than a node
-that is not there; and the quiet tone understated the consequence, because
-a node kind the device cannot run **usually means the project does not work
-on that device at all**. A few kinds are genuinely optional (a radio node
-on a board with no radio) — that case now over-warns slightly, which is the
-right trade: the common case is a broken show, and a broken show must not
-look like healthy silence.
+Stripes are a deliberate idiom: **this surface is not ordinary content**.
+A flat wash reads as a tint on a working node; stripes read as tape across
+a doorway. The var is per-family (another family wanting the idiom gets its
+own var rather than parameterizing this one).
+
+**This is the G1 gate outcome, over three rounds, and it reverses the first
+two attempts.** Round 1 treated the status as quiet: `UiStatusKind::Neutral`,
+an `Info` affordance, and the node's normal body ghosted to ~55–60% opacity,
+reasoning that "nothing is broken, so nothing should shout". Rejected: the
+ghosted body still showed content, so it read as a working node behind a
+scrim rather than a node that is not there, and the quiet tone understated
+the consequence. Round 2 kept the body suppressed but put a bordered
+warning-yellow block inside the pane. Also rejected — "box in a box", and
+crowded: a glyph, a headline and the engine's message stacked in a bordered
+card inside a bordered card. Round 3 is the above: no inner box, no glyph,
+no build jargon, one sentence and one link on a surface that is unmistakably
+not content.
+
+The through-line of all three rounds: a node kind the device cannot run
+**usually means the project does not work on that device at all**. A few
+kinds are genuinely optional (a radio node on a board with no radio), and
+those now over-state slightly — the right trade, because the common case is
+a broken show and a broken show must not look fine.
 
 The device card's Technical section reports capabilities **gaps-only** — a
 fully-capable device adds no lines at all, because listing what every board
@@ -200,9 +217,12 @@ never enters an RV32/Xtensa graph.
 - **A new `UiStatusKind::Disabled` tone family** — a design-system-wide
   cascade (`PaneTone`, `DetailSectionTint`, six matches, new tokens) for
   one status that renders in one place.
-- **Dimmed/neutral treatment with the node's body ghosted behind it** —
-  built, taken to G1, rejected: it read as healthy silence, and the ghosted
-  body still showed state that does not exist. See the studio section.
+- **Dimmed/neutral treatment with the node's body ghosted behind it**
+  (G1 round 1) — read as healthy silence, and the ghosted body still showed
+  state that does not exist.
+- **A bordered warning-family block inside the pane body** (G1 round 2) —
+  box in a box, and crowded. The body region itself had to become the
+  treatment. See the studio section.
 - **Hiding unsupported kinds in the picker** — silent narrowing with no
   place to explain itself.
 - **Capability-based protocol negotiation** — permanently rejected while

@@ -262,17 +262,20 @@ pub(crate) fn add_node_picker_device_gaps() -> Element {
 }
 
 #[story(
-    description = "A project holding a node whose kind this device's firmware does not carry: the tree row announces itself with the ordinary warning affordance (no special dimming), the label reading 'Not on this device' and the engine's reason in the row tooltip. Loud on purpose — an unsupported node usually breaks the show on this device."
+    description = "A project holding a node whose kind this device's firmware does not carry (Clock — a gateable kind; Output is ungated and could never be unsupported). The tree row announces itself with the ordinary attention indicator, no special dimming: rows carry affordances, and the words — 'Not on this device' plus the engine's reason — live in the tooltip and the node's popover. Loud on purpose; an unsupported node usually breaks the show on this device."
 )]
 pub(crate) fn unsupported_node_in_tree() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
     let unsupported = ProjectNodeStatusView::new(
         "Not on this device",
-        Some("node kind Fluid is not included in this firmware build".to_string()),
+        Some("node kind Clock is not included in this firmware build".to_string()),
         ProjectNodeStatusTone::Disabled,
     );
+    // The CLOCK row: a gateable kind. Deliberately not `Output`, which is
+    // ungated in the engine and can never be unsupported — a story that
+    // showed it would be teaching something untrue.
     if let Some(root) = view.tree.roots.first_mut()
-        && let Some(child) = root.children.get_mut(3)
+        && let Some(child) = root.children.first_mut()
     {
         child.status = unsupported;
     }

@@ -61,7 +61,7 @@ pub(crate) fn playlist_node_view() -> UiNodeView {
 pub(crate) fn unsupported_node_view() -> UiNodeView {
     UiNodeView::new(
         UiNodeHeader::new("swirl", "Fluid", "/show/swirl")
-            .with_status(UiStatus::warning("Not on this device"))
+            .with_status(UiStatus::error("Not on this device"))
             .with_detail("node kind Fluid is not included in this firmware build")
             .with_unsupported(true),
         vec![

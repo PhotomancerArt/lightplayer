@@ -129,6 +129,20 @@
     --studio-status-error-bg: #301b1d;
     --studio-status-error-border: #874b4b;
     --studio-status-error-text: #ffc7c7;
+    /* Diagonal hazard stripes for the error family. Stripes are the "this
+       surface is not ordinary content" mark — laid OVER a status background
+       (`background-image` beside `background-color`), never used alone, and
+       reserved for whole surfaces that must not be mistaken for a working
+       one. Here: a node whose kind this device's firmware cannot run.
+       Alpha is tuned to stay legible under body text (a flat wash reads as
+       a tint; the stripes read as tape). Another family may want the same
+       idiom in its own color — give it its own var rather than
+       parameterizing this one. */
+    --studio-status-error-stripes: repeating-linear-gradient(
+        135deg,
+        rgba(255, 199, 199, 0.05) 0 4px,
+        transparent 4px 14px
+    );
     /* Bound/bus-linked (violet): binding is a system concept, distinct from
        good/valid green. */
     --studio-status-bound-bg: #241a33;

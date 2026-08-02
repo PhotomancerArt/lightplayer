@@ -9,7 +9,7 @@ use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
     SlotRecordEditor,
 };
-use crate::base::{Platform, StudioIcon, StudioIconName, node_kind_icon};
+use crate::base::{Platform, StudioIcon, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -53,13 +53,12 @@ pub fn NodePane(
     // pins that composition.
     let tone = affordance_pane_tone(view.header.affordance(), view.header.status.kind);
     let surface_class = pane_surface_tint_class(dirty_tint, dirty);
-    // "Not on this device": there is no runtime here, so the pane shows
-    // NO body — params, products and slots would all describe something
-    // that does not exist, and editing them could not take effect. The
-    // header keeps its warning tone; the empty state carries the reason.
+    // "Not supported on this device": there is no runtime here, so the pane
+    // shows NO body — params, products and slots would all describe
+    // something that does not exist, and editing them could not take
+    // effect. The whole body region becomes hazard-striped red instead.
     let unsupported = view.header.unsupported;
-    let unsupported_reason = view.header.detail.clone();
-    let unsupported_label = view.header.status.label.clone();
+    let unsupported_kind = view.header.kind.clone();
     let header = view.header.clone();
     let title = view.header.title.clone();
     let tabs = view.tabs.clone();
@@ -136,10 +135,7 @@ pub fn NodePane(
                     },
                     body: rsx! {
                         if unsupported {
-                            NodeUnsupportedBody {
-                                label: unsupported_label.clone(),
-                                reason: unsupported_reason.clone(),
-                            }
+                            NodeUnsupportedBody { kind: unsupported_kind.clone() }
                         } else {
                             if !issues.is_empty() {
                                 ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
@@ -210,37 +206,50 @@ pub fn NodePane(
     }
 }
 
-/// Selection indicator/toggle in the pane's primary-affordance slot, left of
-/// the node name (D3).
-/// The whole body of a node whose kind has no runtime on this device: the
-/// status headline and the engine's own reason, in the warning family.
+/// The whole body of a node whose kind has no runtime on this device.
 ///
 /// This REPLACES the node's body rather than dimming it. A node with no
 /// runtime has no live params, products or slots — rendering them (even
 /// ghosted) shows state that does not exist and invites edits that cannot
-/// take effect. It usually also means the project does not work on this
-/// device at all, so it says so plainly instead of whispering.
+/// take effect. And it usually means the project does not work on this
+/// device at all, so the body region wears the error family with diagonal
+/// hazard stripes: the surface itself says "this is not ordinary content",
+/// which no amount of tinted text inside a normal body can.
+///
+/// Deliberately NOT a bordered block inside the body — a box drawn inside
+/// the pane's own box reads as one more section among many. `-mx-4 -mb-4`
+/// bleeds this to the pane's edges (the pane's `overflow-hidden` clips it
+/// into the rounded corners), so the treatment IS the body.
+///
+/// One headline and one link, generously spaced. The engine's detailed
+/// message ("node kind Fluid is not included in this firmware build") stays
+/// in the detail popover: it names a build, and the person reading this
+/// needs to know which BOARD to use.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodeUnsupportedBody(label: String, reason: Option<String>) -> Element {
+fn NodeUnsupportedBody(
+    /// The node's human kind label, as the header and the picker spell it.
+    kind: String,
+) -> Element {
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-1 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-3 tw:py-6 tw:text-center",
-            span { class: "tw:inline-flex tw:items-center tw:justify-center tw:text-status-warning-foreground",
-                StudioIcon {
-                    name: StudioIconName::StepAttention,
-                    size: 18,
-                }
+        div {
+            class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0 tw:justify-items-center tw:gap-4 tw:border-t tw:border-status-error-border tw:bg-status-error-bg tw:bg-[image:var(--studio-status-error-stripes)] tw:px-6 tw:py-12 tw:text-center",
+            p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-status-error-foreground",
+                "{kind} node isn't supported on this device."
             }
-            p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-status-warning-foreground", "{label}" }
-            if let Some(reason) = reason {
-                p { class: "tw:m-0 tw:max-w-[36ch] tw:text-xs tw:leading-normal tw:text-muted-foreground",
-                    "{reason}"
-                }
+            // The hash router's route listener hard-reloads into the boards
+            // catalog, so a plain anchor is the whole mechanism.
+            a {
+                class: "tw:text-xs tw:font-bold tw:text-status-error-foreground tw:underline tw:underline-offset-4 tw:opacity-80 tw:transition-opacity tw:hover:opacity-100",
+                href: "#/boards",
+                "See supported boards"
             }
         }
     }
 }
 
+/// Selection indicator/toggle in the pane's primary-affordance slot, left of
+/// the node name (D3).
 ///
 /// Selecting a node focuses it (probes ride the focused node), so body
 /// clicks stay inert and only this control dispatches the focus action —

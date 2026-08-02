@@ -573,9 +573,6 @@
   .tw\:max-w-96 {
     max-width: calc(var(--tw-spacing) * 96);
   }
-  .tw\:max-w-\[36ch\] {
-    max-width: 36ch;
-  }
   .tw\:max-w-\[85\%\] {
     max-width: 85%;
   }
@@ -1226,6 +1223,9 @@
   .tw\:bg-transparent {
     background-color: transparent;
   }
+  .tw\:bg-\[image\:var\(--studio-status-error-stripes\)\] {
+    background-image: var(--studio-status-error-stripes);
+  }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-attention-bg\)\,transparent_62\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-attention-bg),transparent 62%);
   }
@@ -1403,14 +1403,14 @@
   .tw\:py-5 {
     padding-block: calc(var(--tw-spacing) * 5);
   }
-  .tw\:py-6 {
-    padding-block: calc(var(--tw-spacing) * 6);
-  }
   .tw\:py-8 {
     padding-block: calc(var(--tw-spacing) * 8);
   }
   .tw\:py-10 {
     padding-block: calc(var(--tw-spacing) * 10);
+  }
+  .tw\:py-12 {
+    padding-block: calc(var(--tw-spacing) * 12);
   }
   .tw\:py-px {
     padding-block: 1px;
@@ -1759,6 +1759,9 @@
   .tw\:underline-offset-2 {
     text-underline-offset: 2px;
   }
+  .tw\:underline-offset-4 {
+    text-underline-offset: 4px;
+  }
   .tw\:opacity-0 {
     opacity: 0%;
   }
@@ -1776,6 +1779,9 @@
   }
   .tw\:opacity-70 {
     opacity: 70%;
+  }
+  .tw\:opacity-80 {
+    opacity: 80%;
   }
   .tw\:opacity-100 {
     opacity: 100%;

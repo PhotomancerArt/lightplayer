@@ -24,10 +24,11 @@ pub struct UiNodeHeader {
     pub dirty: DirtySummary,
     /// The node exists in the project but has NO RUNTIME on the device
     /// running it (its kind is not in that firmware build). The pane
-    /// renders an empty state instead of a body: params, products and
-    /// slots all describe a runtime that is not there, and showing them
-    /// invites edits that cannot take effect. The status
-    /// ([`Self::status`], warning-toned) and [`Self::detail`] say why.
+    /// replaces its whole body with the hazard-striped error treatment:
+    /// params, products and slots all describe a runtime that is not
+    /// there, and showing them invites edits that cannot take effect.
+    /// [`Self::kind`] names the kind in the pane's message;
+    /// [`Self::detail`] carries the engine's own wording for the popover.
     pub unsupported: bool,
 }
 
