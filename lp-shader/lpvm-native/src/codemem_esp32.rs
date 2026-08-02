@@ -162,6 +162,11 @@ impl CodeRegion {
     /// [`CodeRegion::reclaimable_heap_span`].
     pub const ESP32_DRAM2_END: u32 = 0x4000_0000;
 
+    /// D-bus origin of esp-hal's `dram2_seg`. Below this address SRAM1 holds
+    /// the ROM's data and per-core stacks (`reserved_rom_data_pro/app`,
+    /// `reserved_rom_stack_pro/app`), the last of which ends exactly here.
+    pub const ESP32_DRAM2_BASE: u32 = 0x3FFE_7E30;
+
     /// The `(base, len)` of SRAM1 this region leaves over for the heap: from
     /// the region's D-bus end up to [`CodeRegion::ESP32_DRAM2_END`].
     ///
@@ -170,9 +175,28 @@ impl CodeRegion {
     /// warnings in two files before (a ⚠️ in `main.rs` and one in the flash
     /// budget ADR), which is exactly the arrangement that lets a region
     /// change silently hand the allocator and the JIT the same bytes.
+    ///
+    /// # Panics
+    /// If the region does not start inside `dram2_seg`. The result feeds an
+    /// `unsafe esp_alloc::HeapRegion::new`, so answering for a region placed
+    /// lower in SRAM1 would hand the allocator the ROM's stacks and data —
+    /// memory the ROM still uses after boot, whose corruption would present
+    /// as an unattributable fault far from here. Refusing is the only safe
+    /// answer, and in the `ESP32_DEFAULT` case it is checked at compile time
+    /// by the const-assert below.
     #[must_use]
     pub const fn reclaimable_heap_span(&self) -> (u32, u32) {
+        assert!(
+            self.dbus_base >= Self::ESP32_DRAM2_BASE,
+            "code region starts below dram2_seg — its leftover span would \
+             include the ROM's data/stack reservations, which must never \
+             reach the allocator"
+        );
         let base = self.dbus_base + self.len_bytes;
+        assert!(
+            base <= Self::ESP32_DRAM2_END,
+            "code region ends above SRAM1"
+        );
         (base, Self::ESP32_DRAM2_END - base)
     }
 
@@ -599,12 +623,43 @@ mod tests {
     fn default_region_is_the_runner_region() {
         let r = CodeRegion::ESP32_DEFAULT;
         r.validate();
-        assert_eq!(r.ibus_base(), 0x400A_1000);
+        // 32 KiB at D-bus 0x3FFE_8000 since 2026-08-02 (was 92 KiB, I-bus
+        // base 0x400A_1000). The D-bus base is unchanged, so shrinking moved
+        // the I-bus BASE up while the I-bus END stayed put — that asymmetry
+        // is the mirror, and it is the thing most worth pinning here.
+        assert_eq!(r.ibus_base(), 0x400B_0000);
         assert_eq!(r.ibus_end(), 0x400B_8000);
         // Word 0 writes through the D-bus LAST word; the last word writes
         // through the D-bus base — the descending walk.
-        assert_eq!(r.dbus_write_addr(r.ibus_base()), 0x3FFF_EFFC);
+        assert_eq!(r.dbus_write_addr(r.ibus_base()), 0x3FFE_FFFC);
         assert_eq!(r.dbus_write_addr(r.ibus_end() - 4), 0x3FFE_8000);
+    }
+
+    /// The heap span and the code region tile `0x3FFE_8000..0x4000_0000`
+    /// without gap or overlap — the property `fw-esp32v3` relies on when it
+    /// hands the leftover to `esp_alloc`.
+    #[test]
+    fn reclaimable_heap_span_abuts_the_region() {
+        let r = CodeRegion::ESP32_DEFAULT;
+        let (base, len) = r.reclaimable_heap_span();
+        assert_eq!(base, r.dbus_end());
+        assert_eq!(base, 0x3FFF_0000);
+        assert_eq!(len, 64 * 1024);
+        assert_eq!(base + len, CodeRegion::ESP32_DRAM2_END);
+        // Nothing of the region is inside the heap span.
+        assert!(r.dbus_base + r.len_bytes <= base);
+    }
+
+    /// A region below `dram2_seg` must refuse to name a heap span rather than
+    /// offer one that contains the ROM's stacks and data.
+    #[test]
+    #[should_panic(expected = "below dram2_seg")]
+    fn reclaimable_heap_span_refuses_a_region_over_the_rom_reservations() {
+        let rogue = CodeRegion {
+            dbus_base: SRAM1_DRAM_BASE, // 0x3FFE_0000 — ROM data lives here
+            len_bytes: 0x1000,
+        };
+        let _ = rogue.reclaimable_heap_span();
     }
 
     struct MapSink(alloc::collections::BTreeMap<u32, u32>);
