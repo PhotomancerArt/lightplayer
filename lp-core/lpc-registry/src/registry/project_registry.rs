@@ -10,9 +10,10 @@ use lpc_model::{
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
     NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
     ProjectFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
-    SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotRole, SlotRoleResolution,
+    SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotRoleResolution,
     SlotShapeLookup, SlotShapeView, StaticSlotShape, StoredSlotEdit, WithRevision,
     lookup_slot_data, lp_value_matches_type, read_project_format_json, resolve_slot_role,
+    slot::SlotPersistence,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
@@ -93,7 +94,43 @@ impl ProjectRegistry {
         }
     }
 
+    /// Apply one mutation, validated exactly like a [`Self::mutate_batch`]
+    /// command.
+    ///
+    /// This used to be the registry's unvalidated bypass (follow-up (d) of
+    /// the editing-model ADR): anything reaching it could store an edit the
+    /// batch path would have rejected — an unwritable slot, a type mismatch,
+    /// a path that resolves nowhere. It now runs the same
+    /// [`Self::validate_mutation`] first, so there is no public write path
+    /// into the overlay that skips validation. The remaining bypass is
+    /// [`Self::stage_dedicated_op`], crate-private and used only by the
+    /// authoring operations that deliberately write `Fixed` containers.
     pub fn mutate(
+        &mut self,
+        fs: &dyn LpFs,
+        mutation: MutationOp,
+        frame: Revision,
+        ctx: &ParseCtx<'_>,
+    ) -> Result<MutationResult, EditApplyError> {
+        self.validate_mutation(&mutation, ctx)
+            .map_err(|rejection| EditApplyError::InvalidPath {
+                message: rejection.message,
+            })?;
+        self.stage_dedicated_op(fs, mutation, frame, ctx)
+    }
+
+    /// Apply one mutation **without** validating it — the staging path for
+    /// dedicated authoring operations.
+    ///
+    /// Crate-private on purpose. Its callers are the node-authoring ops
+    /// ([`crate::registry::node_authoring`]), which validate their own
+    /// preconditions and then write containers no client may edit directly:
+    /// removing a `nodes` / `entries` entry targets a `Fixed` map, so
+    /// [`Self::validate_mutation`] would (correctly) reject the very edit the
+    /// sanctioned operation exists to make. Every other caller — the wire
+    /// path, tests, tooling — goes through [`Self::mutate`] or
+    /// [`Self::mutate_batch`] and is validated.
+    pub(crate) fn stage_dedicated_op(
         &mut self,
         fs: &dyn LpFs,
         mutation: MutationOp,
@@ -104,7 +141,7 @@ impl ProjectRegistry {
         let covered_before = self.overlay_covered_artifacts();
         let overlay_changed = match mutation {
             // Moves must materialize (and therefore validate) even on this
-            // otherwise-unvalidated path; an invalid move maps to the error
+            // unvalidated staging path; an invalid move maps to the error
             // channel rather than silently storing nothing.
             MutationOp::MoveSlotEntry { artifact, from, to } => {
                 self.validate_move_slot_entry(&artifact, &from, &to, ctx)
@@ -537,14 +574,21 @@ impl ProjectRegistry {
         Ok(CommitResult { artifact_changes })
     }
 
-    /// Post-commit overlay: keep slot edits whose governing role is `Debug`
-    /// (they never serialize to def files, so commit does not resolve them;
-    /// they stay pending and runtime-effective). Persisted slot edits and
-    /// asset overlays drop — their content is now on disk. A stale edit
-    /// whose path no longer resolves in the def shape drops like a persisted
-    /// one: it was already unenforceable. Artifacts left without edits are
-    /// not retained, preserving the empty-artifact-overlay removal
-    /// invariant.
+    /// Post-commit overlay: keep slot edits whose governing persistence is
+    /// transient (they never serialize to def files, so commit does not
+    /// resolve them; they stay pending and runtime-effective). Persisted slot
+    /// edits and asset overlays drop — their content is now on disk.
+    /// Artifacts left without edits are not retained, preserving the
+    /// empty-artifact-overlay removal invariant.
+    ///
+    /// The classifier is [`SlotRoleResolution::persistence`] — role **and**
+    /// direction, the same function the studio classifies display and dirty
+    /// state with, so the two sides cannot disagree about whether an edit is
+    /// a Debug override (D1: a produced path is transient whatever its role).
+    /// An edit whose path resolves in no shape (stale artifact, errored def,
+    /// removed field) takes the shared unresolvable rule
+    /// ([`SlotPersistence::for_unresolved_edit`] — Setting) and therefore
+    /// drops like a persisted one: it was already unenforceable.
     fn retain_debug_edits(&self, committed: &ProjectOverlay, ctx: &ParseCtx<'_>) -> ProjectOverlay {
         let mut retained = ProjectOverlay::new();
         for (location, artifact_overlay) in committed.iter() {
@@ -560,8 +604,10 @@ impl ProjectRegistry {
                 continue;
             };
             let debug = slot_overlay.filtered(|path, _| {
-                resolve_edit_policy(def, path, ctx)
-                    .is_some_and(|resolution| resolution.role == SlotRole::Debug)
+                resolve_edit_role(def, path, ctx)
+                    .map(|resolution| resolution.persistence())
+                    .unwrap_or_else(SlotPersistence::for_unresolved_edit)
+                    == SlotPersistence::Transient
             });
             if !debug.is_empty() {
                 retained
@@ -720,13 +766,14 @@ impl ProjectRegistry {
         )
     }
 
-    /// Validate one batch command against the effective inventory before it
-    /// touches the overlay.
+    /// Validate one command against the effective inventory before it
+    /// touches the overlay — the shared gate behind both
+    /// [`Self::mutate_batch`] and [`Self::mutate`].
     ///
-    /// Slot policy applies to slot edits only:
+    /// Slot roles apply to slot edits only:
     ///
     /// - `PutSlotEdit` requires a resolvable artifact and slot path, a
-    ///   writable policy at the path, and (for `AssignValue`) a value-leaf
+    ///   writable role at the path, and (for `AssignValue`) a value-leaf
     ///   target plus a value matching its value type. A structural target
     ///   rejects as [`MutationRejectionReason::NotAValueLeaf`]: composite
     ///   values are never assigned wholesale — gestures compose from
@@ -739,7 +786,7 @@ impl ProjectRegistry {
     ///   map, a source key present in the **effective** definition, and a
     ///   target key absent from it ([`Self::validate_move_slot_entry`]).
     /// - Whole-artifact ops (`SetArtifactBody` / `ClearArtifact` / `Clear`)
-    ///   carry no slot policy and are accepted unchanged.
+    ///   address no slot and are accepted unchanged.
     fn validate_mutation(
         &self,
         mutation: &MutationOp,
@@ -748,7 +795,7 @@ impl ProjectRegistry {
         match mutation {
             MutationOp::PutSlotEdit { artifact, edit } => {
                 let def = self.loaded_def_for_mutation(artifact)?;
-                let Some(resolution) = resolve_edit_policy(def, &edit.path, ctx) else {
+                let Some(resolution) = resolve_edit_role(def, &edit.path, ctx) else {
                     return Err(MutationRejection::new(
                         MutationRejectionReason::UnknownSlotPath,
                         format!(
@@ -804,7 +851,7 @@ impl ProjectRegistry {
     /// does not resolve to a map, or the source key is absent from the
     /// **effective** def (moves act on what the user sees, unlike
     /// base-relative normalization); `NotWritable` per the map's entry
-    /// policy; [`MutationRejectionReason::TargetOccupied`] when the target
+    /// role; [`MutationRejectionReason::TargetOccupied`] when the target
     /// key is already present in the effective def.
     fn validate_move_slot_entry(
         &self,
@@ -832,7 +879,7 @@ impl ProjectRegistry {
                 "move endpoints must address the same map: {from} vs {to}"
             )));
         }
-        let Some(resolution) = resolve_edit_policy(def, to, ctx) else {
+        let Some(resolution) = resolve_edit_role(def, to, ctx) else {
             return Err(unknown_path(format!(
                 "slot path {to} does not resolve in artifact {}",
                 artifact.file_path()
@@ -1001,7 +1048,7 @@ impl ProjectRegistry {
     /// variant must clear, or empty when the mutation is no such edit.
     ///
     /// Detection is a shape-only walk (the same resolution family as
-    /// [`resolve_edit_policy`] / [`resolve_slot_role`], so it works
+    /// [`resolve_edit_role`] / [`resolve_slot_role`], so it works
     /// regardless of which variant is currently active): the edit's terminal
     /// segment must name a declared variant of the enum its parent path
     /// resolves to in the effective definition's shape. Returns the paths of
@@ -1324,15 +1371,15 @@ impl NormalizedEdit {
     }
 }
 
-/// Resolve the policy (and leaf value type) governing `path` inside the
-/// effective definition `def`.
+/// Resolve the role (and governing direction, and leaf value type) for
+/// `path` inside the effective definition `def`.
 ///
 /// Slot edit paths may carry the artifact root variant as their first segment
 /// (mirroring how [`crate::overlay`] applies them): such paths resolve
 /// against the artifact wrapper shape so edits that switch the variant
 /// validate against the target variant's shape. Bare paths resolve against
 /// the effective definition's own shape.
-pub(crate) fn resolve_edit_policy(
+pub(crate) fn resolve_edit_role(
     def: &NodeDef,
     path: &SlotPath,
     ctx: &ParseCtx<'_>,
@@ -1350,7 +1397,7 @@ pub(crate) fn resolve_edit_policy(
 /// Paths of the other declared variants when `path` terminates at an enum
 /// variant per the shape walk, or empty otherwise.
 ///
-/// The root shape follows [`resolve_edit_policy`]'s rule (a leading artifact
+/// The root shape follows [`resolve_edit_role`]'s rule (a leading artifact
 /// root variant segment resolves against the artifact wrapper shape), and the
 /// walk to the parent path is shape-only ([`shape_at_path`]) — enum variant
 /// segments resolve against any declared variant, matching how the edits are
@@ -1396,7 +1443,7 @@ fn enum_variant_sibling_paths(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>
 /// ([`ProjectRegistry::structural_ensure_scope`]): the parent option path
 /// when the terminal segment is an option's `some`, `path` itself otherwise.
 ///
-/// The root shape follows [`resolve_edit_policy`]'s rule and the walk to the
+/// The root shape follows [`resolve_edit_role`]'s rule and the walk to the
 /// parent is shape-only ([`shape_at_path`]), matching how the edit is
 /// validated and applied — including the segment-resolution precedence, so a
 /// record field literally named `some` stays a field terminal, not an option
@@ -1433,7 +1480,7 @@ fn ensure_effective_scope(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>) ->
 /// Shape at `segments` under `shape`: the same shape-only walk as
 /// [`resolve_slot_role`] (chasing `Ref` indirections and `Custom`
 /// projections, resolving enum variant segments against any declared
-/// variant), returning the shape view instead of a policy. `None` when the
+/// variant), returning the shape view instead of a role. `None` when the
 /// path does not resolve in the shape.
 pub(crate) fn shape_at_path<'s>(
     shape: SlotShapeView<'s>,
@@ -1464,7 +1511,7 @@ pub(crate) fn shape_at_path<'s>(
 }
 
 /// Chase `Ref` indirections and `Custom` projections to a concrete shape
-/// (the local counterpart of the policy walk's projection step).
+/// (the local counterpart of the role walk's projection step).
 fn resolve_projected_shape<'s>(
     mut shape: SlotShapeView<'s>,
     ctx: &ParseCtx<'s>,
@@ -1758,10 +1805,11 @@ mod tests {
         let (fs, mut registry) = clock_project(&shapes);
         let clock = clock_artifact();
 
-        // Seed a pending edit through the unvalidated single-mutation path so
-        // there is overlay state to remove on the now read-only slot.
+        // Seed a pending edit through the unvalidated staging path (the
+        // validated `mutate`/`mutate_batch` entry points reject the now
+        // read-only slot) so there is overlay state to remove.
         registry
-            .mutate(
+            .stage_dedicated_op(
                 &fs,
                 MutationOp::PutSlotEdit {
                     artifact: clock.clone(),
@@ -1918,6 +1966,190 @@ mod tests {
     }
 
     #[test]
+    fn commit_classifies_retention_by_persistence_not_role_alone() {
+        // S5: the studio and the registry classify an edit with SEPARATE
+        // resolvers, so they must run the SAME rule or they disagree about
+        // what an edit is. The studio classifies through
+        // `effective_persistence(role, direction)`, where a produced path is
+        // transient whatever its role (D1); retention must therefore ask the
+        // same question. Asking `role == Debug` alone would drop a produced
+        // path's entry at commit while the studio still believed it held a
+        // live override — a Debug value that vanishes with no Clear.
+        let mut shapes = SlotShapeRegistry::default();
+        shapes.replace_shape(
+            ClockDef::SHAPE_ID,
+            clock_shape_with(|rate| {
+                rate.semantics = lpc_model::SlotSemantics::produced();
+            }),
+        );
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let rate = SlotPath::parse("controls.rate").unwrap();
+
+        // A produced path is not client-writable, so it can only be staged
+        // through the dedicated-op path (W9 keeps `mutate` validated).
+        registry
+            .stage_dedicated_op(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(rate.clone(), LpValue::F32(2.5)),
+                },
+                Revision::new(4),
+                &ParseCtx { shapes: &shapes },
+            )
+            .unwrap();
+
+        registry
+            .commit_overlay(&fs, Revision::new(20), &ParseCtx { shapes: &shapes })
+            .unwrap();
+
+        let retained = registry
+            .overlay()
+            .get()
+            .artifact(&clock)
+            .and_then(ArtifactOverlay::as_slot)
+            .expect("a transient-classified edit keeps its artifact overlay");
+        assert!(
+            retained.contains_path(&rate),
+            "a produced path classifies transient on both sides, so commit \
+             retains it exactly like a Debug-role edit"
+        );
+        let text = String::from_utf8(fs.read_file(LpPath::new("/clock.json")).unwrap()).unwrap();
+        assert!(
+            !text.contains("rate"),
+            "and the writer still never serializes it: {text}"
+        );
+    }
+
+    #[test]
+    fn unresolvable_edit_paths_classify_as_settings_on_both_sides() {
+        // The other half of S5: a path that resolves in NO shape. The studio
+        // falls back to `SlotPersistence::for_unresolved_edit` (Setting) when
+        // its shape snapshot cannot classify an entry; commit must reach the
+        // same verdict from the def side, so an unclassifiable edit resolves
+        // away instead of lingering as an override nothing accounts for.
+        assert_eq!(
+            SlotPersistence::for_unresolved_edit(),
+            SlotPersistence::Persisted
+        );
+        let shapes = SlotShapeRegistry::default();
+        let (_fs, registry) = clock_project(&shapes);
+
+        // An absent or errored def cannot classify anything:
+        // `retain_debug_edits` must drop what it cannot resolve, never keep
+        // it. (Reached directly: the overlay cannot legally hold such an
+        // entry through any validated path — which is the point.)
+        let mut ghost = lpc_model::SlotOverlay::new();
+        ghost.put_edit(SlotEdit::assign_value(
+            SlotPath::parse("controls.rate").unwrap(),
+            LpValue::F32(2.0),
+        ));
+        let mut overlay = ProjectOverlay::new();
+        overlay.artifacts.insert(
+            ArtifactLocation::file("/not-a-node.json"),
+            ArtifactOverlay::slot(ghost),
+        );
+
+        let retained = registry.retain_debug_edits(&overlay, &ParseCtx { shapes: &shapes });
+        assert!(
+            retained.is_empty(),
+            "edits the registry cannot classify are Settings by the shared \
+             rule and are never retained"
+        );
+    }
+
+    #[test]
+    fn singular_mutate_validates_like_the_batch_path() {
+        // W9: `mutate` used to be a documented unvalidated bypass. It now
+        // runs the same `validate_mutation` as `mutate_batch`; the bypass
+        // survives only as the crate-private `stage_dedicated_op` the
+        // authoring operations use to write `Fixed` containers.
+        let shapes = shapes_with_read_only_rate();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let ctx = ParseCtx { shapes: &shapes };
+        let rate = SlotPath::parse("controls.rate").unwrap();
+
+        let not_writable = registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(rate.clone(), LpValue::F32(2.0)),
+                },
+                Revision::new(4),
+                &ctx,
+            )
+            .expect_err("a read-only slot is rejected, not stored");
+        assert!(
+            matches!(&not_writable, EditApplyError::InvalidPath { message }
+                if message.contains("not writable")),
+            "{not_writable:?}"
+        );
+
+        let unknown_path = registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("controls.no_longer_in_shape").unwrap(),
+                        LpValue::F32(2.0),
+                    ),
+                },
+                Revision::new(5),
+                &ctx,
+            )
+            .expect_err("an unresolvable path is rejected, not stored");
+        assert!(
+            matches!(&unknown_path, EditApplyError::InvalidPath { message }
+                if message.contains("does not resolve")),
+            "{unknown_path:?}"
+        );
+
+        let type_mismatch = registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("controls.running").unwrap(),
+                        LpValue::F32(2.0),
+                    ),
+                },
+                Revision::new(6),
+                &ctx,
+            )
+            .expect_err("a type-mismatched value is rejected, not stored");
+        assert!(
+            matches!(&type_mismatch, EditApplyError::InvalidPath { message }
+                if message.contains("expects")),
+            "{type_mismatch:?}"
+        );
+
+        assert!(
+            registry.overlay().get().is_empty(),
+            "a rejected mutation stores nothing"
+        );
+
+        // The sanctioned bypass still stages exactly what validation refuses
+        // — that is what the node-authoring ops need it for.
+        registry
+            .stage_dedicated_op(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(rate.clone(), LpValue::F32(2.0)),
+                },
+                Revision::new(7),
+                &ctx,
+            )
+            .expect("the dedicated-op path stages without validating");
+        assert!(!registry.overlay().get().is_empty());
+    }
+
+    #[test]
     fn removing_a_slot_edit_advances_the_def_revision() {
         // Gated-read contract: effective def revisions are monotonic. A
         // revert changes the effective content back to base, so its revision
@@ -1968,9 +2200,10 @@ mod tests {
         );
 
         // The stamp is sticky, not per-derivation: an unrelated later
-        // mutation must not re-stamp the reverted def.
+        // mutation must not re-stamp the reverted def. (Staged through the
+        // dedicated-op path: `nodes` is a `Fixed` map.)
         registry
-            .mutate(
+            .stage_dedicated_op(
                 &fs,
                 MutationOp::PutSlotEdit {
                     artifact: ArtifactLocation::file("/project.json"),
@@ -2078,9 +2311,10 @@ mod tests {
             "leaving the overlay must advance the def revision"
         );
 
-        // Sticky: an unrelated later mutation must not re-stamp it.
+        // Sticky: an unrelated later mutation must not re-stamp it. (Staged
+        // through the dedicated-op path: `nodes` is a `Fixed` map.)
         registry
-            .mutate(
+            .stage_dedicated_op(
                 &fs,
                 MutationOp::PutSlotEdit {
                     artifact: ArtifactLocation::file("/project.json"),
@@ -3607,7 +3841,9 @@ mod tests {
     /// Shape registry where `controls.rate` on the clock definition is
     /// read-only. No authored definition declares a non-writable field today,
     /// so the fixture flips one role in the real clock shape.
-    fn shapes_with_read_only_rate() -> SlotShapeRegistry {
+    /// The clock def shape with `controls.rate`'s field shape rewritten by
+    /// `edit` — the seam behind the role/direction variants below.
+    fn clock_shape_with(edit: impl FnOnce(&mut lpc_model::SlotFieldShape)) -> SlotShape {
         let mut shape = ClockDef::slot_shape();
         let SlotShape::Record { fields, .. } = &mut shape else {
             panic!("clock def shape must be a record");
@@ -3623,10 +3859,16 @@ mod tests {
             .iter_mut()
             .find(|field| field.name.as_str() == "rate")
             .expect("rate field");
-        rate.role = SlotRole::Fixed;
+        edit(rate);
+        shape
+    }
 
+    fn shapes_with_read_only_rate() -> SlotShapeRegistry {
         let mut shapes = SlotShapeRegistry::default();
-        shapes.replace_shape(ClockDef::SHAPE_ID, shape);
+        shapes.replace_shape(
+            ClockDef::SHAPE_ID,
+            clock_shape_with(|rate| rate.role = SlotRole::Fixed),
+        );
         shapes
     }
 

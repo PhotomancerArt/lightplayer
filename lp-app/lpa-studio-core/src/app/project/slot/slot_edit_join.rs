@@ -43,9 +43,9 @@ pub(in crate::app::project) struct SlotEditJoin<'a> {
     /// shadow; the structural ops shadow nothing).
     overlay: BTreeMap<ProjectSlotAddress, SlotEditOp>,
     /// Persistence classification for every buffer/overlay address, resolved
-    /// by `ProjectController` through the shape-only policy walk
-    /// (`lpc_model::resolve_slot_policy`), which works on data-less paths —
-    /// so a removed entry with no surviving row still classifies correctly.
+    /// by `ProjectController` through the shape-only role walk
+    /// (`lpc_model::resolve_slot_role`), which works on data-less paths — so
+    /// a removed entry with no surviving row still classifies correctly.
     persistence: BTreeMap<ProjectSlotAddress, SlotPersistence>,
     /// Asset body edits (buffer + overlay `ArtifactOverlay::Asset` mirror),
     /// keyed per owning node so [`Self::dirty_summary_for_node`] counts them

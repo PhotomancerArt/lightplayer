@@ -27,14 +27,13 @@ use crate::{
     UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
     UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
-use lpc_model::slot::{SlotPersistence, effective_persistence};
+use lpc_model::slot::SlotPersistence;
 use lpc_model::{
     ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
     MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
-    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotDirection, SlotEdit,
-    SlotMapKey, SlotPath, SlotPathSegment, SlotRole, SlotShapeId, SlotShapeLookup,
-    SlotShapeRegistry, TreePath, glsl_type_for_lp_type, resolve_artifact_specifier,
-    resolve_slot_role, starter_for_kind,
+    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
+    SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath,
+    glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -1118,13 +1117,35 @@ impl ProjectController {
     /// entries). Rendered with the artifact path as the label so a stale
     /// pending edit stays visible; save still writes it, so it lists as
     /// persisted.
+    ///
+    /// Classification is role-aware (S4): an artifact that left the node tree
+    /// may still be reachable through the connect-time def-artifact map (an
+    /// unmounted node's def is the common case), and a **Debug** override
+    /// there is not authored work — it belongs in no save-panel section,
+    /// exactly like a Debug entry the join classified (D7). Listing it would
+    /// amber-tint a value that Save will never write. Entries that classify
+    /// nowhere take the shared unresolvable rule (Setting) and list.
     fn stale_pending_edits(&self) -> Vec<UiPendingEdit> {
         let Some(sync) = &self.sync else {
             return Vec::new();
         };
         let nodes_by_artifact = self.nodes_by_def_artifact();
+        let node_ids_by_artifact: BTreeMap<&ArtifactLocation, NodeId> = self
+            .def_artifacts
+            .iter()
+            .map(|(node_id, artifact)| (artifact, *node_id))
+            .collect();
         sync.overlay_slot_edits()
             .filter(|(artifact, _, _)| !nodes_by_artifact.contains_key(artifact))
+            .filter(|(artifact, path, _)| {
+                node_ids_by_artifact
+                    .get(artifact)
+                    .map(|node_id| {
+                        self.persistence_at(*node_id, ProjectSlotRoot::def().name(), path)
+                    })
+                    .unwrap_or_else(SlotPersistence::for_unresolved_edit)
+                    .is_persisted()
+            })
             .map(|(artifact, path, op)| UiPendingEdit {
                 node_label: artifact.file_path().as_str().to_string(),
                 node_path: artifact.file_path().as_str().to_string(),
@@ -1199,21 +1220,28 @@ impl ProjectController {
     /// removed map entries — exactly like paths that still have data. A
     /// produced field (e.g. under the `State` root) always classifies as
     /// transient regardless of its role (D1). Unresolvable entries (unknown
-    /// node/shape/path) classify as the default role's bucket (persisted).
+    /// node/shape/path) take the shared unresolvable rule
+    /// ([`SlotPersistence::for_unresolved_edit`] — Setting), the same
+    /// fallback the server's commit-time retention uses, so the two sides
+    /// cannot disagree about what an edit is.
     fn resolve_edit_persistence(&self, address: &ProjectSlotAddress) -> SlotPersistence {
         self.node(&address.node)
-            .and_then(|node| {
-                let key = root_slot_key(node.target().node_id, address.root.name());
-                let shape = self
-                    .slot_shapes
-                    .get_shape(*self.root_shape_ids.get(&key)?)?;
-                let resolution = resolve_slot_role(shape, &self.slot_shapes, &address.path)?;
-                Some(effective_persistence(resolution.role, resolution.direction))
-            })
-            .unwrap_or(effective_persistence(
-                SlotRole::default(),
-                SlotDirection::default(),
-            ))
+            .map(|node| node.target().node_id)
+            .map(|node_id| self.persistence_at(node_id, address.root.name(), &address.path))
+            .unwrap_or_else(SlotPersistence::for_unresolved_edit)
+    }
+
+    /// The persistence governing `path` under one node's slot root — the
+    /// shape-only classifier behind [`Self::resolve_edit_persistence`] and
+    /// the stale-entry classification in [`Self::stale_pending_edits`], which
+    /// has an artifact and a node id but no slot address.
+    fn persistence_at(&self, node_id: NodeId, root_name: &str, path: &SlotPath) -> SlotPersistence {
+        self.root_shape_ids
+            .get(&root_slot_key(node_id, root_name))
+            .and_then(|shape_id| self.slot_shapes.get_shape(*shape_id))
+            .and_then(|shape| resolve_slot_role(shape, &self.slot_shapes, path))
+            .map(|resolution| resolution.persistence())
+            .unwrap_or_else(SlotPersistence::for_unresolved_edit)
     }
 
     /// Entry keys of `artifact`'s `entries` map that carry pending overlay
@@ -10167,6 +10195,111 @@ mod tests {
         );
         assert_eq!(stale.phase, crate::UiPendingEditPhase::Persisted);
         assert!(stale.revert.is_none());
+    }
+
+    /// S4: the stale-entry path classifies by role like every other entry.
+    /// A node whose def artifact left the tree (unmounted, retired) can still
+    /// be classified through the connect-time def-artifact map and the
+    /// retained shapes — and a Debug override there is not authored work, so
+    /// it must not list as a persisted pending edit (which would amber-tint
+    /// it and present Save as having something to write).
+    #[test]
+    fn stale_overlay_entries_are_classified_by_role_not_hard_coded_persisted() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(1),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("brightness").unwrap(),
+                                LpValue::F32(0.9),
+                            ),
+                        },
+                    },
+                    MutationEffect::overlay_changed(true),
+                ),
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(2),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("rate").unwrap(),
+                                LpValue::F32(2.0),
+                            ),
+                        },
+                    },
+                    MutationEffect::overlay_changed(true),
+                ),
+            ],
+            Revision::new(3),
+        );
+
+        // The node leaves the tree while its shapes (and the def-artifact
+        // map) survive — the unmounted-def case. Both edits are now stale.
+        let mut unmounted = ProjectView::new();
+        install_mixed_policy_slots(&mut unmounted, 1, Revision::new(2));
+        project.apply_project_view(&unmounted).unwrap();
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let listed: Vec<&str> = editor
+            .pending_edits
+            .iter()
+            .map(|edit| edit.slot_path_display.as_str())
+            .collect();
+        assert_eq!(
+            listed,
+            vec!["brightness"],
+            "the stale Debug override lists in no save-panel section (D7); \
+             the stale Setting still does"
+        );
+        assert_eq!(
+            editor.pending_edits[0].phase,
+            crate::UiPendingEditPhase::Persisted
+        );
+    }
+
+    /// The other half of S5, client side: an entry the shapes cannot
+    /// classify falls back to Setting — the same verdict the server's
+    /// commit-time retention reaches — so it lists as authored work rather
+    /// than becoming an override nothing accounts for.
+    #[test]
+    fn unclassifiable_stale_entries_fall_back_to_setting() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        // No node maps to this artifact at all: nothing can
+                        // resolve its role.
+                        artifact: ArtifactLocation::file("/retired.shader.json"),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("rate").unwrap(),
+                            LpValue::F32(2.0),
+                        ),
+                    },
+                },
+                MutationEffect::overlay_changed(true),
+            )],
+            Revision::new(3),
+        );
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert_eq!(editor.pending_edits.len(), 1);
+        assert_eq!(
+            editor.pending_edits[0].phase,
+            crate::UiPendingEditPhase::Persisted,
+            "unresolvable entries are Settings on both sides, so they stay \
+             visible as authored work"
+        );
+        assert_eq!(
+            editor.pending_edits[0].node_label, "/retired.shader.json",
+            "and keep the artifact label — there is no node to name them"
+        );
     }
 
     #[test]

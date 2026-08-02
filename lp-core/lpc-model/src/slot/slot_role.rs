@@ -47,8 +47,8 @@ impl SlotRole {
 ///
 /// A produced field is always effectively read-only: it is written by its
 /// owning node at runtime, so no declared role can make it writable (D1 —
-/// direction implies the constraint, no `read_only_transient` marking
-/// needed).
+/// direction implies the constraint; the former `read_only_transient`
+/// marking on state records is gone because of it).
 pub fn effective_writable(role: SlotRole, direction: SlotDirection) -> bool {
     role.is_writable() && direction != SlotDirection::Produced
 }
