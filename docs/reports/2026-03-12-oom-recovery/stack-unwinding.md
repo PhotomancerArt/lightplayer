@@ -1,6 +1,11 @@
 # OOM Recovery: Stack Unwinding via `unwinding` Crate
 
 **Date:** 2026-03-12
+**Status:** HISTORICAL — this proposal was adopted, then removed 2026-08-02
+(`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`). Its cost model held up
+badly in one specific way worth noting if this is ever revisited: it predicted
+"**Zero RAM overhead**", which was true of the heap and false of the *stack* —
+the unwinder needs ~41 KB of contiguous stack per panic, more than the C6 had.
 **Context:** Same as transactional-alloc.md. This is an alternative approach that uses real stack unwinding instead of `setjmp`/`longjmp` + allocation tracking.
 
 ---

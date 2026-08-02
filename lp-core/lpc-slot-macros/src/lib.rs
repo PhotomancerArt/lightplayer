@@ -38,6 +38,9 @@
 //! - No container marker is required for a slot-modeled type; `Slotted`
 //!   derives static shape support for every record.
 //! - `#[slot(shape_id = "...")]`: override the generated static shape id.
+//! - `#[slot(default_role = "setting" | "fixed" | "debug" | "state")]`: role
+//!   for every field that does not declare its own. Runtime-state records use
+//!   `default_role = "state"`.
 //! Build-time slot-view generation discovers every `Slotted` and emits the
 //! corresponding `*View` type.
 //!
@@ -51,7 +54,12 @@
 //! - `#[slot(map(key = "...", value_ref = "..."))]`: shape a map whose values
 //!   reference another shape root.
 //! - `#[slot(consumed)]`: mark the field as a consumed dataflow slot.
-//! - `#[slot(produced)]`: mark the field as a produced dataflow slot.
+//! - `#[slot(produced)]`: mark the field as a produced dataflow slot. Must be
+//!   paired with role `"state"` (declared on the field or inherited from the
+//!   container's `default_role`), and role `"state"` must be paired with
+//!   `produced` — the derive rejects either one alone.
+//! - `#[slot(role = "setting" | "fixed" | "debug" | "state")]`: editing and
+//!   persistence role for this field.
 //! - `#[slot(merge = "latest" | "error" | "by_key")]`: set the receiver-owned
 //!   merge policy for aggregate consumed slots.
 

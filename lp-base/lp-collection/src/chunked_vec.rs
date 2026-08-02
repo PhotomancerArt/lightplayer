@@ -10,17 +10,29 @@ use core::cmp::Ordering;
 use core::ops::{Index, IndexMut};
 use core::ptr;
 
-/// Maximum chunk size in elements. Inner allocations never exceed this.
-/// The last chunk grows naturally (4→8→16→32→64) until it hits this limit,
-/// then a new chunk is allocated. Keeps peak allocation bounded (~2–4KB typical)
-/// while reducing overhead for small vecs.
-const CHUNK_SIZE: usize = 64;
+/// Target upper bound on a single inner allocation, in **bytes**.
+///
+/// This used to be a flat 64 *elements*, which is not a bound on anything the
+/// heap cares about. It was calibrated against `LpirOp` (20 B on a 32-bit
+/// target → a 1,280 B chunk, comfortably inside the "~2–4 KB" the comment
+/// claimed). `lps-glsl` later reused `ChunkedVec` for `HirExpr`, which is
+/// **96 B** on that same target, and the bound silently became 6,144 B per
+/// chunk — larger than the whole of the classic ESP32's remaining heap at the
+/// point it OOMs. A collection whose entire purpose is to avoid large
+/// contiguous allocations was making the largest one in the compiler.
+///
+/// 1 KiB is chosen to sit under the smallest hole a working classic reliably
+/// has. `HirExpr` gets 8 elements per chunk (768 B), `LpirOp` 32 (640 B).
+///
+/// See `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
+const CHUNK_BYTES: usize = 1024;
 
 /// A vector backed by multiple smaller allocations.
 ///
-/// All chunks except the last have exactly CHUNK_SIZE elements. The last chunk
-/// is a Vec that grows naturally up to CHUNK_SIZE, then a new chunk is started.
-/// This limits peak allocation while avoiding over-allocation for small collections.
+/// All chunks except the last have exactly [`Self::CHUNK_SIZE`] elements. The
+/// last chunk is a Vec that grows naturally up to that, then a new chunk is
+/// started. This limits peak allocation while avoiding over-allocation for
+/// small collections.
 #[derive(Clone, Debug)]
 pub struct ChunkedVec<T> {
     chunks: Vec<Vec<T>>,
@@ -28,6 +40,41 @@ pub struct ChunkedVec<T> {
 }
 
 impl<T> ChunkedVec<T> {
+    /// Elements per chunk, derived from [`CHUNK_BYTES`] so the bound is on the
+    /// allocation the heap sees rather than on a count that means nothing to it.
+    ///
+    /// ⚠️ **A power of two, not `CHUNK_BYTES / size_of::<T>()`.** The last chunk
+    /// is a `Vec` grown by pushing, and `RawVec` doubles from
+    /// `MIN_NON_ZERO_CAP`, so its capacity only ever lands on 4, 8, 16, … — it
+    /// cannot stop at 10. Deriving 10 for a 96-byte `HirExpr` therefore bought a
+    /// chunk whose *capacity* reached 16, i.e. a **1,536-byte allocation against
+    /// a 1,024-byte bound**, which is the same class of mistake as counting
+    /// elements in the first place. Rounding down to a power of two makes the
+    /// doubling land exactly on the limit instead of overshooting it.
+    ///
+    /// Always at least 1, so an element larger than [`CHUNK_BYTES`] still gets a
+    /// chunk of its own rather than a divide-by-zero. Zero-sized types never
+    /// allocate, so their chunk size is arbitrary.
+    ///
+    /// One residual: `RawVec`'s minimum non-zero capacity is 4 for elements of
+    /// 1,024 bytes or less, so for an element between `CHUNK_BYTES / 4` and
+    /// `CHUNK_BYTES` the first allocation is 4 elements no matter what this
+    /// says. Nothing in this workspace is in that band (`HirExpr` 96 B,
+    /// `LpirOp` 20 B), and the alternative — `Vec::with_capacity` per chunk —
+    /// costs a full chunk up front for every short-lived `ChunkedVec`.
+    pub(crate) const CHUNK_SIZE: usize = {
+        let elem = core::mem::size_of::<T>();
+        if elem == 0 {
+            64
+        } else {
+            let mut n = 1;
+            while n * 2 * elem <= CHUNK_BYTES {
+                n *= 2;
+            }
+            n
+        }
+    };
+
     /// Create an empty ChunkedVec.
     pub fn new() -> Self {
         Self {
@@ -45,7 +92,7 @@ impl<T> ChunkedVec<T> {
         let mut chunks = Vec::new();
         let mut remaining = len;
         while remaining > 0 {
-            let chunk_len = remaining.min(CHUNK_SIZE);
+            let chunk_len = remaining.min(Self::CHUNK_SIZE);
             chunks.push(vec![default.clone(); chunk_len]);
             remaining -= chunk_len;
         }
@@ -55,7 +102,7 @@ impl<T> ChunkedVec<T> {
     /// Create a ChunkedVec with capacity for at least `cap` elements.
     /// The last chunk starts empty and grows normally up to CHUNK_SIZE.
     pub fn with_capacity(cap: usize) -> Self {
-        let n_chunks = cap.div_ceil(CHUNK_SIZE);
+        let n_chunks = cap.div_ceil(Self::CHUNK_SIZE);
         let mut chunks = Vec::with_capacity(n_chunks.max(1));
         if cap > 0 {
             chunks.push(Vec::new());
@@ -76,12 +123,12 @@ impl<T> ChunkedVec<T> {
     fn assert_inner_vecs_within_limit(&self) {
         for (i, chunk) in self.chunks.iter().enumerate() {
             assert!(
-                chunk.len() <= CHUNK_SIZE,
+                chunk.len() <= Self::CHUNK_SIZE,
                 "chunk {i} len {} > CHUNK_SIZE",
                 chunk.len()
             );
             assert!(
-                chunk.capacity() <= CHUNK_SIZE,
+                chunk.capacity() <= Self::CHUNK_SIZE,
                 "chunk {i} capacity {} > CHUNK_SIZE",
                 chunk.capacity()
             );
@@ -92,10 +139,10 @@ impl<T> ChunkedVec<T> {
     fn chunk_and_offset(&self, i: usize) -> (usize, usize) {
         if self.chunks.len() == 1 {
             (0, i)
-        } else if i < (self.chunks.len() - 1) * CHUNK_SIZE {
-            (i / CHUNK_SIZE, i % CHUNK_SIZE)
+        } else if i < (self.chunks.len() - 1) * Self::CHUNK_SIZE {
+            (i / Self::CHUNK_SIZE, i % Self::CHUNK_SIZE)
         } else {
-            let full_chunk_elems = (self.chunks.len() - 1) * CHUNK_SIZE;
+            let full_chunk_elems = (self.chunks.len() - 1) * Self::CHUNK_SIZE;
             (self.chunks.len() - 1, i - full_chunk_elems)
         }
     }
@@ -105,7 +152,7 @@ impl<T> ChunkedVec<T> {
             || self
                 .chunks
                 .last()
-                .map(|c| c.len() >= CHUNK_SIZE)
+                .map(|c| c.len() >= Self::CHUNK_SIZE)
                 .unwrap_or(false);
         if need_new_chunk {
             self.chunks.push(Vec::new());
@@ -122,15 +169,15 @@ impl<T> ChunkedVec<T> {
     {
         if new_len <= self.len {
             self.len = new_len;
-            let keep_chunks = new_len.div_ceil(CHUNK_SIZE);
+            let keep_chunks = new_len.div_ceil(Self::CHUNK_SIZE);
             if keep_chunks == 0 {
                 self.chunks.clear();
                 return;
             }
             self.chunks.truncate(keep_chunks);
-            let last_offset = new_len % CHUNK_SIZE;
+            let last_offset = new_len % Self::CHUNK_SIZE;
             let last_len = if last_offset == 0 && new_len > 0 {
-                CHUNK_SIZE
+                Self::CHUNK_SIZE
             } else {
                 last_offset
             };
@@ -355,6 +402,67 @@ mod tests {
         ChunkedVec::new()
     }
 
+    /// Elements per chunk for the type these tests use.
+    ///
+    /// Every size below is expressed in terms of it rather than hardcoded. The
+    /// original tests used literals (130, 200, 600) chosen against a 64-element
+    /// chunk; once the bound became per-type those literals all fit inside a
+    /// single `i32` chunk, so the multi-chunk tests would have kept passing
+    /// while testing nothing. Boundary crossings have to be structural.
+    const CHUNK: usize = ChunkedVec::<i32>::CHUNK_SIZE;
+
+    #[test]
+    fn chunk_size_is_bounded_in_bytes_not_elements() {
+        // The regression this collection exists to prevent: an element type big
+        // enough that a chunk stops being a small allocation. `HirExpr` is 96 B
+        // on a 32-bit target, which under the old flat 64-element bound made a
+        // 6,144 B chunk — bigger than the classic ESP32's whole remaining heap
+        // at the point it OOM'd compiling a shader.
+        assert!(CHUNK * size_of::<i32>() <= CHUNK_BYTES);
+        assert!(ChunkedVec::<[u8; 96]>::CHUNK_SIZE * 96 <= CHUNK_BYTES);
+        assert!(ChunkedVec::<[u8; 20]>::CHUNK_SIZE * 20 <= CHUNK_BYTES);
+        // An element larger than the whole budget still gets a chunk, not a
+        // divide-by-zero.
+        assert_eq!(ChunkedVec::<[u8; CHUNK_BYTES * 2]>::CHUNK_SIZE, 1);
+    }
+
+    /// The bound is on the **allocation**, so it has to be asserted against
+    /// `Vec::capacity`, not against the element count.
+    ///
+    /// The first cut of this change derived `CHUNK_BYTES / size_of::<T>()`,
+    /// giving 10 for a 96-byte element. `RawVec` doubles, so capacity went to
+    /// 16 — a 1,536-byte allocation against a 1,024-byte bound. Every test
+    /// above still passed, because they all use `i32`, whose 256 happens to be
+    /// a power of two. An element size that is *not* a convenient divisor is
+    /// the case that matters, so it is the case that gets tested.
+    #[test]
+    fn real_chunk_allocations_stay_within_the_byte_bound() {
+        // Takes a sample value rather than a `Default` bound: `Default` stops
+        // at `[T; 32]`, and the element sizes that matter here are larger.
+        fn check<T: Clone>(label: &str, sample: T) {
+            let mut v: ChunkedVec<T> = ChunkedVec::new();
+            // Three chunks' worth, so at least one chunk is full and sealed.
+            for _ in 0..(ChunkedVec::<T>::CHUNK_SIZE * 3 + 1) {
+                v.push(sample.clone());
+            }
+            for (i, chunk) in v.chunks.iter().enumerate() {
+                let bytes = chunk.capacity() * size_of::<T>();
+                assert!(
+                    bytes <= CHUNK_BYTES,
+                    "{label}: chunk {i} allocates {bytes} B (capacity {}) \
+                     against a {CHUNK_BYTES} B bound",
+                    chunk.capacity(),
+                );
+            }
+        }
+        check("HirExpr-sized (96 B)", [0u8; 96]);
+        check("LpirOp-sized (20 B)", [0u8; 20]);
+        check("12 B", [0u8; 12]);
+        check("HirStmt-sized (40 B)", [0u8; 40]);
+        check("4 B", 0i32);
+        check("1 B", 0u8);
+    }
+
     #[test]
     fn push_and_len() {
         let mut v = chunked_vec_new();
@@ -371,9 +479,9 @@ mod tests {
 
     #[test]
     fn with_capacity_and_default() {
-        let v = ChunkedVec::with_capacity_and_default(130, -1);
-        assert_eq!(v.len(), 130);
-        for i in 0..130 {
+        let v = ChunkedVec::with_capacity_and_default(CHUNK * 2 + 2, -1);
+        assert_eq!(v.len(), CHUNK * 2 + 2);
+        for i in 0..CHUNK * 2 + 2 {
             assert_eq!(v[i], -1);
         }
         v.assert_inner_vecs_within_limit();
@@ -422,12 +530,13 @@ mod tests {
     #[test]
     fn reverse_preserves_layout_and_order() {
         let mut v = chunked_vec_new();
-        for i in 0..130 {
+        let n = CHUNK * 2 + 2;
+        for i in 0..n {
             v.push(i as i32);
         }
         v.reverse();
-        for i in 0..130 {
-            assert_eq!(v[i], (129 - i) as i32, "index {i} after reverse");
+        for i in 0..n {
+            assert_eq!(v[i], (n - 1 - i) as i32, "index {i} after reverse");
         }
         v.assert_inner_vecs_within_limit();
     }
@@ -435,25 +544,27 @@ mod tests {
     #[test]
     fn reverse_small_partial_chunk() {
         let mut v = chunked_vec_new();
-        for i in 0..70 {
+        let n = CHUNK + 6;
+        for i in 0..n {
             v.push(i as i32);
         }
         v.reverse();
-        for i in 0..70 {
-            assert_eq!(v[i], (69 - i) as i32);
+        for i in 0..n {
+            assert_eq!(v[i], (n - 1 - i) as i32);
         }
     }
 
     #[test]
     fn with_capacity_then_many_pushes() {
-        let mut v = ChunkedVec::with_capacity(600);
-        for i in 0..600 {
+        let n = CHUNK * 9 + 24;
+        let mut v = ChunkedVec::with_capacity(n);
+        for i in 0..n {
             v.push(i as i32);
         }
-        assert_eq!(v.len(), 600);
+        assert_eq!(v.len(), n);
         assert_eq!(v[0], 0);
-        assert_eq!(v[299], 299);
-        assert_eq!(v[599], 599);
+        assert_eq!(v[n / 2], (n / 2) as i32);
+        assert_eq!(v[n - 1], (n - 1) as i32);
         v.assert_inner_vecs_within_limit();
     }
 
@@ -512,7 +623,7 @@ mod tests {
     #[test]
     fn inner_vecs_stay_under_limit_push_across_boundaries() {
         let mut v = chunked_vec_new();
-        for i in 0..200 {
+        for i in 0..CHUNK * 3 + 8 {
             v.push(i as i32);
             v.assert_inner_vecs_within_limit();
         }
@@ -521,19 +632,19 @@ mod tests {
     #[test]
     fn inner_vecs_stay_under_limit_resize() {
         let mut v = chunked_vec_new();
-        v.resize(150, 0);
+        v.resize(CHUNK * 2 + 22, 0);
         v.assert_inner_vecs_within_limit();
-        v.resize(50, 0);
+        v.resize(CHUNK / 2, 0);
         v.assert_inner_vecs_within_limit();
     }
 
     #[test]
     fn inner_vecs_stay_under_limit_swap_remove() {
         let mut v = chunked_vec_new();
-        for i in 0..100 {
+        for i in 0..CHUNK + 36 {
             v.push(i as i32);
         }
-        for _ in 0..50 {
+        for _ in 0..CHUNK / 2 {
             v.swap_remove(v.len() / 2);
             v.assert_inner_vecs_within_limit();
         }

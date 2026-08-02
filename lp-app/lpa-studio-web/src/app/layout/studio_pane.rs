@@ -157,6 +157,10 @@ pub enum PaneTone {
     Good,
     /// Live-only (transient) state, blue.
     Live,
+    /// **Debug** territory (D9): attention-orange + hazard stripes. Distinct
+    /// from [`Self::Attention`] (flat orange = device health) and from
+    /// [`Self::Live`] (blue). The look is defined in `style.css`.
+    Debug,
     /// Unsaved/edited, yellow (node edit vocabulary).
     Warning,
     /// Health needs a look, orange (device/roster attention family).
@@ -310,6 +314,7 @@ fn pane_header_tint_class(tone: PaneTone) -> &'static str {
         PaneTone::Live => {
             "tw:bg-[linear-gradient(90deg,var(--studio-status-live-bg),transparent_62%)]"
         }
+        PaneTone::Debug => "lp-debug-pane-tint",
         PaneTone::Warning => {
             "tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_62%)]"
         }
@@ -336,6 +341,7 @@ fn pane_chip_class(tone: PaneTone) -> &'static str {
         PaneTone::Live => {
             "tw:shrink-0 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-live-border tw:bg-status-live-bg tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:leading-none tw:text-status-live-foreground"
         }
+        PaneTone::Debug => "tw:shrink-0 lp-debug-chip",
         PaneTone::Warning => {
             "tw:shrink-0 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:leading-none tw:text-status-warning-foreground"
         }

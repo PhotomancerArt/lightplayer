@@ -3,6 +3,7 @@
     "fields": [
       {
         "name": "output",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },

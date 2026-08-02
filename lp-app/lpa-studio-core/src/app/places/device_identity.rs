@@ -14,6 +14,14 @@ use serde::{Deserialize, Serialize};
 
 pub const DEVICE_IDENTITY_PATH: &str = "/.lp/device.json";
 
+/// The device-side hardware-manifest override, at the fs ROOT like the
+/// identity above. The firmware's boot loader
+/// (`fw-esp32-common/src/hardware/manifest_loader.rs`) reads this path;
+/// provisioning writes the chosen board's runtime manifest here (D4), and
+/// the pin map takes effect on the NEXT boot. Absent = the compiled-in
+/// per-target default stands.
+pub const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
+
 /// A device's stamped identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

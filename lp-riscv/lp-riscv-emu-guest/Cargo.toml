@@ -14,7 +14,6 @@ lp-recovery = { workspace = true }
 critical-section = { workspace = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 log = { workspace = true, default-features = false }
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 
 [features]
 profile = []

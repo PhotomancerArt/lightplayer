@@ -4,6 +4,7 @@
       {
         "default_bind": "bus:time",
         "name": "seconds",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -20,6 +21,7 @@
       },
       {
         "name": "delta_seconds",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },

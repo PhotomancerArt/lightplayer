@@ -62,7 +62,6 @@
 use core::sync::atomic::AtomicU32;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use crate::blocks::BlockPlan;
 use crate::hw::RmtHw;
 use crate::pulse::STOP_WORD;
 use crate::state::{ChannelState, ChannelStats, BITS_PER_PIXEL, BYTES_PER_PIXEL};
@@ -95,9 +94,10 @@ pub enum FillResult {
 pub enum ConfigError {
     /// `ch` is not in `0..N`.
     ChannelOutOfRange,
-    /// `ch` owns no memory blocks under the driver's
-    /// [`BlockPlan`](crate::BlockPlan): a lower-numbered channel extended over
-    /// them, or the plan left the channel out.
+    /// `ch` owns no memory blocks under the backend's
+    /// [`BlockPlan`](crate::BlockPlan) — a lower-numbered channel extended
+    /// over them, the plan left the channel out, or no plan has been
+    /// published yet. Reported as [`RmtHw::ram_words`] returning zero.
     ChannelUnavailable,
     /// The backend reported fewer than 4 words for the channel.
     RamTooSmall,
@@ -142,7 +142,6 @@ pub enum StartError {
 pub struct Ws281xDriver<H, const N: usize> {
     hw: H,
     channels: [ChannelState; N],
-    blocks: BlockPlan<N>,
     /// Test hook (feature `test_hooks`), per channel: threshold interrupts to
     /// service normally before the drop counter starts consuming them.
     #[cfg(feature = "test_hooks")]
@@ -154,27 +153,19 @@ pub struct Ws281xDriver<H, const N: usize> {
 }
 
 impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
-    /// Wrap a backend, one memory block per channel. No hardware is touched
-    /// until [`Self::configure`].
+    /// Wrap a backend. No hardware is touched until [`Self::configure`].
+    ///
+    /// The backend is the sole authority on window sizes: which channels
+    /// exist, and how much RAM each owns, is whatever [`RmtHw::ram_words`]
+    /// reports — typically a [`BlockPlan`](crate::BlockPlan) the backend
+    /// reads from a [`SharedBlockPlan`](crate::SharedBlockPlan) published at
+    /// driver init. A channel whose window is zero words is rejected by
+    /// [`Self::configure`] with [`ConfigError::ChannelUnavailable`] instead
+    /// of quietly transmitting into RAM it does not own.
     pub const fn new(hw: H) -> Self {
-        Self::with_blocks(hw, BlockPlan::one_per_channel())
-    }
-
-    /// Wrap a backend with an explicit [`BlockPlan`].
-    ///
-    /// The plan decides which channels exist at all: a channel whose memory
-    /// block was absorbed by a lower-numbered one is rejected by
-    /// [`Self::configure`] with [`ConfigError::ChannelUnavailable`] instead of
-    /// quietly transmitting into RAM it does not own.
-    ///
-    /// The backend must be built from the *same* plan — it is a `Copy` value
-    /// precisely so that both halves can share one — because
-    /// [`RmtHw::ram_words`] remains the authority on window size.
-    pub const fn with_blocks(hw: H, blocks: BlockPlan<N>) -> Self {
         Self {
             hw,
             channels: [const { ChannelState::new() }; N],
-            blocks,
             #[cfg(feature = "test_hooks")]
             hook_threshold_skip: [const { AtomicU32::new(0) }; N],
             #[cfg(feature = "test_hooks")]
@@ -185,11 +176,6 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// The backend.
     pub fn hw(&self) -> &H {
         &self.hw
-    }
-
-    /// The memory-block allocation this driver was built with.
-    pub const fn block_plan(&self) -> &BlockPlan<N> {
-        &self.blocks
     }
 
     /// Number of channels this driver manages, available or not.
@@ -224,11 +210,11 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
             .channels
             .get(ch as usize)
             .ok_or(ConfigError::ChannelOutOfRange)?;
-        if !self.blocks.is_available(ch) {
-            return Err(ConfigError::ChannelUnavailable);
-        }
 
         let ram_words = self.hw.ram_words(ch);
+        if ram_words == 0 {
+            return Err(ConfigError::ChannelUnavailable);
+        }
         if ram_words < 4 {
             return Err(ConfigError::RamTooSmall);
         }

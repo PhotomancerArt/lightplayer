@@ -15,22 +15,24 @@ use crate::{PendingAssetEdit, PendingEdit, PendingEditPhase};
 /// counting rule — so an edit at a path with no surviving row (a removed map
 /// entry) still counts exactly once, and the prefix-dirty display state on
 /// ancestor composites never double-counts. Each entry, classified by
-/// [`DirtySummary::for_slot`], lands in exactly one bucket:
+/// [`DirtySummary::for_slot`], lands in at most one bucket:
 ///
 /// - a buffered `Failed` edit → [`failed`](Self::failed) (the overlay may not
 ///   hold the edit, but the slot still needs attention);
-/// - any other buffered edit, or an overlay-mirror edit → persistence bucket
-///   ([`persisted`](Self::persisted) / [`transient`](Self::transient), from
-///   the shape-resolved persistence governing the entry's path).
+/// - any other buffered edit, or an overlay-mirror edit, at a **persisted**
+///   path → [`persisted`](Self::persisted);
+/// - anything else — a Debug (live-only) override, or any produced field —
+///   counts in **no** bucket (D7). Debug values are transient by nature: no
+///   durable value sits underneath them, so they are never "dirty", never
+///   gate an unload, and never appear in the Save panel. Their verb is
+///   **Clear**, not Revert (`SlotEditOp::Clear`, `NodeClearDebugOp`,
+///   `ProjectOp::ClearDebugEdits`).
 ///
 /// Summaries merge upward: node (own edits + child nodes) → project.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DirtySummary {
     /// Dirty slots whose edits are written back to def artifacts on save.
     pub persisted: usize,
-    /// Dirty slots whose edits are live-only (transient persistence) and
-    /// survive save as pending overlay entries.
-    pub transient: usize,
     /// Slots whose buffered edit failed (rejected or transport error); they
     /// need attention even though the overlay may not hold them.
     pub failed: usize,
@@ -44,7 +46,7 @@ impl DirtySummary {
 
     /// Total slots needing a dirty affordance, regardless of bucket.
     pub fn total(&self) -> usize {
-        self.persisted + self.transient + self.failed
+        self.persisted + self.failed
     }
 
     /// True when nothing is dirty or failed.
@@ -56,7 +58,6 @@ impl DirtySummary {
     pub fn merge(self, other: Self) -> Self {
         Self {
             persisted: self.persisted + other.persisted,
-            transient: self.transient + other.transient,
             failed: self.failed + other.failed,
         }
     }
@@ -82,8 +83,7 @@ impl DirtySummary {
     /// Classify one asset body edit entry's join state (same order as
     /// [`Self::for_slot`]: buffered edit first, then the overlay mirror, else
     /// clean). Asset body edits are always **persisted**-class — they are
-    /// written to their artifact files on save — so there is no transient
-    /// bucket for them.
+    /// written to their artifact files on save.
     pub(in crate::app::project) fn for_asset(
         pending: Option<&PendingAssetEdit>,
         overlay_dirty: bool,
@@ -99,17 +99,16 @@ impl DirtySummary {
         }
     }
 
-    /// One dirty slot in the bucket named by its persistence policy.
+    /// One edit entry classified by the persistence governing its path: a
+    /// persisted path is one dirty slot; a transient one (a Debug override or
+    /// a produced field) is not dirty at all and counts nothing (D7).
     fn for_persistence(persistence: SlotPersistence) -> Self {
         match persistence {
             SlotPersistence::Persisted => Self {
                 persisted: 1,
                 ..Self::default()
             },
-            SlotPersistence::Transient => Self {
-                transient: 1,
-                ..Self::default()
-            },
+            SlotPersistence::Transient => Self::default(),
         }
     }
 }
@@ -141,24 +140,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn buffered_edit_counts_by_persistence() {
+    fn buffered_persisted_edit_counts_and_debug_counts_nothing() {
         let edit = PendingEdit::pending(LpValue::F32(1.0));
 
         assert_eq!(
             DirtySummary::for_slot(Some(&edit), false, SlotPersistence::Persisted),
             DirtySummary {
                 persisted: 1,
-                transient: 0,
                 failed: 0,
             }
         );
-        assert_eq!(
-            DirtySummary::for_slot(Some(&edit), false, SlotPersistence::Transient),
-            DirtySummary {
-                persisted: 0,
-                transient: 1,
-                failed: 0,
-            }
+        // D7: a Debug (live-only) override is never dirty — no bucket holds
+        // it, so it cannot gate an unload or tint a header.
+        assert!(
+            DirtySummary::for_slot(Some(&edit), false, SlotPersistence::Transient).is_clean(),
+            "a Debug edit contributes to no bucket"
         );
     }
 
@@ -174,24 +170,29 @@ mod tests {
         };
 
         for overlay_dirty in [false, true] {
-            assert_eq!(
-                DirtySummary::for_slot(Some(&edit), overlay_dirty, SlotPersistence::Persisted),
-                DirtySummary {
-                    persisted: 0,
-                    transient: 0,
-                    failed: 1,
-                }
-            );
+            for persistence in [SlotPersistence::Persisted, SlotPersistence::Transient] {
+                assert_eq!(
+                    DirtySummary::for_slot(Some(&edit), overlay_dirty, persistence),
+                    DirtySummary {
+                        persisted: 0,
+                        failed: 1,
+                    },
+                    "a rejected write needs attention whatever it addresses"
+                );
+            }
         }
     }
 
     #[test]
     fn overlay_edit_counts_by_persistence_and_clean_counts_nothing() {
+        assert!(
+            DirtySummary::for_slot(None, true, SlotPersistence::Transient).is_clean(),
+            "an acked Debug override is not dirty either"
+        );
         assert_eq!(
-            DirtySummary::for_slot(None, true, SlotPersistence::Transient),
+            DirtySummary::for_slot(None, true, SlotPersistence::Persisted),
             DirtySummary {
-                persisted: 0,
-                transient: 1,
+                persisted: 1,
                 failed: 0,
             }
         );
@@ -204,12 +205,10 @@ mod tests {
         let failed = PendingAssetEdit::failed(b"body".to_vec(), "too large");
         let one_persisted = DirtySummary {
             persisted: 1,
-            transient: 0,
             failed: 0,
         };
         let one_failed = DirtySummary {
             persisted: 0,
-            transient: 0,
             failed: 1,
         };
 
@@ -226,38 +225,28 @@ mod tests {
     fn merge_add_and_sum_combine_bucket_wise() {
         let persisted = DirtySummary {
             persisted: 1,
-            transient: 0,
-            failed: 0,
-        };
-        let transient = DirtySummary {
-            persisted: 0,
-            transient: 2,
             failed: 0,
         };
         let failed = DirtySummary {
             persisted: 0,
-            transient: 0,
             failed: 1,
         };
 
         let expected = DirtySummary {
             persisted: 1,
-            transient: 2,
             failed: 1,
         };
-        assert_eq!(persisted.merge(transient).merge(failed), expected);
-        assert_eq!(persisted + transient + failed, expected);
+        assert_eq!(persisted.merge(failed), expected);
+        assert_eq!(persisted + failed, expected);
         assert_eq!(
-            [persisted, transient, failed]
-                .into_iter()
-                .sum::<DirtySummary>(),
+            [persisted, failed].into_iter().sum::<DirtySummary>(),
             expected
         );
 
         let mut accumulated = DirtySummary::clean();
         accumulated += expected;
         assert_eq!(accumulated, expected);
-        assert_eq!(expected.total(), 4);
+        assert_eq!(expected.total(), 2);
         assert!(!expected.is_clean());
     }
 }

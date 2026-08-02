@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
-# Bump the pinned nightly toolchain in lockstep with the ABI-coupled `unwinding`
-# crate, then validate. See docs/toolchain-notes.md for why the toolchain is
-# pinned and why `unwinding` must move with it.
+# Bump the pinned nightly toolchain, then validate. See docs/toolchain-notes.md
+# for why the toolchain is pinned at all.
 #
 # Usage:
 #   scripts/bump-nightly.sh 2026-06-01   # pin to a specific dated nightly
@@ -10,13 +9,17 @@
 #
 # What it does:
 #   1. Rewrites the pin in rust-toolchain.toml and .github/workflows/pre-merge.yml.
-#   2. Runs `just check` (compiles `unwinding` under build-std via clippy-rv32, and
-#      catches new-nightly clippy lints) using the *current* `unwinding`.
-#   3. Only if that fails: advances `unwinding` to the latest 0.2.x and re-checks
-#      (a forward bump past the `catch_unwind` int->bool change needs 0.2.9+).
-#   4. Leaves all changes in the working tree for review; never commits. On an
-#      unrecoverable failure it reverts only the speculative `unwinding` bump and
-#      reports — the toolchain edits stay so you can iterate.
+#   2. Runs `just check` and reports.
+#   3. Leaves all changes in the working tree for review; never commits.
+#
+# This script used to be a two-variable search: the `unwinding` crate was bound
+# to the nightly `core::intrinsics::catch_unwind` ABI (0.2.8 integer return,
+# 0.2.9 bool), so a toolchain bump could require advancing the crate in lockstep
+# and the script did that speculatively, with a Cargo.lock snapshot to revert.
+# `unwinding` is gone (ADR docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md),
+# so nothing in the tree is coupled to a nightly's internal ABI and the bump is
+# a one-variable change. A failure now means a real regression — a new clippy
+# lint or genuine breakage — not a version-matching puzzle.
 
 set -euo pipefail
 
@@ -45,13 +48,8 @@ sedi() {
     if sed --version >/dev/null 2>&1; then sed -i "$@"; else sed -i '' "$@"; fi
 }
 
-unwinding_version() {
-    grep -A1 -E '^name = "unwinding"$' Cargo.lock | grep -E '^version' | head -1 \
-        | sed -E 's/version = "(.*)"/\1/'
-}
-
 CURRENT_PIN="$(grep -Eo 'nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}' "$TOOLCHAIN_FILE" | head -1 || true)"
-echo "Pinning toolchain: ${CURRENT_PIN:-<unpinned>} -> $CHANNEL (unwinding currently $(unwinding_version))"
+echo "Pinning toolchain: ${CURRENT_PIN:-<unpinned>} -> $CHANNEL"
 
 # 1. Every rust-toolchain.toml in the repo (workspace root + per-crate pins, e.g.
 #    lp-fw/fw-esp32c6 which the recipes `cd` into). They must all match or build-std
@@ -70,48 +68,19 @@ done < <(find . -name rust-toolchain.toml -not -path './target/*' -not -path '*/
 # 2. workflow: every `toolchain: nightly[-DATE]` (active + commented-out jobs, kept consistent)
 sedi -E "s/(toolchain: )nightly(-[0-9]{4}-[0-9]{2}-[0-9]{2})?/\1$CHANNEL/g" "$WORKFLOW_FILE"
 
-# Snapshot Cargo.lock so we can revert a speculative unwinding bump if it doesn't help.
-LOCK_BACKUP="$(mktemp)"
-cp Cargo.lock "$LOCK_BACKUP"
-trap 'rm -f "$LOCK_BACKUP"' EXIT
-
 echo
-echo "Validating with 'just check' (installs $CHANNEL, compiles unwinding under build-std)..."
+echo "Validating with 'just check' (installs $CHANNEL and rebuilds core/alloc)..."
 if just check; then
     echo
-    echo "OK: $CHANNEL builds clean with unwinding $(unwinding_version) (unchanged)."
+    echo "OK: $CHANNEL builds clean."
     echo "Review and commit:"
     echo "    git add $TOOLCHAIN_FILE $WORKFLOW_FILE && git commit"
     exit 0
 fi
 
 echo
-echo "Initial check failed. Advancing 'unwinding' to match the new nightly's catch_unwind ABI..."
-cargo update -p unwinding
-if cmp -s Cargo.lock "$LOCK_BACKUP"; then
-    echo
-    echo "FAILED: 'just check' did not pass and 'unwinding' is already at the latest 0.2.x." >&2
-    echo "The failure is unrelated to the unwinding ABI (new clippy lint, other breakage)." >&2
-    echo "Toolchain edits left in place. Inspect the output above, or abandon with:" >&2
-    echo "    git checkout $TOOLCHAIN_FILE $WORKFLOW_FILE" >&2
-    exit 1
-fi
-
-echo "  unwinding -> $(unwinding_version); re-validating..."
-if just check; then
-    echo
-    echo "OK: $CHANNEL builds clean after bumping unwinding to $(unwinding_version)."
-    echo "Review and commit (note the Cargo.lock change):"
-    echo "    git add $TOOLCHAIN_FILE $WORKFLOW_FILE Cargo.lock && git commit"
-    exit 0
-fi
-
-# Neither worked: drop the speculative unwinding bump, keep the toolchain edits.
-cp "$LOCK_BACKUP" Cargo.lock
-echo
-echo "FAILED: $CHANNEL does not build even after bumping unwinding (reverted that bump)." >&2
-echo "Toolchain edits are left in place for iteration. Options:" >&2
-echo "  - pin a specific unwinding: cargo update -p unwinding --precise <ver>, then 'just check'" >&2
-echo "  - if unwinding needs a new MAJOR (e.g. 0.3), bump the req in the crates' Cargo.toml" >&2
-echo "  - abandon the bump: git checkout $TOOLCHAIN_FILE $WORKFLOW_FILE Cargo.lock" >&2
+echo "FAILED: 'just check' did not pass on $CHANNEL." >&2
+echo "Toolchain edits are left in place for iteration. Inspect the output above," >&2
+echo "or abandon the bump with:" >&2
+echo "    git checkout $TOOLCHAIN_FILE $WORKFLOW_FILE" >&2
 exit 1

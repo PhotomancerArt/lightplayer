@@ -19,8 +19,8 @@ rustflags = [
   "-C", "link-arg=-Wl,-Tlinkall.x",
   "-C", "link-arg=-nostartfiles",
 
-  # Abort-tier posture (ADR 2026-07-29-per-chip-fw-toolchains), mirroring
-  # fw-esp32s3: panic=abort, no unwinding, no __eh_frame machinery. P1 does
+  # Abort-tier posture (ADR 2026-08-02-rv32-firmwares-are-abort-tier), mirroring
+  # fw-esp32s3: panic=abort, no unwind tables, no __eh_frame machinery. P1 does
   # not yet carry the lp-recovery RTC ledger fw-esp32s3 pairs this with (see
   # src/main.rs) — the panic handler here is print-and-reset only — but the
   # compiler-level posture is the same so a later phase can add the ledger

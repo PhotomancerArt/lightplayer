@@ -71,6 +71,7 @@ pub fn NodeFaceBody(
                         sections,
                         code_open: card_ui.code_open,
                         advanced_open: card_ui.advanced_open,
+                        debug_open: card_ui.debug_open,
                         platform,
                         pending_edits,
                         dirty_tint,
@@ -81,12 +82,14 @@ pub fn NodeFaceBody(
                     FixtureFace {
                         face: fixture,
                         detail_initially_open: detail_open_control.is_some(),
+                        node: Some(node.clone()),
                         on_action,
                     }
                     NodeCardDrawers {
                         node,
                         sections,
                         advanced_open: card_ui.advanced_open,
+                        debug_open: card_ui.debug_open,
                         platform,
                         pending_edits,
                         dirty_tint,
@@ -99,6 +102,7 @@ pub fn NodeFaceBody(
                         node,
                         sections,
                         advanced_open: card_ui.advanced_open,
+                        debug_open: card_ui.debug_open,
                         platform,
                         pending_edits,
                         dirty_tint,

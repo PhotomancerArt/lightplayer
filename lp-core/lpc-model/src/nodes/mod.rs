@@ -15,8 +15,8 @@ pub mod texture;
 pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
 pub use clock::{ClockControls, ClockDef, ClockDefView, ClockState};
 pub use fixture::{
-    Brightness, ColorOrder, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
-    FixtureSamplingConfig, FixtureState, FixtureStateView, MappingConfig, PathSpec,
+    Brightness, ColorOrder, FixtureDef, FixtureDefView, FixtureDiagnosticMode, FixturePower,
+    FixtureSamplingConfig, FixtureState, FixtureStateView, LampType, MappingConfig, PathSpec,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{

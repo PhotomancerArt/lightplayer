@@ -1,9 +1,16 @@
 [target.'cfg(target_arch = "riscv32")']
 rustflags = [
   "-C", "target-feature=-c",
+  # Abort tier (ADR 2026-08-02-rv32-firmwares-are-abort-tier). `force-frame-pointers`
+  # stays and is NOT unwinding machinery: `lpc-shared`'s `capture_frames_arch`
+  # walks the `s0` chain to build the crash report.
+  #
+  # Note for anyone debugging a build that ignores this file: the emulator test
+  # harness (`lp-riscv-emu/src/test_util.rs`) sets the RUSTFLAGS **env var**,
+  # which REPLACES these rather than adding to them — which is why it has its
+  # own `with_backtrace_support` builder to put `force-frame-pointers` back.
   "-C", "force-frame-pointers",
-  "-C", "force-unwind-tables=yes",
-  "-C", "panic=unwind",
+  "-C", "panic=abort",
 ]
 
 [unstable]

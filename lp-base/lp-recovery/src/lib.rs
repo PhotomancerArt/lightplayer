@@ -1,15 +1,18 @@
 //! Crash-recovery bookkeeping for LightPlayer firmware.
 //!
-//! This crate is the truthful ledger of a two-layer recovery system:
+//! This crate is the truthful ledger of recovery: a panic, OOM, hang or hard
+//! fault reboots the device, and the next boot reads a small **persistent
+//! breadcrumb region** that survives software and watchdog resets (RTC fast RAM
+//! on ESP32; plain buffers on host/emu) to say what died and where.
 //!
-//! - **Layer 1 (in-process)**: panics are unwound and caught per-node
-//!   (`catch_unwind` in the engine). Most failures recover without a reboot.
-//! - **Layer 2 (reboot backstop)**: hangs, double panics, and crashes in the
-//!   panic path itself are handled by rebooting and reading a small
-//!   **persistent breadcrumb region** that survives software and watchdog
-//!   resets (RTC fast RAM on ESP32; plain buffers on host/emu).
+//! It used to be described as the second of two layers, the first being
+//! in-process `catch_unwind` per node. That layer is gone — no target unwinds
+//! since ADR `2026-08-02-rv32-firmwares-are-abort-tier` — and nothing in this
+//! crate changed when it went, because none of it was ever gated on unwinding.
+//! The practical difference is that a crash now costs a reboot to record, so a
+//! repeat offender reaches red across boots rather than within one.
 //!
-//! Both layers share one model: a stack of [`FrameKind`] **recovery frames**
+//! The model is a stack of [`FrameKind`] **recovery frames**
 //! ("compiling shader fire.glsl", "rendering node /x") maintained **eagerly**
 //! in the persistent region — a watchdog reset gives no crash-time hook, so
 //! the stack on entry *is* the blame record.

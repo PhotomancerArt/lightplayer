@@ -259,9 +259,16 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   its path — no client-local dirty tracking, so dirty state is
   cross-client-correct and survives reconnects. The DTO join
   (`slot/slot_edit_join.rs`): buffer entries map to `Saving`/`Error`,
-  overlay-mirror entries to `Dirty`; `UiSlotFieldState.live` distinguishes
-  transient ("live") from persisted ("unsaved") edits. The same join feeds
-  `DirtySummary { persisted, transient, failed }` (`project/dirty_summary.rs`),
+  overlay-mirror entries to `Dirty`; `UiSlotFieldState.debug` marks a
+  **Debug** override (transient by nature, D7) as against a persisted
+  ("unsaved") edit. Debug overrides carry no dirty weight at all — they
+  count in no bucket, list in no save-panel section, and never gate an
+  unload; their verb is **Clear**
+  (`SlotEditOp::Clear` / `NodeClearDebugOp` / `ProjectOp::ClearDebugEdits`),
+  and the join counts them on their own channel
+  (`debug_overrides_for_node` / `debug_override_count`) for the node-card
+  marking and the global "Debug active · N · Clear all" chip. The same join
+  feeds `DirtySummary { persisted, failed }` (`project/dirty_summary.rs`),
   aggregated slot → node → project during the DTO build: node headers,
   child entries, sidebar tree items, and `ProjectEditorView.dirty` all carry
   it, and the project header's contextual Save/Revert actions surface as
@@ -270,8 +277,10 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   (`NodeRevertOp`) on `UiNodeView.header_actions` / `UiNodeChild.header_actions`.
   Each hierarchy DTO also projects status + dirty into its one chrome
   `UiAffordance` (`project/ui_affordance.rs`, priority merge
-  Error > Unsaved > Live > Busy > Info) — the glyph/tone every detail
-  trigger and tree-row indicator renders.
+  Error > Unsaved > Debug > Busy > Info) — the glyph/tone every detail
+  trigger and tree-row indicator renders. `Debug` is the **semantic**
+  variant only: the attention-orange + hazard-stripe rendering lives in
+  `lpa-studio-web` (one mapping seam), per the taxonomy ADR.
   `UiConfigSlot` carries its `ProjectSlotAddress` so fields can dispatch
   edits without extra lookup, plus `edit_entry_address` — the row's **own**
   edit entry when one exists (the row-level Revert/Reset target; a
@@ -280,8 +289,9 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   the variant-switch gesture's storage path). The project popup's save panel
   renders `ProjectEditorView.pending_edits`: one `UiPendingEdit` per edit
   entry (node label, slot path, op/value display string, phase
-  persisted/live/failed, per-entry revert action), built from the same join
-  enumeration the counts sum — list and counts cannot drift. Each
+  `Persisted`/`Failed`, per-entry revert action), built from the same join
+  enumeration the counts sum — list and counts cannot drift. There is no
+  live/transient section: Debug overrides are not edits (D7). Each
   `UiPendingEdit` also carries `old_value` (the saved base as a display
   string) so popups and the panel render `old → new`; base values are
   server-derived and mirrored beside the overlay (`ProjectSync::

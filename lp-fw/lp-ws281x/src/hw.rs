@@ -113,8 +113,13 @@ const fn bit(bits: u32, ch: u8) -> bool {
 pub trait RmtHw {
     /// Number of RMT RAM words usable by `ch` (block size × blocks assigned).
     ///
-    /// Must be stable for the lifetime of the driver, at least 4, and even —
-    /// the driver splits it into two equal ping-pong halves.
+    /// `0` means the channel is **unavailable** — absorbed by a neighbour's
+    /// window, left out of the block plan, or the plan has not been published
+    /// yet — and [`crate::Ws281xDriver::configure`] refuses it. A non-zero
+    /// count must be stable for the lifetime of the driver, at least 4, and
+    /// even — the driver splits it into two equal ping-pong halves. A plan
+    /// fixed at driver init (before any channel is configured) satisfies
+    /// this; windows must never change after init.
     fn ram_words(&self, ch: u8) -> usize;
 
     /// Write one word into `ch`'s RAM window. Backends do a volatile store.

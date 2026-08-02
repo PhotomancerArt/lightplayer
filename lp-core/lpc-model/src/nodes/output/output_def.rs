@@ -15,6 +15,13 @@ pub struct OutputDef {
     pub bindings: BindingDefs,
     /// Optional display pipeline options.
     pub options: OptionSlot<OutputDriverOptionsConfig>,
+    /// Light every channel of this output solid white, bypassing the graph.
+    ///
+    /// A `Debug` slot: diagnostics only ("is this pin wired to that strip?"),
+    /// never authored into a project file and never saved. It survives the
+    /// client that set it and dies on unload or reboot.
+    #[slot(role = "debug")]
+    pub test_pattern: ValueSlot<bool>,
 }
 
 impl OutputDef {
@@ -26,6 +33,7 @@ impl OutputDef {
             endpoint: ValueSlot::new(endpoint),
             bindings: BindingDefs::default(),
             options: OptionSlot::none(),
+            test_pattern: ValueSlot::new(false),
         }
     }
 
@@ -88,7 +96,9 @@ fn default_true_slot() -> ValueSlot<bool> {
 mod tests {
     use super::*;
     use crate::node::kind::NodeKind;
-    use crate::{NodeDef, OutputDefView, SlotPath, SlotShapeRegistry};
+    use crate::{
+        NodeDef, OutputDefView, SlotPath, SlotRole, SlotShape, SlotShapeRegistry, StaticSlotShape,
+    };
     use alloc::format;
 
     #[test]
@@ -138,6 +148,36 @@ mod tests {
             &SlotPath::parse("endpoint").unwrap()
         );
         assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
+    }
+
+    #[test]
+    fn test_pattern_is_a_debug_slot() {
+        let SlotShape::Record { fields, .. } = OutputDef::slot_shape() else {
+            panic!("output def is a record");
+        };
+
+        let field = fields
+            .iter()
+            .find(|field| field.name.as_str() == "test_pattern")
+            .expect("test_pattern field");
+
+        assert_eq!(field.role, SlotRole::Debug);
+        assert!(field.is_writable());
+    }
+
+    #[test]
+    fn authored_test_pattern_is_ignored() {
+        let json = r#"{ "kind": "Output", "endpoint": "ws281x:rmt:D10", "test_pattern": true }"#;
+
+        let def = NodeDef::read_json(&registry(), json).unwrap();
+
+        let NodeDef::Output(def) = def else {
+            panic!("expected output def");
+        };
+        assert!(
+            !*def.test_pattern.value(),
+            "a Debug slot never takes an authored value (D2)"
+        );
     }
 
     fn registry() -> SlotShapeRegistry {

@@ -47,11 +47,17 @@ SECTIONS {
         __fini_array_end = .;
     } > ROM
 
-    /* Exception unwinding: keep .eh_frame in ROM for catch_unwind */
     . = ALIGN(8);
     PROVIDE(__etext = .);
-    PROVIDE(__eh_frame = .);
-    .eh_frame : { KEEP (*(.eh_frame)) *(.eh_frame.*) } > ROM
+
+    /* This guest is abort tier and never unwinds (ADR
+       2026-08-02-rv32-firmwares-are-abort-tier), so unwind tables are dead
+       weight in ROM. Discarded explicitly rather than left to orphan-section
+       placement, matching lp-shader/lps-builtins-emu-app/memory.ld. */
+    /DISCARD/ : {
+        *(.eh_frame .eh_frame.*)
+        *(.gcc_except_table .gcc_except_table.*)
+    }
 
     .bss (NOLOAD) : ALIGN(4) {
         __bss_target_start = .;

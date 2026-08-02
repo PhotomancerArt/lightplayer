@@ -1,11 +1,20 @@
 //! Consumer-side rendering of the core [`UiAffordance`] vocabulary.
 //!
 //! Core computes one affordance per hierarchy surface
-//! (`UiAffordance::merged`, priority Error > Unsaved > Live > Busy > Info);
+//! (`UiAffordance::merged`, priority Error > Unsaved > Debug > Busy > Info);
 //! this module is the ONE place that turns it into chrome — the detail
 //! trigger's glyph + tone (node header, project pane) and the sidebar tree
 //! row's small indicator. Status words and dirty counts never render here;
 //! they live in the popups.
+//!
+//! **The debug mapping seam (D9).** `UiAffordance::Debug` is a SEMANTIC
+//! variant in `lpa-studio-core` — core never says "orange" or "stripes".
+//! Every consumer-side translation of it happens in the match arms below
+//! (`PaneTone::Debug`, `IconMenuTone::Debug`, `.lp-debug-indicator`), and the
+//! pixels themselves live in one CSS block (`src/style.css`, the
+//! `--studio-status-debug-*` tokens and the `.lp-debug-*` classes). Changing
+//! how debug territory looks is an edit to that block; changing what it maps
+//! to is an edit to these arms.
 
 use lpa_studio_core::{UiAffordance, UiStatusKind};
 
@@ -21,8 +30,8 @@ pub(crate) struct AffordanceStyle {
 
 /// The detail-trigger treatment for an affordance: a quiet "i" when there is
 /// nothing to announce (OK is not announced — no checkmark, no status
-/// coloring), the edit pencil for unsaved (yellow) and live (blue) edits,
-/// and the red warning glyph for the attention class.
+/// coloring), the edit pencil for unsaved (yellow) and debug (hazard-orange)
+/// edits, and the red warning glyph for the attention class.
 pub(crate) fn affordance_trigger_style(affordance: UiAffordance) -> AffordanceStyle {
     match affordance {
         UiAffordance::Info => AffordanceStyle {
@@ -33,9 +42,9 @@ pub(crate) fn affordance_trigger_style(affordance: UiAffordance) -> AffordanceSt
             icon: StudioIconName::InfoBare,
             tone: IconMenuTone::Working,
         },
-        UiAffordance::Live => AffordanceStyle {
+        UiAffordance::Debug => AffordanceStyle {
             icon: StudioIconName::Edited,
-            tone: IconMenuTone::Live,
+            tone: IconMenuTone::Debug,
         },
         UiAffordance::Unsaved => AffordanceStyle {
             icon: StudioIconName::Edited,
@@ -55,7 +64,7 @@ pub(crate) fn affordance_pane_tone(affordance: UiAffordance, status: UiStatusKin
     match affordance {
         UiAffordance::Info => status_pane_tone(status),
         UiAffordance::Busy => PaneTone::Working,
-        UiAffordance::Live => PaneTone::Live,
+        UiAffordance::Debug => PaneTone::Debug,
         UiAffordance::Unsaved => PaneTone::Warning,
         UiAffordance::Error => PaneTone::Error,
     }
@@ -69,9 +78,7 @@ pub(crate) fn affordance_indicator_class(affordance: UiAffordance) -> Option<&'s
         UiAffordance::Busy => Some(
             "tw:inline-flex tw:h-4 tw:items-center tw:justify-center tw:text-status-working-foreground",
         ),
-        UiAffordance::Live => Some(
-            "tw:inline-flex tw:h-4 tw:items-center tw:justify-center tw:text-status-live-foreground",
-        ),
+        UiAffordance::Debug => Some("lp-debug-indicator"),
         UiAffordance::Unsaved => Some(
             "tw:inline-flex tw:h-4 tw:items-center tw:justify-center tw:text-status-warning-foreground",
         ),
@@ -110,13 +117,13 @@ mod tests {
         assert_eq!(busy.icon, StudioIconName::InfoBare);
         assert_eq!(busy.tone, IconMenuTone::Working);
 
-        // Edits wear the pencil: yellow for unsaved, blue for live.
+        // Edits wear the pencil: yellow for unsaved, hazard for debug.
         let unsaved = affordance_trigger_style(UiAffordance::Unsaved);
         assert_eq!(unsaved.icon, StudioIconName::Edited);
         assert_eq!(unsaved.tone, IconMenuTone::Warning);
-        let live = affordance_trigger_style(UiAffordance::Live);
-        assert_eq!(live.icon, StudioIconName::Edited);
-        assert_eq!(live.tone, IconMenuTone::Live);
+        let debug = affordance_trigger_style(UiAffordance::Debug);
+        assert_eq!(debug.icon, StudioIconName::Edited);
+        assert_eq!(debug.tone, IconMenuTone::Debug);
 
         // Attention: the red warning glyph.
         let error = affordance_trigger_style(UiAffordance::Error);
@@ -131,8 +138,8 @@ mod tests {
             PaneTone::Warning
         );
         assert_eq!(
-            affordance_pane_tone(UiAffordance::Live, UiStatusKind::Good),
-            PaneTone::Live
+            affordance_pane_tone(UiAffordance::Debug, UiStatusKind::Good),
+            PaneTone::Debug
         );
         assert_eq!(
             affordance_pane_tone(UiAffordance::Error, UiStatusKind::Good),
@@ -158,7 +165,7 @@ mod tests {
         assert!(affordance_indicator_class(UiAffordance::Info).is_none());
         for affordance in [
             UiAffordance::Busy,
-            UiAffordance::Live,
+            UiAffordance::Debug,
             UiAffordance::Unsaved,
             UiAffordance::Error,
         ] {

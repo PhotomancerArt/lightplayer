@@ -498,6 +498,7 @@ mod tests {
             transport: "USB".to_string(),
             last_seen_at: 50.0,
             association: None,
+            board_id: None,
         }
     }
 

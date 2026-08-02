@@ -4,6 +4,7 @@ use crate::{ControlExtent, ControlProduct, ControlProductSlot, NodeId, Slotted, 
 
 /// Runtime state exposed by a fixture node.
 #[derive(Slotted)]
+#[slot(default_role = "state")]
 pub struct FixtureState {
     /// Renderable control output produced by this fixture node.
     #[slot(produced, default_bind = "bus:control.out")]

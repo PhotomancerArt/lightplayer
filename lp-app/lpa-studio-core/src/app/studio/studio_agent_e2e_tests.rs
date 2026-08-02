@@ -588,7 +588,7 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
     assert_eq!(content["engine"]["status"], "ok", "{content}");
 
     // Everything is STAGED, not saved: the save panel counts pending edits.
-    let (persisted, _transient) = editor_dirty(&snapshot);
+    let (persisted, _failed) = editor_dirty(&snapshot);
     assert!(persisted > 0, "the upsert rides the Save-gated overlay");
 
     // The knob appears on the shader face via the EXISTING panel

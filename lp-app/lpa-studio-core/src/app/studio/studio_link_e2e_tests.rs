@@ -388,7 +388,10 @@ fn a_flash_narrates_its_progress_while_it_runs() {
         move |update| seen.borrow_mut().push(update)
     });
     drive(studio.dispatch_with_updates(
-        device_action(DeviceOp::ProvisionFirmware { setup_name: None }),
+        device_action(DeviceOp::ProvisionFirmware {
+            setup_name: None,
+            board_id: None,
+        }),
         sink,
     ))
     .unwrap();
@@ -487,6 +490,7 @@ fn blank_flash_classifies_flashes_and_reaches_needs_a_name() {
     // reconnects, and the empty unstamped device lands on Needs-a-name.
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
         setup_name: None,
+        board_id: None,
     })))
     .unwrap();
     let home = studio.view().home.expect("gallery still shows");
@@ -649,6 +653,7 @@ fn incompatible_no_hello_reflashes_through_the_card() {
     // Flash → reboot → Ready (the flashed build speaks the current proto).
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
         setup_name: None,
+        board_id: None,
     })))
     .unwrap();
     assert!(
@@ -710,6 +715,7 @@ fn incompatible_proto_mismatch_reflashes_through_the_card() {
 
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
         setup_name: None,
+        board_id: None,
     })))
     .unwrap();
     assert!(matches!(
@@ -885,6 +891,7 @@ fn device_rename_reconciles_registry_name_over_the_link() {
             transport: "USB".to_string(),
             last_seen_at: 1.0,
             association: None,
+            board_id: None,
         })
         .unwrap();
     registry
@@ -2280,6 +2287,7 @@ fn push_progress_stays_on_the_live_card() {
             transport: "USB".to_string(),
             last_seen_at: 1.0,
             association: None,
+            board_id: None,
         })
         .unwrap();
 
@@ -2380,6 +2388,7 @@ fn diverged_board_fixture(
                 version: pushed_head,
                 at: 1.0,
             }),
+            board_id: None,
         })
         .unwrap();
     if local_moves_after_push {

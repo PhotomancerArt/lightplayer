@@ -153,7 +153,7 @@ impl SlotValue for FixturePower {
                 panel: false,
                 unit: None,
             },
-            editor: StaticValueEditorHint::Plain,
+            editor: StaticValueEditorHint::Power,
         });
 
     fn value_shape() -> SlotValueShape {
@@ -180,7 +180,7 @@ impl SlotValue for FixturePower {
                 panel: false,
                 unit: None,
             },
-            editor: ValueEditorHint::Plain,
+            editor: ValueEditorHint::Power,
         }
     }
 }

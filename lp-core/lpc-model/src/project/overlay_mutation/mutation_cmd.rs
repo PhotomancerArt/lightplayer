@@ -250,7 +250,7 @@ pub enum MutationRejectionReason {
     /// Mutation referenced a slot path that does not resolve in the
     /// artifact's shape.
     UnknownSlotPath,
-    /// Mutation targeted a slot whose policy is not writable.
+    /// Mutation targeted a slot whose role (or direction) makes it read-only.
     NotWritable,
     /// Mutation assigned a value that does not match the slot's value type.
     TypeMismatch,

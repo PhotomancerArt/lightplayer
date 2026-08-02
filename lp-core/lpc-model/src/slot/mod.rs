@@ -74,12 +74,12 @@ pub use slot_persistence::{SlotPersistence, effective_persistence};
 pub use slot_reader::{SlotFieldReader, SlotOptionReader, SlotReadContext};
 pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
-pub use slot_role::{SlotRole, effective_writable};
+pub use slot_role::{SlotRole, effective_writable, role_matches_direction};
 pub use slot_role_lookup::{SlotRoleResolution, resolve_slot_role};
 pub use slot_semantics::SlotSemantics;
 pub use slot_shape::{
-    SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError,
-    SlotVariantShape,
+    SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotRoleDirectionError, SlotShape,
+    SlotShapeId, SlotShapeIdError, SlotVariantShape,
 };
 pub use slot_shape_lookup::SlotShapeLookup;
 pub use slot_value::{

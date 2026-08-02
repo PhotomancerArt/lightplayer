@@ -11,8 +11,10 @@ BOTH the pinned workspace nightly and the Espressif Xtensa rustc fork:
 
 - No `esp-hal` / `esp-alloc` / `esp-println` / `esp-storage` / `esp-rtos` /
   `esp-radio` dependencies.
-- No `unwinding` dependency and no panic-strategy assumptions (the C6 unwinds,
-  the S3 aborts — each chip crate owns its posture).
+- No `unwinding` dependency and no panic-strategy assumptions. Every chip is
+  abort tier now (ADR `2026-08-02-rv32-firmwares-are-abort-tier`) — the C6 was
+  the last one unwinding — but each chip crate still owns its own posture and
+  panic path.
 - No `rust-toolchain.toml` and no `.cargo/config.toml` here.
 
 Chip facts arrive by injection instead:

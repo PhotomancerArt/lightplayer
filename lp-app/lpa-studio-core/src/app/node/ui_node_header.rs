@@ -22,6 +22,11 @@ pub struct UiNodeHeader {
     /// Aggregate dirty-edit summary for this node's subtree (own slots plus
     /// descendant nodes), matching the per-field affordances.
     pub dirty: DirtySummary,
+    /// Active **Debug** overrides in this node's subtree (D8 tier b: the
+    /// node-card marking). Deliberately NOT part of [`Self::dirty`] — a debug
+    /// override is not pending work (D7) — and deliberately not merged into
+    /// [`Self::affordance`], so it can never mask an unsaved or failed edit.
+    pub debug_overrides: usize,
     /// The node exists in the project but has NO RUNTIME on the device
     /// running it (its kind is not in that firmware build). The pane
     /// replaces its whole body with the hazard-striped error treatment:
@@ -44,6 +49,7 @@ impl UiNodeHeader {
             summary: None,
             detail: None,
             dirty: DirtySummary::clean(),
+            debug_overrides: 0,
             unsupported: false,
         }
     }
@@ -57,6 +63,12 @@ impl UiNodeHeader {
     /// Set the aggregate dirty-edit summary for the node's subtree.
     pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// Set the count of active Debug overrides in the node's subtree.
+    pub fn with_debug_overrides(mut self, debug_overrides: usize) -> Self {
+        self.debug_overrides = debug_overrides;
         self
     }
 
@@ -88,5 +100,12 @@ impl UiNodeHeader {
     /// status and its subtree dirty summary, rendered on the detail trigger.
     pub fn affordance(&self) -> UiAffordance {
         UiAffordance::merged(self.status.kind, &self.dirty)
+    }
+
+    /// The node's DEBUG channel (D8 tier b), separate from
+    /// [`Self::affordance`]: [`UiAffordance::Debug`] while the subtree carries
+    /// an active override, else the silent [`UiAffordance::Info`].
+    pub fn debug_affordance(&self) -> UiAffordance {
+        UiAffordance::from_debug_overrides(self.debug_overrides)
     }
 }

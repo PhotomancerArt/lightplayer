@@ -93,8 +93,9 @@ pub enum OptionPresenceWidth {
     /// vec3/vec4 grids (usable column widths), mat3 (≈9.5rem), the affine2d
     /// grid (≈9.5rem), and the XY pad + readout (≈9rem).
     Wide,
-    /// 14rem — the widest inline editors: mat4 rows (≈12.5rem) and the
-    /// slider track + readout + unit (≈12.5rem).
+    /// 14rem — the widest inline editors: mat4 rows (≈12.5rem), the slider
+    /// track + readout + unit (≈12.5rem), and the power pair's lamp picker +
+    /// budget input (≈13rem).
     ExtraWide,
 }
 
@@ -111,6 +112,9 @@ impl OptionPresenceWidth {
             }
             UiSlotEditorHint::Xy if matches!(value.kind, UiSlotValueKind::Vec2(_)) => {
                 return Self::Wide;
+            }
+            UiSlotEditorHint::Power if matches!(value.kind, UiSlotValueKind::Struct { .. }) => {
+                return Self::ExtraWide;
             }
             _ => {}
         }

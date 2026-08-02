@@ -2,6 +2,7 @@
 //!
 //! - [`esp32_recovery_backend`]: the persistent region in RTC fast RAM and
 //!   the software-reset hook.
+//! - [`panic_path`]: stage a breadcrumb, commit it, print, reset.
 //! - [`reset_cause_map`]: `SocResetReason` → platform-agnostic `ResetCause`.
 //! - [`watchdog`]: RWDT arming and the io-task-aware feed policy.
 //!
@@ -18,6 +19,7 @@
 )]
 
 pub mod esp32_recovery_backend;
+pub mod panic_path;
 pub mod reset_cause_map;
 pub mod watchdog;
 

@@ -1,11 +1,12 @@
 //! The fixture face's power readout.
 
-/// Estimated draw against a fixture's declared supply budget.
+/// Estimated draw against the supply budget actually in force.
 ///
-/// Present only when the fixture declares a budget. A fixture with none is
-/// never limited and gets no readout — the `power` config slot is where that
-/// fixture's owner goes to add one, and a permanent "no budget set" line on
-/// every other card would be noise.
+/// Present whenever the fixture is limited — including the default 1000 mA
+/// guard a fixture gets when it states nothing. Only the explicit zero-budget
+/// opt-out hides the readout: unlimited output has no percentage worth
+/// showing, and the `power` config slot is where that fixture's owner goes to
+/// state a budget again.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiFixturePower {
     /// Estimated draw of the last rendered frame, in milliamps.

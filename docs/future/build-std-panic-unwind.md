@@ -1,6 +1,14 @@
 # Full `panic!()` unwinding via `-Z build-std`
 
-## Status: resolved
+## Status: OBSOLETE (2026-08-02)
+
+Nothing in the tree builds `panic = "unwind"` any more
+(`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`). Kept for the
+`hashbrown/alloc` → `rustc-std-workspace-alloc` lesson below, which applies to
+**any** `-Zbuild-std` build and is still live — both firmwares and the emulator
+guest still rebuild `core`/`alloc` from source.
+
+## Original status: resolved
 
 Both `fw-esp32` and `fw-emu` now use `-Z build-std=core,alloc` to rebuild the
 standard library with `panic=unwind`. The emulator test (`fw-tests/tests/unwind_emu.rs`)

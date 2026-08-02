@@ -97,10 +97,19 @@ pub struct Target {
 /// defaults. `test_default_targets_order_matches_const` is the guard.
 ///
 /// `wasm.f32` is the first *native-code* f32 target: the `lpvm-wasm` backend has
-/// always had a `FloatMode::F32` emit path, but nothing ever executed it. It is
-/// deliberately **not** in [`DEFAULT_TARGETS`] — see the corpus findings from the
-/// run that first exercised it (`@lpfn`/`@glsl` builtin imports still resolve to
-/// the Q32 builtin ids, so any file calling one produces an invalid module).
+/// always had a `FloatMode::F32` emit path, but nothing ever executed it.
+///
+/// It is **not** in [`DEFAULT_TARGETS`], and as of the roadmap's G3 sweep
+/// (2026-08-02) that is **inertia, not a technical blocker**. The original
+/// reason — `@lpfn`/`@glsl` imports resolving to Q32 builtin ids, so any file
+/// calling one produced an invalid module — was obsoleted by M5, which added
+/// `resolve_builtin_id_for_mode` and the tests in `lpvm-wasm/src/emit/imports.rs`
+/// that pin "no import ever resolves across modes" (including the load-bearing
+/// pointer-parameter case). Measured on main 2026-08-02: **850/850 files,
+/// 6345/6345 tests, 13.3 s**, 2 `@unimplemented` and 0 failures. Unlike the
+/// `xtn.*` targets it needs no cross-target artifact — wasmtime is already a
+/// test dependency. Promoting it is a CI-cost decision for the roadmap's owner,
+/// not a correctness one.
 ///
 /// `xtn.f32` / `xtlpn.f32` are the **hardware-FPU** targets (roadmap M8): the
 /// same `lpvm-native` backend on `IsaTarget::Xtensa` in `FloatMode::F32`,

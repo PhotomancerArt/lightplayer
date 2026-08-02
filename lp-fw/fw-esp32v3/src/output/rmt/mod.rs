@@ -11,10 +11,19 @@
 //! * [`esp32v3_rmt_ws281x_driver`] — the `lpc-hardware` seam: endpoints,
 //!   leases, open-time pin binding, and the manifest-index → RMT-slot mapping
 //!   that two blocks per channel makes necessary.
+//!
+//! A fourth module, [`frame_dump`], exists only under the `frame-dump` feature:
+//! it is the serial transcript of what the channels transmitted, and it hangs
+//! off the app driver's write path. Nothing else depends on it, and it is
+//! independent of `ws281x_telemetry` — that one taps the same write path to
+//! answer a question about refill budget rather than about pixel values.
 
 pub mod shared_driver;
 pub mod v3_rmt;
 
 mod esp32v3_rmt_ws281x_driver;
+
+#[cfg(feature = "frame-dump")]
+pub mod frame_dump;
 
 pub use esp32v3_rmt_ws281x_driver::Esp32V3RmtWs281xDriver;

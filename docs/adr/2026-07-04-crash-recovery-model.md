@@ -26,12 +26,25 @@ covers the reboot-based backstop and the blame model.
 
 ## Decision
 
+> **Amended 2026-08-02: layer 1 is gone; layer 2 is the whole model.** The RV32
+> firmwares dropped `panic = "unwind"` and the `unwinding` crate, so no target
+> catches a panic in-process any more — every panic and OOM now takes the
+> reboot-and-report path that layer 2 describes. Read "for what `catch_unwind`
+> cannot handle" below as "for everything". Nothing else in this ADR changes:
+> the frame/path model, the persistent region contract, reset-reason
+> interpretation, the blame/escalation rules and safe mode were never gated on
+> unwinding and are unmodified. The practical difference is that a crash costs
+> a reboot to record, so a repeat offender reaches red across boots rather than
+> within one. See
+> [2026-08-02-rv32-firmwares-are-abort-tier.md](2026-08-02-rv32-firmwares-are-abort-tier.md).
+
 ### Two layers, one model
 
 Recovery is two layers over a single frame/path model:
 
 - **Layer 1 (in-process, pre-existing):** panics unwind and are caught
-  per-node. Most panics and OOMs recover without a reboot.
+  per-node. Most panics and OOMs recover without a reboot. **[Removed
+  2026-08-02 — see the amendment above.]**
 - **Layer 2 (new):** for what `catch_unwind` cannot handle — hangs, double
   panics, faults in the panic path — the device reboots, and the next boot
   reads a persistent breadcrumb region to attribute and report the failure.
@@ -123,7 +136,10 @@ stays serde-free.
 - Repeatedly-crashing nodes/projects/shaders are automatically disabled with a
   legible reason, in-process, without a reboot in the common case.
 - Cost: ~14 KB flash and a ≤ 1 KB RTC-RAM region. The concurrent toml→json
-  work is expected to recover comparable flash.
+  work is expected to recover comparable flash. *(2026-08-02: that figure was
+  only ever the ledger's own code. The layer-1 machinery it sat on top of —
+  `unwinding`, `.eh_frame`, LSDA, landing pads — cost 796,032 B on the C6,
+  measured when it was removed. The ledger itself is unaffected and stays.)*
 - **Accepted limitations:**
   - Power cycle clears all recovery state (RTC RAM is not power-persistent).
     A user pulling power is a reasonable "let me retry" signal; persisting the

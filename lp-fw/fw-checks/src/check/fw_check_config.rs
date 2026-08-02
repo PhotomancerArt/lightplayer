@@ -55,15 +55,6 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_records: false,
     },
     FwCheckConfig {
-        check: FwCheck::Oom,
-        display_name: "OOM recovery",
-        firmware_features: &["test_oom"],
-        done_marker: None,
-        trace_slug: "oom",
-        supported_targets: ESP32_ONLY,
-        emits_records: false,
-    },
-    FwCheckConfig {
         check: FwCheck::Rmt,
         display_name: "RMT output",
         firmware_features: &["test_rmt"],

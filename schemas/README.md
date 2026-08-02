@@ -26,9 +26,14 @@ neither can drift from the parser — but the codec's real contract includes
 behavior JSON Schema cannot express: record fields are all optional on read
 (missing → factory default), unit payloads accept arbitrary junk,
 `Ratio`/`PositiveF32` bounds are unenforced hints, the `kind` discriminator
-must be the *first* property, and `LpValue::Any` reads narrower than it
-writes. A future offline upgrader (Studio/desktop; the device never
-upgrades) will consume shape dumps and fixture files, not JSON Schemas.
+must be the *first* property, `LpValue::Any` reads narrower than it writes,
+and `SlotRole::Debug` fields (session-only diagnostics, e.g. the clock's
+`controls.*`) are omitted from the JSON Schema entirely even though the
+reader still accepts (and now warns-and-ignores) an authored value there —
+the dump still carries their role, since it describes the model, not what a
+def file may validly author. A future offline upgrader (Studio/desktop; the
+device never upgrades) will consume shape dumps and fixture files, not JSON
+Schemas.
 
 ## Regenerating and CI
 

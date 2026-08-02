@@ -4,6 +4,7 @@ use crate::{Slotted, VisualProduct, VisualProductSlot};
 
 /// Runtime state exposed by a shader node.
 #[derive(Default, Slotted)]
+#[slot(default_role = "state")]
 pub struct ShaderState {
     /// Renderable visual output produced by this shader node.
     #[slot(produced, default_bind = "bus:visual.out")]

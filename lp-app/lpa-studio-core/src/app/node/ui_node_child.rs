@@ -41,6 +41,9 @@ pub struct UiNodeChild {
     /// Aggregate dirty-edit summary for this child's subtree (own slots plus
     /// nested children), matching the per-field affordances.
     pub dirty: DirtySummary,
+    /// Active Debug overrides in this child's subtree — the nested card's
+    /// marking (D8 tier b), separate from [`Self::dirty`] (D7).
+    pub debug_overrides: usize,
     /// Contextual header actions for the nested pane this child becomes:
     /// controller-produced, currently the node-subtree batch revert while
     /// [`Self::dirty`] announces pending edits.
@@ -68,6 +71,7 @@ impl UiNodeChild {
             sections: Vec::new(),
             children: Vec::new(),
             dirty: DirtySummary::clean(),
+            debug_overrides: 0,
             header_actions: Vec::new(),
         }
     }
@@ -97,5 +101,11 @@ impl UiNodeChild {
     /// it becomes when rendered as a nested pane).
     pub fn affordance(&self) -> UiAffordance {
         UiAffordance::merged(self.status.kind, &self.dirty)
+    }
+
+    /// The child's DEBUG channel, mirroring
+    /// [`crate::UiNodeHeader::debug_affordance`].
+    pub fn debug_affordance(&self) -> UiAffordance {
+        UiAffordance::from_debug_overrides(self.debug_overrides)
     }
 }

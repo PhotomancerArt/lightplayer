@@ -13,7 +13,9 @@
 //! - [`timing`] — per-channel wire timing and byte order, compiled to RMT words
 //!   for a given clock rate ([`ChannelTiming`], [`PulseCodes`], [`ColorOrder`]).
 //! - [`blocks`] — [`BlockPlan`]: how the peripheral's memory blocks are shared
-//!   out between channels, and which channels an extension makes unavailable.
+//!   out between channels, and which channels an extension makes unavailable;
+//!   [`SharedBlockPlan`], the set-once slot a backend publishes the plan
+//!   through at driver init.
 //! - [`pulse`] — the RMT item format, including the all-zero STOP word the
 //!   guard mechanism is built on.
 //! - [`state`] — the atomics an interrupt handler and its caller share
@@ -87,7 +89,7 @@ pub mod timing;
 #[cfg(feature = "mock")]
 pub mod mock;
 
-pub use blocks::{BlockPlan, BlockPlanError};
+pub use blocks::{BlockPlan, BlockPlanError, SharedBlockPlan, SharedPlanError};
 pub use driver::{ConfigError, FillResult, Half, StartError, Ws281xDriver};
 pub use hw::{InterruptFlags, RmtHw};
 pub use pulse::{pulse_code, Pulse, PulseItem, MAX_DURATION_TICKS, STOP_WORD};

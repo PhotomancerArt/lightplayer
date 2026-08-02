@@ -14,10 +14,11 @@
 //! `Home` while the editor is open detaches the lens and every runtime
 //! session survives, edits included.
 //!
-//! Only **persisted** edits count. Live/transient edits apply to the
-//! running project and are explicitly never written by Save, so warning
-//! about them would train users to dismiss the dialog. Failed edits are
-//! not pending work either — they never reached the overlay.
+//! Only **persisted** edits count — and since D7 that is structural, not a
+//! filter applied here: Debug overrides are transient by nature, so they
+//! never enter the [`DirtySummary`] at all. Warning about them would train
+//! users to dismiss the dialog. Failed edits are counted but are not pending
+//! work either — they never reached the overlay.
 //!
 //! The browser plumbing lives in the web edge
 //! (`lpa-studio-web/src/unsaved_gate.rs`); core stays sans-IO and only
@@ -39,8 +40,8 @@ mod tests {
 
     #[test]
     fn only_persisted_edits_gate() {
-        assert!(has_unsaved_work(&dirty(1, 0, 0)));
-        assert!(has_unsaved_work(&dirty(3, 2, 1)));
+        assert!(has_unsaved_work(&dirty(1, 0)));
+        assert!(has_unsaved_work(&dirty(3, 1)));
     }
 
     #[test]
@@ -49,24 +50,25 @@ mod tests {
     }
 
     #[test]
-    fn live_only_edits_never_gate() {
-        // Live controls apply to the running project and are never written
-        // by Save — warning about them would cry wolf on every knob turn.
-        assert!(!has_unsaved_work(&dirty(0, 5, 0)));
+    fn debug_only_edits_are_absent_from_the_summary_and_never_gate() {
+        // D7 made this structural rather than a filter applied here: a
+        // project whose ONLY pending edits are debug overrides produces the
+        // clean summary — there is no live bucket left for the gate to
+        // ignore. (`DirtySummary::for_slot` proves the classification side;
+        // this asserts the gate's half: clean means no warning.)
+        let debug_only = DirtySummary::clean();
+        assert!(debug_only.is_clean());
+        assert!(!has_unsaved_work(&debug_only));
     }
 
     #[test]
     fn failed_only_edits_never_gate() {
         // A rejected edit is not pending work: it never reached the
         // overlay, so there is nothing for Save to write.
-        assert!(!has_unsaved_work(&dirty(0, 0, 2)));
+        assert!(!has_unsaved_work(&dirty(0, 2)));
     }
 
-    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
-        DirtySummary {
-            persisted,
-            transient,
-            failed,
-        }
+    fn dirty(persisted: usize, failed: usize) -> DirtySummary {
+        DirtySummary { persisted, failed }
     }
 }

@@ -36,8 +36,7 @@ default set; run it explicitly when touching the GPU tier.
 and executes the result, through `lpvm-wasm`'s `FloatMode::F32` emit path. That
 path existed for a long time with no target pointed at it, so it had never run.
 
-It is **not in `DEFAULT_TARGETS` and not in CI** pending review gate G1. Run it
-explicitly:
+It is **not in `DEFAULT_TARGETS` and not in CI**. Run it explicitly:
 
 ```bash
 scripts/filetests.sh --target wasm.f32
@@ -46,28 +45,36 @@ scripts/filetests.sh --target wasm.f32
 Note that the `wasm` shorthand now expands to **both** `wasm.q32` and `wasm.f32`.
 Say `wasm.q32` when you mean only the Q32 one.
 
-Its known dispositions, and what unblocks them:
+**Current disposition** (measured on main 2026-08-02, the f32 roadmap's G3
+sweep):
 
-- **52 files: `@unimplemented(wasm.f32)`** — the shader calls a builtin
-  (`@glsl::sin`, `@lpfn::*`, `@texture::*`, `@lpir::*`). There is no f32 builtin
-  resolution: `lps-builtin-ids` exposes `*_q32_builtin_id` resolvers only, and the
-  `_f32` bodies that exist are stubs that round-trip through
-  `Q32::from_f32_wrapping`. `lpvm-wasm` refuses these imports by name in f32 mode
-  rather than emitting a Q32-typed import into an f32 module. Unblocks with the
-  f32 builtin family.
-- **27 files: `@unsupported`** — the shader does not compile on any target (naga
-  gaps, GLSL parse errors). Not f32-specific, so most of these are already
-  covered by the axis-scoped `@unsupported(*)` / `@unsupported(frontend!=lp)`
-  the file carries for every other target; only the blocks that stop short of
-  `wasm.f32` name it explicitly.
-- **1 file: `@broken(wasm.f32)`** (`uniform/struct.glsl`) — `wasm.f32` and
-  `interp.f32` genuinely disagree, on `normalize(vec3(0))` and NaN propagation
-  through `max`.
+```
+                  pass    fail   unimpl  unsupported  compile-fail
+      wasm.f32    6318       0        2          199             0
+6345/6345 tests passed, 2 expected-failure, 850/850 files passed, 13.34s
+```
 
-`lps-glsl/rainbow.glsl` is a `// test compile` file and was un-annotatable when
-this target first ran; file-level dispositions for compile-only files landed
-with the axis selectors, so it now carries `@unimplemented(wasm.f32)` like any
-other builtin-blocked file.
+The 199 `@unsupported` are overwhelmingly not f32-specific — shaders that do not
+compile on any target (naga gaps, GLSL parse errors), already covered by the
+axis-scoped `@unsupported(*)` / `@unsupported(frontend!=lp)` the file carries for
+every other target. One `@broken(wasm.f32)` remains (`uniform/struct.glsl`),
+and it is a disposition question rather than a defect — see that file's comment.
+
+> **Why it is still on demand.** When this target first ran (roadmap M1) it was
+> held back "pending review gate G1", and **52 files** were `@unimplemented`
+> because `@lpfn`/`@glsl` builtin imports resolved to Q32 builtin ids — there
+> were no f32 resolvers, and the `_f32` bodies that existed were stubs that
+> round-tripped through `Q32::from_f32_wrapping`.
+>
+> **All of that is fixed.** G1 passed 2026-07-31. M5 replaced the stubs with a
+> real f32 builtin family and added `resolve_builtin_id_for_mode`, pinned by
+> tests in `lpvm-wasm/src/emit/imports.rs` asserting that no import ever
+> resolves across modes. The count is now **2**, not 52.
+>
+> So the exclusion is **inertia, not a blocker**. Unlike `xtn.*` this target
+> needs no cross-target artifact, and it costs ~13 s. Promoting it to
+> `DEFAULT_TARGETS` is a CI-cost call, recorded as a G3 follow-up rather than
+> taken unilaterally.
 
 ### The rv32 soft-float pair
 
@@ -443,8 +450,9 @@ could not read" path — that is how a malformed selector stays visible.
 
 **`DEFAULT_TARGETS`** (when the runner does not pass `--target`): `rv32n.q32`,
 `rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
-`just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32`, `wasm.f32`,
-`rv32n.f32` and `rv32lpn.f32` are explicit-only (see Targets above).
+`just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32`, `xtn.f32`,
+`xtlpn.f32`, `wasm.f32`, `rv32n.f32` and `rv32lpn.f32` are explicit-only (see
+Targets above).
 
 ### Error tests (`// test error`) cover **both** frontends
 

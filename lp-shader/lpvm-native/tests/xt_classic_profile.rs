@@ -196,8 +196,9 @@ fn mirrored_install_walk_executes_real_emitted_code() {
 }
 
 /// The classic capacity edge stays a clean error at real-region scale: an
-/// image larger than the 92 KiB region must be a `TooLarge`, never a wild
-/// write.
+/// image larger than the region must be a `TooLarge`, never a wild write.
+/// (Sized from the region itself, so the 2026-08-02 shrink to 32 KiB needed
+/// no edit here.)
 #[test]
 fn oversized_image_is_a_clean_toolarge() {
     let mut arena = CodeArena::new(CodeRegion::ESP32_DEFAULT);

@@ -3,9 +3,9 @@ use lpa_studio_core::{ControllerId, ProjectEditorOp, UiAction};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
-    error_node_view, failed_dirty_node_view, live_dirty_node_view, nested_dirty_node_view,
-    node_delete_pane_action, playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
-    unsupported_node_view,
+    clock_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
+    node_delete_pane_action, output_node_view, playlist_node_view, playlist_pending_edits,
+    unsaved_dirty_node_view, unsupported_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -92,38 +92,6 @@ pub(crate) fn dirty_unsaved_surface_tint() -> Element {
 }
 
 #[story(
-    description = "D7 variant (a), live-only: header-only blue tint with the blue (live) pencil detail trigger (the live default)."
-)]
-pub(crate) fn dirty_live_header_tint() -> Element {
-    let mut view = live_dirty_node_view();
-    view.action = Some(story_focus_action());
-
-    rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::HeaderOnly,
-        }
-    }
-}
-
-#[story(
-    description = "D7 variant (b), live-only: the blue tint re-mixed into the whole pane surface."
-)]
-pub(crate) fn dirty_live_surface_tint() -> Element {
-    let mut view = live_dirty_node_view();
-    view.action = Some(story_focus_action());
-
-    rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::FullSurface,
-        }
-    }
-}
-
-#[story(
     description = "D7 variant (a), failed: the error wash dominates the header and the detail trigger wears the red warning glyph (the live default)."
 )]
 pub(crate) fn dirty_failed_header_tint() -> Element {
@@ -164,6 +132,77 @@ pub(crate) fn nested_dirty_children() -> Element {
 
     rsx! {
         NodePane { view, on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "The live default: a Clock card whose three `controls.*` fields are Debug-role. The section is COLLAPSED — most of the time those controls are not wanted — but its header is always debug territory: hazard-striped, labelled DEBUG, reading \"session only\". Nothing is overridden, so there is no count, no Clear, and no card marking. The persisted rows sit above under `Settings`."
+)]
+pub(crate) fn debug_section_idle() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(0, false), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "Collapsed with two active overrides: the header reads \"2 active · session only\" and offers Clear WITHOUT expanding, and the card header carries the `debug 2` marking. The header box is the same height as the idle story's — the count and the Clear button are reserved space, so touching a control never reflows the card."
+)]
+pub(crate) fn debug_section_collapsed_active() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(2, false), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "Expanded with two active overrides: the flattened Debug rows (Running / Rate / Scrub offset seconds — no nested `Controls` group), the touched ones wearing the hazard row tint with the inline Clear verb. The header wash stays neutral on purpose — a debug override is NOT unsaved work (D7), so it never borrows the amber dirty treatment."
+)]
+pub(crate) fn debug_section_active() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(2, true), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "Expanded and idle: what the disclosure reveals before anything is touched — three transient controls, each already reading as debug territory. This is the clean-transient case D8c exists for."
+)]
+pub(crate) fn debug_section_expanded_idle() -> Element {
+    rsx! {
+        NodePane { view: clock_node_view(0, true), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "The hazard family beside its neighbours, for the G1 distinctness question: collapsed-idle, collapsed-active, and expanded-active Debug sections next to an amber-unsaved card. Debug = attention-orange + diagonal stripes; flat orange stays device health; amber stays unsaved. The three debug cards also show the no-reflow contract — every header strip is the same height."
+)]
+pub(crate) fn debug_section_vs_unsaved() -> Element {
+    let mut unsaved = unsaved_dirty_node_view();
+    unsaved.action = Some(story_focus_action());
+
+    rsx! {
+        div { class: "tw:grid tw:gap-4",
+            NodePane { view: clock_node_view(0, false), on_action: move |_| {} }
+            NodePane { view: clock_node_view(2, false), on_action: move |_| {} }
+            NodePane { view: clock_node_view(2, true), on_action: move |_| {} }
+            NodePane { view: unsaved, on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The P5 proof case, hardware mode: an Output card whose one Debug field is `test_pattern`. Expanded with the override ACTIVE — the strip on `ws281x:rmt:D10` is solid white and the engine skips the graph resolve entirely for this output. The card wears the `debug 1` marking, the striped header offers Clear, and the row carries the hazard tint; endpoint and driver options stay above under `Settings`. Nothing here is output-specific UI: the section is derived from `SlotRole::Debug` (P1) by the same partition that produces the Clock's (P3)."
+)]
+pub(crate) fn output_debug_test_pattern_active() -> Element {
+    rsx! {
+        NodePane { view: output_node_view(true, true), on_action: move |_| {} }
+    }
+}
+
+#[story(
+    description = "The same Output card at rest, collapsed: one Debug field, nothing overridden, so no count, no Clear, no card marking — but the header still reads as debug territory. The live default for a hardware output nobody is probing."
+)]
+pub(crate) fn output_debug_test_pattern_idle() -> Element {
+    rsx! {
+        NodePane { view: output_node_view(false, false), on_action: move |_| {} }
     }
 }
 
@@ -216,8 +255,7 @@ pub(crate) fn unsupported_detail_popup() -> Element {
     description = "The merged node detail popup open: status content plus the per-bucket dirty sections as tinted-title change lists — the node's OWN pending edits with per-entry reverts (subtree counts ride the title rows; the other node's edit in the threaded list is filtered out)."
 )]
 pub(crate) fn dirty_detail_popup() -> Element {
-    let mut view = unsaved_dirty_node_view();
-    view.header.dirty.transient = 1;
+    let view = unsaved_dirty_node_view();
 
     rsx! {
         div { class: "tw:flex tw:min-h-[620px] tw:justify-end",

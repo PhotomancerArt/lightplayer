@@ -7,9 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 fw-core = { path = "../fw-core", default-features = false, features = ["emu"] }
-lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"] }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false }
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
@@ -29,7 +28,6 @@ lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
 # lose one. See the "trap" note on `lpa-server/Cargo.toml`'s `lpc-engine`
 # dependency — the same rule applies here directly.
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
-    "panic-recovery",
     "node-button",
     "node-radio",
     "node-fluid",
@@ -50,8 +48,6 @@ std = []
 # Unified profile session (alloc + perf hooks); guest syscall path was renamed from `alloc-trace`.
 profile = ["lp-riscv-emu-guest/profile"]
 naga = ["lpa-server/naga"]
-# Test command __test_unwind: runs catch_unwind test before server loop (for CI)
-test_unwind = []
 
 [build-dependencies]
 

@@ -8,6 +8,9 @@
 /// the runnable builds for a chosen board, best fit first, and this constant
 /// is the generic fallback for "no board chosen".
 pub const DEFAULT_ESP32C6_FIRMWARE_MANIFEST_PATH: &str = "./firmware/esp32c6-4mb/manifest.json";
+// The deployment's served-build list lives target-unconditionally at
+// `crate::provider::SERVED_FIRMWARE_BUILDS` (host-built UI code reads it);
+// keep it in lockstep with this path.
 pub const DEFAULT_ESPTOOL_MODULE_PATH: &str = "https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm";
 
 #[derive(Clone, Debug, Eq, PartialEq)]

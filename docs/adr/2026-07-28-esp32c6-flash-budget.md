@@ -17,11 +17,27 @@ This is the second time the image has hit the ceiling. In June 2026 a
 change-management feature push overshot the partition by ~302 KB; that effort
 (archived plan `2026-06-12-bin-size-reduction`) recovered 431 KB via
 externally-tagged serde enums and collection hygiene, landing at ~129 KB of
-margin. It also recorded measured dead ends that still hold and should not be
-revisited: `panic = "abort"` saves only ~2 KB at `opt-level=z` + LTO (and
-would cost the unwinding-based node-panic recovery), profile tuning is
-exhausted (`lto = true`, `opt-level = "z"`, `codegen-units = 1`), and the
-flash-MMU `.text_gap` is not reclaimable.
+margin. It also recorded measured dead ends: profile tuning is exhausted
+(`lto = true`, `opt-level = "z"`, `codegen-units = 1`), and the flash-MMU
+`.text_gap` is not reclaimable. Those two still hold.
+
+> ⚠️ **Corrected 2026-08-02.** This paragraph also carried
+> "`panic = "abort"` saves only ~2 KB at `opt-level=z` + LTO", and that number
+> was wrong — it **measured nothing**. The June-2026 A/B changed the Cargo
+> profile's `panic` key, which the target spec silently overrides; only
+> `-C panic=abort` in rustflags takes effect
+> (`docs/reports/2026-03-13-esp32-unwinding-implementation.md`, Problem 6, which
+> predates the mismeasurement and explains it). Measured properly, dropping the
+> unwind tier is **796,032 B — 25.3% of this partition**. See
+> [2026-08-02-rv32-firmwares-are-abort-tier.md](2026-08-02-rv32-firmwares-are-abort-tier.md).
+>
+> The lesson generalises and is why this correction is spelled out rather than
+> silently edited: a size measurement that toggles a setting something
+> downstream overrides produces a null result indistinguishable from a real one,
+> and then sits in the record deterring anyone from re-checking. Before trusting
+> a "measured, not worth it" entry here, confirm the toggle reached the compiler
+> — `cargo rustc -- --print cfg` for panic strategy, section sizes for anything
+> that should have changed shape.
 
 That 129 KB margin was consumed over roughly six weeks of ordinary feature
 work — `lpc_registry` (~51 KB), the streaming project-read serializer family
@@ -189,6 +205,7 @@ Append; do not editorialize old entries.
 
 | Date | Spend | Bought | Clawback lever |
 |---|---|---|---|
+| 2026-08-02 | **−796,032 B (a CREDIT)** — RV32 unwinding teardown (`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`) | Headroom 259,360 → 1,055,392 B. One panic posture across all four chips; the nightly pin decoupled from `unwinding`'s ABI; the esp-hal `text.x` patch retired | **n/a — this is a credit, not a spend.** Re-spending it means re-adopting unwinding, which needs ~41 KB of stack the chip does not have (it has ~34 KB) and which was non-functional on device for its last five weeks. Do not treat this as budget that appeared from nowhere: it is what the WiFi+TLS claim (~120–180 KB, Decision 3) and any C3 port will draw on |
 | 2026-08-01 | **+10,208 B** — resolver persistent resolution (PR #243, `docs/adr/2026-07-31-resolver-persistent-resolution.md`) | −54% engine cycles on the 1-fixture oracle; S3 quad-strips 20→25 fps | **Mostly none** — the spend is the feature; reverting costs the perf win back. The only cheap slice is the intern table's reverse-lookup + error-formatting paths (cycle errors would report ids instead of names): unmeasured, likely single-digit KB flash — its real holding is a few KB of *heap*, not flash. Do not spend an afternoon here expecting 10 KB. |
 
 ## Alternatives Considered
@@ -198,15 +215,20 @@ Append; do not editorialize old entries.
   paired with the lpfs redraw.
 - **Shrink `lpfs` now** to absorb the overshoot. Rejected — reserved (Decision
   4), and it would trade user content space for our lack of discipline.
-- **`panic = "abort"`** (~2 KB, measured June 2026). Rejected — negligible, and
-  it would give up unwinding-based node-panic recovery by design. Note that
-  this recovery path is, as of 2026-07-28, **broken on device for unrelated
-  reasons** (a caught panic overflows the main stack during unwind and
-  cascades into a non-reentrant-lock panic; reproducible on unmodified `main`
-  with the `test_oom` feature, and tracked separately). The design intent
-  stands and the flag stack above does not affect it — a control build without
-  the flags fails identically — but the flash argument for keeping
-  `panic = "unwind"` is currently theoretical.
+- **`panic = "abort"`** — **ADOPTED 2026-08-02, worth 796,032 B.** This entry
+  previously read "~2 KB, measured June 2026. Rejected — negligible". That
+  measurement flipped the Cargo profile only, which the target spec overrides,
+  so it measured nothing (see the correction in Context).
+
+  The note appended here on 2026-07-28 — that the recovery path was **broken on
+  device**, a caught panic overflowing the main stack and cascading into a
+  non-reentrant-lock panic — turned out to be the whole story rather than an
+  aside. It was never fixed: PR #187's one-line fix cost 50 KB of heap and was
+  declined. So the image carried 778 KiB of unwind tables for a feature that
+  converted a contained failure into a bricked boot. Both facts were in this
+  file, one paragraph apart, for five weeks.
+
+  See [2026-08-02-rv32-firmwares-are-abort-tier.md](2026-08-02-rv32-firmwares-are-abort-tier.md).
 - **lld `--icf=safe`** and **`ESP_LOG=warn`**. Measured at 0 B each; see
   Decision 1.
 - **Drop `-C force-frame-pointers`.** Unmeasured, likely tens of KB. Kept:

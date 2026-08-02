@@ -20,8 +20,10 @@
 //! This mirrors the device. `lps-builtins-xt-app` is firmware, so it links into
 //! the flash windows the cache maps (`.text` at IROM, `.rodata` at DROM,
 //! `.data`/`.bss` in internal SRAM); the shader is JIT output, so it gets the
-//! **whole** SRAM code region — 128 KiB on the S3, 92 KiB on classic — with
-//! nothing resident in front of it.
+//! **whole** SRAM code region — 128 KiB on the S3, 32 KiB on classic since
+//! the 2026-08-02 resize — with nothing resident in front of it. (Only the S3
+//! profile actually loads a builtins image today, so classic's figure is
+//! descriptive here rather than a constraint on this path.)
 //!
 //! Until 2026-08-01 both lived in the one SRAM code region, shader code
 //! starting wherever the image's `.text` happened to end. That coupled the

@@ -169,7 +169,7 @@ pub(crate) fn shader_controls(speed_bound: bool) -> Vec<UiPanelControl> {
             4.0,
             UiSlotFieldState::editable()
                 .with_dirty(UiNodeDirtyState::Dirty)
-                .with_live(true),
+                .with_debug(true),
             UiSlotSourceState::Unset,
         ),
         toggle_control(

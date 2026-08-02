@@ -41,6 +41,7 @@ pub(crate) fn derive_record(
         let static_shape_binding = format_ident!("__field_shape_{}", static_shape_bindings.len());
         let semantics = attr::field_semantics_tokens(field_attr.direction, field_attr.merge);
         let selected_role = field_attr.role.or(container_attrs.default_role);
+        attr::check_role_direction(selected_role, field_attr.direction, field_ident.span())?;
         let role = selected_role
             .map(attr::field_role_tokens)
             .unwrap_or_else(|| quote! { ::lpc_model::SlotRole::default() });
@@ -78,14 +79,16 @@ pub(crate) fn derive_record(
             access_arms.push(quote! {
                 #index => Some(#access),
             });
-            // Only produced fields drop dynamic mut access: they are never
-            // authored, so nothing legitimate writes them dynamically
-            // (direction implies read-only regardless of role, D1). A
-            // read-only-but-persisted (`Fixed`) field is still authored
-            // JSON — the dynamic reader must be able to deserialize it —
-            // and its write protection is mutate-time role enforcement
-            // (`resolve_slot_role`), not a codec-level hole.
-            if field_attr.direction != attr::FieldDirectionAttr::Produced
+            // Only `State` fields drop dynamic mut access: they are never
+            // authored, so nothing legitimate writes them dynamically. Keyed
+            // on the declared ROLE since the G2 amendment; `direction ==
+            // Produced` is implied and would select exactly the same fields
+            // (`attr::check_role_direction` above rejects any field where
+            // the two disagree). A read-only-but-persisted (`Fixed`) field is
+            // still authored JSON — the dynamic reader must be able to
+            // deserialize it — and its write protection is mutate-time role
+            // enforcement (`resolve_slot_role`), not a codec-level hole.
+            if selected_role != Some(attr::SlotRoleAttr::State)
                 && let Some(mut_access) =
                     attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
             {

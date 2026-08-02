@@ -823,4 +823,84 @@ mod tests {
 
         assert_eq!(console_line(&entry), "[device/fw_core::server] boot ok");
     }
+
+    /// `style.css` is `include_str!`'d as raw bytes and injected into a
+    /// `<style>` tag — nothing in the build ever PARSES it, and a browser
+    /// silently discards every rule after a syntax error. A single dropped
+    /// `}` in a merge once deleted the whole debug treatment while `just
+    /// check`, `just test` and all 11 CI jobs stayed green; only a human
+    /// looking at the screen caught it (2026-08-02).
+    ///
+    /// So parse it here with a real CSS parser, not a hand-rolled brace
+    /// counter: this catches malformed selectors, bad at-rules and unclosed
+    /// blocks alike, and fails with the offending line.
+    #[test]
+    fn embedded_stylesheet_parses_as_valid_css() {
+        use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+        use std::sync::{Arc, RwLock};
+
+        let warnings = Arc::new(RwLock::new(Vec::new()));
+        let options = ParserOptions {
+            error_recovery: true,
+            warnings: Some(Arc::clone(&warnings)),
+            ..ParserOptions::default()
+        };
+
+        // A hard parse error (the unclosed-block case) surfaces as Err.
+        let sheet = StyleSheet::parse(STYLE, options)
+            .unwrap_or_else(|error| panic!("style.css failed to parse: {error}"));
+
+        // Rules the parser recovered from — exactly what a browser silently
+        // drops. `error_recovery` keeps parsing so one break reports every
+        // consequence, not just the first.
+        let warnings = warnings.read().expect("warning lock");
+        assert!(
+            warnings.is_empty(),
+            "style.css has {} parse error(s) a browser would silently drop:\n{}",
+            warnings.len(),
+            warnings
+                .iter()
+                .map(|warning| format!("  {warning}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        assert!(
+            !sheet.rules.0.is_empty(),
+            "style.css parsed to zero rules — the stylesheet is not reaching the app"
+        );
+
+        // Syntax alone is not enough. A dropped `}` does NOT make the file
+        // invalid — under CSS nesting every following rule silently becomes
+        // a CHILD of the preceding one, which parses cleanly and means
+        // something entirely different. That is exactly how the 2026-08-02
+        // regression erased the debug treatment with CI green.
+        //
+        // This codebase never nests style rules (no `&`, nothing but
+        // `@media`/`@keyframes`/`@supports` containers), so a style rule
+        // holding style rules is a lost brace, not an intention.
+        fn assert_unnested(rules: &lightningcss::rules::CssRuleList<'_>, path: &str) {
+            use lightningcss::rules::CssRule;
+
+            for rule in &rules.0 {
+                match rule {
+                    CssRule::Style(style) => {
+                        assert!(
+                            style.rules.0.is_empty(),
+                            "style.css:{} — a style rule ({path}) contains {} nested rule(s). \
+                             This codebase does not nest style rules, so a `}}` is missing \
+                             above and every nested rule is silently inert in the browser.",
+                            style.loc.line + 1,
+                            style.rules.0.len()
+                        );
+                    }
+                    CssRule::Media(media) => assert_unnested(&media.rules, "@media"),
+                    CssRule::Supports(supports) => assert_unnested(&supports.rules, "@supports"),
+                    _ => {}
+                }
+            }
+        }
+
+        assert_unnested(&sheet.rules, "top level");
+    }
 }

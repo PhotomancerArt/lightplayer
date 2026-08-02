@@ -66,8 +66,15 @@ fn classic_sram1_is_word_mirrored_not_linear() {
 
     // Two distinct sentinels at two D-bus offsets so the mapping's shape is
     // identifiable, not just one point (the C2b methodology).
-    let d0: u32 = 0x3FFF_0000;
-    let d1: u32 = 0x3FFF_0100;
+    //
+    // Taken relative to `code_dbus_base` rather than written as literals: the
+    // emulator only backs the modeled code region, so absolute sentinels stop
+    // being addressable the moment the region is resized. They were literals
+    // until 2026-08-02, when the classic region shrank from 92 KiB to 32 KiB
+    // and this test failed on an unmapped write rather than on anything to do
+    // with the alias rule it exists to check.
+    let d0: u32 = p.code_dbus_base;
+    let d1: u32 = p.code_dbus_base + 0x100;
     emu.mem.write_u32(d0, 0xC0DE_0000).unwrap();
     emu.mem.write_u32(d1, 0xC0DE_0100).unwrap();
 
@@ -80,9 +87,24 @@ fn classic_sram1_is_word_mirrored_not_linear() {
         emu.mem.read_u32(p.alias.dbus_to_ibus(d1)).unwrap(),
         0xC0DE_0100
     );
-    // ...the H1-linear addresses (0x400A_0000 + (dram − 0x3FFE_0000)) do not.
-    assert_ne!(emu.mem.read_u32(0x400B_0000).unwrap(), 0xC0DE_0000);
-    assert_ne!(emu.mem.read_u32(0x400B_0100).unwrap(), 0xC0DE_0100);
+    // ...and the H1-linear addresses (0x400A_0000 + (dram − 0x3FFE_0000)) do
+    // not. Since the 2026-08-02 resize the linear image of the code region
+    // falls entirely *below* the mirrored image, so those addresses are not
+    // backed at all and the read traps. That refutes H1 at least as firmly as
+    // reading a different value did — but it is a different observation, so
+    // it is asserted as what it is rather than papered over.
+    let linear = |d: u32| 0x400A_0000 + (d - 0x3FFE_0000);
+    for (d, sentinel) in [(d0, 0xC0DE_0000u32), (d1, 0xC0DE_0100)] {
+        match emu.mem.read_u32(linear(d)) {
+            Err(_) => {}
+            Ok(v) => assert_ne!(
+                v,
+                sentinel,
+                "the linear address {:#010x} must not hold the sentinel written at {d:#010x}",
+                linear(d)
+            ),
+        }
+    }
     // Bytes within the word are verbatim little-endian — no byte swap.
     let i0 = p.alias.dbus_to_ibus(d0);
     let bytes: Vec<u8> = (0..4).map(|k| emu.mem.read_u8(i0 + k).unwrap()).collect();

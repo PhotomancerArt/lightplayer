@@ -32,6 +32,11 @@ pub struct DeviceSnapshot {
     /// (`DeviceSession::probe_link_mode`) to tell those apart; that probe
     /// reboots the device, which is why it is never automatic.
     pub link_mode: DeviceLinkMode,
+    /// Chip identity, best evidence first: a SYNC probe's answer when one
+    /// ran (authoritative), else the passive boot-banner read. `None` when
+    /// nothing has named the chip — common for a healthy app-mode device
+    /// that booted before Studio attached.
+    pub detected_chip: Option<String>,
 }
 
 impl DeviceSnapshot {

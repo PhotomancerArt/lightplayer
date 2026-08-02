@@ -385,17 +385,7 @@
         },
         "controls": {
           "additionalProperties": false,
-          "properties": {
-            "rate": {
-              "type": "number"
-            },
-            "running": {
-              "type": "boolean"
-            },
-            "scrub_offset_seconds": {
-              "type": "number"
-            }
-          },
+          "properties": {},
           "type": "object"
         },
         "kind": {

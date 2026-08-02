@@ -39,7 +39,10 @@ fn child_node_view(child: UiNodeChild) -> UiNodeView {
         child.detail.clone(),
     )
     .with_status(child.status.clone())
-    .with_dirty(child.dirty);
+    .with_dirty(child.dirty)
+    // The debug channel promotes with the rest: a nested card marks its own
+    // active overrides (D8 tier b) exactly like a top-level one.
+    .with_debug_overrides(child.debug_overrides);
     let header = if let Some(summary) = child.summary {
         header.with_summary(summary)
     } else {

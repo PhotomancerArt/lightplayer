@@ -12,8 +12,40 @@ use std::collections::HashSet;
 use lpc_model::slot_shapes::{static_slot_shape, static_slot_shape_ids, static_slot_shape_name};
 use lpc_model::{
     BindingRef, SlotDirection, SlotShapeId, StaticLpType, StaticSlotFieldShape,
-    StaticSlotShapeDescriptor,
+    StaticSlotShapeDescriptor, role_matches_direction,
 };
+
+/// Produced runtime state is a **declared** role, not an inference from
+/// direction (G2 amendment to `2026-08-01-debug-slots-taxonomy`): every
+/// `#[slot(produced)]` field declares `role = "state"`, and nothing else
+/// does. The `Slotted` derive rejects a mismatch at the declaration site;
+/// this walks the whole generated catalog so a hand-written static
+/// descriptor cannot slip one past it either.
+#[test]
+fn produced_fields_and_state_roles_are_the_same_set() {
+    let mut offenders = Vec::new();
+    for &id in static_slot_shape_ids() {
+        let Some(shape) = static_slot_shape(id) else {
+            continue;
+        };
+        let name = static_slot_shape_name(id)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{id:?}"));
+        let mut visited = HashSet::new();
+        walk(shape, &name, &mut visited, &mut |context, field| {
+            if !role_matches_direction(field.role, field.semantics.direction) {
+                offenders.push(format!(
+                    "{context}.{} (role {:?}, direction {:?})",
+                    field.name, field.role, field.semantics.direction
+                ));
+            }
+        });
+    }
+    assert!(
+        offenders.is_empty(),
+        "produced ⇔ SlotRole::State must hold for every declared field: {offenders:?}"
+    );
+}
 
 /// Every field whose value carries a product (visual/control) must declare a
 /// direction: products are dataflow endpoints, never `Local` bookkeeping.

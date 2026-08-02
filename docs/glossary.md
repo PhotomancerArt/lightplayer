@@ -96,6 +96,17 @@ of implementation — code can lag these names during the transition.
   persists. (module model)
 - **Play mode** — rendering only the root module's panel: the end-user
   view. (module model)
+- **Debug** — a slot that is *transient by nature*: a diagnostic or authoring
+  override with **no durable value underneath** (clock `rate`, output
+  `test_pattern`). Session-only — it dies on project unload or reboot, so a
+  restarted installation never comes up in a debug state. Not a Panel: a
+  panel control *exposes a bound slot via its channel* (authored value =
+  default), which is why latching panel state persists and Debug does not
+  (momentary panel gestures don't persist either, but their fallback is bus
+  resolution, not a shape default). Never dirty, never saved;
+  its verb is **Clear**. Declared `#[slot(role = "debug")]`, rendered in the
+  node card's own hazard-striped Debug section
+  ([ADR](adr/2026-08-01-debug-slots-taxonomy.md)).
 - **Bound (violet)** — the UI state family for "this value comes from a
   binding/bus"; always violet, never green (green = valid only).
 - **Dirty** — an authored value differing from its saved artifact

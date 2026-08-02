@@ -4,6 +4,7 @@
       {
         "default_bind": "bus:control.out",
         "name": "output",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -22,6 +23,7 @@
       },
       {
         "name": "estimated_draw_ma",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -38,6 +40,7 @@
       },
       {
         "name": "power_scale",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },
@@ -54,6 +57,7 @@
       },
       {
         "name": "power_budget_ma",
+        "role": "state",
         "semantics": {
           "direction": "produced"
         },

@@ -116,8 +116,13 @@ lps-builtins-xt-image = { path = "../../lp-xt/lps-builtins-xt-image", optional =
 
 [dev-dependencies]
 rstest = "0.25"
-# Real synth render wrappers for the rt_emu per-invocation fuel tests.
+# Real synth render wrappers for the rt_emu per-invocation fuel tests, and the
+# px-shader pipeline the classic codemem corpus test measures through.
 lp-shader = { path = "../lp-shader" }
+# The GLSL frontend the corpus test drives directly: sizing the classic's JIT
+# code region needs the emitted size of REAL shaders, which means running the
+# real frontend over the repo's shader corpus rather than synthetic modules.
+lps-glsl = { path = "../lps-glsl" }
 # Host-side oracle for the Xtensa builtins-image test: the ELF is cross-compiled
 # from the SAME lps-builtins source this links natively, so the host build is the
 # reference answer.

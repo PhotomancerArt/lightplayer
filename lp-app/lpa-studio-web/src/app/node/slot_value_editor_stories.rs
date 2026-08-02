@@ -30,6 +30,17 @@ fn dim2u_value(width: u32, height: u32) -> UiSlotValue {
     .with_editor(UiSlotEditorHint::Dimensions)
 }
 
+fn fixture_power_value(lamp: &str, budget_ma: u32) -> UiSlotValue {
+    UiSlotValue::struct_value(
+        Some("FixturePower".to_string()),
+        vec![
+            ("lamp_type".to_string(), UiSlotValue::string(lamp)),
+            ("budget_ma".to_string(), UiSlotValue::u32(budget_ma)),
+        ],
+    )
+    .with_editor(UiSlotEditorHint::Power)
+}
+
 #[story(description = "Slot value editor dispatch across the M1 value types.")]
 pub(crate) fn gallery() -> Element {
     rsx! {
@@ -163,6 +174,34 @@ pub(crate) fn dimensions_field() -> Element {
             state: UiSlotFieldState::editable(),
             address: story_slot_address("render_size"),
             on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Power Field",
+    description = "The lamp type + supply budget editor for Power-hinted FixturePower struct values: lamp picker and mA input, composing the whole struct on change (0 mA = unlimited)."
+)]
+pub(crate) fn power_field() -> Element {
+    rsx! {
+        SlotValueEditor {
+            value: fixture_power_value("ws2812b_5v", 1000),
+            state: UiSlotFieldState::editable(),
+            address: story_slot_address("power.some"),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Power Field Read Only",
+    description = "The power pair without an address: lamp name and budget as a read-only readout."
+)]
+pub(crate) fn power_field_read_only() -> Element {
+    rsx! {
+        SlotValueEditor {
+            value: fixture_power_value("ws2811_12v", 4000),
+            state: UiSlotFieldState::readonly(),
         }
     }
 }

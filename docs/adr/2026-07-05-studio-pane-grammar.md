@@ -150,6 +150,33 @@ hierarchy type is deliberately separate because the two levels announce
 different things, but both follow the same grammar: one priority-merged
 affordance on the detail trigger, text in the popup.
 
+### The debug family (added 2026-08-01)
+
+The colour language above assigns one meaning per family: **amber/yellow =
+unsaved**, **blue = live**, **violet = bound** (never green — green is valid
+only), **red = failed**, and **flat orange = device/roster health**. Debug
+(`2026-08-01-debug-slots-taxonomy.md`) needed a treatment that reuses none of
+them and reads as "you have put the system in a debug state", so it takes the
+attention (orange) family in a **striped** form: diagonal hazard stripes.
+Flat orange stays device health; the stripes are what distinguish the two, in
+the repo's form-not-just-colour tradition (the stepped knob's gaps *are* the
+scale).
+
+The split the grammar cares about is where the mapping lives: core carries a
+distinct **semantic** variant — `UiAffordance::Debug`, in the same
+priority-merged vocabulary as `Unsaved`/`Error` — and the web layer holds the
+single orange-plus-stripes mapping (`lpa-studio-web/src/app/affordance.rs`
+plus one `style.css` block of `.lp-debug-*` tokens). Re-skinning debug later
+is one mapping edit, never a call-site hunt. Debug is also unlike the other
+families in that it announces **territory, not an event**: the node card's
+Debug section is striped whenever it exists, idle or not, because knowing a
+value will never be saved *before* touching it is the whole point.
+
+Two consequences for the chrome described above: the `DirtySummary` that
+feeds it no longer has a transient bucket (Debug carries no dirty weight —
+the struct is `{ persisted, failed }`), and the affordance vocabulary's
+`Live` variant was re-homed to `Debug` rather than gaining a sixth family.
+
 ### Consumers
 
 Adopted by the node pane (P3: selection toggle in `primary`, tabs in

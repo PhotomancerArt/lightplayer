@@ -35,6 +35,7 @@ fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
         tab,
         sheet,
         op: None,
+        setup_board: None,
     }
 }
 
@@ -183,6 +184,46 @@ fn ready_to_set_up() -> Element {
 #[story(description = "Amber filled edge: recognized non-LightPlayer firmware, safe to replace.")]
 fn other_firmware() -> Element {
     sheet(vec![card(RosterCardState::OtherFirmware, false)])
+}
+
+/// A blank board whose boot banner named the chip, with a board picked.
+fn setup_card(detected_chip: Option<&str>, setup_board: Option<&str>) -> Element {
+    let mut fixture = device_card(RosterCardState::ReadyToSetUp, false);
+    fixture.detected_chip = detected_chip.map(str::to_string);
+    fixture.ui.setup_board = setup_board.map(str::to_string);
+    rsx! {
+        div { class: "tw:w-72",
+            DeviceCard {
+                card: fixture,
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Setup form with a detected C6 (boot-banner evidence): matching boards lead tagged 'matches detected chip'; the generic fallback is the dashed row; nothing else to fold today (only C6 builds are served)."
+)]
+fn setup_board_picker_detected_c6() -> Element {
+    sheet(vec![setup_card(Some("esp32c6"), None)])
+}
+
+#[story(
+    description = "Setup form with a board picked (accent border, core-owned CardUiState::setup_board — survives tab switches). Install writes this board's runtime manifest to /hardware.json after the flash."
+)]
+fn setup_board_picker_selected() -> Element {
+    sheet(vec![setup_card(
+        Some("esp32c6"),
+        Some("seeed/xiao-esp32-c6"),
+    )])
+}
+
+#[story(
+    description = "Setup form with NO chip evidence (device booted before Studio attached): every provisionable board leads, generic fallback last."
+)]
+fn setup_board_picker_unknown_chip() -> Element {
+    sheet(vec![setup_card(None, None)])
 }
 
 #[story(description = "Amber filled edge: wrong wire protocol — reflash is the only remedy.")]
@@ -593,7 +634,7 @@ fn op_overlay_awaiting_device() -> Element {
 }
 
 #[story(
-    description = "The op flow's Failed phase (state-flow model §2 I4): the error in the terminal and ONE exit to the nearest stable state — no in-place Retry, no silent fallback, no refresh."
+    description = "The op flow's Failed phase (state-flow model §2 I4): the error in the terminal and ONE exit to the nearest stable state — no in-place Retry, no silent fallback, no refresh. \"Copy details\" puts the whole context (error, device state, chip, board choice, running build, console tail) on the clipboard for an agent or a bug report; it sits quieter than the exit, which stays the one way out."
 )]
 fn op_overlay_failed() -> Element {
     sheet(vec![rsx! {
@@ -812,6 +853,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         sim: false,
         console_tail: Vec::new(),
         ui: Default::default(),
+        detected_chip: None,
     }
 }
 
@@ -838,6 +880,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         sim: true,
         console_tail: Vec::new(),
         ui: Default::default(),
+        detected_chip: None,
     }
 }
 

@@ -29,9 +29,9 @@ const MID_FRAME_US: u64 = 8_333;
 /// the steady-state size on the one path that runs when the heap is already at
 /// its high-water mark.
 ///
-/// 8 is the widest RMT TX slot count in the family (the classic's eight, before
-/// `BLOCKS_PER_CHANNEL` halves the usable count). At today's `ChannelState`
-/// size this reservation costs well under a kilobyte.
+/// 8 is the widest RMT TX slot count in the family (the classic's eight,
+/// before the block plan absorbs slots into wider windows). At today's
+/// `ChannelState` size this reservation costs well under a kilobyte.
 ///
 /// ⚠️ Historical note worth keeping: this used to matter enormously.
 /// `ChannelState` carried a 3,084-byte inline white-point LUT, so the same

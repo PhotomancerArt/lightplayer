@@ -149,6 +149,44 @@ fn embedded_catalog_matches_the_directory() {
     }
 }
 
+/// Same completeness + byte-identity gate for the embedded RUNTIME
+/// manifests (provisioning writes these to devices as `/hardware.json` —
+/// a stale or missing embed ships the wrong pin map).
+#[test]
+fn embedded_runtime_manifests_match_the_directory() {
+    let pairs = manifest_pairs();
+    let with_runtime: Vec<&String> = pairs
+        .iter()
+        .filter(|(_, (_, runtime))| runtime.is_some())
+        .map(|(id, _)| id)
+        .collect();
+    let embedded: Vec<&str> = lpa_boards::RUNTIME_MANIFEST_SOURCES
+        .iter()
+        .map(|(id, _)| *id)
+        .collect();
+    for board_id in &with_runtime {
+        assert!(
+            embedded.contains(&board_id.as_str()),
+            "{board_id}: runtime manifest exists on disk but is not embedded in \
+             lpa_boards::RUNTIME_MANIFEST_SOURCES"
+        );
+    }
+    assert_eq!(
+        embedded.len(),
+        with_runtime.len(),
+        "RUNTIME_MANIFEST_SOURCES lists a board with no on-disk runtime manifest"
+    );
+    for (board_id, source) in lpa_boards::RUNTIME_MANIFEST_SOURCES {
+        let path = boards_dir().join(format!("{board_id}.json"));
+        let on_disk = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{board_id}: reading {path:?}: {error}"));
+        assert_eq!(
+            *source, on_disk,
+            "{board_id}: embedded runtime manifest differs from the on-disk file"
+        );
+    }
+}
+
 #[test]
 fn display_pins_agree_with_runtime_manifests() {
     for (board_id, (display, runtime)) in manifest_pairs() {

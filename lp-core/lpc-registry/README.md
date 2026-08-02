@@ -35,8 +35,9 @@ wire-facing caller and any new caller must route through the same validation
 dedicated node-lifecycle operations behind the `CreateNode` / `RemoveNode`
 wire commands (`docs/adr/2026-07-27-node-authoring-operations.md`). They are
 the sanctioned path around the `nodes` map's `Fixed` role: generic slot
-gestures on the map stay rejected, while the ops validate
-everything up front and then act atomically.
+gestures on the map stay rejected, while the ops validate everything up
+front and then act atomically, staging through the crate-private
+`ProjectRegistry::stage_dedicated_op`.
 
 - `create_node` **commits immediately**: it writes asset and def files
   through the injected `LpFs`, rewrites the attach site's **base** file with
@@ -53,15 +54,20 @@ everything up front and then act atomically.
   existing ops (`RemoveSlotEdit` at the site + `ClearArtifact` per staged
   delete).
 
-## Commit Filtering (Transient vs Persisted)
+## Commit Filtering (Debug vs Persisted)
 
 `commit_overlay` materializes persisted edits into node-def artifacts and
 **retains transient overlay entries** instead of clearing the overlay
-wholesale: entries whose resolved policy persistence is `Transient` survive
-the commit and keep applying to the effective inventory. Belt-and-braces, the
-JSON slot writer in `lpc-model` also omits transient fields, so no transient
-value can appear in written def bytes regardless of caller. An only-transient
-commit changes no overlay content and does not bump the overlay revision.
+wholesale: entries whose resolved persistence is `Transient` — Debug-role
+fields, plus anything produced (`SlotRoleResolution::persistence`) — survive
+the commit and keep applying to the effective inventory. That classifier is
+the one the studio also uses, so client and server cannot disagree about
+whether an edit is a Debug override; an edit whose path resolves in no shape
+takes the shared `SlotPersistence::for_unresolved_edit` rule (Setting) and
+drops. Belt-and-braces, the JSON slot writer in `lpc-model` also omits Debug
+and produced fields, so no transient value can appear in written def bytes
+regardless of caller. An only-Debug commit changes no overlay content and
+does not bump the overlay revision.
 
 The editing model (why dirty state derives from the overlay, revision gating,
 the client edit buffer) is recorded in

@@ -202,15 +202,8 @@ cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift", bran
 cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-module = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-object = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-cranelift-reader = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-cranelift-control = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
-
-# regalloc2 - fork (ChunkedVec for OOM mitigation, feature-gating ION allocator)
-regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "lightplayer", default-features = false, features = ["std"] }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
-lp-bootctl = { path = "lp-base/lp-bootctl", default-features = false }
 
 # Common dependencies
 
@@ -221,7 +214,6 @@ anyhow = { version = "1.0.100", default-features = false }
 log = { version = "0.4", default-features = false }
 regex = "1.9.1"
 glob = "0.3.3"
-object = { version = "0.37.3", default-features = false, features = ['read_core', 'elf'] }
 critical-section = { version = "1.2.0", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
@@ -276,17 +268,38 @@ opt-level = 3
 lto = true
 opt-level = "z"
 codegen-units = 1
+# Host/desktop default. Firmware targets override this to "abort" AND set
+# `-C panic=abort` in their own rustflags, which is the setting that actually
+# takes effect on bare metal — see the release-emu note below.
 panic = "unwind"
 
 # fw-emu: keep debug info for backtrace symbolication
 [profile.release.package.fw-emu]
 debug = 1
 
-# ESP32: panic=unwind for OOM recovery via unwinding crate
+# ESP32-C6: abort tier (ADR 2026-08-02-rv32-firmwares-are-abort-tier). Both this
+# AND `-C panic=abort` in lp-fw/fw-esp32c6/.cargo/config.toml are set; the
+# rustflag is the one that decides, because the target spec overrides the
+# profile key (docs/reports/2026-03-13-esp32-unwinding-implementation.md,
+# Problem 6). A June-2026 A/B that changed only this key reported "panic=abort
+# saves ~2 KB" and was measuring nothing; the real figure is 796,032 B.
 [profile.release-esp32]
 inherits = "release"
-panic = "unwind"
+panic = "abort"
 
+# ⚠️ RESTORED, not added. `f07abb731` ("test: parse the embedded stylesheet with
+# lightningcss") deleted six per-package profile blocks its message does not
+# mention. Three of those six were genuinely dead and are NOT restored: the
+# `opt-level = "z"` overrides on esp-phy / esp-radio-rtos-driver /
+# esp-wifi-sys-esp32c6 were no-ops, because `release-esp32` inherits
+# `opt-level = "z"` from `[profile.release]` already. Measured: the image is
+# 2,090,096 B with or without them, to the byte.
+#
+# This one is not dead. Measured by removing it and rebuilding: the ELF goes
+# from 8 `.debug_*` sections to ZERO, so `just decode-backtrace` has nothing to
+# symbolicate against and an abort-tier crash report degrades to bare hex
+# addresses. That report is the entire remaining account of a fault on this
+# chip, so the block is load-bearing precisely because unwinding is gone.
 [profile.release-esp32.package.fw-esp32c6]
 debug = 1
 strip = "none"
@@ -296,15 +309,6 @@ opt-level = "s"
 
 [profile.release-esp32.package.lps-glsl]
 opt-level = "s"
-
-[profile.release-esp32.package.esp-phy]
-opt-level = "z"
-
-[profile.release-esp32.package.esp-radio-rtos-driver]
-opt-level = "z"
-
-[profile.release-esp32.package.esp-wifi-sys-esp32c6]
-opt-level = "z"
 
 # fw-esp32s3: speed-optimized codegen, NOT the workspace's opt-level="z".
 # Measured on silicon 2026-07-31: at "z" the ws281x RX drain path misses the
@@ -333,8 +337,16 @@ opt-level = "s"
 inherits = "release"
 opt-level = 3
 codegen-units = 4
-# panic = "unwind" inherited from release
+# Abort tier (ADR 2026-08-02-rv32-firmwares-are-abort-tier). Stated explicitly
+# rather than inherited, though for a bare-metal target this key is decorative:
+# the target spec's `panic-strategy: abort` overrides the profile, and only
+# `-C panic=...` in rustflags actually decides (see
+# docs/reports/2026-03-13-esp32-unwinding-implementation.md, Problem 6). That is
+# exactly why the old unwind builds needed a `with_unwind_support` rustflags
+# builder in the test harness — the profile alone never did anything.
+panic = "abort"
 
+# Also restored — see the note on the release-esp32 blocks above.
 [profile.release-emu.package.fw-emu]
 debug = 1
 

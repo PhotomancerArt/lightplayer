@@ -4,6 +4,7 @@ use crate::{Slotted, ValueSlot, VisualProduct, VisualProductSlot};
 
 /// Runtime state exposed by a playlist node.
 #[derive(Default, Slotted)]
+#[slot(default_role = "state")]
 pub struct PlaylistState {
     /// Renderable visual output produced by this playlist node.
     #[slot(produced, default_bind = "bus:visual.out")]

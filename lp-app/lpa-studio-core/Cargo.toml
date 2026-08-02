@@ -10,6 +10,9 @@ description = "Headless LightPlayer Studio application core"
 
 [dependencies]
 lpa-agent = { path = "../lpa-agent" }
+# Data-only (no `diagram` feature): the provisioning flow reads the
+# embedded runtime manifests + board↔build join; drawing stays web-side.
+lpa-boards = { path = "../lpa-boards" }
 lpa-client = { path = "../lpa-client", default-features = false }
 # device-session everywhere (RuntimeAttachment::Device drives it); the host
 # transport wire arrives via feature unification when a host provider

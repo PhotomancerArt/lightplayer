@@ -9,7 +9,9 @@
 //! intercepting the P4 add action's default create), and a `DetailPopover`
 //! at the right edge whose trigger renders the pane's one core-computed
 //! `UiAffordance`
-//! (P6 affordance model). No status chip and no count chips in the header:
+//! (P6 affordance model), plus — and ONLY when the project carries active
+//! debug overrides — the global "Debug active · N · Clear all" chip (D8 tier
+//! a). No status chip and no count chips in the header:
 //! the status word ("Ready", "Syncing", …), the per-bucket dirty counts, and
 //! the project stats all live in the detail popup.
 //!
@@ -21,8 +23,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, ProjectEditorView, ProjectSyncPhase, UiAction, UiAffordance, UiConfigSlot,
-    UiMetric, UiPendingEdit, UiStatus,
+    ControllerId, DirtySummary, ProjectController, ProjectEditorView, ProjectOp, ProjectSyncPhase,
+    UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPendingEdit, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
@@ -73,6 +75,9 @@ pub fn ProjectPane(
     let pending_edits = view.pending_edits.clone();
     let root_slots = view.root_slots.clone();
     let library_identity = view.library_identity.clone();
+    // D8 tier (a): the project-wide debug channel, deliberately outside the
+    // dirty rollup that drives `chrome`/`affordance` (D7).
+    let debug_overrides = view.debug_overrides;
 
     rsx! {
         StudioPane {
@@ -81,6 +86,9 @@ pub fn ProjectPane(
             chrome,
             actions: header_actions,
             on_action,
+            trailing: rsx! {
+                DebugActiveChip { count: debug_overrides, on_action }
+            },
             detail: rsx! {
                 ProjectDetailPopover {
                     affordance,
@@ -121,6 +129,44 @@ pub fn ProjectPane(
     }
 }
 
+/// The global **"Debug active · N · Clear all"** chip (D8 tier a): present
+/// whenever ANY debug override is active anywhere in the project, absent
+/// otherwise. It is the only project-level announcement debug overrides get —
+/// they are not dirty (D7), so they never reach the header wash, the Save
+/// affordances, or the save panel's change list.
+///
+/// Pressing it dispatches [`ProjectOp::ClearDebugEdits`] (label "Clear all"
+/// already lives on the op's `ActionMeta`, so the chip stays pure
+/// presentation); persisted edits survive untouched — this is not Revert-all.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -> Element {
+    if count == 0 {
+        return rsx! {};
+    }
+    let action = UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ClearDebugEdits,
+    );
+    let summary = action.meta().summary.clone();
+
+    rsx! {
+        div { class: "tw:flex tw:items-center tw:pr-1",
+            button {
+                class: "lp-debug-global-chip",
+                r#type: "button",
+                title: "{summary}",
+                aria_label: "Clear all debug overrides",
+                onclick: move |event| {
+                    event.stop_propagation();
+                    on_action.call(action.clone());
+                },
+                "Debug active · {count} · Clear all"
+            }
+        }
+    }
+}
+
 /// The detail popup on the shared [`DetailPopover`] base — the save panel:
 /// project identity with the status word (its only home — headers no longer
 /// carry a status chip), the root's "Project settings" identity rows (P6
@@ -128,8 +174,8 @@ pub fn ProjectPane(
 /// and the read-only `format`/`uid`/`nodes` rows — live here, as
 /// purpose-built controls rather than generic slot editors; see
 /// [`ProjectSettingsSection`]), the pending-edit state,
-/// overlay revision, the per-bucket [`DetailSection`]s (unsaved / live /
-/// failed) as titled change lists with per-entry revert (a populated bucket
+/// overlay revision, the per-bucket [`DetailSection`]s (unsaved / failed —
+/// there is no debug bucket, D7) as titled change lists with per-entry revert (a populated bucket
 /// wears its affordance tint on the title; the count rides the title row's
 /// meta cell), and the project stats (moved here from the old sidebar
 /// MetricGrid card).
@@ -155,7 +201,6 @@ fn ProjectDetailPopover(
     let label = trigger_label(affordance);
     let status_class = node_status_label_class(status.kind);
     let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
-    let live_entries = entries_in(&pending_edits, PendingEditBucket::Live);
     let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
 
     rsx! {
@@ -206,15 +251,6 @@ fn ProjectDetailPopover(
                 tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
                 PendingEditList { entries: unsaved_entries, on_action }
             }
-            DetailSection {
-                title: "Live (transient)",
-                meta: dirty.transient.to_string(),
-                tint: bucket_section_tint(PendingEditBucket::Live, dirty.transient),
-                PendingEditList { entries: live_entries, on_action }
-                p { class: "tw:m-0 tw:pt-1 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
-                    "Live controls apply to the running project and are never written by Save."
-                }
-            }
             if dirty.failed > 0 || !failed_entries.is_empty() {
                 DetailSection {
                     title: "Failed edits",
@@ -250,7 +286,7 @@ fn trigger_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "Project details — no unsaved changes",
         UiAffordance::Busy => "Project activity in progress",
-        UiAffordance::Live => "Project has live-only edits",
+        UiAffordance::Debug => "Project has debug overrides",
         UiAffordance::Unsaved => "Project has unsaved changes",
         UiAffordance::Error => "Project needs attention",
     }
@@ -261,7 +297,7 @@ fn state_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "unchanged",
         UiAffordance::Busy => "in progress",
-        UiAffordance::Live => "live edits only",
+        UiAffordance::Debug => "debug overrides only",
         UiAffordance::Unsaved => "uncommitted",
         UiAffordance::Error => "needs attention",
     }
@@ -274,12 +310,8 @@ mod tests {
 
     use super::*;
 
-    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
-        DirtySummary {
-            persisted,
-            transient,
-            failed,
-        }
+    fn dirty(persisted: usize, failed: usize) -> DirtySummary {
+        DirtySummary { persisted, failed }
     }
 
     fn editor_view(dirty: DirtySummary, edits_in_flight: usize) -> ProjectEditorView {
@@ -305,18 +337,19 @@ mod tests {
 
         // Persisted edits: the edited pencil, even while an ack is pending
         // (Unsaved outranks Busy in the shared priority).
-        let uncommitted = editor_view(dirty(1, 0, 0), 1).affordance(UiStatusKind::Good);
+        let uncommitted = editor_view(dirty(1, 0), 1).affordance(UiStatusKind::Good);
         assert_eq!(uncommitted, UiAffordance::Unsaved);
         assert_eq!(state_label(uncommitted), "uncommitted");
 
         // In-flight only: genuine activity.
-        let busy = editor_view(dirty(0, 0, 0), 1).affordance(UiStatusKind::Good);
+        let busy = editor_view(dirty(0, 0), 1).affordance(UiStatusKind::Good);
         assert_eq!(busy, UiAffordance::Busy);
         assert_eq!(state_label(busy), "in progress");
 
-        // Live-only edits stay distinct from unsaved.
-        let live = editor_view(dirty(0, 2, 0), 0).affordance(UiStatusKind::Good);
-        assert_eq!(live, UiAffordance::Live);
+        // D7: a project whose only pending edits are debug overrides reads
+        // clean — they never enter the summary, so the trigger stays quiet.
+        let debug_only = editor_view(DirtySummary::clean(), 0).affordance(UiStatusKind::Good);
+        assert_eq!(debug_only, UiAffordance::Info);
     }
 
     #[test]
@@ -330,20 +363,11 @@ mod tests {
             tone(DirtySummary::clean(), 0, UiStatusKind::Good),
             PaneTone::Good
         );
-        assert_eq!(tone(dirty(1, 0, 1), 2, UiStatusKind::Good), PaneTone::Error);
-        assert_eq!(
-            tone(dirty(2, 1, 0), 0, UiStatusKind::Good),
-            PaneTone::Warning
-        );
-        assert_eq!(tone(dirty(0, 1, 0), 0, UiStatusKind::Good), PaneTone::Live);
-        assert_eq!(
-            tone(dirty(0, 0, 0), 1, UiStatusKind::Good),
-            PaneTone::Working
-        );
+        assert_eq!(tone(dirty(1, 1), 2, UiStatusKind::Good), PaneTone::Error);
+        assert_eq!(tone(dirty(2, 0), 0, UiStatusKind::Good), PaneTone::Warning);
+        assert_eq!(tone(dirty(0, 1), 0, UiStatusKind::Good), PaneTone::Error);
+        assert_eq!(tone(dirty(0, 0), 1, UiStatusKind::Good), PaneTone::Working);
         // An error pane status is never masked by a dirty wash.
-        assert_eq!(
-            tone(dirty(0, 1, 0), 0, UiStatusKind::Error),
-            PaneTone::Error
-        );
+        assert_eq!(tone(dirty(1, 0), 0, UiStatusKind::Error), PaneTone::Error);
     }
 }

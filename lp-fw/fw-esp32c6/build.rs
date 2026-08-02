@@ -3,10 +3,22 @@
 //! Linker script (-Tlinkall.x) is configured via .cargo/config.toml to avoid
 //! duplicate -Tlinkall.x (which would cause "region 'RAM' already defined").
 //!
-//! Patches esp-hal's eh_frame.x so .eh_frame is retained in ROM for unwinding.
-//! esp-hal's default places .eh_frame at address 0 with (INFO) type = non-allocatable,
-//! which discards unwind tables. We replace it with a no-op so our eh_frame_unwind.x
-//! (loaded as a supplemental script) captures .eh_frame into ROM instead.
+//! Patches two of esp-hal's generated linker scripts, both because the ESP32
+//! bootloader maps at most 2 ROM segments:
+//!
+//! - `rodata.x`, to merge `.rodata_desc` and `.rodata` into ONE output section.
+//!   esp-hal's default defines them separately, and `.rodata`'s 128-byte input
+//!   alignment leaves a gap that espflash reads as a segment boundary —
+//!   producing 3 ROM-mapped segments and tripping the ESP32 bootloader's
+//!   `rom_index < 2` assert. See `89487cc05`.
+//! - `eh_frame.x`, flattened to a no-op so nothing captures `.eh_frame` into a
+//!   section of its own.
+//!
+//! Until 2026-08-02 it also patched `text.x`, to capture `.eh_frame` into
+//! `.text` for the `unwinding` crate. That is gone with the rest of the unwind
+//! tier (ADR `2026-08-02-rv32-firmwares-are-abort-tier`), and with it the
+//! `text.x` patch — see the comment in `main` for why it was not merely
+//! trimmed.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -74,44 +86,44 @@ fn main() {
     emit_build_provenance();
     emit_partition_facts();
 
-    // Harness builds: any test_* feature except test_oom selects a hardware
-    // harness entrypoint instead of the app (test_oom runs the full app plus
-    // an OOM/panic exercise). Collapsed to one cfg so app-only code carries a
+    // Harness builds: any test_* feature selects a hardware harness entrypoint
+    // instead of the app. Collapsed to one cfg so app-only code carries a
     // single gate instead of a 12-feature wall at every site.
+    //
+    // `test_oom` used to be the one exception — it ran the full app plus an
+    // OOM/panic exercise rather than replacing the entrypoint — and it went
+    // with the unwind tier it existed to validate.
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
-    let harness = std::env::vars()
-        .any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_") && k != "CARGO_FEATURE_TEST_OOM");
+    let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
     if harness {
         println!("cargo::rustc-cfg=fw_harness");
     }
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    // Patch esp-hal's linker scripts to retain .eh_frame inside .text.
+    // Patch esp-hal's generated linker scripts.
     //
-    // The ESP32 bootloader only supports 2 ROM-mapped segments (rodata + text).
-    // .eh_frame must share the .text section to avoid creating a 3rd segment.
-    // lld only merges content into one section when it's in the SAME definition,
-    // so we patch text.x to include .eh_frame at the end of .text, and patch
-    // eh_frame.x to a no-op (it would otherwise capture .eh_frame at address 0).
+    // The ESP32 bootloader only supports 2 ROM-mapped segments (rodata + text),
+    // and that single constraint is why both patches below exist.
+    //
+    // `text.x` is NOT patched any more. It used to be, to append `.eh_frame`
+    // inside the `.text` output section — lld only merges input sections into
+    // one output section when they appear in the same `SECTIONS { .text : {} }`
+    // block, so a separately-defined `.eh_frame` always became a third ROM
+    // segment. With the unwind tier gone (ADR
+    // `2026-08-02-rv32-firmwares-are-abort-tier`) there is nothing to append,
+    // and what remained of our patch was byte-identical to esp-hal's own
+    // `ld/sections/text.x` for riscv. Patching a file to its own contents is
+    // just a way to break when upstream changes it.
+    //
+    // `eh_frame.x` is still flattened to a no-op even though this image no
+    // longer unwinds: esp-hal's version captures `.eh_frame` into its own
+    // output section, which would be that third ROM segment if anything ever
+    // emitted one. With the no-op and no KEEP in `text.x`, `.eh_frame` has no
+    // home and is dropped entirely — verified: the linked ELF has no
+    // `.eh_frame` section and no `__eh_frame` symbol.
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let build_dir = out_dir.parent().unwrap().parent().unwrap();
-
-    let patched_text = "\
-SECTIONS {
-  .text : ALIGN(4) {
-    KEEP(*(.init));
-    KEEP(*(.init.rust));
-    KEEP(*(.text.abort));
-    *(.literal .text .literal.* .text.*)
-    /* Unwind tables: appended to .text so they share one ROM segment. */
-    . = ALIGN(4);
-    PROVIDE(__eh_frame = .);
-    KEEP(*(.eh_frame));
-    KEEP(*(.eh_frame.*));
-  } > ROTEXT
-}
-";
 
     // The ESP32 bootloader only supports 2 ROM-mapped segments. espflash creates
     // image segments from ELF sections, splitting on gaps between sections. The
@@ -130,7 +142,6 @@ SECTIONS {
     _rodata_start = ABSOLUTE(.);
     *(.rodata .rodata.*)
     *(.srodata .srodata.*)
-    *(.gcc_except_table .gcc_except_table.*)
     . = ALIGN(4);
     *( .rodata_wlog_*.* )
     . = ALIGN(4);
@@ -153,13 +164,12 @@ SECTIONS {
                     // `links` key on esp-hal) cargo gives no ordering edge
                     // between its script and ours — so the fresh mtimes must
                     // dirty this script for the next build to re-patch.
-                    for file in ["text.x", "eh_frame.x", "rodata.x"] {
+                    for file in ["eh_frame.x", "rodata.x"] {
                         println!("cargo:rerun-if-changed={}", out_path.join(file).display());
                     }
-                    patch_file(&out_path.join("text.x"), patched_text);
                     patch_file(
                         &out_path.join("eh_frame.x"),
-                        "/* patched: .eh_frame is in text.x */\n",
+                        "/* patched: this image is abort tier and emits no unwind tables */\n",
                     );
                     patch_file(&out_path.join("rodata.x"), patched_rodata);
                 }
@@ -172,10 +182,19 @@ SECTIONS {
     // the esp-hal watches above this is the staleness guard: if esp-hal's
     // script re-runs while ours stays fingerprint-fresh, the regenerated
     // files dirty this script and the next build re-patches. A same-build
-    // regeneration can still slip one failing link through (no ordering
-    // guarantee between the two scripts), surfacing as `undefined symbol:
-    // __eh_frame` — pristine text.x always kills the link, so that error is
-    // the tripwire for the whole stale set, and one rebuild self-heals it.
+    // regeneration can still slip one bad link through — there is no ordering
+    // guarantee between the two scripts.
+    //
+    // ⚠️ That failure is now SILENT AT BUILD TIME, and it did not used to be.
+    // While `text.x` carried our `__eh_frame` symbol, a pristine copy always
+    // killed the link with `undefined symbol: __eh_frame`, which was the
+    // tripwire for the whole stale set. With the unwind tier gone there is no
+    // such reference: a pristine `rodata.x` links fine and produces THREE
+    // ROM-mapped segments, and the board then fails at boot inside the
+    // bootloader (`Assert failed in unpack_load_app, bootloader_utility.c:762
+    // (rom_index < 2)`). So the symptom moved from the build to the device.
+    // If a freshly built image asserts there, suspect this patch before
+    // suspecting the image: one rebuild re-patches and self-heals.
     println!("cargo:rerun-if-changed={}", manifest_dir.display());
     if !found_esp_hal_out {
         // esp-hal's out dir doesn't exist yet (its script hasn't run).
@@ -186,9 +205,6 @@ SECTIONS {
             build_dir.join("esp-hal-out-pending").display()
         );
     }
-
-    let eh_frame = manifest_dir.join("linker").join("eh_frame_unwind.x");
-    println!("cargo:rustc-link-arg=-T{}", eh_frame.display());
 }
 
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded

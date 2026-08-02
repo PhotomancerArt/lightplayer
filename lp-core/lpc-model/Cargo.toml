@@ -21,6 +21,7 @@ lp-collection = { workspace = true, features = ["serde"] }
 base64 = { workspace = true }
 hashbrown = { workspace = true }
 libm = "0.2"
+log = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }

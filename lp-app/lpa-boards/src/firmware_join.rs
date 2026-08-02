@@ -326,9 +326,14 @@ const fn catalog_note(feature: LpFeature) -> CatalogNote {
         LpFeature::GfxWgpu => CatalogNote::Extra {
             present: "GPU rendering",
         },
-        LpFeature::DiagUnwind => CatalogNote::Norm {
-            absent: "shader faults reboot the device",
-        },
+        // Was `Norm { absent: "shader faults reboot the device" }` — accurate
+        // when the C6 could catch a shader fault in-process and other chips
+        // could not. No build reports `diag.unwind` since ADR
+        // 2026-08-02-rv32-firmwares-are-abort-tier, so as a Norm it would print
+        // that gap on *every* board: not news, and framed as a deficiency
+        // against a baseline that no longer exists. The behaviour it described
+        // is now universal and belongs in the docs, not on each board card.
+        LpFeature::DiagUnwind => CatalogNote::Silent,
         LpFeature::ShaderF32 => CatalogNote::Extra {
             present: "f32 shader math",
         },

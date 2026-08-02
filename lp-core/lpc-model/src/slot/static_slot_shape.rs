@@ -353,6 +353,8 @@ pub enum StaticValueEditorHint {
     Xy,
     Dimensions,
     Affine2d,
+    /// Lamp type + supply budget pair (`FixturePower`-shaped struct).
+    Power,
     Resource,
     RuntimeBufferResource,
     VisualProduct,
@@ -373,6 +375,7 @@ impl StaticValueEditorHint {
             Self::Xy => ValueEditorHint::Xy,
             Self::Dimensions => ValueEditorHint::Dimensions,
             Self::Affine2d => ValueEditorHint::Affine2d,
+            Self::Power => ValueEditorHint::Power,
             Self::Resource => ValueEditorHint::Resource,
             Self::RuntimeBufferResource => ValueEditorHint::RuntimeBufferResource,
             Self::VisualProduct => ValueEditorHint::VisualProduct,

@@ -1,12 +1,22 @@
 # ADR: Per-target panic strategy — unwinding is a device feature, not a default
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-07-23 (formalizes decisions originally made ~2026-07-03
   with the crash-recovery work; backfilled with fresh context during the
   sim-fuel work)
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [2026-08-02-rv32-firmwares-are-abort-tier.md](2026-08-02-rv32-firmwares-are-abort-tier.md)
+
+> **Superseded 2026-08-02.** This ADR's whole subject — the asymmetry between
+> targets that unwind and targets that abort — no longer exists. The RV32
+> firmwares dropped `panic = "unwind"` and the `unwinding` crate, so nothing
+> unwinds and the table below collapses to a single row. The `panic-recovery`
+> feature it governs is deleted, and with it the rule that new
+> panic-as-control-flow sites must be feature-gated: there is no target where
+> such a site is sound. Kept as the record of why the asymmetry existed and what
+> it was load-bearing for (the fuel design in particular). See
+> [2026-08-02-rv32-firmwares-are-abort-tier.md](2026-08-02-rv32-firmwares-are-abort-tier.md).
 
 ## Context
 

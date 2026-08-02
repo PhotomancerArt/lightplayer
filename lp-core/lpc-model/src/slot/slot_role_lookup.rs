@@ -8,7 +8,8 @@
 
 use crate::{
     LpType, SlotDirection, SlotPath, SlotPathSegment, SlotRole, SlotSemantics, SlotShapeLookup,
-    SlotShapeView, slot::effective_writable,
+    SlotShapeView,
+    slot::{SlotPersistence, effective_persistence, effective_writable},
 };
 
 /// Role, governing direction, and leaf value type resolved for one slot path.
@@ -33,6 +34,18 @@ impl SlotRoleResolution {
     /// regardless of role).
     pub fn is_writable(&self) -> bool {
         effective_writable(self.role, self.direction)
+    }
+
+    /// The persistence classification governing this path
+    /// ([`effective_persistence`] of its role and direction).
+    ///
+    /// This is the **one** classifier both sides of an edit's life must
+    /// consult — the studio for display/dirty accounting, the registry for
+    /// commit retention — so a Debug override and an authored edit can never
+    /// swap places between client and server. Paths that resolve in no shape
+    /// take [`SlotPersistence::for_unresolved_edit`] instead.
+    pub fn persistence(&self) -> SlotPersistence {
+        effective_persistence(self.role, self.direction)
     }
 }
 
@@ -165,7 +178,7 @@ mod tests {
     use crate::slot::shape::{field, field_with_role, map, record, value};
     use crate::{
         ClockDef, LpType, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeRegistry,
-        StaticSlotShape,
+        StaticSlotShape, slot::effective_persistence,
     };
     use alloc::vec;
 
@@ -256,29 +269,103 @@ mod tests {
     }
 
     #[test]
-    fn produced_direction_forces_read_only_regardless_of_role() {
-        let (registry, id) = registry_with(record(vec![crate::slot::shape::field_with_semantics(
-            "output",
-            value(LpType::F32),
-            crate::SlotSemantics::produced(),
-        )]));
+    fn produced_state_field_resolves_read_only_and_transient() {
+        let (registry, id) = registry_with(record(vec![state_field("output", value(LpType::F32))]));
 
         let output = resolve(&registry, id, "output");
         assert_eq!(output.direction, SlotDirection::Produced);
+        assert_eq!(output.role, SlotRole::State);
         assert!(!output.is_writable(), "produced fields are never writable");
+        assert_eq!(output.persistence(), SlotPersistence::Transient);
     }
 
     #[test]
-    fn produced_direction_is_inherited_by_nested_leaves() {
-        let (registry, id) = registry_with(record(vec![crate::slot::shape::field_with_semantics(
+    fn produced_state_is_inherited_by_nested_leaves() {
+        let (registry, id) = registry_with(record(vec![state_field(
             "output",
             record(vec![field("inner", value(LpType::F32))]),
-            crate::SlotSemantics::produced(),
         )]));
 
         let inner = resolve(&registry, id, "output.inner");
         assert_eq!(inner.direction, SlotDirection::Produced);
+        assert_eq!(inner.role, SlotRole::State);
         assert!(!inner.is_writable());
+        assert_eq!(inner.persistence(), SlotPersistence::Transient);
+    }
+
+    /// The G2 amendment must not move any existing classification: a
+    /// `State`/`Produced` field resolves exactly as an unmarked produced
+    /// field used to.
+    #[test]
+    fn state_role_classifies_like_the_former_unmarked_produced_field() {
+        assert_eq!(
+            effective_writable(SlotRole::State, SlotDirection::Produced),
+            effective_writable(SlotRole::Setting, SlotDirection::Produced),
+        );
+        assert_eq!(
+            effective_persistence(SlotRole::State, SlotDirection::Produced),
+            effective_persistence(SlotRole::Setting, SlotDirection::Produced),
+        );
+    }
+
+    /// Produced state that forgets to declare `State` (the old
+    /// direction-implied spelling) no longer reaches the registry.
+    #[test]
+    fn registering_an_unmarked_produced_field_fails_loudly() {
+        let id = SlotShapeId::from_static_name("test.role_lookup.unmarked");
+        let mut registry = SlotShapeRegistry::default();
+        let error = registry
+            .register_dynamic_shape(
+                id,
+                record(vec![crate::slot::shape::field_with_semantics(
+                    "output",
+                    value(LpType::F32),
+                    crate::SlotSemantics::produced(),
+                )]),
+            )
+            .expect_err("an unmarked produced field is rejected");
+        assert!(
+            matches!(
+                error,
+                crate::SlotShapeRegistryError::RoleDirectionMismatch(bad, _) if bad == id
+            ),
+            "{error:?}"
+        );
+    }
+
+    /// And the mirror image: `State` on something the runtime does not
+    /// produce.
+    #[test]
+    fn registering_a_state_role_without_produced_fails_loudly() {
+        let id = SlotShapeId::from_static_name("test.role_lookup.mislabeled");
+        let mut registry = SlotShapeRegistry::default();
+        let error = registry
+            .register_dynamic_shape(
+                id,
+                record(vec![field_with_role(
+                    "output",
+                    value(LpType::F32),
+                    SlotRole::State,
+                )]),
+            )
+            .expect_err("a State role without a produced direction is rejected");
+        assert!(
+            matches!(
+                error,
+                crate::SlotShapeRegistryError::RoleDirectionMismatch(bad, _) if bad == id
+            ),
+            "{error:?}"
+        );
+    }
+
+    /// A produced state field, spelled the only way the model now accepts.
+    fn state_field(name: &str, shape: SlotShape) -> crate::SlotFieldShape {
+        crate::slot::shape::field_with_semantics_and_role(
+            name,
+            shape,
+            crate::SlotSemantics::produced(),
+            SlotRole::State,
+        )
     }
 
     fn registry_with(shape: SlotShape) -> (SlotShapeRegistry, SlotShapeId) {

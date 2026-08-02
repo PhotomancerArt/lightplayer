@@ -193,6 +193,11 @@ pub enum AllocError {
     TooManyVRegs,
     UnsupportedControlFlow,
     OutOfRegisters,
+    /// The function needs more spill slots than [`Alloc::Stack`] can name; see
+    /// [`spill::SpillAlloc::MAX_SLOTS`].
+    TooManySpillSlots {
+        max: u32,
+    },
 }
 
 /// Build an [`AllocError::Internal`] capturing the call site.
@@ -223,6 +228,10 @@ impl core::fmt::Display for AllocError {
             AllocError::TooManyVRegs => write!(f, "too many virtual registers"),
             AllocError::UnsupportedControlFlow => write!(f, "unsupported control flow"),
             AllocError::OutOfRegisters => write!(f, "out of physical registers"),
+            AllocError::TooManySpillSlots { max } => write!(
+                f,
+                "function needs more than {max} spill slots; split it into smaller functions"
+            ),
         }
     }
 }

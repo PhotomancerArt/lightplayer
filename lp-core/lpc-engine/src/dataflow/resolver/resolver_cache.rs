@@ -10,6 +10,12 @@
 //! - **routes** — [`ResolvedRoute`], the decision about *how* a query is
 //!   answered. See that type's documentation.
 //!
+//! The two value tables are behind the `resolver-payload-cache` gate; the
+//! route table and the intern table are not. That is the line between the
+//! decisions this cache makes and the payloads it holds, and on a part with a
+//! 110 KB arena only the decisions are affordable — see
+//! [`ResolverCache::set_retain_payloads`].
+//!
 //! Discarding frame values does not clear the table. Each entry carries the
 //! frame it was written for, and a new frame simply stops matching — so a
 //! steady scene neither frees nor reallocates its entries, it overwrites them
@@ -29,17 +35,62 @@ use crate::dataflow::resolver::route::ResolvedRoute;
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 struct FrameStamp(u32);
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ResolverCache {
     frame: FrameStamp,
     values: Vec<Option<(FrameStamp, Production)>>,
     structural: Vec<Option<Production>>,
     routes: Vec<Option<Rc<ResolvedRoute>>>,
+    /// Whether [`Self::insert`] stores payloads at all — see
+    /// [`Self::set_retain_payloads`].
+    retain_payloads: bool,
+}
+
+impl Default for ResolverCache {
+    fn default() -> Self {
+        Self {
+            frame: FrameStamp::default(),
+            values: Vec::new(),
+            structural: Vec::new(),
+            routes: Vec::new(),
+            retain_payloads: cfg!(feature = "resolver-payload-cache"),
+        }
+    }
 }
 
 impl ResolverCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether resolved *payloads* — the two value tables — are stored at all.
+    ///
+    /// The route table and the intern table are not affected: those hold
+    /// decisions, and decisions are the cheap half of this cache in memory and
+    /// the expensive half in cycles. Measured on the classic ESP32
+    /// (`projects/test/quad-strips-v3`, 120 LEDs, 110 KB arena):
+    ///
+    /// | | free heap | fps | `tick` |
+    /// |---|---|---|---|
+    /// | no cache at all (pre-#243) | 18,128 B | 13 | 69 ms |
+    /// | decisions only (`false`) | 18,144 B | 16 | 58 ms |
+    /// | decisions + payloads (`true`) | 9,776 B | 21 | 45 ms |
+    ///
+    /// So the decisions buy 11 ms of the 24 ms for no heap, and the payloads
+    /// buy the remaining 13 ms for 8,368 B. On a part with room that is a good
+    /// trade and stays on; on a part where 8.3 KB is ~90 LEDs of capacity it is
+    /// not, and `fw-esp32v3` leaves the `resolver-payload-cache` gate off.
+    ///
+    /// Correctness does not depend on the choice — a cache miss recomputes.
+    /// `resolution_persistence_tests` asserts both settings render identically.
+    pub fn set_retain_payloads(&mut self, retain: bool) {
+        self.retain_payloads = retain;
+        if !retain {
+            // Release whatever a previous setting accumulated, capacity and
+            // all: a table that is never read again must not hold pages.
+            self.values = Vec::new();
+            self.structural = Vec::new();
+        }
     }
 
     /// Whether a production may outlive the frame that computed it.
@@ -79,6 +130,9 @@ impl ResolverCache {
     }
 
     pub fn insert(&mut self, id: QueryId, production: Production) {
+        if !self.retain_payloads {
+            return;
+        }
         if Self::is_structural(&production.source) {
             grow_to(&mut self.structural, id.index());
             self.structural[id.index()] = Some(production);

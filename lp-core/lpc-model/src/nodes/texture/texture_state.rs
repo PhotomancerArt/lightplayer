@@ -4,6 +4,7 @@ use crate::{Revision, Slotted, ValueSlot};
 
 /// Runtime metadata exposed by a texture node.
 #[derive(Default, Slotted)]
+#[slot(default_role = "state")]
 pub struct TextureState {
     #[slot(produced)]
     pub width: ValueSlot<i32>,
@@ -38,14 +39,14 @@ impl TextureState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SlotDirection, SlotShape, StaticSlotShape};
+    use crate::{SlotDirection, SlotRole, SlotShape, StaticSlotShape};
 
-    /// TextureState carries no explicit role on any field (unlike its sibling
-    /// state records, which used to need a container-wide
-    /// `read_only_transient` marking) — it is safe by construction because
-    /// direction alone implies read-only/never-serialized (D1).
+    /// TextureState is the record that proved the direction-implied rule was
+    /// too quiet: it was safe only because the studio rewrote produced slots
+    /// at DTO-build time. Since the G2 amendment it declares the `State` role
+    /// outright, and the derive would refuse to compile it otherwise.
     #[test]
-    fn texture_state_fields_are_produced_and_present_read_only_with_default_role() {
+    fn texture_state_fields_declare_the_state_role_and_are_read_only() {
         let SlotShape::Record { fields, .. } = TextureState::slot_shape() else {
             panic!("record shape");
         };
@@ -56,10 +57,10 @@ mod tests {
                 .find(|field| field.name.as_str() == name)
                 .expect("texture state field");
             assert_eq!(field.semantics.direction, SlotDirection::Produced);
-            assert!(field.role.is_default(), "no explicit role is declared");
+            assert_eq!(field.role, SlotRole::State);
             assert!(
                 !field.is_writable(),
-                "a produced field is never writable, regardless of its default role"
+                "a State/produced field is never writable"
             );
         }
     }

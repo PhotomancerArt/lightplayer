@@ -217,6 +217,7 @@ fn readme_lens_card() -> UiDeviceCard {
             line(3.0, "engine: frame 41142 · 60fps"),
         ],
         ui: Default::default(),
+        detected_chip: None,
     }
 }
 
@@ -277,6 +278,7 @@ fn readme_home_view() -> UiHomeView {
             sim: true,
             console_tail: Vec::new(),
             ui: Default::default(),
+            detected_chip: None,
         },
         UiDeviceCard {
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
@@ -293,6 +295,7 @@ fn readme_home_view() -> UiHomeView {
             sim: false,
             console_tail: Vec::new(),
             ui: Default::default(),
+            detected_chip: None,
         },
     ];
     UiHomeView {

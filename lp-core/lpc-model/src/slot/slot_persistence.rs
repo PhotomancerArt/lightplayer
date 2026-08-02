@@ -18,7 +18,7 @@ use super::{SlotDirection, SlotRole};
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum SlotPersistence {
-    /// Save this slot when writing the authored model unless another policy overrides it.
+    /// Save this slot when writing the authored model.
     #[default]
     Persisted,
     /// User-editable runtime/session control; skip on ordinary save/writeback.
@@ -29,11 +29,27 @@ impl SlotPersistence {
     pub fn is_persisted(self: &Self) -> bool {
         matches!(self, Self::Persisted)
     }
+
+    /// Classification for an edit whose path resolves in **no** shape —
+    /// a stale artifact, an unmounted node, a field the def no longer has.
+    ///
+    /// Client and server resolve roles independently (the studio walks the
+    /// shipped shape snapshot, the registry walks the effective def), so they
+    /// must agree on the fallback or the two sides disagree about what an
+    /// edit *is*: the studio would hold an invisible live override that the
+    /// server silently dropped at commit, or vice versa. The shared answer is
+    /// **Setting** (`Persisted`) — the save-relevant default: an
+    /// unclassifiable edit presents as authored work and resolves at commit
+    /// rather than lingering as a Debug override nothing accounts for.
+    pub fn for_unresolved_edit() -> Self {
+        Self::Persisted
+    }
 }
 
 /// Derive the persistence classification governing a field carrying `role`
-/// and `direction`: transient unless the role persists (not [`SlotRole::Debug`])
-/// and the direction does not imply a produced (never-serialized) field.
+/// and `direction`: transient unless the role persists (neither
+/// [`SlotRole::Debug`] nor [`SlotRole::State`]) and the direction does not
+/// imply a produced (never-serialized) field.
 pub fn effective_persistence(role: SlotRole, direction: SlotDirection) -> SlotPersistence {
     if role.is_persisted() && direction != SlotDirection::Produced {
         SlotPersistence::Persisted
@@ -68,6 +84,20 @@ mod tests {
         );
         assert_eq!(
             effective_persistence(SlotRole::Fixed, SlotDirection::Produced),
+            SlotPersistence::Transient
+        );
+    }
+
+    /// The G2 amendment renames what direction implied; it must not move the
+    /// classification of a produced field.
+    #[test]
+    fn state_role_classifies_exactly_like_an_unmarked_produced_field() {
+        assert_eq!(
+            effective_persistence(SlotRole::State, SlotDirection::Produced),
+            effective_persistence(SlotRole::Setting, SlotDirection::Produced),
+        );
+        assert_eq!(
+            effective_persistence(SlotRole::State, SlotDirection::Produced),
             SlotPersistence::Transient
         );
     }

@@ -15,6 +15,7 @@ pub(crate) fn open_sections() -> Element {
         ("Warning", DetailSectionTint::Warning),
         ("Error", DetailSectionTint::Error),
         ("Live", DetailSectionTint::Live),
+        ("Debug", DetailSectionTint::Debug),
     ];
 
     rsx! {

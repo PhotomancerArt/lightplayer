@@ -59,6 +59,20 @@
             }
           }
         }
+      },
+      {
+        "name": "test_pattern",
+        "role": "debug",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
       }
     ],
     "meta": {}

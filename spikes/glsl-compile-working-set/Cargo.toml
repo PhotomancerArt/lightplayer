@@ -1,0 +1,16 @@
+# Not a workspace member: a measurement harness, not shipped code.
+#
+#     cd spikes/glsl-compile-working-set && cargo run --release
+[package]
+name = "glsl-compile-working-set"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+lps-glsl = { path = "../../lp-shader/lps-glsl" }
+
+[profile.release]
+debug = false
+
+[workspace]

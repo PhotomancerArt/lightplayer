@@ -272,11 +272,15 @@ mod tests {
     fn leaf_base_display_uses_plain_value_formatting() {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
-        let def = clock_def(r#"{ "kind": "Clock", "controls": { "rate": 2.5 } }"#);
+        // `controls.*` is Debug-role (D2): it can never be authored, so this
+        // deliberately does not author it — every leaf here shows its shape
+        // default, which is what this test exercises for a float and a bool.
+        let def = clock_def(r#"{ "kind": "Clock" }"#);
 
         assert_eq!(
             base_display_in_def(&def, &path("controls.rate"), &ctx),
-            Some("2.5".to_string())
+            Some("1.0".to_string()),
+            "unauthored (and unauthorable) leaves display their shape default"
         );
         assert_eq!(
             base_display_in_def(&def, &path("controls.running"), &ctx),
@@ -328,11 +332,14 @@ mod tests {
     fn variant_prefix_resolves_only_against_the_base_variant() {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
-        let def = clock_def(r#"{ "kind": "Clock", "controls": { "rate": 4.0 } }"#);
+        // `controls.rate` is Debug-role and never authored (D2); this test's
+        // point is the variant-prefix resolution, not the value, so it
+        // exercises the shape default.
+        let def = clock_def(r#"{ "kind": "Clock" }"#);
 
         assert_eq!(
             base_display_in_def(&def, &path("Clock.controls.rate"), &ctx),
-            Some("4.0".to_string())
+            Some("1.0".to_string())
         );
         assert_eq!(
             base_display_in_def(&def, &path("Fixture.color_order"), &ctx),
@@ -379,13 +386,44 @@ mod tests {
     fn base_value_resolves_leaves_only() {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
-        let def = clock_def(r#"{ "kind": "Clock", "controls": { "rate": 2.0 } }"#);
+        // `controls.rate` is Debug-role and never authored (D2); this test's
+        // point is that only leaves resolve to a value (`controls` itself,
+        // a structural target, does not), not the specific value.
+        let def = clock_def(r#"{ "kind": "Clock" }"#);
 
         assert_eq!(
             base_value_in_def(&def, &path("controls.rate"), &ctx),
-            Some(LpValue::F32(2.0))
+            Some(LpValue::F32(1.0))
         );
         assert_eq!(base_value_in_def(&def, &path("controls"), &ctx), None);
+    }
+
+    /// D2 (P4, kills W3): an authored Debug-role value in a def file must
+    /// never become the base — the loader ignores it (with a warning), so
+    /// the base display/value/presence always reflects the shape default
+    /// regardless of what the def file authored. This is the regression
+    /// guard for "a commit can no longer shift base under a live override".
+    #[test]
+    fn debug_role_authored_value_never_becomes_base() {
+        let shapes = ctx_shapes();
+        let ctx = ParseCtx { shapes: &shapes };
+        let def =
+            clock_def(r#"{ "kind": "Clock", "controls": { "rate": 2.5, "running": false } }"#);
+
+        assert_eq!(
+            base_value_in_def(&def, &path("controls.rate"), &ctx),
+            Some(LpValue::F32(1.0)),
+            "authored 2.5 must not become the base; the shape default (1.0) wins"
+        );
+        assert_eq!(
+            base_display_in_def(&def, &path("controls.running"), &ctx),
+            Some("true".to_string()),
+            "authored false must not become the base; the shape default (true) wins"
+        );
+        assert!(
+            base_presence_in_def(&def, &path("controls.rate"), &ctx),
+            "the shape default is still present: EnsurePresent is still a base no-op"
+        );
     }
 
     #[test]
