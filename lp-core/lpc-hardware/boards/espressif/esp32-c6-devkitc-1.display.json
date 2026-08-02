@@ -8,54 +8,297 @@
   "flash_mb": 8,
   "price_usd": 9.0,
   "tier": "silver",
-  "capabilities": ["Wi-Fi 6", "BLE 5", "802.15.4", "onboard RGB pixel"],
-  "blurb": "The reference C6 devkit and our best-tested board. RISC-V, Wi-Fi 6, cheap — the easiest way to start.",
+  "capabilities": [
+    "Wi-Fi 6",
+    "BLE 5",
+    "802.15.4",
+    "onboard RGB pixel"
+  ],
+  "blurb": "Espressif's C6 development board: RISC-V, Wi-Fi 6, onboard RGB pixel, standard pin headers.",
   "purchase_urls": [
-    { "label": "Espressif", "href": "https://www.espressif.com/en/products/devkits/esp32-c6-devkitc-1" },
-    { "label": "DigiKey", "href": "https://www.digikey.com/en/products/detail/espressif-systems/ESP32-C6-DEVKITC-1-N8/17728861" }
+    {
+      "label": "Espressif",
+      "href": "https://www.espressif.com/en/products/devkits/esp32-c6-devkitc-1"
+    },
+    {
+      "label": "DigiKey",
+      "href": "https://www.digikey.com/en/products/detail/espressif-systems/ESP32-C6-DEVKITC-1-N8/17728861"
+    }
   ],
   "usb_bridge": "native-usb-jtag",
   "hw": {
     "width": 112,
-    "module": { "x": 16, "y": 8, "w": 80, "h": 66, "label": "ESP32-C6", "antenna": true },
-    "usb": [ { "x": 30, "label": "USB" }, { "x": 76, "label": "UART" } ],
-    "buttons": [ { "x": 24, "y": -20, "label": "RST" }, { "x": 88, "y": -20, "label": "BOOT" } ],
-    "rgb": { "x": 56, "y": 100, "gpio": 8 },
+    "module": {
+      "x": 16,
+      "y": 8,
+      "w": 80,
+      "h": 66,
+      "label": "ESP32-C6",
+      "antenna": true
+    },
+    "usb": [
+      {
+        "x": 30,
+        "label": "USB"
+      },
+      {
+        "x": 76,
+        "label": "UART"
+      }
+    ],
+    "buttons": [
+      {
+        "x": 24,
+        "y": -20,
+        "label": "RST"
+      },
+      {
+        "x": 88,
+        "y": -20,
+        "label": "BOOT"
+      }
+    ],
+    "rgb": {
+      "x": 56,
+      "y": 100,
+      "gpio": 8
+    },
     "left": [
-      { "label": "3V3", "role": "pwr3" },
-      { "label": "RST", "role": "ctl" },
-      { "label": "4", "role": "io", "gpio": 4, "caps": [ { "text": "ADC1_4", "kind": "adc" } ] },
-      { "label": "5", "role": "io", "gpio": 5, "caps": [ { "text": "ADC1_5", "kind": "adc" } ] },
-      { "label": "6", "role": "io", "gpio": 6, "caps": [ { "text": "ADC1_6", "kind": "adc" } ] },
-      { "label": "7", "role": "io", "gpio": 7 },
-      { "label": "0", "role": "io", "gpio": 0, "caps": [ { "text": "ADC1_0", "kind": "adc" } ] },
-      { "label": "1", "role": "io", "gpio": 1, "caps": [ { "text": "ADC1_1", "kind": "adc" } ] },
-      { "label": "8", "role": "strap", "gpio": 8, "caps": [ { "text": "RGB LED", "kind": "warn" }, { "text": "strap", "kind": "strap" } ] },
-      { "label": "10", "role": "io", "gpio": 10 },
-      { "label": "11", "role": "io", "gpio": 11 },
-      { "label": "2", "role": "io", "gpio": 2, "caps": [ { "text": "ADC1_2", "kind": "adc" } ] },
-      { "label": "3", "role": "io", "gpio": 3, "caps": [ { "text": "ADC1_3", "kind": "adc" } ] },
-      { "label": "5V", "role": "pwr5" },
-      { "label": "GND", "role": "gnd" },
-      { "label": "NC", "role": "nc" }
+      {
+        "label": "3V3",
+        "role": "pwr3"
+      },
+      {
+        "label": "RST",
+        "role": "ctl"
+      },
+      {
+        "label": "4",
+        "role": "io",
+        "gpio": 4,
+        "caps": [
+          {
+            "text": "ADC1_4",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "5",
+        "role": "io",
+        "gpio": 5,
+        "caps": [
+          {
+            "text": "ADC1_5",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "6",
+        "role": "io",
+        "gpio": 6,
+        "caps": [
+          {
+            "text": "ADC1_6",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "7",
+        "role": "io",
+        "gpio": 7
+      },
+      {
+        "label": "0",
+        "role": "io",
+        "gpio": 0,
+        "caps": [
+          {
+            "text": "ADC1_0",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "1",
+        "role": "io",
+        "gpio": 1,
+        "caps": [
+          {
+            "text": "ADC1_1",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "8",
+        "role": "strap",
+        "gpio": 8,
+        "caps": [
+          {
+            "text": "RGB LED",
+            "kind": "warn"
+          },
+          {
+            "text": "strap",
+            "kind": "strap"
+          }
+        ]
+      },
+      {
+        "label": "10",
+        "role": "io",
+        "gpio": 10
+      },
+      {
+        "label": "11",
+        "role": "io",
+        "gpio": 11
+      },
+      {
+        "label": "2",
+        "role": "io",
+        "gpio": 2,
+        "caps": [
+          {
+            "text": "ADC1_2",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "3",
+        "role": "io",
+        "gpio": 3,
+        "caps": [
+          {
+            "text": "ADC1_3",
+            "kind": "adc"
+          }
+        ]
+      },
+      {
+        "label": "5V",
+        "role": "pwr5"
+      },
+      {
+        "label": "GND",
+        "role": "gnd"
+      },
+      {
+        "label": "NC",
+        "role": "nc"
+      }
     ],
     "right": [
-      { "label": "GND", "role": "gnd" },
-      { "label": "TX", "role": "io", "gpio": 16, "caps": [ { "text": "U0_TXD", "kind": "uart" } ] },
-      { "label": "RX", "role": "io", "gpio": 17, "caps": [ { "text": "U0_RXD", "kind": "uart" } ] },
-      { "label": "15", "role": "io", "gpio": 15 },
-      { "label": "23", "role": "io", "gpio": 23 },
-      { "label": "22", "role": "io", "gpio": 22 },
-      { "label": "21", "role": "io", "gpio": 21 },
-      { "label": "20", "role": "io", "gpio": 20 },
-      { "label": "19", "role": "io", "gpio": 19 },
-      { "label": "18", "role": "io", "gpio": 18 },
-      { "label": "9", "role": "strap", "gpio": 9, "caps": [ { "text": "BOOT", "kind": "strap" } ] },
-      { "label": "13", "role": "usb", "gpio": 13, "caps": [ { "text": "USB_D+", "kind": "usb" } ] },
-      { "label": "12", "role": "usb", "gpio": 12, "caps": [ { "text": "USB_D-", "kind": "usb" } ] },
-      { "label": "GND", "role": "gnd" },
-      { "label": "NC", "role": "nc" },
-      { "label": "NC", "role": "nc" }
+      {
+        "label": "GND",
+        "role": "gnd"
+      },
+      {
+        "label": "TX",
+        "role": "io",
+        "gpio": 16,
+        "caps": [
+          {
+            "text": "U0_TXD",
+            "kind": "uart"
+          }
+        ]
+      },
+      {
+        "label": "RX",
+        "role": "io",
+        "gpio": 17,
+        "caps": [
+          {
+            "text": "U0_RXD",
+            "kind": "uart"
+          }
+        ]
+      },
+      {
+        "label": "15",
+        "role": "io",
+        "gpio": 15
+      },
+      {
+        "label": "23",
+        "role": "io",
+        "gpio": 23
+      },
+      {
+        "label": "22",
+        "role": "io",
+        "gpio": 22
+      },
+      {
+        "label": "21",
+        "role": "io",
+        "gpio": 21
+      },
+      {
+        "label": "20",
+        "role": "io",
+        "gpio": 20
+      },
+      {
+        "label": "19",
+        "role": "io",
+        "gpio": 19
+      },
+      {
+        "label": "18",
+        "role": "io",
+        "gpio": 18
+      },
+      {
+        "label": "9",
+        "role": "strap",
+        "gpio": 9,
+        "caps": [
+          {
+            "text": "BOOT",
+            "kind": "strap"
+          }
+        ]
+      },
+      {
+        "label": "13",
+        "role": "usb",
+        "gpio": 13,
+        "caps": [
+          {
+            "text": "USB_D+",
+            "kind": "usb"
+          }
+        ]
+      },
+      {
+        "label": "12",
+        "role": "usb",
+        "gpio": 12,
+        "caps": [
+          {
+            "text": "USB_D-",
+            "kind": "usb"
+          }
+        ]
+      },
+      {
+        "label": "GND",
+        "role": "gnd"
+      },
+      {
+        "label": "NC",
+        "role": "nc"
+      },
+      {
+        "label": "NC",
+        "role": "nc"
+      }
     ]
   }
 }

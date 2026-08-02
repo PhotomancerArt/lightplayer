@@ -155,6 +155,15 @@ Use `reserved_reason` for known-dangerous or unavailable resources:
 }
 ```
 
+## Facts, not reviews
+
+Display copy (`blurb`, notes) states what a board IS — chip, form factor,
+notable hardware — never how it ranks or feels. No "best", "easiest",
+"clean choice", no claims about testing cadence that the tier system
+doesn't already carry. Opinionated review content may come later as its
+own clearly-labeled surface; the catalog is a spec sheet. (Ratified at the
+firmware-manifest G2 gate, 2026-08-02.)
+
 ## Omit what you cannot verify
 
 A wrong GPIO number is a physical-damage class of mistake, not a logic error.
