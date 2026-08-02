@@ -200,6 +200,22 @@ compile working set (below), so a 17 KB one cannot compile at any region size.
 The code region was never the binding constraint for those shaders; the heap
 was, and this trade moves 64 KiB to the side that binds.
 
+⚠️ **That last argument is the one thing here with a moving dependency.** It
+rests on the ~65 KB compile working set, and PR #284 shrinks that figure:
+`ChunkedVec` was bounding chunks in *elements* (64), so a 96-byte `HirExpr`
+gave 6,144 B chunks with a 9,216 B peak across the doubling step; at
+`CHUNK_BYTES = 1024` those become 960 B and 1,440 B. If the transient falls far
+enough that a 17 KB-GLSL shader becomes compilable, then for *that* shader the
+32 KiB region really would be the binding constraint, and this paragraph would
+need revisiting rather than merely re-baselining.
+
+Two reasons not to treat that as urgent: the corpus guard in
+`tests/xt_classic_codemem_corpus.rs` fails on the host the moment a real shader
+outgrows the region, so the failure mode is a red CI rather than a surprise on
+a board; and the reclaim's *value* argument only strengthens as the transient
+shrinks (less transient plus more heap). Re-derive the ~65 KB with #284 in
+before quoting it again.
+
 Verified on silicon: the JIT arena's span accounting closes exactly across a
 project swap (`allocs=2 frees=1 spans=1 used=2032`, `largest_free` back to
 `32768 − 2032` unfragmented), so spans are returned, not leaked.
