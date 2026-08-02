@@ -241,13 +241,32 @@ predicted. The `DisplayPipeline` saving cannot appear there (that type is not in
 the emulator image); it is covered by a unit test asserting both buffers are
 zero-length when their option is off.
 
-> ⚠️ **The post-change figure has NOT been re-measured on silicon.** The desk
-> classic was held by another session's `espflash flash --monitor` throughout
-> this work and was not touched. Predicted ≈76.5 B/LED and a ceiling near 235
-> LEDs, but **treat the ceiling line above as the current quotable number until
-> a board measurement replaces this note** — the whole point of this ADR is that
-> LED counts are quoted from measured RAM, and 76.5 is arithmetic, not a
-> measurement.
+> ⚠️ **The post-change figure has NOT been re-measured on silicon.** Predicted
+> ≈76.5 B/LED and a ceiling near 235 LEDs, but **treat the ceiling line above as
+> the current quotable number until a board measurement replaces this note** —
+> the whole point of this ADR is that LED counts are quoted from measured RAM,
+> and 76.5 is arithmetic, not a measurement.
+>
+> Two things blocked it, both worth knowing before the next attempt:
+>
+> 1. **The desk classic was in a recovery-red state from another session.** It
+>    reported `last run crashed (oom) … alloc 720 bytes failed`, and the node
+>    was `disabled after 3 crashes`. Clearing that ledger is a power-on-class
+>    wipe which would have destroyed the other session's evidence, so the board
+>    was left exactly as found.
+> 2. **A `load_project` bracket does not capture the per-LED cost.** Measured on
+>    the board: `quad-strips-v3` (120 LEDs) costs **53,052 B** across load
+>    (101,704 → 48,652 B free). But `direct_points`, the graphics sample
+>    buffers, and `DisplayPipeline` are all allocated at *tick*/output-open
+>    time, not load time. The per-LED figure has to come from **steady-state**
+>    free heap with the project actually rendering — which is what the original
+>    18,128 B / 7,384 B two-point measurement did.
+>
+> Byte-precision `[mem]` logging was added on this branch so the next attempt
+> can difference the two points without ±8 B/LED of KB rounding. What is still
+> missing is a byte-precision *steady-state* readout: the heartbeat carries
+> `free_bytes` on the wire but every display of it (CLI and `[mem]` logs) is
+> KB-granular.
 
 ### Radio, if it is ever attempted
 
