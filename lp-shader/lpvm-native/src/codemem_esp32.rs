@@ -98,15 +98,78 @@ pub struct CodeRegion {
 }
 
 impl CodeRegion {
-    /// The classic-ESP32 default: D-bus `0x3FFE_8000` + 92 KiB, I-bus image
-    /// `0x400A_1000..0x400B_8000`. Chosen inside esp-hal's `dram2_seg` free
-    /// span and clear of the ROM data/stack reservations lower in SRAM1;
-    /// hardware-proven by the experiment repo's payload runner, and modeled
-    /// exactly by `lp-xt-emu`'s `BoardProfile::esp32()`.
+    /// The classic-ESP32 default: D-bus `0x3FFE_8000` + **32 KiB**, I-bus
+    /// image `0x400B_0000..0x400B_8000`. Sits inside esp-hal's `dram2_seg`
+    /// free span and clear of the ROM data/stack reservations lower in SRAM1
+    /// (the last of them, `reserved_rom_stack_app`, ends exactly at
+    /// `dram2_seg`'s origin `0x3FFE_7E30`); hardware-proven by the experiment
+    /// repo's payload runner, and modeled exactly by `lp-xt-emu`'s
+    /// `BoardProfile::esp32()`.
+    ///
+    /// # Why 32 KiB and not the original 92 KiB
+    ///
+    /// The 92 KiB was picked as "a comfortable span", never measured, and it
+    /// was expensive: this region is the sole reason `dram2_seg` cannot join
+    /// the heap, on a chip whose entire heap is 110 KB and whose measured
+    /// binding constraint is a ~65 KB *compile working set*
+    /// (`docs/adr/2026-08-01-esp32v3-flash-budget.md`).
+    ///
+    /// `tests/xt_classic_codemem_corpus.rs` measures the real cost by
+    /// compiling every shader in `examples/` and `projects/` through the
+    /// device's own pipeline:
+    ///
+    /// | figure | measured |
+    /// |---|---|
+    /// | largest single shader (`examples/basic`) | 6,108 B |
+    /// | mean over 27 shaders | 3,129 B |
+    /// | worst real project (`fyeah-button`, 2 shaders) | 9,800 B |
+    /// | + one keep-last-good recompile copy | **15,908 B** |
+    ///
+    /// 15,908 B is the peak model, because `shader_node.rs` holds the old
+    /// program while the new one compiles. 32 KiB is **2.06×** that, and
+    /// **5.4×** the largest single real shader — so a user shader five times
+    /// larger than anything in this repo still compiles. The remaining
+    /// 64 KiB goes to the heap (`fw-esp32v3`'s `main.rs`).
+    ///
+    /// Nothing here is a hard bound: a shader is unbounded in principle, and
+    /// [`CodeMemError::TooLarge`] is the real backstop — a project whose
+    /// shader will not fit fails *that node* with a compile error while
+    /// keep-last-good keeps the previous program rendering. Raising this
+    /// number is a one-line change if the corpus ever demands it, and the
+    /// corpus test is what will say so.
     pub const ESP32_DEFAULT: CodeRegion = CodeRegion {
         dbus_base: 0x3FFE_8000,
-        len_bytes: 0x0001_7000,
+        len_bytes: 0x0000_8000,
     };
+
+    /// D-bus end (exclusive) of `dram2_seg`, and so of the span the region is
+    /// carved from: esp-hal's `dram2_seg` is `0x3FFE_7E30 + 98,768 B`, which
+    /// ends exactly at SRAM1's top.
+    ///
+    /// Everything between [`CodeRegion::dbus_end`] and here is what the
+    /// firmware may hand to the allocator as a second heap region — see
+    /// [`CodeRegion::reclaimable_heap_span`].
+    pub const ESP32_DRAM2_END: u32 = 0x4000_0000;
+
+    /// The `(base, len)` of SRAM1 this region leaves over for the heap: from
+    /// the region's D-bus end up to [`CodeRegion::ESP32_DRAM2_END`].
+    ///
+    /// This exists so the boundary the firmware must respect is *computed
+    /// from* the region rather than restated beside it. The two were prose
+    /// warnings in two files before (a ⚠️ in `main.rs` and one in the flash
+    /// budget ADR), which is exactly the arrangement that lets a region
+    /// change silently hand the allocator and the JIT the same bytes.
+    #[must_use]
+    pub const fn reclaimable_heap_span(&self) -> (u32, u32) {
+        let base = self.dbus_base + self.len_bytes;
+        (base, Self::ESP32_DRAM2_END - base)
+    }
+
+    /// D-bus end (exclusive) of the region.
+    #[must_use]
+    pub const fn dbus_end(&self) -> u32 {
+        self.dbus_base + self.len_bytes
+    }
 
     /// I-bus address of byte 0 of the region's executable image — the
     /// *lowest* I-bus address, which under the mirrored rule is the image of
@@ -153,13 +216,24 @@ impl CodeRegion {
 // Pin the default so a change that breaks emulator parity is loud; the
 // emulator's classic profile derives 0x400A_1000 from the same numbers
 // (cross-checked against `lp-xt-emu` itself in `tests/xt_classic_profile.rs`).
-const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x400A_1000);
+const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x400B_0000);
 const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_end() == 0x400B_8000);
 // The mirror rule round-trips at both region ends.
 const _: () = {
     let r = CodeRegion::ESP32_DEFAULT;
     assert!(r.dbus_write_addr(r.ibus_base()) == r.dbus_base + r.len_bytes - 4);
     assert!(r.dbus_write_addr(r.ibus_end() - 4) == r.dbus_base);
+};
+// The heap span and the code region partition `0x3FFE_8000..0x4000_0000`
+// exactly: they abut, they do not overlap, and nothing between them is lost.
+// This is the invariant the ⚠️ in `fw-esp32v3/src/main.rs` used to assert in
+// prose — a shrink that forgets to move the heap boundary cannot compile.
+const _: () = {
+    let r = CodeRegion::ESP32_DEFAULT;
+    let (heap_base, heap_len) = r.reclaimable_heap_span();
+    assert!(heap_base == r.dbus_end());
+    assert!(heap_base + heap_len == CodeRegion::ESP32_DRAM2_END);
+    assert!(heap_len == 0x0001_0000); // 64 KiB returned to the allocator
 };
 
 /// Where installed words go. The device implementation writes through the
