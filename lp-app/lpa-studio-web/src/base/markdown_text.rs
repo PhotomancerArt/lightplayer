@@ -37,8 +37,9 @@ pub fn MarkdownText(text: String) -> Element {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum MdNode {
     Paragraph(Vec<MdNode>),
-    /// Any heading level; all render as one demoted strong style.
-    Heading(Vec<MdNode>),
+    /// A heading with its source level. Chat rendering demotes every
+    /// level to one small strong style; docs rendering keeps the levels.
+    Heading { level: u8, children: Vec<MdNode> },
     Text(String),
     Strong(Vec<MdNode>),
     Emphasis(Vec<MdNode>),
@@ -76,7 +77,7 @@ struct Frame {
 
 enum FrameKind {
     Paragraph,
-    Heading,
+    Heading { level: u8 },
     Strong,
     Emphasis,
     Strikethrough,
@@ -143,7 +144,7 @@ impl TreeBuilder {
         let children = frame.children;
         match frame.kind {
             FrameKind::Paragraph => self.push(MdNode::Paragraph(children)),
-            FrameKind::Heading => self.push(MdNode::Heading(children)),
+            FrameKind::Heading { level } => self.push(MdNode::Heading { level, children }),
             FrameKind::Strong => self.push(MdNode::Strong(children)),
             FrameKind::Emphasis => self.push(MdNode::Emphasis(children)),
             FrameKind::Strikethrough => self.push(MdNode::Strikethrough(children)),
@@ -211,7 +212,9 @@ impl TreeBuilder {
 fn frame_kind(tag: Tag<'_>) -> FrameKind {
     match tag {
         Tag::Paragraph => FrameKind::Paragraph,
-        Tag::Heading { .. } => FrameKind::Heading,
+        Tag::Heading { level, .. } => FrameKind::Heading {
+            level: level as u8,
+        },
         Tag::Strong => FrameKind::Strong,
         Tag::Emphasis => FrameKind::Emphasis,
         Tag::Strikethrough => FrameKind::Strikethrough,
@@ -239,12 +242,54 @@ fn safe_href(href: &str) -> bool {
 
 // -- rendering ------------------------------------------------------------
 
+/// Markdown rendered as a docs article: same parser and hardening as
+/// [`MarkdownText`] (untrusted posture stays — escaped HTML, scheme
+/// allowlist, no `dangerous_inner_html`), but headings keep their levels
+/// with real docs styling instead of the chat demotion.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn MarkdownDocs(text: String) -> Element {
+    let nodes = parse_markdown(&text);
+    rsx! {
+        div { class: "tw:min-w-0 tw:max-w-[72ch] tw:break-words tw:text-sm tw:leading-relaxed",
+            for (index, node) in nodes.iter().enumerate() {
+                Fragment { key: "{index}", {render_docs_node(node)} }
+            }
+        }
+    }
+}
+
+/// Docs-mode node rendering: headings get level styles; every other node
+/// shares the chat mapping (headings never nest inside those in practice).
+fn render_docs_node(node: &MdNode) -> Element {
+    match node {
+        MdNode::Heading { level, children } => {
+            let class = docs_heading_class(*level);
+            match level {
+                1 => rsx! { h1 { class: "{class}", {render_children(children)} } },
+                2 => rsx! { h2 { class: "{class}", {render_children(children)} } },
+                _ => rsx! { h3 { class: "{class}", {render_children(children)} } },
+            }
+        }
+        other => render_node(other),
+    }
+}
+
+/// Heading classes by level; deeper than h3 clamps to the h3 style.
+fn docs_heading_class(level: u8) -> &'static str {
+    match level {
+        1 => "tw:m-0 tw:mb-3 tw:text-lg tw:font-bold tw:text-strong-foreground",
+        2 => "tw:m-0 tw:mt-5 tw:mb-2 tw:first:mt-0 tw:text-[15px] tw:font-bold tw:text-heading",
+        _ => "tw:m-0 tw:mt-4 tw:mb-1.5 tw:first:mt-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+    }
+}
+
 fn render_node(node: &MdNode) -> Element {
     match node {
         MdNode::Paragraph(children) => rsx! {
             p { class: "tw:m-0 tw:mb-1.5 tw:last:mb-0", {render_children(children)} }
         },
-        MdNode::Heading(children) => rsx! {
+        MdNode::Heading { children, .. } => rsx! {
             // Demoted heading: a small strong block, never h1-h6 chrome.
             p { class: "tw:m-0 tw:mt-2 tw:mb-1 tw:first:mt-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
                 {render_children(children)}
@@ -331,14 +376,24 @@ mod tests {
     }
 
     #[test]
-    fn headings_demote_to_one_style() {
-        for source in ["# Title", "### Title"] {
+    fn headings_keep_their_level_in_the_tree() {
+        for (source, level) in [("# Title", 1), ("### Title", 3)] {
             let nodes = parse_markdown(source);
             assert_eq!(
                 nodes,
-                vec![MdNode::Heading(vec![MdNode::Text("Title".into())])]
+                vec![MdNode::Heading {
+                    level,
+                    children: vec![MdNode::Text("Title".into())]
+                }]
             );
         }
+    }
+
+    #[test]
+    fn docs_heading_classes_step_down_by_level() {
+        // h1 is the article title; deeper levels step down and clamp.
+        assert_ne!(docs_heading_class(1), docs_heading_class(2));
+        assert_eq!(docs_heading_class(4), docs_heading_class(6));
     }
 
     #[test]
@@ -441,7 +496,7 @@ mod tests {
             nodes.iter().any(|node| match node {
                 MdNode::Text(text) => text.contains(needle),
                 MdNode::Paragraph(c)
-                | MdNode::Heading(c)
+                | MdNode::Heading { children: c, .. }
                 | MdNode::Strong(c)
                 | MdNode::Emphasis(c)
                 | MdNode::Strikethrough(c)
