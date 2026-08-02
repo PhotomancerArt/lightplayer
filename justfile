@@ -6,7 +6,7 @@ rv32_target := "riscv32imac-unknown-none-elf"
 rv32_packages := "lps-builtins-emu-app"
 rv32_firmware_packages := "fw-esp32c6"
 
-# fw-esp32c6 uses release-esp32 (panic=unwind, nightly) for panic recovery
+# fw-esp32c6 uses release-esp32 (nightly, for -Zbuild-std)
 
 fw_esp32c6_profile := "release-esp32"
 fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp32c6"
@@ -559,7 +559,7 @@ build-rv32: install-rv32-target build-rv32-builtins build-fw-esp32c6 build-rv32-
 
 build-rv32-release: build-rv32
 
-# riscv32: fw-esp32c6 (uses release-esp32 profile: nightly + panic=unwind for OOM recovery)
+# riscv32: fw-esp32c6 (uses release-esp32 profile: nightly for -Zbuild-std)
 build-fw-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
 
@@ -1263,7 +1263,7 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     set -euo pipefail
     cd lp-fw/fw-esp32c6
     for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
-                   test_usb test_json test_oom test_msafluid test_fluid_demo \
+                   test_usb test_json test_msafluid test_fluid_demo \
                    test_jit_math_perf test_shader_compile_incremental; do
         echo "==> fw-esp32c6 harness: $feature"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
@@ -1691,10 +1691,6 @@ calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
 # Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
 fwtest-json-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
-
-# Run firmware with test_oom: allocates until OOM, verifies catch_unwind recovers
-fwtest-oom-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo run --features test_oom,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_msafluid: MSAFluid solver perf experiment, prints mcycle per step
 fwtest-msafluid-esp32c6: install-rv32-target

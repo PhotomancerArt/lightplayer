@@ -16,7 +16,6 @@ extern crate alloc;
 
 use core::alloc::Layout;
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 // The build's self-description, embedded as a scannable blob (extracted by
 // `lp-cli firmware show` and reported on ServerHello in M4). Feature truth
@@ -44,160 +43,24 @@ lpc_model::lp_embed_manifest_core! {
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
 }
 
-const OOM_STATE_NORMAL: u8 = 0;
-const OOM_STATE_UNWINDING: u8 = 1;
-const OOM_STATE_RECURSIVE: u8 = 2;
-
-static OOM_STATE: AtomicU8 = AtomicU8::new(OOM_STATE_NORMAL);
-static OOM_ALLOC_SIZE: AtomicUsize = AtomicUsize::new(0);
-static OOM_ALLOC_ALIGN: AtomicUsize = AtomicUsize::new(0);
-static OOM_FREE_BYTES: AtomicUsize = AtomicUsize::new(0);
-static OOM_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
-
-/// Custom panic handler that starts stack unwinding via the `unwinding` crate.
-///
-/// In no_std, `panic!()` routes directly to `#[panic_handler]` — there is no automatic
-/// unwinding step. We must explicitly call `begin_panic` to start unwinding so that
-/// `catch_unwind` (used for panic recovery in node render) can catch panics.
-///
-/// Before unwinding, a crash breadcrumb is staged into the `lp-recovery` persistent
-/// region (zero-alloc). If no `catch_unwind` catches the panic, the breadcrumb is
-/// committed and the device reboots via `software_reset` (see `fatal_reset_or_hang`);
-/// the next boot reads the region and reports what crashed. See the crate `recovery`
-/// module and `docs/adr/2026-07-04-crash-recovery-model.md`.
+/// Abort-tier panic handler: stage a breadcrumb into the RTC ledger, commit
+/// it, report on serial, reset. See `recovery::panic_path` for why the ledger
+/// is written before anything is printed, and for what the unwinding-tier
+/// handler that used to live here cost.
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
-    esp_println::println!("\n\n====================== PANIC ======================");
-    esp_println::println!("{info}");
-    print_panic_frames();
-    esp_println::println!();
-
-    // Stage a breadcrumb in the persistent recovery region NOW (zero-alloc):
-    // if unwinding fails or the device hangs mid-unwind, the next boot can
-    // still report what happened. Layer-1 recovery voids it on catch.
-    stage_recovery_crash(info);
-
-    if is_esp_sync_reentrant_lock_panic(info) {
-        esp_println::println!(
-            "fatal: esp-sync lock reentry while panicking; aborting without heap allocation"
-        );
-        fatal_reset_or_hang();
-    }
-
-    OOM_STATE.store(OOM_STATE_NORMAL, Ordering::Relaxed);
-    fatal_reset_or_hang();
+    recovery::panic_path::stage_and_reset(info)
 }
 
-/// Stage the panic into the recovery breadcrumb region. Zero-alloc; a no-op
-/// when no recovery global is installed (test builds, pre-init panics).
-fn stage_recovery_crash(info: &PanicInfo) {
-    let is_oom = OOM_STATE.load(Ordering::Relaxed) == OOM_STATE_UNWINDING;
-    let cause = if is_oom {
-        lp_recovery::CrashCause::Oom
-    } else {
-        lp_recovery::CrashCause::Panic
-    };
-    let oom = is_oom.then(|| lp_recovery::OomStats {
-        requested: OOM_ALLOC_SIZE.load(Ordering::Relaxed) as u32,
-        align: OOM_ALLOC_ALIGN.load(Ordering::Relaxed) as u32,
-        free: OOM_FREE_BYTES.load(Ordering::Relaxed) as u32,
-        used: OOM_USED_BYTES.load(Ordering::Relaxed) as u32,
-    });
-    let location = info.location().map(|loc| (loc.file(), loc.line()));
-    let mut frames = [0u32; lpc_shared::backtrace::MAX_FRAMES];
-    let count = lpc_shared::backtrace::capture_frames(&mut frames);
-    let message = info.message();
-    lp_recovery::stage_crash(cause, &message, location, &frames[..count], oom);
-}
-
-/// Dead-end failure: commit the staged breadcrumb and reset. When a
-/// recovery global is installed (real firmware boots), this diverges via
-/// `software_reset`; otherwise (test features, panics before recovery
-/// init) it preserves the old hang-in-place behavior so dev boards don't
-/// boot-loop.
-fn fatal_reset_or_hang() -> ! {
-    let _ = lp_recovery::finalize_crash_and_reset();
-    loop {}
-}
-
-fn is_esp_sync_reentrant_lock_panic(info: &PanicInfo) -> bool {
-    info.location()
-        .is_some_and(|loc| loc.file().contains("esp-sync/src/lib.rs"))
-}
-
-fn print_panic_frames() {
-    let mut frames = [0; lpc_shared::backtrace::MAX_FRAMES];
-    let count = lpc_shared::backtrace::capture_frames(&mut frames);
-    if count == 0 {
-        return;
-    }
-
-    esp_println::print!("frames:");
-    for frame in frames.iter().take(count) {
-        esp_println::print!(" 0x{:08x}", frame);
-    }
-    esp_println::println!();
-    esp_println::print!("decode: just decode-backtrace");
-    for frame in frames.iter().take(count) {
-        esp_println::print!(" 0x{:08x}", frame);
-    }
-    esp_println::println!();
-}
-
-/// Custom OOM handler that panics normally so catch_unwind can recover.
-/// The default alloc_error_handler uses nounwind panic and cannot be caught.
+/// Allocation failure: record it as an `Oom` with the heap counters attached.
+///
+/// Rust's default handler panics, which the handler above would catch — but by
+/// then the request size is only a formatted string and the free/used numbers
+/// are gone. "How much was left, and was it in one piece" is the question an
+/// OOM report has to answer, so it gets its own path.
 #[alloc_error_handler]
 fn on_alloc_error(layout: Layout) -> ! {
-    if OOM_STATE
-        .compare_exchange(
-            OOM_STATE_NORMAL,
-            OOM_STATE_UNWINDING,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        )
-        .is_err()
-    {
-        OOM_STATE.store(OOM_STATE_RECURSIVE, Ordering::Relaxed);
-        esp_println::println!("\n\n====================== OOM ======================");
-        esp_println::println!(
-            "allocation failed while building OOM panic payload: requested={} align={} original_requested={} original_free={} original_used={}",
-            layout.size(),
-            layout.align(),
-            OOM_ALLOC_SIZE.load(Ordering::Relaxed),
-            OOM_FREE_BYTES.load(Ordering::Relaxed),
-            OOM_USED_BYTES.load(Ordering::Relaxed),
-        );
-        lp_recovery::stage_crash(
-            lp_recovery::CrashCause::Oom,
-            &"recursive OOM while building panic payload",
-            None,
-            &[],
-            Some(lp_recovery::OomStats {
-                requested: layout.size() as u32,
-                align: layout.align() as u32,
-                free: OOM_FREE_BYTES.load(Ordering::Relaxed) as u32,
-                used: OOM_USED_BYTES.load(Ordering::Relaxed) as u32,
-            }),
-        );
-        fatal_reset_or_hang();
-    }
-
-    let free = esp_alloc::HEAP.free();
-    let used = esp_alloc::HEAP.used();
-    OOM_ALLOC_SIZE.store(layout.size(), Ordering::Relaxed);
-    OOM_ALLOC_ALIGN.store(layout.align(), Ordering::Relaxed);
-    OOM_FREE_BYTES.store(free, Ordering::Relaxed);
-    OOM_USED_BYTES.store(used, Ordering::Relaxed);
-    esp_println::println!("\n\n====================== OOM ======================");
-    esp_println::println!(
-        "allocation failed: requested={} align={} free={} used={} context={}",
-        layout.size(),
-        layout.align(),
-        free,
-        used,
-        lpc_shared::backtrace::oom_context().unwrap_or("<unset>"),
-    );
-    panic!("memory allocation of {} bytes failed", layout.size());
+    recovery::panic_path::stage_oom_and_reset(layout)
 }
 
 mod board;
@@ -357,34 +220,6 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     crate::logger::init(serial::io_task::log_write_to_outgoing);
 
     log::info!("[fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)");
-
-    #[cfg(feature = "test_oom")]
-    {
-        // Test 1: simple panic (not OOM) — validates basic unwinding
-        esp_println::println!("[test_oom] Test 1: catching simple panic...");
-        let r1 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
-            panic!("test panic");
-        }));
-        match r1 {
-            Ok(_) => esp_println::println!("[test_oom] Test 1 FAIL: panic was not caught"),
-            Err(_) => esp_println::println!("[test_oom] Test 1 OK: simple panic caught"),
-        }
-
-        // Test 2: OOM inside catch_unwind
-        esp_println::println!("[test_oom] Test 2: catching OOM...");
-        let r2 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
-            let mut vecs: alloc::vec::Vec<alloc::vec::Vec<u8>> = alloc::vec::Vec::new();
-            loop {
-                vecs.push(alloc::vec![0u8; 64 * 1024]);
-            }
-        }));
-        match r2 {
-            Ok(_) => esp_println::println!("[test_oom] Test 2 FAIL: did not OOM"),
-            Err(_) => esp_println::println!("[test_oom] Test 2 OK: OOM caught, recovery works"),
-        }
-
-        esp_println::println!("[test_oom] Tests complete, continuing boot...");
-    }
 
     // Create serial transport. Project-read responses stream through io_task;
     // small messages use the simpler full-message serializer.
