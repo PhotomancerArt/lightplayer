@@ -98,15 +98,113 @@ pub struct CodeRegion {
 }
 
 impl CodeRegion {
-    /// The classic-ESP32 default: D-bus `0x3FFE_8000` + 92 KiB, I-bus image
-    /// `0x400A_1000..0x400B_8000`. Chosen inside esp-hal's `dram2_seg` free
-    /// span and clear of the ROM data/stack reservations lower in SRAM1;
-    /// hardware-proven by the experiment repo's payload runner, and modeled
-    /// exactly by `lp-xt-emu`'s `BoardProfile::esp32()`.
+    /// The classic-ESP32 default: D-bus `0x3FFE_8000` + **32 KiB**, I-bus
+    /// image `0x400B_0000..0x400B_8000`. Sits inside esp-hal's `dram2_seg`
+    /// free span and clear of the ROM data/stack reservations lower in SRAM1
+    /// (the last of them, `reserved_rom_stack_app`, ends exactly at
+    /// `dram2_seg`'s origin `0x3FFE_7E30`); hardware-proven by the experiment
+    /// repo's payload runner, and modeled exactly by `lp-xt-emu`'s
+    /// `BoardProfile::esp32()`.
+    ///
+    /// # Why 32 KiB and not the original 92 KiB
+    ///
+    /// The 92 KiB was picked as "a comfortable span", never measured, and it
+    /// was expensive: this region is the sole reason `dram2_seg` cannot join
+    /// the heap, on a chip whose entire heap is 110 KB and whose measured
+    /// binding constraint is a ~65 KB *compile working set*
+    /// (`docs/adr/2026-08-01-esp32v3-flash-budget.md`).
+    ///
+    /// `tests/xt_classic_codemem_corpus.rs` measures the real cost by
+    /// compiling every shader in `examples/` and `projects/` through the
+    /// device's own pipeline, at the device's own settings (Q32, fuel on):
+    ///
+    /// | figure | measured |
+    /// |---|---|
+    /// | largest single shader (`examples/basic`) | 6,516 B |
+    /// | mean over 27 shaders | 3,348 B |
+    /// | worst real project (`fyeah-button`, 2 shaders) | 10,260 B |
+    /// | + one keep-last-good recompile copy | **16,776 B** |
+    ///
+    /// Those are device figures, not a host estimate of them: the classic
+    /// reported 2,444 B for `examples/shader-oracle` and M3 measured 2,032 B
+    /// for `quad-strips-v3`, and the test reproduces both exactly.
+    ///
+    /// 16,776 B is the peak model, because `shader_node.rs` holds the old
+    /// program while the new one compiles ("Old + new coexist for the
+    /// compile duration"). 32 KiB is **1.95×** that, **5.03×** the largest
+    /// single real shader — a user shader five times larger than anything in
+    /// this repo still compiles — and about **9.8 shaders at the corpus
+    /// mean**. The remaining 64 KiB goes to the heap (`fw-esp32v3`'s
+    /// `main.rs`).
+    ///
+    /// What 32 KiB gives up honestly: the old 92 KiB could hold the entire
+    /// 27-shader corpus at once (90,400 B). This cannot. No project in the
+    /// repo has more than two shader nodes, and the heap those bytes buy is
+    /// the chip's actual binding constraint, so that is the trade taken.
+    ///
+    /// Nothing here is a hard bound: a shader is unbounded in principle, and
+    /// [`CodeMemError::TooLarge`] is the real backstop — a project whose
+    /// shader will not fit fails *that node* with a compile error while
+    /// keep-last-good keeps the previous program rendering. Raising this
+    /// number is a one-line change if the corpus ever demands it, and the
+    /// corpus test is what will say so.
     pub const ESP32_DEFAULT: CodeRegion = CodeRegion {
         dbus_base: 0x3FFE_8000,
-        len_bytes: 0x0001_7000,
+        len_bytes: 0x0000_8000,
     };
+
+    /// D-bus end (exclusive) of `dram2_seg`, and so of the span the region is
+    /// carved from: esp-hal's `dram2_seg` is `0x3FFE_7E30 + 98,768 B`, which
+    /// ends exactly at SRAM1's top.
+    ///
+    /// Everything between [`CodeRegion::dbus_end`] and here is what the
+    /// firmware may hand to the allocator as a second heap region — see
+    /// [`CodeRegion::reclaimable_heap_span`].
+    pub const ESP32_DRAM2_END: u32 = 0x4000_0000;
+
+    /// D-bus origin of esp-hal's `dram2_seg`. Below this address SRAM1 holds
+    /// the ROM's data and per-core stacks (`reserved_rom_data_pro/app`,
+    /// `reserved_rom_stack_pro/app`), the last of which ends exactly here.
+    pub const ESP32_DRAM2_BASE: u32 = 0x3FFE_7E30;
+
+    /// The `(base, len)` of SRAM1 this region leaves over for the heap: from
+    /// the region's D-bus end up to [`CodeRegion::ESP32_DRAM2_END`].
+    ///
+    /// This exists so the boundary the firmware must respect is *computed
+    /// from* the region rather than restated beside it. The two were prose
+    /// warnings in two files before (a ⚠️ in `main.rs` and one in the flash
+    /// budget ADR), which is exactly the arrangement that lets a region
+    /// change silently hand the allocator and the JIT the same bytes.
+    ///
+    /// # Panics
+    /// If the region does not start inside `dram2_seg`. The result feeds an
+    /// `unsafe esp_alloc::HeapRegion::new`, so answering for a region placed
+    /// lower in SRAM1 would hand the allocator the ROM's stacks and data —
+    /// memory the ROM still uses after boot, whose corruption would present
+    /// as an unattributable fault far from here. Refusing is the only safe
+    /// answer, and in the `ESP32_DEFAULT` case it is checked at compile time
+    /// by the const-assert below.
+    #[must_use]
+    pub const fn reclaimable_heap_span(&self) -> (u32, u32) {
+        assert!(
+            self.dbus_base >= Self::ESP32_DRAM2_BASE,
+            "code region starts below dram2_seg — its leftover span would \
+             include the ROM's data/stack reservations, which must never \
+             reach the allocator"
+        );
+        let base = self.dbus_base + self.len_bytes;
+        assert!(
+            base <= Self::ESP32_DRAM2_END,
+            "code region ends above SRAM1"
+        );
+        (base, Self::ESP32_DRAM2_END - base)
+    }
+
+    /// D-bus end (exclusive) of the region.
+    #[must_use]
+    pub const fn dbus_end(&self) -> u32 {
+        self.dbus_base + self.len_bytes
+    }
 
     /// I-bus address of byte 0 of the region's executable image — the
     /// *lowest* I-bus address, which under the mirrored rule is the image of
@@ -153,13 +251,42 @@ impl CodeRegion {
 // Pin the default so a change that breaks emulator parity is loud; the
 // emulator's classic profile derives 0x400A_1000 from the same numbers
 // (cross-checked against `lp-xt-emu` itself in `tests/xt_classic_profile.rs`).
-const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x400A_1000);
+const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x400B_0000);
 const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_end() == 0x400B_8000);
 // The mirror rule round-trips at both region ends.
 const _: () = {
     let r = CodeRegion::ESP32_DEFAULT;
     assert!(r.dbus_write_addr(r.ibus_base()) == r.dbus_base + r.len_bytes - 4);
     assert!(r.dbus_write_addr(r.ibus_end() - 4) == r.dbus_base);
+};
+// The heap span and the code region partition `0x3FFE_8000..0x4000_0000`
+// exactly: they abut, they do not overlap, and nothing between them is lost.
+// This is the invariant the ⚠️ in `fw-esp32v3/src/main.rs` used to assert in
+// prose — a shrink that forgets to move the heap boundary cannot compile.
+const _: () = {
+    let r = CodeRegion::ESP32_DEFAULT;
+    let (heap_base, heap_len) = r.reclaimable_heap_span();
+    assert!(heap_base == r.dbus_end());
+    assert!(heap_base + heap_len == CodeRegion::ESP32_DRAM2_END);
+    assert!(heap_len == 0x0001_0000); // 64 KiB returned to the allocator
+};
+// The reclaimed span must not be able to ABUT the `dram_seg` arena, which is
+// the firmware's other heap region. Adjacent regions are indistinguishable
+// from one region to any tool that recovers the free list by address
+// contiguity — `fw-esp32v3`'s `free_list_shape` walks runs exactly that way,
+// and two abutting regions would merge into one run whose reported `largest`
+// names a block no single allocation can ever get. `dram_seg` ends at
+// `0x3FFE_0000`; `dram2_seg` starts 32,304 B above it, and the region can
+// only be carved from `dram2_seg`, so a gap always exists. Asserted rather
+// than assumed because this file is where the boundary moves.
+const _: () = {
+    const DRAM_SEG_END: u32 = 0x3FFE_0000;
+    let (heap_base, _) = CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
+    assert!(
+        heap_base > DRAM_SEG_END,
+        "SRAM1 heap span could abut the arena"
+    );
+    assert!(CodeRegion::ESP32_DRAM2_BASE > DRAM_SEG_END);
 };
 
 /// Where installed words go. The device implementation writes through the
@@ -252,6 +379,44 @@ pub struct CodeArena {
     region: CodeRegion,
     /// Sorted, non-adjacent free spans as `(ibus_base, len)`.
     free: Vec<(u32, u32)>,
+    stats: ArenaStats,
+}
+
+/// Residency counters for the arena — the numbers that decide how big the
+/// region actually has to be.
+///
+/// `peak_used` is the high-water mark of *concurrent* residency, which is the
+/// only figure a region size may be derived from: total-ever-allocated says
+/// nothing when spans are recycled, and instantaneous `used` misses the peak
+/// between two heartbeats.
+///
+/// `allocs`/`frees` exist to answer the span-leak question directly rather
+/// than by inference. A workload that returns to idle with
+/// `allocs == frees` and `live_spans == 0` has leaked nothing; a Studio
+/// editing loop whose `allocs` climbs while `frees` does not is leaking a
+/// slice of the region per recompile, and that must be fixed *before* the
+/// region is shrunk — otherwise the shrink only converts a slow leak into a
+/// fast one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ArenaStats {
+    /// Bytes currently reserved (word-rounded, so this is what the region
+    /// actually has to hold — not the callers' unrounded byte lengths).
+    pub used: u32,
+    /// High-water mark of [`ArenaStats::used`] since boot.
+    pub peak_used: u32,
+    /// Spans currently reserved.
+    pub live_spans: u32,
+    /// High-water mark of [`ArenaStats::live_spans`] since boot.
+    pub peak_spans: u32,
+    /// Successful [`CodeArena::alloc`] calls since boot.
+    pub allocs: u32,
+    /// [`CodeArena::free`] calls since boot.
+    pub frees: u32,
+    /// [`CodeArena::alloc`] calls that failed with
+    /// [`CodeMemError::TooLarge`] — a nonzero value here means the region is
+    /// too small for the workload that ran, and is the signal that a shrink
+    /// went too far.
+    pub alloc_failures: u32,
 }
 
 impl CodeArena {
@@ -261,7 +426,14 @@ impl CodeArena {
         Self {
             free: alloc::vec![(region.ibus_base(), region.len_bytes)],
             region,
+            stats: ArenaStats::default(),
         }
+    }
+
+    /// Residency counters — see [`ArenaStats`].
+    #[must_use]
+    pub fn stats(&self) -> ArenaStats {
+        self.stats
     }
 
     #[must_use]
@@ -299,9 +471,15 @@ impl CodeArena {
                 } else {
                     self.free[i] = (base + need, flen - need);
                 }
+                self.stats.used += need;
+                self.stats.peak_used = self.stats.peak_used.max(self.stats.used);
+                self.stats.live_spans += 1;
+                self.stats.peak_spans = self.stats.peak_spans.max(self.stats.live_spans);
+                self.stats.allocs += 1;
                 return Ok(base);
             }
         }
+        self.stats.alloc_failures += 1;
         Err(CodeMemError::TooLarge {
             requested: len,
             largest_free: self.largest_free(),
@@ -319,6 +497,9 @@ impl CodeArena {
                 && ibus_base % 4 == 0,
             "freeing span {ibus_base:#x}+{need:#x} outside the arena"
         );
+        self.stats.used = self.stats.used.saturating_sub(need);
+        self.stats.live_spans = self.stats.live_spans.saturating_sub(1);
+        self.stats.frees += 1;
         let idx = self
             .free
             .iter()
@@ -376,6 +557,18 @@ pub mod global {
     #[must_use]
     pub fn installed() -> bool {
         !ARENA.load(Ordering::SeqCst).is_null()
+    }
+
+    /// Residency counters for the installed arena, plus its `largest_free`.
+    ///
+    /// `None` when no arena is installed or one is mid-compile — a reporting
+    /// path (the heartbeat) must never block or alias the compiler's `&mut`,
+    /// and a skipped sample is worth nothing lost when the next one is 5 s
+    /// away. Note that `used`/`peak_used` are word-rounded reservation
+    /// totals, so they are the figures a region size may be derived from.
+    #[must_use]
+    pub fn stats() -> Option<(super::ArenaStats, u32)> {
+        with(|arena| (arena.stats(), arena.largest_free())).ok()
     }
 
     /// Run `f` with exclusive access to the arena.
@@ -448,12 +641,43 @@ mod tests {
     fn default_region_is_the_runner_region() {
         let r = CodeRegion::ESP32_DEFAULT;
         r.validate();
-        assert_eq!(r.ibus_base(), 0x400A_1000);
+        // 32 KiB at D-bus 0x3FFE_8000 since 2026-08-02 (was 92 KiB, I-bus
+        // base 0x400A_1000). The D-bus base is unchanged, so shrinking moved
+        // the I-bus BASE up while the I-bus END stayed put — that asymmetry
+        // is the mirror, and it is the thing most worth pinning here.
+        assert_eq!(r.ibus_base(), 0x400B_0000);
         assert_eq!(r.ibus_end(), 0x400B_8000);
         // Word 0 writes through the D-bus LAST word; the last word writes
         // through the D-bus base — the descending walk.
-        assert_eq!(r.dbus_write_addr(r.ibus_base()), 0x3FFF_EFFC);
+        assert_eq!(r.dbus_write_addr(r.ibus_base()), 0x3FFE_FFFC);
         assert_eq!(r.dbus_write_addr(r.ibus_end() - 4), 0x3FFE_8000);
+    }
+
+    /// The heap span and the code region tile `0x3FFE_8000..0x4000_0000`
+    /// without gap or overlap — the property `fw-esp32v3` relies on when it
+    /// hands the leftover to `esp_alloc`.
+    #[test]
+    fn reclaimable_heap_span_abuts_the_region() {
+        let r = CodeRegion::ESP32_DEFAULT;
+        let (base, len) = r.reclaimable_heap_span();
+        assert_eq!(base, r.dbus_end());
+        assert_eq!(base, 0x3FFF_0000);
+        assert_eq!(len, 64 * 1024);
+        assert_eq!(base + len, CodeRegion::ESP32_DRAM2_END);
+        // Nothing of the region is inside the heap span.
+        assert!(r.dbus_base + r.len_bytes <= base);
+    }
+
+    /// A region below `dram2_seg` must refuse to name a heap span rather than
+    /// offer one that contains the ROM's stacks and data.
+    #[test]
+    #[should_panic(expected = "below dram2_seg")]
+    fn reclaimable_heap_span_refuses_a_region_over_the_rom_reservations() {
+        let rogue = CodeRegion {
+            dbus_base: SRAM1_DRAM_BASE, // 0x3FFE_0000 — ROM data lives here
+            len_bytes: 0x1000,
+        };
+        let _ = rogue.reclaimable_heap_span();
     }
 
     struct MapSink(alloc::collections::BTreeMap<u32, u32>);
@@ -527,6 +751,55 @@ mod tests {
         a.free(s3, 16);
         assert_eq!(a.available(), a.capacity());
         assert_eq!(a.largest_free(), a.capacity());
+    }
+
+    /// The counters the region-sizing decision rests on: `peak_used` survives
+    /// the frees that follow it (an instantaneous `used` would not), and a
+    /// balanced workload returns to zero live spans — which is exactly the
+    /// shape "no leak" has on the device.
+    #[test]
+    fn stats_track_peak_and_return_to_zero_when_balanced() {
+        let mut a = CodeArena::new(CodeRegion::ESP32_DEFAULT);
+        // Two concurrent modules, then a third after the first is freed:
+        // peak is the 2-module moment, not the 3-alloc total.
+        let s1 = a.alloc(2_032).unwrap(); // word-rounds to 2_032
+        let s2 = a.alloc(2_030).unwrap(); // word-rounds to 2_032
+        assert_eq!(a.stats().used, 4_064);
+        assert_eq!(a.stats().live_spans, 2);
+        a.free(s1, 2_032);
+        let s3 = a.alloc(1_000).unwrap();
+        assert_eq!(a.stats().used, 3_032);
+        // Peak is remembered across the free.
+        assert_eq!(a.stats().peak_used, 4_064);
+        assert_eq!(a.stats().peak_spans, 2);
+
+        a.free(s2, 2_030);
+        a.free(s3, 1_000);
+        let st = a.stats();
+        assert_eq!(st.used, 0, "balanced workload leaks nothing");
+        assert_eq!(st.live_spans, 0);
+        assert_eq!(st.allocs, 3);
+        assert_eq!(st.frees, 3);
+        assert_eq!(st.alloc_failures, 0);
+        assert_eq!(st.peak_used, 4_064, "peak survives the drain");
+        // And the arena really is whole again.
+        assert_eq!(a.available(), a.capacity());
+    }
+
+    /// A failed `alloc` is counted and changes nothing else — the shrink's
+    /// safety net has to be visible in the telemetry, not only in the error.
+    #[test]
+    fn stats_count_alloc_failures_without_disturbing_residency() {
+        let mut a = CodeArena::new(CodeRegion::ESP32_DEFAULT);
+        let s = a.alloc(64).unwrap();
+        assert!(a.alloc(a.capacity()).is_err());
+        let st = a.stats();
+        assert_eq!(st.alloc_failures, 1);
+        assert_eq!(st.allocs, 1, "a failure is not an alloc");
+        assert_eq!(st.used, 64);
+        assert_eq!(st.live_spans, 1);
+        a.free(s, 64);
+        assert_eq!(a.stats().used, 0);
     }
 
     #[test]
