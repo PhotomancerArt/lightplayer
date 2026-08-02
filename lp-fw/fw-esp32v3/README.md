@@ -113,28 +113,31 @@ sequencing stays in `lp-ws281x`, whose host suite (`cargo test -p lp-ws281x`)
 is the regression net; this crate adds no trait surface
 (ADR `2026-07-31-lp-ws281x-multi-channel-driver-adoption`).
 
-### Two blocks per channel, and where the four outputs come from
+### The block plan, and where the four outputs come from
 
-`BLOCKS_PER_CHANNEL = 2` (a compile-time constant in `v3_rmt.rs`, not a
-config surface). The classic has eight RMT channels of 64 words each; a
-channel that takes two blocks **absorbs its neighbour's**, so exactly four
-slots — `0, 2, 4, 6` — own memory, with 128-word windows halving into
-64-word (80 µs) refill deadlines.
+The RMT block plan is **computed at driver init from the board manifest's
+declared `/rmt/ws281xK` count** (`v3_rmt::plan_for_declared`): each declared
+channel gets `floor(8 / count)` of the chip's eight 64-word blocks, capped at
+four (`tx_lim` is 9 bits — a 512-word window cannot be expressed). The
+DOM-Z-102's four declared channels get two blocks each — slots `0, 2, 4, 6`
+own memory, with 128-word windows halving into 64-word (80 µs) refill
+deadlines, the exact split the old `BLOCKS_PER_CHANNEL = 2` constant
+produced. A one-channel manifest gets a 256-word window (160 µs deadlines).
 
-That is not a taste call. The classic's *delivered* interrupt rate saturates
-around 48 k/s regardless of demand (experiment `findings.md` §12 — this is the
-root cause of the equal-start truncation defect, and staggering does not fix
-it). At one block per channel each busy output demands 25 k refills/s, so the
-chip runs out at **two**. Two blocks halves the demand to 12.5 k/s and should
-reach four — but 4 × 12.5 k = 50 k against a ~48 k ceiling is *marginal
-arithmetic, not a measurement*. Validating it on silicon is M4-P3.
+Two blocks for four outputs is not a taste call. The classic's *delivered*
+interrupt rate saturates around 48 k/s regardless of demand (experiment
+`findings.md` §12 — this is the root cause of the equal-start truncation
+defect, and staggering does not fix it). At one block per channel each busy
+output demands 25 k refills/s, so the chip runs out at **two**. Two blocks
+halves the demand to 12.5 k/s and reaches four — validated on silicon at
+G-M4, re-baselined with telemetry in the RMT-priority plan's P4.
 
 **Absorbed slots are skipped by construction.** Manifest channel `K`
-(`/rmt/ws281xK`) resolves to RMT slot `K * SLOT_STRIDE` via
-`v3_rmt::slot_for_index`, and the channel-creation loop only ever hands
-esp-hal a slot that owns memory. The experiment harness did *not* do this —
-it kept asking for channels 0,1,2,3 and got `MemoryBlockNotAvailable` for the
-odd ones, which is why its `BLOCKS_PER_CHANNEL=2` configuration never ran.
+(`/rmt/ws281xK`) resolves to the plan's `K`-th available slot, and the
+channel-creation loop only ever hands esp-hal a slot that owns memory. The
+experiment harness did *not* do this — it kept asking for channels 0,1,2,3
+and got `MemoryBlockNotAvailable` for the odd ones, which is why its
+two-block configuration never ran.
 
 Channel **count** comes from the board manifest and nowhere else: the
 DOM-Z-102 declares four `/rmt/ws281xK` resources, and the endpoints offered
@@ -164,6 +167,41 @@ Off by default so the shipping image spends nothing on it: the module is
 `cfg`'d out and the call site becomes an empty `#[inline(always)]` fn — not
 even the timer read survives. `just clippy-fw-esp32v3` lints the feature on,
 so it cannot rot.
+
+### Frame dump (`--features frame-dump`, off by default)
+
+The other tap on the same write path, answering a different question: not
+"did the refills keep up?" but "were the pixels *right*?". A `frame-dump`
+build prints one full hex dump per channel after open or resize, then a
+checksum-and-lit-count summary about once a second:
+
+```
+[OUT] open endpoint=… bytes=192 leds=64 (frame-dump build)
+[OUT] dump frame=1 leds=64 shown=64 crc=0x55772254 rgb=324a0208…
+[OUT] frame=60 leds=64 crc=0x55772254 lit=64 first=(50,74,2) (8,55,106) …
+```
+
+Those line shapes are a **byte-for-byte port of `fw-esp32s3`'s**, deliberately:
+`scripts/m4-hardware-walk.sh` and `lp-app/lpa-server/tests/shader_oracle_frame.rs`
+parse both chips' transcripts with no per-chip branch, and the walk's whole
+claim is that the two hex strings are equal. Change a format string here and
+you must change it in all three places.
+
+This is the M7 FINAL-gate instrument — "a shader compiles on-device into the
+fixed SRAM1 code region and renders bit-exactly vs the host oracle". Run it
+once the board is free:
+
+```bash
+just ci-prereqs                              # the oracle's rv32 engine needs this
+scripts/m4-hardware-walk.sh --chip esp32     # or: ... --chip esp32 /dev/cu.wchusbserialNNNN
+```
+
+The walk flashes with `frame-dump`, pushes `examples/shader-oracle` (retargeted
+from the XIAO's `D10` pad to this board's `IO18` — an endpoint picks a wire, not
+a colour), reflashes to watch the device compile and render it, and diffs the
+device's `rgb=` against the host's. Off by default for the same reason the
+telemetry is: hex-formatting frames costs render time and floods the 921600-baud
+UART0 the transport is also using. `just clippy-fw-esp32v3` lints it on.
 
 ## DRAM budget
 

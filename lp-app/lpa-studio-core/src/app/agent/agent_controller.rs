@@ -495,7 +495,9 @@ impl AgentController {
     ) {
         for section in sections {
             match section {
-                UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => {
+                UiNodeSection::AssetSlots(slots)
+                | UiNodeSection::ConfigSlots(slots)
+                | UiNodeSection::DebugSlots(slots) => {
                     self.decorate_slots(slots, runtime, ctx);
                 }
                 _ => {}

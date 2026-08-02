@@ -11,9 +11,9 @@
 //! Ported from this project's own classic-ESP32 experiment firmware
 //! (`2026-esp32s3-experiment`, `fw/led-lab-esp32/src/esp32_rmt.rs` @ `b1dff8f`),
 //! which ran the loopback, soak and channel-count-sweep suites on this exact
-//! chip. The adaptation is packaging — crate paths, a fixed
-//! [`BLOCKS_PER_CHANNEL`] instead of the harness's `option_env!`, and the
-//! removal of the harness-only RAM probe — not redesign.
+//! chip. The adaptation is packaging — crate paths, a manifest-derived block
+//! plan ([`plan_for_declared`]) instead of the harness's `option_env!`, and
+//! the removal of the harness-only RAM probe — not redesign.
 //!
 //! Register derivation sources (license-safe, in the order they settled each
 //! question): esp-hal 1.1.1 `src/rmt.rs` `chip_specific` module for
@@ -42,8 +42,8 @@
 //!   `rx_en` was. This backend drives channels `0..TX_CHANNELS` as
 //!   transmitters and never touches the rest.
 //! * **64-word blocks** (`rmt.channel_ram_size` = 64) → 32-word halves at one
-//!   block per channel, 64-word halves at the two this firmware ships. The
-//!   bit-cursor core handles either split untouched.
+//!   block per channel, 64-word halves at the two a four-channel manifest
+//!   gets. The bit-cursor core handles any split untouched.
 //! * **Per-channel `CHnCONF0`/`CHnCONF1`** instead of the S3's single
 //!   `CH_TX_CONF0`: divider/memsize/idle-threshold live in CONF0; start/reset
 //!   /owner/idle-output bits in CONF1. There is **no `conf_update`** — writes
@@ -72,115 +72,78 @@
 //!   the window extends into, exactly as esp-hal's classic `start_tx` does.
 //! * `CHnSTATUS.mem_raddr_ex` is 10 bits (max 1023 — wide enough for all 512
 //!   words, the tell that it is an absolute offset) and `CH_TX_LIM.tx_lim` is
-//!   9 bits (max 511; a full 8-block window of 512 words would not fit, so an
-//!   all-blocks-on-one-channel plan is rejected by the width mask — not a
-//!   configuration this firmware uses).
+//!   9 bits (max 511; a full 8-block window of 512 words would not fit, which
+//!   is why [`MAX_BLOCKS_PER_CHANNEL`] caps every plan at four blocks).
 
 use esp_hal::peripherals::RMT;
-use lp_ws281x::{BlockPlan, InterruptFlags, RmtHw};
+use lp_ws281x::{BlockPlan, InterruptFlags, RmtHw, SharedBlockPlan};
 
 /// RMT channels the classic ESP32 has, all of which can transmit.
 ///
 /// This is the **hardware** count, not the output count: how many of these
-/// slots are usable at once is [`BLOCKS_PER_CHANNEL`]'s decision, and how many
-/// are *offered* is the board manifest's (ADR
-/// `2026-07-31-lp-ws281x-multi-channel-driver-adoption`). See
-/// [`USABLE_CHANNELS`].
+/// slots are usable at once is the block plan's decision, and how many are
+/// *offered* is the board manifest's (ADR
+/// `2026-07-31-lp-ws281x-multi-channel-driver-adoption`).
 pub const TX_CHANNELS: usize = 8;
 
 /// Words in one classic-ESP32 RMT memory block (`rmt.channel_ram_size`).
 pub const BLOCK_WORDS: usize = 64;
 
-/// Memory blocks given to each transmitting channel — **two**, i.e. 128-word
-/// windows halving into 64-word ping-pong halves.
+/// Widest window any one channel may take, in blocks.
 ///
-/// This is the compile-time answer to the classic's ISR-throughput ceiling and
-/// the reason this firmware offers four outputs rather than eight.
+/// **Four, because of `tx_lim`'s width, not preference**: the threshold
+/// register is 9 bits (max 511), and the driver core arms it with the full
+/// window size at every other crossing — a 512-word all-blocks window would
+/// mask to 0 and never fire. Four blocks (256 words) is the widest
+/// expressible power-of-two split, and its 128-word halves already relax the
+/// refill deadline to ~160 µs.
+pub const MAX_BLOCKS_PER_CHANNEL: u8 = 4;
+
+/// The block plan, computed once at driver init from the number of WS281x
+/// channels the board manifest declares ([`plan_for_declared`]) and read by
+/// the backend, the drivers and the interrupt handler from then on.
 ///
-/// From the experiment's `findings.md` §12 (the root cause of the "equal-start"
-/// defect): the delivered RMT interrupt rate on this chip flatlines at roughly
-/// **46–55 k/s regardless of demand** — it is a throughput ceiling, not a
-/// latency problem, and staggering frame starts does not move it. A
-/// continuously transmitting channel demands `800_000 / half_words` refills per
-/// second, so
+/// Fail-closed: until a driver publishes a plan, every channel reads as
+/// unavailable and nothing can transmit.
+pub static TX_PLAN: SharedBlockPlan<TX_CHANNELS> = SharedBlockPlan::new();
+
+/// The plan for a board manifest declaring `declared` WS281x channels, or
+/// `None` for a board with none: `floor(8 / channels)` consecutive blocks
+/// each, capped at [`MAX_BLOCKS_PER_CHANNEL`].
+///
+/// The DOM-Z-102's four declared channels get two blocks each —
+/// `[2, 0, 2, 0, 2, 0, 2, 0]`, the exact plan the old compile-time constant
+/// produced, so the shipped board's windows, interrupt demand and stress
+/// baselines are unchanged. Fewer declared channels widen the windows (one
+/// strip gets a 256-word window); more than four get one block each, which
+/// the experiment's `findings.md` §12 measured as truncating from channel 3
+/// up — the chip's ISR-throughput ceiling (~46–55 k interrupts/s regardless
+/// of demand) sits right at that demand curve:
 ///
 /// ```text
 ///   blocks  half_words  demand/channel  channels under a ~48 k/s ceiling
 ///   1       32          25 000/s        2   (measured: truncation from ch 3 up)
 ///   2       64          12 500/s        ~4  (arithmetic; MARGINAL — 50 k vs 48 k)
-///   4       128          6 250/s        ~2  (only two slots exist at 4 blocks)
+///   4       128          6 250/s        ~2  (only two windows exist at 4 blocks)
 /// ```
 ///
-/// Two blocks is the only setting that reaches four outputs at all, and its
-/// four-channel margin is thin enough that it is a *prediction* until silicon
-/// says otherwise — which is exactly what P3 of this milestone measures. The
-/// experiment's `BLOCKS_PER_CHANNEL` was an `option_env!` because a sweep
-/// harness varied it; here it is a plain constant, because firmware ships one
-/// value and an env-driven constant is a stale-binary trap (`option_env!` does
-/// not make cargo rebuild — the roadmap lost a run to that once already).
-///
-/// Raising it trades outputs for headroom, lowering it trades headroom for
-/// outputs that then truncate; either way [`TX_BLOCKS`] and
-/// [`USABLE_CHANNELS`] follow automatically and the driver offers a different
-/// number of endpoints. See [`lp_ws281x::BlockPlan`].
-pub const BLOCKS_PER_CHANNEL: u8 = 2;
-
-/// The TX-side allocation of RMT memory blocks, validated at compile time.
-///
-/// The *same* value is handed to the driver and to [`V3Rmt`], so window sizes
-/// can never disagree. At the shipped [`BLOCKS_PER_CHANNEL`] this is
-/// `[2, 0, 2, 0, 2, 0, 2, 0]`.
-pub const TX_BLOCKS: BlockPlan<TX_CHANNELS> = match BlockPlan::uniform(BLOCKS_PER_CHANNEL) {
-    Ok(plan) => plan,
-    Err(_) => panic!("BLOCKS_PER_CHANNEL does not divide the classic ESP32's RMT memory blocks"),
-};
-
-/// Spacing between usable channel slots.
-///
-/// A channel given `n` blocks absorbs the next `n-1` channels' blocks, so with
-/// two blocks each only slots **0, 2, 4, 6** can be configured — slots 1, 3, 5
-/// and 7 have no memory of their own and asking esp-hal to configure one fails
-/// with `ConfigError::MemoryBlockNotAvailable` (the experiment harness did
-/// exactly that, which is why its `BLOCKS_PER_CHANNEL=2` config never ran).
-/// Manifest channel `k` therefore drives RMT slot `k * SLOT_STRIDE`; see
-/// [`slot_for_index`].
-pub const SLOT_STRIDE: usize = BLOCKS_PER_CHANNEL as usize;
-
-/// How many RMT slots the block plan leaves transmittable — the ceiling on the
-/// number of WS281x endpoints this chip can back, whatever the manifest says.
-pub const USABLE_CHANNELS: usize = TX_CHANNELS / SLOT_STRIDE;
-
-/// The RMT slot backing manifest channel `index` (`/rmt/ws281x<index>`), or
-/// `None` when the block plan has no slot for it.
-///
-/// This is the whole of the absorbed-slot fix: callers enumerate *manifest*
-/// channels `0..USABLE_CHANNELS` and get back only slots the plan marks
-/// available, so an absorbed slot is never handed to `configure_tx` in the
-/// first place. The `is_available` check is belt-and-braces — with a uniform
-/// plan the stride already lands on owners — and keeps this honest under a
-/// hand-written non-uniform plan.
-pub const fn slot_for_index(index: usize) -> Option<u8> {
-    let slot = index * SLOT_STRIDE;
-    if slot >= TX_CHANNELS {
+/// A manifest that declares more channels than its strips need is therefore
+/// paying real margin for phantom outputs — the manifest is the tuning knob
+/// now, which is the point: it is the sole authority on channel count.
+pub fn plan_for_declared(declared: usize) -> Option<BlockPlan<TX_CHANNELS>> {
+    if declared == 0 {
         return None;
     }
-    let slot = slot as u8;
-    if TX_BLOCKS.is_available(slot) {
-        Some(slot)
-    } else {
-        None
-    }
+    let channels = declared.min(TX_CHANNELS);
+    let blocks_each = ((TX_CHANNELS / channels) as u8).min(MAX_BLOCKS_PER_CHANNEL);
+    // Validated by the `for_channels` tests in `lp-ws281x`; cannot fail for
+    // 1..=8 channels at a capped width.
+    BlockPlan::for_channels(channels, blocks_each).ok()
 }
 
-/// RAM words a channel owns under [`TX_BLOCKS`], for the channels that have
-/// any. Reported in the driver's boot line so a serial log says what refill
-/// deadline the run was measured against (`CHANNEL_WORDS / 2` words per half,
-/// 1.25 µs per word at 800 kHz).
-pub const CHANNEL_WORDS: usize = BLOCK_WORDS * BLOCKS_PER_CHANNEL as usize;
-
-/// Total RAM claimed by the TX-side plan, in words — the bound every pointer
-/// here respects. All eight blocks belong to transmitters on this chip (there
-/// are no receive-only channels), so this is the whole 512-word RMT RAM.
+/// Total RMT RAM, in words — the bound every pointer here respects. All eight
+/// blocks belong to transmitters on this chip (there are no receive-only
+/// channels), so this is the whole 512-word RMT RAM.
 const TX_RAM_WORDS: usize = BLOCK_WORDS * TX_CHANNELS;
 
 /// Byte offset from the RMT peripheral base to the start of RMT RAM.
@@ -219,20 +182,20 @@ const fn tx_event_mask(ch: u8) -> u32 {
     int_tx_end_bit(ch) | int_err_bit(ch) | int_thr_bit(ch)
 }
 
-/// Pointer to word `word_idx` of channel `ch`'s RAM window under `blocks`, or
-/// `None` if either index is out of range.
+/// Pointer to word `word_idx` of channel `ch`'s RAM window under [`TX_PLAN`],
+/// or `None` if either index is out of range.
 ///
 /// The bounds check costs one compare per word on the refill path and buys a
 /// handler that can never scribble outside the RMT RAM, whatever the caller
-/// does. With `blocks_per_channel > 1` the window spans several blocks, which
-/// is why the size comes from the plan rather than from a constant.
+/// does. A multi-block window spans its neighbours' blocks, which is why the
+/// size comes from the plan rather than from a constant.
 #[inline(always)]
-fn ram_word(blocks: &BlockPlan<TX_CHANNELS>, ch: u8, word_idx: usize) -> Option<*mut u32> {
-    if word_idx >= blocks.window_words(ch, BLOCK_WORDS) {
+fn ram_word(ch: u8, word_idx: usize) -> Option<*mut u32> {
+    if word_idx >= TX_PLAN.window_words(ch, BLOCK_WORDS) {
         // Covers an out-of-range or absorbed channel too: both have no window.
         return None;
     }
-    let index = blocks.window_start(ch, BLOCK_WORDS) + word_idx;
+    let index = TX_PLAN.window_start(ch, BLOCK_WORDS) + word_idx;
     if index >= TX_RAM_WORDS {
         return None;
     }
@@ -245,38 +208,29 @@ fn ram_word(blocks: &BlockPlan<TX_CHANNELS>, ch: u8, word_idx: usize) -> Option<
 
 /// The seven register operations `lp-ws281x` needs, on the classic ESP32.
 ///
-/// Carries only the memory-block plan: everything else it addresses is
-/// memory-mapped, so it is `const`-constructible and can live in a `static`
-/// shared with the interrupt handler.
-#[derive(Debug, Clone, Copy)]
-pub struct V3Rmt {
-    blocks: BlockPlan<TX_CHANNELS>,
-}
+/// Carries no state at all — the memory-block plan lives in [`TX_PLAN`] and
+/// everything else it addresses is memory-mapped — so it is
+/// `const`-constructible and can live in a `static` shared with the
+/// interrupt handler.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct V3Rmt;
 
 impl V3Rmt {
-    /// A backend handle for `blocks`. Touches no hardware.
-    ///
-    /// Pass the same plan to [`lp_ws281x::Ws281xDriver::with_blocks`].
-    pub const fn new(blocks: BlockPlan<TX_CHANNELS>) -> Self {
-        Self { blocks }
-    }
-}
-
-impl Default for V3Rmt {
-    fn default() -> Self {
-        Self::new(TX_BLOCKS)
+    /// A backend handle. Touches no hardware; reads [`TX_PLAN`].
+    pub const fn new() -> Self {
+        Self
     }
 }
 
 impl RmtHw for V3Rmt {
     #[inline]
     fn ram_words(&self, ch: u8) -> usize {
-        self.blocks.window_words(ch, BLOCK_WORDS)
+        TX_PLAN.window_words(ch, BLOCK_WORDS)
     }
 
     #[inline]
     fn write_ram(&self, ch: u8, word_idx: usize, value: u32) {
-        let Some(ptr) = ram_word(&self.blocks, ch, word_idx) else {
+        let Some(ptr) = ram_word(ch, word_idx) else {
             return;
         };
         // SAFETY: `ram_word` returned an in-range, naturally aligned pointer
@@ -318,7 +272,7 @@ impl RmtHw for V3Rmt {
         // request smaller than a half (the core never makes one today) is
         // passed through, so the test hook that suppresses a threshold still
         // behaves as written.
-        let half = (self.blocks.window_words(ch, BLOCK_WORDS) / 2) as u16;
+        let half = (TX_PLAN.window_words(ch, BLOCK_WORDS) / 2) as u16;
         let period = if half == 0 { words } else { words.min(half) };
         // A note on what was tried here, so it is not tried again blind.
         // Writing `CH_TX_LIM` restarts the channel's entry counter, so the
@@ -341,7 +295,7 @@ impl RmtHw for V3Rmt {
 
     #[inline]
     fn read_pos(&self, ch: u8) -> u16 {
-        let window = self.blocks.window_words(ch, BLOCK_WORDS);
+        let window = TX_PLAN.window_words(ch, BLOCK_WORDS);
         if window == 0 {
             return 0;
         }
@@ -355,7 +309,7 @@ impl RmtHw for V3Rmt {
         // (`CHnSTATUS` here, `CH_TX_STATUS` there); esp-hal's classic
         // `hw_offset()` subtracts the same term. The modulo keeps a reading
         // taken mid-wrap inside the window instead of panicking or aliasing.
-        let base = self.blocks.window_start(ch, BLOCK_WORDS) as u16;
+        let base = TX_PLAN.window_start(ch, BLOCK_WORDS) as u16;
         absolute.wrapping_sub(base) % window as u16
     }
 
@@ -384,7 +338,7 @@ impl RmtHw for V3Rmt {
         // blocks; each of those blocks is owned via its own channel's
         // `mem_owner` bit, so hand every one of them to the transmitter —
         // esp-hal's classic `start_tx` does exactly this dance.
-        for extra in 1..self.blocks.blocks(ch) {
+        for extra in 1..TX_PLAN.blocks(ch) {
             rmt.chconf1(idx + extra as usize)
                 .modify(|_, w| w.mem_owner().clear_bit());
         }
@@ -417,8 +371,8 @@ impl RmtHw for V3Rmt {
         // all-zero word is the STOP marker, so this doubles as leaving the
         // channel in the safest possible state — and it is harmless on an
         // already-idle channel, which the driver's cleanup path relies on.
-        for word in 0..self.blocks.window_words(ch, BLOCK_WORDS) {
-            if let Some(ptr) = ram_word(&self.blocks, ch, word) {
+        for word in 0..TX_PLAN.window_words(ch, BLOCK_WORDS) {
+            if let Some(ptr) = ram_word(ch, word) {
                 // SAFETY: in-range, aligned RMT RAM pointer from `ram_word`;
                 // volatile because the transmitter reads this memory
                 // concurrently — that race is the mechanism, not a hazard: an
@@ -515,9 +469,9 @@ pub fn enable_tx_interrupts(ch: u8) {
 ///
 /// An all-zero word is the STOP marker, so this leaves the channel in the
 /// safest possible state: whatever happens, the transmitter stops at word 0.
-pub fn clear_ram(blocks: &BlockPlan<TX_CHANNELS>, ch: u8) {
-    for word in 0..blocks.window_words(ch, BLOCK_WORDS) {
-        if let Some(ptr) = ram_word(blocks, ch, word) {
+pub fn clear_ram(ch: u8) {
+    for word in 0..TX_PLAN.window_words(ch, BLOCK_WORDS) {
+        if let Some(ptr) = ram_word(ch, word) {
             // SAFETY: in-range, aligned RMT RAM pointer from `ram_word`;
             // volatile because the transmitter also reads this memory.
             unsafe { ptr.write_volatile(0) };

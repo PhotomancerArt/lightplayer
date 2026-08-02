@@ -36,6 +36,13 @@
 //! greps for `[OUT] dump` and for the `rgb=` token, and
 //! `lp-app/lpa-server/tests/shader_oracle_frame.rs` mirrors them on the host so
 //! the two transcripts line up without either side being sliced by hand.
+//!
+//! ⚠️ There is a **third** copy: `lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs`
+//! is a byte-for-byte port of this module, so the classic ESP32's M7 gate can
+//! reuse the same walk script and the same host comparator with no per-chip
+//! branch. Two firmwares under separate toolchains with no shared chip-side
+//! library, so the duplication is deliberate — but a format string changed here
+//! and not there silently breaks the classic's gate.
 
 use lpc_hardware::HwEndpointId;
 

@@ -354,7 +354,7 @@ fn a_snapshot_carrying_both_an_end_and_a_threshold_serves_both() {
 fn an_absorbed_channel_cannot_be_configured() {
     // Two outputs of two blocks each: channels 1 and 3 no longer exist.
     let plan = BlockPlan::<4>::uniform(2).unwrap();
-    let driver = Ws281xDriver::with_blocks(MockRmt::from_block_plan(&plan, 48), plan);
+    let driver: Ws281xDriver<_, 4> = Ws281xDriver::new(MockRmt::from_block_plan(&plan, 48));
 
     assert_eq!(
         driver.configure_default_clock(1, &ChannelTiming::WS2812),
@@ -375,7 +375,7 @@ fn an_absorbed_channel_cannot_be_configured() {
             .unwrap_or_else(|e| panic!("configure ch{ch}: {e:?}"));
         assert_eq!(driver.hw().ram_words(ch), 96);
     }
-    assert_eq!(driver.block_plan().available_channels(), 2);
+    assert_eq!(plan.available_channels(), 2);
 }
 
 #[test]
@@ -389,7 +389,7 @@ fn a_wider_window_transmits_the_same_frame_with_fewer_refills() {
     let mut refills = Vec::new();
     for blocks in [1u8, 2, 4] {
         let plan = BlockPlan::<4>::uniform(blocks).unwrap();
-        let driver = Ws281xDriver::with_blocks(MockRmt::from_block_plan(&plan, 48), plan);
+        let driver: Ws281xDriver<_, 4> = Ws281xDriver::new(MockRmt::from_block_plan(&plan, 48));
         driver.configure_default_clock(0, &timing).unwrap();
         driver
             .send_blocking(0, &frame, || {
@@ -426,7 +426,7 @@ fn a_wider_window_transmits_the_same_frame_with_fewer_refills() {
 #[test]
 fn a_two_block_channel_still_has_no_cross_talk_with_its_neighbour() {
     let plan = BlockPlan::<4>::new([2, 0, 1, 1]).unwrap();
-    let driver = Ws281xDriver::with_blocks(MockRmt::from_block_plan(&plan, 48), plan);
+    let driver: Ws281xDriver<_, 4> = Ws281xDriver::new(MockRmt::from_block_plan(&plan, 48));
     let timings = [
         ChannelTiming::WS2812,
         ChannelTiming::WS2812,

@@ -59,6 +59,7 @@ impl ControlRadioDef {
 
 /// Runtime control radio state.
 #[derive(Debug, Clone, Default, PartialEq, Slotted)]
+#[slot(default_role = "state")]
 pub struct ControlRadioState {
     /// Accepted local and remote control messages for this tick.
     #[slot(produced, map(key = "u32", value_ref = "lp::control::Message"))]
