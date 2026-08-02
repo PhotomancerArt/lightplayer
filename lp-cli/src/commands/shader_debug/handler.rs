@@ -48,10 +48,18 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     let naga = lps_frontend::compile(&src).context("GLSL parse (Naga)")?;
     let (mut ir, mut sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
 
+    // Parsed before the synth, not after: the synthesised entry decodes its
+    // Q16.16 coordinates differently per mode, so it has to know the mode.
+    let float_mode = match args.float_mode.as_str() {
+        "q32" => FloatMode::Q32,
+        "f32" => FloatMode::F32,
+        _ => anyhow::bail!("invalid --float-mode (use q32 or f32)"),
+    };
+
     let synth_formats = args
         .render_texture_formats()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    apply_render_texture_synth(&mut ir, &mut sig, &synth_formats);
+    apply_render_texture_synth(&mut ir, &mut sig, &synth_formats, float_mode);
 
     if let Err(errs) = validate_module(&ir) {
         anyhow::bail!(
@@ -62,12 +70,6 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
                 .join("\n")
         );
     }
-
-    let float_mode = match args.float_mode.as_str() {
-        "q32" => FloatMode::Q32,
-        "f32" => FloatMode::F32,
-        _ => anyhow::bail!("invalid --float-mode (use q32 or f32)"),
-    };
 
     let mut compiler_config = CompilerConfig::default();
     for opt in &args.opt {
@@ -132,6 +134,7 @@ fn apply_render_texture_synth(
     ir: &mut LpirModule,
     sig: &mut LpsModuleSig,
     formats: &[TextureStorageFormat],
+    float_mode: FloatMode,
 ) {
     if formats.is_empty() {
         return;
@@ -146,7 +149,7 @@ fn apply_render_texture_synth(
     };
 
     for &format in formats {
-        match synthesise_render_texture(ir, sig, render_idx, format) {
+        match synthesise_render_texture(ir, sig, render_idx, format, float_mode) {
             Ok(name) => eprintln!("info: synthesised {name}"),
             Err(SynthError::RenderFunctionMissing) => eprintln!(
                 "info: --render-texture {format:?} skipped (render arity does not match channel count)",
