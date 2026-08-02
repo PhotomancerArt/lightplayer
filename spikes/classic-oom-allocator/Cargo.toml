@@ -1,0 +1,16 @@
+# Deliberately NOT a workspace member: this is an investigation harness, not
+# shipped code, and it should not gate CI. Run it in place:
+#
+#     cd spikes/classic-oom-allocator && cargo test --release
+[package]
+name = "classic-oom-allocator"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Pinned to what `esp-alloc` 0.10 pins, which is what fw-esp32v3 runs. The
+# claims below are about THIS version's `HoleList::split_current`.
+linked_list_allocator = { version = "=0.10.5", default-features = false }
+
+[workspace]
