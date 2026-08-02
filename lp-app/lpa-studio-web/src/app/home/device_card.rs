@@ -295,16 +295,22 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
 }
 
 /// The blank board's SETUP FORM (state-flow model §1-A): the Status tab
-/// IS the form — a prefilled date-default name plus ONE Install button,
-/// no confirm, no separate naming dialog. The name rides the provision
-/// op and stamps at first post-flash contact, so the happy path never
-/// lands on Needs-a-name.
+/// IS the form — the board picker (M5), a prefilled date-default name,
+/// and ONE Install button; no confirm, no separate naming dialog. The
+/// name rides the provision op and stamps at first post-flash contact;
+/// the board choice rides the same op and lands as `/hardware.json`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SetupForm(
+    card_key: String,
     default_name: String,
     /// OtherFirmware wears replacing copy; a blank board installing copy.
     replaces: bool,
+    /// The core-owned board pick (`CardUiState::setup_board`); `None` =
+    /// the generic fallback.
+    setup_board: Option<String>,
+    /// Chip identity from passive/probe evidence — matching boards lead.
+    detected_chip: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut name = use_signal(|| default_name.clone());
@@ -313,8 +319,92 @@ fn SetupForm(
     } else {
         "Install firmware"
     };
+    let boards = provisionable_boards();
+    let detected = detected_chip.as_deref().map(normalize_chip);
+    // SoC-lead: boards matching the detected chip first; the rest fold
+    // behind a disclosure. Unknown chip ⇒ everything leads.
+    let (matching, other): (Vec<&'static lpa_boards::BoardDisplayFile>, Vec<_>) = boards
+        .iter()
+        .partition(|board| detected.as_deref() == Some(normalize_chip(&board.family).as_str()));
+    let unknown_chip = detected.is_none();
+    let leading = if unknown_chip {
+        boards.clone()
+    } else {
+        matching
+    };
+    let folded = if unknown_chip { Vec::new() } else { other };
+    let mut show_folded = use_signal(|| false);
+    let submit_board = setup_board.clone();
+
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-2",
+            div {
+                label { class: "tw:mb-1 tw:block tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                    "Board"
+                    if let Some(chip) = &detected_chip {
+                        span { class: "tw:ml-1.5 tw:font-normal tw:normal-case tw:text-subtle-foreground",
+                            "detected: {chip}"
+                        }
+                    }
+                }
+                div { class: "tw:grid tw:gap-1",
+                    for board in leading {
+                        BoardPickRow {
+                            board: board.clone(),
+                            selected: setup_board.as_deref() == Some(board.board_id.as_str()),
+                            tag: (!unknown_chip).then_some("matches detected chip"),
+                            on_action,
+                            card_key: card_key.clone(),
+                        }
+                    }
+                    // The generic fallback: keep the compiled-in pin map.
+                    button {
+                        class: if setup_board.is_none() {
+                            "tw:flex tw:w-full tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-accent tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-left"
+                        } else {
+                            "tw:flex tw:w-full tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border tw:px-2 tw:py-1.5 tw:text-left tw:hover:border-strong"
+                        },
+                        onclick: {
+                            let card_key = card_key.clone();
+                            move |_| {
+                                on_action.call(home_action(HomeOp::CardUi(
+                                    CardUiOp::SelectSetupBoard {
+                                        card: card_key.clone(),
+                                        board_id: None,
+                                    },
+                                )));
+                            }
+                        },
+                        span { class: "tw:text-sm tw:text-strong-foreground", "Generic board" }
+                        span { class: "tw:text-xs tw:text-subtle-foreground",
+                            "keep the firmware's default pin map"
+                        }
+                    }
+                    if !folded.is_empty() {
+                        button {
+                            class: "tw:w-full tw:rounded-md tw:px-2 tw:py-1 tw:text-left tw:text-xs tw:text-subtle-foreground tw:hover:text-strong-foreground",
+                            onclick: move |_| show_folded.set(!show_folded()),
+                            if show_folded() {
+                                "▾ hide boards that don't match the detected chip"
+                            } else {
+                                "▸ {folded.len()} more (don't match the detected chip)"
+                            }
+                        }
+                        if show_folded() {
+                            for board in folded {
+                                BoardPickRow {
+                                    board: board.clone(),
+                                    selected: setup_board.as_deref()
+                                        == Some(board.board_id.as_str()),
+                                    tag: None,
+                                    on_action,
+                                    card_key: card_key.clone(),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             div {
                 label { class: "tw:mb-1 tw:block tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
                     "Device name"
@@ -336,7 +426,7 @@ fn SetupForm(
                             ControllerId::new(DeviceController::NODE_ID),
                             DeviceOp::ProvisionFirmware {
                                 setup_name,
-                                board_id: None,
+                                board_id: submit_board.clone(),
                             },
                         ));
                     },
@@ -347,6 +437,82 @@ fn SetupForm(
             }
         }
     }
+}
+
+/// One pickable board: thumbnail (the same renderer as everywhere), name,
+/// SoC — selection is core-owned card state, so it survives re-renders
+/// and tab switches.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BoardPickRow(
+    board: lpa_boards::BoardDisplayFile,
+    selected: bool,
+    #[props(default)] tag: Option<&'static str>,
+    on_action: EventHandler<UiAction>,
+    card_key: String,
+) -> Element {
+    let board_id = board.board_id.clone();
+    rsx! {
+        button {
+            class: if selected {
+                "tw:flex tw:w-full tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-accent tw:bg-terminal tw:px-2 tw:py-1 tw:text-left"
+            } else {
+                "tw:flex tw:w-full tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-border tw:px-2 tw:py-1 tw:text-left tw:hover:border-strong"
+            },
+            onclick: move |_| {
+                on_action.call(home_action(HomeOp::CardUi(CardUiOp::SelectSetupBoard {
+                    card: card_key.clone(),
+                    board_id: Some(board_id.clone()),
+                })));
+            },
+            span { class: "tw:flex tw:w-12 tw:flex-none tw:items-center tw:justify-center",
+                lpa_boards::BoardDiagram {
+                    board: board.clone(),
+                    mode: lpa_boards::DiagramMode::Plain,
+                    scale: 0.24,
+                    labels: false,
+                }
+            }
+            span { class: "tw:min-w-0 tw:flex-1",
+                span { class: "tw:block tw:truncate tw:text-sm tw:text-strong-foreground",
+                    "{board.display_name}"
+                }
+                span { class: "tw:block tw:text-[0.65rem] tw:text-subtle-foreground",
+                    "{board.soc}"
+                    if let Some(tag) = tag {
+                        span { class: "tw:ml-1.5 tw:text-accent", "· {tag}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Normalize a chip name for family matching: probe answers say
+/// "ESP32-C6", boot banners say "esp32c6", board families say "esp32c6".
+fn normalize_chip(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// The boards the picker offers: a build this deployment SERVES exists for
+/// the board (`SERVED_FIRMWARE_BUILDS` — flashing is real, not aspirational)
+/// AND its runtime manifest is checked in (the `/hardware.json` write needs
+/// the bytes). Display-only catalog boards stay out until both land.
+fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
+    lpa_boards::all_boards()
+        .iter()
+        .filter(|board| {
+            lpa_boards::runtime_manifest_json(&board.board_id).is_some()
+                && lpa_boards::compatible_builds_for(board)
+                    .iter()
+                    .any(|candidate| {
+                        lpa_link::SERVED_FIRMWARE_BUILDS.contains(&candidate.build.id.as_str())
+                    })
+        })
+        .collect()
 }
 
 /// One roster card: the device (or live sim session) as a tabbed control
@@ -983,8 +1149,11 @@ fn status_tab_body(
         }
         if setup_form {
             SetupForm {
+                card_key: card_key.to_string(),
                 default_name: default_setup_name(now_secs),
                 replaces: matches!(card.state, RosterCardState::OtherFirmware),
+                setup_board: card.ui.setup_board.clone(),
+                detected_chip: card.detected_chip.clone(),
                 on_action,
             }
         } else if recovery_face {
