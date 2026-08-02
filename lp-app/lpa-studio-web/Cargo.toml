@@ -92,3 +92,6 @@ syn = { version = "2.0", features = ["full", "parsing"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+lightningcss = { version = "1.0.0-alpha.72", default-features = false }
