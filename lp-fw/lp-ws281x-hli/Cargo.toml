@@ -1,0 +1,29 @@
+# The host-testable half of the classic-ESP32 level-4 RMT refill experiment
+# (`fw-esp32v3` feature `hli_refill`): the exact state layout the hand-written
+# level-4 vector reads, and a pure-Rust model of the algorithm the vector
+# implements, so the algorithm is pinned by host tests and the assembly only
+# has to be proven *equal to the model* on silicon.
+#
+# Deliberately dependency-free: it must compile for `xtensa-esp32-none-elf`
+# under the esp fork (as a dependency of fw-esp32v3) and for the host (where
+# its tests run). `lp-ws281x` appears only as a dev-dependency, as the oracle
+# for the differential test.
+[package]
+name = "lp-ws281x-hli"
+version = "0.1.0"
+# Explicit (not workspace-inherited) for the same reason as lp-ws281x next
+# door: the crate also resolves as a path dependency from the excluded fw/
+# workspaces, which cannot see the root [workspace.package].
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/light-player/lp2025"
+description = "Contract and reference model for the classic-ESP32 level-4 high-priority-interrupt WS281x refill (the HLI experiment)."
+rust-version = "1.86"
+
+[dependencies]
+
+[dev-dependencies]
+lp-ws281x = { path = "../lp-ws281x" }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
