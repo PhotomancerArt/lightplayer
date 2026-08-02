@@ -4405,3 +4405,20 @@ label:has(> input:not(:disabled)) {
     max-height: 46px;
     width: auto;
 }
+
+/* "Copy details" on a failed op: quieter than the exit (which is the ONE
+   way out, model §2 I4) — relaying the failure must never outrank leaving
+   it. */
+.ux-card-op-copy {
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+    cursor: pointer;
+    background: none;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 6px;
+}
+
+.ux-card-op-copy:hover {
+    color: var(--studio-color-text-strong);
+}
