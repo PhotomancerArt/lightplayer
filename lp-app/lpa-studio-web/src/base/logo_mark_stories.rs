@@ -27,7 +27,7 @@ fn lockup() -> Element {
     description = "Marketing lockup (D): the full-rainbow wordmark for website/readme heroes."
 )]
 fn lockup_marketing() -> Element {
-    dark_stage(rsx! { LogoLockup { size: 64, marketing: true } })
+    dark_stage(rsx! { LogoLockup { size: 110, marketing: true } })
 }
 
 #[story(

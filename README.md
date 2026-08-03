@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup-marketing__lg.png" alt="LightPlayer" width="520">
+  <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup-marketing__lg.png" alt="LightPlayer" width="720">
 </p>
 
 LightPlayer is an open platform for LED art: author effects as GLSL shaders in a browser studio,
 preview them in a built-in simulator, and run them on real hardware — where they are JIT-compiled
-to native RISC-V code on the device itself.
+to native code on the device itself.
 
 **Try it now at [lightplayer.app](https://lightplayer.app)** — the Studio runs entirely in your
 browser, and the built-in simulator means you don't need any hardware to start playing.
@@ -15,8 +15,8 @@ browser, and the built-in simulator means you don't need any hardware to start p
 
 **What makes it different:**
 
-- **GLSL, compiled on the device.** A full compiler stack (GLSL → LPIR → native RV32) runs on the
-  microcontroller, executing shaders in Q16.16 fixed point — no floating-point unit required.
+- **GLSL, compiled on the device.** A full compiler stack (GLSL → LPIR → native machine code) runs
+  on the microcontroller, executing shaders in Q16.16 fixed point — no floating-point unit required.
 - **Studio in your browser.** Live previews, node-based project editing, and AI-assisted shader
   authoring (bring your own API key). The built-in simulator runs the real firmware as a WASM
   worker — no hardware needed to try everything.
