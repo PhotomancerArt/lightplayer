@@ -18,6 +18,7 @@
   "lpc_model::nodes::fluid::fluid_def::FluidDef": 2887292794,
   "lpc_model::nodes::fluid::fluid_state::FluidState": 3376641154,
   "lpc_model::nodes::node_def::NodeArtifact": 3831631647,
+  "lpc_model::nodes::output::output_channel_def::OutputChannelDef": 3125801182,
   "lpc_model::nodes::output::output_def::OutputDef": 770241759,
   "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig": 2660578566,
   "lpc_model::nodes::playlist::playlist_def::PlaylistDef": 1520921198,
