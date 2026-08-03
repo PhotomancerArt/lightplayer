@@ -142,6 +142,33 @@ the negative control that proves the feature gate holds.
   shows the compile error. This is a real gap in authoring, recorded as a
   follow-up rather than papered over: an invalid wasm module would have been a
   worse failure than a clear refusal.
+
+  > **⚠️ Dated correction — 2026-08-02. The second clause above is false.** The
+  > decision stands; its stated reason does not, and the text is left in place
+  > rather than rewritten so the record shows what was believed on 2026-08-01.
+  >
+  > The f32 emit path does **not** resolve `@lpfn`/`@glsl` imports to Q32
+  > builtin ids. M5 (PR #224) added `resolve_builtin_id_for_mode` and threaded
+  > `float_mode` through `lpvm-wasm`'s emit path. Measured on `d3ee69f09`:
+  > `wasm.f32` runs **850/850 files, 6,345/6,345, 0 compile-fail**, including
+  > `@glsl` (`builtins/trig-sin.glsl` 10/10) and `@lpfn` (`lpfn/` 89/89).
+  > `wasm.f32`'s absence from `DEFAULT_TARGETS` had the same stale reason and
+  > was a CI-cost question, not a correctness one.
+  >
+  > **The first clause is the true and sufficient one:** the tier's engine is
+  > built Q32, and `supports_float_mode` answers "the mode I was built with".
+  > On the *frame* boundary there is now a second, measured reason on
+  > `rt_wasmtime` — with its guard removed it renders one count low against the
+  > rv32 oracle, the known wasmtime last-bit divergence
+  > (`../defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md`). The browser
+  > tier is unverified rather than known-bad.
+  >
+  > **Why this note exists at all.** The f32 roadmap's G3 review found this
+  > clause stale and deliberately left it, judging a silent amendment worse than
+  > a note in the review artifact. The clause was then cited *from this ADR* by
+  > PR #287 into live source comments and a user-facing Studio error string. An
+  > uncorrected ADR is not inert — it is what the next implementer quotes. Hence
+  > a dated correction in place, which is the form that was always available.
 - **A stub backend must state its tiers.** `CountingGraphics` in `lpc-engine`'s
   tests inherited the one-tier default and answered Q32 for a Float request —
   caught by the new test, which is the same bug shape the tier request exists

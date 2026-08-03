@@ -47,6 +47,27 @@ jobs:
           rustup target add wasm32-unknown-unknown
           rustup target add ${{ env.RISC_V_TARGET }}
 
+      # The site serves an image per chip (lp-fw/builds/served.json), and two
+      # of the three are Xtensa — the S3 and the classic ESP32. Both build
+      # only on Espressif's Rust fork, and their Rust target specs link
+      # through the fork's GNU binutils rather than rust-lld, so the action's
+      # `buildtargets` must name both.
+      #
+      # `default: false`, UNLIKE pre-merge's firmware jobs: this job also
+      # builds host tooling and the wasm bundle on the pinned nightly above,
+      # and making `esp` the default toolchain would break them. The firmware
+      # crates select the fork themselves via their rust-toolchain.toml, and
+      # `lp-cli firmware package` runs cargo in the crate directory.
+      #
+      # Keep the version pin in sync with pre-merge.yml's three copies.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3,esp32
+          default: false
+          ldproxy: false
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:

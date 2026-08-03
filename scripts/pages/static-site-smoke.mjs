@@ -18,6 +18,15 @@ const browserMode = args.browser ?? "optional";
 const serverMode = args.server ?? "required";
 const baseUrl = `http://127.0.0.1:${port}/`;
 
+// The builds the site claims to serve. The provisioning picker offers a
+// board only when one of its compatible builds is in this list, so an id
+// here whose `firmware/<id>/` did not make it into the artifact is a board
+// Studio offers and then 404s on. Same file `lpa-boards` embeds and the
+// justfile packages from — one deployment fact, three readers.
+const servedFirmwareBuilds = JSON.parse(
+  readFileSync(path.join(repoRoot, "lp-fw/builds/served.json"), "utf8"),
+).builds;
+
 const checks = {
   studio: {
     indexNeedle: "assets/lpa-studio-web-",
@@ -29,7 +38,7 @@ const checks = {
       { prefix: "assets/lpa-studio-web_bg-", suffix: ".wasm" },
       "pkg/fw_browser.js",
       "pkg/fw_browser_bg.wasm",
-      "firmware/esp32c6-4mb/manifest.json",
+      ...servedFirmwareBuilds.map((id) => `firmware/${id}/manifest.json`),
       "lpa-link/browser_esp32_device_controller.js",
     ],
   },

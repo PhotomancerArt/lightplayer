@@ -32,10 +32,21 @@ use crate::{
     LinkManagementProgress, LinkRawFilesystemReadResult,
 };
 
-/// Chip this provider flashes. The firmware package targets the ESP32-C6
-/// exclusively (`just studio-firmware-package-esp32c6`); a mismatch surfaces
-/// as an espflash `ChipMismatch` at connect time.
-const TARGET_CHIP: Chip = Chip::Esp32c6;
+/// The espflash chip a manifest's `core.target.chip` names, or `None` for a
+/// chip this build has no `Chip` variant for.
+///
+/// The image decides which chip we are willing to talk to — not a constant.
+/// This used to be `const TARGET_CHIP: Chip = Chip::Esp32c6`, which was true
+/// only while exactly one image existed; the day a second one shipped it
+/// would have declared "C6" while writing an S3 image.
+fn manifest_chip(target_chip: &str) -> Option<Chip> {
+    match crate::chip_id_from_reported(target_chip)? {
+        "esp32c6" => Some(Chip::Esp32c6),
+        "esp32s3" => Some(Chip::Esp32s3),
+        "esp32" => Some(Chip::Esp32),
+        _ => None,
+    }
+}
 
 /// Baud rate for the espflash connection. 115200 is the ROM/stub default and
 /// matches the browser provider; espflash negotiates faster stub baud itself.
@@ -62,8 +73,19 @@ pub(super) fn flash_firmware(
         manifest.firmware_id, manifest.image_count, manifest.total_bytes
     ));
 
-    let mut flasher = connect(port_name, &mut recorder)?;
+    // Declaring the manifest's chip makes espflash refuse the handshake on a
+    // mismatch; the explicit check below turns that into an error naming
+    // both chips, and covers the unknown-chip manifest espflash cannot be
+    // told about at all.
+    let expected_chip = manifest_chip(&manifest.target_chip).ok_or_else(|| {
+        LinkError::other(format!(
+            "firmware manifest {} targets chip `{}`, which this build cannot flash",
+            manifest_path, manifest.target_chip
+        ))
+    })?;
+    let mut flasher = connect(port_name, Some(expected_chip), &mut recorder)?;
     let chip_name = chip_name(&mut flasher);
+    assert_chip_matches_manifest(flasher.chip(), &manifest)?;
 
     for image in &images {
         let data = std::fs::read(&image.absolute_path).map_err(|error| {
@@ -107,7 +129,7 @@ pub(super) fn erase_device_flash(
     let mut recorder = EventRecorder::new(events);
     recorder.log("Erasing device flash");
 
-    let mut flasher = connect(port_name, &mut recorder)?;
+    let mut flasher = connect(port_name, None, &mut recorder)?;
     let chip_name = chip_name(&mut flasher);
 
     recorder.progress(LinkManagementProgress::new("Erasing flash"));
@@ -145,7 +167,7 @@ pub(super) fn write_boot_control(
         flags.bits()
     ));
 
-    let mut flasher = connect(port_name, &mut recorder)?;
+    let mut flasher = connect(port_name, None, &mut recorder)?;
     let chip_name = chip_name(&mut flasher);
 
     recorder.progress(LinkManagementProgress::new("Erasing boot-control sector"));
@@ -188,7 +210,7 @@ pub(super) fn read_raw_filesystem(
     events: &LinkManagementEventSink,
 ) -> Result<LinkRawFilesystemReadResult, LinkError> {
     let mut recorder = EventRecorder::new(events);
-    let mut flasher = connect(port_name, &mut recorder)?;
+    let mut flasher = connect(port_name, None, &mut recorder)?;
     let chip_name = chip_name(&mut flasher);
     let region = chip_name
         .as_deref()
@@ -332,7 +354,7 @@ pub(super) fn probe_target(
 ) -> Result<Option<String>, LinkError> {
     let mut recorder = EventRecorder::new(events);
     recorder.log(format!("Probing {port_name} for a bootloader"));
-    let mut flasher = connect(port_name, &mut recorder)?;
+    let mut flasher = connect(port_name, None, &mut recorder)?;
     let chip_name = chip_name(&mut flasher);
     reset_into_app(&mut flasher, &mut recorder);
     recorder.log(match &chip_name {
@@ -364,7 +386,19 @@ pub(super) fn reset_runtime(
 /// sync, chip-detect, upload stub). `before = DefaultReset` performs the
 /// USB-JTAG download-mode entry; `after = HardReset` is applied by
 /// [`reset_into_app`] once the operation finishes.
-fn connect(port_name: &str, recorder: &mut EventRecorder) -> Result<Flasher, LinkError> {
+/// Open `port_name` and run the espflash handshake.
+///
+/// `expect_chip` is `Some` only on the flash path, where an image is about to
+/// be written and the chip it was built for is the one we are willing to
+/// find. Every other operation here (erase, raw read, boot-control) is
+/// chip-agnostic by design — the raw read in particular exists for a board
+/// nobody can identify any other way, so declaring a chip would refuse the
+/// one case it is for.
+fn connect(
+    port_name: &str,
+    expect_chip: Option<Chip>,
+    recorder: &mut EventRecorder,
+) -> Result<Flasher, LinkError> {
     recorder.log(format!("Connecting to {port_name}"));
     let serial = serialport::new(port_name, CONNECT_BAUD)
         .flow_control(serialport::FlowControl::None)
@@ -377,11 +411,32 @@ fn connect(port_name: &str, recorder: &mut EventRecorder) -> Result<Flasher, Lin
         /* use_stub  */ true,
         /* verify    */ false,
         /* skip      */ false,
-        Some(TARGET_CHIP),
+        expect_chip,
         ResetAfterOperation::HardReset,
         ResetBeforeOperation::DefaultReset,
     )
     .map_err(|error| LinkError::other(format!("espflash connect failed: {error}")))
+}
+
+/// Refuse to write `manifest` onto `detected`.
+///
+/// Belt to the declared chip's braces: `Flasher::connect` already rejects a
+/// mismatch, but it does so as espflash's `ChipMismatch`, which names neither
+/// the image nor what the user should do about it. This runs before the first
+/// `write_bin_to_flash` and says both.
+fn assert_chip_matches_manifest(
+    detected: Chip,
+    manifest: &LinkFirmwareManifest,
+) -> Result<(), LinkError> {
+    let detected_name = detected.to_string();
+    if crate::chip_ids_match(&detected_name, &manifest.target_chip) {
+        return Ok(());
+    }
+    Err(LinkError::other(format!(
+        "refusing to flash: this device is {detected_name}, but the firmware image {} \
+         is built for {}",
+        manifest.firmware_id, manifest.target_chip
+    )))
 }
 
 /// Apply the connection's `after` operation (HardReset) so the chip leaves
@@ -733,6 +788,42 @@ mod tests {
         assert_eq!(parse_hex_u32("0X10"), Some(0x10));
         assert_eq!(parse_hex_u32("10000"), Some(0x10000));
         assert_eq!(parse_hex_u32("zz"), None);
+    }
+
+    #[test]
+    fn every_served_build_target_maps_to_an_espflash_chip() {
+        // The three chips the site serves images for. A build def whose
+        // `chip.name` this cannot map is a firmware variant the host
+        // provider silently cannot flash.
+        assert_eq!(manifest_chip("esp32c6"), Some(Chip::Esp32c6));
+        assert_eq!(manifest_chip("esp32s3"), Some(Chip::Esp32s3));
+        assert_eq!(manifest_chip("esp32"), Some(Chip::Esp32));
+        // esptool-js's chatty spelling reaches this through the manifest's
+        // `core.target.chip` only in principle, but normalizing costs
+        // nothing and keeps the two providers' rules identical.
+        assert_eq!(manifest_chip("ESP32-C6"), Some(Chip::Esp32c6));
+        assert_eq!(manifest_chip("esp32c3"), None);
+    }
+
+    #[test]
+    fn a_mismatched_image_is_refused_by_name() {
+        let manifest = LinkFirmwareManifest {
+            firmware_id: "esp32c6-4mb".into(),
+            display_name: "LightPlayer ESP32-C6 server firmware".into(),
+            target_chip: "esp32c6".into(),
+            image_count: 1,
+            total_bytes: 1,
+            manifest_path: None,
+        };
+        assert!(assert_chip_matches_manifest(Chip::Esp32c6, &manifest).is_ok());
+
+        let error = assert_chip_matches_manifest(Chip::Esp32s3, &manifest)
+            .expect_err("an S3 must not take a C6 image");
+        let text = error.to_string();
+        // Both halves of the mismatch, so the message is actionable without
+        // reading the log above it.
+        assert!(text.contains("esp32s3"), "{text}");
+        assert!(text.contains("esp32c6"), "{text}");
     }
 
     #[test]
