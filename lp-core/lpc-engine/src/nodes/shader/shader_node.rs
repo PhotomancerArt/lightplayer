@@ -40,6 +40,19 @@ use super::shader_input_materialize::materialize_shader_input;
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
 /// Shader producer wired to the core engine.
+/// After the first black-fallback frame, restate it only every this many
+/// frames. Mirrors `LpServer::TICK_ERROR_RESTATE_EVERY` (~8 s at 60 fps).
+const BLACK_FALLBACK_RESTATE_EVERY: u32 = 512;
+
+/// Count one black-fallback frame and decide whether it should be logged.
+///
+/// Free-standing so it can be tested without building a whole `ShaderNode`:
+/// the decision depends on nothing but the counter.
+fn note_black_fallback_frame(frames: &mut u32) -> bool {
+    *frames = frames.saturating_add(1);
+    *frames == 1 || *frames % BLACK_FALLBACK_RESTATE_EVERY == 0
+}
+
 pub struct ShaderNode {
     node_id: NodeId,
     source_location: AssetLocation,
@@ -60,6 +73,9 @@ pub struct ShaderNode {
     /// running `shader` — the status reports the error while the last good
     /// program keeps rendering.
     compilation_error: Option<String>,
+    /// Consecutive frames rendered/sampled as the black fallback, used to
+    /// throttle the log below. See [`BLACK_FALLBACK_RESTATE_EVERY`].
+    black_fallback_frames: u32,
     /// True when the current source/config has not been compile-attempted
     /// yet. Cleared after one attempt regardless of outcome, so a broken
     /// source never recompiles per frame.
@@ -81,6 +97,7 @@ impl ShaderNode {
             config_accessors: None,
             shader: None,
             compilation_error: None,
+            black_fallback_frames: 0,
             needs_compile: true,
             state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
@@ -92,6 +109,21 @@ impl ShaderNode {
 
     pub fn visual_product(&self) -> VisualProduct {
         *self.state.output.value()
+    }
+
+    /// Count one black-fallback frame and decide whether to log it.
+    ///
+    /// A quarantined shader falls back to black on **every frame**, and the
+    /// unthrottled log saturated a 921,600-baud console badly enough that a
+    /// device could not be recovered: 90,020 lines in one run, and a
+    /// 30-second bench step still unfinished 45 minutes later because the
+    /// operator's own reset commands could not get through. See
+    /// `docs/debt/black-fallback-warning-floods-the-console.md`.
+    ///
+    /// Mirrors `LpServer`'s `TICK_ERROR_RESTATE_EVERY`: say it once, then
+    /// restate periodically so it is visibly still happening.
+    fn note_black_fallback(&mut self) -> bool {
+        note_black_fallback_frame(&mut self.black_fallback_frames)
     }
 
     pub fn compilation_error(&self) -> Option<&str> {
@@ -180,6 +212,8 @@ impl ShaderNode {
                 // the replacement exists. Old + new coexist for the compile
                 // duration — the transient memory cost of keep-last-good.
                 self.shader = Some(shader);
+                // Recovered: the next failure deserves to be reported at once.
+                self.black_fallback_frames = 0;
                 log::info!(
                     "[shader-node] compilation succeeded (node={:?}, {})",
                     self.node_id,
@@ -669,13 +703,16 @@ impl RenderNode for ShaderNode {
         }
 
         if !self.ensure_compiled(ctx)? {
-            log::warn!(
-                "[shader-node] rendering black fallback texture (node={:?}): {}",
-                self.node_id,
-                self.compilation_error
-                    .as_deref()
-                    .unwrap_or("shader not compiled")
-            );
+            if self.note_black_fallback() {
+                log::warn!(
+                    "[shader-node] rendering black fallback texture (node={:?}, frame {}): {}",
+                    self.node_id,
+                    self.black_fallback_frames,
+                    self.compilation_error
+                        .as_deref()
+                        .unwrap_or("shader not compiled")
+                );
+            }
             ctx.graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?
                 .clear_texture(target)
@@ -711,13 +748,16 @@ impl RenderNode for ShaderNode {
         }
 
         if !self.ensure_compiled(ctx)? {
-            log::warn!(
-                "[shader-node] sampling black fallback (node={:?}): {}",
-                self.node_id,
-                self.compilation_error
-                    .as_deref()
-                    .unwrap_or("shader not compiled")
-            );
+            if self.note_black_fallback() {
+                log::warn!(
+                    "[shader-node] sampling black fallback (node={:?}, frame {}): {}",
+                    self.node_id,
+                    self.black_fallback_frames,
+                    self.compilation_error
+                        .as_deref()
+                        .unwrap_or("shader not compiled")
+                );
+            }
             ctx.graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?
                 .clear_sample_out(target.samples)
@@ -826,6 +866,73 @@ fn validate_shader_visual_product(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod black_fallback_throttle_tests {
+    use super::{BLACK_FALLBACK_RESTATE_EVERY, note_black_fallback_frame};
+
+    /// A quarantined shader hits the black-fallback path every frame. Left
+    /// unthrottled it emitted 90,020 lines in a single bench run and saturated
+    /// a 921,600-baud console so completely that the operator's own reset
+    /// commands could not get through — a 30-second step was still unfinished
+    /// 45 minutes later. See
+    /// `docs/debt/black-fallback-warning-floods-the-console.md`.
+    #[test]
+    fn logs_once_then_only_every_restate_interval() {
+        let mut frames = 0u32;
+
+        assert!(
+            note_black_fallback_frame(&mut frames),
+            "first frame must be reported"
+        );
+        for frame in 2..BLACK_FALLBACK_RESTATE_EVERY {
+            assert!(
+                !note_black_fallback_frame(&mut frames),
+                "frame {frame} must be silent between restates"
+            );
+        }
+        assert!(
+            note_black_fallback_frame(&mut frames),
+            "the restate interval must speak up"
+        );
+
+        // Over a 10,000-frame quarantine (~3 minutes at 60 fps) this is the
+        // difference between ~20 lines and 10,000.
+        let mut logged = 2u32;
+        for _ in BLACK_FALLBACK_RESTATE_EVERY + 1..=10_000 {
+            if note_black_fallback_frame(&mut frames) {
+                logged += 1;
+            }
+        }
+        assert_eq!(logged, 10_000 / BLACK_FALLBACK_RESTATE_EVERY + 1);
+    }
+
+    /// A shader that recovers and fails again must report the new failure
+    /// immediately rather than inheriting the old throttle. `ensure_compiled`
+    /// zeroes the counter on a successful compile; this pins that contract.
+    #[test]
+    fn recovery_resets_the_throttle() {
+        let mut frames = 0u32;
+        for _ in 0..100 {
+            note_black_fallback_frame(&mut frames);
+        }
+        frames = 0; // what a successful compile does
+        assert!(
+            note_black_fallback_frame(&mut frames),
+            "a failure after recovery must be reported at once"
+        );
+    }
+
+    /// The counter saturates rather than wrapping — a very long quarantine
+    /// must not silently return to logging every frame.
+    #[test]
+    fn counter_saturates() {
+        let mut frames = u32::MAX - 1;
+        note_black_fallback_frame(&mut frames);
+        note_black_fallback_frame(&mut frames);
+        assert_eq!(frames, u32::MAX);
+    }
 }
 
 #[cfg(test)]
