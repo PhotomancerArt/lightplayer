@@ -1,4 +1,6 @@
-# LightPlayer
+<p align="center">
+  <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup-marketing__lg.png" alt="LightPlayer" width="520">
+</p>
 
 LightPlayer is an open platform for LED art: author effects as GLSL shaders in a browser studio,
 preview them in a built-in simulator, and run them on real hardware — where they are JIT-compiled
@@ -10,9 +12,6 @@ browser, and the built-in simulator means you don't need any hardware to start p
 ![LightPlayer Studio — editing a show with live node previews, shader knobs, and the built-in simulator](lp-app/lpa-studio-web/story-images/studio__readme__studio-hero__lg.png)
 
 ![Studio home — the simulator and devices running projects, your library, and examples](lp-app/lpa-studio-web/story-images/studio__readme__home-gallery__lg.png)
-
-*Screenshots are CI-maintained UI captures from the story test suite — they update automatically
-as the app changes.*
 
 **What makes it different:**
 
@@ -31,7 +30,7 @@ as the app changes.*
 
 LightPlayer is in **alpha**. A determined tester can get real value today: author GLSL effects in
 the browser studio, run them in the simulator without hardware, and drive WS2812-class strips from
-an ESP32-C6 over USB. Expect rough edges and breaking changes — there are no project-format or
+an ESP32-family board over USB. Expect rough edges and breaking changes — there are no project-format or
 protocol compatibility promises yet. The Studio requires a Chromium-based browser (it uses
 WebSerial and OPFS). Issue reports are welcome.
 
@@ -64,9 +63,13 @@ just demo
 just demo -- <example-name>   # run other examples
 ```
 
-# Run on hardware (ESP32-C6)
+# Run on hardware
 
-To flash firmware, push the `examples/basic` project over USB serial, and run it on real hardware:
+LightPlayer runs on ESP32-family boards — ESP32-C6, ESP32-S3, and classic ESP32 — with the
+supported-board list at **[lightplayer.app/#/boards](https://lightplayer.app/#/boards)**.
+
+The quickest demo path uses an ESP32-C6. To flash firmware, push the `examples/basic` project over
+USB serial, and run it on real hardware:
 
 ```bash
 just demo-esp32c6-host
