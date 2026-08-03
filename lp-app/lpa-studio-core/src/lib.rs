@@ -47,8 +47,9 @@ pub use app::home::{
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiNodeChild, UiNodeDirtyState,
-    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPanelControl,
+    UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace, UiNodeChild,
+    UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelGroup,
     UiPanelTarget, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding,
     UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview,
     UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform,

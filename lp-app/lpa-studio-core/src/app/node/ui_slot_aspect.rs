@@ -36,6 +36,12 @@ pub enum UiSlotAspectKind {
     Binding,
     /// Slot value family and type metadata.
     TypeInfo,
+    /// **Panel state** for a control on a module panel
+    /// (`docs/design/panel.md` P2): held / following / at default, plus
+    /// what the held value displaced. Unlike the other kinds this one
+    /// titles itself from [`UiSlotAspect::title`], because the three panel
+    /// states are the section's whole point.
+    PanelState,
 }
 
 /// A stable popup section for one slot concern.
