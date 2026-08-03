@@ -76,7 +76,11 @@ pub fn LogoMark(size: u32, #[props(default = false)] animated: bool) -> Element 
 /// rainbow sweep; otherwise "Light" alone carries the rainbow (D3).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BrandWord(word_px: u32, #[props(default = false)] mono: bool, #[props(default = false)] marketing: bool) -> Element {
+fn BrandWord(
+    word_px: u32,
+    #[props(default = false)] mono: bool,
+    #[props(default = false)] marketing: bool,
+) -> Element {
     let style = format!("font-size:{word_px}px");
     if mono {
         return rsx! {
@@ -87,8 +91,16 @@ fn BrandWord(word_px: u32, #[props(default = false)] mono: bool, #[props(default
             }
         };
     }
-    let light_class = if marketing { "lp-brand-word-full" } else { "lp-brand-light" };
-    let player_class = if marketing { "lp-brand-word-full" } else { "tw:text-strong" };
+    let light_class = if marketing {
+        "lp-brand-word-full"
+    } else {
+        "lp-brand-light"
+    };
+    let player_class = if marketing {
+        "lp-brand-word-full"
+    } else {
+        "tw:text-strong"
+    };
     rsx! {
         span {
             class: "tw:font-extrabold tw:leading-none tw:tracking-[-0.015em]",
