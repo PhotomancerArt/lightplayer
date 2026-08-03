@@ -283,6 +283,79 @@ pub fn compatible_builds_for(board: &BoardDisplayFile) -> Vec<CompatibleBuild> {
     compatible_builds(board, all_builds())
 }
 
+// --- provisioning selection ---------------------------------------------------------------------
+
+/// The build to flash when provisioning, or `None` when nothing served fits.
+///
+/// **Chip is the necessary condition, board is the refinement.** A different
+/// ISA cannot execute the image at all, so the chip decides which builds are
+/// even candidates; the board only chooses among several that all run on it
+/// (today that is never more than one, but flash-size variants are exactly
+/// what build defs exist to express). A probed chip with no picked board —
+/// the generic-install path, and the common one — still resolves.
+///
+/// A pick that contradicts the detected chip is **honoured**, not
+/// second-guessed: provisioning also writes the picked board's runtime
+/// manifest to `/hardware.json`, so silently flashing the detected chip's
+/// image would produce a booting device with another board's pin map. The
+/// flash-time chip guard refuses the mismatch by name instead, which is the
+/// answer that tells the user what to change.
+///
+/// `normalized_chip` must already be lowercase alphanumeric
+/// (`lpa_link::normalize_chip_name`): probe answers say `ESP32-C6` and boot
+/// banners say `esp32c6`, and this crate cannot depend on the crate that
+/// owns that normalizer. `chip_names_are_already_normalized` in the drift
+/// tests pins the other side — every checked-in `chip.name` and board
+/// `family` is in that form.
+///
+/// `None` is a real answer, not a failure: the caller falls back to the
+/// deployment default and the flash-time chip guard catches a mismatch.
+/// Guessing an image here would be the bug this whole path exists to fix.
+pub fn provisioning_build(
+    board: Option<&BoardDisplayFile>,
+    normalized_chip: Option<&str>,
+    builds: &'static [FirmwareBuild],
+    served: &[String],
+) -> Option<&'static FirmwareBuild> {
+    let is_served = |build: &FirmwareBuild| served.iter().any(|id| *id == build.id);
+
+    // A picked board is the most specific evidence there is: it carries a
+    // verified flash size, so `compatible_builds` can rank by fit.
+    if let Some(board) = board
+        && let Some(matched) = compatible_builds(board, builds)
+            .into_iter()
+            .find(|matched| is_served(matched.build))
+    {
+        return Some(matched.build);
+    }
+
+    // Generic install, or a board whose builds this deployment does not
+    // serve. Fall back to the chip — detected first, because it is ground
+    // truth and a picked board can simply be the wrong one.
+    let chip = normalized_chip.or(board.map(|board| board.family.as_str()))?;
+    builds
+        .iter()
+        .filter(|build| build.chip.name == chip && is_served(build))
+        // Smallest image first: without a board there is no verified flash
+        // size, and the smallest declared flash is the one most likely to
+        // fit whatever is actually on the module.
+        .min_by(|a, b| {
+            a.flash_size_mb
+                .cmp(&b.flash_size_mb)
+                .then_with(|| a.id.cmp(&b.id))
+        })
+}
+
+/// [`provisioning_build`] over the checked-in build defs and served list,
+/// returning just the id the flash request carries.
+pub fn provisioning_build_id(
+    board: Option<&BoardDisplayFile>,
+    normalized_chip: Option<&str>,
+) -> Option<&'static str> {
+    provisioning_build(board, normalized_chip, all_builds(), served_build_ids())
+        .map(|build| build.id.as_str())
+}
+
 /// Why `board` has no compatible build, for the catalog's empty state.
 /// Returns `None` when it does have one.
 pub fn no_build_reason(
@@ -569,6 +642,113 @@ mod tests {
         assert_eq!(
             no_build_reason(&board, &[]),
             Some(NoBuildReason::NoBuildForChip)
+        );
+    }
+
+    fn served(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    fn picked(
+        board: Option<&BoardDisplayFile>,
+        chip: Option<&str>,
+        served_ids: &[&str],
+    ) -> Option<&'static str> {
+        provisioning_build(board, chip, all_builds(), &served(served_ids))
+            .map(|build| build.id.as_str())
+    }
+
+    /// All three served builds, as P4 ships them.
+    const ALL_SERVED: &[&str] = &["esp32c6-4mb", "esp32s3-8mb", "esp32v3-4mb"];
+
+    #[test]
+    fn a_picked_board_selects_its_own_build() {
+        let s3 = board("seeed/xiao-esp32-s3-plus");
+        assert_eq!(picked(Some(&s3), Some("esp32s3"), ALL_SERVED), Some("esp32s3-8mb"));
+        let classic = board("domraem/dom-z-102");
+        assert_eq!(picked(Some(&classic), Some("esp32"), ALL_SERVED), Some("esp32v3-4mb"));
+    }
+
+    /// The generic-install path, and the common one: no board picked, but
+    /// the probe named the chip. This is the case that made the old
+    /// single-image flow write a C6 image onto everything.
+    #[test]
+    fn a_detected_chip_alone_resolves_a_build() {
+        assert_eq!(picked(None, Some("esp32s3"), ALL_SERVED), Some("esp32s3-8mb"));
+        assert_eq!(picked(None, Some("esp32"), ALL_SERVED), Some("esp32v3-4mb"));
+        assert_eq!(picked(None, Some("esp32c6"), ALL_SERVED), Some("esp32c6-4mb"));
+    }
+
+    /// A pick that contradicts the chip is HONOURED, and the flash-time
+    /// guard refuses it by name. Quietly resolving the detected chip instead
+    /// would flash an S3 image while `/hardware.json` stamps the C6 board the
+    /// user chose — a booting device with the wrong pin map, which is worse
+    /// than a refusal that says "pick the board you actually have".
+    #[test]
+    fn a_board_that_contradicts_the_chip_is_honoured_and_refused_downstream() {
+        let c6 = board("seeed/xiao-esp32-c6");
+        assert_eq!(
+            picked(Some(&c6), Some("esp32s3"), ALL_SERVED),
+            Some("esp32c6-4mb")
+        );
+    }
+
+    /// A board whose build this deployment does not serve resolves nothing
+    /// on the board path, so the detected chip is what is left. (The picker
+    /// filters on the served list, so this is a stale pick or a shrinking
+    /// deployment, not a normal flow.)
+    #[test]
+    fn an_unserved_board_falls_back_to_the_detected_chip() {
+        let c6 = board("seeed/xiao-esp32-c6");
+        assert_eq!(
+            picked(Some(&c6), Some("esp32s3"), &["esp32s3-8mb"]),
+            Some("esp32s3-8mb")
+        );
+        // With no chip detected either, the board's own family is the last
+        // evidence — and it is unserved, so: nothing.
+        assert_eq!(picked(Some(&c6), None, &["esp32s3-8mb"]), None);
+    }
+
+    #[test]
+    fn nothing_known_and_nothing_served_resolve_to_none() {
+        assert_eq!(picked(None, None, ALL_SERVED), None);
+        assert_eq!(picked(None, Some("esp32c3"), ALL_SERVED), None);
+        // Served list gates the answer: the S3 build exists but is not
+        // shipped, so the picker could not have offered it either.
+        assert_eq!(picked(None, Some("esp32s3"), &["esp32c6-4mb"]), None);
+    }
+
+    /// Without a board there is no verified flash size, so the smallest
+    /// declared image — the one most likely to fit — wins. Synthesized,
+    /// because no chip has two served builds today and this rule is exactly
+    /// what will be untested the day one does.
+    #[test]
+    fn chip_only_selection_prefers_the_smallest_image() {
+        static TWO_C6_BUILDS: OnceLock<Vec<FirmwareBuild>> = OnceLock::new();
+        let builds = TWO_C6_BUILDS.get_or_init(|| {
+            let base = build_by_id("esp32c6-4mb").expect("c6 build def").clone();
+            vec![
+                FirmwareBuild {
+                    id: "esp32c6-8mb".into(),
+                    flash_size_mb: 8,
+                    ..base.clone()
+                },
+                base,
+            ]
+        });
+        let served_both = served(&["esp32c6-4mb", "esp32c6-8mb"]);
+        assert_eq!(
+            provisioning_build(None, Some("esp32c6"), builds, &served_both).map(|b| b.id.as_str()),
+            Some("esp32c6-4mb")
+        );
+        // A board, though, HAS a verified flash size — 8 MB of headroom is
+        // the better fit, and `compatible_builds` already ranks it first.
+        let mut roomy = board("seeed/xiao-esp32-c6");
+        roomy.flash_mb = Some(8);
+        assert_eq!(
+            provisioning_build(Some(&roomy), Some("esp32c6"), builds, &served_both)
+                .map(|b| b.id.as_str()),
+            Some("esp32c6-8mb")
         );
     }
 

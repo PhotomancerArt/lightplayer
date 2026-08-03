@@ -47,7 +47,32 @@ pub struct HostSerialEsp32Options {
     /// `lp-cli firmware package <id>`). `FlashFirmware` fails with a
     /// configuration error when unset; the host has no meaningful
     /// cwd-relative default, so the embedder locates the package.
+    ///
+    /// A `FlashFirmware { build_id: Some(..) }` request is resolved against
+    /// this path's **sibling directory**, because `lp-cli firmware package`
+    /// writes every build as `<base>/<id>/manifest.json` — so pointing at
+    /// one packaged build implicitly locates all of them. Not a layout
+    /// invented here; it is the packager's own.
     pub firmware_manifest_path: Option<String>,
+}
+
+impl HostSerialEsp32Options {
+    /// The manifest to flash for `build_id`. `None`, or a configured path
+    /// that is not in `<base>/<id>/manifest.json` shape, uses the configured
+    /// path verbatim — the chip guard is what stops a wrong image, not a
+    /// path guess.
+    fn manifest_path_for(&self, build_id: Option<&str>) -> Option<String> {
+        let configured = self.firmware_manifest_path.as_deref()?;
+        let Some(build_id) = build_id else {
+            return Some(configured.to_string());
+        };
+        let path = std::path::Path::new(configured);
+        let Some(base) = path.parent().and_then(|dir| dir.parent()) else {
+            return Some(configured.to_string());
+        };
+        let file_name = path.file_name()?;
+        Some(base.join(build_id).join(file_name).display().to_string())
+    }
 }
 
 impl HostSerialEsp32Provider {
@@ -261,9 +286,11 @@ impl HostSerialEsp32Provider {
         let port_name = self.session_manage_port(session_id, &request)?;
         self.release_transport_if_open(session_id).await?;
         match request {
-            LinkManagementRequest::FlashFirmware => {
-                let manifest_path =
-                    self.options.firmware_manifest_path.clone().ok_or_else(|| {
+            LinkManagementRequest::FlashFirmware { ref build_id } => {
+                let manifest_path = self
+                    .options
+                    .manifest_path_for(build_id.as_deref())
+                    .ok_or_else(|| {
                         LinkError::other(
                             "no firmware manifest configured for the host serial ESP32 provider \
                              (set HostSerialEsp32Options::firmware_manifest_path)",

@@ -4092,10 +4092,11 @@ impl StudioController {
         // than which button was pressed, because that is what determines
         // whether waiting for a reattach is sensible.
         let from_recovery = self.device_is_in_recovery_mode();
+        let build_id = self.provisioning_build_id(board_id.as_deref());
         let mut outcome = self
             .run_device_management(
                 ManagementFlowSpec {
-                    request: LinkManagementRequest::FlashFirmware,
+                    request: LinkManagementRequest::FlashFirmware { build_id },
                     progress_label: "Flashing firmware",
                     reconnect_detail: if from_recovery {
                         "Unplug the board and plug it back in to start it"
@@ -4268,6 +4269,29 @@ impl StudioController {
 
     /// Whether the managed device is currently sitting in ROM download
     /// mode — the state whose flash needs a manual replug to take effect.
+    /// Which firmware build to flash onto the attached device.
+    ///
+    /// Chip first, because a different ISA cannot execute the image at all,
+    /// and the chip is DISCOVERED — the boot-line classifier's ROM banner or
+    /// the bootloader probe, not something the user typed. The picked board
+    /// refines that when several served builds run on the chip, and also
+    /// wins outright when it resolves, because provisioning stamps that
+    /// board's runtime manifest into `/hardware.json`: flashing one board's
+    /// image while recording another's pin map is worse than the refusal the
+    /// flash-time chip guard produces.
+    ///
+    /// `None` — nothing picked and nothing detected — leaves the provider on
+    /// its deployment default, and the guard catches it if that is wrong.
+    fn provisioning_build_id(&self, board_id: Option<&str>) -> Option<String> {
+        let detected_chip = self
+            .hardware_session()
+            .and_then(|session| session.snapshot().detected_chip)
+            .map(|chip| lpa_link::normalize_chip_name(&chip));
+        let board = board_id.and_then(lpa_boards::board_by_id);
+        lpa_boards::provisioning_build_id(board, detected_chip.as_deref())
+            .map(|build_id| build_id.to_string())
+    }
+
     fn device_is_in_recovery_mode(&self) -> bool {
         self.hardware_session().is_some_and(|session| {
             matches!(session.snapshot().state, lpa_link::DeviceState::Bootloader)
@@ -6512,7 +6536,7 @@ mod reattach_failure_tests {
 
     fn spec(awaits_manual_replug: bool) -> ManagementFlowSpec {
         ManagementFlowSpec {
-            request: LinkManagementRequest::FlashFirmware,
+            request: LinkManagementRequest::FlashFirmware { build_id: None },
             progress_label: "Flashing firmware",
             reconnect_detail: "Unplug the board and plug it back in to start it",
             failed_exit_label: "Back to set up",

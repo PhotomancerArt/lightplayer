@@ -186,8 +186,13 @@ impl BrowserSerialEsp32Provider {
         Ok(())
     }
 
-    pub async fn load_firmware_manifest(&self) -> Result<BrowserEsp32FirmwareManifest, LinkError> {
-        browser_esp32_flash::load_manifest(&self.options.firmware_manifest_path).await
+    /// Read a packaged build's manifest without touching the device.
+    /// `None` reads the deployment default.
+    pub async fn load_firmware_manifest(
+        &self,
+        build_id: Option<&str>,
+    ) -> Result<BrowserEsp32FirmwareManifest, LinkError> {
+        browser_esp32_flash::load_manifest(&self.options.firmware_manifest_path(build_id)).await
     }
 
     pub async fn probe_target(
@@ -201,20 +206,22 @@ impl BrowserSerialEsp32Provider {
     pub async fn flash_firmware(
         &self,
         endpoint_id: &LinkEndpointId,
+        build_id: Option<&str>,
     ) -> Result<BrowserEsp32FlashResult, LinkError> {
-        self.flash_firmware_with_events(endpoint_id, LinkManagementEventSink::noop())
+        self.flash_firmware_with_events(endpoint_id, build_id, LinkManagementEventSink::noop())
             .await
     }
 
     pub async fn flash_firmware_with_events(
         &self,
         endpoint_id: &LinkEndpointId,
+        build_id: Option<&str>,
         events: LinkManagementEventSink,
     ) -> Result<BrowserEsp32FlashResult, LinkError> {
         let port_id = self.endpoint_port_id(endpoint_id)?;
         browser_esp32_flash::flash_firmware_with_events(
             port_id,
-            &self.options.firmware_manifest_path,
+            &self.options.firmware_manifest_path(build_id),
             self.options.esptool_module_path(),
             events,
         )
@@ -253,9 +260,9 @@ impl BrowserSerialEsp32Provider {
         let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
         self.release_protocol_if_open(session_id).await?;
         match request {
-            LinkManagementRequest::FlashFirmware => {
+            LinkManagementRequest::FlashFirmware { ref build_id } => {
                 let result = self
-                    .flash_firmware_with_events(&endpoint_id, events.clone())
+                    .flash_firmware_with_events(&endpoint_id, build_id.as_deref(), events.clone())
                     .await?;
                 let logs = result
                     .logs

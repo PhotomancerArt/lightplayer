@@ -452,12 +452,15 @@ fn manage_fake_device(
             device.reset_runtime();
             Ok(LinkManagementResult::ResetRuntime)
         }
-        LinkManagementRequest::FlashFirmware => {
+        LinkManagementRequest::FlashFirmware { build_id } => {
             device.fake_flash(FAKE_IMAGE_IDENTITY);
             Ok(LinkManagementResult::FlashFirmware(
                 LinkFirmwareFlashResult {
                     manifest: LinkFirmwareManifest {
-                        firmware_id: FAKE_IMAGE_IDENTITY.to_string(),
+                        // The requested build, echoed back, so a test can
+                        // see which image selection chose. Falls back to the
+                        // fake identity for a request that named none.
+                        firmware_id: build_id.unwrap_or_else(|| FAKE_IMAGE_IDENTITY.to_string()),
                         display_name: "Fake LightPlayer firmware".to_string(),
                         target_chip: "esp32c6".to_string(),
                         image_count: 1,

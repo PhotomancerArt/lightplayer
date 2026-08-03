@@ -61,7 +61,7 @@ async fn unsupported_management_request_returns_link_error() {
         .unwrap();
 
     let error = provider
-        .manage(session.id(), LinkManagementRequest::FlashFirmware)
+        .manage(session.id(), LinkManagementRequest::FlashFirmware { build_id: None })
         .await
         .unwrap_err();
 
