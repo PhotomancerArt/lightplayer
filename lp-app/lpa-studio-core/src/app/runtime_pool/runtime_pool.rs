@@ -253,6 +253,27 @@ impl RuntimePool {
         self.sessions.values().filter(|session| session.is_device())
     }
 
+    /// The session currently attached at `endpoint_id`, if any — the
+    /// board a same-endpoint [`Self::install`] is about to replace.
+    ///
+    /// Read BEFORE installing: the endpoint is a physical board's
+    /// continuity across a replug, and it is the only thing that connects
+    /// the outgoing session to the incoming one.
+    pub(crate) fn endpoint_session(
+        &self,
+        endpoint_id: &lpa_link::LinkEndpointId,
+    ) -> Option<RuntimeId> {
+        self.sessions
+            .iter()
+            .find(|(_, session)| {
+                session
+                    .payload()
+                    .link_session()
+                    .is_some_and(|link| link.endpoint_id == *endpoint_id)
+            })
+            .map(|(id, _)| *id)
+    }
+
     /// The session-targeted resolution seam (M4): device-session, deploy,
     /// and reconcile ops resolve their client through here, naming the
     /// board the user clicked.

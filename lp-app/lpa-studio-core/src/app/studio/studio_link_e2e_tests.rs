@@ -2754,6 +2754,77 @@ fn disconnecting_one_board_leaves_the_other_attached() {
     );
 }
 
+/// A card-owned op flow belongs to the SESSION it runs on (M4 P2).
+///
+/// Before this, `takes_card_op` matched "any uid-less live card" and
+/// `op_in_flight` was stamped on the OLDEST board's evidence — so one
+/// flash narrated on BOTH blank boards, and the card that lost its
+/// Danger affordance to `OperationInFlight` was not necessarily the one
+/// being flashed ("the duplicate card missing its Danger tab").
+#[test]
+fn a_flash_narrates_on_its_own_board_and_leaves_the_other_alone() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::BlankFlash),
+        FakeDeviceScript::new(FakeBootState::BlankFlash),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &first_id).expect("first blank board connects");
+    connect_through_link(&mut studio, &second_id).expect("second blank board connects");
+
+    let home = studio.view().home.expect("gallery shows");
+    let keys: Vec<String> = home
+        .devices
+        .iter()
+        .filter(|card| !card.sim)
+        .filter_map(|card| card.session_key.clone())
+        .collect();
+    assert_eq!(keys.len(), 2, "two blank boards to start");
+
+    // ⚠️ Interim: the op still targets the OLDEST board (P3 takes the
+    // target from the clicked card). What P2 fixes is where it NARRATES.
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        setup_name: None,
+        board_id: None,
+    })))
+    .expect("flash dispatches");
+
+    let home = studio.view().home.expect("gallery still shows");
+    let narrating: Vec<String> = home
+        .devices
+        .iter()
+        .filter(|card| !card.sim && card.ui.op.is_some())
+        .filter_map(|card| card.session_key.clone())
+        .collect();
+    assert!(
+        narrating.len() <= 1,
+        "one flash must narrate on at most one card, got {narrating:?}"
+    );
+    if let Some(narrating) = narrating.first() {
+        assert_eq!(
+            *narrating, keys[0],
+            "the op narrates on the board it ran on"
+        );
+    }
+
+    // And the OTHER board keeps a card that is not mid-operation — the
+    // state whose empty Danger section costs a card its Danger tab.
+    let other = home
+        .devices
+        .iter()
+        .find(|card| card.session_key.as_deref() == Some(keys[1].as_str()))
+        .expect("the second board still has a card");
+    assert!(
+        !matches!(
+            other.state,
+            crate::RosterCardState::OperationInFlight { .. }
+        ),
+        "the board nobody flashed is not mid-operation: {:?}",
+        other.state
+    );
+}
+
 fn studio_with_two_fake_devices(
     first: FakeDeviceScript,
     second: FakeDeviceScript,
