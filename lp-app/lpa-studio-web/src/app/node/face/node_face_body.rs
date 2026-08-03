@@ -2,7 +2,7 @@
 //! plus the drawers under it.
 //!
 //! [`super::super::NodePane`] renders this when `UiNodeView.face` is `Some`
-//! (shader/fixture/playlist today); nodes without a face keep the generic
+//! (shader/fixture/playlist/output today); nodes without a face keep the generic
 //! tab/section body. The body owns the full-bleed container: faces and
 //! drawers emit flat
 //! [`super::NodeCardSection`]s that span the card edge-to-edge, divided by
@@ -22,7 +22,7 @@ use lpa_studio_core::{
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
-use super::{FixtureFace, NodeCardDrawers, PlaylistFace, ShaderFace};
+use super::{FixtureFace, NodeCardDrawers, OutputFace, PlaylistFace, ShaderFace};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -109,12 +109,8 @@ pub fn NodeFaceBody(
                         on_action,
                     }
                 },
-                // The output face's own surface — board diagram + channel
-                // rows — is P5's work. Core already derives the DTO
-                // (`UiOutputFace`), so until the component lands the card
-                // renders its drawers alone: the same rows, no new
-                // presentation invented here.
-                UiNodeFace::Output(_) => rsx! {
+                UiNodeFace::Output(output) => rsx! {
+                    OutputFace { face: output, on_action }
                     NodeCardDrawers {
                         node,
                         sections,
