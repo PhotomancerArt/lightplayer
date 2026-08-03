@@ -103,8 +103,9 @@ impl UiPanelControlView {
     /// and the `(scope, channel)` identity itself (P1).
     ///
     /// The widget's own aspects (validation, type info, binding on the
-    /// backing slot) follow, so the panel popup is a superset of the slot
-    /// popup rather than a fork of it.
+    /// backing slot) follow — carrying the AUTHORED value the face no
+    /// longer prints beside the live one (GV fix 3) — so the panel popup is
+    /// a superset of the slot popup rather than a fork of it.
     pub fn detail_aspects(&self, scope: &str) -> Vec<UiSlotAspect> {
         let mut aspects = vec![self.state_aspect()];
         aspects.push(
@@ -113,7 +114,7 @@ impl UiPanelControlView {
                 .with_row(UiSlotAspectRow::new("Channel", self.channel.clone()))
                 .with_row(UiSlotAspectRow::new("Scope", scope)),
         );
-        aspects.extend(self.control.aspects.iter().cloned());
+        aspects.extend(self.control.detail_aspects());
         aspects
     }
 

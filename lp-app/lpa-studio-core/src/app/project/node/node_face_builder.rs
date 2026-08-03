@@ -12,6 +12,10 @@
 //! reaches a panel by carrying a `panel_target`, which the project walk
 //! derives from the binding itself.
 //!
+//! Publicity is **authored** wiring: a uniform whose only binding is the
+//! one its own `default_bind` materialized (origin `Default`) is not on
+//! anyone's panel — see [`authored_panel_target`].
+//!
 //! - **Shader**: preview = the produced visual product; controls = consumed
 //!   uniform slots BOUND to a bus channel, as knobs over the authored
 //!   `min`/`max` editing `consumed.<name>.default.some`, snapping to the
@@ -295,10 +299,18 @@ fn shader_uniform_control(
     // uniform name) — it carries a `panel_target` exactly when the binding
     // resolves to a `(scope, channel)`. The legacy authored `panel` flag is
     // gone; an unbound uniform gets no knob anywhere.
+    //
+    // GV fix 1: publicity is AUTHORED wiring only. A uniform reached solely
+    // through its own `default_bind` (the probe marks that binding
+    // `WireBindingOrigin::Default`, and the derived endpoint carries
+    // `default_origin`) is plumbing the author never asked for — fyeah's
+    // `time` is bound to `bus:time` by its shape, and a time knob on the
+    // panel is noise. The channel stays wired and readable; it just is not
+    // a control.
     let panel_target = top_rows
         .iter()
         .find(|row| row.key == name)
-        .and_then(|row| bound_panel_target(row))?;
+        .and_then(|row| authored_panel_target(row))?;
 
     let default_row = uniform_field(fields, "default")?;
     // Whole-number uniforms ("how many meteors") snap: the authored `step`
@@ -387,6 +399,18 @@ fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
 fn bound_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
     match &slot.source {
         UiSlotSourceState::Bound(endpoint) => endpoint.panel_target.clone(),
+        _ => None,
+    }
+}
+
+/// The same target, but only when the wiring was **authored** — a
+/// default-origin endpoint (a `default_bind` the loader materialized) does
+/// not make its uniform public (GV fix 1).
+fn authored_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
+    match &slot.source {
+        UiSlotSourceState::Bound(endpoint) if !endpoint.default_origin => {
+            endpoint.panel_target.clone()
+        }
         _ => None,
     }
 }
@@ -961,6 +985,44 @@ mod tests {
             "an unbound uniform is not on the panel, got {:?}",
             face.controls
         );
+    }
+
+    /// GV fix 1: a uniform reached only through its own `default_bind`
+    /// (`WireBindingOrigin::Default`, surfaced as `default_origin` on the
+    /// endpoint) is NOT public. fyeah's `time` is exactly this shape — the
+    /// shader shape binds it to `bus:time`, and a time knob is noise on
+    /// every panel it would reach.
+    #[test]
+    fn a_default_bound_uniform_gets_no_knob() {
+        let sections = shader_sections_with(
+            channel_endpoint("bus:time", "time", 2)
+                .with_default_origin()
+                .with_live_value("12.5"),
+        );
+
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert!(
+            face.controls.is_empty(),
+            "default-origin wiring is not publicity, got {:?}",
+            face.controls
+                .iter()
+                .map(|control| control.label.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        // The same row, AUTHORED, is public — the exclusion turns on the
+        // origin flag alone.
+        let authored = shader_sections_with(channel_endpoint("bus:time", "time", 2));
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &authored, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert_eq!(face.controls.len(), 1);
     }
 
     #[test]

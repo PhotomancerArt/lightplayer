@@ -3231,7 +3231,14 @@ impl StudioController {
 
     /// Panel-control gesture: dispatch the `(scope, channel)` panel write
     /// down the runtime command channel (no overlay, no dirty flag).
+    ///
+    /// The value is echoed locally FIRST (GV fix 5). A panel-target widget
+    /// has no edit buffer behind it, so without the echo its only feedback
+    /// was the probe round trip and drags moved at probe cadence; the echo
+    /// retires as soon as a snapshot shows the engine holding the writer.
     async fn execute_panel_write_op(&mut self, op: PanelWriteOp) -> UiResult {
+        self.project
+            .note_panel_write(op.scope, &op.channel, op.value.clone());
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.panel_write(server, op).await

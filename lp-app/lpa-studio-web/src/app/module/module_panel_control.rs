@@ -14,7 +14,12 @@
 //! |---|---|---|
 //! | Read, at default | accent arc at the authored default, subtle label | absent |
 //! | Read, following | **violet** arc at the LIVE value, violet label | absent |
-//! | Engaged (Latch) | **amber** arc + body ring, amber label | present |
+//! | Engaged (Latch) | **amber** arc + body ring at the HELD value, amber label | present |
+//!
+//! In every state the face carries exactly ONE number
+//! ([`UiPanelControl::shown_display`]): the live reading when the channel
+//! has one, the authored value when it does not. The authored value it
+//! displaces is a row in the detail popup, not a parenthetical beside it.
 //!
 //! Amber (the `status-attention` family) is the spike's engaged proposal:
 //! it is the one warm family Studio already owns, it is not violet (bound
@@ -209,7 +214,7 @@ fn ModulePanelControlBody(
 
     let readout = rsx! {
         span { class: "{READOUT_CLASS} {readout_class}",
-            span { "{shown_display(&control.value.display, control.live_value.as_deref(), state)}" }
+            span { "{control.shown_display()}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
         }
     };
@@ -222,7 +227,7 @@ fn ModulePanelControlBody(
             rsx! {
                 KnobField {
                     value,
-                    live_value: live_numeric(&control.live_value, following),
+                    live_value: control.live_numeric(),
                     min,
                     max,
                     step,
@@ -249,7 +254,7 @@ fn ModulePanelControlBody(
                 }
                 HFaderField {
                     value,
-                    live_value: live_numeric(&control.live_value, following),
+                    live_value: control.live_numeric(),
                     min,
                     max,
                     step,
@@ -271,7 +276,7 @@ fn ModulePanelControlBody(
                 span { class: "tw:flex tw:h-[46px] tw:items-center",
                     ToggleField {
                         value,
-                        live_value: live_bool(&control.live_value, following),
+                        live_value: control.live_bool(),
                         state: control.state.clone(),
                         bound: following,
                         engaged,
@@ -322,27 +327,6 @@ fn panel_state_readout_class(state: UiPanelControlState) -> &'static str {
     }
 }
 
-/// The number the readout shows: a followed control displays the live
-/// resolved value (P6 item 1 — watch the LFO move the knob); everything
-/// else shows its own value.
-fn shown_display(value: &str, live: Option<&str>, state: UiPanelControlState) -> String {
-    match (state, live) {
-        (UiPanelControlState::ReadFollowing, Some(live)) => live.to_string(),
-        _ => value.to_string(),
-    }
-}
-
-/// The live reading as a number for the widget geometry — only meaningful
-/// while the control is following something.
-fn live_numeric(live: &Option<String>, following: bool) -> Option<f32> {
-    following.then(|| live.as_deref()?.parse().ok()).flatten()
-}
-
-/// The live reading as a bool for the toggle pill.
-fn live_bool(live: &Option<String>, following: bool) -> Option<bool> {
-    following.then(|| live.as_deref()?.parse().ok()).flatten()
-}
-
 /// Read-only fallback when the widget family and the value family disagree.
 fn mismatch(label: &str, display: &str) -> Element {
     rsx! {
@@ -364,7 +348,7 @@ mod tests {
         UiSlotFieldState, UiSlotValue,
     };
 
-    use super::{panel_state_label_class, panel_state_readout_class, shown_display};
+    use super::{panel_state_label_class, panel_state_readout_class};
 
     fn view(state: UiPanelControlState, source: Option<&str>) -> UiPanelControlView {
         UiPanelControlView::new(
@@ -421,20 +405,34 @@ mod tests {
         }
     }
 
+    /// GV fix 3: one value on the face, in every state — the live reading
+    /// when the channel has one, the authored value when it does not.
     #[test]
-    fn a_following_control_reads_out_the_live_value_not_its_default() {
+    fn the_readout_shows_the_live_reading_in_every_state() {
+        for state in [
+            UiPanelControlState::ReadFollowing,
+            UiPanelControlState::Engaged,
+            UiPanelControlState::ReadDefault,
+        ] {
+            let mut view = view(state, None);
+            view.control.live_value = Some("2.72".to_string());
+            assert_eq!(
+                view.control.shown_display(),
+                "2.72",
+                "the live reading leads in {state:?}"
+            );
+            assert_eq!(
+                view.control.live_numeric(),
+                Some(2.72),
+                "and the widget geometry follows it in {state:?}"
+            );
+        }
+        // No live reading: the authored value is the one value shown.
         assert_eq!(
-            shown_display("1.60", Some("2.72"), UiPanelControlState::ReadFollowing),
-            "2.72"
-        );
-        // Engaged shows the held value; the live reading is its own.
-        assert_eq!(
-            shown_display("1.60", Some("2.72"), UiPanelControlState::Engaged),
-            "1.60"
-        );
-        assert_eq!(
-            shown_display("1.60", None, UiPanelControlState::ReadDefault),
-            "1.60"
+            view(UiPanelControlState::ReadDefault, None)
+                .control
+                .shown_display(),
+            "0.5"
         );
     }
 

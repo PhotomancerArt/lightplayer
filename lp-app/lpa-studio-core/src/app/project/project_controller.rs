@@ -135,6 +135,20 @@ pub struct ProjectController {
     /// `ProjectRead`, so the ack-time refresh usually resolves it
     /// immediately; a slower delta resolves on the next applied read).
     pending_focus: Option<PendingNodeFocus>,
+    /// Panel writes dispatched but not yet visible in a probe snapshot —
+    /// the panel's LOCAL ECHO (GV fix 5).
+    ///
+    /// A panel-target knob has no edit buffer behind it (a panel write is a
+    /// runtime command, not an overlay edit), so before this its only
+    /// feedback was the probe round trip and a drag moved at probe cadence.
+    /// An entry here displays as the channel's live reading and reads
+    /// ENGAGED immediately. **Display and control state only** — it never
+    /// touches authored values, the edit buffer, dirty tracking, or the
+    /// wiring drawer's writer/reader lists, all of which stay probe truth.
+    ///
+    /// Entries expire the moment probe truth can carry the value itself:
+    /// see [`ProjectController::expire_converged_panel_writes`].
+    pending_panel_writes: BTreeMap<(lpc_wire::WireScopeRef, String), lpc_model::LpValue>,
     /// The local library, when the platform mounted a store (browser).
     /// Absent on host tests — flows degrade to the legacy deploy path.
     library: Option<LibraryContext>,
@@ -208,6 +222,7 @@ impl ProjectController {
             next_mutation_cmd_id: 1,
             staged_removals: BTreeMap::new(),
             pending_focus: None,
+            pending_panel_writes: BTreeMap::new(),
             library: None,
         }
     }
@@ -632,7 +647,8 @@ impl ProjectController {
             // carries the churning value (P6 item 1).
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
                 && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
-                && let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind)
+                && let Some(live) =
+                    self.live_channel_display(graph, scope.as_ref(), channel, binding.kind)
             {
                 endpoint = endpoint.with_live_value(live);
             }
@@ -646,7 +662,7 @@ impl ProjectController {
                 endpoint = endpoint.with_panel_target(crate::UiPanelTarget {
                     scope: *scope,
                     channel: channel.clone(),
-                    engaged: panel_writer_engaged(graph, scope, channel),
+                    engaged: self.panel_engaged(graph, scope, channel),
                 });
             }
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
@@ -970,11 +986,13 @@ impl ProjectController {
         out
     }
 
-    /// Human-readable project name for the agent's system prompt (the
-    /// synced root label, like the project pane title).
+    /// Human-readable project name for the agent's system prompt — the
+    /// same title the project pane and the root card show.
     pub(crate) fn agent_project_name(&self) -> String {
         match &self.state {
-            ProjectState::Ready { project_id, .. } => self.project_name(project_id),
+            ProjectState::Ready { project_id, .. } => {
+                self.project_name(self.active_manifest().as_ref(), project_id)
+            }
             _ => "project".to_string(),
         }
     }
@@ -1451,7 +1469,8 @@ impl ProjectController {
             let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
                 continue;
             };
-            let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind)
+            let Some(live) =
+                self.live_channel_display(graph, scope.as_ref(), channel, binding.kind)
             else {
                 continue;
             };
@@ -1664,6 +1683,21 @@ impl ProjectController {
             // playlist's picker honest with the project pane's.
             self.gate_add_node_menus(node);
         }
+        // The root card IS the project (GV fix 4): its header carries the
+        // project's display name rather than the runtime tree's root
+        // segment, which is derived from the storage folder and read
+        // "Studio" for every library project. Applied before the faces
+        // derive so the root panel group wears the same name.
+        //
+        // The manifest is read once and threaded to both consumers (the
+        // title and the project popup's identity rows) — reading
+        // `project.json` off the package fs is the expensive half, and this
+        // runs on every view build.
+        let manifest = self.active_manifest();
+        let project_name = self.project_name(manifest.as_ref(), project_id);
+        if let Some(root) = nodes.first_mut() {
+            root.header.title = project_name.clone();
+        }
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -1695,10 +1729,10 @@ impl ProjectController {
             self.node_tree_view(),
             nodes,
         )
-        .with_project_name(self.project_name(project_id))
+        .with_project_name(project_name)
         .with_channel_choices(self.ui_channel_choices())
         .with_root_slots(root_slots)
-        .with_manifest(self.active_manifest())
+        .with_manifest(manifest)
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
         .with_debug_overrides(edits.debug_override_count())
@@ -1708,16 +1742,31 @@ impl ProjectController {
         .with_edits_in_flight(self.edits_in_flight())
     }
 
-    /// Human-readable project name for the project pane title: the synced
-    /// root node's label, falling back to the project id until the tree has
-    /// synced (the pane's kind label already says "Project", so the title
-    /// carries the name).
-    fn project_name(&self, project_id: &str) -> String {
-        self.root_nodes
-            .first()
-            .map(|node| node.label().to_string())
-            .filter(|label| !label.is_empty())
-            .unwrap_or_else(|| project_id.to_string())
+    /// Human-readable project name for the project pane title and the root
+    /// card's header (GV fix 4).
+    ///
+    /// The **container manifest's `name`** leads: it is the field whose
+    /// whole job is to be the project's display name. The root node's
+    /// tree label is only a fallback, because that label is derived from
+    /// the runtime tree's root path, which the server sanitizes out of the
+    /// project's STORAGE FOLDER (`lpa_server::project_root_path`) — and the
+    /// Studio's own library projects live in a folder called `studio`, so
+    /// every one of them read "Studio". Last resort is the project id.
+    ///
+    /// The root module def carries no authored label slot today; when one
+    /// arrives it takes precedence over all of this. Naming a node after
+    /// its type/role automatically is deliberately NOT attempted here (see
+    /// the auto-naming entry in the modules-vision future-work register).
+    fn project_name(
+        &self,
+        manifest: Option<&crate::UiProjectManifest>,
+        project_id: &str,
+    ) -> String {
+        project_display_title(
+            manifest.and_then(|manifest| manifest.name.as_deref()),
+            self.root_nodes.first().map(|node| node.label()),
+            project_id,
+        )
     }
 
     pub fn mark_connecting_running(&mut self) {
@@ -2276,40 +2325,25 @@ impl ProjectController {
         let owner = node.target().node_id;
         let scope = lpc_wire::WireScopeRef::Module { owner };
 
-        let mut controls: Vec<crate::UiPanelControlView> = Vec::new();
-        let mut seen: BTreeSet<String> = BTreeSet::new();
-        for control in subtree_panel_controls(children) {
-            let Some(target) = control
-                .panel_target
-                .as_ref()
-                .filter(|target| target.scope == scope)
-            else {
-                continue;
-            };
-            // One (scope, channel) is ONE control (panel.md P1) however many
-            // cards below consume it; the first one found wins.
-            if !seen.insert(target.channel.clone()) {
-                continue;
-            }
-            let (state, source) = self.panel_control_state(graph, scope, target);
-            controls.push(crate::UiPanelControlView {
-                channel: target.channel.clone(),
-                control: control.clone(),
-                state,
-                source,
-            });
-        }
+        let controls = self.scoped_panel_controls(graph, scope, children);
 
         // Presentation recursion (R8): each direct child module's finished
         // panel rides along as a nested group. Nothing is promoted — the
         // group still belongs to the child's own scope.
-        let groups = children
+        let mut groups: Vec<crate::UiPanelGroup> = children
             .iter()
             .filter_map(|child| match &child.face {
                 Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
                 _ => None,
             })
             .collect();
+        // R9: the ACTIVE playlist entry's controls bubble up too. An entry's
+        // scope is a SINK, not a module, so its controls match no module
+        // panel by scope and would otherwise be visible only on the entry's
+        // own card — which is how fyeah's root panel came to render empty
+        // while its idle shader carried two knobs. The group is the entry's,
+        // not the playlist's: its reset clears the entry's writers.
+        self.collect_playlist_entry_groups(graph, children, &mut groups);
 
         // The module's own visual mirror (R7); a module with no visual
         // simply has no hero (E6). The mirror ROW supplies identity and
@@ -2318,10 +2352,8 @@ impl ProjectController {
         // stream (only the primary visual and the focused node's products
         // are tracked), so without this rehoming the root hero renders
         // black while the shader card below it is live.
-        let mut preview = super::node::node_face_builder::product_of_kind(
-            sections,
-            crate::UiProductKind::Visual,
-        );
+        let mut preview =
+            super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
         if let Some(hero) = preview.as_mut()
             && let Some(product) = graph
                 .channels
@@ -2376,6 +2408,109 @@ impl ProjectController {
         })
     }
 
+    /// Every panel control a card subtree already derived whose
+    /// `panel_target` names `scope`, deduplicated per channel.
+    ///
+    /// One `(scope, channel)` is ONE control (panel.md P1) however many
+    /// cards below consume it; the first one found wins. Shared by the
+    /// module panel and by a playlist entry's bubbled-up group, so a knob
+    /// reaching a panel through either door is the SAME `UiPanelControl`
+    /// the card below renders.
+    fn scoped_panel_controls(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: lpc_wire::WireScopeRef,
+        children: &[crate::UiNodeChild],
+    ) -> Vec<crate::UiPanelControlView> {
+        let mut controls: Vec<crate::UiPanelControlView> = Vec::new();
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for control in subtree_panel_controls(children) {
+            let Some(target) = control
+                .panel_target
+                .as_ref()
+                .filter(|target| target.scope == scope)
+            else {
+                continue;
+            };
+            if !seen.insert(target.channel.clone()) {
+                continue;
+            }
+            let (state, source) = self.panel_control_state(graph, scope, target);
+            controls.push(crate::UiPanelControlView {
+                channel: target.channel.clone(),
+                control: control.clone(),
+                state,
+                source,
+            });
+        }
+        controls
+    }
+
+    /// Walk a module's card subtree for playlists and append one group per
+    /// playlist whose ACTIVE entry publishes controls (R9).
+    ///
+    /// The walk stops at two kinds of card: a child MODULE owns its own
+    /// scope (its panel already rides along as its own group), and a
+    /// PLAYLIST's entry subtree belongs to that entry's sink scope, not to
+    /// this module's — so neither is descended past.
+    fn collect_playlist_entry_groups(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        children: &[crate::UiNodeChild],
+        out: &mut Vec<crate::UiPanelGroup>,
+    ) {
+        for child in children {
+            if child.kind == MODULE_KIND_LABEL {
+                continue;
+            }
+            let Some(crate::UiNodeFace::Playlist(face)) = child.face.as_ref() else {
+                self.collect_playlist_entry_groups(graph, &child.children, out);
+                continue;
+            };
+            if let Some(group) = self.playlist_entry_group(graph, child, face) {
+                out.push(group);
+            }
+        }
+    }
+
+    /// One playlist's ACTIVE-entry group: the entry's own controls, labeled
+    /// by the entry (fyeah's root panel shows an "idle" cluster), targeting
+    /// the entry's SINK scope so the group reset clears exactly the writers
+    /// that entry engaged.
+    ///
+    /// `None` — no group at all — when the playlist has no resolved active
+    /// entry, its card is not backed by a controller, or the active entry
+    /// publishes nothing: an empty cluster is worse than no cluster.
+    fn playlist_entry_group(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        card: &crate::UiNodeChild,
+        face: &crate::UiPlaylistFace,
+    ) -> Option<crate::UiPanelGroup> {
+        let entry = face.active?;
+        let address = ProjectNodeAddress::parse(&card.detail).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        let scope = lpc_wire::WireScopeRef::Sink { owner, entry };
+        // The playlist face keeps ONLY the active entry's child (the one
+        // live surface rule), so the shown child IS the entry's card.
+        let entry_card = card.children.first()?;
+        let controls = self.scoped_panel_controls(graph, scope, core::slice::from_ref(entry_card));
+        if controls.is_empty() {
+            return None;
+        }
+        let label = face
+            .entries
+            .iter()
+            .find(|candidate| candidate.key == entry)
+            .map(|candidate| candidate.name.clone())
+            .unwrap_or_else(|| entry_card.label.clone());
+        Some(
+            crate::UiPanelGroup::new(label, entry_card.detail.clone())
+                .with_target(scope)
+                .with_controls(controls),
+        )
+    }
+
     /// Whether `owner` is the project's root module — the one card that
     /// presents project-level switches (today: panel auto-save).
     fn is_root_module(&self, owner: NodeId) -> bool {
@@ -2412,7 +2547,14 @@ impl ProjectController {
         scope: lpc_wire::WireScopeRef,
         target: &crate::UiPanelTarget,
     ) -> (crate::UiPanelControlState, Option<String>) {
-        if target.engaged {
+        // `target.engaged` already folds in the local echo (GV fix 5); the
+        // pending map is consulted again here because a control can reach a
+        // panel carrying a target built before the write.
+        if target.engaged
+            || self
+                .pending_panel_write(Some(&scope), &target.channel)
+                .is_some()
+        {
             // The panel itself holds the channel; "who drives it" is this
             // control, so there is nothing else to name.
             return (crate::UiPanelControlState::Engaged, None);
@@ -2803,6 +2945,9 @@ impl ProjectController {
         self.root_shape_ids.clear();
         self.staged_removals.clear();
         self.pending_focus = None;
+        // Panel echoes belong to the runtime that was holding the channels
+        // (GV fix 5); the next project's controls start from probe truth.
+        self.pending_panel_writes.clear();
         // the library binding follows the loaded project: a disconnected or
         // failed project must not keep pulling saves into (or advertising)
         // the previously open package. Its host lock is queued for release
@@ -2868,6 +3013,10 @@ impl ProjectController {
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
         let result = self.apply_project_view(sync.project_view());
         self.sync = Some(sync);
+        // A fresh binding-graph snapshot retires the panel's local echoes
+        // it has caught up with (GV fix 5) — before the presentation pass,
+        // which is what reads them.
+        self.expire_converged_panel_writes();
         // The binding presentation reads the overlay mirror and the binding
         // graph through `self.sync`, which was taken out during the view
         // apply — run it now that it is restored.
@@ -3013,6 +3162,92 @@ impl ProjectController {
         })
     }
 
+    /// Record a panel write's value as the control's LOCAL ECHO (GV fix 5).
+    ///
+    /// Called by the studio controller's op executor for every
+    /// [`PanelWriteOp`] it runs, *before* and independent of the wire send:
+    /// the point is to be faster than the round trip, and a write the
+    /// server later refuses simply never converges, so the next snapshot
+    /// carrying no Panel provider leaves probe truth showing through.
+    pub fn note_panel_write(
+        &mut self,
+        scope: lpc_wire::WireScopeRef,
+        channel: &str,
+        value: lpc_model::LpValue,
+    ) {
+        self.pending_panel_writes
+            .insert((scope, channel.to_string()), value);
+    }
+
+    /// Drop echo entries the engine has taken over: a channel whose row now
+    /// carries a Panel-origin provider IS the panel's write, and probe truth
+    /// (including whatever the engine did to the value — clamping, kind
+    /// coercion) is strictly better than the echo of it.
+    ///
+    /// Runs on every applied binding-graph snapshot, so an echo lives at
+    /// most one probe round trip: exactly the window it exists to cover.
+    fn expire_converged_panel_writes(&mut self) {
+        let Some(graph) = self.sync.as_ref().and_then(|sync| sync.binding_graph()) else {
+            return;
+        };
+        self.pending_panel_writes
+            .retain(|(scope, channel), _| !panel_writer_engaged(graph, scope, channel));
+    }
+
+    /// Drop the echo entries a clear releases, immediately — the control
+    /// must fall back to Read on the gesture, not on the next probe.
+    fn drop_pending_panel_writes(&mut self, request: &lpc_wire::WirePanelClearRequest) {
+        match request {
+            lpc_wire::WirePanelClearRequest::Channel { scope, channel } => {
+                self.pending_panel_writes.remove(&(*scope, channel.clone()));
+            }
+            lpc_wire::WirePanelClearRequest::Scope { scope } => {
+                self.pending_panel_writes
+                    .retain(|(pending, _), _| pending != scope);
+            }
+            lpc_wire::WirePanelClearRequest::All => self.pending_panel_writes.clear(),
+        }
+    }
+
+    /// The echoed value for `(scope, channel)`, when a panel write is still
+    /// waiting for probe truth to catch up.
+    fn pending_panel_write(
+        &self,
+        scope: Option<&lpc_wire::WireScopeRef>,
+        channel: &str,
+    ) -> Option<&lpc_model::LpValue> {
+        self.pending_panel_writes
+            .get(&(*scope?, channel.to_string()))
+    }
+
+    /// The channel's live reading for display, echo first: a just-written
+    /// value reads back immediately instead of at probe cadence (GV fix 5).
+    fn live_channel_display(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: Option<&lpc_wire::WireScopeRef>,
+        channel: &str,
+        binding_kind: lpc_model::Kind,
+    ) -> Option<String> {
+        match self.pending_panel_write(scope, channel) {
+            Some(value) => crate::app::project::format_live_scalar(value),
+            None => live_channel_value(graph, scope, channel, binding_kind),
+        }
+    }
+
+    /// Whether a panel writer holds `(scope, channel)` — an echoed write
+    /// counts, so the control reads Engaged (and offers its reset) on the
+    /// gesture rather than a round trip later.
+    fn panel_engaged(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: &lpc_wire::WireScopeRef,
+        channel: &str,
+    ) -> bool {
+        self.pending_panel_write(Some(scope), channel).is_some()
+            || panel_writer_engaged(graph, scope, channel)
+    }
+
     /// Engage (or update) the panel writer for `(scope, channel)` via
     /// `WireProjectCommand::PanelWrite` — the runtime command channel, so
     /// no overlay entry, no dirty flag, no Save-panel row. Quiet on
@@ -3061,6 +3296,9 @@ impl ProjectController {
         op: PanelClearOp,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
+        // The echo goes with the writer it echoes (GV fix 5) — releasing a
+        // held control must read as released on the gesture.
+        self.drop_pending_panel_writes(&op.request);
         let run = server.panel_clear(handle_id, op.request).await?;
         let notices = match run.response {
             lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
@@ -5055,6 +5293,29 @@ fn live_channel_value(
     crate::app::project::format_live_scalar(value)
 }
 
+/// The display title for a project, in preference order (GV fix 4):
+/// the container manifest's `name`, the synced root node's tree label, the
+/// project id. Blank candidates are skipped rather than shown.
+///
+/// Split out from [`ProjectController::project_name`] so the ladder itself
+/// is testable without standing up a library package: the root label — the
+/// only candidate before this fix — is derived from the runtime tree's root
+/// path, which the server sanitizes out of the project's storage folder,
+/// and the Studio's library projects all live in one called `studio`.
+fn project_display_title(
+    manifest_name: Option<&str>,
+    root_label: Option<&str>,
+    project_id: &str,
+) -> String {
+    manifest_name
+        .into_iter()
+        .chain(root_label)
+        .map(str::trim)
+        .find(|candidate| !candidate.is_empty())
+        .unwrap_or(project_id)
+        .to_string()
+}
+
 /// Whether a panel writer is engaged for `(scope, channel)`: the probe
 /// surfaces one as a Panel-origin provider row on the scoped channel
 /// listing, so engagement reads from the graph the UI already pulls.
@@ -5683,6 +5944,33 @@ mod tests {
         let project = ProjectController::new();
 
         assert!(project.actions(false).is_empty());
+    }
+
+    /// GV fix 4: the project title (pane AND root card) comes from the
+    /// container manifest, not from the runtime tree's root label.
+    ///
+    /// The regression shape: every Studio library project runs out of a
+    /// storage folder called `studio`, and the server derives the runtime
+    /// root path from that folder — so the root label humanized to
+    /// "Studio" and the fyeah example's card and pane both said so.
+    #[test]
+    fn the_project_title_prefers_the_manifests_name_over_the_tree_root_label() {
+        assert_eq!(
+            project_display_title(Some("Fyeah Sign"), Some("Studio"), "examples/fyeah-sign"),
+            "Fyeah Sign"
+        );
+        // No package behind the project (device projects, fixture servers):
+        // the tree label is still the best thing there is.
+        assert_eq!(
+            project_display_title(None, Some("Aurora"), "prj_x"),
+            "Aurora"
+        );
+        // Blank candidates never win — an empty title is worse than an id.
+        assert_eq!(
+            project_display_title(Some("   "), Some(""), "prj_x"),
+            "prj_x"
+        );
+        assert_eq!(project_display_title(None, None, "prj_x"), "prj_x");
     }
 
     #[test]
@@ -7399,6 +7687,153 @@ mod tests {
             bound_endpoint("Brightness").live_value.as_deref(),
             Some("0.12")
         );
+    }
+
+    /// GV fix 5: a panel write echoes locally, so the control reads its new
+    /// value (and Engaged) BEFORE any probe — the jerky-drag fix — and the
+    /// echo retires the moment probe truth can carry it.
+    #[test]
+    fn a_panel_write_echoes_locally_until_the_graph_carries_it() {
+        let owner = lpc_model::NodeId::new(1);
+        let scope = lpc_wire::WireScopeRef::Module { owner };
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        // One authored consume of a scoped channel nothing writes: the
+        // control reads its own default and offers a panel target.
+        let graph = |panel_provider: bool, value: f32| lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![
+                lpc_wire::WireEffectiveBinding {
+                    owner,
+                    node: owner,
+                    slot: Some(SlotPath::parse("wired_in").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: Some(scope),
+                        channel: "wobble".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Authored,
+                    priority: 0,
+                    kind: lpc_model::Kind::Amplitude,
+                },
+                lpc_wire::WireEffectiveBinding {
+                    owner,
+                    node: owner,
+                    slot: None,
+                    direction: lpc_wire::WireBindingDirection::Publishes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: Some(scope),
+                        channel: "wobble".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Panel,
+                    priority: 100,
+                    kind: lpc_model::Kind::Amplitude,
+                },
+            ],
+            channels: vec![lpc_wire::WireBusChannel {
+                scope: Some(scope),
+                name: "wobble".to_string(),
+                kind: Some(lpc_model::Kind::Amplitude),
+                providers: if panel_provider { vec![1] } else { Vec::new() },
+                consumers: vec![0],
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::F32(value)),
+                    error: None,
+                }),
+                primary_visual: false,
+            }],
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph(false, 0.1));
+        project.refresh_binding_presentation();
+
+        let wired_endpoint = |project: &ProjectController| -> crate::UiBindingEndpoint {
+            let nodes = project.ui_nodes();
+            let config = section_config_slots(node_sections(&nodes[0]));
+            let row = config
+                .iter()
+                .find(|slot| slot.label == "Wired in")
+                .expect("the wired row");
+            let UiSlotSourceState::Bound(endpoint) = &row.source else {
+                panic!("expected a bound row, got {:?}", row.source);
+            };
+            endpoint.clone()
+        };
+
+        let before = wired_endpoint(&project);
+        assert_eq!(before.live_value.as_deref(), Some("0.1"));
+        assert!(
+            !before
+                .panel_target
+                .as_ref()
+                .expect("a scoped consume is a panel target")
+                .engaged
+        );
+
+        // The write — nothing else. No probe, no refresh, no graph change.
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.9));
+        let echoed = wired_endpoint(&project);
+        assert_eq!(
+            echoed.live_value.as_deref(),
+            Some("0.9"),
+            "the panel's own write reads back immediately, not at probe cadence"
+        );
+        assert!(
+            echoed.panel_target.expect("target survives").engaged,
+            "and the control reads Engaged at once (its reset is reachable)"
+        );
+        // …including on the module panel's own state derivation.
+        let target = crate::UiPanelTarget {
+            scope,
+            channel: "wobble".to_string(),
+            engaged: false,
+        };
+        let snapshot = project.binding_graph().expect("graph").clone();
+        assert_eq!(
+            project.panel_control_state(&snapshot, scope, &target).0,
+            crate::UiPanelControlState::Engaged
+        );
+
+        // A snapshot whose channel row carries the Panel provider IS the
+        // engine holding the writer: probe truth takes over, echo retires.
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph(true, 0.9));
+        project.expire_converged_panel_writes();
+        assert!(project.pending_panel_writes.is_empty());
+        let converged = wired_endpoint(&project);
+        assert_eq!(converged.live_value.as_deref(), Some("0.9"));
+        assert!(
+            converged.panel_target.expect("target survives").engaged,
+            "still engaged — now on the graph's authority"
+        );
+
+        // A clear drops the echo on the gesture, not a round trip later.
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.3));
+        project.drop_pending_panel_writes(&lpc_wire::WirePanelClearRequest::Channel {
+            scope,
+            channel: "wobble".to_string(),
+        });
+        assert!(project.pending_panel_writes.is_empty());
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.3));
+        project.drop_pending_panel_writes(&lpc_wire::WirePanelClearRequest::Scope { scope });
+        assert!(project.pending_panel_writes.is_empty());
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.3));
+        project.drop_pending_panel_writes(&lpc_wire::WirePanelClearRequest::All);
+        assert!(project.pending_panel_writes.is_empty());
+
+        // And the echo never leaks into authored state or dirty tracking.
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.42));
+        assert!(project.pending_edits().is_empty());
+        assert!(project.edit_buffer.is_empty());
     }
 
     #[test]
