@@ -1,21 +1,26 @@
 {
   "id": "s5-foreign-firmware",
   "title": "Foreign firmware (recognized non-LightPlayer)",
-  "board": "C6 or S3",
+  "board": "S3 (or classic) \u2014 WLED has no C6 build",
   "needs": [],
   "expect": [
     "state:foreign-firmware"
   ],
   "setup": [
     {
-      "describe": "Flash a known non-LightPlayer image (an esp-idf example / MicroPython \u2014 anything on the classifier's safe-to-replace boot-string list).",
-      "run": null,
+      "describe": "Fetch a WLED release image (the foreign firmware a real user is most likely to have). Set WLED_URL to the asset for your board from https://github.com/wled/WLED/releases \u2014 e.g. the ESP32-S3 4MB build. Pinned by URL on purpose: a moving 'latest' would silently change what this fixture captured.",
+      "run": "test -n \"${WLED_URL:-}\" && curl -fL --proto '=https' --tlsv1.2 -o /tmp/wled.bin \"$WLED_URL\" && ls -l /tmp/wled.bin",
+      "verified": false
+    },
+    {
+      "describe": "Flash it at 0x0 (WLED release binaries are FULL images: bootloader + partitions + app). This overwrites LightPlayer entirely \u2014 that is the point.",
+      "run": "espflash write-bin --port {port} 0x0 /tmp/wled.bin",
       "verified": false
     }
   ],
   "manual": [
     "Connect to this board.",
-    "The card should read as replaceable foreign firmware."
+    "EXPECTED TO FAIL TODAY: the card should read as replaceable foreign firmware, but the classifier's safe-to-replace list holds exactly one entry (the Seeed XIAO C6 factory demo), so WLED will most likely land Unresponsive. File the finding \u2014 the captured RX lines ARE the evidence needed to teach the classifier WLED's boot signature."
   ],
   "port_filter": {
     "kind_contains": "USB-Serial/JTAG"

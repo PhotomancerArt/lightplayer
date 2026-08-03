@@ -84,3 +84,19 @@ for M6:
   came back USABLE (connect, name, push) rather than dead. That is the
   right graceful degradation — and the contrast with attempt 2's wedge
   is what makes that wedge worth its defect entry.
+## 2026-08-03T22:43:50.599Z — s6-corrupt-lpfs-project
+
+- Expected: sync:unreadable (missing: sync:unreadable)
+- Observed (trace summary):
+  - flow   selecting-provider → discovering-endpoints
+  - flow   discovering-endpoints → selecting-endpoint
+  - flow   selecting-endpoint → connecting
+  - state  · → booting
+  - flow   connecting → connected
+  - pool   install (Device)
+  - state  booting → ready
+  - sync   empty
+  - sync   empty
+- Note: just lands on "name your device" and "Connected — nothing loaded"
+- Trace: s6-corrupt-lpfs-project.failed.jsonl (109 events)
+
