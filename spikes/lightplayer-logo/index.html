@@ -317,7 +317,9 @@
   reserved for marketing surfaces; chip goes <b>white + more technical</b> (Chip tint/stroke controls,
   mark H); wordmark stays a basic sans — no need to get fancy.
   <b>Gate-2:</b> mark = <b>H·Datasheet fine</b> (confirmed), <b>pin-1 dot dropped</b> (accurate but
-  noisy); rainbow scope D / D2 / D3 (“Player” still · triangle still) under judgment.
+  noisy); lockup gap set to the optical norm (~0.5× cap height).
+  <b>Gate-3:</b> <b>D3 in-app</b> (always on, no hover gating), <b>D full for marketing</b>;
+  icon-only forms animate the triangle (A behavior); H package corners rounded a hair (rx 1.3→1.9).
 </p>
 
 <div class="controls">
@@ -461,7 +463,7 @@ const MARKS = {
     build: (s, c) => svgOpen(s, c) + sig() + spiralPlay(14.8, 16, 11.5, 6, 1.5) + `</svg>` },
   tech: { label: 'H · Datasheet fine', tag: 'CHOSEN · gate-2', note: 'The technical read: thin silkscreen strokes, squarer corners, slim pads. Pin-1 dot dropped at gate-2 — accurate but visual noise.',
     build: (s, c) => svgOpen(s, c)
-      + `<rect class="pkg" x="5.5" y="5.5" width="21" height="21" rx="1.3" stroke-width="1.25"/>`
+      + `<rect class="pkg" x="5.5" y="5.5" width="21" height="21" rx="1.9" stroke-width="1.25"/>`
       + `<rect class="pad p1" x="3.6" y="8.2" width="1.9" height="4.2" rx="0.6"/>`
       + `<rect class="pad p2" x="26.5" y="8.2" width="1.9" height="4.2" rx="0.6"/>`
       + `<rect class="pad p3" x="26.5" y="19.6" width="1.9" height="4.2" rx="0.6"/>`
@@ -605,17 +607,17 @@ const ANIMS = {
   rplay: { label: 'A · LED lens', cls: 'a-rplay', note: 'Only the play cycles through the LED rainbow. The chip stays quiet; the pixel is alive.' },
   chase: { label: 'B · Pad chase', cls: 'a-chase', note: 'The four pads pulse in rotation, each holding its own hue — an addressable chain in miniature.' },
   flow:  { label: 'C · Signal flow', cls: 'a-flow', note: 'Data streams in the left pads and out the right; the play breathes as frames pass through.' },
-  rword: { label: 'D · Rainbow wordmark — full', cls: 'a-rword', note: 'The loud one. Gate-1: “great, but a tiny bit distracting in an actual app” — kept for marketing surfaces; in-app it becomes F.' },
-  rwordl: { label: 'D2 · Rainbow “Light” only', cls: 'a-rwordl', note: 'Gate-2 A/B vs D: “Player” holds still in the strong ink; only “Light” (and the play) carry the rainbow. Calmer, anchors the name.' },
-  rwordt: { label: 'D3 · “Light” only, all-white mark', cls: 'a-rwordt', note: 'Mark goes full white — triangle included. ONLY the word “Light” moves. The chip is hardware; the light is in the name.' },
+  rword: { label: 'D · Rainbow wordmark — full', cls: 'a-rword', note: 'CHOSEN for marketing surfaces (gate-3): website/readme hero, where loud is the point.' },
+  rwordl: { label: 'D2 · Rainbow “Light” only', cls: 'a-rwordl', note: 'Passed over at gate-3 — the cycling triangle survives only in icon-only forms.' },
+  rwordt: { label: 'D3 · “Light” only, all-white mark', cls: 'a-rwordt', note: 'CHOSEN in-app (gate-3), always on — no hover gating. The chip is hardware; the light is in the name.' },
   glow:  { label: 'E · Breathe', cls: 'a-glow', note: 'No rainbow — the accent play softly blooms, like a status LED idling.' },
-  hover: { label: 'F · Hover rainbow', cls: 'a-hover', note: 'Static brand; hover plays the full D treatment (rainbow word + play). The in-app candidate per gate-1.' },
+  hover: { label: 'F · Hover rainbow', cls: 'a-hover', note: 'Superseded at gate-3: D3 runs always-on in-app; no hover gating needed.' },
 };
 
 /* ============================== state =============================== */
 /* URL hash preseeds everything, e.g. #mark=escapes&font=circuit&anim=rword&canvas=light
    — handy for pointing at an exact composition in gate feedback. */
-const state = { mark: 'tech', font: 'inter', anim: 'rword' };
+const state = { mark: 'tech', font: 'inter', anim: 'rwordt' };
 const hash = new URLSearchParams(location.hash.slice(1));
 for (const k of ['mark', 'font', 'anim']) {
   const v = hash.get(k);
@@ -694,9 +696,9 @@ function renderSheet() {
     <div class="body tall stage">${lockupHTML(state, 52, 30, a)}</div>
   </div>
   <div class="tile">
-    <span class="tname">Top bar · 22px — always hover-gated (gate-1)</span>
+    <span class="tname">Top bar · 22px — D3 always-on (gate-3)</span>
     <div class="body"><div class="topbar" style="width:100%">
-      ${lockupHTML(state, 22, 13.5, ANIMS.hover.cls)}
+      ${lockupHTML(state, 22, 13.5, a)}
       <span class="nav"><span class="on">Project</span><span>Devices</span><span>Output</span></span>
       <span class="right"><span class="pill">LIVE</span></span>
     </div></div>
@@ -704,24 +706,24 @@ function renderSheet() {
   <div class="tile">
     <span class="tname">Stacked / square</span>
     <div class="body tall stage" style="justify-content:center">
-      <span style="display:flex;flex-direction:column;align-items:center;gap:9px">
-        <span class="lockup ${a}">${MARKS[state.mark].build(54)}</span>
+      <span class="lockup ${a}" style="flex-direction:column;gap:9px">
+        ${MARKS[state.mark].build(54)}
         ${wordHTML(state.font, 15)}
       </span>
     </div>
   </div>
   <div class="tile">
-    <span class="tname">App icons</span>
+    <span class="tname">App icons — icon-only: triangle animates (gate-3)</span>
     <div class="body" style="gap:16px">
-      <span class="apptile t-dark"><span class="lockup ${a}">${MARKS[state.mark].build(44)}</span></span>
+      <span class="apptile t-dark"><span class="lockup a-rplay">${MARKS[state.mark].build(44)}</span></span>
       <span class="apptile t-accent ink"><span class="lockup">${MARKS[state.mark].build(44)}</span></span>
-      <span class="apptile t-black"><span class="lockup ${a}">${MARKS[state.mark].build(44)}</span></span>
+      <span class="apptile t-black"><span class="lockup a-rplay">${MARKS[state.mark].build(44)}</span></span>
     </div>
   </div>
   <div class="tile">
     <span class="tname">Favicon — actual size</span>
     <div class="body" style="flex-direction:column;gap:10px">
-      <div class="tabmock"><span class="lockup ${a}">${MARKS[state.mark].build(16)}</span> LightPlayer Studio — zook-dome <span class="x">×</span></div>
+      <div class="tabmock"><span class="lockup a-rplay">${MARKS[state.mark].build(16)}</span> LightPlayer Studio — zook-dome <span class="x">×</span></div>
       <div class="favrow">
         <span><span class="lockup" style="color:#94b8aa">${MARKS[state.mark].build(16)}</span><div class="lab">16</div></span>
         <span><span class="lockup" style="color:#94b8aa">${MARKS[state.mark].build(32)}</span><div class="lab">32</div></span>
@@ -741,8 +743,8 @@ function renderSheet() {
     <div class="body stage fix-accent-ink ink" style="justify-content:center">${lockupHTML(state, 34, 20)}</div>
   </div>
   <div class="tile">
-    <span class="tname">Social avatar</span>
-    <div class="body"><span class="avatar"><span class="lockup ${a}">${MARKS[state.mark].build(36)}</span></span></div>
+    <span class="tname">Social avatar — icon-only: triangle animates</span>
+    <div class="body"><span class="avatar"><span class="lockup a-rplay">${MARKS[state.mark].build(36)}</span></span></div>
   </div>`;
 }
 renderSheet();
