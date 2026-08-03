@@ -4328,7 +4328,30 @@ impl StudioController {
         // than which button was pressed, because that is what determines
         // whether waiting for a reattach is sensible.
         let from_recovery = self.device_is_in_recovery_mode();
-        let build_id = self.provisioning_build_id(board_id.as_deref());
+        // No image, no flash — there is no fallback build (Yona,
+        // 2026-08-03: "either it matches, or its a fail case"). The
+        // deployment default used to aim an unidentified board at the C6
+        // image and leave the flash-time chip guard to refuse a build
+        // nobody chose ("Refusing to flash: this device is ESP32-D0WD-V3
+        // … but the image is built for esp32c6"). Refuse HERE, where the
+        // evidence is, and say what would fix it.
+        let Some(build_id) = self.provisioning_build_id(board_id.as_deref()) else {
+            let detected = self
+                .hardware_session()
+                .and_then(|session| session.snapshot().detected_chip);
+            let subject = match detected
+                .as_deref()
+                .and_then(lpa_link::chip_id_from_reported)
+            {
+                Some(chip) => format!("this {chip} device"),
+                None => "this device".to_string(),
+            };
+            return Err(UiError::UnsupportedAction(format!(
+                "No firmware image matches {subject}. Pick your board in the setup form — \
+                 and if it is not listed, this Studio build ships no image for that chip."
+            )));
+        };
+        let build_id = Some(build_id);
         let mut outcome = self
             .run_device_management(
                 ManagementFlowSpec {

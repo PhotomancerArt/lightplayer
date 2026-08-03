@@ -196,11 +196,11 @@ impl BrowserSerialEsp32Provider {
     }
 
     /// Read a packaged build's manifest without touching the device.
-    /// `None` reads the deployment default.
     pub async fn load_firmware_manifest(
         &self,
         build_id: Option<&str>,
     ) -> Result<BrowserEsp32FirmwareManifest, LinkError> {
+        let build_id = require_build_id(build_id)?;
         browser_esp32_flash::load_manifest(&self.options.firmware_manifest_path(build_id)).await
     }
 
@@ -227,6 +227,7 @@ impl BrowserSerialEsp32Provider {
         build_id: Option<&str>,
         events: LinkManagementEventSink,
     ) -> Result<BrowserEsp32FlashResult, LinkError> {
+        let build_id = require_build_id(build_id)?;
         let port_id = self.endpoint_port_id(endpoint_id)?;
         browser_esp32_flash::flash_firmware_with_events(
             port_id,
@@ -596,6 +597,20 @@ impl LinkProvider for BrowserSerialEsp32Provider {
         ));
         Ok(())
     }
+}
+
+/// A flash request must NAME its image. There is no fallback build
+/// (Yona, 2026-08-03: "there shouldn't be a fallback for firmware.
+/// either it matches, or its a fail case") — the deployment default
+/// silently aimed a classic ESP32 at the C6 image and left the
+/// flash-time chip guard to refuse a build nobody had chosen.
+fn require_build_id(build_id: Option<&str>) -> Result<&str, LinkError> {
+    build_id.ok_or_else(|| {
+        LinkError::other(
+            "no firmware image matches this device: pick your board in the setup form, \
+             and if it is not listed, this Studio build ships no image for that chip",
+        )
+    })
 }
 
 fn session_state<'a>(
