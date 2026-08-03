@@ -97,6 +97,11 @@ whole effective binding graph plus a bus-channel summary.**
 ## Follow-ups
 
 - M3 bus pane and binding-derived node rows consume this surface.
+  *Amended 2026-08-03:* the bus pane is gone; the same rows are now the
+  module card's wiring drawer, one per scope, and the probe grew scoped
+  channel rows (wire proto 7–8) to key them —
+  `2026-08-01-scoped-bus-engine-architecture.md`,
+  `2026-08-03-panel-visibility-is-derived.md`.
 - M5 replaces the origin derivation's producer (loader helpers →
   declarative policy) without touching the contract.
 - Bus value **writes** (operator overrides) are out of scope; recorded as

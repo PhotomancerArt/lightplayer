@@ -7,8 +7,12 @@
   (`2026-08-01-scoped-bus-engine-architecture.md`), which supplies the
   `(scope, channel)` identity this whole tier keys on, and follows the
   runtime command-channel precedent from
-  `2026-07-27-runtime-node-command-channel.md`.
-- Plan: `planning/2026-08-01-1003-modules-impl-roadmap` P8–P10.
+  `2026-07-27-runtime-node-command-channel.md`. What decides WHICH
+  controls reach a panel to engage these writers is
+  `2026-08-03-panel-visibility-is-derived.md`.
+- Plan: `planning/2026-08-01-1003-modules-impl-roadmap` P8–P10; the P11
+  auto-save toggle reached the wire at proto 9 in
+  `planning/2026-08-03-1021-modules-vision-push`.
 
 ## Decision
 

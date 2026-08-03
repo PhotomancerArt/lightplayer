@@ -13,7 +13,7 @@ pub fn NodeChildren(
     #[props(default)]
     pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
-    /// M2 UX spike: panel gestures raised by a module child's face, passed
+    /// Panel gestures raised by a module child's face, passed
     /// down so a child module's panel is as live as its host's.
     #[props(default = None)]
     module_panel: Option<EventHandler<crate::app::module::PanelGesture>>,

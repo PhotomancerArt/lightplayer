@@ -3,7 +3,7 @@
 //!
 //! These are the retired `studio/bus/bus-pane/*` stories, relocated rather
 //! than redesigned (P3): the sidebar bus pane is gone, and
-//! [`crate::app::BusPaneBody`] now renders inside the module card's wiring
+//! [`crate::app::WiringDrawerBody`] now renders inside the module card's wiring
 //! drawer, one view per scope, hung off the module that owns it. The rows
 //! themselves — the violet slot-pane treatment, the PRIMARY badge, the
 //! writers→readers detail popup — are unchanged, which is exactly what
@@ -20,7 +20,7 @@ use lpa_studio_core::{
 };
 use lpa_studio_web_story_macros::story;
 
-use crate::app::bus::bus_pane::BusChannelPane;
+use crate::app::wiring::wiring_drawer::BusChannelPane;
 
 use super::ModuleFace;
 use super::module_fixtures::{ROOT_SCOPE, scope_target};

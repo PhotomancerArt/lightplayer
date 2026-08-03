@@ -1037,7 +1037,87 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     );
 }
 
+#[test]
+fn every_gallery_example_opens_onto_a_populated_root_panel() {
+    // A gallery example that opens onto an EMPTY panel teaches the wrong
+    // thing about modules: the panel is the product, so each embedded
+    // package must publish at least one root-scope control (whether
+    // directly, or bubbled up from a playlist's active entry per R9).
+    //
+    // Booting each example through a real `LpServer` also compiles its
+    // shaders on the device frontend, which is coverage the checked-in
+    // examples otherwise lack (`docs/debt/example-shaders-not-compile-gated.md`).
+    for example in crate::app::home::embedded_examples() {
+        let server = Rc::new(RefCell::new(example_e2e_server(example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+        let editor = project_editor(&snapshot);
+        assert_eq!(
+            editor.nodes.len(),
+            1,
+            "{}: one top-level workspace card",
+            example.id
+        );
+        let face = module_face(&snapshot);
+        let published = face.panel.controls.len()
+            + face
+                .panel
+                .groups
+                .iter()
+                .map(|group| group.controls.len())
+                .sum::<usize>();
+        assert!(
+            published > 0,
+            "{}: the root panel publishes nothing — a gallery example must \
+             open onto live controls, not an empty panel",
+            example.id
+        );
+    }
+}
+
 // -- harness -----------------------------------------------------------------
+
+/// A server holding one embedded gallery example, loaded from the very
+/// bytes the wasm bundle ships (`include_bytes!` of `examples/<name>/`).
+fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+    let dir = format!("/projects/{}", example.id.replace('/', "-"));
+    for (name, bytes) in example.files {
+        server
+            .base_fs_mut()
+            .write_file(format!("{dir}/{name}").as_path(), bytes)
+            .expect("write example file");
+    }
+    server
+        .load_project(dir.as_path())
+        .unwrap_or_else(|err| panic!("{} loads: {err}", example.id));
+    server.advance_frame(16).expect("tick");
+    server
+}
 
 const PROJECT_DIR: &str = "/projects/face-e2e";
 

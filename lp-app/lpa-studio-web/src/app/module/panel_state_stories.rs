@@ -1,12 +1,12 @@
 //! Stories for the panel's three control states and its reset gestures
-//! (M2 UX spike, gate G2 question 5).
+//! (`docs/design/panel.md` P2/P-Q2).
 //!
 //! `docs/design/panel.md` P-Q2 asks for confirmation that
 //! Read-following-automation, Read-at-default, and Engaged are three
 //! *visibly distinct* states. These stories put them next to each other so
 //! that is a judgement about pixels rather than about prose.
 //!
-//! The spike's proposal: **amber** (`status-attention`) for engaged. Not
+//! The shipped treatment: **amber** (`status-attention`) for engaged. Not
 //! violet — bound means *wired*, engaged means *captured* (P6). Not green
 //! — green is valid-only. Not the blue live family — that is a transient
 //! unsaved edit. A dedicated `status-engaged` token family is the eventual
@@ -16,8 +16,7 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use super::module_fixtures::{
-    PLASMA_1_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face, root_module_node_view,
-    three_state_panel,
+    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, root_module_node_view, three_state_panel,
 };
 use super::{ModulePanel, PanelGesture};
 
@@ -88,18 +87,18 @@ fn auto_save_off() -> Element {
 fn latch_walkthrough() -> Element {
     // Start from the pristine Read face, so the FIRST touch is the thing
     // being felt — and so a clear has somewhere honest to land.
-    let mut spike = use_signal(|| PanelSpike::new(root_module_node_view()));
+    let mut walk = use_signal(|| PanelWalk::new(root_module_node_view()));
 
     rsx! {
         PanelCanvas {
             ModulePanel {
-                panel: spike().face().panel.clone(),
-                auto_save: spike().face().auto_save,
+                panel: walk().face().panel.clone(),
+                auto_save: walk().face().auto_save,
                 on_panel: move |gesture: PanelGesture| {
-                    spike.with_mut(|spike| spike.apply_gesture(&gesture));
+                    walk.with_mut(|walk| walk.apply_gesture(&gesture));
                 },
                 on_action: move |action| {
-                    spike.with_mut(|spike| spike.apply_action(&action));
+                    walk.with_mut(|walk| walk.apply_action(&action));
                 },
             }
         }

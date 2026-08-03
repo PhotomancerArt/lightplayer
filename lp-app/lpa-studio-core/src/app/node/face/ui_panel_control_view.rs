@@ -7,8 +7,9 @@
 //! module model reuses the node-face panel widgets rather than forking a
 //! second control family.
 //!
-//! M2 UX spike: the state below is carried by mock fixtures. The engine
-//! runtime that materializes real panel writers is M4's.
+//! The state below is derived by `ProjectController`'s panel projection
+//! from the engine's live writer set; story fixtures build the same shapes
+//! by hand so the storybook stays deterministic.
 
 use crate::{UiPanelControl, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 

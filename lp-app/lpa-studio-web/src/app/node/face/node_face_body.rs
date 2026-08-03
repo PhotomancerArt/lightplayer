@@ -117,7 +117,7 @@ pub fn NodeFaceBody(
                         on_action,
                     }
                 },
-                // M2 UX spike: the module face carries its own drawer
+                // The module face carries its own drawer
                 // (wiring), so it does NOT compose `NodeCardDrawers` — the
                 // advanced slot view lives on the individual child nodes,
                 // which are sibling cards below this one.

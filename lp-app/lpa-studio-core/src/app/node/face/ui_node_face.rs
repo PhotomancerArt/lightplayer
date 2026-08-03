@@ -20,7 +20,7 @@ pub enum UiNodeFace {
     /// scope's panel, and the bus-wiring drawer. Worn at every depth — root
     /// workspace card and embedded child card alike. Its children render
     /// below it as sibling cards via [`crate::UiNodeChild`], like every
-    /// other kind. **M2 UX spike:** fed by mock fixtures, not yet derived.
+    /// other kind.
     Module(UiModuleFace),
     /// A non-module node whose whole face is its bound slots, presented as
     /// panel controls (`docs/design/modules.md` R3): the clock, the control
@@ -28,6 +28,5 @@ pub enum UiNodeFace {
     /// ENCLOSING scope, because a leaf introduces no scope of its own — so
     /// these controls share their `(scope, channel)` identity, and their
     /// panel state, with the module panel above (`panel.md` P1).
-    /// **M2 UX spike:** mock-fed.
     Controls(UiPanelGroup),
 }

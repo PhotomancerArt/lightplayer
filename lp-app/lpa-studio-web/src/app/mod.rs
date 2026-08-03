@@ -9,13 +9,12 @@ pub(crate) mod affordance;
 pub(crate) mod board_diagram_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod board_editor_stories;
-pub mod bus;
 pub mod docs;
 pub mod home;
 pub mod layout;
 #[cfg(feature = "stories")]
 pub(crate) mod mapping_editor_stories;
-/// M2 UX spike: the module face, panel, and play-mode surfaces.
+/// The module face, panel, and play-mode surfaces.
 pub mod module;
 pub mod node;
 pub mod project;
@@ -24,10 +23,11 @@ pub(crate) mod readme_stories;
 pub mod roster;
 #[cfg(feature = "stories")]
 pub(crate) mod story_fixtures;
+pub mod wiring;
 
-pub use bus::BusPaneBody;
 pub use docs::DocsPage;
 pub use home::{HomeGallery, ProjectOpeningFrame};
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;
 pub use project::{ProjectNodeWorkspace, ProjectPane};
+pub use wiring::WiringDrawerBody;

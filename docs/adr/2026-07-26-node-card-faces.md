@@ -11,9 +11,11 @@
   anticipated). Builds on the pane grammar
   (`2026-07-05-studio-pane-grammar.md`) and the editing overlay model
   (`2026-07-04-studio-editing-model.md`).
-- **Superseded by:** Partially — `docs/design/modules.md` Q13
-  (binding-is-publicity, implemented 2026-08-03) deletes the `panel` flags
-  this ADR introduced. See the amendment under "Faces are type-aware".
+- **Superseded by:** Partially — `2026-08-03-panel-visibility-is-derived.md`
+  (`docs/design/modules.md` Q13, binding-is-publicity, implemented
+  2026-08-03) deletes the `panel` flags this ADR introduced. The face
+  grammar itself stands, and the Module face joins the family. See the
+  amendment under "Faces are type-aware".
 
 ## Context
 

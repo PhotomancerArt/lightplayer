@@ -21,7 +21,7 @@
 //! has one, the authored value when it does not. The authored value it
 //! displaces is a row in the detail popup, not a parenthetical beside it.
 //!
-//! Amber (the `status-attention` family) is the spike's engaged proposal:
+//! Amber (the `status-attention` family) is the engaged treatment:
 //! it is the one warm family Studio already owns, it is not violet (bound
 //! means *wired*, engaged means *captured* — P6), not green (valid only),
 //! and not the blue live family (transient edits). A dedicated
@@ -88,8 +88,9 @@ pub fn ModulePanelControl(
     /// Open this control's detail popup on first render (stories).
     #[props(default = false)]
     detail_initially_open: bool,
-    /// Widget value writes. The spike keeps knob drags on the existing
-    /// slot-edit path; M4 routes them to `PanelWrite`.
+    /// Widget value writes: a control carrying a `panel_target` dispatches
+    /// `PanelWriteOp` (panel.md P8); an unbound one falls back to the
+    /// existing slot-edit path.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {

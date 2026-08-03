@@ -1,4 +1,4 @@
-//! Stories for the module face (M2 UX spike, gate G2).
+//! Stories for the module face (`docs/design/modules.md` §5).
 //!
 //! These carry G2 questions 1–3: does one face hold up at every zoom
 //! level, is the controls/wiring split right, and does the root module back
@@ -15,7 +15,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::NodePane;
 
 use super::module_fixtures::{
-    HELD, PLASMA_1_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face, held_root_view, module_node_view,
+    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, held_root_view, module_node_view,
     plasma_children, plasma_face, plasma_one_panel, root_module_node_view,
 };
 use super::{ModuleFace, PanelGesture};
@@ -37,17 +37,17 @@ fn root_card() -> Element {
     // The walkable fixture: the card view is DERIVED from it each render,
     // so a knob drag really does move the knob and engage the control —
     // on the panel and on the child card that shares its identity.
-    let mut spike = use_signal(|| PanelSpike::new(root_module_node_view()).with_held(HELD));
+    let mut walk = use_signal(|| PanelWalk::new(root_module_node_view()).with_held(HELD));
 
     rsx! {
         WorkspaceCanvas {
             NodePane {
-                view: spike().view.clone(),
+                view: walk().view.clone(),
                 module_panel: move |gesture: PanelGesture| {
-                    spike.with_mut(|spike| spike.apply_gesture(&gesture));
+                    walk.with_mut(|walk| walk.apply_gesture(&gesture));
                 },
                 on_action: move |action| {
-                    spike.with_mut(|spike| spike.apply_action(&action));
+                    walk.with_mut(|walk| walk.apply_action(&action));
                 },
             }
         }
@@ -88,7 +88,7 @@ fn embedded_module() -> Element {
 }
 
 #[story(
-    description = "Bus split, drawer half: the wiring drawer open on the root module — every channel in this scope with its writers and readers, i.e. exactly the retired sidebar bus pane's content, now hung off the module that owns the scope. The panel above is the same bus presented for playing. The rows themselves are unchanged (see studio/module/wiring-drawer/*); the bus/wiring view gets its own UX spike."
+    description = "Bus split, drawer half: the wiring drawer open on the root module — every channel in this scope with its writers and readers, i.e. exactly the retired sidebar bus pane's content, now hung off the module that owns the scope. The panel above is the same bus presented for playing. The rows themselves are unchanged (see studio/module/wiring-drawer/*)."
 )]
 fn wiring_drawer_open() -> Element {
     let mut face = held_root_face();
