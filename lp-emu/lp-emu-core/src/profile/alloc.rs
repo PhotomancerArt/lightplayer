@@ -187,7 +187,10 @@ mod tests {
         // leaves less than it found — retained must not go negative in the
         // report, but the raw field records the shrink.
         assert_eq!(link.transient, 0, "a window that only frees has no peak");
-        assert_eq!(link.retained, 0, "max-across-openings floors at the initial 0");
+        assert_eq!(
+            link.retained, 0,
+            "max-across-openings floors at the initial 0"
+        );
         assert_eq!(link.largest_alloc, 0);
 
         let body = report.render_body_without_header();
