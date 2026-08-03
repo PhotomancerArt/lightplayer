@@ -1208,7 +1208,10 @@ mod tests {
         assert_eq!(
             view.render_text_lines(),
             vec![
-                "Home: 0 devices, 0 projects, 1 examples".to_string(),
+                format!(
+                    "Home: 0 devices, 0 projects, {} examples",
+                    embedded_examples().len()
+                ),
                 "  opening prj_x".to_string(),
                 "  issue: boom".to_string(),
             ]
