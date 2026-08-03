@@ -839,9 +839,13 @@ impl StudioController {
                 .as_ref()
                 .map(crate::app::home::home_view_builder::sim_card)
         } else {
+            // THE LENS session's entry, not the first (M3): with several
+            // boards attached the editor may be a lens on any of them.
+            let lens_key = session.id().to_string();
             evidence
                 .devices
-                .first()
+                .iter()
+                .find(|entry| entry.session_key.as_deref() == Some(lens_key.as_str()))
                 .map(crate::app::home::home_view_builder::device_card_from_live_evidence)
                 .map(|card| self.with_remembered_sighting(card))
         };
@@ -937,66 +941,47 @@ impl StudioController {
         Some(view)
     }
 
-    /// The runtime pool's roster evidence (P4): one evidence bundle per
-    /// DEVICE session — reconcile state reads the device session, never
-    /// the lens, which may be on the sim (P2 coexistence) — plus the SIM
-    /// session's evidence while it lives (D36: the sim card exists exactly
-    /// as long as the session does). The connect flow's transient evidence
-    /// (a connect in flight before any session exists) rides the device
-    /// entry, exactly as the single-session shape carried it.
+    /// The runtime pool's roster evidence (P4 → multi-device M3): one
+    /// evidence bundle per DEVICE session — reconcile state reads each
+    /// device session, never the lens, which may be on the sim (P2
+    /// coexistence) — plus the SIM session's evidence while it lives
+    /// (D36: the sim card exists exactly as long as the session does).
+    ///
+    /// The connect FLOW and the card-op slot are still app-singular (M4/M5
+    /// make them targeted): their narration rides the OLDEST device entry
+    /// — the same session the id-less op seam resolves — or a session-less
+    /// entry ("evidence of work, not of a session") while nothing is
+    /// attached, exactly as the ≤1 shape carried it. Recorded in the
+    /// multi-device ADR so M5 inherits the attribution decision.
     fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
-        let (observed_version, head_version) = self
+        let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
             .pool
-            .device_session()
-            .map(crate::RuntimeSession::device_versions)
-            .unwrap_or((None, None));
-        let (local_saved_at, pushed_at) = self
-            .pool
-            .device_session()
-            .map(crate::RuntimeSession::device_drift_times)
-            .unwrap_or((None, None));
-        // A long-running operation on the device session (flash / erase /
-        // push — the same flag that blocks pool replaces) owns the card's
-        // narration; the connect flow narrates otherwise.
-        let connect = match self
-            .pool
-            .device_session()
-            .and_then(|session| session.operation_label().map(str::to_string))
-        {
-            Some(label) => crate::ConnectEvidence::OperationInFlight {
-                label,
-                percent: None,
-            },
-            None => self.gallery_connect_evidence(),
-        };
-        let device = crate::app::home::HomeDeviceEvidence {
-            session_key: self
-                .pool
-                .device_session()
-                .map(|session| session.id().to_string()),
-            sync: self.device_sync().cloned(),
-            link: self.device_state(),
-            connect,
-            transport: self.transport_label().map(str::to_string),
-            observed_version,
-            head_version,
-            local_saved_at,
-            pushed_at,
-            pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
-            console_tail: self
-                .pool
-                .device_session()
-                .map(|session| session.console_tail().iter().cloned().collect())
-                .unwrap_or_default(),
-            op_in_flight: self.device_card_op.is_some(),
-            recovery: self
-                .pool
-                .device_session()
-                .and_then(|session| session.recovery_status().cloned()),
-            detected_chip: self
-                .hardware_session()
-                .and_then(|session| session.snapshot().detected_chip),
-        };
+            .device_sessions()
+            .map(|session| self.device_evidence(session))
+            .collect();
+        let flow_connect = self.gallery_connect_evidence();
+        let pending_uid = self.device.pending_reconnect_uid().map(str::to_string);
+        let op_in_flight = self.device_card_op.is_some();
+        match devices.first_mut() {
+            Some(first) => {
+                // An in-flight operation on the session owns its card's
+                // narration (set in `device_evidence`); the connect flow
+                // narrates otherwise.
+                if first.connect == crate::ConnectEvidence::Idle {
+                    first.connect = flow_connect;
+                }
+                first.pending_uid = pending_uid;
+                first.op_in_flight = op_in_flight;
+            }
+            None => {
+                devices.push(crate::app::home::HomeDeviceEvidence {
+                    connect: flow_connect,
+                    pending_uid,
+                    op_in_flight,
+                    ..Default::default()
+                });
+            }
+        }
         let sim = self
             .pool
             .sim_session()
@@ -1009,9 +994,48 @@ impl StudioController {
                     }),
                 console_tail: session.console_tail().iter().cloned().collect(),
             });
-        crate::app::home::HomePoolEvidence {
-            devices: vec![device],
-            sim,
+        crate::app::home::HomePoolEvidence { devices, sim }
+    }
+
+    /// One device session's roster evidence — every field reads THIS
+    /// session (M3). The app-singular connect-flow/card-op narration is
+    /// overlaid by [`Self::home_pool_evidence`], not here.
+    fn device_evidence(
+        &self,
+        session: &crate::RuntimeSession,
+    ) -> crate::app::home::HomeDeviceEvidence {
+        let (observed_version, head_version) = session.device_versions();
+        let (local_saved_at, pushed_at) = session.device_drift_times();
+        // A long-running operation (flash / erase / push — the same flag
+        // that blocks pool replaces) owns this card's narration.
+        let connect = match session.operation_label() {
+            Some(label) => crate::ConnectEvidence::OperationInFlight {
+                label: label.to_string(),
+                percent: None,
+            },
+            None => crate::ConnectEvidence::Idle,
+        };
+        crate::app::home::HomeDeviceEvidence {
+            session_key: Some(session.id().to_string()),
+            sync: session.device_sync().cloned(),
+            link: session.device_state(),
+            connect,
+            transport: session
+                .payload()
+                .link_session()
+                .and_then(|link| link.provider_kind.transport_label())
+                .map(str::to_string),
+            observed_version,
+            head_version,
+            local_saved_at,
+            pushed_at,
+            pending_uid: None,
+            console_tail: session.console_tail().iter().cloned().collect(),
+            op_in_flight: false,
+            recovery: session.recovery_status().cloned(),
+            detected_chip: session
+                .hardware_session()
+                .and_then(|hardware| hardware.snapshot().detected_chip),
         }
     }
 
@@ -1269,17 +1293,37 @@ impl StudioController {
             .and_then(crate::RuntimeSession::device_sync)
     }
 
-    /// Connect-is-a-pull (D8): pull the attached device's copy, classify
-    /// it against the library, persist per the M4b locking model, refresh
-    /// the registry, and cache the result. Never fails the connect —
-    /// errors are logged and leave the state `None` (flash/erase must
-    /// stay reachable on a device we can't read).
+    /// Connect-is-a-pull (D8) against the OLDEST device session (the
+    /// id-less seam's target — the pre-M4 callers: stamp, push,
+    /// reconcile). Attach flows call [`Self::refresh_device_sync_for`]
+    /// with their own session id instead.
     pub(crate) async fn refresh_device_sync(&mut self) {
-        if let Ok(session) = self.pool.device_session_mut() {
+        let Some(id) = self.pool.device_session().map(crate::RuntimeSession::id) else {
+            return;
+        };
+        self.refresh_device_sync_for(id).await;
+    }
+
+    /// The DEVICE session `id`, mutably — `None` for a missing session or
+    /// a non-device id (device flows never land on the sim).
+    fn device_session_by_id(&mut self, id: crate::RuntimeId) -> Option<&mut crate::RuntimeSession> {
+        self.pool
+            .session_mut(id)
+            .filter(|session| session.is_device())
+    }
+
+    /// Connect-is-a-pull (D8) targeting session `id` (multi-device M3:
+    /// attaching a second board pulls THAT board): pull the device's copy,
+    /// classify it against the library, persist per the M4b locking model,
+    /// refresh the registry, and cache the result on that session. Never
+    /// fails the connect — errors are logged and leave the state `None`
+    /// (flash/erase must stay reachable on a device we can't read).
+    pub(crate) async fn refresh_device_sync_for(&mut self, id: crate::RuntimeId) {
+        if let Some(session) = self.device_session_by_id(id) {
             session.clear_reconcile();
         }
         let pulled = {
-            let Ok(session) = self.pool.device_session_mut() else {
+            let Some(session) = self.device_session_by_id(id) else {
                 return;
             };
             let Ok(server) = session.client_mut() else {
@@ -1301,7 +1345,7 @@ impl StudioController {
                     // an actionable state, never an eternal "Checking…":
                     // the dialog shows the unreadable note; flash/erase
                     // stay reachable
-                    if let Ok(session) = self.pool.device_session_mut() {
+                    if let Some(session) = self.device_session_by_id(id) {
                         session.set_device_sync(Some(DeviceSyncState {
                             identity: None,
                             content: DeviceContent::Unreadable {
@@ -1314,12 +1358,12 @@ impl StudioController {
                 }
             }
         };
-        if let Ok(session) = self.pool.device_session_mut() {
+        if let Some(session) = self.device_session_by_id(id) {
             session.set_device_storage_id(Some(pulled.storage_id.clone()));
         }
         match self.absorb_device_pull(pulled).await {
             Ok(state) => {
-                if let Ok(session) = self.pool.device_session_mut() {
+                if let Some(session) = self.device_session_by_id(id) {
                     session.set_device_sync(Some(state));
                 }
                 self.mark_dirty();
@@ -2458,13 +2502,25 @@ impl StudioController {
         outcome: Result<DeviceOpenOutcome, UiError>,
         updates: UxUpdateSink,
     ) -> UiResult {
+        // Multi-device M3: a DEVICE connect that ends without a session no
+        // longer clears the kind's slot — with several boards attachable,
+        // opening the picker (or a cancelled/failed attempt at an
+        // ADDITIONAL board) must not tear down a live session. The ≤1-era
+        // "empty-slot ending" semantics survive for the sim (capacity 1),
+        // and a RECONNECT of an existing endpoint still replaces its own
+        // session at install time (the pool's per-endpoint rule).
+        let clear_on_empty_ending = kind != crate::RuntimeKind::Device;
         match outcome {
             Ok(DeviceOpenOutcome::Opened) => {
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 Ok(UiNotices::new())
             }
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
@@ -2476,12 +2532,16 @@ impl StudioController {
                 // M6: the ladder's honest ending lives on the CARD
                 // (PortHeld/Unresponsive flow states → card evidence);
                 // nothing toasts, nothing errors.
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 self.mark_dirty();
                 Ok(UiNotices::new())
             }
             Err(error) => {
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 Err(error)
             }
         }
@@ -3634,7 +3694,9 @@ impl StudioController {
                 // the sim is not a device (D22). Failures are logged,
                 // never fatal (flash/erase must stay reachable).
                 if !is_sim {
-                    self.refresh_device_sync().await;
+                    // Multi-device M3: pull the session being ATTACHED,
+                    // not whatever the id-less seam resolves.
+                    self.refresh_device_sync_for(id).await;
                 }
                 Ok(outcome)
             }
@@ -4675,7 +4737,11 @@ impl StudioController {
                 label: format!(
                     "{} — {}",
                     spec.progress_label,
-                    if manage_result.is_ok() { "ok" } else { "failed" }
+                    if manage_result.is_ok() {
+                        "ok"
+                    } else {
+                        "failed"
+                    }
                 ),
             },
         );
@@ -6384,13 +6450,17 @@ mod tests {
         );
     }
 
-    /// A connect that ends WITHOUT a session must not leave the mirror
-    /// dressed: when the ladder's soft ending clears the slot the lens
-    /// sits on, the project quiesces and the gallery comes back. The old
-    /// `remove_kind`-only teardown left `project.state` Ready with no
-    /// lens, which is the second path into the retired pane.
+    /// A DEVICE connect that ends WITHOUT a session leaves live sessions
+    /// alone (multi-device M3): a failed attempt at an ADDITIONAL board
+    /// must not tear down the board you are working on, so the lens, the
+    /// editor, and the existing session all stay. (Pre-M3 this scenario
+    /// cleared the kind's slot and quiesced back to the gallery — the
+    /// "empty-slot ending" semantics that only make sense at capacity 1;
+    /// the retired-pane hazard that teardown guarded against cannot arise
+    /// here because nothing is removed. A reconnect of the SAME endpoint
+    /// still replaces its own session at install time.)
     #[test]
-    fn a_soft_connect_ending_on_the_lens_kind_returns_to_the_gallery() {
+    fn a_soft_connect_ending_leaves_live_sessions_and_the_editor_alone() {
         let mut studio = StudioController::with_link_registry_for_test(
             || 0.0,
             registry_with_fake_connect_error("Failed to open serial port."),
@@ -6414,12 +6484,12 @@ mod tests {
 
         let view = studio.view();
         assert!(
-            studio.pool.lens_session().is_none(),
-            "the lens went with its session"
+            studio.pool.lens_session().is_some(),
+            "the live session and its lens survive the failed extra connect"
         );
         assert!(
-            view.panes.is_empty() && view.home.is_some(),
-            "the mirror quiesced with the session — the gallery shows"
+            !view.panes.is_empty() && view.home.is_none(),
+            "the editor stays open — a failed extra connect never yanks it"
         );
     }
 

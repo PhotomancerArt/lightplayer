@@ -47,10 +47,12 @@ pub struct HomeInputs {
 /// — plus the SIM session's evidence while that session lives.
 #[derive(Clone, Debug, Default)]
 pub struct HomePoolEvidence {
-    /// Per-DEVICE-session evidence (≤1 under the MVP capacity policy —
-    /// the Vec is the shape, capacity is policy). The connect flow's
-    /// transient evidence (a connect in flight before any session exists)
-    /// rides an entry of its own: evidence of work, not of a session.
+    /// Per-DEVICE-session evidence — one entry per attached board, in
+    /// install order, up to `DEVICE_SESSION_CAPACITY` (multi-device M3;
+    /// the Vec was always the shape, capacity is policy). The connect
+    /// flow's transient evidence (a connect in flight before any session
+    /// exists) rides an entry of its own: evidence of work, not of a
+    /// session.
     pub devices: Vec<HomeDeviceEvidence>,
     /// The live SIM session's evidence — present exactly while the
     /// session lives (D36: the sim card exists only while the session
@@ -443,11 +445,7 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         // still key distinctly by `session_key` — see `identity_key`.
         name: identity
             .map(|identity| identity.name.clone())
-            .or_else(|| {
-                live.detected_chip
-                    .as_deref()
-                    .and_then(display_chip_name)
-            })
+            .or_else(|| live.detected_chip.as_deref().and_then(display_chip_name))
             .unwrap_or_else(|| "Connected device".to_string()),
         transport: live.transport.clone().unwrap_or_default(),
         state,
@@ -1408,7 +1406,10 @@ mod tests {
         let view = build_home_view(None, None, None, &pool);
 
         assert_eq!(view.devices.len(), 2);
-        assert_eq!(view.devices[0].name, view.devices[1].name, "same chip, same title");
+        assert_eq!(
+            view.devices[0].name, view.devices[1].name,
+            "same chip, same title"
+        );
         assert_ne!(
             view.devices[0].render_key(),
             view.devices[1].render_key(),
@@ -1443,6 +1444,10 @@ mod tests {
             Some("ESP32-S3")
         );
         assert_eq!(display_chip_name("esp32").as_deref(), Some("ESP32"));
-        assert_eq!(display_chip_name("rp2040"), None, "unknown silicon keeps the caller's fallback");
+        assert_eq!(
+            display_chip_name("rp2040"),
+            None,
+            "unknown silicon keeps the caller's fallback"
+        );
     }
 }

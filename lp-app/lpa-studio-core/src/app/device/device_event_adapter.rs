@@ -247,7 +247,8 @@ mod tests {
         );
         assert_eq!(log.anomaly_count("serial-1"), 1);
         assert!(
-            log.iter().all(|record| record.endpoint.as_deref() == Some("serial-1")),
+            log.iter()
+                .all(|record| record.endpoint.as_deref() == Some("serial-1")),
             "connect-time records attribute to the endpoint"
         );
     }

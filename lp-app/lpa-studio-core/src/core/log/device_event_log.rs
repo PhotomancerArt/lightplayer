@@ -46,7 +46,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use serde::Serialize;
+use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use super::LogClock;
 
@@ -58,17 +58,15 @@ use super::LogClock;
 /// here.
 pub const DEVICE_EVENT_LOG_CAPACITY: usize = 2000;
 
-/// What happened. Serialized flat into the record (`"kind":"state",...`).
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+/// What happened. Serialized flat into the record (`"kind":"state",...`)
+/// by the hand-written [`Serialize`] impl below — the repo bans serde's
+/// internal-tagging/flatten Content machinery (ADR 2026-07-04), so the
+/// flat shape is written explicitly.
+#[derive(Clone, Debug, PartialEq)]
 pub enum DeviceEventKind {
     /// A `DeviceState` transition. `from` is `None` only for the initial
     /// entry into `booting` at connect.
-    State {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        from: Option<String>,
-        to: String,
-    },
+    State { from: Option<String>, to: String },
     /// A `ConnectFlowState` transition in the device controller.
     Flow { from: String, to: String },
     /// A runtime-pool lifecycle action (`install`, `remove`, `clear-slot`).
@@ -92,20 +90,71 @@ impl DeviceEventKind {
 }
 
 /// One recorded device event: clock stamp + attribution + what happened.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DeviceEventRecord {
     /// Seconds since the Unix epoch on the injected [`LogClock`].
     pub t: f64,
     /// The pool session this belongs to (`RuntimeId` rendering), when one
     /// exists — connect-time records predate the pool install and carry
     /// only `endpoint`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
     /// The link endpoint id, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    #[serde(flatten)]
     pub kind: DeviceEventKind,
+}
+
+impl Serialize for DeviceEventRecord {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("t", &self.t)?;
+        if let Some(session) = &self.session {
+            map.serialize_entry("session", session)?;
+        }
+        if let Some(endpoint) = &self.endpoint {
+            map.serialize_entry("endpoint", endpoint)?;
+        }
+        match &self.kind {
+            DeviceEventKind::State { from, to } => {
+                map.serialize_entry("kind", "state")?;
+                if let Some(from) = from {
+                    map.serialize_entry("from", from)?;
+                }
+                map.serialize_entry("to", to)?;
+            }
+            DeviceEventKind::Flow { from, to } => {
+                map.serialize_entry("kind", "flow")?;
+                map.serialize_entry("from", from)?;
+                map.serialize_entry("to", to)?;
+            }
+            DeviceEventKind::Pool { action, detail } => {
+                map.serialize_entry("kind", "pool")?;
+                map.serialize_entry("action", action)?;
+                map.serialize_entry("detail", detail)?;
+            }
+            DeviceEventKind::Mgmt { phase, label } => {
+                map.serialize_entry("kind", "mgmt")?;
+                map.serialize_entry("phase", phase)?;
+                map.serialize_entry("label", label)?;
+            }
+            DeviceEventKind::Sweep { disposition } => {
+                map.serialize_entry("kind", "sweep")?;
+                map.serialize_entry("disposition", disposition)?;
+            }
+            DeviceEventKind::Anomaly { detail } => {
+                map.serialize_entry("kind", "anomaly")?;
+                map.serialize_entry("detail", detail)?;
+            }
+            DeviceEventKind::Rx { line } => {
+                map.serialize_entry("kind", "rx")?;
+                map.serialize_entry("line", line)?;
+            }
+            DeviceEventKind::Tx { frame } => {
+                map.serialize_entry("kind", "tx")?;
+                map.serialize_entry("frame", frame)?;
+            }
+        }
+        map.end()
+    }
 }
 
 impl DeviceEventRecord {
@@ -257,9 +306,7 @@ impl DeviceEventRecorder {
     /// Whether capture mode is on (producers may skip building raw-traffic
     /// records entirely when it is off).
     pub fn capture(&self) -> bool {
-        self.log
-            .as_ref()
-            .is_some_and(|log| log.borrow().capture())
+        self.log.as_ref().is_some_and(|log| log.borrow().capture())
     }
 }
 
