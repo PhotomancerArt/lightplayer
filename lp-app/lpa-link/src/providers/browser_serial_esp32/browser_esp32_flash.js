@@ -80,6 +80,12 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath, onE
 
     try {
       const chipName = await loader.main();
+      // The image is chosen before the port is opened; the chip is only
+      // known once the SYNC handshake answers. Between those two facts is
+      // the last moment anything can stop a C6 image from being written
+      // onto an S3 — after `writeFlash` the board is already bricked-ish
+      // and the user has no idea why. Refuse loudly instead.
+      assertChipMatchesManifest(chipName, manifest, manifestPath);
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
@@ -391,22 +397,22 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
   }
 }
 
-/// Judge an erase by its OWN outcome, not by the flash-ID probe.
-///
-/// The ID probe reads 0 and prints "Failed to communicate with the flash
-/// chip" on ESP32-C6 rev 2 over USB-Serial-JTAG while real stub traffic
-/// works — established on the bench 2026-07-31 (see f3586b9c8, which moved
-/// the boot-control write to readback verification for this reason). That
-/// commit left the erase path gated on the warning because "there is
-/// nothing to read back after an erase"; it turns out there IS something
-/// to check — esptool announces the chip erase it actually performed.
-///
-/// Yona's walk 2026-08-02: erase logged the benign warning, then "Chip
-/// erase completed successfully in 2.241s", and this gate failed the
-/// operation anyway. So: a completion line is proof and outranks the
-/// warning; without one, the warning is the best explanation we have and
-/// is surfaced; with neither, `eraseFlash()` returned without throwing and
-/// there is no evidence of failure to report.
+// Judge an erase by its OWN outcome, not by the flash-ID probe.
+//
+// The ID probe reads 0 and prints "Failed to communicate with the flash
+// chip" on ESP32-C6 rev 2 over USB-Serial-JTAG while real stub traffic
+// works — established on the bench 2026-07-31 (see f3586b9c8, which moved
+// the boot-control write to readback verification for this reason). That
+// commit left the erase path gated on the warning because "there is
+// nothing to read back after an erase"; it turns out there IS something
+// to check — esptool announces the chip erase it actually performed.
+//
+// Yona's walk 2026-08-02: erase logged the benign warning, then "Chip
+// erase completed successfully in 2.241s", and this gate failed the
+// operation anyway. So: a completion line is proof and outranks the
+// warning; without one, the warning is the best explanation we have and
+// is surfaced; with neither, `eraseFlash()` returned without throwing and
+// there is no evidence of failure to report.
 function assertEraseCompleted(logs, context) {
   const completed = logs.some((line) =>
     line.includes("Chip erase completed successfully")
@@ -532,6 +538,39 @@ async function loadEsptoolModule(esptoolModulePath) {
   } catch (error) {
     throw new Error(`Failed to import esptool module ${esptoolModulePath}: ${errorMessage(error)}`);
   }
+}
+
+// Reduce a chip name to lowercase alphanumerics. The Rust twin is
+// `lpa_link::normalize_chip_name`; this copy exists because the compare
+// happens where the loader does, and both of its inputs (esptool-js's
+// banner, the manifest's own `core.target.chip`) are already JS-visible.
+// Keep the two definitions identical.
+function normalizeChip(name) {
+  return String(name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+// Refuse to write `manifest` onto `reportedChip`.
+//
+// A reported chip of `null` is NOT treated as a match: esptool-js always
+// names the chip it synced with, so an absent name means the handshake did
+// not go the way this code assumes, and guessing there is the same bet the
+// guard exists to refuse.
+function assertChipMatchesManifest(reportedChip, manifest, manifestPath) {
+  const manifestChip = manifest.core?.target?.chip;
+  const detected = normalizeChip(reportedChip);
+  const expected = normalizeChip(manifestChip);
+  if (detected && detected === expected) {
+    return;
+  }
+  const detectedLabel = reportedChip ? String(reportedChip) : "an unidentified chip";
+  throw new Error(
+    `Refusing to flash: this device is ${detectedLabel}, but the firmware image ` +
+      `${manifest.firmwareId} (${manifestPath}) is built for ${manifestChip}. ` +
+      `Pick the board you actually have in the setup form, or install the generic ` +
+      `image for this chip.`,
+  );
 }
 
 function summarizeManifest(manifest, manifestPath) {
