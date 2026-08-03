@@ -2178,7 +2178,32 @@ fn wire_card_affordance(
                 strip_confirmation(forget_device_action(uid, card.name.clone())),
             )
         }),
+        // Non-destructive (the board keeps running; reconnecting adds it
+        // back), so it dispatches straight from the row — no confirm
+        // theatre. Only live cards carry a session key to target.
+        DeviceDetailAffordance::DisconnectDevice => card
+            .session_key
+            .clone()
+            .map(|session_key| CardRowAction::from_action(disconnect_device_action(session_key))),
     }
+}
+
+/// The Danger tab's disconnect row (multi-device M3): close THIS board's
+/// session, targeted by the card's session key so a second attached board
+/// is untouched.
+pub(crate) fn disconnect_device_action(session_key: String) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::DisconnectDevice {
+            session_key: Some(session_key),
+        },
+    )
+    .with_label("Disconnect")
+    .with_summary(
+        "Close this board's session and remove its card. The board keeps \
+         running; connecting it again adds it back.",
+    )
+    .with_icon("remove")
 }
 
 /// Map one sim section's affordance identities onto card rows (the

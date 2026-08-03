@@ -93,7 +93,14 @@ pub enum DeviceOp {
         card_key: String,
         flow: BootloaderEntryFlow,
     },
-    DisconnectDevice,
+    /// Disconnect ONE device session: close its link (the board keeps
+    /// running; reconnecting adds it back) and remove it from the pool.
+    /// `session_key` is the card's session identity (`RuntimeId`
+    /// rendering, multi-device M3) — `None` targets the oldest device
+    /// session, matching the other still-untargeted device ops until M4.
+    DisconnectDevice {
+        session_key: Option<String>,
+    },
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
     /// editor when the lens is on the sim, close the provider session
     /// (`worker.terminate()` on the web), remove it from the pool. The
@@ -208,9 +215,9 @@ impl ControllerOp for DeviceOp {
                 "This erases firmware and device data from the selected ESP32.",
                 "Wipe device",
             )),
-            Self::DisconnectDevice => ActionMeta::new(
+            Self::DisconnectDevice { .. } => ActionMeta::new(
                 "Disconnect",
-                "Close the current device session and return to connection choices.",
+                "Close this board's session. The board keeps running; connecting it again adds it back.",
                 ActionPriority::Tertiary,
             ),
             Self::StopSimulator => ActionMeta::new(
@@ -254,7 +261,7 @@ impl ControllerOp for DeviceOp {
             | Self::BootSafeOnce
             | Self::BackUpFilesystem
             | Self::ProbeBootloaderMode { .. }
-            | Self::DisconnectDevice
+            | Self::DisconnectDevice { .. }
             | Self::StopSimulator
             | Self::RefreshConnections => ActionClass::Recovery,
             // A quick request/ack on the existing connection — no reason to
@@ -311,7 +318,7 @@ mod tests {
             },
             DeviceOp::ResetToBlank,
             DeviceOp::BackUpFilesystem,
-            DeviceOp::DisconnectDevice,
+            DeviceOp::DisconnectDevice { session_key: None },
             DeviceOp::StopSimulator,
             DeviceOp::RefreshConnections,
         ];

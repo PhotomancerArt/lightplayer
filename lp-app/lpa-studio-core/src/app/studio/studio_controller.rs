@@ -2227,7 +2227,7 @@ impl StudioController {
 
     async fn execute_device_op(&mut self, op: DeviceOp, updates: UxUpdateSink) -> UiResult {
         match op {
-            DeviceOp::DisconnectDevice => self.disconnect_device().await,
+            DeviceOp::DisconnectDevice { session_key } => self.disconnect_device(session_key).await,
             DeviceOp::StopSimulator => self.stop_simulator().await,
             DeviceOp::DisconnectLightPlayer => self.disconnect_lightplayer().await,
             DeviceOp::SetLogLevel { level } => self.set_device_log_level(level).await,
@@ -4155,22 +4155,43 @@ impl StudioController {
         }
     }
 
-    async fn disconnect_device(&mut self) -> UiResult {
-        self.project.reset();
-        // Taking a session out of the pool drops its wire client, server
-        // state, and reconcile bundle with it; the controller closes each
-        // payload and resets the connect flow. This is the EXPLICIT
-        // disconnect affordance and keeps its full teardown meaning (P3);
-        // the gallery-return route policy now dispatches the lens detach
-        // (`ProjectOp::DetachLens`) instead, which keeps every session.
-        let sessions = self.pool.take_all_sessions();
-        if sessions.is_empty() {
-            self.device.disconnect(None).await?;
-        } else {
-            for session in sessions {
-                self.device.disconnect(Some(session.into_payload())).await?;
-            }
+    /// Disconnect ONE device session (the card's Danger-zone affordance,
+    /// multi-device M3): close its link and remove it from the pool — the
+    /// other sessions (a second board, the sim) stay attached. `None`
+    /// targets the oldest device session, matching the other
+    /// still-untargeted device ops until M4. (The pre-M3 shape took EVERY
+    /// session down, sim included — the ≤1-era "explicit disconnect =
+    /// full teardown" semantics.)
+    async fn disconnect_device(&mut self, session_key: Option<String>) -> UiResult {
+        let id = match &session_key {
+            Some(key) => self
+                .pool
+                .device_sessions()
+                .find(|session| session.id().to_string() == *key)
+                .map(crate::RuntimeSession::id),
+            None => self.pool.device_session().map(crate::RuntimeSession::id),
+        };
+        let Some(id) = id else {
+            return Ok(UiNotices::new().with_notice(UiNotice::info("No device to disconnect")));
+        };
+        // The mirror quiesces only when the editor was a lens on THIS
+        // session (a project open on the sim or another board survives).
+        if self.pool.lens() == Some(id) {
+            self.project.reset();
         }
+        let session = self.pool.remove_session(id);
+        self.record_device_event(
+            Some(&id.to_string()),
+            None,
+            DeviceEventKind::Pool {
+                action: "disconnect".to_string(),
+                detail: "user".to_string(),
+            },
+        );
+        if let Some(session) = session {
+            self.device.disconnect(Some(session.into_payload())).await?;
+        }
+        self.mark_dirty();
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
 
@@ -6082,7 +6103,7 @@ mod tests {
     fn device_disconnect_clears_project_server_and_link() {
         let mut studio = connected_studio();
 
-        block_on_ready(studio.disconnect_device()).unwrap();
+        block_on_ready(studio.disconnect_device(None)).unwrap();
 
         assert!(matches!(
             studio.project.snapshot().state,
@@ -6103,7 +6124,7 @@ mod tests {
         let mut studio = connected_studio();
         let action = UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::DisconnectDevice,
+            DeviceOp::DisconnectDevice { session_key: None },
         );
 
         block_on_ready(studio.dispatch(action)).unwrap();

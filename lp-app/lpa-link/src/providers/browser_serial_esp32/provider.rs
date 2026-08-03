@@ -130,7 +130,16 @@ impl BrowserSerialEsp32Provider {
 
     pub async fn request_access(&self) -> Result<LinkEndpoint, LinkError> {
         let port = browser_serial::request_port().await?;
-        let endpoint_id = self.create_granted_endpoint(port.label, port.id);
+        // Re-picking an already-granted port resolves to ITS endpoint
+        // (the multi-board L1 defect): the JS layer already returns the
+        // existing session for a known SerialPort, and a second endpoint
+        // over the same port would put two Rust sessions on one
+        // reader/writer. With the pool's one-session-per-endpoint rule,
+        // re-picking a connected port now REPLACES its session cleanly.
+        let endpoint_id = match self.endpoint_id_for_port(port.id) {
+            Some(endpoint_id) => endpoint_id,
+            None => self.create_granted_endpoint(port.label, port.id),
+        };
         self.endpoint(&endpoint_id)
     }
 
