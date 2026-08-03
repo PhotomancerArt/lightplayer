@@ -27,10 +27,15 @@ from* (publicity, channels, scopes); this document defines how controls
 >    module — ordinary authored dataflow and bus vocabulary, not a panel
 >    mechanism.
 >
-> **Related:** `docs/design/modules.md` (publicity, scopes, resolution),
+> **Related:** `docs/design/modules.md` (publicity, scopes, resolution;
+> §10 carries the shared future-work register),
 > `docs/glossary.md` (terms),
 > `docs/adr/2026-07-26-node-card-faces.md` (widget grammar the panel
-> renders with).
+> renders with),
+> `docs/adr/2026-08-02-panel-writers-and-state-persistence.md` (the
+> writer tier and its persistence),
+> `docs/adr/2026-08-03-panel-visibility-is-derived.md` (what reaches a
+> panel at all).
 
 ## 1. Concepts
 
@@ -190,7 +195,12 @@ applying restored panel state is non-conforming.
   the corresponding persisted entries immediately.
 
 > Status: implemented 2026-08-02 (`lpa-server/src/panel_state.rs`;
-> ADR `2026-08-02-panel-writers-and-state-persistence.md`).
+> ADR `2026-08-02-panel-writers-and-state-persistence.md`). The USER
+> TOGGLE reached the UI 2026-08-03: `WireProjectCommand::PanelAutoSave`
+> plus `ServerRuntimeStatus.panel_auto_save` (wire proto 9 — the current
+> value rides every project read rather than a dedicated pull), rendered
+> once on the project's ROOT module face, since the state file is
+> per project folder.
 >
 > **Device-first, per settled D-B**: both sim tiers run on `LpFsMemory`,
 > so sims stay ephemeral by construction; the unit tests are the
@@ -217,6 +227,11 @@ Play mode renders **panels only** — the root module's panel, which
 recursively presents nested module groups (modules.md R8) — no faces, no
 authoring surfaces. It speaks only P8's two ops plus reads. Anything
 play mode can do, an end user is allowed to do.
+
+> Status: implemented 2026-08-03 — mounted at
+> `#/sim|device/<key>/play`, the same session as the editor route (the
+> segment changes the surface, never the runtime). What a panel PUBLISHES
+> is `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
 
 ### P13 — External inputs (future, seam only)
 
@@ -294,10 +309,17 @@ this document never specifies resolution.
   **writer-side shaping**: the panel writer holds the raw value (P7) and
   what it emits is shaped on the way out, so nothing downstream of the
   writer — resolution, persistence, identity — changes.
-- **P-Q2:** engaged-affordance treatment (distinct from bound-violet) —
+- **P-Q2:** ~~engaged-affordance treatment (distinct from bound-violet) —
   UX spike owns the visual; confirm the *requirement* that Read-following
   -automation, Read-at-default, and Latch are three visibly distinct
-  states.
+  states.~~ **Requirement CONFIRMED and shipped 2026-08-03** (gate GV):
+  the three states are visibly distinct and walkable — Read-following
+  -automation names its driver, Read-at-default reads its authored value,
+  and Latch is amber with an off-flow reset glyph that never reflows the
+  control. Two threads stay open and are NOT to be changed without Yona:
+  (a) amber (`status-attention`) may be too intense for "held" — he leans
+  maybe-blue, "more thinking needed"; (b) the treatment still borrows
+  `status-attention` rather than a minted `status-engaged` token family.
 - **P-Q3:** ~~`panel.json` schema version field name/shape, and whether a
   clean-shutdown flush is feasible on device (or throttle-only).~~
   **Settled 2026-08-02.** The file is

@@ -44,7 +44,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{NodeCardDrawer, NodeUiOp, UiAction, UiModuleFace as UiModuleFaceData};
 
-use crate::app::BusPaneBody;
+use crate::app::WiringDrawerBody;
 use crate::app::node::{NodeCardSection, ProductPreview, node_ui_action};
 
 use super::{ModulePanel, PanelGesture};
@@ -112,7 +112,7 @@ pub fn ModuleFace(
                         "Every channel in this module's scope, and what writes and reads it. "
                         "The controls above are the same bus, presented for playing rather than patching."
                     }
-                    BusPaneBody { view: wiring, on_action: move |action| {
+                    WiringDrawerBody { view: wiring, on_action: move |action| {
                         if let Some(handler) = on_action {
                             handler.call(action);
                         }

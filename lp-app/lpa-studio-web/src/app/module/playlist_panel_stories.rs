@@ -1,4 +1,4 @@
-//! Stories for playlist meta-switching (M2 UX spike; `modules.md` E2).
+//! Stories for playlist meta-switching (`modules.md` E2).
 //!
 //! A playlist is an *isolating* node: each entry gets its own anonymous
 //! sink scope (R2), so the same channel name lists separately per entry and
@@ -19,7 +19,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::{NodeCardSection, PlaylistFace};
 
 use super::module_fixtures::{
-    PanelSpike, entry_held_panel, entry_panel, entry_scope, playlist_face,
+    PanelWalk, entry_held_panel, entry_panel, entry_scope, playlist_face,
 };
 use super::{ModulePanel, PanelGesture};
 
@@ -39,7 +39,7 @@ fn PlaylistCard(
         div { class: "tw:w-full tw:max-w-md tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
             PlaylistFace { face: entries.clone(), on_action: move |_| {} }
             // Entry switching has no wire op today (activation-by-click is
-            // still an open authoring gesture), so the spike exposes it as
+            // still an open authoring gesture), so the fixture exposes it as
             // plain buttons — the point being measured is what happens to
             // the PANEL, not how the entry gets activated.
             if let Some(on_select) = on_select {
@@ -111,9 +111,9 @@ fn meta_switch() -> Element {
     // still be there after a round trip through Whirl.
     let mut drift = use_signal(|| {
         let scope = entry_scope(0);
-        PanelSpike::new(spike_view(0)).with_held(&[(scope.as_str(), "speed", 0.35)])
+        PanelWalk::new(walk_view(0)).with_held(&[(scope.as_str(), "speed", 0.35)])
     });
-    let mut whirl = use_signal(|| PanelSpike::new(spike_view(1)));
+    let mut whirl = use_signal(|| PanelWalk::new(walk_view(1)));
     let mut entries = playlist_face();
     entries.active = Some(entry());
     let active = entry();
@@ -132,16 +132,16 @@ fn meta_switch() -> Element {
                 panel,
                 on_panel: move |gesture: PanelGesture| {
                     if active == 0 {
-                        drift.with_mut(|spike| spike.apply_gesture(&gesture));
+                        drift.with_mut(|walk| walk.apply_gesture(&gesture));
                     } else {
-                        whirl.with_mut(|spike| spike.apply_gesture(&gesture));
+                        whirl.with_mut(|walk| walk.apply_gesture(&gesture));
                     }
                 },
                 on_action: move |action| {
                     if active == 0 {
-                        drift.with_mut(|spike| spike.apply_action(&action));
+                        drift.with_mut(|walk| walk.apply_action(&action));
                     } else {
-                        whirl.with_mut(|spike| spike.apply_action(&action));
+                        whirl.with_mut(|walk| walk.apply_action(&action));
                     }
                 },
             }
@@ -149,10 +149,10 @@ fn meta_switch() -> Element {
     }
 }
 
-/// One entry's panel wrapped as walkable spike state. Each entry gets its
+/// One entry's panel wrapped as walkable walk state. Each entry gets its
 /// OWN state holder — that separation is the model's, not a story
 /// convenience: two sink scopes are two identities (P1).
-fn spike_view(entry: u32) -> lpa_studio_core::UiNodeView {
+fn walk_view(entry: u32) -> lpa_studio_core::UiNodeView {
     use lpa_studio_core::{UiModuleFace, UiNodeFace, UiNodeHeader, UiNodeView};
     let scope = entry_scope(entry);
     let header = UiNodeHeader::new("entry", "Module", scope.clone());

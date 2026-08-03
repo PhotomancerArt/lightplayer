@@ -1,26 +1,23 @@
-//! **M2 UX spike** — the module face, the panel, and play mode.
+//! The module face, the panel, and play mode.
 //!
-//! Prototype surfaces for the module container model
-//! (`docs/design/modules.md`, `docs/design/panel.md`), built for the G2
-//! visual gate. Everything here is fed by mock DTOs: the engine has no
-//! scopes, no panel writers, and no `PanelWrite`/`PanelClear` ops yet — M4
-//! owns that. What the spike is meant to answer is whether the *shapes*
-//! work on screen:
+//! The rendering half of the module container model
+//! (`docs/design/modules.md`, `docs/design/panel.md`). Everything here is
+//! fed by real DTOs: `ProjectController::module_face` derives the face from
+//! the engine's scoped channels, and the controls dispatch `PanelWriteOp` /
+//! `PanelClearOp` down the runtime command channel. The story fixtures
+//! mirror those shapes rather than standing in for them.
 //!
-//! 1. Does one face hold up at all three zoom levels — effect author
-//!    (children expanded), artist (a card in the workspace), end user
-//!    (play mode)?
-//! 2. Is bus-as-controls-on-the-face + bus-as-wiring-in-a-drawer the right
-//!    split, with the sidebar bus pane gone?
-//! 3. Does the root module back in the node area read better or worse?
-//! 4. Is play mode as "root face only" the right direction?
-//! 5. Where do the reset and auto-save gestures belong?
+//! One face at three zoom levels, all shipped: the effect author works
+//! inside the module (children expanded as sibling cards), the artist sees
+//! the module face as a card in the workspace, and the end user sees the
+//! root module's face alone (play mode, `#/sim|device/<key>/play`). The
+//! sidebar bus pane is gone: bus-as-controls lives on the face, and
+//! bus-as-writers/readers in the wiring drawer.
 //!
-//! The components are deliberately parallel to the node-face family
-//! (`app/node/face/`) rather than merged into it: this is a spike, and the
-//! seam should be easy to either promote or delete. The widgets themselves
-//! (knob v2, fader, toggle) are the production ones, extended with one
-//! `engaged` prop.
+//! The components stay parallel to the node-face family (`app/node/face/`)
+//! rather than merged into it — a module card's surface is a panel, not a
+//! kind-specific hero + sections. The widgets themselves (knob v2, fader,
+//! toggle) are the production ones, extended with one `engaged` prop.
 
 mod module_face;
 mod module_panel;

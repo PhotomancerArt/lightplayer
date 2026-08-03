@@ -45,8 +45,7 @@ pub fn NodePane(
     /// for deterministic captures.
     #[props(default = None)]
     face_platform: Option<Platform>,
-    /// M2 UX spike: panel gestures raised by a module face (reset,
-    /// auto-save, nested-group disclosure).
+    /// Panel gestures raised by a module face (reset, auto-save).
     #[props(default = None)]
     module_panel: Option<EventHandler<crate::app::module::PanelGesture>>,
 ) -> Element {

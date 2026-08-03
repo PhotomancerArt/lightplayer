@@ -1,10 +1,10 @@
-//! Mock DTOs for the M2 UX spike.
+//! Story DTOs for the module face, panel, and play mode.
 //!
-//! Every fixture here is hand-built. The engine has no scopes, no panel
-//! writers, and no `PanelWrite`/`PanelClear` ops (M4 owns all three), so
-//! the spike fakes the states the design docs describe and the stories walk
-//! them. The content is not arbitrary: it reproduces the worked examples
-//! from `docs/design/modules.md` so the gate is judging the real shapes.
+//! Every fixture here is hand-built: it mirrors the shapes
+//! `ProjectController::module_face` derives, so the storybook stays
+//! deterministic instead of depending on a live engine. The content is not
+//! arbitrary — it reproduces the worked examples from
+//! `docs/design/modules.md`, so the stories judge the real shapes.
 //!
 //! - **E3 (drop-in embed):** `plasma` embedded in a host that already has a
 //!   visual; the host's panel shows a plasma group.
@@ -78,11 +78,11 @@ pub(crate) fn scope_display(target: &lpc_wire::WireScopeRef) -> &'static str {
 
 /// A story-only slot address, so the widgets render wired and their drags
 /// dispatch into the story's own handler.
-fn spike_address(node: &str, slot: &str) -> ProjectSlotAddress {
+fn walk_address(node: &str, slot: &str) -> ProjectSlotAddress {
     ProjectSlotAddress::new(
-        ProjectNodeAddress::parse(node).expect("valid spike node address"),
+        ProjectNodeAddress::parse(node).expect("valid story node address"),
         ProjectSlotRoot::def(),
-        SlotPath::parse(slot).expect("valid spike slot path"),
+        SlotPath::parse(slot).expect("valid story slot path"),
     )
 }
 
@@ -100,7 +100,7 @@ fn knob(
         channel,
         UiPanelControl {
             label: label.to_string(),
-            address: Some(spike_address(scope, channel)),
+            address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Knob { min, max, step },
             value: UiSlotValue::f32(value),
             live_value: None,
@@ -122,7 +122,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
         channel,
         UiPanelControl {
             label: label.to_string(),
-            address: Some(spike_address(scope, channel)),
+            address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Fader {
                 min: 0.0,
                 max,
@@ -148,7 +148,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
         channel,
         UiPanelControl {
             label: label.to_string(),
-            address: Some(spike_address(scope, channel)),
+            address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Toggle,
             value: UiSlotValue::bool(value),
             live_value: None,
@@ -366,7 +366,7 @@ pub(crate) fn root_controls() -> Vec<UiPanelControlView> {
 }
 
 /// The root module's face with the story's held controls already engaged —
-/// what the panel stories render, and what [`PanelSpike`] clears back from.
+/// what the panel stories render, and what [`PanelWalk`] clears back from.
 pub(crate) fn held_root_face() -> UiModuleFace {
     let Some(UiNodeFace::Module(face)) = held_root_view().face else {
         unreachable!("the root module view wears a module face")
@@ -548,8 +548,9 @@ fn channel(
     readers: Vec<UiBusSiteView>,
 ) -> UiBusChannelView {
     UiBusChannelView {
-        // Pre-scope spike fixture: the wiring drawer's rows carry no
-        // structured scope, exactly like the other pre-scope snapshots.
+        // This fixture leaves `scope` unset on purpose: it pins how a row
+        // with no structured scope renders (the shape a channel takes
+        // before its owning scope resolves).
         scope: None,
         scope_label: None,
         name: name.to_string(),
@@ -587,12 +588,10 @@ pub(crate) fn root_module_node_view() -> UiNodeView {
 
 /// The root module view with the story's held controls already engaged.
 pub(crate) fn held_root_view() -> UiNodeView {
-    PanelSpike::new(root_module_node_view())
-        .with_held(HELD)
-        .view
+    PanelWalk::new(root_module_node_view()).with_held(HELD).view
 }
 
-/// Any module as a node card view, so the spike wears the real card chrome
+/// Any module as a node card view, so the story wears the real card chrome
 /// (header, kind, collapse) instead of a mock frame.
 pub(crate) fn module_node_view(
     name: &str,
@@ -639,7 +638,7 @@ pub(crate) fn playlist_face() -> UiPlaylistFace {
 }
 
 /// The active entry's sink scope path. Sink scopes are anonymous in the
-/// model (R2); the spike names them after the entry's own child node so
+/// model (R2); the fixtures name them after the entry's own child node so
 /// they are legible on screen and parse as node paths.
 pub(crate) fn entry_scope(entry: u32) -> String {
     let child = if entry == 0 { "drift" } else { "whirl" };
@@ -737,9 +736,8 @@ pub(crate) fn three_state_panel() -> UiPanelGroup {
 
 /// Live fixture state for the walkable stories.
 ///
-/// The dev-server walk is the point of the spike: turning a knob must
-/// actually engage it, and resetting must actually let go. This holds the
-/// mock node view — the card's face AND the sibling child cards below it —
+/// The dev-server walk is the point: turning a knob must actually engage
+/// it, and resetting must actually let go. This holds the story node view — the card's face AND the sibling child cards below it —
 /// plus a pristine baseline, applies the widget's own
 /// `SlotEditOp::SetValue` dispatch as a panel write, and applies
 /// [`PanelGesture`]s as clears.
@@ -750,15 +748,15 @@ pub(crate) fn three_state_panel() -> UiPanelGroup {
 /// leaf child's own face below it. Holding one has to move the other, and
 /// that only works if the walk covers the tree.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PanelSpike {
+pub(crate) struct PanelWalk {
     /// The node view the stories render.
     pub view: UiNodeView,
     /// The untouched view, for restoring cleared controls.
     baseline: UiNodeView,
 }
 
-impl PanelSpike {
-    /// Wrap a **Read-form** node view as walkable spike state. The view
+impl PanelWalk {
+    /// Wrap a **Read-form** node view as walkable story state. The view
     /// passed in becomes the clear-target, so it must have nothing engaged.
     pub fn new(view: UiNodeView) -> Self {
         Self {
@@ -770,7 +768,7 @@ impl PanelSpike {
     /// The root module's face, for the panel-only stories.
     pub fn face(&self) -> UiModuleFace {
         let Some(UiNodeFace::Module(face)) = self.view.face.clone() else {
-            unreachable!("the spike's root view wears a module face")
+            unreachable!("the walk's root view wears a module face")
         };
         face
     }
@@ -944,13 +942,13 @@ mod tests {
     use lpa_studio_core::{UiNodeFace, UiPanelControlState};
 
     use super::{
-        HELD, PLASMA_1_SCOPE, PLASMA_2_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face,
+        HELD, PLASMA_1_SCOPE, PLASMA_2_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face,
         root_module_node_view, scope_target,
     };
     use crate::app::module::PanelGesture;
 
-    fn spike() -> PanelSpike {
-        PanelSpike::new(root_module_node_view()).with_held(HELD)
+    fn walk() -> PanelWalk {
+        PanelWalk::new(root_module_node_view()).with_held(HELD)
     }
 
     #[test]
@@ -971,16 +969,16 @@ mod tests {
 
     #[test]
     fn clearing_a_scope_descends_into_its_nested_groups() {
-        let mut spike = spike();
+        let mut walk = walk();
         // brightness (root) + plasma_1's speed are held.
-        assert_eq!(spike.face().panel.engaged_total(), 2);
+        assert_eq!(walk.face().panel.engaged_total(), 2);
 
-        spike.apply_gesture(&PanelGesture::ClearScope {
+        walk.apply_gesture(&PanelGesture::ClearScope {
             scope: scope_target(ROOT_SCOPE),
         });
 
         assert_eq!(
-            spike.face().panel.engaged_total(),
+            walk.face().panel.engaged_total(),
             0,
             "reset means reset — the nested plasma writer goes too"
         );
@@ -988,8 +986,8 @@ mod tests {
 
     #[test]
     fn clearing_one_control_leaves_its_siblings_alone() {
-        let mut spike = spike();
-        spike.apply_gesture(&PanelGesture::ClearControl {
+        let mut walk = walk();
+        walk.apply_gesture(&PanelGesture::ClearControl {
             target: lpa_studio_core::UiPanelTarget {
                 scope: scope_target(PLASMA_1_SCOPE),
                 channel: "speed".to_string(),
@@ -997,26 +995,26 @@ mod tests {
             },
         });
 
-        assert_eq!(spike.face().panel.groups[0].engaged_total(), 0);
+        assert_eq!(walk.face().panel.groups[0].engaged_total(), 0);
         assert_eq!(
-            spike.face().panel.engaged_here(),
+            walk.face().panel.engaged_here(),
             1,
             "the root's own held brightness is untouched"
         );
         // Clearing restores the Read form, not just the state flag: the
         // control falls back into whatever was driving the channel.
         assert_eq!(
-            spike.face().panel.groups[0].controls[0].state,
+            walk.face().panel.groups[0].controls[0].state,
             UiPanelControlState::ReadFollowing
         );
     }
 
     #[test]
     fn auto_save_is_a_view_gesture() {
-        let mut spike = spike();
-        assert_eq!(spike.face().auto_save, Some(true));
-        spike.apply_gesture(&PanelGesture::SetAutoSave(false));
-        assert_eq!(spike.face().auto_save, Some(false));
+        let mut walk = walk();
+        assert_eq!(walk.face().auto_save, Some(true));
+        walk.apply_gesture(&PanelGesture::SetAutoSave(false));
+        assert_eq!(walk.face().auto_save, Some(false));
     }
 
     /// Groups are bordered clusters in a wrapping row, never folded away —
@@ -1057,15 +1055,15 @@ mod tests {
     /// has to move the fixture card below.
     #[test]
     fn one_control_two_cards_move_together() {
-        let spike = spike();
-        let Some(UiNodeFace::Controls(halo)) = &spike.view.children[4].face else {
+        let walk = walk();
+        let Some(UiNodeFace::Controls(halo)) = &walk.view.children[4].face else {
             panic!("the fixture child wears a controls face");
         };
         assert_eq!(halo.controls[0].channel, "brightness");
         assert_eq!(halo.controls[0].state, UiPanelControlState::Engaged);
         assert_eq!(
             halo.controls[0].control.value.display,
-            spike.face().panel.controls[0].control.value.display,
+            walk.face().panel.controls[0].control.value.display,
             "the panel and the fixture card show the same held value"
         );
     }

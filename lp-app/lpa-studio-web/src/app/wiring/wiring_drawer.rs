@@ -1,4 +1,7 @@
-//! Bus pane body: one [`SlotPane`] per channel.
+//! Wiring drawer body: one [`SlotPane`] per channel of a module's scope.
+//!
+//! Built as the sidebar bus pane's body; the pane is gone (P3) and the
+//! rows now hang off the module card's wiring drawer, unchanged.
 //!
 //! Each channel wears the shared slot-pane language (roadmap D10 — one
 //! binding treatment everywhere): violet `Bound` frame, channel name in the
@@ -18,7 +21,7 @@ use crate::base::StudioIconName;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn BusPaneBody(view: UiBusView, on_action: EventHandler<UiAction>) -> Element {
+pub fn WiringDrawerBody(view: UiBusView, on_action: EventHandler<UiAction>) -> Element {
     if view.channels.is_empty() {
         return rsx! {
             div { class: "tw:grid tw:gap-1 tw:text-sm tw:text-muted-foreground",
