@@ -1,0 +1,23 @@
+{
+  "id": "s6-corrupt-lpfs-project",
+  "title": "Corrupted lpfs project data",
+  "board": "C6",
+  "needs": [
+    "s3-current-fw-valid-project"
+  ],
+  "expect": [
+    "state:ready"
+  ],
+  "setup": [
+    {
+      "describe": "Start from s3 (firmware + project), then garble the lpfs partition head so the project data is unreadable",
+      "run": "python3 -c \"import os,sys; sys.stdout.buffer.write(os.urandom(4096))\" > /tmp/lp-garbage.bin && espflash write-bin --port {port} 0x310000 /tmp/lp-garbage.bin",
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Open the printed Studio URL and Connect to this board.",
+    "The card should surface the unreadable/recovery path, not hang on Checking.",
+    "Press Enter here to finish the capture."
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "s7-unplug-mid-op",
+  "title": "Unplug mid-operation (procedure)",
+  "board": "any",
+  "needs": [],
+  "expect": [
+    "state:gone"
+  ],
+  "setup": [],
+  "manual": [
+    "Open the printed Studio URL, Connect, and start a push or flash on the card.",
+    "While the operation runs, PHYSICALLY UNPLUG the board.",
+    "Watch what the card does; plug it back in when it settles.",
+    "Press Enter here to finish the capture."
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "s5-foreign-firmware",
+  "title": "Foreign firmware (recognized non-LightPlayer)",
+  "board": "C6 or S3",
+  "needs": [],
+  "expect": [
+    "state:foreign-firmware"
+  ],
+  "setup": [
+    {
+      "describe": "Flash a known non-LightPlayer image (an esp-idf example / MicroPython \u2014 anything on the classifier's safe-to-replace boot-string list).",
+      "run": null,
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Open the printed Studio URL and Connect to this board.",
+    "The card should read as replaceable foreign firmware.",
+    "Press Enter here to finish the capture."
+  ]
+}

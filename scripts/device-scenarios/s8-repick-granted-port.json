@@ -1,0 +1,16 @@
+{
+  "id": "s8-repick-granted-port",
+  "title": "Re-pick an already-granted port in the chooser (the L1 mechanism)",
+  "board": "any",
+  "needs": [],
+  "expect": [
+    "flow:connecting"
+  ],
+  "setup": [],
+  "manual": [
+    "Open the printed Studio URL and Connect to the board normally.",
+    "With the board connected, open the chooser again (Connect / add device) and pick the SAME port.",
+    "Watch for duplicate cards, disconnects, or a wedged session.",
+    "Press Enter here to finish the capture."
+  ]
+}
