@@ -206,6 +206,7 @@ the combination first being registered as a target.
 | --- | --- | --- | --- | --- |
 | opt-in-degradation | 2026-08-01 | [xt-builtins-image-strands-just-test](2026-08-01-xt-builtins-image-strands-just-test.md) | fixed | justfile (`ci-prereqs`/`test`) + build-builtins-xt.sh + lpvm-native tests |
 | config-masked-defect | 2026-08-01 | [xtlpn-f32-loses-writes-to-value-parameters](2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md) | fixed | lpvm-native lowering (lower_f32.rs) |
+| unsynchronized-shared-artifact | 2026-08-02 | [serial-line-interleaving](2026-08-02-serial-line-interleaving.md) | **open** | fw-esp32v3 UART0 (esp_println + log + transport) |
 | precision-loss-at-a-seam | 2026-08-01 | [gamma-8bit-choke](2026-08-01-gamma-8bit-choke.md) | fixed | lpc-engine fixture node |
 | misattributed-symptom | 2026-08-01 | [classic-rmt-open-fault](2026-08-01-classic-rmt-open-fault.md) | fixed | lpc-shared DisplayPipeline + fw-esp32-common provider |
 | capacity-regression | 2026-08-01 | [classic-heap-regression-after-f32-merge](2026-08-01-classic-heap-regression-after-f32-merge.md) | fixed | lpc-engine resolver (payload caches) + fw-esp32v3 gate |
