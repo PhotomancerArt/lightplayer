@@ -1,0 +1,8 @@
+# Classic ESP32 (Xtensa) has no upstream Rust target; build on Espressif's
+# fork via the rustup `esp` channel, same as fw-esp32v3/fw-esp32s3 and per
+# docs/adr/2026-07-29-per-chip-fw-toolchains.md. `espup update` if a version
+# error appears (esp-hal git main may want a newer esp release than older
+# espup installs).
+[toolchain]
+channel = "esp"
+components = ["rustfmt", "clippy", "rust-src"]

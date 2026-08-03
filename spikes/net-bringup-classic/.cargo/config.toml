@@ -1,0 +1,23 @@
+[build]
+target = "xtensa-esp32-none-elf"
+
+[target.xtensa-esp32-none-elf]
+# Spike uses espflash's default partition table (small image, no lpfs needed).
+runner = "espflash flash --chip esp32 --monitor --after hard-reset"
+rustflags = [
+  # Mirrors fw-esp32v3: GNU ld via xtensa-esp32-elf-gcc, abort-tier posture.
+  # NOTE: `-C force-frame-pointers` (used by esp-hal's own example) is
+  # deliberately ABSENT — it trips an Xtensa LLVM register-scavenging ICE
+  # ("spill A8 from class AR") building compiler_builtins on the esp
+  # toolchain (observed 2026-08-03).
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+  "-C", "panic=abort",
+]
+
+[env]
+ESP_LOG = "info"
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem", "optimize_for_size"]
