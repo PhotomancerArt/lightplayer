@@ -456,9 +456,17 @@ impl LpvmInstance for BrowserLpvmInstance {
         width: u32,
         height: u32,
     ) -> Result<(), Self::Error> {
+        // Deliberately still Q32-only, unlike lpvm-native's two backends: the
+        // CPU preview tier refuses Float on purpose, because the wasm emitter's
+        // f32 builtin id resolution is unimplemented and would produce an
+        // invalid module rather than a wrong one
+        // (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`). A Float
+        // shader previews on the GPU tier. Drop this guard when that resolution
+        // lands, not before.
         if self.float_mode != FloatMode::Q32 {
             return Err(WasmError::runtime(
-                "BrowserLpvmInstance::call_render_texture requires FloatMode::Q32",
+                "BrowserLpvmInstance::call_render_texture requires FloatMode::Q32 \
+                 (the wasm CPU preview tier has no f32 builtin lowering yet)",
             ));
         }
 
@@ -490,9 +498,11 @@ impl LpvmInstance for BrowserLpvmInstance {
         out: &mut LpvmBuffer,
         count: u32,
     ) -> Result<(), Self::Error> {
+        // See `call_render_texture` for why this one stays.
         if self.float_mode != FloatMode::Q32 {
             return Err(WasmError::runtime(
-                "BrowserLpvmInstance::call_render_samples requires FloatMode::Q32",
+                "BrowserLpvmInstance::call_render_samples requires FloatMode::Q32 \
+                 (the wasm CPU preview tier has no f32 builtin lowering yet)",
             ));
         }
 

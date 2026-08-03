@@ -4,10 +4,10 @@
 //! the engine* contribute?" from `cfg!` — the same compile-time facts as the
 //! `node-*` gates themselves, so the answer cannot drift from the build.
 //!
-//! The engine only speaks for features it owns (the node gates and
-//! `panic-recovery`). Embedder-owned features — `svc.*` services, the `gfx.*`
-//! backend, `shader.f32` — are supplied by the firmware manifest composition
-//! layer, which unions them with this list.
+//! The engine only speaks for features it owns (the node gates).
+//! Embedder-owned features — `svc.*` services, the `gfx.*` backend,
+//! `shader.f32` — are supplied by the firmware manifest composition layer,
+//! which unions them with this list.
 
 use alloc::vec::Vec;
 
@@ -34,7 +34,11 @@ const fn origin(feature: LpFeature) -> FeatureOrigin {
         LpFeature::NodeRadio => FeatureOrigin::Engine(cfg!(feature = "node-radio")),
         LpFeature::NodeShader => FeatureOrigin::Engine(cfg!(feature = "node-shader")),
         LpFeature::NodeTexture => FeatureOrigin::Engine(cfg!(feature = "node-texture")),
-        LpFeature::DiagUnwind => FeatureOrigin::Engine(cfg!(feature = "panic-recovery")),
+        // Retained as wire vocabulary, reported by nothing. No target unwinds
+        // (ADR 2026-08-02-rv32-firmwares-are-abort-tier); the variant keeps its
+        // ordinal so removing it does not renumber `LpFeature` under
+        // `wireProto 5`.
+        LpFeature::DiagUnwind => FeatureOrigin::Engine(false),
         LpFeature::SvcButton => FeatureOrigin::Embedder,
         LpFeature::SvcRadioEspnow => FeatureOrigin::Embedder,
         LpFeature::GfxLpvm => FeatureOrigin::Embedder,
@@ -93,11 +97,10 @@ const _: () = assert!(LpFeature::ALL.len() == 15);
 mod tests {
     use super::*;
 
-    /// Under the crate's default feature set (all eight node gates on,
-    /// `panic-recovery` off) the derivation yields exactly the eight `node.*`
-    /// features. The expected list is written out by hand — independent of
-    /// the `cfg!` match — so a wrong gate string or dropped arm in `origin`
-    /// fails here instead of shipping.
+    /// Under the crate's default feature set (all eight node gates on) the
+    /// derivation yields exactly the eight `node.*` features. The expected list
+    /// is written out by hand — independent of the `cfg!` match — so a wrong
+    /// gate string or dropped arm in `origin` fails here instead of shipping.
     #[test]
     #[cfg(all(
         feature = "node-button",
@@ -108,7 +111,6 @@ mod tests {
         feature = "node-radio",
         feature = "node-shader",
         feature = "node-texture",
-        not(feature = "panic-recovery")
     ))]
     fn default_build_yields_the_eight_node_features() {
         assert_eq!(

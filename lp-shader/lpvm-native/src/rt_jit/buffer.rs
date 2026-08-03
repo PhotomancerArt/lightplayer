@@ -26,8 +26,10 @@ enum Inner {
     Placed { exec_base: usize, len: usize },
     /// As `Placed`, but the span came from `codemem_esp32::global`'s arena
     /// (the `xt-placed-code` firmware path) and is returned to it on drop —
-    /// without this, every Studio recompile would leak a slice of the 92 KiB
-    /// region until `TooLarge`.
+    /// without this, every Studio recompile would leak a slice of the
+    /// region until `TooLarge` — verified on silicon 2026-08-02, where a
+    /// project swap showed `allocs=2 frees=1 spans=1` and the arena
+    /// coalesced back to one free span.
     #[cfg(feature = "xt-placed-code")]
     PlacedGlobal { exec_base: usize, len: usize },
 }

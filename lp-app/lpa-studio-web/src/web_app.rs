@@ -23,6 +23,7 @@ use std::rc::Rc;
 
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
+use crate::app::layout::{SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge};
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
 use crate::unsaved_gate;
@@ -87,16 +88,10 @@ pub fn App() -> Element {
         };
     }
 
-    // The boards catalog: same standalone-page pattern. The detected OS
-    // drives per-bridge driver warnings (plan D5) — detected here at the
-    // platform edge; lpa-boards stays platform-blind.
-    if let StudioRoute::Boards { board } = router::current_route() {
-        return rsx! {
-            style { "{STYLE}" }
-            document::Stylesheet { href: asset!("/assets/tailwind.css") }
-            lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
-        };
-    }
+    // NOTE: Boards and Docs deliberately have NO early return — they are
+    // sections of the running app, not standalone pages. An early return
+    // here would run before the hooks below, which is why the surfaces
+    // that do it can only be entered by a page load. See the render body.
 
     let mut view = use_signal(UiStudioView::empty);
     // The OpenRouter connect return leg (`?code=…`): consumed synchronously
@@ -414,14 +409,19 @@ pub fn App() -> Element {
                         )));
                     }
                 }
+                StudioRoute::Boards { .. } | StudioRoute::Docs { .. } => {
+                    // In-app sections: setting the route signal above already
+                    // re-rendered the body. Nothing unloads — the runtime
+                    // pool, sims, and device sessions keep running while the
+                    // user reads docs or browses boards.
+                }
                 StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
-                | StudioRoute::Boards { .. }
                 | StudioRoute::BoardEditor => {
-                    // the story book, mapping editor, boards catalog, and
-                    // board editor mount on fresh page loads only (their
-                    // early returns in App run before any hooks); reload to
-                    // keep the hook order sound
+                    // the story book, mapping editor, and board editor mount
+                    // on fresh page loads only (their early returns in App
+                    // run before any hooks); reload to keep the hook order
+                    // sound
                     router::hard_reload();
                 }
             }
@@ -486,7 +486,8 @@ pub fn App() -> Element {
                 | StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
                 | StudioRoute::Boards { .. }
-                | StudioRoute::BoardEditor => {}
+                | StudioRoute::BoardEditor
+                | StudioRoute::Docs { .. } => {}
             }
             // D32 auto-connect (M6): the load-time attach sweep — queued
             // AFTER the route dispatch, so a `#/device/<uid>` reload's own
@@ -565,18 +566,47 @@ pub fn App() -> Element {
     let opening_frame = matches!(current_route, StudioRoute::Sim { .. })
         && !current_route.sim_matches_view(&current_view);
 
+    // One shell for every section: the chrome renders at the same offset
+    // whatever is below it, and switching sections swaps only the body —
+    // the actor, runtime pool, and open sessions are untouched.
+    // Shared by the chrome and the section body below: an EventHandler is
+    // Copy, the raw closure is not.
+    let on_action = EventHandler::new(on_action);
+    let section = match &current_route {
+        StudioRoute::Boards { .. } => SiteSection::Boards,
+        StudioRoute::Docs { .. } => SiteSection::Docs,
+        _ => SiteSection::Studio,
+    };
+    let settings = current_view.settings.clone();
+
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
-        div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-4 tw:max-[880px]:px-[18px]",
+        main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
+            SiteChrome { section, on_action,
+                VersionBadge {}
+                StudioSettingsPopover { settings, on_settings }
+            }
             LocalStoreBanner { status: store_status.read().clone() }
-        }
-        StudioShell {
-            view: current_view,
-            running: false,
-            opening_frame,
-            on_action,
-            on_settings,
+            match current_route {
+                StudioRoute::Boards { board } => rsx! {
+                    // The detected OS drives per-bridge driver warnings
+                    // (plan D5) — detected here at the platform edge;
+                    // lpa-boards stays platform-blind.
+                    lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
+                },
+                StudioRoute::Docs { page } => rsx! {
+                    crate::app::DocsPage { page }
+                },
+                _ => rsx! {
+                    StudioShell {
+                        view: current_view,
+                        running: false,
+                        opening_frame,
+                        on_action,
+                    }
+                },
+            }
         }
     }
 }
@@ -822,5 +852,85 @@ mod tests {
         );
 
         assert_eq!(console_line(&entry), "[device/fw_core::server] boot ok");
+    }
+
+    /// `style.css` is `include_str!`'d as raw bytes and injected into a
+    /// `<style>` tag — nothing in the build ever PARSES it, and a browser
+    /// silently discards every rule after a syntax error. A single dropped
+    /// `}` in a merge once deleted the whole debug treatment while `just
+    /// check`, `just test` and all 11 CI jobs stayed green; only a human
+    /// looking at the screen caught it (2026-08-02).
+    ///
+    /// So parse it here with a real CSS parser, not a hand-rolled brace
+    /// counter: this catches malformed selectors, bad at-rules and unclosed
+    /// blocks alike, and fails with the offending line.
+    #[test]
+    fn embedded_stylesheet_parses_as_valid_css() {
+        use lightningcss::stylesheet::{ParserOptions, StyleSheet};
+        use std::sync::{Arc, RwLock};
+
+        let warnings = Arc::new(RwLock::new(Vec::new()));
+        let options = ParserOptions {
+            error_recovery: true,
+            warnings: Some(Arc::clone(&warnings)),
+            ..ParserOptions::default()
+        };
+
+        // A hard parse error (the unclosed-block case) surfaces as Err.
+        let sheet = StyleSheet::parse(STYLE, options)
+            .unwrap_or_else(|error| panic!("style.css failed to parse: {error}"));
+
+        // Rules the parser recovered from — exactly what a browser silently
+        // drops. `error_recovery` keeps parsing so one break reports every
+        // consequence, not just the first.
+        let warnings = warnings.read().expect("warning lock");
+        assert!(
+            warnings.is_empty(),
+            "style.css has {} parse error(s) a browser would silently drop:\n{}",
+            warnings.len(),
+            warnings
+                .iter()
+                .map(|warning| format!("  {warning}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        assert!(
+            !sheet.rules.0.is_empty(),
+            "style.css parsed to zero rules — the stylesheet is not reaching the app"
+        );
+
+        // Syntax alone is not enough. A dropped `}` does NOT make the file
+        // invalid — under CSS nesting every following rule silently becomes
+        // a CHILD of the preceding one, which parses cleanly and means
+        // something entirely different. That is exactly how the 2026-08-02
+        // regression erased the debug treatment with CI green.
+        //
+        // This codebase never nests style rules (no `&`, nothing but
+        // `@media`/`@keyframes`/`@supports` containers), so a style rule
+        // holding style rules is a lost brace, not an intention.
+        fn assert_unnested(rules: &lightningcss::rules::CssRuleList<'_>, path: &str) {
+            use lightningcss::rules::CssRule;
+
+            for rule in &rules.0 {
+                match rule {
+                    CssRule::Style(style) => {
+                        assert!(
+                            style.rules.0.is_empty(),
+                            "style.css:{} — a style rule ({path}) contains {} nested rule(s). \
+                             This codebase does not nest style rules, so a `}}` is missing \
+                             above and every nested rule is silently inert in the browser.",
+                            style.loc.line + 1,
+                            style.rules.0.len()
+                        );
+                    }
+                    CssRule::Media(media) => assert_unnested(&media.rules, "@media"),
+                    CssRule::Supports(supports) => assert_unnested(&supports.rules, "@supports"),
+                    _ => {}
+                }
+            }
+        }
+
+        assert_unnested(&sheet.rules, "top level");
     }
 }

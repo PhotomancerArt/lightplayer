@@ -32,6 +32,11 @@ pub struct RegisteredDevice {
     pub last_seen_at: f64,
     /// What was last pushed to it, if anything.
     pub association: Option<DeviceAssociation>,
+    /// The board chosen at provisioning (`vendor/product`, board-selection
+    /// M5) — gallery art + the hardware pane (M6) read it. `None` =
+    /// generic/unknown; preserved across sightings by the merge upsert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_id: Option<String>,
 }
 
 /// Load/save wrapper over the store.
@@ -131,6 +136,7 @@ mod tests {
                 version: ContentHash::of(b"v3"),
                 at: 1.0,
             }),
+            board_id: None,
         };
         registry.upsert(device.clone()).unwrap();
         registry
@@ -160,6 +166,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
                 association: None,
+                board_id: None,
             })
             .unwrap();
 
@@ -185,6 +192,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
                 association: None,
+                board_id: None,
             })
             .unwrap();
 

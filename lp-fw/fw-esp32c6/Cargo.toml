@@ -73,7 +73,6 @@ test_button = ["server"]  # Test root-owned GPIO button input with internal pull
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
 memory_fs = []  # Use in-memory filesystem instead of persistent flash
-test_oom = []   # Allocate until OOM, verify catch_unwind recovers (for panic recovery validation)
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
@@ -87,7 +86,6 @@ test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 embassy-executor = "0.10.0"
 embassy-time = "0.5.0"
 embassy-sync = "0.8.0"
@@ -125,14 +123,13 @@ libm = "0.2"
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
 # fw-esp32c6 deliberately opts into every node kind it has today — all
 # eight `lpa-server` node-* gates (which forward to the matching
-# `lpc-engine` gate), plus `panic-recovery` — on top of the real
-# `lp-gfx-lpvm` compiler backend selected below by target architecture.
+# `lpc-engine` gate) — on top of the real `lp-gfx-lpvm` compiler backend
+# selected below by target architecture.
 # This is not a constrained build; it exists so a genuinely constrained
 # firmware (the S3 app layer, M3) can list fewer of these gates on its own
 # `lpa-server` dependency and link only the node kinds it runs. See
 # `lpc-engine/README.md` for what each gate is worth in flash.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
-    "panic-recovery",
     "node-button",
     "node-radio",
     "node-fluid",
@@ -141,6 +138,10 @@ lpa-server = { path = "../../lp-app/lpa-server", default-features = false, featu
     "node-playlist",
     "node-clock",
     "node-shader",
+    # Kept explicitly: this crate takes `default-features = false`, and this
+    # part has the RAM for the resolver's value caches. Only `fw-esp32v3`
+    # trades them away.
+    "resolver-payload-cache",
 ], optional = true }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }

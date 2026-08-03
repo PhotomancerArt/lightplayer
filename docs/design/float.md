@@ -137,7 +137,35 @@ Inside builtin implementations, the §3–§5 classes still apply to the
 individual operations; a builtin's overall tolerance band is what conformance
 asserts.
 
-## 7. Authoring guidance
+## 7. The frame boundary is fixed-point in both modes
+
+`float_mode` describes the shader's *interior*. The frame boundary — the
+buffers the host hands the synthesised `__render_texture_<format>` /
+`__render_samples_rgba16` entries — is **Q16.16 in, RGBA16 out, in both
+modes**, because those buffers are an interchange format shared with fixtures
+and outputs. Widening them for Float would be a far larger change than making
+the interior f32, and would leave the product with two frame ABIs.
+
+The wrappers therefore convert at the boundary (`lp-shader`'s
+`Q16CoordDecoder`):
+
+| direction | Q32 | Float |
+|---|---|---|
+| coordinate in | reinterpret (`FfromI32Bits`) — the lane *is* the word | `ItofS(word) × 2^-16` |
+| channel out | `clamp(word, 0, 65535)` | `floor(v × 65536)` clamped |
+
+Both Float conversions are **Guaranteed** (§3): int→float is correctly
+rounded, `2^-16` is exactly representable so the scale is exact for any
+coordinate below `2^24` in Q16.16 units, and the two `FtoUnorm16` lowerings
+share one convention by construction (`lps-builtins`' `unorm_conv_f32` /
+`unorm_conv_q32`). So a shader whose interior is exact in both modes renders
+the same codes in both — which is what
+`lps-filetests/tests/f32_render_entry.rs` asserts against one shared table.
+
+The cost is two conversions per coordinate per sample, paid in the frame hot
+path in Float mode only.
+
+## 8. Authoring guidance
 
 For shader authors (human and agentic):
 
@@ -149,7 +177,7 @@ For shader authors (human and agentic):
 - Division by zero and out-of-domain library calls won't crash the shader,
   but their results aren't portable — guard them.
 
-## 8. Testing rules (summary for `lps-filetests`)
+## 9. Testing rules (summary for `lps-filetests`)
 
 1. Assert Guaranteed behavior freely, on every f32 target.
 2. Target-defined behavior may be asserted **per target only** (e.g. an

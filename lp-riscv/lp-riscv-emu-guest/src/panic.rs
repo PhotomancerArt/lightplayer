@@ -94,33 +94,19 @@ fn report_panic_to_host(info: &core::panic::PanicInfo) -> ! {
     panic_syscall(panic_msg_buf.as_ptr(), cursor, file_ptr, file_len, line);
 }
 
-/// Panic handler: build PanicPayload, attempt unwinding, fall back to host report.
+/// Panic handler: stage a breadcrumb, request a reset, report to the host.
+///
+/// Abort tier, matching the ESP32 firmwares (ADR
+/// `2026-08-02-rv32-firmwares-are-abort-tier`). This used to build a
+/// `PanicPayload` and call `unwinding::panic::begin_panic`, reaching the reset
+/// below only when no `catch_unwind` was found on the stack. There is no
+/// catcher any more, so the unwind attempt was pure cost — and keeping it here
+/// while the real firmware dropped it would have made this guest test a
+/// configuration nothing ships.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    extern crate alloc;
-    use core::fmt::Write;
-
-    let message = {
-        let mut buf = alloc::string::String::new();
-        let _ = write!(buf, "{}", info.message());
-        if buf.is_empty() {
-            alloc::string::String::from("panic occurred (no message)")
-        } else {
-            buf
-        }
-    };
-    let (file, line) = if let Some(loc) = info.location() {
-        (
-            Some(alloc::string::String::from(loc.file())),
-            Some(loc.line()),
-        )
-    } else {
-        (None, None)
-    };
-
-    // Stage a breadcrumb in the recovery region (no-op when no recovery
-    // global is installed): if unwinding fails, the next boot reports it;
-    // if a catch boundary recovers, it voids/records the staged crash.
+    // Zero-alloc, and a no-op when no recovery global is installed. Nothing can
+    // catch this panic, so the staged record is the whole report.
     let location = info.location().map(|loc| (loc.file(), loc.line()));
     lp_recovery::stage_crash(
         lp_recovery::CrashCause::Panic,
@@ -130,12 +116,9 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         None,
     );
 
-    let payload = lpc_shared::backtrace::PanicPayload::new(message, file.as_deref(), line);
-    let _code = unwinding::panic::begin_panic(alloc::boxed::Box::new(payload));
-
-    // begin_panic returned — no catch_unwind on stack. Commit the
-    // breadcrumb and request a reset (diverges via the reset sentinel when
-    // a recovery global is installed); otherwise report the raw panic.
+    // Commit the breadcrumb and request a reset (diverges via the reset
+    // sentinel when a recovery global is installed); otherwise report the raw
+    // panic to the host.
     let _ = lp_recovery::finalize_crash_and_reset();
     report_panic_to_host(info);
 }

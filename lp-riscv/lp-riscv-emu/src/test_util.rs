@@ -56,9 +56,13 @@ mod std_impl {
             self
         }
 
-        /// Enable frame pointers for backtrace support (required for stack unwinding).
+        /// Enable frame pointers so the guest can walk its own stack.
         ///
-        /// Adds `-C force-frame-pointers=yes` to RUSTFLAGS when building the binary.
+        /// Adds `-C force-frame-pointers=yes` to RUSTFLAGS when building the
+        /// binary. This is what `lpc-shared`'s `capture_frames_arch` needs to
+        /// follow the `s0` chain — it is **not** unwinding machinery, and it
+        /// outlived the `with_unwind_support` builder that used to sit beside
+        /// it (ADR `2026-08-02-rv32-firmwares-are-abort-tier`).
         pub fn with_backtrace_support(mut self, enable: bool) -> Self {
             if enable {
                 let extra = " -C force-frame-pointers=yes";
@@ -67,19 +71,7 @@ mod std_impl {
             self
         }
 
-        /// Enable full unwinding support (catch_unwind, .eh_frame, landing pads).
-        ///
-        /// Adds -C panic=unwind (overrides target's abort), -C force-unwind-tables=yes,
-        /// and -C force-frame-pointers=yes. Required for fw-emu unwind tests.
-        pub fn with_unwind_support(mut self, enable: bool) -> Self {
-            if enable {
-                let extra = " -C panic=unwind -C force-unwind-tables=yes";
-                self.rustflags = Some(self.rustflags.unwrap_or_default() + extra);
-            }
-            self
-        }
-
-        /// Use -Z build-std=core,alloc (required for panic=unwind on bare-metal targets).
+        /// Use -Z build-std=core,alloc (bare-metal `core`/`alloc` from source).
         pub fn with_build_std(mut self, enable: bool) -> Self {
             self.build_std = enable;
             self

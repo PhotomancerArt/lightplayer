@@ -3267,9 +3267,10 @@ label:has(> input:not(:disabled)) {
 /* ---- boards catalog page (#/boards, lpa-boards BoardsCatalogPage) ------ */
 
 .lpb-cat-page {
-    max-width: 1340px;
-    margin: 0 auto;
-    padding: 28px 32px 120px;
+    /* The catalog is a section body inside the app shell: the shared
+       container owns width and side padding, so this only adds the
+       bottom run-out. */
+    padding: 0 0 60px;
 }
 
 .lpb-cat-header h1 {
@@ -4419,6 +4420,38 @@ label:has(> input:not(:disabled)) {
     display: none;
 }
 
+/* Setup-form board tiles: every board drawing gets the SAME art box, so a
+   tall devkit and a stubby XIAO share a baseline. The renderer sizes its
+   SVG from the board's own geometry, so the clamp has to live here rather
+   than in a per-board `scale`. */
+.lpb-setup-tile-art {
+    height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lpb-setup-tile-art svg {
+    max-height: 46px;
+    width: auto;
+}
+
+/* "Copy details" on a failed op: quieter than the exit (which is the ONE
+   way out, model §2 I4) — relaying the failure must never outrank leaving
+   it. */
+.ux-card-op-copy {
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+    cursor: pointer;
+    background: none;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 6px;
+}
+
+.ux-card-op-copy:hover {
+    color: var(--studio-color-text-strong);
+}
 /* ---------------------------------------------------------------------------
    Debug (hazard) treatment — D9.
    ---------------------------------------------------------------------------
@@ -4734,4 +4767,32 @@ label:has(> input:not(:disabled)) {
 /* Debug section-title text color (the "color on the TITLE" convention). */
 .lp-debug-title {
     color: var(--studio-status-debug-text);
+}
+
+/* ---- board callouts (M2b) ---------------------------------------------
+   Anatomy gold, but LOUDER than the anatomy annotation they grew from: an
+   instruction someone follows at the desk competes with the pin rows
+   behind it, so the leader is solid and ends in a filled arrowhead rather
+   than fading into a dot. Still gold, never attention-orange — a callout
+   explains, it does not alarm (M2b gate). */
+.lpb-callout-line {
+    stroke: #e4c065;
+    stroke-width: 1.6;
+    fill: none;
+}
+
+.lpb-callout-head {
+    fill: #e4c065;
+}
+
+.lpb-callout-label {
+    font-family: var(--studio-font-sans);
+    font-weight: 600;
+    font-size: 9px;
+    fill: #f0d488;
+}
+
+.lpb-callout-step {
+    font-weight: 800;
+    fill: #e4c065;
 }

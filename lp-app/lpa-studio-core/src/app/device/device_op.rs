@@ -43,8 +43,16 @@ pub enum DeviceOp {
     /// lands and the wire is up, the controller stamps this name so the
     /// happy path never detours through Needs-a-name. `None` = a plain
     /// flash / firmware update (already-stamped or recovery contexts).
+    ///
+    /// `board_id` is the setup form's board choice (`vendor/product`,
+    /// board-selection D4): after the flash lands and the wire is up, the
+    /// controller writes the board's runtime manifest to the device's
+    /// `/hardware.json` so the NEXT boot runs the right pin map. `None` =
+    /// generic board — nothing written, the compiled-in default stands.
+    /// Recovery flashes always pass `None` for both fields.
     ProvisionFirmware {
         setup_name: Option<String>,
+        board_id: Option<String>,
     },
     /// Wipe the device's project storage back to blank (the
     /// Holds-unreadable-data card's way out — state-flow model rev
@@ -297,7 +305,10 @@ mod tests {
             DeviceOp::ConnectLightPlayer,
             DeviceOp::DisconnectLightPlayer,
             DeviceOp::ResetDevice,
-            DeviceOp::ProvisionFirmware { setup_name: None },
+            DeviceOp::ProvisionFirmware {
+                setup_name: None,
+                board_id: None,
+            },
             DeviceOp::ResetToBlank,
             DeviceOp::BackUpFilesystem,
             DeviceOp::DisconnectDevice,

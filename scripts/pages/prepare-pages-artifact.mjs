@@ -27,6 +27,7 @@ const configs = {
     sourceDir: path.join(repoRoot, "target/dx/lpa-studio-web/release/web/public"),
     entries: [
       "index.html",
+      "favicon.svg",
       "assets",
       "pkg",
       "lpa-link",

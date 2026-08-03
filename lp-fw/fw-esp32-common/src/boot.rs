@@ -95,8 +95,14 @@ pub fn auto_load_project(server: &mut LpServer) {
 fn log_memory(server: &LpServer, label: &str) {
     if let Some(stats) = server.memory_stats().and_then(|f| f()) {
         let (free, used) = stats;
+        // Bytes as well as KB, deliberately. The pair of these lines around
+        // `load_project` is the cheapest bracket we have on what a project
+        // costs, and the per-LED figure this chip's LED ceiling is quoted from
+        // is derived by differencing two such brackets. At KB granularity that
+        // difference carries ±8 B/LED of rounding — enough to hide a whole
+        // optimisation. See `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
         log::info!(
-            "[mem] {label}: {}k free / {}k used",
+            "[mem] {label}: {free} B free / {used} B used ({}k / {}k)",
             free / 1024,
             used / 1024
         );
