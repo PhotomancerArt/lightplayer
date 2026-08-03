@@ -8,8 +8,8 @@
   ],
   "setup": [
     {
-      "describe": "Fetch WLED 16.0.1 for the ESP32-S3 8MB (the foreign firmware a real user is most likely to have). Version PINNED, not 'latest': a moving release would silently change what this fixture captured. For the classic instead, swap the asset to WLED_16.0.1_ESP32.bin.",
-      "run": "curl -fL --proto '=https' --tlsv1.2 -o /tmp/wled.bin https://github.com/wled/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-S3_8MB_qspi.bin && ls -l /tmp/wled.bin",
+      "describe": "Fetch WLED 16.0.1 for the ESP32-S3 8MB OPI. The 8MB_qspi asset was WRONG for this board (2026-08-03): SHA-256 comparison failed at boot and the board watchdog-looped (rst:0x7 TG0WDT_SYS_RST), re-enumerating USB each cycle. Version pinned on purpose. For the classic instead, swap to WLED_16.0.1_ESP32.bin.",
+      "run": "curl -fL --proto '=https' --tlsv1.2 -o /tmp/wled.bin https://github.com/wled/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-S3_8MB_opi.bin && ls -l /tmp/wled.bin",
       "verified": false
     },
     {

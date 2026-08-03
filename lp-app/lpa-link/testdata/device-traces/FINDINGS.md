@@ -156,3 +156,24 @@ safe-to-replace list holds one entry). If (2), M7 starts with a
 scripted repro instead of a hardware hunt.
 
 Trace: s5-foreign-firmware.failed.jsonl (71 events, both cycles).
+
+#### Resolved: mechanism (1) — the board was boot-looping
+
+`espflash monitor` settled it immediately:
+
+    SHA-256 comparison failed: … Attempting to boot anyway
+    rst:0x7 (TG0WDT_SYS_RST)   ← watchdog reset, looping
+
+The `ESP32-S3_8MB_qspi` asset is the wrong flash mode for this board:
+the image fails its own checksum, boots anyway, hangs, and the watchdog
+resets it — re-enumerating USB every cycle. So Studio's `gone` was
+HONEST: the device really did keep vanishing. **This is NOT defect (3)**
+— strike the earlier reading that it might be a confounder-free repro
+for M7. The spec now fetches the `_opi` asset.
+
+One product observation survives: a board in a watchdog boot loop
+presents to Studio as connect → gone → sweep re-attach → gone, with
+nothing on screen naming the pattern. "This board keeps restarting"
+is a state Studio could recognise (repeated short-lived sessions on one
+endpoint) and is worth considering when M5 revisits the sweep — a user
+whose board is boot-looping currently sees only flicker.
