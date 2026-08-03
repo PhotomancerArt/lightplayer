@@ -36,6 +36,13 @@ use super::ui_package_card::{UiCardConnection, UiPackageCard};
 pub struct HomeInputs {
     pub projects: Vec<UiPackageCard>,
     pub devices: Vec<UiDeviceCard>,
+    /// The raw registry rows [`Self::devices`] was derived from.
+    ///
+    /// Kept because a card is a PRESENTATION and some registry facts are not
+    /// presentation: the output face's board diagram needs the lens device's
+    /// `board_id`, which no card carries. Read through
+    /// `StudioController::lens_board_id`.
+    pub registered: Vec<RegisteredDevice>,
     /// Listing failed — the gallery surfaces this instead of an empty
     /// library.
     pub issue: Option<UiIssue>,
@@ -162,6 +169,7 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
     HomeInputs {
         projects,
         devices,
+        registered,
         issue,
     }
 }
