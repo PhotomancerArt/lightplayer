@@ -125,6 +125,12 @@ fn render_project(graphics: Arc<dyn LpGraphics>) -> Vec<u8> {
         .load_project(LpPathBuf::from("/projects").join(PROJECT_NAME).as_path())
         .expect("load project");
 
+    // The first frame renders the black fallback: shader compiles defer one
+    // frame for the memory-pressure compile window (ADR
+    // 2026-08-03-memory-pressure-at-compile-safe-points). Advance past it so
+    // every captured frame is a real render.
+    server.advance_frame(16).expect("advance compile-window frame");
+
     let mut frames: Vec<Vec<u8>> = Vec::new();
     for _ in 0..FRAMES {
         server.advance_frame(16).expect("advance frame");
