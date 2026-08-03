@@ -466,9 +466,9 @@ mod tests {
     use lpa_studio_core::UiSlotFieldState;
 
     use super::{
-        CONTINUOUS_TICKS, TICK_INNER_RADIUS, TICK_OUTER_RADIUS, knob_arc_chunks, knob_drag_value,
-        knob_fraction, knob_key_step, knob_key_value, knob_pointer_deg, knob_snap, knob_tick_x,
-        knob_tick_y, knob_value_stroke,
+        TICK_INNER_RADIUS, TICK_OUTER_RADIUS, knob_arc_chunks, knob_drag_value, knob_fraction,
+        knob_key_step, knob_key_value, knob_pointer_deg, knob_snap, knob_tick_x, knob_tick_y,
+        knob_value_stroke,
     };
 
     #[test]
