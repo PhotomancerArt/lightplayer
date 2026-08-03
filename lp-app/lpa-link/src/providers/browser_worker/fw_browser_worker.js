@@ -123,7 +123,9 @@ async function boot(label, modulePath, wasmPath, mode) {
     }
     self.postMessage({ kind: "status", status: "booting" });
     fwBrowser = await import(modulePath);
-    wasmExports = await fwBrowser.default(wasmPath || undefined);
+    wasmExports = await fwBrowser.default(
+      wasmPath ? { module_or_path: wasmPath } : undefined,
+    );
     fwBrowser.fw_browser_init_exports(wasmExports);
     // One WebGPU device request per worker, at boot. The outcome (available
     // or unavailable with a reason) is recorded inside the wasm module and
