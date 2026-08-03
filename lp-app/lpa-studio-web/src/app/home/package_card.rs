@@ -4,7 +4,7 @@ use std::cell::RefCell;
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ActionConfirmation, ControllerId, DEPLOY_NODE_ID, DeployOp, HOME_NODE_ID, HomeOp,
+    ActionConfirmation, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceTarget, HOME_NODE_ID, HomeOp,
     PreviewSource, SyncRelation, UiAction, UiPackageCard,
 };
 
@@ -36,7 +36,9 @@ pub(crate) fn PackageCard(
     /// this card — the gallery IS the chooser for a freshly set-up board,
     /// and the target is always named, never guessed. Empty = no buttons.
     #[props(default)]
-    empty_devices: Vec<String>,
+    /// The Connected-empty boards this card offers a one-click push to,
+    /// as (card key, display name) — the key is the push target (M4).
+    empty_devices: Vec<(String, String)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(platform_now_secs);
@@ -149,13 +151,14 @@ pub(crate) fn PackageCard(
                     }
                     span { "Open in sim" }
                 }
-                for device_name in empty_devices.iter() {
+                for (device_key, device_name) in empty_devices.iter() {
                     button {
                         class: "{quiet_action_class()} tw:relative tw:z-[2]",
                         r#type: "button",
                         title: "Put this project on \"{device_name}\" — it's empty and ready.",
                         onclick: {
                             let key = card.uid.clone();
+                            let device_key = device_key.clone();
                             move |event: MouseEvent| {
                                 event.stop_propagation();
                                 if busy || opening {
@@ -163,7 +166,10 @@ pub(crate) fn PackageCard(
                                 }
                                 on_action.call(UiAction::from_op(
                                     ControllerId::new(DEPLOY_NODE_ID),
-                                    DeployOp::PushProject { key: key.clone() },
+                                    DeployOp::PushProject {
+                                        key: key.clone(),
+                                        target: DeviceTarget::card(&device_key),
+                                    },
                                 ));
                             }
                         },
@@ -211,6 +217,7 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
             ControllerId::new(DEPLOY_NODE_ID),
             DeployOp::PushProject {
                 key: card.uid.clone(),
+                target: DeviceTarget::card(&connection.device_key),
             },
         )
         .with_label(format!("Push to {}", connection.device_name))

@@ -286,6 +286,7 @@ fn card_native_stamp_and_push_through_the_link() {
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::app::home::HOME_NODE_ID),
         crate::HomeOp::NameDevice {
+            target: studio.device_target_for_test(),
             name: "Luna's porch sign".to_string(),
         },
     )))
@@ -304,6 +305,7 @@ fn card_native_stamp_and_push_through_the_link() {
     // + re-pull (no re-stamp — the root identity is outside the replaced
     // storage dir).
     drive(studio.dispatch(deploy_action(DeployOp::PushProject {
+        target: studio.device_target_for_test(),
         key: summary.uid.to_string(),
     })))
     .unwrap();
@@ -399,6 +401,7 @@ fn a_flash_narrates_its_progress_while_it_runs() {
     });
     drive(studio.dispatch_with_updates(
         device_action(DeviceOp::ProvisionFirmware {
+            target: studio.device_target_for_test(),
             setup_name: None,
             board_id: None,
         }),
@@ -499,6 +502,7 @@ fn blank_flash_classifies_flashes_and_reaches_needs_a_name() {
     // affordance): the device reboots as LightPlayer, the controller
     // reconnects, and the empty unstamped device lands on Needs-a-name.
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        target: studio.device_target_for_test(),
         setup_name: None,
         board_id: None,
     })))
@@ -561,7 +565,9 @@ fn disconnect_mid_pull_is_nonfatal_and_erase_stays_reachable() {
 
     // Erase is still reachable: the scripted transition runs and the
     // controller degrades gracefully when the (dead) wire cannot reattach.
-    let outcome = drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)));
+    let outcome = drive(studio.dispatch(device_action(DeviceOp::ResetToBlank {
+        target: studio.device_target_for_test(),
+    })));
     assert!(
         outcome.is_ok(),
         "erase after a disconnect must not fail fatally: {outcome:?}"
@@ -664,6 +670,7 @@ fn incompatible_no_hello_reflashes_through_the_card() {
 
     // Flash → reboot → Ready (the flashed build speaks the current proto).
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        target: studio.device_target_for_test(),
         setup_name: None,
         board_id: None,
     })))
@@ -726,6 +733,7 @@ fn incompatible_proto_mismatch_reflashes_through_the_card() {
     );
 
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        target: studio.device_target_for_test(),
         setup_name: None,
         board_id: None,
     })))
@@ -771,8 +779,10 @@ fn unresponsive_device_reconnects_to_ready_after_unstall() {
 
     // The wire recovers (un-stall) → explicit reconnect rebuilds the link.
     device.set_failure_plan(FakeFailurePlan::none());
-    drive(studio.dispatch(device_action(DeviceOp::ConnectLightPlayer)))
-        .expect("reconnect after un-stall succeeds");
+    drive(studio.dispatch(device_action(DeviceOp::ConnectLightPlayer {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("reconnect after un-stall succeeds");
 
     assert!(matches!(
         studio.device_state_for_test(),
@@ -813,8 +823,10 @@ fn reconnect_after_gone_rebuilds_the_link_to_ready() {
 
     // Replug: reconnect rebuilds stream + transport and re-runs readiness.
     device.set_failure_plan(FakeFailurePlan::none());
-    drive(studio.dispatch(device_action(DeviceOp::ConnectLightPlayer)))
-        .expect("reconnect after Gone succeeds");
+    drive(studio.dispatch(device_action(DeviceOp::ConnectLightPlayer {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("reconnect after Gone succeeds");
 
     assert!(matches!(
         studio.device_state_for_test(),
@@ -842,8 +854,10 @@ fn erase_lands_blank_flash_as_success_through_the_card() {
 
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
 
-    let outcome = drive(studio.dispatch(deploy_action(DeployOp::EraseDevice)))
-        .expect("erase from the card is a success");
+    let outcome = drive(studio.dispatch(deploy_action(DeployOp::EraseDevice {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("erase from the card is a success");
     assert!(
         outcome
             .notices
@@ -1186,6 +1200,7 @@ fn push_replaces_the_running_project_with_a_different_one() {
     );
 
     drive(studio.dispatch(deploy_action(DeployOp::PushProject {
+        target: studio.device_target_for_test(),
         key: other.uid.to_string(),
     })))
     .expect("pushing a different project succeeds");
@@ -1670,8 +1685,10 @@ fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
     assert!(studio.view().home.is_none(), "the editor is showing");
 
     // Erase the device from under the open editor.
-    let outcome = drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)))
-        .expect("erase succeeds even from the editor");
+    let outcome = drive(studio.dispatch(device_action(DeviceOp::ResetToBlank {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("erase succeeds even from the editor");
 
     // The lens is severed → the app is back at the gallery.
     assert_eq!(
@@ -1826,8 +1843,10 @@ fn erasing_the_device_leaves_a_sim_lens_editor_alone() {
 
     // …the hardware connects alongside, and gets erased from its card.
     connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
-    drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)))
-        .expect("erase succeeds with a sim lens open");
+    drive(studio.dispatch(device_action(DeviceOp::ResetToBlank {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("erase succeeds with a sim lens open");
 
     assert_eq!(
         studio.runtime_pool_for_test().lens(),
@@ -1888,7 +1907,10 @@ fn runtime_reset_from_the_editor_keeps_the_lens_bound() {
         .expect("device session")
         .id();
 
-    drive(studio.dispatch(device_action(DeviceOp::ResetDevice))).expect("runtime reset succeeds");
+    drive(studio.dispatch(device_action(DeviceOp::ResetDevice {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("runtime reset succeeds");
 
     assert_eq!(
         studio.runtime_pool_for_test().lens(),
@@ -2224,6 +2246,7 @@ fn push_from_card_narrates_operation_in_flight_and_settles() {
     });
     let outcome = drive(studio.dispatch_with_updates(
         deploy_action(DeployOp::PushProject {
+            target: studio.device_target_for_test(),
             key: summary.uid.to_string(),
         }),
         sink,
@@ -2354,6 +2377,7 @@ fn push_progress_stays_on_the_live_card() {
     });
     drive(studio.dispatch_with_updates(
         deploy_action(DeployOp::PushProject {
+            target: studio.device_target_for_test(),
             key: summary.uid.to_string(),
         }),
         sink,
@@ -2609,7 +2633,10 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
-    drive(studio.dispatch(device_action(DeviceOp::BackUpFilesystem))).expect("the backup succeeds");
+    drive(studio.dispatch(device_action(DeviceOp::BackUpFilesystem {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("the backup succeeds");
 
     let backup = studio
         .view()
@@ -2736,7 +2763,7 @@ fn disconnecting_one_board_leaves_the_other_attached() {
     assert_eq!(keys.len(), 2, "two live boards to start");
 
     drive(studio.dispatch(device_action(DeviceOp::DisconnectDevice {
-        session_key: Some(keys[1].clone()),
+        target: crate::DeviceTarget::card(keys[1].clone()),
     })))
     .expect("disconnect dispatches");
 
@@ -2785,6 +2812,7 @@ fn a_flash_narrates_on_its_own_board_and_leaves_the_other_alone() {
     // ⚠️ Interim: the op still targets the OLDEST board (P3 takes the
     // target from the clicked card). What P2 fixes is where it NARRATES.
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        target: studio.device_target_for_test(),
         setup_name: None,
         board_id: None,
     })))
@@ -2822,6 +2850,109 @@ fn a_flash_narrates_on_its_own_board_and_leaves_the_other_alone() {
         ),
         "the board nobody flashed is not mid-operation: {:?}",
         other.state
+    );
+}
+
+/// THE test this milestone exists for: an operation runs on the board
+/// the user clicked, not on whichever one attached first (M4 P3).
+///
+/// Before this, every device op resolved "the" device — the OLDEST
+/// device session — so with two boards attached, clicking flash on the
+/// second card flashed the first.
+#[test]
+fn a_flash_aimed_at_the_second_board_leaves_the_first_untouched() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::BlankFlash),
+        FakeDeviceScript::new(FakeBootState::BlankFlash),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &first_id).expect("first board connects");
+    connect_through_link(&mut studio, &second_id).expect("second board connects");
+
+    let state_of = |studio: &StudioController, key: &str| {
+        studio
+            .view()
+            .home
+            .expect("gallery shows")
+            .devices
+            .iter()
+            .find(|card| card.session_key.as_deref() == Some(key))
+            .map(|card| card.state.clone())
+    };
+    let keys: Vec<String> = studio
+        .view()
+        .home
+        .expect("gallery shows")
+        .devices
+        .iter()
+        .filter(|card| !card.sim)
+        .filter_map(|card| card.session_key.clone())
+        .collect();
+    assert_eq!(keys.len(), 2, "two boards to start");
+    let first_before = state_of(&studio, &keys[0]);
+    let second_before = state_of(&studio, &keys[1]);
+
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        target: crate::DeviceTarget::card(keys[1].clone()),
+        setup_name: None,
+        board_id: None,
+    })))
+    .expect("flashing the SECOND board dispatches");
+
+    assert_eq!(
+        state_of(&studio, &keys[0]),
+        first_before,
+        "board A is exactly as it was — it is not the board the user clicked"
+    );
+    assert_ne!(
+        state_of(&studio, &keys[1]),
+        second_before,
+        "board B took the flash and left the unflashed state"
+    );
+}
+
+/// An operation whose target names no live session REFUSES. It must not
+/// quietly land on some other board — that fallback is the whole defect.
+#[test]
+fn an_op_aimed_at_no_live_board_refuses_instead_of_picking_one() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, _second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::BlankFlash),
+        FakeDeviceScript::new(FakeBootState::BlankFlash),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &first_id).expect("first board connects");
+
+    let card_state = |studio: &StudioController| {
+        studio
+            .view()
+            .home
+            .expect("gallery shows")
+            .devices
+            .iter()
+            .find(|card| !card.sim)
+            .map(|card| card.state.clone())
+    };
+    let before = card_state(&studio);
+
+    let outcome = drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        target: crate::DeviceTarget::card("dev_never_attached"),
+        setup_name: None,
+        board_id: None,
+    })));
+
+    assert!(
+        matches!(outcome, Err(crate::UiError::MissingSession(ref message))
+            if message.contains("dev_never_attached")),
+        "the refusal names the card that could not be resolved: {outcome:?}"
+    );
+    assert_eq!(
+        card_state(&studio),
+        before,
+        "the attached board must NOT absorb an op aimed elsewhere"
     );
 }
 

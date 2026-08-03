@@ -312,6 +312,7 @@ fn assemble_roster(
                 connections.push((
                     chip.uid.clone(),
                     UiCardConnection {
+                        device_key: card.identity_key().to_string(),
                         device_name: card.name.clone(),
                         relation,
                     },

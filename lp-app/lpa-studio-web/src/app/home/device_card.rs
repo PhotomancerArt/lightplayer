@@ -26,10 +26,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp,
     CardVerb, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController,
-    DeviceDetailAffordance, DeviceOp, DeviceRichInput, HomeOp, LinkProviderKind, ProjectController,
-    ProjectOp, RecoveryInstructions, RichObjectView, RichSection, RosterAffordance,
-    RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard,
-    UiDeviceProjectChip, UiStatusKind, device_card_tabs, device_rich_object, sim_rich_object,
+    DeviceDetailAffordance, DeviceOp, DeviceRichInput, DeviceTarget, HomeOp, LinkProviderKind,
+    ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
+    RosterAffordance, RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput,
+    UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind, device_card_tabs,
+    device_rich_object, sim_rich_object,
 };
 use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
@@ -93,8 +94,9 @@ impl CardRowAction {
 /// value, never a boxed op). Each verb names exactly one card action; the
 /// confirmation copy rides the action itself.
 fn verb_to_action(verb: &CardVerb, card: &UiDeviceCard) -> UiAction {
+    let card_key = card.identity_key();
     match verb {
-        CardVerb::Erase => erase_device_action(card.name.clone()),
+        CardVerb::Erase => erase_device_action(card_key, card.name.clone()),
         CardVerb::Forget => {
             forget_device_action(card.uid.clone().unwrap_or_default(), card.name.clone())
         }
@@ -102,10 +104,12 @@ fn verb_to_action(verb: &CardVerb, card: &UiDeviceCard) -> UiAction {
         // Base meta carries the confirm copy ("can't be backed up…").
         CardVerb::WipeProject => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::WipeProject,
+            DeviceOp::WipeProject {
+                target: DeviceTarget::card(card_key),
+            },
         ),
-        CardVerb::Flash => flash_device_action_destructive(),
-        CardVerb::PushDrop { key } => push_project_action(key.clone()).with_confirmation(
+        CardVerb::Flash => flash_device_action_destructive(card_key),
+        CardVerb::PushDrop { key } => push_project_action(card_key, key.clone()).with_confirmation(
             lpa_studio_core::ActionConfirmation::new(
                 "Push this project",
                 format!(
@@ -223,6 +227,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element {
+    let recovery_key = card_key.clone();
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-3",
             div { class: "tw:grid tw:gap-1",
@@ -233,7 +238,11 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         onclick: move |_| {
                             on_action.call(UiAction::from_op(
                                 ControllerId::new(DeviceController::NODE_ID),
-                                DeviceOp::ProvisionFirmware { setup_name: None, board_id: None },
+                                DeviceOp::ProvisionFirmware {
+                                    target: DeviceTarget::card(&recovery_key),
+                                    setup_name: None,
+                                    board_id: None,
+                                },
                             ));
                         },
                     }
@@ -249,7 +258,7 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         label: "Start in safe mode",
                         tone: SheetButtonTone::Quiet,
                         onclick: {
-                            let action = boot_safe_once_action();
+                            let action = boot_safe_once_action(&card_key);
                             move |_| on_action.call(action.clone())
                         },
                     }
@@ -266,7 +275,7 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         label: "Download a backup",
                         tone: SheetButtonTone::Quiet,
                         onclick: {
-                            let action = back_up_filesystem_action();
+                            let action = back_up_filesystem_action(&card_key);
                             move |_| on_action.call(action.clone())
                         },
                     }
@@ -384,6 +393,7 @@ fn SetupForm(
     let name_value = typed_name().unwrap_or(derived_name);
     let submit_board = setup_board.clone();
     let submit_name = name_value.clone();
+    let submit_card_key = card_key.clone();
 
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-3.5",
@@ -453,6 +463,7 @@ fn SetupForm(
                     on_action.call(UiAction::from_op(
                         ControllerId::new(DeviceController::NODE_ID),
                         DeviceOp::ProvisionFirmware {
+                            target: DeviceTarget::card(&submit_card_key),
                             setup_name,
                             board_id: submit_board.clone(),
                         },
@@ -926,7 +937,7 @@ pub(crate) fn DeviceCard(
                                 {console_tab_body(&card.console_tail)}
                             },
                             DeviceCardTab::Project if picker_mode => rsx! {
-                                {project_picker_body(&project_choices, on_action)}
+                                {project_picker_body(&card_key, &project_choices, on_action)}
                             },
                             _ => rsx! {
                                 {sections_tab_body(&tabs, active_tab, on_action, &card_key)}
@@ -1275,6 +1286,7 @@ fn status_tab_body(
             // sheet detour predates the on-card form (sitting feedback,
             // 2026-08-03: "we moved mostly away from the little dialogs").
             NameForm {
+                card_key: card_key.to_string(),
                 board_id: card.hardware.as_ref().and_then(|hw| hw.board_id.clone()),
                 detected_chip: card.detected_chip.clone(),
                 now_secs,
@@ -1436,8 +1448,8 @@ fn TroubleshootSheet(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let reconnect = reconnect_device_action(uid);
-    let recovery_flash = flash_device_action(false);
-    let boot_safe_once = boot_safe_once_action();
+    let recovery_flash = flash_device_action(&card_key, false);
+    let boot_safe_once = boot_safe_once_action(&card_key);
     // The firmware package names the chip it was built for ("fw-esp32c6"),
     // which is the only chip source available before the user reaches
     // bootloader mode — a device that will not boot cannot tell us its board.
@@ -1679,6 +1691,7 @@ fn ConfirmSheet(action: UiAction, card_key: String, on_action: EventHandler<UiAc
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NameForm(
+    card_key: String,
     board_id: Option<String>,
     detected_chip: Option<String>,
     now_secs: Option<f64>,
@@ -1697,6 +1710,7 @@ fn NameForm(
     let derived = default_setup_name(now_secs, &discriminator);
     let name_value = typed_name().unwrap_or(derived);
     let submit_name = name_value.clone();
+    let name_card_key = card_key.clone();
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-3.5",
             div {
@@ -1715,7 +1729,10 @@ fn NameForm(
                 onclick: move |_| {
                     let value = submit_name.trim().to_string();
                     if !value.is_empty() {
-                        on_action.call(home_action(HomeOp::NameDevice { name: value }));
+                        on_action.call(home_action(HomeOp::NameDevice {
+                            target: DeviceTarget::card(&name_card_key),
+                            name: value,
+                        }));
                     }
                 },
             }
@@ -1793,7 +1810,10 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
     if value.is_empty() {
         return;
     }
-    on_action.call(home_action(HomeOp::NameDevice { name: value }));
+    on_action.call(home_action(HomeOp::NameDevice {
+        target: DeviceTarget::card(card_key),
+        name: value,
+    }));
     on_action.call(close_sheet_action(card_key));
 }
 
@@ -1877,10 +1897,12 @@ pub(crate) fn connect_device_action() -> UiAction {
 /// which the card's own state carries the flow.
 /// Write the boot-control record so the device's next restart skips its
 /// project. Non-destructive and one-shot — see `DeviceOp::BootSafeOnce`.
-pub(crate) fn boot_safe_once_action() -> UiAction {
+pub(crate) fn boot_safe_once_action(card_key: &str) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::BootSafeOnce,
+        DeviceOp::BootSafeOnce {
+            target: DeviceTarget::card(card_key),
+        },
     )
     .with_label("Start in safe mode")
 }
@@ -1890,10 +1912,12 @@ pub(crate) fn boot_safe_once_action() -> UiAction {
 /// No confirmation: nothing is written. It is deliberately the row people
 /// meet BEFORE the destructive verbs, because it is what makes them
 /// survivable — see `DeviceOp::BackUpFilesystem`.
-pub(crate) fn back_up_filesystem_action() -> UiAction {
+pub(crate) fn back_up_filesystem_action(card_key: &str) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::BackUpFilesystem,
+        DeviceOp::BackUpFilesystem {
+            target: DeviceTarget::card(card_key),
+        },
     )
     .with_label("Download a backup")
     .with_summary(
@@ -1903,11 +1927,12 @@ pub(crate) fn back_up_filesystem_action() -> UiAction {
     .with_icon("download")
 }
 
-pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
+pub(crate) fn flash_device_action(card_key: &str, device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
             DeviceOp::ProvisionFirmware {
+                target: DeviceTarget::card(card_key),
                 setup_name: None,
                 board_id: None,
             },
@@ -1928,10 +1953,13 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
 
 /// The in-card push op for one library project (M5's lane; M8′ reuses
 /// it for the picker rows and the drop-confirm sheet).
-fn push_project_action(key: String) -> UiAction {
+fn push_project_action(card_key: &str, key: String) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::PushProject { key },
+        DeployOp::PushProject {
+            key,
+            target: DeviceTarget::card(card_key),
+        },
     )
     .with_label("Push")
     .with_summary("Push this project to the device.")
@@ -1942,6 +1970,7 @@ fn push_project_action(key: String) -> UiAction {
 /// menu rows — one click pushes (the click is the D11 consent, exactly
 /// like the in-card Push). Rendered only on the Connected-empty card.
 fn project_picker_body(
+    card_key: &str,
     choices: &[UiDeviceProjectChip],
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -1952,7 +1981,7 @@ fn project_picker_body(
         div { class: "tw:grid",
             for chip in choices.iter() {
                 {
-                    let action = push_project_action(chip.uid.clone())
+                    let action = push_project_action(card_key, chip.uid.clone())
                         .with_label(chip.name.clone())
                         .with_summary(format!("Push {} to this device.", chip.name))
                         .with_icon("play");
@@ -2018,6 +2047,8 @@ pub(super) fn device_affordance_action(
     card: &UiDeviceCard,
     affordance: &RosterAffordance,
 ) -> Option<UiAction> {
+    // Every device verb below acts on THIS card's board (M4).
+    let card_key = card.identity_key();
     let action = match affordance {
         // the grow control (⤢) is the editor entry — no row
         // The visible editor CTA on the running card's face (2026-07-26
@@ -2036,6 +2067,7 @@ pub(super) fn device_affordance_action(
                 ControllerId::new(DEPLOY_NODE_ID),
                 DeployOp::PushProject {
                     key: chip.uid.clone(),
+                    target: DeviceTarget::card(card_key),
                 },
             )
             .with_summary("Push your newest version to this device.")
@@ -2045,19 +2077,25 @@ pub(super) fn device_affordance_action(
         // directly — both are non-destructive by construction (adopt keeps
         // the old head in history; keep-both forks), so neither needs a
         // gate. The copy SAYS so, which is what makes one click feel safe.
-        RosterAffordance::UseBoardCopy => {
-            UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::AdoptDeviceCopy)
-                .with_summary(
-                    "Make the board's copy your newest version — your local \
+        RosterAffordance::UseBoardCopy => UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::AdoptDeviceCopy {
+                target: DeviceTarget::card(card_key),
+            },
+        )
+        .with_summary(
+            "Make the board's copy your newest version — your local \
                      changes stay in your project history.",
-                )
-                .with_icon("download")
-        }
-        RosterAffordance::KeepBoth => {
-            UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::KeepBothFork)
-                .with_summary("Save the board's copy as its own project.")
-                .with_icon("copy")
-        }
+        )
+        .with_icon("download"),
+        RosterAffordance::KeepBoth => UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::KeepBothFork {
+                target: DeviceTarget::card(card_key),
+            },
+        )
+        .with_summary("Save the board's copy as its own project.")
+        .with_icon("copy"),
         // intercepted upstream: the troubleshoot sheet / the Project-tab
         // picker / the wipe confirm (`wire_card_affordance`)
         RosterAffordance::Troubleshoot
@@ -2072,6 +2110,7 @@ pub(super) fn device_affordance_action(
         RosterAffordance::SetUp => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
             DeviceOp::ProvisionFirmware {
+                target: DeviceTarget::card(card_key),
                 setup_name: None,
                 board_id: None,
             },
@@ -2084,6 +2123,7 @@ pub(super) fn device_affordance_action(
         RosterAffordance::UpdateFirmware => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
             DeviceOp::ProvisionFirmware {
+                target: DeviceTarget::card(card_key),
                 setup_name: None,
                 board_id: None,
             },
@@ -2142,6 +2182,7 @@ fn wire_card_affordance(
         // The name-stamping sheet (an unstamped board's one naming flow).
         DeviceDetailAffordance::Roster(RosterAffordance::NameDevice) => {
             let display = home_action(HomeOp::NameDevice {
+                target: DeviceTarget::card(card.identity_key()),
                 name: String::new(),
             })
             .with_label("Name this device…")
@@ -2166,6 +2207,7 @@ fn wire_card_affordance(
                 UiAction::from_op(
                     ControllerId::new(DeviceController::NODE_ID),
                     DeviceOp::ProvisionFirmware {
+                        target: DeviceTarget::card(card.identity_key()),
                         setup_name: None,
                         board_id: None,
                     },
@@ -2181,7 +2223,9 @@ fn wire_card_affordance(
         DeviceDetailAffordance::Roster(RosterAffordance::WipeProject) => {
             let action = UiAction::from_op(
                 ControllerId::new(DeviceController::NODE_ID),
-                DeviceOp::WipeProject,
+                DeviceOp::WipeProject {
+                    target: DeviceTarget::card(card.identity_key()),
+                },
             )
             .with_label(RosterAffordance::WipeProject.label())
             .with_summary("Remove the project from this device — back to blank.")
@@ -2212,16 +2256,16 @@ fn wire_card_affordance(
         // action with the gate stripped (the sheet IS the gate).
         DeviceDetailAffordance::FlashFirmware => Some(CardRowAction::Sheet(
             CardSheetState::Confirm(CardVerb::Flash),
-            strip_confirmation(flash_device_action_destructive()),
+            strip_confirmation(flash_device_action_destructive(card.identity_key())),
         )),
         // Non-destructive, so it dispatches straight from the row — a
         // confirm gate on "save a copy of your work" would be theatre.
-        DeviceDetailAffordance::BackUpFilesystem => {
-            Some(CardRowAction::from_action(back_up_filesystem_action()))
-        }
+        DeviceDetailAffordance::BackUpFilesystem => Some(CardRowAction::from_action(
+            back_up_filesystem_action(card.identity_key()),
+        )),
         DeviceDetailAffordance::EraseDevice => Some(CardRowAction::Sheet(
             CardSheetState::Confirm(CardVerb::Erase),
-            strip_confirmation(erase_device_action(card.name.clone())),
+            strip_confirmation(erase_device_action(card.identity_key(), card.name.clone())),
         )),
         DeviceDetailAffordance::ForgetDevice => card.uid.clone().map(|uid| {
             CardRowAction::Sheet(
@@ -2235,18 +2279,18 @@ fn wire_card_affordance(
         DeviceDetailAffordance::DisconnectDevice => card
             .session_key
             .clone()
-            .map(|session_key| CardRowAction::from_action(disconnect_device_action(session_key))),
+            .map(|session_key| CardRowAction::from_action(disconnect_device_action(&session_key))),
     }
 }
 
 /// The Danger tab's disconnect row (multi-device M3): close THIS board's
 /// session, targeted by the card's session key so a second attached board
 /// is untouched.
-pub(crate) fn disconnect_device_action(session_key: String) -> UiAction {
+pub(crate) fn disconnect_device_action(card_key: &str) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
         DeviceOp::DisconnectDevice {
-            session_key: Some(session_key),
+            target: DeviceTarget::card(card_key),
         },
     )
     .with_label("Disconnect")
@@ -2288,8 +2332,8 @@ fn wire_sim_card_section(section: RichSection<SimDetailAffordance>) -> RichSecti
 /// The Danger tab's flash row: [`flash_device_action`] with a live
 /// device context, wearing the destructive treatment the tab's rows
 /// share (the inline red zone reads uniformly red).
-pub(super) fn flash_device_action_destructive() -> UiAction {
-    let action = flash_device_action(true);
+pub(super) fn flash_device_action_destructive(card_key: &str) -> UiAction {
+    let action = flash_device_action(card_key, true);
     let meta = action.meta().clone().destructive();
     action.with_meta(meta)
 }
@@ -2297,17 +2341,21 @@ pub(super) fn flash_device_action_destructive() -> UiAction {
 /// Erase the device's flash entirely, from the Danger tab. Confirmation
 /// states the honest facts: full wipe; anything Studio could read was
 /// banked at connect (D8) — unreadable content is gone for good.
-pub(crate) fn erase_device_action(name: String) -> UiAction {
-    UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::EraseDevice).with_confirmation(
-        lpa_studio_core::ActionConfirmation::new(
-            "Erase device",
-            format!(
-                "Erase everything on \"{name}\"? Its flash is wiped clean; \
-                 anything Studio could read was already saved to your library."
-            ),
-            "Erase",
-        ),
+pub(crate) fn erase_device_action(card_key: &str, name: String) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::EraseDevice {
+            target: DeviceTarget::card(card_key),
+        },
     )
+    .with_confirmation(lpa_studio_core::ActionConfirmation::new(
+        "Erase device",
+        format!(
+            "Erase everything on \"{name}\"? Its flash is wiped clean; \
+                 anything Studio could read was already saved to your library."
+        ),
+        "Erase",
+    ))
 }
 
 /// The forget action (D34 hygiene) for the offline card's Danger tab.

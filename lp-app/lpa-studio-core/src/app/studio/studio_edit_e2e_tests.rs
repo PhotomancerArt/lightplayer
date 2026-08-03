@@ -653,7 +653,9 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
     // project's new head, and the handler's own re-sync lands on AtHead.
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::AdoptDeviceCopy,
+        DeployOp::AdoptDeviceCopy {
+            target: controller.device_target_for_test(),
+        },
     )))
     .expect("adopt works straight from the card sheet");
     let sync = controller
@@ -683,7 +685,9 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
     drive(controller.refresh_device_sync_for_test());
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::KeepBothFork,
+        DeployOp::KeepBothFork {
+            target: controller.device_target_for_test(),
+        },
     )))
     .expect("keep-both works straight from the card sheet");
     let summaries = store.list().unwrap();
@@ -762,6 +766,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(crate::app::home::HOME_NODE_ID),
         crate::HomeOp::NameDevice {
+            target: controller.device_target_for_test(),
             name: "Luna's porch sign".to_string(),
         },
     )))
@@ -789,6 +794,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     // history + association recorded; device now AtHead
     let outcome = drive(controller.dispatch(deploy_action(DeployOp::PushProject {
         key: summary.uid.to_string(),
+        target: controller.device_target_for_test(),
     })))
     .unwrap();
     assert!(

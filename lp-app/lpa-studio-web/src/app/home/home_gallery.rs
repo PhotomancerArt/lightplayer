@@ -71,14 +71,23 @@ pub fn HomeGallery(
     // the roster shows whenever it is non-empty or a grant exists
     let device_section_expanded =
         !home.devices.is_empty() || has_ever_granted.or(*probed_grant.read()).unwrap_or(false);
-    // a live (non-offline) DEVICE card means the flash affordance has a
-    // device context and may open the dialog; otherwise it opens the
-    // recovery chooser first (the sim is not a device — D22 — and never a
-    // flash context)
-    let device_connected = home
+    // The roster HEADER's flash has no card behind it, so it can only
+    // act directly when there is exactly ONE live board to mean (M4).
+    // With two attached it cannot name one — and guessing is how the
+    // wrong board gets flashed — so it falls back to the recovery
+    // chooser, which asks. Per-board flashing lives on each card
+    // (Set-up / Update / the Danger tab), which is where it belongs.
+    // (The sim is not a device — D22 — and never a flash context.)
+    let live_boards: Vec<&lpa_studio_core::UiDeviceCard> = home
         .devices
         .iter()
-        .any(|card| !card.sim && !matches!(card.state, RosterCardState::Offline { .. }));
+        .filter(|card| !card.sim && !matches!(card.state, RosterCardState::Offline { .. }))
+        .collect();
+    let flash_card_key = match live_boards.as_slice() {
+        [only] => only.identity_key().to_string(),
+        _ => String::new(),
+    };
+    let device_connected = live_boards.len() == 1;
     // "Devices" holds until the P4 visual gate decides the label; the
     // override exists for the label-candidate stories only
     let roster_title = roster_label.unwrap_or_else(|| "Devices".to_string());
@@ -86,11 +95,13 @@ pub fn HomeGallery(
     // Connected-EMPTY devices grow "Put on <name>" buttons on every
     // project card (state-flow model §1-A: the gallery IS the chooser
     // for a freshly set-up board; the target is always named).
-    let empty_devices: Vec<String> = home
+    // (key, name): with two empty boards attached the NAME no longer
+    // identifies the target (M4) — the key is what the push addresses.
+    let empty_devices: Vec<(String, String)> = home
         .devices
         .iter()
         .filter(|card| !card.sim && matches!(card.state, RosterCardState::ConnectedEmpty))
-        .map(|card| card.name.clone())
+        .map(|card| (card.identity_key().to_string(), card.name.clone()))
         .collect();
     let import_dropped = import_handler(on_action);
     let import_picked = import_dropped.clone();
@@ -125,7 +136,7 @@ pub fn HomeGallery(
                     header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
                         h2 { class: section_title_class(), "{roster_title}" }
                         ActionButton {
-                            action: flash_device_action(device_connected),
+                            action: flash_device_action(&flash_card_key, device_connected),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -165,7 +176,7 @@ pub fn HomeGallery(
                         on_action,
                     }
                     ActionButton {
-                        action: flash_device_action(device_connected),
+                        action: flash_device_action(&flash_card_key, device_connected),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
