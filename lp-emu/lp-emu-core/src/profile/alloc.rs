@@ -18,6 +18,16 @@ use std::path::{Path, PathBuf};
 use super::{Collector, EmuCtx, FinishCtx, GateAction, HaltReason, PerfEvent, SyscallAction};
 use std::any::Any;
 
+/// ⚠️ These tests do **not** run under `cargo test -p lp-emu-core`.
+///
+/// `pub mod profile` is `#[cfg(feature = "std")]` and `std` is not a default
+/// feature, so an isolated `-p` run compiles neither the module nor its tests
+/// and cheerfully reports every other test passing. They do run in the
+/// workspace suite (`just check test` / CI), where feature unification turns
+/// `std` on via `lpa-client`.
+///
+/// If you are iterating on this file, use `cargo test -p lp-emu-core --features std`
+/// — otherwise a green run means nothing here was built.
 #[cfg(test)]
 mod tests {
     use super::SymbolResolver;
@@ -161,9 +171,35 @@ mod tests {
         // Whole-trace stats still include everything.
         assert_eq!(report.stats.alloc_count, 4);
 
+        // --- budget figures ---
+        //
+        // Live bytes over the trace: 8 (outside) -> +100 -> -8 -> +50 -> +7.
+        // The compile window opens at 8 live, peaks at 8+100+50-8 = 150, and
+        // closes at 150. So transient = 150-8 = 142 and retained = 142 too:
+        // this window frees nothing it allocated.
+        assert_eq!(compile.live_at_open, 8);
+        assert_eq!(compile.peak_live, 150);
+        assert_eq!(compile.transient, 142);
+        assert_eq!(compile.retained, 142);
+        assert_eq!(compile.largest_alloc, 100, "biggest single request inside");
+
+        // The nested link window only deallocates, so it costs nothing and
+        // leaves less than it found — retained must not go negative in the
+        // report, but the raw field records the shrink.
+        assert_eq!(link.transient, 0, "a window that only frees has no peak");
+        assert_eq!(
+            link.retained, 0,
+            "max-across-openings floors at the initial 0"
+        );
+        assert_eq!(link.largest_alloc, 0);
+
         let body = report.render_body_without_header();
         assert!(body.contains("--- Windows (by perf event) ---"), "{body}");
         assert!(body.contains("shader-compile"), "{body}");
+        assert!(
+            body.contains("budget: transient 142 B, retained 142 B, largest alloc 100 B"),
+            "{body}"
+        );
     }
 
     #[test]
@@ -436,9 +472,51 @@ struct WindowStats {
     bytes_freed: u64,
     /// caller -> (alloc+realloc count, bytes)
     site_stats: HashMap<String, (u64, u64)>,
+
+    // --- budget figures ---
+    //
+    // `bytes_allocated` counts churn, which is not what a memory budget is
+    // about: a window that allocates and frees 1 MB in 4 KB pieces costs
+    // nothing. What a budget cares about is how much was live *at once*
+    // (`transient`) and how much the window left behind (`retained`), plus the
+    // largest single request, because one big contiguous ask can fail while
+    // total free is ample.
+    /// Live bytes when the window most recently opened.
+    live_at_open: u64,
+    /// Highest live-byte total observed inside the window, across all openings.
+    peak_live: u64,
+    /// `peak_live - live_at_open`, maximised across openings. The transient
+    /// cost of doing whatever the window does.
+    transient: u64,
+    /// Live bytes at close minus at open, maximised across openings. What the
+    /// window leaves resident.
+    retained: i64,
+    /// Largest single allocation request seen inside the window.
+    largest_alloc: u32,
 }
 
 impl WindowStats {
+    /// Note the current live-byte total while this window is open.
+    fn observe_live(&mut self, live_bytes: u64) {
+        if live_bytes > self.peak_live {
+            self.peak_live = live_bytes;
+        }
+        let transient = live_bytes.saturating_sub(self.live_at_open);
+        if transient > self.transient {
+            self.transient = transient;
+        }
+    }
+
+    /// Called when the window closes. Keeps the largest retention seen across
+    /// repeated openings — `frame` opens once per frame, and the figure worth
+    /// budgeting against is the worst one, not the last.
+    fn close(&mut self, live_bytes: u64) {
+        let retained = live_bytes as i64 - self.live_at_open as i64;
+        if retained > self.retained {
+            self.retained = retained;
+        }
+    }
+
     fn record_site(&mut self, frames: &[u32], sz: u32, resolver: &SymbolResolver) {
         if frames.len() > 1 {
             let caller = resolver.resolve(frames[1]);
@@ -611,6 +689,9 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
     // Named windows in first-open order; `active` holds indices into `windows`.
     let mut windows: Vec<(String, WindowStats)> = Vec::new();
     let mut active: Vec<usize> = Vec::new();
+    // Running total of live bytes, maintained alongside `live` so window peaks
+    // can be read without re-summing the map on every event.
+    let mut live_bytes: u64 = 0;
 
     for line in lines {
         let line = line?;
@@ -634,6 +715,13 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                     win.alloc_count += 1;
                     win.bytes_allocated += event.sz as u64;
                     win.record_site(&event.frames, event.sz, &resolver);
+                    if event.sz > win.largest_alloc {
+                        win.largest_alloc = event.sz;
+                    }
+                }
+                live_bytes += event.sz as u64;
+                for &w in &active {
+                    windows[w].1.observe_live(live_bytes);
                 }
                 live.insert(
                     event.ptr,
@@ -651,7 +739,9 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                     win.dealloc_count += 1;
                     win.bytes_freed += event.sz as u64;
                 }
-                live.remove(&event.ptr);
+                if let Some(prev) = live.remove(&event.ptr) {
+                    live_bytes = live_bytes.saturating_sub(prev.size as u64);
+                }
             }
             "R" => {
                 stats.record_reported_free(event.free, event.ic);
@@ -664,8 +754,17 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                     win.bytes_allocated += event.sz as u64;
                     win.bytes_freed += old_sz as u64;
                     win.record_site(&event.frames, event.sz, &resolver);
+                    if event.sz > win.largest_alloc {
+                        win.largest_alloc = event.sz;
+                    }
                 }
-                live.remove(&old_ptr);
+                if let Some(prev) = live.remove(&old_ptr) {
+                    live_bytes = live_bytes.saturating_sub(prev.size as u64);
+                }
+                live_bytes += event.sz as u64;
+                for &w in &active {
+                    windows[w].1.observe_live(live_bytes);
+                }
                 live.insert(
                     event.ptr,
                     LiveAllocation {
@@ -692,12 +791,17 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                                 windows.len() - 1
                             }
                         };
-                        windows[idx].1.open_count += 1;
+                        let win = &mut windows[idx].1;
+                        win.open_count += 1;
+                        win.live_at_open = live_bytes;
+                        win.peak_live = win.peak_live.max(live_bytes);
                         active.push(idx);
                     }
                     Some("E") => {
                         // Close the innermost open window with this name.
                         if let Some(pos) = active.iter().rposition(|&w| windows[w].0 == name) {
+                            let idx = active[pos];
+                            windows[idx].1.close(live_bytes);
                             active.remove(pos);
                         }
                     }
@@ -812,6 +916,16 @@ impl AllocReport {
                 fmt_num(win.dealloc_count),
                 fmt_num(win.bytes_freed),
                 fmt_num(win.realloc_count),
+            )
+            .unwrap();
+            // The budget line. `bytes` above is churn; these three are what a
+            // memory budget is actually made of.
+            writeln!(
+                out,
+                "    budget: transient {} B, retained {} B, largest alloc {} B",
+                fmt_num(win.transient),
+                fmt_num(win.retained.max(0) as u64),
+                fmt_num(win.largest_alloc as u64),
             )
             .unwrap();
             let mut sites: Vec<_> = win.site_stats.iter().collect();
