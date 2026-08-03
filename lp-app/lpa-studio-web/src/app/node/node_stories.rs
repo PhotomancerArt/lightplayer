@@ -12,7 +12,7 @@ use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 /// Story stand-in for the controller-built focus action so panes render the
 /// header select control.
 fn story_focus_action() -> UiAction {
-    UiAction::from_op(ControllerId::new("story.project"), ProjectEditorOp::Focus)
+    UiAction::from_op(ControllerId::new("story.module"), ProjectEditorOp::Focus)
 }
 
 #[story(description = "A composed node pane showing the current node anatomy direction.")]

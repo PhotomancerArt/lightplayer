@@ -12,7 +12,7 @@
 //! it did for device cards.
 //!
 //! The state is keyed by the node's ADDRESS PATH (`UiNodeHeader::path`,
-//! e.g. `/demo.project/orbit.shader`) so it follows the node, not the
+//! e.g. `/demo.module/orbit.shader`) so it follows the node, not the
 //! widget, and it is pruned when the loaded project closes.
 //!
 //! **The composer draft is deliberately a MIRROR, not the live value.**
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn ops_round_trip_through_the_state() {
-        let node = "/demo.project/orbit.shader".to_string();
+        let node = "/demo.module/orbit.shader".to_string();
         let mut state = NodeCardUiState::default();
         assert!(!state.code_open && !state.advanced_open && !state.agent_collapsed);
         assert!(
@@ -201,21 +201,21 @@ mod tests {
     fn every_op_names_its_node() {
         let ops = [
             NodeUiOp::SetDrawer {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 drawer: NodeCardDrawer::Advanced,
                 open: true,
             },
             NodeUiOp::SetAgentCollapsed {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 collapsed: true,
             },
             NodeUiOp::SetDraft {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 draft: String::new(),
             },
         ];
         for op in &ops {
-            assert_eq!(op.node(), "/a.project/b.shader");
+            assert_eq!(op.node(), "/a.module/b.shader");
         }
     }
 
@@ -224,16 +224,16 @@ mod tests {
         // Order is the contract: the mirror must land before the collapse
         // flips, so the state a collapsed remount seeds from already
         // carries the half-typed text.
-        let ops = NodeUiOp::toggle_agent_section("/a.project/b.shader", false, "half a thought");
+        let ops = NodeUiOp::toggle_agent_section("/a.module/b.shader", false, "half a thought");
         assert_eq!(
             ops,
             vec![
                 NodeUiOp::SetDraft {
-                    node: "/a.project/b.shader".into(),
+                    node: "/a.module/b.shader".into(),
                     draft: "half a thought".into(),
                 },
                 NodeUiOp::SetAgentCollapsed {
-                    node: "/a.project/b.shader".into(),
+                    node: "/a.module/b.shader".into(),
                     collapsed: true,
                 },
             ]
@@ -245,11 +245,11 @@ mod tests {
         // Expanding must never write the draft: the composer is unmounted
         // while collapsed, so its live value is whatever the caller has on
         // hand — the mirror is the truth and stays untouched.
-        let ops = NodeUiOp::toggle_agent_section("/a.project/b.shader", true, "");
+        let ops = NodeUiOp::toggle_agent_section("/a.module/b.shader", true, "");
         assert_eq!(
             ops,
             vec![NodeUiOp::SetAgentCollapsed {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 collapsed: false,
             }]
         );

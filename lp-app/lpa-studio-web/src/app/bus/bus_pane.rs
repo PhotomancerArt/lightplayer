@@ -52,16 +52,24 @@ pub(crate) fn BusChannelPane(
     let aspects = channel.visible_aspects();
     let UiBusChannelView {
         name,
+        scope_label,
         kind,
         value,
         value_error,
         primary_visual,
         ..
     } = channel;
+    // Embedded-scope channels carry their module's label as a prefix so two
+    // same-named channels stay tellable apart; the proper grouped
+    // presentation is the module-face phase's job.
+    let title = match scope_label {
+        Some(scope_label) => format!("{scope_label} · {name}"),
+        None => name,
+    };
 
     rsx! {
         SlotPane {
-            title: name,
+            title,
             aspects,
             initially_open,
             treatment: SlotPaneTreatment::Bound,

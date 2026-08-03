@@ -39,6 +39,15 @@ pub enum WireProjectCommand {
         node: NodeId,
         command: WireNodeCommand,
     },
+    /// Engage/update a panel writer at `(scope, channel)` — runtime state,
+    /// no overlay, no dirty (see [`crate::WirePanelWriteRequest`]).
+    PanelWrite {
+        request: crate::WirePanelWriteRequest,
+    },
+    /// Clear engaged panel writers (see [`crate::WirePanelClearRequest`]).
+    PanelClear {
+        request: crate::WirePanelClearRequest,
+    },
 }
 
 /// Project command response.
@@ -65,6 +74,12 @@ pub enum WireProjectCommandResponse {
     },
     NodeCommand {
         response: WireNodeCommandResponse,
+    },
+    PanelWrite {
+        response: crate::WirePanelCommandResponse,
+    },
+    PanelClear {
+        response: crate::WirePanelCommandResponse,
     },
 }
 

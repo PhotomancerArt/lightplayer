@@ -169,11 +169,15 @@ impl ProjectManager {
     /// Removes the project from memory but doesn't delete it from the filesystem.
     /// Output channels and other resources are freed before removal.
     pub fn unload_project(&mut self, handle: ProjectHandle) -> Result<(), ServerError> {
-        let project = self
+        let mut project = self
             .projects
             .remove(&handle)
             .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
 
+        // The clean-shutdown flush (panel.md P11): an orderly unload is
+        // the one moment we can beat the ~10 s throttle, so the last few
+        // seconds of a gesture are not lost.
+        project.flush_panel_state();
         let name = project.name();
         self.name_to_handle.remove(name);
 
@@ -186,6 +190,9 @@ impl ProjectManager {
     /// Output channels and other resources are freed before removal.
     /// Note: next_handle_id is not reset - handles continue incrementing.
     pub fn unload_all_projects(&mut self) -> Result<(), ServerError> {
+        for project in self.projects.values_mut() {
+            project.flush_panel_state();
+        }
         self.projects.clear();
         self.name_to_handle.clear();
         Ok(())

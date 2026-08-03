@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn activate_is_editor_foreground_class_with_activate_meta() {
         let op = PlaylistActivateOp {
-            node: ProjectNodeAddress::parse("/demo.project/show.playlist").unwrap(),
+            node: ProjectNodeAddress::parse("/demo.module/show.playlist").unwrap(),
             entry: 2,
         };
 

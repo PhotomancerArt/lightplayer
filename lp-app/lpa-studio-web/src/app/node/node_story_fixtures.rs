@@ -118,7 +118,7 @@ pub(crate) fn node_revert_pane_action() -> UiPaneAction {
     UiPaneAction::new(
         "revert",
         UiAction::from_op(
-            ControllerId::new("story.project"),
+            ControllerId::new("story.module"),
             NodeRevertOp {
                 node: ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
                     .expect("valid story node address"),
@@ -142,7 +142,7 @@ pub(crate) fn node_delete_pane_action() -> UiPaneAction {
     UiPaneAction::new(
         "remove",
         UiAction::from_op(
-            ControllerId::new("story.project"),
+            ControllerId::new("story.module"),
             NodeRemoveOp {
                 node: ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
                     .expect("valid story node address"),
@@ -393,7 +393,7 @@ fn story_pending_edit(
         old_value: None,
         phase,
         revert: Some(UiAction::from_op(
-            ControllerId::new("story.project"),
+            ControllerId::new("story.module"),
             SlotEditOp::Revert { address },
         )),
     }

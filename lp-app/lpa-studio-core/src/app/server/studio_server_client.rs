@@ -397,6 +397,12 @@ pub struct StudioNodeCommand {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// A panel command's response plus any server logs it produced.
+pub struct StudioPanelCommand {
+    pub response: lpc_wire::WirePanelCommandResponse,
+    pub logs: Vec<UiLogDraft>,
+}
+
 /// Result of an overlay commit, with the post-commit overlay revision.
 pub struct StudioOverlayCommit {
     pub result: CommitResult,
@@ -530,6 +536,42 @@ impl StudioServerClient {
     /// Dispatch a runtime node command (the non-overlay command channel;
     /// first consumer: playlist activate-entry). The server's rejection is
     /// data in the response, not a transport error.
+    pub async fn panel_write(
+        &mut self,
+        handle_id: u32,
+        request: lpc_wire::WirePanelWriteRequest,
+    ) -> Result<StudioPanelCommand, UiError> {
+        let response = self
+            .client
+            .project_panel_write(WireProjectHandle::new(handle_id), request)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(response.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioPanelCommand {
+            response: response.value,
+            logs,
+        })
+    }
+
+    pub async fn panel_clear(
+        &mut self,
+        handle_id: u32,
+        request: lpc_wire::WirePanelClearRequest,
+    ) -> Result<StudioPanelCommand, UiError> {
+        let response = self
+            .client
+            .project_panel_clear(WireProjectHandle::new(handle_id), request)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(response.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioPanelCommand {
+            response: response.value,
+            logs,
+        })
+    }
+
     pub async fn node_command(
         &mut self,
         handle_id: u32,

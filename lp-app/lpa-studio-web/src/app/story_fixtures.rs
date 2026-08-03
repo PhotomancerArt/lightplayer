@@ -220,7 +220,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
     );
     let project = tree_item(
         1,
-        "/demo.project",
+        "/demo.module",
         "Demo",
         "Project",
         running.clone(),
@@ -228,7 +228,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
         vec![
             tree_item(
                 2,
-                "/demo.project/clock.clock",
+                "/demo.module/clock.clock",
                 "Clock",
                 "Clock",
                 running.clone(),
@@ -237,7 +237,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
             ),
             tree_item(
                 3,
-                "/demo.project/orbit.shader",
+                "/demo.module/orbit.shader",
                 "Orbit shader",
                 "Shader",
                 running.clone(),
@@ -246,7 +246,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
             ),
             tree_item(
                 4,
-                "/demo.project/palette.visual",
+                "/demo.module/palette.visual",
                 "Sunrise palette",
                 "Visual",
                 warning.clone(),
@@ -255,7 +255,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
             ),
             tree_item(
                 5,
-                "/demo.project/output.output",
+                "/demo.module/output.output",
                 "Output",
                 "Output",
                 running.clone(),
@@ -275,6 +275,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
     )
     .with_project_name("Demo")
     .with_root_slots(project_root_slots())
+    .with_manifest(Some(project_manifest()))
 }
 
 pub(crate) fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
@@ -358,16 +359,11 @@ pub(crate) fn project_workspace_nodes() -> Vec<UiNodeView> {
 
 /// The project root's own config rows for the project popup's settings
 /// section: `name` editable, `format`/`uid`/`nodes` read-only — matching
-/// the `Fixed` role each carries on `lpc_model::ProjectDef`
+/// the `Fixed` role each carries on `lpc_model::ModuleDef`
 /// (`uid` joined them 2026-07-28; it had been writable by default).
 pub(crate) fn project_root_slots() -> Vec<UiConfigSlot> {
     use lpa_studio_core::UiSlotFieldState;
     vec![
-        UiConfigSlot::value("name", "Name", UiSlotValue::string("Demo")),
-        UiConfigSlot::value("format", "Format", UiSlotValue::u32(1))
-            .with_state(UiSlotFieldState::readonly()),
-        UiConfigSlot::value("uid", "UID", UiSlotValue::string("prj_7k2mQx4vN8pL"))
-            .with_state(UiSlotFieldState::readonly()),
         UiConfigSlot::record(
             "nodes",
             "Nodes",
@@ -381,6 +377,15 @@ pub(crate) fn project_root_slots() -> Vec<UiConfigSlot> {
         .with_detail("2 nodes")
         .with_state(UiSlotFieldState::readonly()),
     ]
+}
+
+/// Container-manifest identity for the settings-section stories.
+pub(crate) fn project_manifest() -> lpa_studio_core::UiProjectManifest {
+    lpa_studio_core::UiProjectManifest {
+        format: Some(3),
+        uid: Some("prj_7k2mQx4vN8pL".to_string()),
+        name: Some("Demo".to_string()),
+    }
 }
 
 /// One top-level workspace pane built from a child fixture (the same
@@ -408,7 +413,7 @@ fn clock_node_child() -> UiNodeChild {
     node_child(
         "Clock",
         "Clock",
-        "/demo.project/clock.clock",
+        "/demo.module/clock.clock",
         UiStatus::good("Running"),
     )
     .with_sections(vec![
@@ -431,7 +436,7 @@ fn orbit_shader_child() -> UiNodeChild {
     node_child(
         "Orbit shader",
         "Shader",
-        "/demo.project/orbit.shader",
+        "/demo.module/orbit.shader",
         UiStatus::good("Running"),
     )
     .active("focused")
@@ -473,7 +478,7 @@ fn palette_node_child() -> UiNodeChild {
     node_child(
         "Sunrise palette",
         "Visual",
-        "/demo.project/palette.visual",
+        "/demo.module/palette.visual",
         UiStatus::warning("Warning"),
     )
     .with_sections(vec![
@@ -503,7 +508,7 @@ fn output_node_child() -> UiNodeChild {
     node_child(
         "Output",
         "Output",
-        "/demo.project/output.output",
+        "/demo.module/output.output",
         UiStatus::good("Running"),
     )
     .with_sections(vec![UiNodeSection::ConfigSlots(vec![

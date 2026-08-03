@@ -6,7 +6,6 @@
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 
-use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
 };
@@ -22,12 +21,11 @@ use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
 use lpc_model::{
     AssetLocation, FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath,
-    SlotShapeRegistry, WithRevision, bus::ChannelName, lookup_slot_data_and_shape,
+    SlotShapeRegistry, WithRevision, lookup_slot_data_and_shape,
 };
 use lpc_registry::{AssetBytes, AssetReadError, AssetText, ProjectRegistry};
 use lpc_shared::time::TimeProvider;
 use lpfs::LpFs;
-use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
 
@@ -611,19 +609,17 @@ impl<'a> RenderContext<'a> {
 }
 
 /// Context for [`super::Node::destroy`](super::NodeRuntime::destroy).
-pub struct DestroyCtx<'a> {
+pub struct DestroyCtx {
     node_id: NodeId,
     revision: Revision,
-    bus: &'a Bus,
 }
 
-impl<'a> DestroyCtx<'a> {
+impl DestroyCtx {
     /// Create a new destroy context.
-    pub fn new(node_id: NodeId, frame_id: Revision, bus: &'a Bus) -> Self {
+    pub fn new(node_id: NodeId, frame_id: Revision) -> Self {
         Self {
             node_id,
             revision: frame_id,
-            bus,
         }
     }
 
@@ -636,27 +632,20 @@ impl<'a> DestroyCtx<'a> {
     pub fn frame_id(&self) -> Revision {
         self.revision
     }
-
-    /// Read the current value from a bus channel.
-    pub fn bus_read(&self, channel: &ChannelName) -> Option<&LpsValueF32> {
-        self.bus.read(channel)
-    }
 }
 
 /// Context for [`super::Node::handle_memory_pressure`](super::NodeRuntime::handle_memory_pressure).
-pub struct MemPressureCtx<'a> {
+pub struct MemPressureCtx {
     node_id: NodeId,
     revision: Revision,
-    bus: &'a Bus,
 }
 
-impl<'a> MemPressureCtx<'a> {
+impl MemPressureCtx {
     /// Create a new memory pressure context.
-    pub fn new(node_id: NodeId, frame_id: Revision, bus: &'a Bus) -> Self {
+    pub fn new(node_id: NodeId, frame_id: Revision) -> Self {
         Self {
             node_id,
             revision: frame_id,
-            bus,
         }
     }
 
@@ -668,11 +657,6 @@ impl<'a> MemPressureCtx<'a> {
     /// Current frame.
     pub fn revision(&self) -> Revision {
         self.revision
-    }
-
-    /// Read the current value from a bus channel.
-    pub fn bus_read(&self, channel: &ChannelName) -> Option<&LpsValueF32> {
-        self.bus.read(channel)
     }
 }
 
@@ -691,6 +675,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
     use lpc_model::{Kind, LpValue, SlotPath, SlotShapeRegistry, Slotted, ValueSlot};
+    use lps_shared::LpsValueF32;
 
     #[derive(Default, Slotted)]
     #[slot(default_role = "state")]
@@ -736,6 +721,7 @@ mod tests {
 
         fn providers_for_bus(
             &self,
+            _scope: Option<crate::node::ScopeRef>,
             channel: &lpc_model::ChannelName,
         ) -> Vec<(BindingRef, BindingEntry)> {
             self.entries
@@ -774,9 +760,10 @@ mod tests {
 
         fn providers_for_bus(
             &self,
+            scope: Option<crate::node::ScopeRef>,
             channel: &lpc_model::ChannelName,
         ) -> Vec<(BindingRef, BindingEntry)> {
-            self.bindings.providers_for_bus(channel)
+            self.bindings.providers_for_bus(scope, channel)
         }
     }
 
@@ -838,7 +825,10 @@ mod tests {
             &slot_shapes,
         );
         let pv = ctx
-            .resolve(&QueryKey::Bus(channel.clone()))
+            .resolve(&QueryKey::Bus {
+                scope: None,
+                channel: channel.clone(),
+            })
             .expect("resolve bus");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(7.8)));
     }
@@ -971,17 +961,14 @@ mod tests {
             Ok(super::super::ProduceResult::Produced)
         }
 
-        fn destroy(
-            &mut self,
-            _ctx: &mut super::DestroyCtx<'_>,
-        ) -> Result<(), crate::node::NodeError> {
+        fn destroy(&mut self, _ctx: &mut super::DestroyCtx) -> Result<(), crate::node::NodeError> {
             Ok(())
         }
 
         fn handle_memory_pressure(
             &mut self,
             _level: super::super::PressureLevel,
-            _ctx: &mut super::MemPressureCtx<'_>,
+            _ctx: &mut super::MemPressureCtx,
         ) -> Result<(), crate::node::NodeError> {
             Ok(())
         }
@@ -1009,7 +996,10 @@ mod tests {
         let slot_shapes = SlotShapeRegistry::default();
 
         let mut node = QueryResolvingNode {
-            query: QueryKey::Bus(channel),
+            query: QueryKey::Bus {
+                scope: None,
+                channel,
+            },
             resolved_value: None,
         };
 
@@ -1069,55 +1059,15 @@ mod tests {
 
     #[test]
     fn destroy_ctx_accessors() {
-        let bus = Bus::new();
-        let ctx = DestroyCtx::new(NodeId::new(1), Revision::new(99), &bus);
+        let ctx = DestroyCtx::new(NodeId::new(1), Revision::new(99));
         assert_eq!(ctx.node_id(), NodeId::new(1));
         assert_eq!(ctx.frame_id(), Revision::new(99));
     }
 
     #[test]
-    fn destroy_ctx_bus_read() {
-        let mut bus = Bus::new();
-        let channel = ChannelName(String::from("test"));
-
-        bus.claim_writer(
-            &channel,
-            NodeId::new(1),
-            SlotPath::parse("outputs[0]").unwrap(),
-            lpc_model::Kind::Amplitude,
-        )
-        .unwrap();
-        bus.publish(&channel, LpsValueF32::F32(2.5), Revision::new(5));
-
-        let ctx = DestroyCtx::new(NodeId::new(1), Revision::new(99), &bus);
-        let val = ctx.bus_read(&channel).unwrap();
-        assert!(matches!(val, LpsValueF32::F32(2.5)));
-    }
-
-    #[test]
     fn mem_pressure_ctx_accessors() {
-        let bus = Bus::new();
-        let ctx = MemPressureCtx::new(NodeId::new(2), Revision::new(100), &bus);
+        let ctx = MemPressureCtx::new(NodeId::new(2), Revision::new(100));
         assert_eq!(ctx.node_id(), NodeId::new(2));
         assert_eq!(ctx.revision(), Revision::new(100));
-    }
-
-    #[test]
-    fn mem_pressure_ctx_bus_read() {
-        let mut bus = Bus::new();
-        let channel = ChannelName(String::from("pressure"));
-
-        bus.claim_writer(
-            &channel,
-            NodeId::new(1),
-            SlotPath::parse("outputs[0]").unwrap(),
-            lpc_model::Kind::Amplitude,
-        )
-        .unwrap();
-        bus.publish(&channel, LpsValueF32::F32(0.8), Revision::new(2));
-
-        let ctx = MemPressureCtx::new(NodeId::new(2), Revision::new(100), &bus);
-        let val = ctx.bus_read(&channel).unwrap();
-        assert!(matches!(val, LpsValueF32::F32(0.8)));
     }
 }

@@ -166,7 +166,7 @@ fn render_node_type_badge(ui: &mut egui::Ui, kind: &'static str, accent: egui::C
     painter.circle_stroke(rect.center(), 17.0, egui::Stroke::new(1.5_f32, accent));
     let stroke = egui::Stroke::new(1.8_f32, accent);
     match kind {
-        "Project" => render_project_icon(painter, rect, accent),
+        "Module" => render_project_icon(painter, rect, accent),
         "Clock" => render_clock_icon(painter, rect, stroke),
         "Texture" => render_texture_icon(painter, rect, accent),
         "Shader" => render_shader_icon(painter, rect, stroke),
@@ -620,7 +620,7 @@ fn node_kind_label(view: &ProjectView, id: NodeId) -> &'static str {
         return "Node";
     };
     if entry.parent.is_none() {
-        return "Project";
+        return "Module";
     }
     if let Some(kind) = entry
         .path
@@ -635,7 +635,7 @@ fn node_kind_label(view: &ProjectView, id: NodeId) -> &'static str {
     };
     match data {
         SlotData::Enum(value) => match value.variant.as_str() {
-            "Project" => "Project",
+            "Module" => "Module",
             "Clock" => "Clock",
             "Texture" => "Texture",
             "Shader" => "Shader",
@@ -651,7 +651,7 @@ fn node_kind_label(view: &ProjectView, id: NodeId) -> &'static str {
 
 fn node_kind_from_path_tag(tag: &str) -> Option<&'static str> {
     match tag {
-        "project" | "show" => Some("Project"),
+        "module" | "project" | "show" => Some("Module"),
         "clock" => Some("Clock"),
         "texture" => Some("Texture"),
         "shader" => Some("Shader"),

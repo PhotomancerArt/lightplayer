@@ -106,9 +106,41 @@ fn shader_face(sections: &[UiNodeSection]) -> Option<UiShaderFace> {
 /// the generic sections.
 fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
     let preview = product_of_kind(sections, UiProductKind::Control)?;
-    let brightness = config_rows(sections)
-        .into_iter()
-        .find_map(|slot| panel_control_from_row(slot, panel_widget(slot)?))?;
+    let rows = config_rows(sections);
+    let (key, mut brightness) = rows
+        .iter()
+        .find_map(|slot| {
+            Some((
+                slot.key.clone(),
+                panel_control_from_row(slot, panel_widget(slot)?),
+            ))
+        })
+        .and_then(|(key, control)| control.map(|control| (key, control)))?;
+    // Same rule the shader knobs follow: when the fader's slot is wired to
+    // a bus channel, the fader drives that channel (a panel write) rather
+    // than an authored default it can no longer affect. The wiring rides a
+    // separate binding-derived row — for a fixture it carries the SAME key
+    // as the authored row it decorates (unlike a shader uniform, whose
+    // entry key is `consumed[name]`), so this scans for whichever row
+    // actually carries the wiring rather than taking the first by key.
+    //
+    // NOTE (2026-08-02): no fixture can reach this yet. The project loader
+    // registers authored `source` bindings only for a fixed set of slot
+    // names per kind — for a fixture that is `input` alone — so
+    // `brightness` cannot currently be bound to a channel at all. This
+    // path exists so the fixture fader behaves like every other panel
+    // control the moment it can be, rather than silently lacking the
+    // feature; brightness is the scarf's own control and the two
+    // derivations must not diverge.
+    let field = key.rsplit('.').next().unwrap_or(&key).to_string();
+    let field = field.split('[').next().unwrap_or(&field).to_string();
+    let wired = || rows.iter().filter(|row| row.key == field);
+    if brightness.panel_target.is_none() {
+        brightness.panel_target = wired().find_map(|row| bound_panel_target(row));
+    }
+    if brightness.live_value.is_none() {
+        brightness.live_value = wired().find_map(|row| bound_live_value(row));
+    }
     Some(UiFixtureFace {
         preview,
         brightness,
@@ -277,6 +309,15 @@ fn shader_uniform_control(
             .find(|row| row.key == name)
             .and_then(|row| bound_live_value(row));
     }
+    // The panel-write target rides the same binding-derived row: a wired
+    // uniform's knob writes the consumed (scope, channel) down the command
+    // path; an unwired one keeps editing the authored default.
+    if control.panel_target.is_none() {
+        control.panel_target = top_rows
+            .iter()
+            .find(|row| row.key == name)
+            .and_then(|row| bound_panel_target(row));
+    }
     Some(control)
 }
 
@@ -305,6 +346,16 @@ fn snap_control_display(control: &mut UiPanelControl, min: f32, step: f32) {
 fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
     match &slot.source {
         UiSlotSourceState::Bound(endpoint) => endpoint.live_value.clone(),
+        _ => None,
+    }
+}
+
+/// A row's panel-write target: the `(scope, channel)` its bound source
+/// endpoint consumes, so the control dispatches panel commands (panel.md
+/// P8) instead of editing the authored default.
+fn bound_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
+    match &slot.source {
+        UiSlotSourceState::Bound(endpoint) => endpoint.panel_target.clone(),
         _ => None,
     }
 }
@@ -587,6 +638,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         widget,
         value: value.clone(),
         live_value: bound_live_value(slot),
+        panel_target: bound_panel_target(slot),
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),
@@ -643,7 +695,7 @@ mod tests {
     /// The stable authored address faces are built for; entry activation
     /// actions carry it (P7's runtime command channel).
     fn test_address() -> ProjectNodeAddress {
-        ProjectNodeAddress::parse("/demo.project/node.playlist").expect("valid address")
+        ProjectNodeAddress::parse("/demo.module/node.playlist").expect("valid address")
     }
 
     #[test]
@@ -815,6 +867,65 @@ mod tests {
         assert!(
             face.controls[0].bound(),
             "the knob rolls up the binding row's Bound affordance"
+        );
+    }
+
+    #[test]
+    fn a_bus_wired_uniform_gets_a_panel_write_target() {
+        // panel.md P8: the knob for a uniform that CONSUMES a bus channel
+        // writes that (scope, channel) down the command channel instead of
+        // editing the authored default it can no longer affect. A uniform
+        // with nothing behind it keeps the slot-edit path, which is why
+        // the target is optional rather than assumed.
+        let mut sections = shader_sections();
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
+            rows.push(
+                UiConfigSlot::empty("speed", "Speed").with_source(UiSlotSourceState::Bound(
+                    UiBindingEndpoint::new("bus:glow").with_panel_target(crate::UiPanelTarget {
+                        scope: lpc_wire::WireScopeRef::Module {
+                            owner: lpc_model::NodeId::new(3),
+                        },
+                        channel: "glow".to_string(),
+                        engaged: false,
+                    }),
+                )),
+            );
+        }
+
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        let target = face.controls[0]
+            .panel_target
+            .as_ref()
+            .expect("a bus-wired uniform's knob targets its channel");
+        assert_eq!(target.channel, "glow");
+        assert_eq!(
+            target.scope,
+            lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(3)
+            }
+        );
+    }
+
+    #[test]
+    fn an_unwired_uniform_keeps_the_slot_edit_path() {
+        // No binding row at all: nothing to write, so the knob still edits
+        // `consumed.speed.default.some` exactly as it did before P9.
+        let Some(UiNodeFace::Shader(face)) = kind_face(
+            "shader",
+            &test_address(),
+            &shader_sections(),
+            &mut Vec::new(),
+        ) else {
+            panic!("expected a shader face");
+        };
+        assert!(face.controls[0].panel_target.is_none());
+        assert!(
+            face.controls[0].address.is_some(),
+            "and it still has a slot address to edit"
         );
     }
 
@@ -1060,7 +1171,7 @@ mod tests {
 
     fn address(path: &str) -> ProjectSlotAddress {
         ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/node.shader").expect("valid address"),
+            ProjectNodeAddress::parse("/demo.module/node.shader").expect("valid address"),
             ProjectSlotRoot::Def,
             SlotPath::parse(path).expect("valid path"),
         )
@@ -1177,13 +1288,64 @@ mod tests {
         let mut child = UiNodeChild::new(
             label,
             "Shader",
-            format!("/main.project/playlist.playlist/{name}.shader"),
+            format!("/main.module/playlist.playlist/{name}.shader"),
         );
         child.action = Some(
-            UiAction::from_op(ControllerId::new("test.project"), ProjectEditorOp::Focus)
+            UiAction::from_op(ControllerId::new("test.module"), ProjectEditorOp::Focus)
                 .with_label(format!("Focus {label}")),
         );
         child
+    }
+
+    #[test]
+    fn a_bus_wired_brightness_fader_drives_the_channel() {
+        // The scarf's own control (panel.md P10): once brightness is wired
+        // to a channel, dimming it must engage a panel writer — that is
+        // what persists across a replug. The fixture path derives its
+        // target from the same binding-derived row the shader knobs use.
+        let mut sections = fixture_sections();
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
+            rows.push(UiConfigSlot::empty("brightness", "Brightness").with_source(
+                UiSlotSourceState::Bound(
+                    UiBindingEndpoint::new("bus:brightness").with_panel_target(
+                        crate::UiPanelTarget {
+                            scope: lpc_wire::WireScopeRef::Module {
+                                owner: lpc_model::NodeId::new(1),
+                            },
+                            channel: "brightness".to_string(),
+                            engaged: true,
+                        },
+                    ),
+                ),
+            ));
+        }
+
+        let Some(UiNodeFace::Fixture(face)) =
+            kind_face("fixture", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a fixture face");
+        };
+        let target = face
+            .brightness
+            .panel_target
+            .as_ref()
+            .expect("a wired brightness fader targets its channel");
+        assert_eq!(target.channel, "brightness");
+        assert!(target.engaged, "and reports the engaged writer");
+    }
+
+    #[test]
+    fn an_unwired_brightness_fader_still_edits_its_slot() {
+        let Some(UiNodeFace::Fixture(face)) = kind_face(
+            "fixture",
+            &test_address(),
+            &fixture_sections(),
+            &mut Vec::new(),
+        ) else {
+            panic!("expected a fixture face");
+        };
+        assert!(face.brightness.panel_target.is_none());
+        assert!(face.brightness.address.is_some());
     }
 
     fn fixture_sections() -> Vec<UiNodeSection> {

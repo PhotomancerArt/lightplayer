@@ -18,13 +18,13 @@ fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {
 fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let shapes = SlotShapeRegistry::default();
     let mut fs = LpFsMemory::new();
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 3\n}\n");
     write_file(
         &mut fs,
-        "/project.json",
+        "/module.json",
         r#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -51,7 +51,7 @@ fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     registry
         .load_root(
             &fs,
-            LpPath::new("/project.json"),
+            LpPath::new("/module.json"),
             Revision::new(1),
             &parse_ctx(&shapes),
         )
@@ -62,13 +62,13 @@ fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
 fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let shapes = SlotShapeRegistry::default();
     let mut fs = LpFsMemory::new();
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 3\n}\n");
     write_file(
         &mut fs,
-        "/project.json",
+        "/module.json",
         r#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -94,7 +94,7 @@ fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     registry
         .load_root(
             &fs,
-            LpPath::new("/project.json"),
+            LpPath::new("/module.json"),
             Revision::new(1),
             &parse_ctx(&shapes),
         )

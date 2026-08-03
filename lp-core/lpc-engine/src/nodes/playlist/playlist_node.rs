@@ -227,14 +227,14 @@ impl NodeRuntime for PlaylistNode {
         }
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }

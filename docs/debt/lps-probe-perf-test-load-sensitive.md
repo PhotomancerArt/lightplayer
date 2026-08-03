@@ -39,6 +39,28 @@ already recorded in story-capture-pipeline.md).
   boards-catalog visual-gate session while the worktree dev server and a
   second agent session were active; passed clean between them with the
   server stopped. Filed this entry.
+- 2026-08-02 — one full-gate failure during the modules-roadmap merge
+  session, with a firmware build and background cargo jobs sharing the
+  machine: **12.02 s against the 10 s bound**. Re-run alone on the same
+  tree: **8.42 s**. A 43% swing from load alone, on an assert with 20%
+  of headroom — the measurement is reporting the machine, not the code.
+- 2026-08-02 (later, same session) — failed again at 10.88 s in the
+  gate and **11.56 s on a supposedly standalone re-run**. The re-run was
+  not standalone: `uptime` showed load average **143** and 49 cargo
+  processes, because a SIBLING agent session was running
+  `cargo clippy --workspace` on the same machine. The entry's own
+  premise — "re-run it alone and it passes" — is therefore not a
+  reliable workaround when you do not control the whole machine: there
+  is no way to tell flake from regression locally under a foreign
+  workload. That verdict had to be deferred to CI, which is the only
+  place with a dedicated runner. **Check `uptime` before believing any
+  measurement from this test**, and note the merge that session carried
+  main's lpvm changes (26 files, +1459 lines) — a real regression could
+  not be ruled out locally, only by CI.
+  **Resolved same day: `Validate (x64)` passed on CI** (run
+  30766114996), so both local failures were load, not a regression. The
+  cost of the ambiguity was real even so — two gate cycles and a
+  firmware build spent deciding whether to believe a stopwatch.
 
 - 2026-08-02 — M5 provisioning-gate session: `perf_4096_render_evals_under_10s_debug`
   took **10.998 s** against the 10 s bound with the worktree dev server and a

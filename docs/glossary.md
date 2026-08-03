@@ -74,7 +74,7 @@ of implementation — code can lag these names during the transition.
 - **Drawer** — a collapsible authoring surface below a face (code,
   advanced slots, bus wiring).
 - **Panel state** — unauthored runtime writer state per (scope, channel);
-  persisted to `.lp/state.json` with throttled writes; never dirties the
+  persisted to `.lp/panel.json` with throttled writes; never dirties the
   project. (module model)
 - **Engaged (Latch)** — a panel control whose lazy runtime writer has
   materialized (it was touched): it captures the channel, overriding

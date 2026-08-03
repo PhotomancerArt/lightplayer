@@ -60,7 +60,11 @@ fn runtime_spine_tick_context_resolve_bus_query() {
             Err(SessionResolveError::other("unexpected produce"))
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(
+            &self,
+            _scope: Option<lpc_engine::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
             if channel == &self.channel {
                 Vec::from([(BindingRef::new(self.binding.owner, 0), self.binding.clone())])
             } else {
@@ -75,7 +79,10 @@ fn runtime_spine_tick_context_resolve_bus_query() {
     };
     let slot_shapes = lpc_model::SlotShapeRegistry::default();
     let mut node = ProduceProbeNode {
-        query: QueryKey::Bus(channel),
+        query: QueryKey::Bus {
+            scope: None,
+            channel,
+        },
         last: None,
     };
 
@@ -171,12 +178,13 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         .node_id(&clock_use)
         .expect("clock runtime node");
 
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -208,7 +216,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
     let changes = registry.refresh_artifacts(
         &fs,
         &[FsEvent {
-            path: LpPathBuf::from("/project.json"),
+            path: LpPathBuf::from("/module.json"),
             kind: FsEventKind::Modify,
         }],
         Revision::new(2),
@@ -438,12 +446,13 @@ fn project_apply_remove_node_op_tears_down_runtime_node() {
 
 fn fixture_map2d_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -480,12 +489,13 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
 
 fn clock_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -512,12 +522,13 @@ fn clock_project_fs() -> LpFsMemory {
 
 fn shader_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .expect("write container manifest");
     fs.write_file_mut(
-        LpPath::new("/project.json"),
+        LpPath::new("/module.json"),
         br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -565,14 +576,14 @@ impl NodeRuntime for ProduceProbeNode {
         Ok(ProduceResult::Produced)
     }
 
-    fn destroy(&mut self, _ctx: &mut lpc_engine::node::DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut lpc_engine::node::DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }
