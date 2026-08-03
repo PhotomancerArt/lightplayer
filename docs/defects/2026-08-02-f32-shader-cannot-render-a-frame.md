@@ -87,13 +87,39 @@ instead is two conversions per coordinate per sample, in the frame hot path.
 
 With the marshalling correct, the guards came out of `lpvm-native`'s two
 backends (`rt_jit` — the device — and `rt_emu`). The **wasm pair keeps
-refusing, deliberately**: `rt_wasmtime` and `rt_browser` cannot compile a
-correct Float module at all yet, because the wasm emitter's f32 builtin id
-resolution is unimplemented — the same defect that keeps `wasm.f32` out of
-`DEFAULT_TARGETS` and the CPU preview tier Q32-only
-(`../adr/2026-08-01-float-mode-reaches-the-device.md`). Their messages now name
-that reason instead of just stating the requirement. So the three-way split is
-now a decision with one open follow-up, not an accident.
+refusing, deliberately.**
+
+> **Correction, 2026-08-02 (same day).** This paragraph originally said the wasm
+> pair "cannot compile a correct Float module at all yet, because the wasm
+> emitter's f32 builtin id resolution is unimplemented." **That reason is
+> false**, and was false when written — it was inherited from
+> `../adr/2026-08-01-float-mode-reaches-the-device.md`, whose own copy of the
+> claim the f32 roadmap's G3 review had already identified as stale and left
+> uncorrected. M5 (PR #224) added `resolve_builtin_id_for_mode` and threaded
+> `float_mode` through the whole `lpvm-wasm` emit path. Measured on
+> `d3ee69f09`: `wasm.f32` is **850/850 files, 6,345/6,345, 0 compile-fail**,
+> including `@glsl` builtins (`builtins/trig-sin.glsl` 10/10) and `@lpfn`
+> transliterations (`lpfn/` 89/89 across 14 files). If f32 builtin ids did not
+> resolve, those would compile-fail.
+>
+> **The measured reason the guards stay:** removing them on `rt_wasmtime` and
+> driving this entry's own tests produces *structurally correct* output that is
+> uniformly **one count low** against the rv32-emulator oracle — 16383 for
+> 16384, 32767 for 32768, 8191 for 8192, every channel, both entries. That is
+> the known wasmtime last-bit divergence
+> (`2026-07-30-q32-native-vs-wasmtime-last-bit.md`), which is exactly why
+> `rt_emu` and not wasmtime is the host oracle. It is a *numeric agreement*
+> question, not a capability one, and it is now the thing to decide: classify
+> the one count under `../design/float.md` (Guaranteed → fix it; Unspecified →
+> drop the guard and stop asserting cross-backend equality at this boundary).
+>
+> `rt_browser` was **not** measured — it runs in the browser's own wasm engine,
+> so its agreement is *unverified* rather than known-bad. Refusing there is the
+> conservative read of an unmeasured tier, and Float still previews on the GPU
+> tier.
+
+So the three-way split is a decision with one open follow-up, not an accident —
+but the follow-up is "classify one count", not "implement a lowering".
 
 **Regression coverage** — `lp-shader/lps-filetests/tests/f32_render_entry.rs`,
 entering through the **product's** door: it compiles GLSL with
