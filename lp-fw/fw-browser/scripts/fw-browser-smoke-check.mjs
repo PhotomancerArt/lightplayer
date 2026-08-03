@@ -152,12 +152,28 @@ async function runSmoke(browser, pageUrl) {
 
   const deadline = Date.now() + smokeTimeoutMs;
   let last = { smoke: undefined };
+  // An evaluation exception inside the polling window means "not readable
+  // YET" — the first evaluate can land while navigation is still replacing
+  // the execution context (CDP reports a bare `Uncaught`), and a loaded CI
+  // runner widens that window. Only a deadline expiry raises it, as the
+  // timeout's evidence.
+  let lastError = null;
   while (Date.now() < deadline) {
-    last = await readPageState(cdp, sessionId);
+    try {
+      last = await readPageState(cdp, sessionId);
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+      await delay(250);
+      continue;
+    }
     if (last.smoke === "ok" || last.smoke === "error") {
       return last;
     }
     await delay(250);
+  }
+  if (lastError) {
+    throw new Error(`page never became readable before the deadline: ${lastError.message}`);
   }
   return { ...last, smoke: last.smoke ?? "timeout" };
 }
