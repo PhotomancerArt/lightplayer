@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LightPlayer logo — concept spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Display faces not on macOS come from Google Fonts; each specimen shows a
+     "fallback" badge if its face failed to load, so offline judging is honest.
+     Inter + JetBrains Mono load from the repo's vendored woff2 files. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Outfit:wght@600;700;800&family=Chakra+Petch:wght@600;700&family=Orbitron:wght@600;800&family=Michroma&family=Audiowide&family=Bungee&display=swap">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --gold: #e4c065;
+    --sans: 'InterV', Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: 'JBMV', "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    /* rainbow ramp used by every animated concept — LED-saturated but sits
+       okay against the studio palette */
+    --r1:#ff5d5d; --r2:#ffab4a; --r3:#f5e04e; --r4:#5fe08b; --r5:#53c6f2; --r6:#a58af7;
+    --spd: 1; /* animation speed multiplier (controls strip) */
+  }
+  /* vendored production fonts (relative path into the repo) */
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-Regular.woff2') format('woff2'); font-weight:400; }
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-SemiBold.woff2') format('woff2'); font-weight:600; }
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-Bold.woff2') format('woff2'); font-weight:700; }
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-ExtraBold.woff2') format('woff2'); font-weight:800; }
+  @font-face { font-family:'JBMV'; src:url('../../lp-app/lpa-studio-web/public/fonts/JetBrainsMono-SemiBold.woff2') format('woff2'); font-weight:600; }
+  @font-face { font-family:'JBMV'; src:url('../../lp-app/lpa-studio-web/public/fonts/JetBrainsMono-Bold.woff2') format('woff2'); font-weight:700; }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 860px; }
+  p.hint b { color: var(--muted); font-weight: 600; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 860px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+
+  /* ---- exploration controls -------------------------------------- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; font-family: var(--sans);
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- stages: preview surfaces that follow the Canvas control ---- */
+  body[data-canvas=terminal] { --stage-bg: var(--terminal); --stage-line: var(--border-muted);
+    --stage-mark: #94b8aa; --stage-ink: #c7cbd0; --stage-strong: #fffaf0; --stage-dim: #94b8aa; }
+  body[data-canvas=surface]  { --stage-bg: var(--surface); --stage-line: var(--border);
+    --stage-mark: #94b8aa; --stage-ink: #c7cbd0; --stage-strong: #fffaf0; --stage-dim: #94b8aa; }
+  body[data-canvas=light]    { --stage-bg: #f0eee6; --stage-line: #d8d4c8;
+    --stage-mark: #475550; --stage-ink: #3a4048; --stage-strong: #14181d; --stage-dim: #5c6b66; }
+  .stage {
+    background: var(--stage-bg); border: 1px solid var(--stage-line); border-radius: 8px;
+    display: flex; align-items: center; gap: 16px; padding: 14px 16px;
+  }
+
+  /* ---- the lockup ------------------------------------------------- */
+  .lockup { display: inline-flex; align-items: center; color: var(--stage-mark); }
+  .lockup svg.mark { flex: none; display: block; }
+  .mark .pkg  { stroke: currentColor; fill: none; }
+  .mark .pad  { fill: currentColor; opacity: .75; }
+  .mark .lens { stroke: currentColor; fill: none; opacity: .85; }
+  .mark .lens.filled { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: var(--accent-border); opacity: 1; }
+  .mark .play { fill: var(--accent); }
+  .mark .pin1 { fill: currentColor; opacity: .9; }
+  .mark .ring { stroke: var(--accent); fill: none; }
+  .mark .trace { stroke: currentColor; fill: none; opacity: .8; }
+  .mark .via  { fill: currentColor; }
+  .mark .esc  { stroke: currentColor; fill: none; opacity: .65; }
+  .mark .escv { fill: currentColor; opacity: .8; }
+  .mark .sig  { stroke: var(--accent); fill: none; visibility: hidden;
+                stroke-dasharray: 2.6 5.2; }
+  .word { font-weight: 800; line-height: 1; white-space: nowrap; }
+  .word .w1 { color: var(--stage-dim); }
+  .word .w2 { color: var(--stage-strong); }
+  body[data-tone=mono] .word .w1 { color: var(--stage-strong); }
+  body[data-tone=accent] .word .w1 { color: var(--accent); }
+  .word svg { display: inline-block; vertical-align: baseline; }
+  .word .cw-stroke { stroke: var(--stage-ink); fill: none; }
+  .word .cw-via { /* per-via rainbow fill set inline */ }
+  .word .dm-dot { fill: var(--stage-strong); }
+  .word .tri-a { fill: var(--accent); }
+  body[data-case=lower] .word.cased { text-transform: lowercase; }
+  body[data-case=upper] .word.cased { text-transform: uppercase; }
+
+  /* ink (monochrome) contexts: everything takes currentColor */
+  .ink, .ink .lockup { color: currentColor; }
+  .ink .mark .play, .ink .mark .ring, .ink .mark .sig { fill: currentColor; stroke: none; }
+  .ink .mark .ring { fill: none; stroke: currentColor; }
+  .ink .mark .lens.filled { fill: none; stroke: currentColor; }
+  .ink .word, .ink .word .w1, .ink .word .w2 { color: currentColor !important; }
+  .ink .word .cw-stroke { stroke: currentColor; }
+  .ink .word .cw-via { fill: currentColor !important; }
+  .ink .word .dm-dot { fill: currentColor !important; }
+  .ink .word .tri-a { fill: currentColor !important; }
+
+  /* ---- animations -------------------------------------------------- */
+  @keyframes kf-rfill  { 0%{fill:var(--r1)} 17%{fill:var(--r2)} 33%{fill:var(--r3)}
+                         50%{fill:var(--r4)} 67%{fill:var(--r5)} 83%{fill:var(--r6)} 100%{fill:var(--r1)} }
+  @keyframes kf-rstroke{ 0%{stroke:var(--r1)} 17%{stroke:var(--r2)} 33%{stroke:var(--r3)}
+                         50%{stroke:var(--r4)} 67%{stroke:var(--r5)} 83%{stroke:var(--r6)} 100%{stroke:var(--r1)} }
+  @keyframes kf-pulse  { 0%,100%{opacity:.3} 50%{opacity:1} }
+  @keyframes kf-dash   { to { stroke-dashoffset: -7.8px; } }
+  @keyframes kf-sweep  { to { background-position: -300% 0; } }
+  @keyframes kf-glow   { 0%,100% { filter: drop-shadow(0 0 1px var(--accent)); opacity:.85; }
+                         50%     { filter: drop-shadow(0 0 5px var(--accent)); opacity:1; } }
+
+  /* A · LED lens: only the play is alive */
+  .a-rplay .mark .play { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
+  .a-rplay .mark .ring { animation: kf-rstroke calc(8s/var(--spd)) linear infinite; animation-delay: calc(var(--i,0) * -.45s); }
+  /* B · pad chase */
+  .a-chase .mark .pad { animation: kf-rfill calc(8s/var(--spd)) linear infinite,
+                                   kf-pulse calc(2.4s/var(--spd)) ease-in-out infinite; }
+  .a-chase .mark .pad.p2 { animation-delay: calc(.6s/var(--spd)), calc(.6s/var(--spd)); }
+  .a-chase .mark .pad.p3 { animation-delay: calc(1.2s/var(--spd)), calc(1.2s/var(--spd)); }
+  .a-chase .mark .pad.p4 { animation-delay: calc(1.8s/var(--spd)), calc(1.8s/var(--spd)); }
+  /* C · signal flow */
+  .a-flow .mark .sig { visibility: visible;
+    animation: kf-dash calc(1.4s/var(--spd)) linear infinite,
+               kf-rstroke calc(8s/var(--spd)) linear infinite; }
+  .a-flow .mark .play { animation: kf-pulse calc(2.8s/var(--spd)) ease-in-out infinite; }
+  .a-flow .mark .esc, .a-flow .mark .escv { animation: kf-pulse calc(2.8s/var(--spd)) ease-in-out infinite; }
+  /* D · rainbow wordmark (+play synced) */
+  .a-rword .mark .play { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
+  .a-rword .word.cased, .a-rword .word .w1, .a-rword .word .w2 {
+    background: linear-gradient(90deg,var(--r1),var(--r2),var(--r3),var(--r4),var(--r5),var(--r6),var(--r1));
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent !important;
+    animation: kf-sweep calc(7s/var(--spd)) linear infinite;
+  }
+  .a-rword .word .cw-via, .a-rword .word .dm-dot {
+    animation: kf-rfill calc(4s/var(--spd)) linear infinite;
+    animation-delay: calc(var(--i,0) * calc(-.22s/var(--spd)));
+  }
+  .a-rword .word .tri-a { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
+  /* E · breathe */
+  .a-glow .mark .play { animation: kf-glow calc(3.2s/var(--spd)) ease-in-out infinite; }
+  /* F · hover spark: static until hovered */
+  .a-hover .mark .play { animation: none; }
+  .a-hover:hover .mark .play { animation: kf-rfill calc(2.5s/var(--spd)) linear infinite; }
+  .a-hover:hover .word .cw-via, .a-hover:hover .word .dm-dot {
+    animation: kf-rfill calc(2.5s/var(--spd)) linear infinite;
+    animation-delay: calc(var(--i,0) * -.15s);
+  }
+
+  /* motion gating */
+  body[data-motion=off] * { animation-play-state: paused !important; }
+  body[data-motion=hover] .stage * { animation-play-state: paused; }
+  body[data-motion=hover] .stage:hover * { animation-play-state: running; }
+
+  /* ---- section 1 · mark cards ------------------------------------- */
+  .grid { display: grid; gap: 14px; max-width: 1500px;
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 13px; display: flex; flex-direction: column; gap: 9px; cursor: pointer;
+    transition: border-color .15s; position: relative;
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .card[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .card .cname { font-size: 12px; font-weight: 700; color: var(--strong); display:flex; align-items:baseline; gap:7px; }
+  .card .ctag { font-size: 10px; font-weight: 600; color: var(--dim); letter-spacing: .05em; text-transform: uppercase; }
+  .card .cnote { font-size: 11px; color: var(--dim); line-height: 1.4; }
+  .card .badge { position:absolute; top:10px; right:10px; font-size:9.5px; font-weight:700;
+    color: var(--gold); border:1px solid color-mix(in srgb, var(--gold) 45%, transparent);
+    border-radius: 4px; padding: 1px 5px; letter-spacing:.05em; }
+  .marksizes { display: flex; align-items: center; gap: 18px; justify-content: center; padding: 10px 0 4px; }
+
+  /* ---- section 2 · font specimens --------------------------------- */
+  .fgrid { display: grid; gap: 14px; max-width: 1500px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .spec .big { padding: 14px 16px; justify-content: flex-start; }
+  .spec .bar { padding: 9px 14px; }
+
+  /* ---- section 3 · animation cards -------------------------------- */
+  .agrid { display: grid; gap: 14px; max-width: 1500px;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+
+  /* ---- section 4 · brand sheet ------------------------------------ */
+  .sheet { display: grid; gap: 14px; max-width: 1500px;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 13px; display: flex; flex-direction: column; gap: 9px; }
+  .tile .tname { font-size: 11px; font-weight: 700; color: var(--muted);
+    letter-spacing: .07em; text-transform: uppercase; }
+  .tile .body { min-height: 96px; display:flex; align-items:center; justify-content:center; }
+  .tile .body.tall { min-height: 130px; }
+  .sheetbar-note { font-size: 11.5px; color: var(--dim); margin: 4px 0 14px; }
+  .sheetbar-note b { color: var(--accent); font-weight: 700; }
+
+  /* fixed-color stages for the mono tiles (do not follow Canvas) */
+  .stage.fix-light { background: #f4f2ec; border-color: #d8d4c8; color: #14181d;
+    --stage-mark:#14181d; --stage-ink:#14181d; --stage-strong:#14181d; --stage-dim:#14181d; }
+  .stage.fix-black { background: #000; border-color: #22262b; color: #fffaf0;
+    --stage-mark:#fffaf0; --stage-ink:#fffaf0; --stage-strong:#fffaf0; --stage-dim:#fffaf0; }
+  .stage.fix-accent-ink { color: var(--accent);
+    --stage-mark: var(--accent); --stage-ink: var(--accent);
+    --stage-strong: var(--accent); --stage-dim: var(--accent); }
+
+  /* app icon tiles */
+  .apptile { border-radius: 14.5px; width: 64px; height: 64px; display:flex;
+    align-items:center; justify-content:center; flex:none;
+    box-shadow: 0 3px 10px rgba(0,0,0,.35); }
+  .apptile.t-dark { background: linear-gradient(160deg,#1d232a,#0c1114); color:#94b8aa; }
+  .apptile.t-accent { background: linear-gradient(160deg,#8ae7bd,#57c391); color:#0c1114; }
+  .apptile.t-black { background:#000; color:#e8e4da; }
+  .avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--terminal);
+    border: 1px solid var(--border-muted); display:flex; align-items:center; justify-content:center;
+    color:#94b8aa; }
+
+  /* favicon / browser tab mock */
+  .tabmock { display:flex; align-items:center; gap:8px; background: var(--surface-raised);
+    border: 1px solid var(--border); border-bottom: none;
+    border-radius: 8px 8px 0 0; padding: 6px 14px 6px 10px; font-size: 11.5px; color: var(--muted); }
+  .tabmock .x { margin-left: 10px; color: var(--dim); }
+  .favrow { display:flex; align-items:center; gap:18px; }
+  .favrow .lab { font-size: 10px; color: var(--dim); text-align:center; margin-top:4px; }
+
+  /* top bar mock */
+  .topbar { display:flex; align-items:center; gap:14px; background: var(--surface-subtle);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; }
+  .topbar .nav { display:flex; gap:4px; margin-left: 8px; }
+  .topbar .nav span { font-size: 12px; font-weight:600; color: var(--subtle); padding: 3px 9px;
+    border-radius: 6px; }
+  .topbar .nav span.on { color: var(--text); background: var(--surface-raised); }
+  .topbar .right { margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .topbar .pill { font-size: 10.5px; font-weight:700; color: var(--accent);
+    border:1px solid var(--accent-border); border-radius: 999px; padding: 2px 9px; }
+
+  @media (max-width: 720px) { body { padding: 18px 14px 120px; } }
+</style>
+</head>
+<body data-canvas="terminal" data-motion="on" data-tone="duo" data-case="auto" style="--spd:1">
+
+<h1>LightPlayer logo — concept spike</h1>
+<p class="hint">
+  Exploring the LightPlayer brand from the liked direction — <b>a play triangle inside a
+  WS2811-style addressable-LED package</b> — plus motifs harvested from the Light&nbsp;at&nbsp;Play
+  archive (spiral play, circuit-trace letterforms with via dots, rainbow-as-identity).
+  §1 tunes the mark, §2 auditions wordmark typography, §3 auditions motion, and §4 is a live
+  brand sheet: click a card in §1/§2/§3 and the sheet recomposes. Display faces load from
+  Google Fonts (badged if offline); Inter &amp; JetBrains Mono are the repo's vendored production fonts.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Canvas</b>
+    <button class="chip" data-ctl="canvas" data-v="terminal" aria-pressed="true">Terminal</button>
+    <button class="chip" data-ctl="canvas" data-v="surface">Surface</button>
+    <button class="chip" data-ctl="canvas" data-v="light">Light</button>
+  </span>
+  <span class="group"><b>Motion</b>
+    <button class="chip" data-ctl="motion" data-v="on" aria-pressed="true">On</button>
+    <button class="chip" data-ctl="motion" data-v="hover">Hover</button>
+    <button class="chip" data-ctl="motion" data-v="off">Off</button>
+  </span>
+  <span class="group"><b>Speed</b>
+    <button class="chip" data-ctl="spd" data-v="0.5">0.5×</button>
+    <button class="chip" data-ctl="spd" data-v="1" aria-pressed="true">1×</button>
+    <button class="chip" data-ctl="spd" data-v="2.5">2.5×</button>
+  </span>
+  <span class="group"><b>Case</b>
+    <button class="chip" data-ctl="case" data-v="auto" aria-pressed="true">As designed</button>
+    <button class="chip" data-ctl="case" data-v="lower">lowercase</button>
+    <button class="chip" data-ctl="case" data-v="upper">UPPERCASE</button>
+  </span>
+  <span class="group"><b>Word tone</b>
+    <button class="chip" data-ctl="tone" data-v="duo" aria-pressed="true">Duo</button>
+    <button class="chip" data-ctl="tone" data-v="mono">Mono</button>
+    <button class="chip" data-ctl="tone" data-v="accent">Accent “Light”</button>
+  </span>
+</div>
+
+<!-- ==================== 1 · the mark ==================== -->
+<h2><span class="n">1</span> The mark — chip refinements &amp; heritage hybrids</h2>
+<p class="sub">
+  The production mark (first card) is the baseline. Chip variants keep the WS2811 package and
+  tune what lives inside it; heritage variants remix the 2014 Light&nbsp;at&nbsp;Play spiral- and
+  circuit-play motifs into (or out of) the package. Each card shows 40&nbsp;/&nbsp;22&nbsp;/&nbsp;16&nbsp;px —
+  the 22&nbsp;px cell is the top-bar reality check. Click to feed §4.
+</p>
+<div class="grid" id="markcards"></div>
+
+<!-- ==================== 2 · the wordmark ==================== -->
+<h2><span class="n">2</span> The wordmark — typography audition</h2>
+<p class="sub">
+  Each specimen: the wordmark large, then the full lockup at top-bar scale (22&nbsp;px mark).
+  <b>Case</b> and <b>Word&nbsp;tone</b> in the controls apply everywhere; “as designed” uses each
+  face's preferred casing. The last three are custom letterform treatments, not fonts —
+  the circuit-trace alphabet is redrawn from the 2014 wordmark (E and R are new glyphs in that style).
+  Click to feed §4.
+</p>
+<div class="fgrid" id="fontcards"></div>
+
+<!-- ==================== 3 · motion ==================== -->
+<h2><span class="n">3</span> Motion &amp; rainbow — how alive is the brand?</h2>
+<p class="sub">
+  All CSS/SVG (portable to the Dioxus component). Cards A–C animate only the mark;
+  D lights the wordmark too; F is the restrained option — static until hovered.
+  All respect the <b>Motion</b> and <b>Speed</b> controls; “Hover” gates every concept behind hover.
+  Shown on the production mark + current font for comparability. Click to feed §4.
+</p>
+<div class="agrid" id="animcards"></div>
+
+<!-- ==================== 4 · brand sheet ==================== -->
+<h2><span class="n">4</span> Brand sheet — the system, composed live</h2>
+<p class="sheetbar-note" id="sheetsel">…</p>
+<div class="sheet" id="sheet"></div>
+
+<script>
+'use strict';
+/* =============================== marks =============================== */
+/* Geometry is the production mark's, from lp-app/lpa-studio-web/src/base/logo_mark.rs */
+const PLAY_D = "M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z";
+const PLAY_BIG = "M12.4 10.75v10.5c0 1.02 1.12 1.65 2 1.12l8.58-5.25a1.31 1.31 0 0 0 0-2.24L14.4 9.63c-.88-.53-2 .1-2 1.12z";
+
+function svgOpen(size, cls) {
+  return `<svg class="mark ${cls||''}" width="${size}" height="${size}" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">`;
+}
+function pkg() {
+  return `<rect class="pkg" x="5.5" y="5.5" width="21" height="21" rx="2.4" stroke-width="1.7"/>`
+    + `<rect class="pad p1" x="3.2" y="8" width="2.3" height="4.6" rx="1"/>`
+    + `<rect class="pad p2" x="26.5" y="8" width="2.3" height="4.6" rx="1"/>`
+    + `<rect class="pad p3" x="26.5" y="19.4" width="2.3" height="4.6" rx="1"/>`
+    + `<rect class="pad p4" x="3.2" y="19.4" width="2.3" height="4.6" rx="1"/>`;
+}
+function sig() { // signal path for the flow animation: enters left, exits right, skirts the lens
+  return `<path class="sig" stroke-width="1.3" d="M0.5 10.2H8.9"/>`
+       + `<path class="sig" stroke-width="1.3" d="M23.1 21.8h8.4" style="animation-delay: calc(-.7s/var(--spd)), 0s"/>`;
+}
+function spiralPlay(cx, cy, r0, rings, sw) { // nested rotating play triangles (2014 whirl)
+  let out = '', r = r0, rot = 0;
+  for (let i = 0; i < rings; i++) {
+    const pts = [0, 120, 240].map(a => {
+      const t = (a + rot) * Math.PI / 180;
+      return `${(cx + r * Math.cos(t)).toFixed(2)} ${(cy + r * Math.sin(t)).toFixed(2)}`;
+    });
+    out += `<path class="ring" style="--i:${i}" stroke-width="${(sw * (0.55 + 0.45 * (r / r0))).toFixed(2)}" stroke-linejoin="round" d="M${pts[0]}L${pts[1]}L${pts[2]}Z"/>`;
+    r *= 0.72; rot += 21;
+  }
+  return out;
+}
+const MARKS = {
+  prod: { label: 'A · Production', tag: 'baseline', note: 'The shipped mark: package, pads, lens ring, accent play.',
+    build: (s, c) => svgOpen(s, c) + pkg() + sig()
+      + `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.5"/>`
+      + `<path class="play" d="${PLAY_D}"/></svg>` },
+  filled: { label: 'B · Lit lens', tag: 'chip variant', note: 'Lens carries a faint accent glow — the LED is on. Slightly stronger presence at 22px.',
+    build: (s, c) => svgOpen(s, c) + pkg() + sig()
+      + `<circle class="lens filled" cx="16" cy="16" r="7.6" stroke-width="1.5"/>`
+      + `<path class="play" d="${PLAY_D}"/></svg>` },
+  boldplay: { label: 'C · Bold play', tag: 'chip variant', note: 'Drop the lens ring; the play grows into the package. Strongest read at 16px, loses the “LED” story.',
+    build: (s, c) => svgOpen(s, c) + pkg() + sig()
+      + `<path class="play" d="${PLAY_BIG}"/></svg>` },
+  pin1: { label: 'D · Pin-1 dot', tag: 'chip variant', note: 'Production plus the datasheet pin-1 marker in the corner. A wink for hardware people.',
+    build: (s, c) => svgOpen(s, c) + pkg() + sig()
+      + `<circle class="pin1" cx="8.6" cy="8.6" r="1.15"/>`
+      + `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.5"/>`
+      + `<path class="play" d="${PLAY_D}"/></svg>` },
+  escapes: { label: 'E · Routed', tag: 'heritage hybrid', note: 'Pads escape as PCB traces with via dots — the chip is routed on a board. 2014 circuit motif, WS2811 body.',
+    build: (s, c) => svgOpen(s, c) + pkg() + sig()
+      + `<path class="esc" stroke-width="1.1" d="M2.6 10.3H1.2"/><circle class="escv" cx="0.9" cy="10.3" r="0.9"/>`
+      + `<path class="esc" stroke-width="1.1" d="M2.6 21.7H1.2"/><circle class="escv" cx="0.9" cy="21.7" r="0.9"/>`
+      + `<path class="esc" stroke-width="1.1" d="M29.4 10.3h1.4"/><circle class="escv" cx="31.1" cy="10.3" r="0.9"/>`
+      + `<path class="esc" stroke-width="1.1" d="M29.4 21.7h1.4"/><circle class="escv" cx="31.1" cy="21.7" r="0.9"/>`
+      + `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.5"/>`
+      + `<path class="play" d="${PLAY_D}"/></svg>` },
+  spiral: { label: 'F · Spiral lens', tag: 'heritage hybrid', note: 'The 2014 triangle-spiral, miniaturized inside the lens. Hypnotic large; softens to texture at 22px.',
+    build: (s, c) => svgOpen(s, c) + pkg() + sig()
+      + `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.5"/>`
+      + spiralPlay(15.5, 16, 5.6, 4, 1.15) + `</svg>` },
+  spiralfree: { label: 'G · Free spiral', tag: 'heritage', note: 'The spiral play alone, no package — closest to the 2014 mark. For comparison against the chip direction.',
+    build: (s, c) => svgOpen(s, c) + sig() + spiralPlay(14.8, 16, 11.5, 6, 1.5) + `</svg>` },
+};
+
+/* ============================ wordmarks ============================= */
+/* circuit-trace alphabet, redrawn from the 2014 wordmark (monoline + vias).
+   Unit grid: cap height 7, y down. Each glyph: strokes (polylines), vias, width. */
+const CW = {
+  L: { w: 4, s: [[[0,0],[0,7],[4,7]]],                          v: [[0,0],[4,7]] },
+  I: { w: 0, s: [[[0,0],[0,7]]],                                v: [[0,0],[0,7]] },
+  G: { w: 4, s: [[[4,0],[0,0],[0,7],[4,7],[4,4],[2.2,4]]],      v: [[4,0],[2.2,4]] },
+  H: { w: 4, s: [[[0,0],[0,7]],[[4,0],[4,7]],[[0,3.5],[4,3.5]]],v: [[4,0],[0,7]] },
+  T: { w: 4, s: [[[0,0],[4,0]],[[2,0],[2,7]]],                  v: [[0,0],[2,7]] },
+  P: { w: 4, s: [[[0,7],[0,0],[4,0],[4,3.5],[0,3.5]]],          v: [[0,7],[4,1.75]] },
+  A: { w: 4, s: [[[0,7],[2,0],[4,7]],[[0.9,4.6],[3.1,4.6]]],    v: [[0,7],[4,7]] },
+  Y: { w: 4, s: [[[0,0],[2,3.2],[4,0]],[[2,3.2],[2,7]]],        v: [[0,0],[4,0],[2,7]] },
+  E: { w: 4, s: [[[4,0],[0,0],[0,7],[4,7]],[[0,3.5],[3,3.5]]],  v: [[4,0],[3,3.5]] },
+  R: { w: 4, s: [[[0,7],[0,0],[4,0],[4,3.5],[0,3.5]],[[1.4,3.5],[4,7]]], v: [[4,7],[0,7]] },
+};
+const RAINBOW = ['#ff5d5d','#ffab4a','#f5e04e','#5fe08b','#53c6f2','#a58af7'];
+function circuitWord(px) { // px = cap height in CSS px
+  const u = px / 7, sw = 0.95, gap = 2.6, word = 'LIGHTPLAYER';
+  let x = 1.2, paths = '', vias = '', vi = 0;
+  const viaTotal = [...word].reduce((n, ch) => n + CW[ch].v.length, 0);
+  for (const ch of word) {
+    const g = CW[ch];
+    for (const seg of g.s) {
+      paths += `<path class="cw-stroke" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" d="M` +
+        seg.map(p => `${(x + p[0]).toFixed(2)} ${(p[1] + 1.6).toFixed(2)}`).join('L') + `"/>`;
+    }
+    for (const p of g.v) {
+      vias += `<circle class="cw-via" style="--i:${vi}" fill="${RAINBOW[Math.floor(vi / viaTotal * RAINBOW.length) % 6]}" cx="${(x + p[0]).toFixed(2)}" cy="${(p[1] + 1.6).toFixed(2)}" r="1.05"/>`;
+      vi++;
+    }
+    x += g.w + gap;
+  }
+  const W = x - gap + 1.2, H = 10.2;
+  return `<svg width="${(W * u).toFixed(0)}" height="${(H * u).toFixed(0)}" viewBox="0 0 ${W.toFixed(1)} ${H}" xmlns="http://www.w3.org/2000/svg">${paths}${vias}</svg>`;
+}
+/* 5×7 LED-matrix alphabet */
+const DM = {
+  L:['10000','10000','10000','10000','10000','10000','11111'],
+  I:['111','010','010','010','010','010','111'],
+  G:['01111','10000','10000','10011','10001','10001','01110'],
+  H:['10001','10001','10001','11111','10001','10001','10001'],
+  T:['11111','00100','00100','00100','00100','00100','00100'],
+  P:['11110','10001','10001','11110','10000','10000','10000'],
+  A:['01110','10001','10001','11111','10001','10001','10001'],
+  Y:['10001','10001','01010','00100','00100','00100','00100'],
+  E:['11111','10000','10000','11110','10000','10000','11111'],
+  R:['11110','10001','10001','11110','10100','10010','10001'],
+};
+function dotWord(px) {
+  const u = px / 7, word = 'LIGHTPLAYER';
+  let x = 0, dots = '', col = 0;
+  for (const ch of word) {
+    const rows = DM[ch], w = rows[0].length;
+    for (let cx = 0; cx < w; cx++) {
+      for (let cy = 0; cy < 7; cy++) {
+        if (rows[cy][cx] === '1')
+          dots += `<circle class="dm-dot" style="--i:${col}" cx="${x + cx + .5}" cy="${cy + 1.1}" r="0.38"/>`;
+      }
+      col++;
+    }
+    x += w + 1.4; col += 1;
+  }
+  const W = x - 1.4 + .6, H = 9.2;
+  return `<svg width="${(W * u).toFixed(0)}" height="${(H * u).toFixed(0)}" viewBox="0 0 ${W.toFixed(1)} ${H}" xmlns="http://www.w3.org/2000/svg">${dots}</svg>`;
+}
+function triA(px) { // play triangle standing in for the A (points up = A silhouette)
+  const h = px, w = px * 0.92;
+  return `<svg width="${w.toFixed(0)}" height="${h.toFixed(0)}" viewBox="0 0 10 11" style="margin:0 .04em"><path class="tri-a" d="M5 .9 9.4 10.1a.62.62 0 0 1-.56.9H1.16a.62.62 0 0 1-.56-.9z"/></svg>`;
+}
+
+const FONTS = {
+  inter:    { label:'Inter ExtraBold', tag:'current · vendored', family:"'InterV', Inter, ui-sans-serif", wt:800, ls:'-0.015em', word:'LightPlayer',
+              note:'The shipped wordmark. Neutral, competent, zero flavor — the control specimen.' },
+  grotesk:  { label:'Space Grotesk Bold', tag:'tech grotesque · web', family:"'Space Grotesk'", check:'700 16px "Space Grotesk"', wt:700, ls:'-0.01em', word:'LightPlayer',
+              note:'Modern tool-brand energy; quirky terminals keep it human. The obvious “safe upgrade”.' },
+  outfit:   { label:'Outfit Bold', tag:'geometric · web', family:"'Outfit'", check:'700 16px Outfit', wt:700, ls:'0', word:'LightPlayer',
+              note:'Round, friendly geometry — closest in spirit to the 2014 Quicksand-era lettering.' },
+  futura:   { label:'Futura Bold', tag:'geometric · system', family:"Futura", wt:700, ls:'0.005em', word:'LightPlayer',
+              note:'The heritage geometric. Timeless, slightly retro-lab; the lowercase “y” is lovely.' },
+  avenir:   { label:'Avenir Next Bold', tag:'neo-geometric · system', family:"'Avenir Next'", wt:700, ls:'0', word:'LightPlayer',
+              note:'Futura civilized. Reads premium and quiet; risk: reads corporate.' },
+  dina:     { label:'DIN Alternate Bold', tag:'industrial · system', family:"'DIN Alternate'", wt:700, ls:'0.01em', word:'LightPlayer',
+              note:'Datasheet lettering — the face silkscreened next to real LED chips. On-theme for hardware.' },
+  dinc:     { label:'DIN Condensed Bold', tag:'industrial · system', family:"'DIN Condensed'", wt:700, ls:'0.045em', word:'LIGHTPLAYER',
+              note:'Tall, tight, poster-industrial. Caps only; strong at large sizes, thin at 13px.' },
+  jbm:      { label:'JetBrains Mono Bold', tag:'mono · vendored', family:"'JBMV', 'JetBrains Mono', monospace", wt:700, ls:'-0.02em', word:'lightplayer',
+              note:'The studio’s code font. Says “dev tool” instantly; lowercase feels like an identifier.' },
+  chakra:   { label:'Chakra Petch Bold', tag:'squared techno · web', family:"'Chakra Petch'", check:'700 16px "Chakra Petch"', wt:700, ls:'0.03em', word:'LIGHTPLAYER',
+              note:'Chamfered corners, very hardware. Sits naturally beside the chip mark.' },
+  orbitron: { label:'Orbitron ExtraBold', tag:'LED display · web', family:"'Orbitron'", check:'800 16px Orbitron', wt:800, ls:'0.05em', word:'LIGHTPLAYER',
+              note:'Full sci-fi LED signage. Probably too costume — included to mark the edge of the axis.' },
+  michroma: { label:'Michroma', tag:'wide techno · web', family:"'Michroma'", check:'400 16px Michroma', wt:400, ls:'0.02em', word:'LightPlayer',
+              note:'Engineered, wide, calm — Eurostile’s web cousin. Wide footprint hurts the top bar.' },
+  audiowide:{ label:'Audiowide', tag:'retro neon · web', family:"'Audiowide'", check:'400 16px Audiowide', wt:400, ls:'0.01em', word:'LightPlayer',
+              note:'Neon-sign rounded tech. Fun, glows well; borderline novelty.' },
+  bungee:   { label:'Bungee', tag:'marquee · web', family:"'Bungee'", check:'400 16px Bungee', wt:400, ls:'0.02em', word:'LIGHTPLAYER',
+              note:'Sign-painting for light-up marquees — literally designed for illuminated signage.' },
+  circuit:  { label:'Circuit traces', tag:'custom · heritage', custom: circuitWord, word:'LIGHTPLAYER',
+              note:'The 2014 letterforms, redrawn: monoline traces, rainbow via dots (E/R are new glyphs). Ignores case/tone.' },
+  dots:     { label:'LED matrix', tag:'custom', custom: dotWord, word:'LIGHTPLAYER',
+              note:'The wordmark as the medium itself — a 5×7 pixel matrix. Animates as a true LED wave. Ignores case/tone.' },
+  playa:    { label:'Inter + play-as-A', tag:'treatment', family:"'InterV', Inter, ui-sans-serif", wt:800, ls:'0.01em', word:'LIGHTPLAYER', playA:true,
+              note:'The accent triangle stands in for the A — mark and wordmark share a glyph. Needs caps.' },
+};
+
+function wordHTML(key, px, opts) {
+  const f = FONTS[key]; opts = opts || {};
+  if (f.custom) return `<span class="word">${f.custom(px)}</span>`;
+  let w = f.word;
+  if (f.playA) {
+    // LIGHTPL▲YER — split so tone spans still work: "Light"=LIGHT, "Player"=PL▲YER
+    return `<span class="word" style="font-family:${f.family};font-weight:${f.wt};letter-spacing:${f.ls};font-size:${px}px">` +
+      `<span class="w1">LIGHT</span><span class="w2">PL${triA(px * .78)}YER</span></span>`;
+  }
+  const cut = w.toLowerCase().indexOf('player');
+  const a = w.slice(0, cut), b = w.slice(cut);
+  return `<span class="word cased" style="font-family:${f.family};font-weight:${f.wt};letter-spacing:${f.ls};font-size:${px}px">` +
+    `<span class="w1">${a}</span><span class="w2">${b}</span></span>`;
+}
+function lockupHTML(state, markPx, wordPx, animCls) {
+  const gap = Math.round(markPx * 0.32);
+  return `<span class="lockup ${animCls || ''}" style="gap:${gap}px">` +
+    MARKS[state.mark].build(markPx) + wordHTML(state.font, wordPx) + `</span>`;
+}
+
+/* ============================ animations ============================ */
+const ANIMS = {
+  none:  { label: '· Static', cls: '', note: 'No motion. The control case — the brand may simply not need to move.' },
+  rplay: { label: 'A · LED lens', cls: 'a-rplay', note: 'Only the play cycles through the LED rainbow. The chip stays quiet; the pixel is alive.' },
+  chase: { label: 'B · Pad chase', cls: 'a-chase', note: 'The four pads pulse in rotation, each holding its own hue — an addressable chain in miniature.' },
+  flow:  { label: 'C · Signal flow', cls: 'a-flow', note: 'Data streams in the left pads and out the right; the play breathes as frames pass through.' },
+  rword: { label: 'D · Rainbow wordmark', cls: 'a-rword', note: 'The loud one: gradient sweeps the text (or chases the vias/pixels on custom letterforms), play synced.' },
+  glow:  { label: 'E · Breathe', cls: 'a-glow', note: 'No rainbow — the accent play softly blooms, like a status LED idling.' },
+  hover: { label: 'F · Hover spark', cls: 'a-hover', note: 'Static brand; rainbow only under the cursor. The restrained default for real UI.' },
+};
+
+/* ============================== state =============================== */
+/* URL hash preseeds everything, e.g. #mark=escapes&font=circuit&anim=rword&canvas=light
+   — handy for pointing at an exact composition in gate feedback. */
+const state = { mark: 'prod', font: 'inter', anim: 'rplay' };
+const hash = new URLSearchParams(location.hash.slice(1));
+for (const k of ['mark', 'font', 'anim']) {
+  const v = hash.get(k);
+  if (v && ({mark: MARKS, font: FONTS, anim: ANIMS})[k][v]) state[k] = v;
+}
+for (const k of ['canvas', 'motion', 'tone', 'case']) {
+  if (hash.get(k)) document.body.dataset[k] = hash.get(k);
+}
+if (hash.get('spd')) document.body.style.setProperty('--spd', hash.get('spd'));
+
+/* ============================ section 1 ============================= */
+const markcards = document.getElementById('markcards');
+for (const [k, m] of Object.entries(MARKS)) {
+  const el = document.createElement('div');
+  el.className = 'card'; el.dataset.k = k; el.setAttribute('aria-pressed', String(k === state.mark));
+  el.innerHTML = `<span class="cname">${m.label} <span class="ctag">${m.tag}</span></span>` +
+    `<div class="stage marksizes">` +
+      `<span class="lockup">${m.build(40)}</span>` +
+      `<span class="lockup">${m.build(22)}</span>` +
+      `<span class="lockup">${m.build(16)}</span>` +
+    `</div>` +
+    `<span class="cnote">${m.note}</span>`;
+  el.addEventListener('click', () => { state.mark = k; refreshSel(markcards, k); renderSheet(); });
+  markcards.appendChild(el);
+}
+
+/* ============================ section 2 ============================= */
+const fontcards = document.getElementById('fontcards');
+for (const [k, f] of Object.entries(FONTS)) {
+  const el = document.createElement('div');
+  el.className = 'card spec'; el.dataset.k = k; el.setAttribute('aria-pressed', String(k === state.font));
+  el.innerHTML = `<span class="cname">${f.label} <span class="ctag">${f.tag}</span></span>` +
+    (f.check ? `<span class="badge" data-check='${f.check}' hidden>FALLBACK</span>` : '') +
+    `<div class="stage big">${wordHTML(k, 24)}</div>` +
+    `<div class="stage bar">` +
+      `<span class="lockup" style="gap:7px">${MARKS.prod.build(22)}${wordHTML(k, 14)}</span>` +
+    `</div>` +
+    `<span class="cnote">${f.note}</span>`;
+  el.addEventListener('click', () => { state.font = k; refreshSel(fontcards, k); renderSheet(); });
+  fontcards.appendChild(el);
+}
+
+/* ============================ section 3 ============================= */
+const animcards = document.getElementById('animcards');
+for (const [k, a] of Object.entries(ANIMS)) {
+  const el = document.createElement('div');
+  el.className = 'card'; el.dataset.k = k; el.setAttribute('aria-pressed', String(k === state.anim));
+  el.innerHTML = `<span class="cname">${a.label}</span>` +
+    `<div class="stage" style="justify-content:center;padding:16px">` +
+      `<span class="lockup ${a.cls}" style="gap:10px">${MARKS.prod.build(34)}${wordHTML('inter', 20)}</span>` +
+    `</div>` +
+    `<span class="cnote">${a.note}</span>`;
+  el.addEventListener('click', () => { state.anim = k; refreshSel(animcards, k); renderSheet(); });
+  animcards.appendChild(el);
+}
+
+function refreshSel(container, k) {
+  for (const c of container.children) c.setAttribute('aria-pressed', String(c.dataset.k === k));
+}
+
+/* ============================ section 4 ============================= */
+const sheet = document.getElementById('sheet');
+function renderSheet() {
+  const a = ANIMS[state.anim].cls;
+  document.getElementById('sheetsel').innerHTML =
+    `Composed from <b>${MARKS[state.mark].label}</b> + <b>${FONTS[state.font].label}</b> + <b>${ANIMS[state.anim].label}</b> — click cards above to recompose.`;
+  sheet.innerHTML = `
+  <div class="tile" style="grid-column: 1 / -1">
+    <span class="tname">Primary lockup — animated</span>
+    <div class="body tall stage">${lockupHTML(state, 52, 30, a)}</div>
+  </div>
+  <div class="tile">
+    <span class="tname">Top bar · 22px</span>
+    <div class="body"><div class="topbar" style="width:100%">
+      ${lockupHTML(state, 22, 13.5, a)}
+      <span class="nav"><span class="on">Project</span><span>Devices</span><span>Output</span></span>
+      <span class="right"><span class="pill">LIVE</span></span>
+    </div></div>
+  </div>
+  <div class="tile">
+    <span class="tname">Stacked / square</span>
+    <div class="body tall stage" style="justify-content:center">
+      <span style="display:flex;flex-direction:column;align-items:center;gap:9px">
+        <span class="lockup ${a}">${MARKS[state.mark].build(54)}</span>
+        ${wordHTML(state.font, 15)}
+      </span>
+    </div>
+  </div>
+  <div class="tile">
+    <span class="tname">App icons</span>
+    <div class="body" style="gap:16px">
+      <span class="apptile t-dark"><span class="lockup ${a}">${MARKS[state.mark].build(44)}</span></span>
+      <span class="apptile t-accent ink"><span class="lockup">${MARKS[state.mark].build(44)}</span></span>
+      <span class="apptile t-black"><span class="lockup ${a}">${MARKS[state.mark].build(44)}</span></span>
+    </div>
+  </div>
+  <div class="tile">
+    <span class="tname">Favicon — actual size</span>
+    <div class="body" style="flex-direction:column;gap:10px">
+      <div class="tabmock"><span class="lockup ${a}">${MARKS[state.mark].build(16)}</span> LightPlayer Studio — zook-dome <span class="x">×</span></div>
+      <div class="favrow">
+        <span><span class="lockup" style="color:#94b8aa">${MARKS[state.mark].build(16)}</span><div class="lab">16</div></span>
+        <span><span class="lockup" style="color:#94b8aa">${MARKS[state.mark].build(32)}</span><div class="lab">32</div></span>
+      </div>
+    </div>
+  </div>
+  <div class="tile">
+    <span class="tname">Mono — print / light</span>
+    <div class="body stage fix-light ink" style="justify-content:center">${lockupHTML(state, 34, 20)}</div>
+  </div>
+  <div class="tile">
+    <span class="tname">Mono — dark</span>
+    <div class="body stage fix-black ink" style="justify-content:center">${lockupHTML(state, 34, 20)}</div>
+  </div>
+  <div class="tile">
+    <span class="tname">One color — accent</span>
+    <div class="body stage fix-accent-ink ink" style="justify-content:center">${lockupHTML(state, 34, 20)}</div>
+  </div>
+  <div class="tile">
+    <span class="tname">Social avatar</span>
+    <div class="body"><span class="avatar"><span class="lockup ${a}">${MARKS[state.mark].build(36)}</span></span></div>
+  </div>`;
+}
+renderSheet();
+
+/* ============================ controls ============================== */
+document.querySelectorAll('.chip[data-ctl]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const ctl = btn.dataset.ctl, v = btn.dataset.v;
+    document.querySelectorAll(`.chip[data-ctl=${ctl}]`).forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    if (ctl === 'spd') document.body.style.setProperty('--spd', v);
+    else document.body.dataset[ctl === 'canvas' ? 'canvas' : ctl] = v;
+  });
+});
+/* sync chip pressed-states with whatever the hash preseeded */
+document.querySelectorAll('.chip[data-ctl]').forEach(b => {
+  const ctl = b.dataset.ctl;
+  const cur = ctl === 'spd' ? getComputedStyle(document.body).getPropertyValue('--spd').trim()
+                            : document.body.dataset[ctl];
+  b.setAttribute('aria-pressed', String(b.dataset.v === cur));
+});
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.body.dataset.motion = 'off';
+  document.querySelectorAll('.chip[data-ctl=motion]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === 'off')));
+}
+
+/* web-font loaded badges */
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => {
+    document.querySelectorAll('.badge[data-check]').forEach(b => {
+      b.hidden = document.fonts.check(b.dataset.check);
+    });
+  });
+}
+</script>
+</body>
+</html>
