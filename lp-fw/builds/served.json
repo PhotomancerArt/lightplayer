@@ -1,4 +1,4 @@
 {
   "format": 1,
-  "builds": ["esp32c6-4mb"]
+  "builds": ["esp32c6-4mb", "esp32s3-8mb", "esp32v3-4mb"]
 }

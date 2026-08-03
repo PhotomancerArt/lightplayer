@@ -335,12 +335,12 @@ fn SetupForm(
     };
 
     let boards = provisionable_boards();
-    let detected = detected_chip.as_deref().map(normalize_chip);
+    let detected = detected_chip.as_deref().and_then(chip_id);
     // Chip-matching boards lead; the rest follow in the same grid (round 3:
     // the card may grow — a long grid beats a disclosure nobody opens).
     let (matching, other): (Vec<&'static lpa_boards::BoardDisplayFile>, Vec<_>) = boards
         .iter()
-        .partition(|board| detected.as_deref() == Some(normalize_chip(&board.family).as_str()));
+        .partition(|board| detected.is_some() && detected == chip_id(&board.family));
     let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if detected.is_none() {
         boards.clone()
     } else {
@@ -361,7 +361,11 @@ fn SetupForm(
         .and_then(|id| boards.iter().find(|board| board.board_id == id).copied());
     let discriminator = match (&picked, &detected_chip) {
         (Some(board), _) => board_slug(&board.board_id).to_string(),
-        (None, Some(chip)) => normalize_chip(chip),
+        // The chip ID, not the raw report: a probe answer would otherwise
+        // name the device `…-esp32c6qfn32revisionv02`.
+        (None, Some(chip)) => chip_id(chip)
+            .map(str::to_string)
+            .unwrap_or_else(|| lpa_link::normalize_chip_name(chip)),
         (None, None) => "lightplayer".to_string(),
     };
     let derived_name = default_setup_name(now_secs, &discriminator);
@@ -455,11 +459,13 @@ const SETUP_TILE_LIMIT: usize = 11;
 /// A chip id as the headline shows it (`esp32c6` → `ESP32-C6`); unknown
 /// shapes pass through uppercased rather than being dropped.
 fn chip_display(chip: &str) -> String {
-    match normalize_chip(chip).as_str() {
-        "esp32c6" => "ESP32-C6".to_string(),
-        "esp32s3" => "ESP32-S3".to_string(),
-        "esp32c3" => "ESP32-C3".to_string(),
-        "esp32" => "ESP32".to_string(),
+    match chip_id(chip) {
+        Some("esp32c6") => "ESP32-C6".to_string(),
+        Some("esp32s3") => "ESP32-S3".to_string(),
+        Some("esp32c3") => "ESP32-C3".to_string(),
+        // The classic. Its probe answer is a die name — `ESP32-D0WD-V3
+        // (revision v3.0)` — which is not what the headline should read.
+        Some("esp32") => "ESP32".to_string(),
         _ => chip.to_ascii_uppercase(),
     }
 }
@@ -535,15 +541,16 @@ fn BoardTile(
     }
 }
 
-/// Normalize a chip name for family matching: probe answers say
-/// "ESP32-C6", boot banners say "esp32c6", board families say "esp32c6".
+/// Resolve a chip name to its canonical id for family matching: probe
+/// answers say `ESP32-C6 (QFN32) (revision v0.2)`, boot banners say
+/// `esp32c6`, board families say `esp32c6`.
 ///
-/// Deliberately the SAME function the flash guard compares with
-/// (`lpa_link::normalize_chip_name`). A picker that matched boards by one
-/// rule while the guard refused images by another would offer a board and
-/// then refuse to flash it.
-fn normalize_chip(name: &str) -> String {
-    lpa_link::normalize_chip_name(name)
+/// Deliberately the SAME resolution the flash guard and the build selector
+/// use (`lpa_link::chip_id_from_reported`). A picker that matched boards by
+/// one rule while the guard refused images by another would offer a board
+/// and then refuse to flash it.
+fn chip_id(name: &str) -> Option<&'static str> {
+    lpa_link::chip_id_from_reported(name)
 }
 
 /// The boards the picker offers: a build this deployment SERVES exists for

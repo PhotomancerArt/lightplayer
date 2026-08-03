@@ -18,6 +18,11 @@ pub const BUILD_DEF_FORMAT: u32 = 1;
 /// Directory holding the checked-in build defs, relative to the repo root.
 pub const BUILDS_DIR: &str = "lp-fw/builds";
 
+/// `.json` files in [`BUILDS_DIR`] that are not build defs. `served.json` is
+/// a statement *about* build defs — which of them the Studio site ships — so
+/// it shares their directory and must never be parsed as one.
+const NON_BUILD_DEF_FILES: &[&str] = &["served.json"];
+
 /// One firmware variant.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -116,6 +121,11 @@ pub fn load_build_defs(repo_root: &Path) -> Result<Vec<BuildDef>> {
         .with_context(|| format!("reading build defs from {}", dir.display()))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .filter(|path| {
+            !path
+                .file_name()
+                .is_some_and(|name| NON_BUILD_DEF_FILES.iter().any(|skip| name == *skip))
+        })
         .collect();
     paths.sort();
 
