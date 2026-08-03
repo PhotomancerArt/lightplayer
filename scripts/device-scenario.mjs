@@ -510,7 +510,27 @@ async function runOne(spec, state, argPort, studioUrl) {
   for (const [index, manual] of (spec.manual ?? []).entries()) {
     console.log(`  ${index + 1}. ${manual}`);
   }
-  await ask("\nPress Enter here when the scenario is done… ");
+  // `r` restarts the CAPTURE, not the scenario: the expensive half
+  // (flash/erase setup, the board's known state) is already done, so a
+  // false start in the UI should cost the buffer, not the sitting
+  // (sitting feedback, 2026-08-03 — "sometimes the UI is in a bad state
+  // and I need to change something before running the scenario").
+  for (;;) {
+    const answer = await ask(
+      "\nPress Enter when the scenario is done · r = reset the capture buffer and re-do it here: ",
+    );
+    if (answer !== "r") {
+      break;
+    }
+    const dropped = records.length;
+    records.length = 0;
+    writeFileSync(partial, "");
+    console.log(`  ↺ discarded ${dropped} events — the board and its setup are untouched.`);
+    console.log("    Get the UI into the state you want, then run the steps again:");
+    for (const [index, manual] of (spec.manual ?? []).entries()) {
+      console.log(`      ${index + 1}. ${manual}`);
+    }
+  }
   state.active = null;
   console.log("\n(close the Studio tab before the next scenario's setup — an open tab holds the port)");
 
