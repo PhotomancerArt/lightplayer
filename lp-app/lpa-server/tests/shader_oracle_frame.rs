@@ -129,7 +129,9 @@ fn render_project(graphics: Arc<dyn LpGraphics>) -> Vec<u8> {
     // frame for the memory-pressure compile window (ADR
     // 2026-08-03-memory-pressure-at-compile-safe-points). Advance past it so
     // every captured frame is a real render.
-    server.advance_frame(16).expect("advance compile-window frame");
+    server
+        .advance_frame(16)
+        .expect("advance compile-window frame");
 
     let mut frames: Vec<Vec<u8>> = Vec::new();
     for _ in 0..FRAMES {
