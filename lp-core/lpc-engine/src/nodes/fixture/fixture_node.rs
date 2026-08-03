@@ -72,11 +72,14 @@ pub struct FixtureNode {
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
     render_target: Option<TextureHandle>,
-    sample_points: Option<SamplePointsHandle>,
+    sample_points: Option<FixtureSamplePoints>,
     sample_target: Option<SampleOutHandle>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
-    direct_points: Option<(Revision, alloc::vec::Vec<DirectSamplePoint>)>,
+    /// Channel list for Direct sampling — the ONLY per-lamp data that stays
+    /// resident (4 B/lamp). Coordinates are regenerated transiently from the
+    /// mapping when the sample-point buffer needs rewriting.
+    direct_channels: Option<(Revision, alloc::vec::Vec<u32>)>,
     display_layout_revision: Option<(FixtureDisplayLayoutKey, Revision)>,
     /// Current-limit scale for the NEXT frame, in Q16. Demand for a frame is
     /// only known once that frame is rendered, so the scale always trails it
@@ -112,7 +115,7 @@ impl FixtureNode {
             sample_points: None,
             sample_target: None,
             precomputed: None,
-            direct_points: None,
+            direct_channels: None,
             display_layout_revision: None,
             power_scale_q16: power_limit::UNITY_SCALE_Q16,
             power_estimate_ma: 0,
@@ -187,27 +190,20 @@ impl FixtureNode {
         }
     }
 
-    fn ensure_direct_points(&mut self, mapping_ver: Revision) {
+    fn ensure_direct_channels(&mut self, mapping_ver: Revision) {
         let stale = self
-            .direct_points
+            .direct_channels
             .as_ref()
             .is_none_or(|(ver, _)| *ver != mapping_ver);
         if stale {
             let generated = lpc_model::nodes::fixture::generate_mapping_points(&self.mapping, 1, 1);
-            // Build into an exactly-sized Vec rather than
-            // `generated.into_iter().map(..).collect()`. That collect is an
-            // in-place iterator: because `DirectSamplePoint` (12 B) is no
-            // larger than `MappingPoint` (16 B), the collect REUSES the source
-            // buffer and the resulting Vec keeps a 16-B-per-element allocation
-            // forever. Measured as 16 B/LED resident where 12 is enough — 4
-            // B/LED of pure slack on a device where an LED costs ~90 B.
-            let mut points = alloc::vec::Vec::with_capacity(generated.len());
-            points.extend(generated.iter().map(|point| DirectSamplePoint {
-                channel: point.channel,
-                x_norm_q16: normalized_f32_to_q16(point.center[0]),
-                y_norm_q16: normalized_f32_to_q16(point.center[1]),
-            }));
-            self.direct_points = Some((mapping_ver, points));
+            // Build into an exactly-sized Vec: only `point.channel` is read
+            // per frame, so 4 B/lamp is the whole resident cost. The
+            // coordinates the sampler needs are regenerated transiently in
+            // `ensure_fixture_sample_points` when its buffer key changes.
+            let mut channels = alloc::vec::Vec::with_capacity(generated.len());
+            channels.extend(generated.iter().map(|point| point.channel));
+            self.direct_channels = Some((mapping_ver, channels));
         }
     }
 
@@ -226,7 +222,7 @@ impl FixtureNode {
             self.mapping = next;
             self.mapping_version = ctx.revision();
             self.precomputed = None;
-            self.direct_points = None;
+            self.direct_channels = None;
             self.display_layout_revision = None;
         }
         Ok(())
@@ -253,11 +249,20 @@ impl FixtureNode {
     }
 }
 
-#[derive(Clone, Copy)]
-struct DirectSamplePoint {
-    channel: u32,
-    x_norm_q16: i32,
-    y_norm_q16: i32,
+/// The persistent graphics-side sample-point buffer for Direct sampling,
+/// carrying the key its coordinates were last written for. Coordinates are
+/// derived purely from (mapping, render size), so the buffer is rewritten
+/// only when that key changes — not per frame. The key lives INSIDE the
+/// Option so a memory-pressure drop of the buffer drops the key with it and
+/// a recreated buffer is always rewritten; a detached key that survived the
+/// drop would claim freshly-zeroed coordinates were current, which is the
+/// silent-staleness failure this subsystem keeps re-learning
+/// (docs/debt/s3-frame-cost-scales-per-fixture.md).
+struct FixtureSamplePoints {
+    handle: SamplePointsHandle,
+    mapping_version: Revision,
+    width: u32,
+    height: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -357,7 +362,7 @@ impl NodeRuntime for FixtureNode {
                 self.ensure_texture_area_mapping(width, height, mapping_ver, ver);
             }
             if self.sampling == FixtureSamplingConfig::Direct {
-                self.ensure_direct_points(mapping_ver);
+                self.ensure_direct_channels(mapping_ver);
             }
         } else {
             self.last_visual_product = None;
@@ -406,13 +411,13 @@ impl NodeRuntime for FixtureNode {
     ) -> Result<(), NodeError> {
         // Everything dropped here is rebuilt lazily by its ensure_* seam on
         // the next render (`ensure_texture_area_mapping`,
-        // `ensure_direct_points`, `ensure_fixture_sample_points`,
+        // `ensure_direct_channels`, `ensure_fixture_sample_points`,
         // `ensure_fixture_sample_target`, `ensure_fixture_render_target`) —
         // the memory-pressure contract guarantees nothing beyond that. The
         // resolved mapping itself (`self.mapping`) is source-of-truth state,
         // not a cache, and stays.
         self.precomputed = None;
-        self.direct_points = None;
+        self.direct_channels = None;
         self.sample_points = None;
         self.sample_target = None;
         self.render_target = None;
@@ -459,7 +464,7 @@ impl NodeRuntime for FixtureNode {
                     source.revision = asset_revision;
                 }
                 self.precomputed = None;
-                self.direct_points = None;
+                self.direct_channels = None;
                 self.display_layout_revision = None;
                 self.mapping_error = None;
             }
@@ -708,13 +713,17 @@ impl FixtureNode {
             );
         };
         if self.sampling == FixtureSamplingConfig::Direct {
+            let (channels_version, channels) = self
+                .direct_channels
+                .as_ref()
+                .map(|(ver, channels)| (*ver, channels.as_slice()))
+                .ok_or_else(|| NodeError::msg("fixture direct render missing cached channels"))?;
             return render_direct_fixture_control(
                 &mut self.sample_points,
                 &mut self.sample_target,
-                self.direct_points
-                    .as_ref()
-                    .map(|(_, points)| points.as_slice())
-                    .ok_or_else(|| NodeError::msg("fixture direct render missing cached points"))?,
+                &self.mapping,
+                channels_version,
+                channels,
                 visual_product,
                 request,
                 target,
@@ -855,44 +864,71 @@ fn ensure_fixture_sample_target<'a>(
 }
 
 fn ensure_fixture_sample_points<'a>(
-    current: &'a mut Option<SamplePointsHandle>,
-    points: &[DirectSamplePoint],
+    current: &'a mut Option<FixtureSamplePoints>,
+    mapping: &MappingConfig,
+    mapping_version: Revision,
+    count: u32,
     output_width: u32,
     output_height: u32,
     ctx: &ControlRenderContext<'_>,
 ) -> Result<&'a mut SamplePointsHandle, NodeError> {
-    let count = points.len() as u32;
-    let stale = current
-        .as_ref()
-        .is_none_or(|buffer| buffer.count() != count);
+    let current_matches = current.as_ref().is_some_and(|sp| {
+        sp.handle.count() == count
+            && sp.mapping_version == mapping_version
+            && sp.width == output_width
+            && sp.height == output_height
+    });
+    if current_matches {
+        return Ok(&mut current.as_mut().expect("checked above").handle);
+    }
+
     let graphics = ctx
         .graphics()
         .ok_or_else(|| NodeError::msg("fixture sample point allocation requires graphics"))?;
-    if stale {
-        drop(current.take());
-        let buffer = graphics
+    // Reuse the buffer when only the key changed; recreate when the count did.
+    let mut handle = match current.take() {
+        Some(sp) if sp.handle.count() == count => sp.handle,
+        _ => graphics
             .create_sample_points(count)
-            .map_err(err_ctx("fixture sample point allocation"))?;
-        *current = Some(buffer);
+            .map_err(err_ctx("fixture sample point allocation"))?,
+    };
+
+    // Regenerate coordinates transiently from the mapping — this is the one
+    // place they exist; the resident per-lamp state is the channel list
+    // alone. Runs only when the (mapping, size, count) key changes, never
+    // per frame.
+    let generated = lpc_model::nodes::fixture::generate_mapping_points(mapping, 1, 1);
+    if generated.len() as u32 != count {
+        return Err(NodeError::msg(format!(
+            "fixture sample points out of sync with channels: mapping generated {} points for {} channels",
+            generated.len(),
+            count
+        )));
     }
-    let buffer = current
-        .as_mut()
-        .ok_or_else(|| NodeError::msg("fixture sample points missing after allocation"))?;
-    let mut coords = vec![0i32; points.len() * 2];
-    for (dst, point) in coords.chunks_exact_mut(2).zip(points) {
-        dst[0] = normalized_q16_to_pixel_q16(point.x_norm_q16, output_width);
-        dst[1] = normalized_q16_to_pixel_q16(point.y_norm_q16, output_height);
+    let mut coords = vec![0i32; generated.len() * 2];
+    for (dst, point) in coords.chunks_exact_mut(2).zip(&generated) {
+        dst[0] = normalized_q16_to_pixel_q16(normalized_f32_to_q16(point.center[0]), output_width);
+        dst[1] = normalized_q16_to_pixel_q16(normalized_f32_to_q16(point.center[1]), output_height);
     }
     graphics
-        .write_sample_points(buffer, &coords)
+        .write_sample_points(&mut handle, &coords)
         .map_err(err_ctx("fixture sample point write"))?;
-    Ok(buffer)
+
+    *current = Some(FixtureSamplePoints {
+        handle,
+        mapping_version,
+        width: output_width,
+        height: output_height,
+    });
+    Ok(&mut current.as_mut().expect("just stored").handle)
 }
 
 fn render_direct_fixture_control(
-    sample_points: &mut Option<SamplePointsHandle>,
+    sample_points: &mut Option<FixtureSamplePoints>,
     sample_target: &mut Option<SampleOutHandle>,
-    points: &[DirectSamplePoint],
+    mapping: &MappingConfig,
+    mapping_version: Revision,
+    channels: &[u32],
     visual_product: VisualProduct,
     request: &ControlRenderRequest,
     target: ControlRenderTarget<'_>,
@@ -919,9 +955,16 @@ fn render_direct_fixture_control(
         ));
     }
 
-    let point_buf =
-        ensure_fixture_sample_points(sample_points, points, settings.width, settings.height, ctx)?;
-    let sample_buf = ensure_fixture_sample_target(sample_target, points.len() as u32, ctx)?;
+    let point_buf = ensure_fixture_sample_points(
+        sample_points,
+        mapping,
+        mapping_version,
+        channels.len() as u32,
+        settings.width,
+        settings.height,
+        ctx,
+    )?;
+    let sample_buf = ensure_fixture_sample_target(sample_target, channels.len() as u32, ctx)?;
     ctx.sample_visual_into(
         visual_product,
         crate::products::visual::VisualSampleBufferRequest {
@@ -943,8 +986,8 @@ fn render_direct_fixture_control(
     target.samples.fill(0);
     let brightness = settings.brightness.to_q32() / 255.to_q32();
     let mut written_samples = 0usize;
-    for (point, rgba) in points.iter().zip(sampled.chunks_exact(4)) {
-        let base = (point.channel as usize).saturating_mul(3);
+    for (channel, rgba) in channels.iter().zip(sampled.chunks_exact(4)) {
+        let base = (*channel as usize).saturating_mul(3);
         if base + 3 > expected_samples {
             continue;
         }
@@ -1750,6 +1793,106 @@ mod tests {
             }
         }
         TextureRenderProduct::new(width, height, format, pixels).map_err(err_ctx("solid texture"))
+    }
+
+    /// Coordinates are written only when the (mapping, size, count) key
+    /// changes — never per frame — and a size change MUST rewrite them.
+    /// Stale coordinates here fail silently as subtly-wrong sampling, the
+    /// failure mode of `docs/debt/s3-frame-cost-scales-per-fixture.md`; the
+    /// per-frame rewrite this replaced was also ~8 B/LED of transient churn
+    /// every frame.
+    #[test]
+    #[cfg(feature = "node-shader")]
+    fn sample_point_coords_rewrite_only_when_the_key_changes() {
+        struct NoServices;
+        impl crate::node::ControlRenderServices for NoServices {
+            fn render_texture(
+                &mut self,
+                _product: VisualProduct,
+                _request: &RenderTextureRequest,
+            ) -> Result<TextureRenderProduct, NodeError> {
+                Err(NodeError::msg("unused"))
+            }
+            fn render_texture_into(
+                &mut self,
+                _product: VisualProduct,
+                _request: &RenderTextureRequest,
+                _target: &mut lp_gfx::TextureHandle,
+            ) -> Result<(), NodeError> {
+                Err(NodeError::msg("unused"))
+            }
+            fn sample_visual_into(
+                &mut self,
+                _product: VisualProduct,
+                _request: VisualSampleBufferRequest<'_>,
+                _target: VisualSampleTarget<'_>,
+            ) -> Result<(), NodeError> {
+                Err(NodeError::msg("unused"))
+            }
+        }
+
+        let graphics: Arc<dyn lp_gfx::LpGraphics> = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ));
+        let mut services = NoServices;
+        let ctx = ControlRenderContext::new(
+            lpc_model::NodeId::new(1),
+            Revision::new(1),
+            Some(graphics.clone()),
+            0.0,
+            None,
+            &mut services,
+        );
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
+            2.0,
+        );
+        let ver = Revision::new(7);
+        let mut current = None;
+
+        let handle = ensure_fixture_sample_points(&mut current, &mapping, ver, 2, 4, 4, &ctx)
+            .expect("first ensure");
+        assert_eq!(
+            graphics.read_sample_points(handle).expect("read"),
+            vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
+            "fresh buffer carries pixel-space coords for 4x4"
+        );
+
+        // Poke garbage in, then re-ensure with the SAME key: nothing may be
+        // rewritten. (A rewrite here would silently restore the old
+        // every-frame churn.)
+        graphics
+            .write_sample_points(handle, &[111, 222, 333, 444])
+            .expect("poke");
+        let handle = ensure_fixture_sample_points(&mut current, &mapping, ver, 2, 4, 4, &ctx)
+            .expect("same-key ensure");
+        assert_eq!(
+            graphics.read_sample_points(handle).expect("read"),
+            vec![111, 222, 333, 444],
+            "an unchanged key must not rewrite the buffer"
+        );
+
+        // A render-size change is part of the key and must rewrite.
+        let handle = ensure_fixture_sample_points(&mut current, &mapping, ver, 2, 4, 8, &ctx)
+            .expect("resized ensure");
+        assert_eq!(
+            graphics.read_sample_points(handle).expect("read"),
+            vec![2 * 65536, 4 * 65536, 4 * 65536, 4 * 65536],
+            "a height change must rescale the y coordinates"
+        );
+
+        // A mapping-version change must rewrite too.
+        graphics
+            .write_sample_points(handle, &[9, 9, 9, 9])
+            .expect("poke");
+        let handle =
+            ensure_fixture_sample_points(&mut current, &mapping, Revision::new(8), 2, 4, 8, &ctx)
+                .expect("remapped ensure");
+        assert_eq!(
+            graphics.read_sample_points(handle).expect("read"),
+            vec![2 * 65536, 4 * 65536, 4 * 65536, 4 * 65536],
+            "a mapping change must regenerate the coordinates"
+        );
     }
 
     /// A ticked engine holding one directly-sampled two-lamp fixture fed by
