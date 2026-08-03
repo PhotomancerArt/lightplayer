@@ -100,3 +100,59 @@ for M6:
 - Note: just lands on "name your device" and "Connected — nothing loaded"
 - Trace: s6-corrupt-lpfs-project.failed.jsonl (109 events)
 
+## 2026-08-03T22:53:00.349Z — s5-foreign-firmware
+
+- Expected: state:foreign-firmware (missing: state:foreign-firmware)
+- Observed (trace summary):
+  - flow   selecting-provider → discovering-endpoints
+  - flow   discovering-endpoints → selecting-endpoint
+  - flow   selecting-endpoint → connecting
+  - state  · → booting
+  - flow   connecting → connected
+  - pool   install (Device)
+  - state  booting → gone
+  - flow   connected → discovering-endpoints
+  - flow   discovering-endpoints → selecting-endpoint
+  - flow   selecting-endpoint → connecting
+  - state  · → booting
+  - flow   connecting → connected
+  - pool   install (Device)
+  - state  booting → gone
+- Note: the device just appears for a moment then disappears.
+- Trace: s5-foreign-firmware.failed.jsonl (71 events)
+
+
+### Addendum — s5 is a DETERMINISTIC reproduction of defect (3)
+
+The WLED board did not land `unresponsive` (the predicted classifier
+gap). It landed **`gone` — twice — with the auto-connect sweep
+re-attaching in between**:
+
+    state  · → booting ; pool install ; state booting → gone
+    flow   connected → discovering-endpoints → … → connecting
+    state  · → booting ; pool install ; state booting → gone
+
+That is the multi-board roadmap's reported defect (3) verbatim: "the
+device just disconnects after a moment in the ui" (Yona, 2026-08-02
+walk) — and s5 now reproduces it ON DEMAND from a scripted setup, which
+is exactly what M7 was told it would have to hunt for on hardware.
+
+Two candidate mechanisms, distinguishable by ONE observation — whether
+`/dev/cu.usbmodem*` disappears while it is happening (`ls /dev | grep
+usb` during the cycle):
+
+1. **Board-side USB re-enumeration.** The image is WLED's
+   `ESP32-S3_8MB_qspi`; an S3 whose flash is OPI (N8R8) boot-loops on a
+   qspi image, and every reboot re-enumerates USB — the port really
+   does vanish and return. Trying `WLED_16.0.1_ESP32-S3_8MB_opi.bin`
+   would settle it: if the disconnects stop, it was the flash mode.
+2. **Studio-side**: the transport drops while the port stays present —
+   which would make this the same class as the original defect and a
+   confounder-free reproduction for M7.
+
+Either answer is worth having. If (1), s5 needs the right image and the
+classifier gap is still untested (WLED remains unrecognized — the
+safe-to-replace list holds one entry). If (2), M7 starts with a
+scripted repro instead of a hardware hunt.
+
+Trace: s5-foreign-firmware.failed.jsonl (71 events, both cycles).
