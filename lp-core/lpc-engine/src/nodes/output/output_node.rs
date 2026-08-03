@@ -187,14 +187,14 @@ impl NodeRuntime for OutputNode {
         self.publish_channel_buffer(ctx)
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         // Fully re-established on the next consume: the resolve path resizes
         // to the control extent and renders the whole target. The runtime

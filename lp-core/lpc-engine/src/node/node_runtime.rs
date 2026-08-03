@@ -96,12 +96,12 @@ pub trait NodeRuntime {
         Ok(AssetRefreshResult::Unused)
     }
 
-    fn destroy(&mut self, ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError>;
+    fn destroy(&mut self, ctx: &mut DestroyCtx) -> Result<(), NodeError>;
 
     fn handle_memory_pressure(
         &mut self,
         level: PressureLevel,
-        ctx: &mut MemPressureCtx<'_>,
+        ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError>;
 
     /// Whether this node was denied a heavy allocation transient (a shader
@@ -201,14 +201,14 @@ mod tests {
     }
 
     impl NodeRuntime for DummyNode {
-        fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+        fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
             Ok(())
         }
 
         fn handle_memory_pressure(
             &mut self,
             _level: PressureLevel,
-            _ctx: &mut MemPressureCtx<'_>,
+            _ctx: &mut MemPressureCtx,
         ) -> Result<(), NodeError> {
             Ok(())
         }

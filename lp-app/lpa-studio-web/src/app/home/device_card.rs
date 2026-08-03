@@ -1744,7 +1744,7 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
 fn tab_icon(tab: DeviceCardTab) -> StudioIconName {
     match tab {
         DeviceCardTab::Status => StudioIconName::Play,
-        DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Project),
+        DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Module),
         DeviceCardTab::Settings => StudioIconName::Settings,
         DeviceCardTab::Performance => StudioIconName::Performance,
         DeviceCardTab::Console => StudioIconName::Console,

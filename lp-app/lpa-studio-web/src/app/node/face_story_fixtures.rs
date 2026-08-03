@@ -71,6 +71,7 @@ pub(crate) fn knob_control_stepped(
         widget: UiPanelWidget::Knob { min, max, step },
         value: slot_value,
         live_value: None,
+        panel_target: None,
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
@@ -98,6 +99,7 @@ pub(crate) fn fader_control(
         },
         value: slot_value,
         live_value: None,
+        panel_target: None,
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
@@ -121,6 +123,7 @@ pub(crate) fn toggle_control(
         widget: UiPanelWidget::Toggle,
         value: slot_value,
         live_value: None,
+        panel_target: None,
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
@@ -491,7 +494,7 @@ pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
 /// The node-select action a strip entry dispatches (story mock — dispatch
 /// goes to the story's no-op handler).
 fn entry_select_action(name: &str) -> UiAction {
-    UiAction::from_op(ControllerId::new("story.project"), ProjectEditorOp::Focus)
+    UiAction::from_op(ControllerId::new("story.module"), ProjectEditorOp::Focus)
         .with_label(format!("Select {name}"))
 }
 

@@ -90,7 +90,7 @@ fn authored_binding_to_the_default_channel_wins_over_the_default() {
         .filter(|binding| {
             matches!(
                 &binding.endpoint,
-                WireBindingEndpoint::Bus { channel } if channel == "time"
+                WireBindingEndpoint::Bus { channel, .. } if channel == "time"
             ) && binding.direction == lpc_wire::WireBindingDirection::Publishes
         })
         .collect();
@@ -161,7 +161,7 @@ fn assert_delta_binding(project: &mut Project, when: &str) {
         .find(|binding| {
             matches!(
                 &binding.endpoint,
-                WireBindingEndpoint::Bus { channel } if channel == "delta-t"
+                WireBindingEndpoint::Bus { channel, .. } if channel == "delta-t"
             )
         })
         .unwrap_or_else(|| {
@@ -218,10 +218,16 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         .base_fs_mut()
         .write_file(
             project_path.join("project.json").as_path(),
+            b"{\n  \"format\": 3\n}\n",
+        )
+        .expect("write container manifest");
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("module.json").as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"

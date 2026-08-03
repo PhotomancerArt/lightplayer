@@ -27,6 +27,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::slot_detail_button::primary_affordance;
+use crate::app::node::slot_edit_actions::panel_clear_action;
 use crate::app::node::{SlotDetailButton, SlotUnitSuffix};
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -124,6 +125,30 @@ fn PanelControlBody(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let bound = control.bound();
+    // A panel-targeted control with an ENGAGED writer gets the clear
+    // affordance (panel.md P2): a small ↺ beside the readout releasing the
+    // held value back to the authored wiring.
+    let clear = control
+        .panel_target
+        .as_ref()
+        .filter(|target| target.engaged)
+        .map(|target| {
+            let action = panel_clear_action(target);
+            rsx! {
+                button {
+                    class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:text-status-bound-foreground tw:opacity-70 tw:hover:opacity-100",
+                    r#type: "button",
+                    title: "Release the held panel value",
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        if let Some(handler) = on_action {
+                            handler.call(action.clone());
+                        }
+                    },
+                    StudioIcon { name: StudioIconName::Revert, size: 10 }
+                }
+            }
+        });
     // The live bus reading (display-only; P6 item 1): the readout leads
     // with it in the bound-violet family while the authored default — still
     // the edit target — rides secondary in parentheses.
@@ -134,12 +159,14 @@ fn PanelControlBody(
                 span { class: "tw:text-status-bound-foreground", title: "live bus value", "{live}" }
                 SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
                 span { class: "tw:text-dim-foreground", title: "authored default", "({control.value.display})" }
+                {clear}
             }
         },
         None => rsx! {
             span { class: "tw:inline-flex tw:items-baseline tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
                 span { "{control.value.display}" }
                 SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
+                {clear}
             }
         },
     };
@@ -159,6 +186,7 @@ fn PanelControlBody(
                     state: control.state.clone(),
                     bound,
                     address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
                 }
@@ -184,6 +212,7 @@ fn PanelControlBody(
                     state: control.state.clone(),
                     bound,
                     address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
                 }
@@ -203,6 +232,7 @@ fn PanelControlBody(
                         state: control.state.clone(),
                         bound,
                         address: control.address.clone(),
+                        panel_target: control.panel_target.clone(),
                         on_action,
                     }
                 }
@@ -336,6 +366,7 @@ mod tests {
             },
             value,
             live_value: None,
+            panel_target: None,
             unit: None,
             state,
             aspects: aspect_slot.visible_aspects(),

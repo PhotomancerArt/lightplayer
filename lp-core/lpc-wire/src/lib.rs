@@ -36,7 +36,7 @@ pub use messages::{
     ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
     RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, WireBindingDirection,
     WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireEffectiveBinding,
+    WireEffectiveBinding, WireScopeRef,
 };
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use project::{
@@ -47,7 +47,8 @@ pub use project::{
 };
 pub use project_command::{
     WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
-    WireProjectCommand, WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WirePanelClearRequest, WirePanelCommandResponse, WirePanelWriteRequest, WireProjectCommand,
+    WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 pub use project_inventory::{
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,

@@ -41,6 +41,62 @@ fn checked_in_examples_load_as_core_projects() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn checked_in_examples_rewrite_byte_identically() -> Result<()> {
+    // Mitosis invariant: loading and re-writing an unchanged project
+    // produces identical bytes for BOTH split files — the container
+    // manifest through `ProjectManifest::write_json`, the root module
+    // through the canonical slot writer.
+    use lpc_model::{NodeDef, ProjectManifest, SlotShapeRegistry};
+
+    let workspace_dir = workspace_dir();
+    let examples_dir = workspace_dir.join("examples");
+    let mut project_dirs = Vec::new();
+    collect_project_dirs(&examples_dir, &mut project_dirs)?;
+    project_dirs.sort();
+    let registry = SlotShapeRegistry::default();
+
+    let mut failures = Vec::new();
+    for project_dir in project_dirs {
+        let rel = project_dir
+            .strip_prefix(&workspace_dir)
+            .unwrap_or(&project_dir)
+            .display()
+            .to_string();
+
+        let manifest_text = std::fs::read_to_string(project_dir.join("project.json"))
+            .with_context(|| format!("{rel}: read project.json"))?;
+        match ProjectManifest::read_json(&manifest_text) {
+            Ok(manifest) if manifest.write_json() != manifest_text => {
+                failures.push(format!("{rel}: project.json is not canonical"));
+            }
+            Ok(_) => {}
+            Err(err) => failures.push(format!("{rel}: project.json: {err}")),
+        }
+
+        let module_text = std::fs::read_to_string(project_dir.join("module.json"))
+            .with_context(|| format!("{rel}: read module.json"))?;
+        match NodeDef::read_json(&registry, &module_text) {
+            Ok(def) => match def.write_json(&registry) {
+                Ok(rewritten) if rewritten != module_text => {
+                    failures.push(format!("{rel}: module.json is not canonical"));
+                }
+                Ok(_) => {}
+                Err(err) => failures.push(format!("{rel}: module.json rewrite: {err}")),
+            },
+            Err(err) => failures.push(format!("{rel}: module.json: {err}")),
+        }
+    }
+
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "example projects failed the byte-identity rewrite:\n{}",
+            failures.join("\n")
+        );
+    }
+    Ok(())
+}
+
 fn workspace_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

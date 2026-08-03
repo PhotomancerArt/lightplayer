@@ -335,14 +335,14 @@ impl NodeRuntime for ComputeShaderNode {
         Ok(AssetRefreshResult::Refreshed)
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         // Nothing droppable — see the sibling comment in `shader_node.rs`.
         Ok(())

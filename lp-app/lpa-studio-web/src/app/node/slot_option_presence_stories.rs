@@ -279,7 +279,7 @@ fn xy_value(value: [f32; 2]) -> UiSlotValue {
 
 fn story_slot_address(path: &str) -> ProjectSlotAddress {
     ProjectSlotAddress::new(
-        ProjectNodeAddress::parse("/demo.project/clock.clock").expect("valid story node address"),
+        ProjectNodeAddress::parse("/demo.module/clock.clock").expect("valid story node address"),
         ProjectSlotRoot::def(),
         SlotPath::parse(path).expect("valid story slot path"),
     )

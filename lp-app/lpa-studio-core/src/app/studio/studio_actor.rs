@@ -517,6 +517,26 @@ impl CommandPlan {
 /// change what a path *means*, so each queued gesture must reach the server
 /// in order.
 fn push_action_coalesced(actions: &mut Vec<UiAction>, action: UiAction) {
+    if let Some(op) = action.op_as::<crate::PanelWriteOp>() {
+        // Panel writes coalesce per (scope, channel) with the same
+        // tail-scan rule: a knob-drag flood collapses to the newest value,
+        // and any non-PanelWrite action is a barrier (a queued clear must
+        // reach the server between two writes, in order).
+        let key = (op.scope, op.channel.clone());
+        for queued in actions.iter_mut().rev() {
+            match queued.op_as::<crate::PanelWriteOp>() {
+                Some(queued_op) => {
+                    if (queued_op.scope, queued_op.channel.clone()) == key {
+                        *queued = action;
+                        return;
+                    }
+                }
+                _ => break,
+            }
+        }
+        actions.push(action);
+        return;
+    }
     let Some(SlotEditOp::SetValue { address, .. }) = action.op_as::<SlotEditOp>() else {
         actions.push(action);
         return;

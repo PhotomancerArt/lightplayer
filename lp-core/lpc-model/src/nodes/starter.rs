@@ -232,7 +232,7 @@ mod tests {
     use alloc::string::ToString;
 
     const ALL_KINDS: &[NodeKind] = &[
-        NodeKind::Project,
+        NodeKind::Module,
         NodeKind::Button,
         NodeKind::Clock,
         NodeKind::Texture,

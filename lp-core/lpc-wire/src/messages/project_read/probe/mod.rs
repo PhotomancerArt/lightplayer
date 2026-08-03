@@ -8,6 +8,7 @@ mod render_product_probe;
 pub use binding_graph_probe::{
     BindingGraphProbeRequest, BindingGraphProbeResult, WireBindingDirection, WireBindingEndpoint,
     WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding,
+    WireScopeRef,
 };
 pub use control_product_probe::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,

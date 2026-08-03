@@ -91,57 +91,146 @@ impl Engine {
 
         let mut bindings = Vec::new();
         let mut wire_index: VecMap<BindingRef, u32> = VecMap::new();
+        let mut scoped_rows = Vec::new();
         for (binding_ref, entry) in self.tree().bindings_with_refs() {
             wire_index.insert(binding_ref, bindings.len() as u32);
             bindings.push(wire_effective_binding(entry));
+            scoped_rows.push((entry.owner, entry.clone()));
+        }
+        // Endpoint scopes need tree lookups, which borrow-conflict with the
+        // iteration above — annotate in a second pass.
+        for (binding, (owner, entry)) in bindings.iter_mut().zip(scoped_rows.iter()) {
+            if let lpc_wire::WireBindingEndpoint::Bus { scope, .. } = &mut binding.endpoint {
+                *scope = match binding.direction {
+                    lpc_wire::WireBindingDirection::Publishes => {
+                        self.tree().node_scope(*owner).map(wire_scope_ref)
+                    }
+                    lpc_wire::WireBindingDirection::Consumes => {
+                        self.tree().bus_read_scope(*owner).map(wire_scope_ref)
+                    }
+                };
+            }
+            let _ = entry;
         }
 
-        let channel_names: Vec<(ChannelName, Kind)> = self
-            .tree()
-            .bus_channels()
-            .map(|(name, kind)| (name.clone(), kind))
-            .collect();
+        // Channels list PER SCOPE (wire 8): same-named channels in
+        // different scopes are distinct entries, and display strings are a
+        // client concern. Sink scopes list too — a playlist entry's panel
+        // control reads its live/engaged state off the entry's own
+        // (scope, channel) row (panel.md §3, the per-entry held value) —
+        // but presentation surfaces (the bus listing, binding pickers)
+        // are expected to filter `scope.is_sink()` rows out: R2 keeps sink
+        // channels invisible to enclosing READERS, which is a resolution
+        // property, not a wire omission. Non-sink scopes list first so
+        // name-keyed readers keep finding the enclosing row. A scope-less
+        // tree (test harness without assigned scopes) falls back to the
+        // flat listing.
+        let scopes: Vec<Option<crate::node::ScopeRef>> = {
+            let mut all: Vec<_> = self.tree().scopes();
+            all.sort_by_key(|scope| scope.is_sink());
+            if all.is_empty() {
+                alloc::vec![None]
+            } else {
+                all.into_iter().map(Some).collect()
+            }
+        };
+        let root_scope = self.tree().node_scope(self.tree().root());
 
-        let mut channels = Vec::with_capacity(channel_names.len());
-        for (name, kind) in channel_names {
-            let mut providers = self.tree().providers_for_bus(&name);
-            // Highest priority first; stable by binding ref within a priority.
-            providers.sort_by_key(|(binding_ref, entry)| {
-                (core::cmp::Reverse(entry.priority), *binding_ref)
-            });
-            let providers = providers
-                .iter()
-                .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied())
-                .collect();
-            let consumers = self
-                .tree()
-                .consumers_for_bus(&name)
-                .iter()
-                .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied())
-                .collect();
-
-            let value = request.include_values.then(|| {
-                match self.resolve_bus_channel_value(registry, &name) {
-                    Ok(production) => WireBusChannelValue {
-                        revision,
-                        value: production.value_leaf().map(|leaf| leaf.value().clone()),
-                        error: None,
-                    },
-                    Err(error) => WireBusChannelValue {
-                        revision,
-                        value: None,
-                        error: Some(format!("{error:?}")),
-                    },
+        let mut channels = Vec::new();
+        for scope in scopes {
+            let scope_channels: Vec<(ChannelName, Kind)> = match scope {
+                Some(scope) => self.tree().scope_channels(scope),
+                None => self
+                    .tree()
+                    .bus_channels()
+                    .map(|(name, kind)| (name.clone(), kind))
+                    .collect(),
+            };
+            for (name, kind) in scope_channels {
+                // An engaged panel writer surfaces as a provider row with
+                // Panel origin — synthesized here (it lives in the side
+                // store, not in any node's binding set) so the UI can
+                // render engaged state from the same graph it already
+                // reads.
+                let panel_row = scope.and_then(|scope| {
+                    self.panel_writers()
+                        .get(scope, &name)
+                        .map(|writer| WireEffectiveBinding {
+                            owner: scope.owner(),
+                            node: scope.owner(),
+                            slot: None,
+                            direction: WireBindingDirection::Publishes,
+                            endpoint: WireBindingEndpoint::Literal {
+                                value: writer.value.clone(),
+                            },
+                            origin: WireBindingOrigin::Panel,
+                            priority: BindingPriority::panel().as_i32(),
+                            kind,
+                        })
+                });
+                let panel_index = panel_row.map(|row| {
+                    let index = bindings.len() as u32;
+                    bindings.push(row);
+                    index
+                });
+                let mut providers = match scope {
+                    Some(scope) => self.tree().providers_for_bus_in_scope(scope, &name),
+                    None => self.tree().providers_for_bus(&name),
+                };
+                // Highest priority first; stable by binding ref within a
+                // priority.
+                providers.sort_by_key(|(binding_ref, entry)| {
+                    (core::cmp::Reverse(entry.priority), *binding_ref)
+                });
+                let providers: Vec<u32> = panel_index
+                    .into_iter()
+                    .chain(
+                        providers
+                            .iter()
+                            .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied()),
+                    )
+                    .collect();
+                let consumers = match scope {
+                    Some(scope) => self.tree().consumers_for_bus_in_scope(scope, &name),
+                    None => self.tree().consumers_for_bus(&name),
                 }
-            });
+                .iter()
+                .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied())
+                .collect();
 
-            channels.push(WireBusChannel {
-                name: name.0.clone(),
-                kind: Some(kind),
-                providers,
-                consumers,
-                value,
-            });
+                let value = (request.include_values
+                    && self.bus_probe_value_is_sink_demand_free(scope, &name))
+                .then(
+                    || match self.resolve_bus_channel_value(registry, scope, &name) {
+                        Ok(production) => WireBusChannelValue {
+                            revision,
+                            value: production.value_leaf().map(|leaf| leaf.value().clone()),
+                            error: None,
+                        },
+                        Err(error) => WireBusChannelValue {
+                            revision,
+                            value: None,
+                            error: Some(format!("{error:?}")),
+                        },
+                    },
+                );
+
+                // Root-scope role, decided engine-side ONCE: the primary
+                // visual is the root scope's listing of the vocabulary
+                // channel the root module's mirror reads. The name
+                // comparison lives only here, next to the vocabulary.
+                let primary_visual = name.0 == lpc_model::PRIMARY_VISUAL_CHANNEL
+                    && (scope == root_scope || root_scope.is_none());
+                channels.push(WireBusChannel {
+                    scope: scope.map(wire_scope_ref),
+                    name: name.0.clone(),
+                    kind: Some(kind),
+                    providers,
+                    consumers,
+                    value,
+                    primary_visual,
+                });
+            }
         }
 
         BindingGraphProbeResult::Graph(WireBindingGraph {
@@ -149,6 +238,44 @@ impl Engine {
             bindings,
             channels,
         })
+    }
+
+    /// Whether resolving `(scope, channel)`'s value from a probe stays free
+    /// of sink-scope demand — the R2 no-demand property ("a probe pull must
+    /// never render an inactive playlist entry"), kept at the value-request
+    /// seam now that sink scopes list their channel rows.
+    ///
+    /// Mirrors the resolution walk (panel overlay included): the value is
+    /// resolvable when the WINNING provider level is either a panel writer
+    /// (a literal — no demand), a non-sink level (probe demand on enclosing
+    /// producers is today's accepted behavior), all-literal sink providers,
+    /// or nothing at all (a provider-less channel resolves without ticking
+    /// anything). Only a sink level winning with a producer-backed source
+    /// is refused — that value would have rendered the entry.
+    fn bus_probe_value_is_sink_demand_free(
+        &self,
+        scope: Option<crate::node::ScopeRef>,
+        channel: &ChannelName,
+    ) -> bool {
+        let Some(mut scope) = scope else {
+            return true;
+        };
+        loop {
+            if self.panel_writers().get(scope, channel).is_some() {
+                return true;
+            }
+            let candidates = self.tree().providers_for_bus_in_scope(scope, channel);
+            if !candidates.is_empty() {
+                return !scope.is_sink()
+                    || candidates
+                        .iter()
+                        .all(|(_, entry)| matches!(entry.source, BindingSource::Literal(_)));
+            }
+            match self.tree().parent_scope(scope) {
+                Some(parent) => scope = parent,
+                None => return true,
+            }
+        }
     }
 
     pub(super) fn read_project_control_product_probe(
@@ -233,6 +360,16 @@ fn linear_unorm16_to_srgb8(value: u16) -> u8 {
 /// exists, otherwise the produced source feeding a bus channel. A binding
 /// with no local slot (literal or bus-to-bus bridge publishing to a
 /// channel) anchors to its owner with no slot path.
+/// Project an engine scope into its wire form.
+fn wire_scope_ref(scope: crate::node::ScopeRef) -> lpc_wire::WireScopeRef {
+    match scope {
+        crate::node::ScopeRef::Module { owner } => lpc_wire::WireScopeRef::Module { owner },
+        crate::node::ScopeRef::Sink { owner, entry } => {
+            lpc_wire::WireScopeRef::Sink { owner, entry }
+        }
+    }
+}
+
 fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
     let origin = wire_binding_origin(entry.priority);
     let (node, slot, direction, endpoint) = match (&entry.source, &entry.target) {
@@ -247,6 +384,7 @@ fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
             Some(slot.clone()),
             WireBindingDirection::Publishes,
             WireBindingEndpoint::Bus {
+                scope: None,
                 channel: channel.0.clone(),
             },
         ),
@@ -258,6 +396,7 @@ fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
             None,
             WireBindingDirection::Publishes,
             WireBindingEndpoint::Bus {
+                scope: None,
                 channel: channel.0.clone(),
             },
         ),
@@ -279,6 +418,8 @@ fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
 fn wire_binding_origin(priority: BindingPriority) -> WireBindingOrigin {
     if priority == BindingPriority::default_fallback() {
         WireBindingOrigin::Default
+    } else if priority == BindingPriority::panel() {
+        WireBindingOrigin::Panel
     } else {
         WireBindingOrigin::Authored
     }
@@ -294,6 +435,7 @@ fn wire_endpoint_from_source(source: &BindingSource) -> WireBindingEndpoint {
             slot: slot.clone(),
         },
         BindingSource::BusChannel(channel) => WireBindingEndpoint::Bus {
+            scope: None,
             channel: channel.0.clone(),
         },
     }
@@ -367,7 +509,7 @@ mod tests {
         assert_eq!(provider.origin, WireBindingOrigin::Authored);
         assert!(matches!(
             &provider.endpoint,
-            WireBindingEndpoint::Bus { channel } if channel == "video"
+            WireBindingEndpoint::Bus { channel, .. } if channel == "video"
         ));
         assert_eq!(
             provider.slot.as_ref(),
@@ -379,7 +521,7 @@ mod tests {
         assert_eq!(consumer.direction, WireBindingDirection::Consumes);
         assert!(matches!(
             &consumer.endpoint,
-            WireBindingEndpoint::Bus { channel } if channel == "video"
+            WireBindingEndpoint::Bus { channel, .. } if channel == "video"
         ));
 
         let value = channel.value.as_ref().expect("value requested");

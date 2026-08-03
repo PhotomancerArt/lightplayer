@@ -174,7 +174,7 @@ impl<'a> EngineSession<'a> {
         query: &QueryKey,
     ) -> Result<ResolvedRoute, SessionResolveError> {
         match query {
-            QueryKey::Bus(channel) => self.compute_bus_route(host, channel),
+            QueryKey::Bus { scope, channel } => self.compute_bus_route(host, *scope, channel),
             QueryKey::ConsumedSlot { node, slot } => {
                 self.compute_consumed_route(host, *node, slot, query)
             }
@@ -188,12 +188,15 @@ impl<'a> EngineSession<'a> {
     fn compute_bus_route<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
+        scope: Option<crate::node::ScopeRef>,
         channel: &ChannelName,
     ) -> Result<ResolvedRoute, SessionResolveError> {
         self.resolver.counters_mut().binding_lookups += 1;
-        let candidates = host.providers_for_bus(channel);
+        let candidates = host.providers_for_bus(scope, channel);
         let (binding_ref, entry) = select_highest_priority_bus_provider(channel, &candidates)?;
-        let target = self.route_target(&entry.source);
+        // A provider that itself sources another channel reads it from its
+        // OWN scope (R4/R5) — the winning entry's owner supplies it.
+        let target = self.route_target(host, entry.owner, &entry.source);
         Ok(ResolvedRoute::Binding {
             binding_ref,
             target,
@@ -246,15 +249,22 @@ impl<'a> EngineSession<'a> {
         Ok(match host.binding_for_consumed_slot(node, slot) {
             Some((binding_ref, entry)) => ResolvedRoute::Binding {
                 binding_ref,
-                target: self.route_target(&entry.source),
+                target: self.route_target(host, entry.owner, &entry.source),
             },
             None => ResolvedRoute::Produce,
         })
     }
 
     /// Reduce a binding source to what the frame needs: a literal to
-    /// materialize, or the id of the query to resolve.
-    fn route_target(&mut self, source: &BindingSource) -> RouteTarget {
+    /// materialize, or the id of the query to resolve. `reader` is the
+    /// binding's owner — a bus source resolves from ITS scope (R5), which
+    /// becomes part of the interned key.
+    fn route_target<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &H,
+        reader: NodeId,
+        source: &BindingSource,
+    ) -> RouteTarget {
         match source {
             BindingSource::Literal(spec) => RouteTarget::Literal(spec.clone()),
             BindingSource::ProducedSlot { node, slot } => {
@@ -264,7 +274,10 @@ impl<'a> EngineSession<'a> {
                 }))
             }
             BindingSource::BusChannel(channel) => {
-                RouteTarget::Query(self.resolver.intern_query(&QueryKey::Bus(channel.clone())))
+                RouteTarget::Query(self.resolver.intern_query(&QueryKey::Bus {
+                    scope: host.node_scope(reader),
+                    channel: channel.clone(),
+                }))
             }
         }
     }
@@ -282,18 +295,22 @@ impl<'a> EngineSession<'a> {
         out: &mut Vec<(BindingRef, RouteTarget)>,
     ) -> Result<(), SessionResolveError> {
         let BindingSource::BusChannel(channel) = source else {
-            let target = self.route_target(source);
+            let target = self.route_target(host, binding_ref.owner, source);
             out.push((binding_ref, target));
             return Ok(());
         };
 
-        let bus_query = QueryKey::Bus(channel.clone());
+        let scope = host.node_scope(binding_ref.owner);
+        let bus_query = QueryKey::Bus {
+            scope,
+            channel: channel.clone(),
+        };
         let bus_id = self.resolver.intern_query(&bus_query);
         self.trace
             .try_push_active(bus_id, &bus_query)
             .map_err(SessionResolveError::from)?;
         self.resolver.counters_mut().binding_lookups += 1;
-        let mut providers = host.providers_for_bus(channel);
+        let mut providers = host.providers_for_bus(scope, channel);
         providers.sort_by_key(|(provider_ref, entry)| (entry.priority, *provider_ref));
         for (provider_ref, provider) in providers.iter() {
             if let Err(err) = self.expand_merge_inputs(host, *provider_ref, &provider.source, out) {
@@ -532,7 +549,11 @@ mod tests {
                 .collect()
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(
+            &self,
+            _scope: Option<crate::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
             self.entries
                 .iter()
                 .filter_map(|(binding_ref, entry)| {
@@ -582,8 +603,12 @@ mod tests {
             self.bindings.bindings_for_consumed_slot(node, slot)
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
-            self.bindings.providers_for_bus(channel)
+        fn providers_for_bus(
+            &self,
+            scope: Option<crate::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(scope, channel)
         }
     }
 
@@ -655,7 +680,13 @@ mod tests {
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let pv = session
-            .resolve(&mut host, &QueryKey::Bus(c))
+            .resolve(
+                &mut host,
+                &QueryKey::Bus {
+                    scope: None,
+                    channel: c,
+                },
+            )
             .expect("resolve bus");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(9.0)));
         assert_eq!(host.produce_calls, 0);
@@ -729,7 +760,13 @@ mod tests {
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let pv = session
-            .resolve(&mut host, &QueryKey::Bus(outer))
+            .resolve(
+                &mut host,
+                &QueryKey::Bus {
+                    scope: None,
+                    channel: outer,
+                },
+            )
             .expect("bus chain");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(3.25)));
     }
@@ -749,8 +786,12 @@ mod tests {
             ))
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
-            self.bindings.providers_for_bus(channel)
+        fn providers_for_bus(
+            &self,
+            scope: Option<crate::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(scope, channel)
         }
     }
 
@@ -789,7 +830,13 @@ mod tests {
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let err = session
-            .resolve(&mut host, &QueryKey::Bus(a))
+            .resolve(
+                &mut host,
+                &QueryKey::Bus {
+                    scope: None,
+                    channel: a,
+                },
+            )
             .expect_err("cycle");
         assert!(matches!(err, SessionResolveError::Cycle { .. }));
     }
@@ -849,8 +896,12 @@ mod tests {
             self.bindings.binding_for_consumed_slot(node, slot)
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
-            self.bindings.providers_for_bus(channel)
+        fn providers_for_bus(
+            &self,
+            scope: Option<crate::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(scope, channel)
         }
 
         fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
@@ -1032,8 +1083,12 @@ mod tests {
             }
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
-            self.bindings.providers_for_bus(channel)
+        fn providers_for_bus(
+            &self,
+            scope: Option<crate::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(scope, channel)
         }
     }
 
@@ -1063,14 +1118,28 @@ mod tests {
         let mut host = TraceHost { node, bindings };
         let mut session = ResolveSession::new(frame, &mut resolver, trace);
         session
-            .resolve(&mut host, &QueryKey::Bus(bus.clone()))
+            .resolve(
+                &mut host,
+                &QueryKey::Bus {
+                    scope: None,
+                    channel: bus.clone(),
+                },
+            )
             .unwrap();
         // Second resolve — cache hit on bus
-        session.resolve(&mut host, &QueryKey::Bus(bus)).unwrap();
+        session
+            .resolve(
+                &mut host,
+                &QueryKey::Bus {
+                    scope: None,
+                    channel: bus,
+                },
+            )
+            .unwrap();
 
         let evs = session.trace().events();
         assert!(evs.iter().any(|e| {
-            matches!(e, ResolveTraceEvent::BeginQuery(QueryKey::Bus(b)) if b.0 == "out")
+            matches!(e, ResolveTraceEvent::BeginQuery(QueryKey::Bus { scope: None, channel: b }) if b.0 == "out")
         }));
         assert!(
             evs.iter()
@@ -1086,7 +1155,7 @@ mod tests {
         )));
         assert!(evs.iter().any(|e| matches!(
             e,
-            ResolveTraceEvent::CacheHit(QueryKey::Bus(b)) if b.0 == "out"
+            ResolveTraceEvent::CacheHit(QueryKey::Bus { scope: None, channel: b }) if b.0 == "out"
         )));
     }
 }

@@ -9,11 +9,10 @@ use lpc_model::{
     MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
     NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
-    ProjectFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
+    ProjectInventory, ProjectManifest, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
     SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotRoleResolution,
     SlotShapeLookup, SlotShapeView, StaticSlotShape, StoredSlotEdit, WithRevision,
-    lookup_slot_data, lp_value_matches_type, read_project_format_json, resolve_slot_role,
-    slot::SlotPersistence,
+    lookup_slot_data, lp_value_matches_type, resolve_slot_role, slot::SlotPersistence,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
@@ -35,6 +34,13 @@ pub struct ProjectRegistry {
 }
 
 impl ProjectRegistry {
+    /// Project-root path of the `project.json` container manifest the load
+    /// gate reads. Not a node artifact — see [`lpc_model::ProjectManifest`].
+    pub const CONTAINER_MANIFEST_PATH: &'static str = "/project.json";
+
+    /// Project-root path of the root module node artifact.
+    pub const ROOT_MODULE_PATH: &'static str = "/module.json";
+
     pub fn new() -> Self {
         Self {
             artifacts: ArtifactStore::new(),
@@ -51,9 +57,9 @@ impl ProjectRegistry {
         frame: Revision,
         ctx: &ParseCtx<'_>,
     ) -> Result<LoadResult, RegistryError> {
+        self.check_container_manifest(fs)?;
         let artifact = self.artifacts.register_file(root_path.to_path_buf(), frame);
         let root = NodeDefLocation::artifact_root(artifact);
-        self.check_root_format(fs, &root)?;
         let before = ProjectInventory::new();
 
         self.root = Some(root.clone());
@@ -64,32 +70,39 @@ impl ProjectRegistry {
         Ok(LoadResult::new(root, changes))
     }
 
-    /// Reject project roots whose authored `format` is missing or unsupported.
+    /// Reject projects whose `project.json` container manifest is missing,
+    /// unreadable, or carries a missing/unsupported `format`.
     ///
-    /// The probe runs on the raw root bytes before anything parses, so a
-    /// future-format project fails with the dedicated error instead of a deep
-    /// parse failure. Unreadable, malformed, or non-`Project` roots skip the
-    /// check and keep their existing diagnostics.
-    fn check_root_format(
-        &mut self,
-        fs: &dyn LpFs,
-        root: &NodeDefLocation,
-    ) -> Result<(), RegistryError> {
-        let Ok(bytes) = self.artifacts.read_bytes(&root.artifact, fs) else {
-            return Ok(());
-        };
-        let Ok(text) = core::str::from_utf8(&bytes) else {
-            return Ok(());
-        };
-        let Ok(ProjectFormatProbe::Project { format }) = read_project_format_json(text) else {
-            return Ok(());
-        };
-        if format == Some(PROJECT_FORMAT_VERSION) {
+    /// The manifest is read via the streaming probe on the raw bytes before
+    /// anything parses — one code path on host, browser, and device — so a
+    /// future-format project fails with the dedicated error instead of a
+    /// deep parse failure. A missing or malformed container manifest is a
+    /// HARD refuse (settled D-A): the manifest carries the format gate, so
+    /// skipping it would let unversioned projects load ungated.
+    fn check_container_manifest(&self, fs: &dyn LpFs) -> Result<(), RegistryError> {
+        use lpfs::AsLpPath;
+
+        let bytes = fs
+            .read_file(Self::CONTAINER_MANIFEST_PATH.as_path())
+            .map_err(|error| RegistryError::Manifest {
+                message: format!(
+                    "missing or unreadable {}: {error:?}",
+                    Self::CONTAINER_MANIFEST_PATH
+                ),
+            })?;
+        let text = core::str::from_utf8(&bytes).map_err(|_| RegistryError::Manifest {
+            message: format!("{} is not UTF-8", Self::CONTAINER_MANIFEST_PATH),
+        })?;
+        let manifest =
+            ProjectManifest::read_json(text).map_err(|error| RegistryError::Manifest {
+                message: format!("{}: {error}", Self::CONTAINER_MANIFEST_PATH),
+            })?;
+        if manifest.format == Some(PROJECT_FORMAT_VERSION) {
             Ok(())
         } else {
             Err(RegistryError::FormatVersion {
                 expected: PROJECT_FORMAT_VERSION,
-                found: format,
+                found: manifest.format,
             })
         }
     }
@@ -1645,15 +1658,16 @@ mod tests {
     }
 
     #[test]
-    fn project_root_format_and_nodes_reject_writes_but_name_stays_writable() {
-        // P6 flat-root policy: `ProjectDef.format` and `ProjectDef.nodes` are
-        // role `Fixed` — only the loader format gate / future upgrader
-        // (format) and dedicated project ops (nodes, Studio authoring M2)
-        // own them. The role inherits into the subtree (map entries, option
-        // interior); `name` stays writable (project rename is legitimate).
+    fn module_root_nodes_reject_writes_and_container_fields_are_unknown() {
+        // Post-mitosis: `ModuleDef.nodes` carries role `Fixed` — only
+        // dedicated project ops own it, and the role inherits into the
+        // subtree (map entries, option interior). The container identity
+        // fields (`format`/`uid`/`name`) are no longer slots on the root at
+        // all (they live in the `project.json` manifest), so edits addressed
+        // at them reject as unknown paths rather than role violations.
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
-        let project = ArtifactLocation::file("/project.json");
+        let module = ArtifactLocation::file("/module.json");
 
         let results = mutate_batch(
             &fs,
@@ -1661,55 +1675,53 @@ mod tests {
             &shapes,
             vec![
                 MutationOp::PutSlotEdit {
-                    artifact: project.clone(),
-                    // Deliberately not PROJECT_FORMAT_VERSION: the write must
-                    // be rejected, so it has to be distinguishable from the
-                    // value the fixture already carries.
-                    edit: SlotEdit::assign_value(
-                        SlotPath::parse("format.some").unwrap(),
-                        LpValue::U32(999),
-                    ),
-                },
-                MutationOp::PutSlotEdit {
-                    artifact: project.clone(),
+                    artifact: module.clone(),
                     edit: SlotEdit::ensure_present(SlotPath::parse("nodes[strip]").unwrap()),
                 },
                 MutationOp::PutSlotEdit {
-                    artifact: project.clone(),
+                    artifact: module.clone(),
                     edit: SlotEdit::remove(SlotPath::parse("nodes[clock]").unwrap()),
-                },
-                MutationOp::PutSlotEdit {
-                    artifact: project.clone(),
-                    edit: SlotEdit::assign_value(
-                        SlotPath::parse("name.some").unwrap(),
-                        LpValue::String("Renamed".into()),
-                    ),
                 },
             ],
         );
-
-        for rejected in &results[0..3] {
+        for rejected in &results {
             assert_eq!(
                 rejection_reason(rejected),
                 &MutationRejectionReason::NotWritable
             );
         }
-        assert_accepted(&results[3], true);
+
+        for path in ["format.some", "name.some"] {
+            let results = mutate_batch(
+                &fs,
+                &mut registry,
+                &shapes,
+                vec![MutationOp::PutSlotEdit {
+                    artifact: module.clone(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse(path).unwrap(),
+                        LpValue::String("x".into()),
+                    ),
+                }],
+            );
+            assert!(
+                matches!(
+                    rejection_reason(&results[0]),
+                    MutationRejectionReason::UnknownSlotPath | MutationRejectionReason::NotWritable
+                ),
+                "container field {path} must not be editable on the module root: {:?}",
+                results[0]
+            );
+        }
 
         let def = registry
-            .def(&NodeDefLocation::artifact_root(project))
-            .expect("project def entry")
+            .def(&NodeDefLocation::artifact_root(module))
+            .expect("module def entry")
             .state
             .loaded_def()
-            .expect("project def loaded")
-            .as_project()
-            .expect("project def");
-        assert_eq!(def.name(), Some("Renamed"));
-        assert_eq!(
-            def.format(),
-            Some(PROJECT_FORMAT_VERSION),
-            "format edit never applied"
-        );
+            .expect("module def loaded")
+            .as_module()
+            .expect("module def");
         assert!(def.nodes.entries.contains_key("clock"));
         assert!(!def.nodes.entries.contains_key("strip"));
     }
@@ -2216,7 +2228,7 @@ mod tests {
             .stage_dedicated_op(
                 &fs,
                 MutationOp::PutSlotEdit {
-                    artifact: ArtifactLocation::file("/project.json"),
+                    artifact: ArtifactLocation::file("/module.json"),
                     edit: SlotEdit::ensure_present(SlotPath::parse("nodes[clock]").unwrap()),
                 },
                 Revision::new(14),
@@ -2327,7 +2339,7 @@ mod tests {
             .stage_dedicated_op(
                 &fs,
                 MutationOp::PutSlotEdit {
-                    artifact: ArtifactLocation::file("/project.json"),
+                    artifact: ArtifactLocation::file("/module.json"),
                     edit: SlotEdit::ensure_present(SlotPath::parse("nodes[pixels]").unwrap()),
                 },
                 Revision::new(14),
@@ -3681,12 +3693,12 @@ mod tests {
 
     fn clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -3705,7 +3717,7 @@ mod tests {
         registry
             .load_root(
                 &fs,
-                lpfs::LpPath::new("/project.json"),
+                lpfs::LpPath::new("/module.json"),
                 Revision::new(1),
                 &ParseCtx { shapes },
             )
@@ -3722,12 +3734,12 @@ mod tests {
     /// BindingDef default None).
     fn bound_clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -3747,7 +3759,7 @@ mod tests {
         registry
             .load_root(
                 &fs,
-                lpfs::LpPath::new("/project.json"),
+                lpfs::LpPath::new("/module.json"),
                 Revision::new(1),
                 &ParseCtx { shapes },
             )
@@ -3759,12 +3771,12 @@ mod tests {
     /// authored to a non-default value ("rgb"; the shape default is "grb").
     fn fixture_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
   }
@@ -3783,7 +3795,7 @@ mod tests {
         registry
             .load_root(
                 &fs,
-                lpfs::LpPath::new("/project.json"),
+                lpfs::LpPath::new("/module.json"),
                 Revision::new(1),
                 &ParseCtx { shapes },
             )
@@ -3801,12 +3813,12 @@ mod tests {
     /// entry) — the move-op fixtures.
     fn path_points_fixture_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
   }
@@ -3840,7 +3852,7 @@ mod tests {
         registry
             .load_root(
                 &fs,
-                lpfs::LpPath::new("/project.json"),
+                lpfs::LpPath::new("/module.json"),
                 Revision::new(1),
                 &ParseCtx { shapes },
             )

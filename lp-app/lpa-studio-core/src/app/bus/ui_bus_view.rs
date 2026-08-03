@@ -21,6 +21,13 @@ impl UiBusView {
 /// One bus channel row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiBusChannelView {
+    /// Structured scope this channel entry lists in — the Studio-side key
+    /// is `(scope, name)`; same-named channels in different scopes are
+    /// distinct rows. `None` for pre-scope snapshots/fixtures.
+    pub scope: Option<lpc_wire::WireScopeRef>,
+    /// Derived display label for the scope (owner node's label; empty for
+    /// the root scope). Presentation only — never used as a key.
+    pub scope_label: Option<String>,
     /// Channel name (`time`, `trigger`, `visual.out`, …).
     pub name: String,
     /// Established semantic kind label, when known.
@@ -140,6 +147,8 @@ mod tests {
 
     fn channel() -> UiBusChannelView {
         UiBusChannelView {
+            scope: None,
+            scope_label: None,
             name: "trigger".to_string(),
             kind: Some("Instant".to_string()),
             value: Some("msg 3".to_string()),
@@ -189,7 +198,7 @@ mod tests {
     fn sites_with_focus_carry_clickable_actions() {
         let mut ch = channel();
         ch.writers[0].focus = Some(crate::UiAction::from_op(
-            crate::ControllerId::new("test.project"),
+            crate::ControllerId::new("test.module"),
             crate::ProjectEditorOp::Focus,
         ));
         let aspects = ch.visible_aspects();

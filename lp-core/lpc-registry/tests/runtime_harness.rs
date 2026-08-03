@@ -84,13 +84,13 @@ fn fake_runtime_consumes_load_apply_and_commit_change_summaries() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 3\n}\n");
     write_file(
         &mut fs,
-        "/project.json",
+        "/module.json",
         r#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -115,7 +115,7 @@ fn fake_runtime_consumes_load_apply_and_commit_change_summaries() {
 
     let mut registry = ProjectRegistry::new();
     let load = registry
-        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/module.json"), Revision::new(1), &ctx)
         .unwrap();
     let mut runtime = FakeRuntime::default();
     runtime.apply(&registry, &load.changes);
