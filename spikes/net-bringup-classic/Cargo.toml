@@ -1,0 +1,71 @@
+# Deliberately NOT a workspace member: M1 bench spike for the networking
+# roadmap (~/.photomancer/planning/lp2025/2026-08-03-1438-wifi-discovery/).
+# Probes the Zook-copy DOM-Z-102-family board's Ethernet: MDIO scan → PHY id,
+# then DHCP + TCP echo, printing RAM/flash numbers for gate G1.
+#
+# esp-hal is pinned to a git-main rev because the classic-ESP32 EMAC driver
+# (merged 2026-05-17, PR #5546) is not in any crates.io release yet. All
+# esp-* siblings ride the same rev; embassy crates match what the in-tree
+# embassy_ethernet example pins.
+#
+# Run it in place (esp toolchain via rust-toolchain.toml):
+#
+#     cd spikes/net-bringup-classic && cargo build --release
+#     espflash flash --monitor target/xtensa-esp32-none-elf/release/net-bringup-classic
+
+[package]
+name = "net-bringup-classic"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+embassy-executor = "0.10.0"
+embassy-net = { version = "0.9.0", features = [
+    "dhcpv4",
+    "medium-ethernet",
+    "tcp",
+    "dns",
+] }
+embassy-time = "0.5.0"
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec", features = [
+    "esp32",
+    "panic-handler",
+    "println",
+] }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec", features = ["esp32"] }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec", features = [
+    "esp32",
+    "log-04",
+    "unstable",
+] }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec", features = ["esp32", "log-04"] }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec", features = [
+    "esp32",
+    "embassy",
+    "log-04",
+] }
+futures-util = { version = "0.3", default-features = false }
+static_cell = "2.1.0"
+
+[features]
+default = []
+# Clock topology fallbacks if ExternalRefClock (osc → GPIO0) finds no PHY:
+# WT32-ETH01-style boards gate the oscillator behind GPIO16 — drive it high.
+osc-en-16 = []
+# APLL clock-out topologies (ESP32 synthesizes 50 MHz for the PHY). NOTE:
+# APLL mode is documented incompatible with wifi/ESP-NOW — if the board
+# needs this, that fact goes straight into the G1 report.
+apll-out-16 = []
+apll-out-17 = []
+# PHY hardware reset on GPIO5 (ESP32-Ethernet-Kit convention). Off by
+# default: GPIO5 is a strapping pin and its wiring on this board is unknown.
+phy-reset-5 = []
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+
+[workspace]
