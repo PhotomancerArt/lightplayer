@@ -52,9 +52,19 @@ pub fn handle_bench(args: BenchArgs) -> Result<()> {
     println!("start:  {start_leds} LEDs");
     println!();
 
+    let expected_commit = packaged_commit(&repo_root, &build.id);
+    if expected_commit.is_none() {
+        eprintln!(
+            "note:   no packaged manifest for `{}` — the image on the board cannot be \
+             verified against a build (run `lp-cli firmware package {}` to enable that check)",
+            build.id, build.id
+        );
+    }
+
     let outcome = run_bench(BenchPlan {
         port,
         expected_package: build.package.clone(),
+        expected_commit,
         endpoint,
         start_leds,
         verbose: args.verbose,
@@ -141,6 +151,23 @@ fn today() -> String {
 
 /// Anything the run learned that the numbered fields cannot hold — today, the
 /// OOM byte counts the firmware prints but the wire drops.
+/// Commit recorded in the last `firmware package` output for this build, if
+/// any. Read straight out of the distribution manifest's extracted `core`,
+/// so it is the commit of the bytes that were actually written.
+fn packaged_commit(repo_root: &Path, build_id: &str) -> Option<String> {
+    let path = repo_root
+        .join("target/studio-web-assets/firmware")
+        .join(build_id)
+        .join("manifest.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let manifest: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    manifest
+        .get("core")?
+        .get("commit")?
+        .as_str()
+        .map(str::to_owned)
+}
+
 fn notes(outcome: &BenchOutcome) -> Option<String> {
     if outcome.oom_stats.is_empty() {
         return None;
@@ -151,20 +178,25 @@ fn notes(outcome: &BenchOutcome) -> Option<String> {
 fn print_summary(outcome: &BenchOutcome, record: &MeasurementRecord, path: &Path) {
     println!();
     println!(
-        "{:>7}  {:>9}  {:>10}  {}",
-        "LEDs", "result", "free heap", "frames"
+        "{:>7}  {:>9}  {:>10}  {:>10}  {}",
+        "LEDs", "result", "free heap", "used heap", "frames"
     );
     for step in &outcome.steps {
         println!(
-            "{:>7}  {:>9}  {:>10}  {}",
+            "{:>7}  {:>9}  {:>10}  {:>10}  {}",
             step.leds,
             match step.outcome {
                 StepOutcome::Survived => "survived",
                 StepOutcome::Died => "oom",
             },
             free_heap_cell(step),
+            used_heap_cell(step),
             step.frames
         );
+    }
+    if let Some(fit) = per_led_fit(&outcome.steps) {
+        println!();
+        println!("{fit}");
     }
     println!();
     println!(
@@ -183,6 +215,48 @@ fn print_summary(outcome: &BenchOutcome, record: &MeasurementRecord, path: &Path
         println!("{notes}");
     }
     println!("record   {}", path.display());
+}
+
+/// Least-squares fit of `used` against LED count over the surviving steps.
+/// The slope is the marginal cost of one LED; the intercept is everything
+/// that does not scale with LEDs (idle + project residency + whatever the
+/// compile left behind). Two points is enough to be useful, so the bar is
+/// low — this is a reading aid printed beside the data it came from, not a
+/// checked-in claim.
+fn per_led_fit(steps: &[BenchStepReport]) -> Option<String> {
+    let points: Vec<(f64, f64)> = steps
+        .iter()
+        .filter_map(|step| Some((f64::from(step.leds), f64::from(step.max_used_bytes?))))
+        .collect();
+    if points.len() < 2 {
+        return None;
+    }
+    let n = points.len() as f64;
+    let mean_x = points.iter().map(|(x, _)| x).sum::<f64>() / n;
+    let mean_y = points.iter().map(|(_, y)| y).sum::<f64>() / n;
+    let covariance: f64 = points
+        .iter()
+        .map(|(x, y)| (x - mean_x) * (y - mean_y))
+        .sum();
+    let variance: f64 = points.iter().map(|(x, _)| (x - mean_x).powi(2)).sum();
+    if variance == 0.0 {
+        return None;
+    }
+    let slope = covariance / variance;
+    let intercept = mean_y - slope * mean_x;
+    Some(format!(
+        "used ≈ {:.1} B/LED × leds + {:.0} B fixed  ({} points)",
+        slope,
+        intercept,
+        points.len()
+    ))
+}
+
+fn used_heap_cell(step: &BenchStepReport) -> String {
+    match step.max_used_bytes {
+        Some(bytes) => format!("{}k", bytes / 1024),
+        None => "-".to_string(),
+    }
 }
 
 fn free_heap_cell(step: &BenchStepReport) -> String {
