@@ -654,17 +654,15 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
     );
 
     // …and the clear releases it (the ↺ path).
-    handle
-        .tx
-        .send(StudioCommand::Action(UiAction::from_op(
-            ControllerId::new(ProjectController::NODE_ID),
-            crate::PanelClearOp {
-                request: lpc_wire::WirePanelClearRequest::Channel {
-                    scope: target.scope,
-                    channel: target.channel.clone(),
-                },
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Channel {
+                scope: target.scope,
+                channel: target.channel.clone(),
             },
-        )));
+        },
+    )));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());

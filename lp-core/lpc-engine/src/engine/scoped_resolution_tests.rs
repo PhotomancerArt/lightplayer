@@ -277,7 +277,9 @@ fn sink_channel_rows_carry_panel_writer_values_without_demand() {
         .find(|channel| channel.name == "glow")
         .expect("the sink-consumed channel lists");
     assert!(
-        glow.scope.as_ref().is_some_and(lpc_wire::WireScopeRef::is_sink),
+        glow.scope
+            .as_ref()
+            .is_some_and(lpc_wire::WireScopeRef::is_sink),
         "glow lists in the entry's sink scope: {:?}",
         glow.scope
     );
