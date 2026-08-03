@@ -109,6 +109,23 @@ pub fn NodeFaceBody(
                         on_action,
                     }
                 },
+                // The output face's own surface — board diagram + channel
+                // rows — is P5's work. Core already derives the DTO
+                // (`UiOutputFace`), so until the component lands the card
+                // renders its drawers alone: the same rows, no new
+                // presentation invented here.
+                UiNodeFace::Output(_) => rsx! {
+                    NodeCardDrawers {
+                        node,
+                        sections,
+                        advanced_open: card_ui.advanced_open,
+                        debug_open: card_ui.debug_open,
+                        platform,
+                        pending_edits,
+                        dirty_tint,
+                        on_action,
+                    }
+                },
             }}
         }
     }

@@ -1,6 +1,6 @@
 //! The kind-specific face variants a node card can render.
 
-use crate::{UiFixtureFace, UiPlaylistFace, UiShaderFace};
+use crate::{UiFixtureFace, UiOutputFace, UiPlaylistFace, UiShaderFace};
 
 /// Kind-specific permanent face for a node card.
 ///
@@ -16,4 +16,7 @@ pub enum UiNodeFace {
     /// Playlist card: entry strip; the active child's real card renders
     /// below via the existing [`crate::UiNodeChild`].
     Playlist(UiPlaylistFace),
+    /// Output card: one row per physical wire, over the running device's
+    /// board diagram when its board is known.
+    Output(UiOutputFace),
 }
