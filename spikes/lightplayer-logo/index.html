@@ -93,6 +93,14 @@
     --stage-mark: #94b8aa; --stage-ink: #c7cbd0; --stage-strong: #fffaf0; --stage-dim: #94b8aa; }
   body[data-canvas=light]    { --stage-bg: #f0eee6; --stage-line: #d8d4c8;
     --stage-mark: #475550; --stage-ink: #3a4048; --stage-strong: #14181d; --stage-dim: #5c6b66; }
+  /* chip tint (gate-1 feedback: consider a white chip) */
+  body[data-tint=white]  .stage { --stage-mark: var(--stage-strong); }
+  body[data-tint=subtle] .stage { --stage-mark: var(--stage-ink); }
+  /* chip stroke weight (gate-1 feedback: more technical — stroke width and such) */
+  body[data-wt=fine]  .mark .pkg  { stroke-width: 1.2px; }
+  body[data-wt=fine]  .mark .lens { stroke-width: 1.05px; }
+  body[data-wt=heavy] .mark .pkg  { stroke-width: 2.15px; }
+  body[data-wt=heavy] .mark .lens { stroke-width: 1.85px; }
   .stage {
     background: var(--stage-bg); border: 1px solid var(--stage-line); border-radius: 8px;
     display: flex; align-items: center; gap: 16px; padding: 14px 16px;
@@ -180,12 +188,20 @@
   .a-rword .word .tri-a { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
   /* E · breathe */
   .a-glow .mark .play { animation: kf-glow calc(3.2s/var(--spd)) ease-in-out infinite; }
-  /* F · hover spark: static until hovered */
+  /* F · hover rainbow: static until hovered, then the full D treatment
+     (gate-1 feedback: D is great but distracting in-app — make it a hover state) */
   .a-hover .mark .play { animation: none; }
   .a-hover:hover .mark .play { animation: kf-rfill calc(2.5s/var(--spd)) linear infinite; }
   .a-hover:hover .word .cw-via, .a-hover:hover .word .dm-dot {
     animation: kf-rfill calc(2.5s/var(--spd)) linear infinite;
     animation-delay: calc(var(--i,0) * -.15s);
+  }
+  .a-hover:hover .word.cased, .a-hover:hover .word .w1, .a-hover:hover .word .w2 {
+    background: linear-gradient(90deg,var(--r1),var(--r2),var(--r3),var(--r4),var(--r5),var(--r6),var(--r1));
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent !important;
+    animation: kf-sweep calc(3.5s/var(--spd)) linear infinite;
   }
 
   /* motion gating */
@@ -275,7 +291,7 @@
   @media (max-width: 720px) { body { padding: 18px 14px 120px; } }
 </style>
 </head>
-<body data-canvas="terminal" data-motion="on" data-tone="duo" data-case="auto" style="--spd:1">
+<body data-canvas="terminal" data-motion="on" data-tone="duo" data-case="auto" data-tint="white" data-wt="std" style="--spd:1">
 
 <h1>LightPlayer logo — concept spike</h1>
 <p class="hint">
@@ -285,6 +301,9 @@
   §1 tunes the mark, §2 auditions wordmark typography, §3 auditions motion, and §4 is a live
   brand sheet: click a card in §1/§2/§3 and the sheet recomposes. Display faces load from
   Google Fonts (badged if offline); Inter &amp; JetBrains Mono are the repo's vendored production fonts.
+  <br><b>Gate-1 decisions (2026-08-03):</b> rainbow wordmark = hover state in-app (concept F), loud D
+  reserved for marketing surfaces; chip goes <b>white + more technical</b> (Chip tint/stroke controls,
+  mark H); wordmark stays a basic sans — no need to get fancy.
 </p>
 
 <div class="controls">
@@ -312,6 +331,16 @@
     <button class="chip" data-ctl="tone" data-v="duo" aria-pressed="true">Duo</button>
     <button class="chip" data-ctl="tone" data-v="mono">Mono</button>
     <button class="chip" data-ctl="tone" data-v="accent">Accent “Light”</button>
+  </span>
+  <span class="group"><b>Chip tint</b>
+    <button class="chip" data-ctl="tint" data-v="white" aria-pressed="true">White</button>
+    <button class="chip" data-ctl="tint" data-v="heading">Heading green</button>
+    <button class="chip" data-ctl="tint" data-v="subtle">Subtle</button>
+  </span>
+  <span class="group"><b>Chip stroke</b>
+    <button class="chip" data-ctl="wt" data-v="std" aria-pressed="true">Std</button>
+    <button class="chip" data-ctl="wt" data-v="fine">Fine</button>
+    <button class="chip" data-ctl="wt" data-v="heavy">Heavy</button>
   </span>
 </div>
 
@@ -415,6 +444,17 @@ const MARKS = {
       + spiralPlay(15.5, 16, 5.6, 4, 1.15) + `</svg>` },
   spiralfree: { label: 'G · Free spiral', tag: 'heritage', note: 'The spiral play alone, no package — closest to the 2014 mark. For comparison against the chip direction.',
     build: (s, c) => svgOpen(s, c) + sig() + spiralPlay(14.8, 16, 11.5, 6, 1.5) + `</svg>` },
+  tech: { label: 'H · Datasheet fine', tag: 'gate-1 feedback', note: 'The technical read: thin silkscreen strokes, squarer corners, slim pads, pin-1 dot. Meant to wear the White tint.',
+    build: (s, c) => svgOpen(s, c)
+      + `<rect class="pkg" x="5.5" y="5.5" width="21" height="21" rx="1.3" stroke-width="1.25"/>`
+      + `<rect class="pad p1" x="3.6" y="8.2" width="1.9" height="4.2" rx="0.6"/>`
+      + `<rect class="pad p2" x="26.5" y="8.2" width="1.9" height="4.2" rx="0.6"/>`
+      + `<rect class="pad p3" x="26.5" y="19.6" width="1.9" height="4.2" rx="0.6"/>`
+      + `<rect class="pad p4" x="3.6" y="19.6" width="1.9" height="4.2" rx="0.6"/>`
+      + sig()
+      + `<circle class="pin1" cx="8.5" cy="8.5" r="0.95"/>`
+      + `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.05"/>`
+      + `<path class="play" d="${PLAY_D}"/></svg>` },
 };
 
 /* ============================ wordmarks ============================= */
@@ -548,15 +588,15 @@ const ANIMS = {
   rplay: { label: 'A · LED lens', cls: 'a-rplay', note: 'Only the play cycles through the LED rainbow. The chip stays quiet; the pixel is alive.' },
   chase: { label: 'B · Pad chase', cls: 'a-chase', note: 'The four pads pulse in rotation, each holding its own hue — an addressable chain in miniature.' },
   flow:  { label: 'C · Signal flow', cls: 'a-flow', note: 'Data streams in the left pads and out the right; the play breathes as frames pass through.' },
-  rword: { label: 'D · Rainbow wordmark', cls: 'a-rword', note: 'The loud one: gradient sweeps the text (or chases the vias/pixels on custom letterforms), play synced.' },
+  rword: { label: 'D · Rainbow wordmark', cls: 'a-rword', note: 'The loud one. Gate-1: “great, but a tiny bit distracting in an actual app” — kept for marketing surfaces; in-app it becomes F.' },
   glow:  { label: 'E · Breathe', cls: 'a-glow', note: 'No rainbow — the accent play softly blooms, like a status LED idling.' },
-  hover: { label: 'F · Hover spark', cls: 'a-hover', note: 'Static brand; rainbow only under the cursor. The restrained default for real UI.' },
+  hover: { label: 'F · Hover rainbow', cls: 'a-hover', note: 'Static brand; hover plays the full D treatment (rainbow word + play). The in-app candidate per gate-1.' },
 };
 
 /* ============================== state =============================== */
 /* URL hash preseeds everything, e.g. #mark=escapes&font=circuit&anim=rword&canvas=light
    — handy for pointing at an exact composition in gate feedback. */
-const state = { mark: 'prod', font: 'inter', anim: 'rplay' };
+const state = { mark: 'tech', font: 'inter', anim: 'hover' };
 const hash = new URLSearchParams(location.hash.slice(1));
 for (const k of ['mark', 'font', 'anim']) {
   const v = hash.get(k);
@@ -566,6 +606,12 @@ for (const k of ['canvas', 'motion', 'tone', 'case']) {
   if (hash.get(k)) document.body.dataset[k] = hash.get(k);
 }
 if (hash.get('spd')) document.body.style.setProperty('--spd', hash.get('spd'));
+if (hash.get('sec')) { // e.g. #sec=2 — jump to a section (also used for screenshot capture)
+  addEventListener('load', () => setTimeout(() => {
+    const h = document.querySelectorAll('h2')[+hash.get('sec') - 1];
+    if (h) h.scrollIntoView({ block: 'start' });
+  }, 300));
+}
 
 /* ============================ section 1 ============================= */
 const markcards = document.getElementById('markcards');
