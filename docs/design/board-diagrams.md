@@ -20,6 +20,7 @@ rev 5, PR #222, two visual gates).
 | **Band** | Horizontal strip above/below the rails holding rows for top/bottom-edge pins (screw terminals etc.), which can't have vertical rows. |
 | **Leader** | Elbow line connecting a top/bottom pad to its band row. |
 | **Pad** | The pin's physical marker on the board edge, colored by role. Two styles via `pad_style`: the flat header/solder pad (default) and the **screw terminal** — a square block with a screw head, matching the band's terminal drawing, for boards whose rail pins are screw blocks (DIN-rail controllers like the DOM-Z-102). |
+| **Callout** | An instruction anchored to a feature: leader + dot + label, in anatomy gold. Answers "which button?" when silkscreen is too small to read. |
 | **Label** | The pin's name, silkscreen-style *inside* the board edge, colored by role. Keeps outside cells left-aligned into columns. |
 
 The annotated-anatomy story (`studio/boards/board-diagram/anatomy` in the
@@ -101,3 +102,41 @@ and pins already bound or reserved (onboard RGB).
 
 The discovery *mechanics* (driver rotation, channel budgets) are M7's plan;
 this section defines only the visual language the `swatch` mode renders.
+
+## Callouts
+
+A callout points at a feature and says what to do with it — "hold this
+while you plug in". Silkscreen on a thumb-sized board is unreadable, so
+naming a button in prose fails the user standing at the desk; pointing at
+it does not.
+
+`BoardDiagram` takes `callouts: Vec<BoardCallout>`, each a `CalloutTarget`
+(button by label, pin by GPIO or silkscreen label) plus its text. Anchors
+resolve against `BoardLayout`, so a callout lands exactly where the
+renderer drew the feature — buttons were lifted into the layout for this
+(their `y` may be expressed from the bottom edge, so only the layout knows
+where they end up).
+
+Two rules, settled at the M2b gate:
+
+- **One at a time.** A recovery ritual is a sequence — "hold BOOT", then
+  "tap RST" — so the drawing shows the action you take now. The prop is a
+  `Vec` because a doc figure may label several parts at once; instructional
+  callers pass one.
+- **Anatomy gold, never attention-orange.** A callout explains, it does not
+  alarm. Orange belongs to the card's own state, and a diagram that shouts
+  competes with the status beside it.
+
+Text carries what the drawing cannot. The DOM-Z-102's BOOT sits physically
+ON TOP of RST; a 2D board drawing can only place them adjacent, so the
+callout says "the TOP button of the pair".
+
+The margin a callout needs is **derived**, never passed in: text width is
+estimated from the character count (the engine is DOM-free and cannot
+measure glyphs) and the viewBox grows to fit. A caller who had to widen
+`DiagramMargin` by hand would eventually forget and ship clipped text —
+which is exactly what a fixed budget did during development.
+
+A callout whose target the board lacks is **dropped**, not drawn pointing
+at nothing: bad instruction data is the board editor's lint to catch, not
+the renderer's.

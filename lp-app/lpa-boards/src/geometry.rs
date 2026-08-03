@@ -246,6 +246,34 @@ pub struct TerminalBlock {
     pub label: Option<RowLabel>,
 }
 
+/// A button's drawn footprint. Lifted out of the renderer 2026-08-02 so
+/// callouts can anchor to the same coordinates the button is drawn at —
+/// this crate's rule is that geometry lives here and `BoardDiagram` only
+/// walks it, and buttons were the one feature still computing their own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ButtonLayout {
+    /// Silkscreen label ("BOOT", "RST").
+    pub label: String,
+    /// Cap center — what a callout points AT.
+    pub center: (f32, f32),
+    /// The button body.
+    pub rect: Rect,
+    pub cap_radius: f32,
+    /// Caption placement; `None` when labels are off.
+    pub caption: Option<RowLabel>,
+}
+
+/// A USB connector's drawn footprint — lifted alongside buttons so
+/// "plug in the USB cable" can point at it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsbLayout {
+    pub label: String,
+    /// Center of the connector body — what a callout points AT.
+    pub center: (f32, f32),
+    pub rect: Rect,
+    pub caption: Option<RowLabel>,
+}
+
 /// The fully resolved diagram geometry. All coordinates are board-local
 /// drawing units; the board's top-left corner is the origin, so rails extend
 /// into negative x and the band into negative y.
@@ -269,6 +297,8 @@ pub struct BoardLayout {
     pub right: Vec<RailRow>,
     pub band: Vec<BandRow>,
     pub terminals: Vec<TerminalBlock>,
+    pub buttons: Vec<ButtonLayout>,
+    pub usb: Vec<UsbLayout>,
 }
 
 impl BoardLayout {
@@ -462,6 +492,68 @@ impl BoardLayout {
         let vb_w = (board_w + cw_left + cw_right).max(band_right + cw_left + 6.0);
         let vb_h = board_h + 1.6 * u - vb_y;
 
+        // USB connectors sit on the bottom edge, half-overhanging it.
+        let usb: Vec<UsbLayout> = hw
+            .usb
+            .iter()
+            .map(|usb| UsbLayout {
+                label: usb.label.clone(),
+                center: (usb.x, board_h - 2.5),
+                rect: Rect {
+                    x: usb.x - 11.0,
+                    y: board_h - 9.0,
+                    w: 22.0,
+                    h: 13.0,
+                },
+                caption: opts.labels.then(|| RowLabel {
+                    text: usb.label.clone(),
+                    x: usb.x,
+                    y: board_h + 0.9 * u,
+                    start_anchored: false,
+                    kind: None,
+                    font_size: label_font,
+                }),
+            })
+            .collect();
+
+        // Buttons: a negative `y` means "from the bottom edge" (the sidecar
+        // convention), and the caption falls to whichever side has room.
+        let buttons: Vec<ButtonLayout> = hw
+            .buttons
+            .iter()
+            .map(|button| {
+                let by = if button.y < 0.0 {
+                    board_h + button.y
+                } else {
+                    button.y
+                };
+                let inner = button.x < board_w / 2.0;
+                ButtonLayout {
+                    label: button.label.clone(),
+                    center: (button.x, by),
+                    rect: Rect {
+                        x: button.x - 7.0,
+                        y: by - 5.0,
+                        w: 14.0,
+                        h: 10.0,
+                    },
+                    cap_radius: 2.6,
+                    caption: opts.labels.then(|| RowLabel {
+                        text: button.label.clone(),
+                        x: if inner {
+                            button.x + 10.0
+                        } else {
+                            button.x - 10.0
+                        },
+                        y: by + 2.5,
+                        start_anchored: inner,
+                        kind: None,
+                        font_size: label_font,
+                    }),
+                }
+            })
+            .collect();
+
         Self {
             mode: opts.mode,
             u,
@@ -478,6 +570,8 @@ impl BoardLayout {
             right,
             band,
             terminals,
+            buttons,
+            usb,
         }
     }
 

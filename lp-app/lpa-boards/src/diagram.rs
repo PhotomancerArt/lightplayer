@@ -8,11 +8,38 @@
 
 use dioxus::prelude::*;
 
+use crate::callout::BoardCallout;
 use crate::display_manifest::BoardDisplayFile;
 use crate::geometry::{
     BoardLayout, CellBody, CellLayout, DiagramMode, DiagramOptions, PinSwatch, RowLabel,
     WiredConnection, pad_css_suffix,
 };
+
+/// Callout label size, matching `.lpb-anat-label`'s `font-size`. The
+/// engine is deliberately DOM-free, so text width is ESTIMATED from the
+/// character count with the same per-char factor the row engine uses for
+/// cells — a fixed budget clipped long instructions, which is exactly the
+/// failure a derived margin exists to prevent.
+const CALLOUT_FONT: f32 = 9.0;
+/// Arrowhead length and half-width, in drawing units.
+const ARROW_LEN: f32 = 7.0;
+const ARROW_HALF_W: f32 = 3.2;
+const CALLOUT_CHAR_W: f32 = 0.72;
+
+/// Estimated on-screen width of a callout's RENDERED label, in drawing
+/// units — the step lead-in included, because it is drawn too. Measuring
+/// only `text` clipped every numbered callout.
+///
+/// The factor over-estimates on purpose: the label is semibold, and the
+/// costs are asymmetric — a generous guess adds whitespace, a tight one
+/// cuts words off.
+fn callout_label_width(callout: &crate::callout::CalloutPlacement) -> f32 {
+    let step_chars = callout
+        .step
+        .map(|step| format!("Step {step}. ").chars().count())
+        .unwrap_or(0);
+    (step_chars + callout.text.chars().count()) as f32 * CALLOUT_FONT * CALLOUT_CHAR_W + 8.0
+}
 
 /// Extra viewBox space around the board, in drawing units, for overlays that
 /// draw outside the layout (the anatomy story's callouts).
@@ -39,6 +66,11 @@ pub fn BoardDiagram(
     #[props(default)] wired: Vec<WiredConnection>,
     #[props(default)] swatches: Vec<PinSwatch>,
     #[props(default)] margin: DiagramMargin,
+    /// "Press THIS button" instructions (M2b). Anchored to the layout, so
+    /// they land on the feature the renderer drew; the margin they need is
+    /// derived, not hand-tuned by the caller.
+    #[props(default)]
+    callouts: Vec<BoardCallout>,
     /// Extra SVG content rendered above the board (annotation layers).
     #[props(default)]
     overlay: Option<Element>,
@@ -52,6 +84,28 @@ pub fn BoardDiagram(
     };
     let layout = BoardLayout::compute(&board, &options);
     let hw = &board.hw;
+
+    // Callouts extend past the board, so the viewBox has to grow for them.
+    // Deriving it here is the difference between an API and a trap: a caller
+    // who forgot to widen `margin` would get labels clipped at the edge.
+    let placed = layout.place_callouts(&callouts);
+    let (view_left, view_right) = (layout.view_box[0], layout.view_box[0] + layout.view_box[2]);
+    let margin = placed.iter().fold(margin, |margin, callout| {
+        // The text box runs OUTWARD from the label point, whichever way the
+        // label is anchored; the margin is how far that box escapes the
+        // current viewBox on each side.
+        let width = callout_label_width(callout);
+        let (text_left, text_right) = if callout.start_anchored {
+            (callout.label.0, callout.label.0 + width)
+        } else {
+            (callout.label.0 - width, callout.label.0)
+        };
+        DiagramMargin {
+            left: margin.left.max((view_left - text_left).max(0.0)),
+            right: margin.right.max((text_right - view_right).max(0.0)),
+            ..margin
+        }
+    });
 
     let [vx, vy, vw, vh] = layout.view_box;
     let (vx, vy) = (vx - margin.left, vy - margin.top);
@@ -141,50 +195,49 @@ pub fn BoardDiagram(
             }
 
             // ---- fixed hardware -----------------------------------------
-            for usb in hw.usb.iter() {
+            for usb in layout.usb.iter() {
                 rect {
                     class: "lpb-usb",
-                    x: "{usb.x - 11.0}",
-                    y: "{board_h - 9.0}",
-                    width: "22",
-                    height: "13",
+                    x: "{usb.rect.x}",
+                    y: "{usb.rect.y}",
+                    width: "{usb.rect.w}",
+                    height: "{usb.rect.h}",
                     rx: "3",
                 }
-                if labels {
+                if let Some(caption) = &usb.caption {
                     text {
                         class: "lpb-silk",
-                        x: "{usb.x}",
-                        y: "{board_h + 0.9 * layout.u}",
+                        x: "{caption.x}",
+                        y: "{caption.y}",
                         text_anchor: "middle",
-                        "{usb.label}"
+                        "{caption.text}"
                     }
                 }
             }
-            for button in hw.buttons.iter() {
-                {
-                    let by = if button.y < 0.0 { board_h + button.y } else { button.y };
-                    let inner = button.x < board_w / 2.0;
-                    let caption_x = if inner { button.x + 10.0 } else { button.x - 10.0 };
-                    let caption_anchor = if inner { "start" } else { "end" };
-                    rsx! {
-                        rect {
-                            class: "lpb-button",
-                            x: "{button.x - 7.0}",
-                            y: "{by - 5.0}",
-                            width: "14",
-                            height: "10",
-                            rx: "2",
-                        }
-                        circle { class: "lpb-button-cap", cx: "{button.x}", cy: "{by}", r: "2.6" }
-                        if labels {
-                            text {
-                                class: "lpb-silk",
-                                x: "{caption_x}",
-                                y: "{by + 2.5}",
-                                text_anchor: caption_anchor,
-                                "{button.label}"
-                            }
-                        }
+            // Buttons come from the LAYOUT (M2b): callouts anchor to the
+            // same coordinates, which only holds if one place computes them.
+            for button in layout.buttons.iter() {
+                rect {
+                    class: "lpb-button",
+                    x: "{button.rect.x}",
+                    y: "{button.rect.y}",
+                    width: "{button.rect.w}",
+                    height: "{button.rect.h}",
+                    rx: "2",
+                }
+                circle {
+                    class: "lpb-button-cap",
+                    cx: "{button.center.0}",
+                    cy: "{button.center.1}",
+                    r: "{button.cap_radius}",
+                }
+                if let Some(caption) = &button.caption {
+                    text {
+                        class: "lpb-silk",
+                        x: "{caption.x}",
+                        y: "{caption.y}",
+                        text_anchor: if caption.start_anchored { "start" } else { "end" },
+                        "{caption.text}"
                     }
                 }
             }
@@ -263,6 +316,41 @@ pub fn BoardDiagram(
                 }
             }
 
+            // Callouts sit under any story overlay, above the board. Bolder
+            // than the anatomy annotation they grew out of: an instruction
+            // someone follows at the desk has to win against the pin rows
+            // behind it, so the leader is solid and ends in an arrowhead
+            // rather than fading into a dot.
+            for callout in placed.iter() {
+                {
+                    // The head points along the lead, toward the feature.
+                    let (ax, ay) = callout.anchor;
+                    let dir = if callout.start_anchored { 1.0 } else { -1.0 };
+                    let base = ax + dir * ARROW_LEN;
+                    let head = format!(
+                        "M {ax} {ay} L {base} {} L {base} {} Z",
+                        ay - ARROW_HALF_W,
+                        ay + ARROW_HALF_W
+                    );
+                    rsx! {
+                        path {
+                            class: "lpb-callout-line",
+                            d: "M {callout.label.0} {callout.label.1 - 2.5} L {base} {ay}",
+                        }
+                        path { class: "lpb-callout-head", d: "{head}" }
+                        text {
+                            class: "lpb-callout-label",
+                            x: "{callout.label.0}",
+                            y: "{callout.label.1}",
+                            text_anchor: if callout.start_anchored { "start" } else { "end" },
+                            if let Some(step) = callout.step {
+                                tspan { class: "lpb-callout-step", "Step {step}. " }
+                            }
+                            "{callout.text}"
+                        }
+                    }
+                }
+            }
             if let Some(overlay) = overlay {
                 {overlay}
             }
