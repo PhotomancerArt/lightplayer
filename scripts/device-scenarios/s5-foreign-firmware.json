@@ -14,8 +14,10 @@
     }
   ],
   "manual": [
-    "Open the printed Studio URL and Connect to this board.",
-    "The card should read as replaceable foreign firmware.",
-    "Press Enter here to finish the capture."
-  ]
+    "Connect to this board.",
+    "The card should read as replaceable foreign firmware."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
 }

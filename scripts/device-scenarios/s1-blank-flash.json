@@ -14,9 +14,10 @@
     }
   ],
   "manual": [
-    "Open the printed Studio URL (capture streaming is armed).",
     "Click Connect and pick this board's port in Chrome's chooser.",
-    "Wait for the card to settle \u2014 it should read as blank flash / needs firmware.",
-    "Return here and press Enter to finish the capture."
-  ]
+    "Wait for the card to settle \u2014 it should read as blank flash / needs firmware."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
 }
