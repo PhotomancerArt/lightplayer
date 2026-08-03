@@ -13,11 +13,10 @@ fn snapshot_overlay_can_bootstrap_project_files() {
     let base = ProjectSnapshot::empty();
     let mut target = ProjectSnapshot::empty();
     target.insert(
-        LpPathBuf::from("/project.json"),
+        LpPathBuf::from("/module.json"),
         br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -38,7 +37,12 @@ fn snapshot_overlay_can_bootstrap_project_files() {
     );
 
     let overlay = derive_overlay_between_snapshots(&base, &target);
-    let fs = LpFsMemory::new();
+    let mut fs = LpFsMemory::new();
+    // The container manifest is not a node artifact, so it rides beside the
+    // snapshot-derived files rather than through the overlay.
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 3\n}\n")
+        .unwrap();
+    let fs = fs;
     let mut registry = ProjectRegistry::new();
     for (artifact, artifact_overlay) in overlay.iter() {
         let ArtifactOverlay::Asset { overlay: edit } = artifact_overlay else {
@@ -62,7 +66,7 @@ fn snapshot_overlay_can_bootstrap_project_files() {
 
     let mut loaded = ProjectRegistry::new();
     loaded
-        .load_root(&fs, LpPath::new("/project.json"), Revision::new(3), &ctx)
+        .load_root(&fs, LpPath::new("/module.json"), Revision::new(3), &ctx)
         .unwrap();
     assert_eq!(loaded.inventory().defs.len(), 2);
 }

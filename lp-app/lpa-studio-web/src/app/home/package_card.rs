@@ -390,7 +390,7 @@ mod tests {
     fn card(connected: Option<SyncRelation>, running_in_sim: bool) -> UiPackageCard {
         UiPackageCard {
             uid: "prj_1".to_string(),
-            kind: "Project".to_string(),
+            kind: "Module".to_string(),
             slug: "2026-07-09-1421-basic".to_string(),
             last_saved_at: None,
             provenance: None,

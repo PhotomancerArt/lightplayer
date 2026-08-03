@@ -14,7 +14,7 @@ fn site(label: &str, slot: Option<&str>, default_origin: bool) -> UiBusSiteView 
         slot: slot.map(str::to_string),
         default_origin,
         focus: Some(UiAction::from_op(
-            ControllerId::new("story.project"),
+            ControllerId::new("story.module"),
             ProjectEditorOp::Focus,
         )),
     }
@@ -26,6 +26,8 @@ fn fyeah_bus_view() -> UiBusView {
     UiBusView {
         channels: vec![
             UiBusChannelView {
+                scope: None,
+                scope_label: None,
                 name: "time".to_string(),
                 kind: Some("Instant".to_string()),
                 value: Some("3.333".to_string()),
@@ -35,6 +37,8 @@ fn fyeah_bus_view() -> UiBusView {
                 readers: vec![site("Playlist", Some("time"), false)],
             },
             UiBusChannelView {
+                scope: None,
+                scope_label: None,
                 name: "trigger".to_string(),
                 kind: Some("Instant".to_string()),
                 value: None,
@@ -50,6 +54,8 @@ fn fyeah_bus_view() -> UiBusView {
                 ],
             },
             UiBusChannelView {
+                scope: None,
+                scope_label: None,
                 name: "visual.out".to_string(),
                 kind: Some("Color".to_string()),
                 value: Some("visual product #5:0".to_string()),
@@ -59,6 +65,8 @@ fn fyeah_bus_view() -> UiBusView {
                 readers: vec![site("Fixture", Some("input"), false)],
             },
             UiBusChannelView {
+                scope: None,
+                scope_label: None,
                 name: "control.out".to_string(),
                 kind: Some("Color".to_string()),
                 value: None,

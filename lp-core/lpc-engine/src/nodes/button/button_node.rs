@@ -139,7 +139,7 @@ impl NodeRuntime for ButtonNode {
         Ok(ProduceResult::Produced)
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         self.input = None;
         self.opened = None;
         self.held_id_seq = None;
@@ -149,7 +149,7 @@ impl NodeRuntime for ButtonNode {
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }

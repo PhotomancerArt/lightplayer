@@ -113,6 +113,15 @@ impl ResolveError {
         ))
     }
 
+    /// True when this error is the "channel has no provider anywhere"
+    /// case — the one shape callers may treat as a legitimate empty
+    /// channel (module mirrors render cleared, R7). Keyed off the
+    /// [`SessionResolveError::NoBusProvider`] display form, which the
+    /// tick-resolver bridge flattens to a message; keep the two in sync.
+    pub fn is_no_bus_provider(&self) -> bool {
+        self.message.starts_with("no bus provider")
+    }
+
     /// Create an error for unresolvable binding.
     pub fn unresolvable(prop_path: impl Into<String>) -> Self {
         Self::new(format!(

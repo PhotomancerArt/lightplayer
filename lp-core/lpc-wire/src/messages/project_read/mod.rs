@@ -32,7 +32,7 @@ pub use probe::{
     ControlProductProbeResultHeader, ProjectProbeRequest, ProjectProbeResult,
     ProjectProbeResultHeader, RenderProductProbeRequest, RenderProductProbeResult,
     RenderProductProbeResultHeader, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
-    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding,
+    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding, WireScopeRef,
 };
 pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,

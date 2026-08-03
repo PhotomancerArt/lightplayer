@@ -24,6 +24,10 @@ pub fn demo_project_files() -> &'static [DemoProjectFile] {
             bytes: include_bytes!("../../../../../examples/fyeah-sign/project.json"),
         },
         DemoProjectFile {
+            relative_path: "module.json",
+            bytes: include_bytes!("../../../../../examples/fyeah-sign/module.json"),
+        },
+        DemoProjectFile {
             relative_path: "button.json",
             bytes: include_bytes!("../../../../../examples/fyeah-sign/button.json"),
         },
@@ -104,6 +108,14 @@ mod tests {
                 .unwrap()
                 .bytes,
             include_bytes!("../../../../../examples/fyeah-sign/project.json")
+        );
+        assert_eq!(
+            files
+                .iter()
+                .find(|file| file.relative_path == "module.json")
+                .unwrap()
+                .bytes,
+            include_bytes!("../../../../../examples/fyeah-sign/module.json")
         );
         // The fixture's mapping document must deploy with the project — its
         // absence fails the fixture at load (found the hard way when the M2

@@ -36,9 +36,9 @@ impl NodeRuntime for CorePlaceholderNode {
     /// A placeholder standing in for a GATEABLE kind reports the build gap.
     ///
     /// Two other placeholder shapes must stay silent: the synthetic spine
-    /// folder (`kind: None`), and the project ROOT — spelled
-    /// `new_leaf(NodeKind::Project)`, an always-on kind whose placeholder
-    /// means "the root has no behavior", never "this build lacks Project".
+    /// folder (`kind: None`), and the root MODULE — spelled
+    /// `new_leaf(NodeKind::Module)`, an always-on kind whose placeholder
+    /// means "the root has no behavior", never "this build lacks Module".
     /// [`LpFeature::for_node_kind`] draws exactly that line: a kind with no
     /// feature can never be gated out.
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
@@ -47,14 +47,14 @@ impl NodeRuntime for CorePlaceholderNode {
             .map(|_| NodeRuntimeStatus::Unsupported(Self::unsupported_kind_message(kind)))
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }

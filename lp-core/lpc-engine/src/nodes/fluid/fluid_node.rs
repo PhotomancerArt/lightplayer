@@ -123,14 +123,14 @@ impl NodeRuntime for FluidNode {
         Ok(ProduceResult::Produced)
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         self.solver = None;
         self.solver_config = None;
@@ -334,12 +334,13 @@ mod tests {
     #[test]
     fn fluid_node_loaded_from_project_produces_sampleable_visual_product() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -441,12 +442,13 @@ mod tests {
     #[test]
     fn fluid_node_consumes_compute_emitter_map_through_bus() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"

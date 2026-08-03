@@ -110,13 +110,13 @@ mod tests {
             ProjectEditorTarget::addressed_node(node_target())
                 .node_id()
                 .as_str(),
-            "studio|project|node|nid|3|path|/demo.project/orbit.shader"
+            "studio|project|node|nid|3|path|/demo.module/orbit.shader"
         );
         assert_eq!(
             ProjectEditorTarget::addressed_slot(node_target(), slot_address())
                 .node_id()
                 .as_str(),
-            "studio|project|node|nid|3|path|/demo.project/orbit.shader|slot|def|path|config.brightness"
+            "studio|project|node|nid|3|path|/demo.module/orbit.shader|slot|def|path|config.brightness"
         );
         assert_eq!(
             ProjectEditorTarget::asset("shader_main").node_id().as_str(),
@@ -191,14 +191,14 @@ mod tests {
 
     fn node_target() -> ProjectNodeTarget {
         ProjectNodeTarget::new(
-            ProjectNodeAddress::parse("/demo.project/orbit.shader").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
             NodeId::new(3),
         )
     }
 
     fn slot_address() -> ProjectSlotAddress {
         ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/orbit.shader").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
             ProjectSlotRoot::def(),
             SlotPath::parse("config.brightness").unwrap(),
         )

@@ -274,7 +274,7 @@ impl NodeRuntime for ControlRadioNode {
         Ok(())
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         self.device = None;
         self.opened = None;
         self.pending.clear();
@@ -285,7 +285,7 @@ impl NodeRuntime for ControlRadioNode {
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         Ok(())
     }
