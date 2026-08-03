@@ -195,6 +195,16 @@ function portHeldBy(portPath) {
 /// is what the step is for.
 async function ensurePortFree(portPath) {
   for (;;) {
+    // The path can VANISH between the pick and the flash: a native-USB
+    // board re-enumerates on reset/replug, and espflash then fails with
+    // a bare "Serial port not found" after the download already ran
+    // (2026-08-03 sitting). Catch it here, where re-picking is cheap.
+    if (!existsSync(portPath)) {
+      console.log(`  ✗ ${portPath} is GONE — the board re-enumerated or was unplugged.`);
+      const answer = await ask("    Enter to re-check · p = pick a port again: ");
+      if (answer === "p") return null;
+      continue;
+    }
     const holders = portHeldBy(portPath);
     if (holders.length === 0) {
       console.log(`  ✓ ${portPath} is free.`);
@@ -478,10 +488,16 @@ async function runOne(spec, state, argPort, studioUrl) {
 
   if (needs_port) {
     banner(`the board (${spec.board})`);
-    const port = await pickPort(argPort, spec);
+    let port = await pickPort(argPort, spec);
     if (port) {
       banner("the port must be free (close the Studio tab / Disconnect the card)");
-      await ensurePortFree(port);
+      if ((await ensurePortFree(port)) === null) {
+        const repicked = await pickPort(null, spec);
+        if (repicked) {
+          port = repicked;
+          await ensurePortFree(port);
+        }
+      }
     } else {
       step += 1; // keep numbering honest when the port check is skipped
     }
