@@ -138,5 +138,9 @@ being fixed. Both deploy workflows take the toolchain step instead.
 - `LinkManagementRequest::FlashFirmware` grew a payload and the
   payload-less form is gone. Alpha wire posture — no alias, no shim.
 - The advisory "firmware update available" path (`BundledFirmware`) is
-  story-only today and untouched. When it goes live it must choose its
-  comparison build from the device's chip through the same function.
+  story-only today and untouched — nothing in production supplies it, which
+  is why serving three images did not turn it into a second wrong-image
+  bug. Its standing debt entry
+  (`docs/debt/bundled-firmware-chip-unplumbed.md`) has been updated with
+  the requirement this decision adds: whoever wires it up must resolve the
+  comparison build from the device's own chip, or say nothing.
