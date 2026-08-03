@@ -80,6 +80,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath, onE
 
     try {
       const chipName = await loader.main();
+      assertImageMatchesChip(chipName, manifest, manifestPath);
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
@@ -389,6 +390,40 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
     reportFailure("esp32-fsread", error, onEvent);
     throw error;
   }
+}
+
+/// Refuse to write an image built for a different chip.
+///
+/// The bootloader handshake already told us what is on the wire and the
+/// manifest already says what the image is for; until 2026-08-02 nothing
+/// compared them, so flashing an S3 or a classic ESP32 from Studio wrote
+/// the C6 image onto it with no warning (Studio serves one build today —
+/// see SERVED_FIRMWARE_BUILDS). The device is recoverable, but it will not
+/// boot and nothing says why.
+///
+/// Only a DEFINITE mismatch refuses. When either side is unidentifiable we
+/// proceed as before rather than inventing a new way to block a legitimate
+/// flash — this guard exists to catch the wrong image, not to gate on
+/// imperfect detection.
+function assertImageMatchesChip(chipName, manifest, manifestPath) {
+  const connected = normalizeChipName(chipName);
+  const image = normalizeChipName(manifest.core?.target?.chip);
+  if (!connected || !image || connected === image) {
+    return;
+  }
+  throw new Error(
+    `This firmware is built for ${manifest.core.target.chip}, but the ` +
+      `connected device is ${chipName}. Flashing it would leave the board ` +
+      `unable to boot. (image: ${manifestPath})`
+  );
+}
+
+/// Chip names arrive in two dialects — the bootloader says "ESP32-C6",
+/// build manifests say "esp32c6". Compare on alphanumerics only.
+function normalizeChipName(name) {
+  return String(name ?? "")
+    .replace(/[^0-9a-z]/gi, "")
+    .toLowerCase();
 }
 
 /// Judge an erase by its OWN outcome, not by the flash-ID probe.
