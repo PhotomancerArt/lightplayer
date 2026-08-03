@@ -55,7 +55,22 @@ export async function probeTarget(portId, esptoolModulePath) {
   }
 }
 
-export async function flashFirmware(portId, manifestPath, esptoolModulePath, onEvent) {
+/**
+ * Flash the merged image described by `manifestPath`.
+ *
+ * `knownChipIds` is `lpa_link::KNOWN_CHIP_IDS`, passed in rather than
+ * restated here: it is an ordered table (most specific id first, bare
+ * `esp32` last) whose ordering is the correctness argument for the chip
+ * guard, and a second copy of it in another language is precisely the kind
+ * of drift that lets a wrong image through.
+ */
+export async function flashFirmware(
+  portId,
+  manifestPath,
+  esptoolModulePath,
+  knownChipIds,
+  onEvent,
+) {
   if (!isSupported()) {
     throw new Error("Web Serial firmware flashing is not supported in this browser.");
   }
@@ -80,7 +95,12 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath, onE
 
     try {
       const chipName = await loader.main();
-      assertImageMatchesChip(chipName, manifest, manifestPath);
+      // The image is chosen before the port is opened; the chip is only
+      // known once the SYNC handshake answers. Between those two facts is
+      // the last moment anything can stop a C6 image from being written
+      // onto an S3 — after `writeFlash` the board is already bricked-ish
+      // and the user has no idea why. Refuse loudly instead.
+      assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
@@ -392,40 +412,6 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
   }
 }
 
-/// Refuse to write an image built for a different chip.
-///
-/// The bootloader handshake already told us what is on the wire and the
-/// manifest already says what the image is for; until 2026-08-02 nothing
-/// compared them, so flashing an S3 or a classic ESP32 from Studio wrote
-/// the C6 image onto it with no warning (Studio serves one build today —
-/// see SERVED_FIRMWARE_BUILDS). The device is recoverable, but it will not
-/// boot and nothing says why.
-///
-/// Only a DEFINITE mismatch refuses. When either side is unidentifiable we
-/// proceed as before rather than inventing a new way to block a legitimate
-/// flash — this guard exists to catch the wrong image, not to gate on
-/// imperfect detection.
-function assertImageMatchesChip(chipName, manifest, manifestPath) {
-  const connected = normalizeChipName(chipName);
-  const image = normalizeChipName(manifest.core?.target?.chip);
-  if (!connected || !image || connected === image) {
-    return;
-  }
-  throw new Error(
-    `This firmware is built for ${manifest.core.target.chip}, but the ` +
-      `connected device is ${chipName}. Flashing it would leave the board ` +
-      `unable to boot. (image: ${manifestPath})`
-  );
-}
-
-/// Chip names arrive in two dialects — the bootloader says "ESP32-C6",
-/// build manifests say "esp32c6". Compare on alphanumerics only.
-function normalizeChipName(name) {
-  return String(name ?? "")
-    .replace(/[^0-9a-z]/gi, "")
-    .toLowerCase();
-}
-
 /// Judge an erase by its OWN outcome, not by the flash-ID probe.
 ///
 /// The ID probe reads 0 and prints "Failed to communicate with the flash
@@ -567,6 +553,50 @@ async function loadEsptoolModule(esptoolModulePath) {
   } catch (error) {
     throw new Error(`Failed to import esptool module ${esptoolModulePath}: ${errorMessage(error)}`);
   }
+}
+
+/// The chip id a reported name belongs to — the JS half of
+/// `lpa_link::chip_id_from_reported`, over the table Rust hands in.
+///
+/// Whole-string equality does NOT work here, and this is not theoretical:
+/// esptool-js 0.6.0's `main()` returns `getChipDescription()`, which builds
+/// `"ESP32-C6 (revision 0)"`, `"ESP32-S3 (QFN56) (revision v0.2)"`, and for
+/// the classic a DIE name — `"ESP32-D0WDQ6"`, `"ESP32-U4WDH"`,
+/// `"ESP32-PICO-D4"` — never the bare id a manifest carries. Comparing
+/// normalized strings for equality therefore refuses EVERY real device.
+/// Nor does a substring test work: all of those contain "esp32", so a
+/// classic image would sail onto a C6. Prefix-matching an ordered,
+/// most-specific-first table is what distinguishes them.
+function chipIdFrom(reported, knownChipIds) {
+  const normalized = String(reported ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  return Array.from(knownChipIds ?? []).find((id) => normalized.startsWith(id)) ?? null;
+}
+
+/// Refuse to write `manifest` onto `reportedChip`.
+///
+/// An unresolvable chip on either side is NOT a match: esptool-js always
+/// names the chip it synced with, so an absent or unrecognized name means
+/// the handshake did not go the way this code assumes, and guessing there
+/// is the same bet the guard exists to refuse.
+function assertChipMatchesManifest(reportedChip, manifest, manifestPath, knownChipIds) {
+  const manifestChip = manifest.core?.target?.chip;
+  const detected = chipIdFrom(reportedChip, knownChipIds);
+  const expected = chipIdFrom(manifestChip, knownChipIds);
+  if (detected && detected === expected) {
+    return;
+  }
+  const detectedLabel = reportedChip ? String(reportedChip) : "an unidentified chip";
+  throw new Error(
+    `Refusing to flash: this device is ${detectedLabel}, but the firmware image ` +
+      `${manifest.firmwareId} (${manifestPath}) is built for ${manifestChip}. ` +
+      `Pick the board you actually have in the setup form, or install the generic ` +
+      `image for this chip.`,
+  );
 }
 
 function summarizeManifest(manifest, manifestPath) {

@@ -203,10 +203,17 @@ fn setup_card(detected_chip: Option<&str>, setup_board: Option<&str>) -> Element
 }
 
 #[story(
-    description = "Setup form with a detected C6 (boot-banner evidence): matching boards lead tagged 'matches detected chip'; the generic fallback is the dashed row; nothing else to fold today (only C6 builds are served)."
+    description = "Setup form with a detected C6 (boot-banner evidence): only the C6 boards are offered, because a board for another chip cannot be flashed onto this device — the guard refuses it. The other-chip boards are behind '+N other boards'; the generic fallback is the dashed cell."
 )]
 fn setup_board_picker_detected_c6() -> Element {
     sheet(vec![setup_card(Some("esp32c6"), None)])
+}
+
+#[story(
+    description = "The same collapse from the other side: an S3 is attached, so the S3 boards lead and the C6/classic ones fold. Regression guard for the hardware walk of 2026-08-02 — serving three builds made every non-matching board visible on every card, and a C6 user was shown four boards they could not use."
+)]
+fn setup_board_picker_detected_s3() -> Element {
+    sheet(vec![setup_card(Some("esp32s3"), None)])
 }
 
 #[story(
@@ -220,7 +227,7 @@ fn setup_board_picker_selected() -> Element {
 }
 
 #[story(
-    description = "Setup form with NO chip evidence (device booted before Studio attached): every provisionable board leads, generic fallback last."
+    description = "Setup form with NO chip evidence (device booted before Studio attached): nothing can be ruled out, so every provisionable board is offered flat — this is the one case where the other-chip collapse would hide the board the user actually needs."
 )]
 fn setup_board_picker_unknown_chip() -> Element {
     sheet(vec![setup_card(None, None)])

@@ -45,3 +45,16 @@ already computes the join).
 **Coverage** — none: `browser_esp32_flash.js` is browser-only JS driving
 real USB hardware and the repo has no harness for it. The guard's decision
 table lives in its doc comment.
+
+**Amendment 2026-08-02** — the comparison rule shipped here was wrong, and
+the absent coverage is why it shipped. `assertImageMatchesChip` assumed the
+bootloader says `ESP32-C6` where the manifest says `esp32c6`; esptool-js
+actually returns `getChipDescription()` — `ESP32-C6 (revision 0)`,
+`ESP32-S3 (QFN56) (revision v0.2)`, and for the classic a die name like
+`ESP32-D0WDQ6`. Under equality every one of those is a "DEFINITE mismatch",
+so the guard refused **every** legitimate flash, C6 included. Replaced by
+`lpa_link::chip_id_from_reported` (ordered prefix table, Rust-side and
+unit-tested, handed to JS as data) in
+[provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md),
+which also carries the transcribed esptool-js strings and the selection
+half this entry deferred.

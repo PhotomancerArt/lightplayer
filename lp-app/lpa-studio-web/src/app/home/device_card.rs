@@ -335,25 +335,52 @@ fn SetupForm(
     };
 
     let boards = provisionable_boards();
-    let detected = detected_chip.as_deref().map(normalize_chip);
-    // Chip-matching boards lead; the rest follow in the same grid (round 3:
-    // the card may grow — a long grid beats a disclosure nobody opens).
+    let detected = detected_chip.as_deref().and_then(chip_id);
     let (matching, other): (Vec<&'static lpa_boards::BoardDisplayFile>, Vec<_>) = boards
         .iter()
-        .partition(|board| detected.as_deref() == Some(normalize_chip(&board.family).as_str()));
-    let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if detected.is_none() {
-        boards.clone()
+        .partition(|board| detected.is_some() && detected == chip_id(&board.family));
+    // A board for another chip CANNOT be flashed onto this device — the
+    // guard refuses it — so when the chip is known, the non-matching boards
+    // are collapsed rather than merely sorted after the matching ones.
+    //
+    // Round 3 of the M5 gate flattened this to one grid, correctly: only the
+    // C6 image was served then, so `other` was always empty and the
+    // disclosure was a control that never had anything behind it. Serving
+    // three builds made it non-empty, and a C6 user was shown four boards
+    // they cannot use (Yona, hardware walk 2026-08-02). The spike's original
+    // collapse is back, and now it earns its place.
+    let collapse_others = detected.is_some() && !other.is_empty();
+    let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if collapse_others {
+        if show_all() {
+            matching.into_iter().chain(other.iter().copied()).collect()
+        } else {
+            matching
+        }
     } else {
-        matching.into_iter().chain(other).collect()
+        boards.clone()
     };
     // Generic occupies the first cell, so the board capacity is one less;
     // the overflow cell fills the 12th (4 rows of 3).
     let capacity = SETUP_TILE_LIMIT - 1;
-    let overflow = ordered.len().saturating_sub(capacity);
-    let shown: Vec<_> = if show_all() || overflow == 0 {
+    let overflow = if collapse_others {
+        // The disclosure counts the other-chip boards, not grid overflow:
+        // "+4 other boards" is a different offer from "+4 more".
+        if show_all() { 0 } else { other.len() }
+    } else {
+        ordered.len().saturating_sub(capacity)
+    };
+    let shown: Vec<_> = if show_all() || overflow == 0 || collapse_others {
         ordered
     } else {
         ordered.into_iter().take(capacity).collect()
+    };
+    let overflow_label = if collapse_others {
+        // Name what is behind it. "+4 more" reads as truncation; these are
+        // boards for a different chip and the user should know that before
+        // opening it.
+        format!("+{overflow} other boards")
+    } else {
+        format!("+{overflow} more")
     };
 
     let picked = setup_board
@@ -361,7 +388,11 @@ fn SetupForm(
         .and_then(|id| boards.iter().find(|board| board.board_id == id).copied());
     let discriminator = match (&picked, &detected_chip) {
         (Some(board), _) => board_slug(&board.board_id).to_string(),
-        (None, Some(chip)) => normalize_chip(chip),
+        // The chip ID, not the raw report: a probe answer would otherwise
+        // name the device `…-esp32c6qfn32revisionv02`.
+        (None, Some(chip)) => chip_id(chip)
+            .map(str::to_string)
+            .unwrap_or_else(|| lpa_link::normalize_chip_name(chip)),
         (None, None) => "lightplayer".to_string(),
     };
     let derived_name = default_setup_name(now_secs, &discriminator);
@@ -414,7 +445,7 @@ fn SetupForm(
                     button {
                         class: "tw:flex tw:min-h-[4.5rem] tw:items-center tw:justify-center tw:rounded-lg tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:text-xs tw:text-subtle-foreground tw:hover:border-strong tw:hover:text-strong-foreground",
                         onclick: move |_| show_all.set(true),
-                        "+{overflow} more"
+                        "{overflow_label}"
                     }
                 }
             }
@@ -455,11 +486,13 @@ const SETUP_TILE_LIMIT: usize = 11;
 /// A chip id as the headline shows it (`esp32c6` → `ESP32-C6`); unknown
 /// shapes pass through uppercased rather than being dropped.
 fn chip_display(chip: &str) -> String {
-    match normalize_chip(chip).as_str() {
-        "esp32c6" => "ESP32-C6".to_string(),
-        "esp32s3" => "ESP32-S3".to_string(),
-        "esp32c3" => "ESP32-C3".to_string(),
-        "esp32" => "ESP32".to_string(),
+    match chip_id(chip) {
+        Some("esp32c6") => "ESP32-C6".to_string(),
+        Some("esp32s3") => "ESP32-S3".to_string(),
+        Some("esp32c3") => "ESP32-C3".to_string(),
+        // The classic. Its probe answer is a die name — `ESP32-D0WD-V3
+        // (revision v3.0)` — which is not what the headline should read.
+        Some("esp32") => "ESP32".to_string(),
         _ => chip.to_ascii_uppercase(),
     }
 }
@@ -535,19 +568,23 @@ fn BoardTile(
     }
 }
 
-/// Normalize a chip name for family matching: probe answers say
-/// "ESP32-C6", boot banners say "esp32c6", board families say "esp32c6".
-fn normalize_chip(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_ascii_lowercase()
+/// Resolve a chip name to its canonical id for family matching: probe
+/// answers say `ESP32-C6 (QFN32) (revision v0.2)`, boot banners say
+/// `esp32c6`, board families say `esp32c6`.
+///
+/// Deliberately the SAME resolution the flash guard and the build selector
+/// use (`lpa_link::chip_id_from_reported`). A picker that matched boards by
+/// one rule while the guard refused images by another would offer a board
+/// and then refuse to flash it.
+fn chip_id(name: &str) -> Option<&'static str> {
+    lpa_link::chip_id_from_reported(name)
 }
 
 /// The boards the picker offers: a build this deployment SERVES exists for
-/// the board (`SERVED_FIRMWARE_BUILDS` — flashing is real, not aspirational)
-/// AND its runtime manifest is checked in (the `/hardware.json` write needs
-/// the bytes). Display-only catalog boards stay out until both land.
+/// the board (`lp-fw/builds/served.json` — flashing is real, not
+/// aspirational) AND its runtime manifest is checked in (the
+/// `/hardware.json` write needs the bytes). Display-only catalog boards stay
+/// out until both land.
 fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
     lpa_boards::all_boards()
         .iter()
@@ -555,9 +592,7 @@ fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
             lpa_boards::runtime_manifest_json(&board.board_id).is_some()
                 && lpa_boards::compatible_builds_for(board)
                     .iter()
-                    .any(|candidate| {
-                        lpa_link::SERVED_FIRMWARE_BUILDS.contains(&candidate.build.id.as_str())
-                    })
+                    .any(|candidate| lpa_boards::is_served(&candidate.build.id))
         })
         .collect()
 }

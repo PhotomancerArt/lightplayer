@@ -37,12 +37,20 @@ fn builds_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lp-fw/builds")
 }
 
+/// Files in `lp-fw/builds/` that are not build defs. `served.json` is a
+/// statement *about* build defs (which ones the site ships), so it shares
+/// their directory but must never be walked as one.
+const NON_BUILD_DEF_FILES: &[&str] = &["served.json"];
+
 /// `build_id -> parsed build def` walked from `lp-fw/builds/`.
 fn build_defs_on_disk() -> BTreeMap<String, serde_json::Value> {
     let mut defs = BTreeMap::new();
     for entry in fs::read_dir(builds_dir()).expect("lp-fw/builds") {
         let path = entry.expect("build def entry").path();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if NON_BUILD_DEF_FILES.contains(&name.as_str()) {
+            continue;
+        }
         let Some(id) = name.strip_suffix(".json") else {
             continue;
         };
@@ -79,6 +87,59 @@ fn embedded_build_defs_match_their_files() {
         assert_eq!(value["package"], build.package.as_str());
         assert_eq!(value["chip"]["name"], build.chip.name.as_str());
         assert_eq!(value["flashSizeMb"], build.flash_size_mb);
+    }
+}
+
+/// A served id with no build def would name a `firmware/<id>/` directory
+/// nothing can produce: the picker would offer the board and the flash would
+/// 404. The reverse is fine — a build def may exist unserved.
+#[test]
+fn every_served_build_has_a_build_def() {
+    let on_disk = build_defs_on_disk();
+    let served = lpa_boards::served_build_ids();
+    assert!(!served.is_empty(), "served.json lists no builds");
+    for id in served {
+        assert!(
+            on_disk.contains_key(id),
+            "served.json lists {id}, which has no lp-fw/builds/{id}.json"
+        );
+        assert!(
+            lpa_boards::build_by_id(id).is_some(),
+            "served.json lists {id}, which is not in BUILD_DEF_SOURCES"
+        );
+        assert!(lpa_boards::is_served(id));
+    }
+}
+
+/// `provisioning_build` compares its `normalized_chip` argument against
+/// these two fields verbatim, so they have to already BE normalized —
+/// lowercase alphanumerics, the form `lpa_link::normalize_chip_name`
+/// produces. A `chip.name` of `ESP32-C6` would silently match nothing and
+/// provisioning would fall back to the deployment default for that chip
+/// forever.
+#[test]
+fn chip_names_are_already_normalized() {
+    let normalized = |name: &str| {
+        name.chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect::<String>()
+            .to_ascii_lowercase()
+    };
+    for build in all_builds() {
+        assert_eq!(
+            normalized(&build.chip.name),
+            build.chip.name,
+            "build def {}: chip.name must be lowercase alphanumeric",
+            build.id
+        );
+    }
+    for board in all_boards() {
+        assert_eq!(
+            normalized(&board.family),
+            board.family,
+            "{}: family must be lowercase alphanumeric",
+            board.board_id
+        );
     }
 }
 

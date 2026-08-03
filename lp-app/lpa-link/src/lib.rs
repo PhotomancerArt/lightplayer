@@ -18,6 +18,9 @@ pub use device_session::{
     DeviceLinkMode, DeviceManageOutcome, DeviceMode, DeviceSession, DeviceSnapshot, DeviceState,
     DeviceTimers, IncompatibleReason,
 };
+pub use provider::chip::{
+    KNOWN_CHIP_IDS, chip_id_from_reported, chip_ids_match, normalize_chip_name,
+};
 #[cfg(feature = "device-session-host")]
 pub use provider::connection::{LinkClientTransport, LinkServerConnection};
 pub use provider::connection::{LinkConnection, LinkConnectionKind};
@@ -39,7 +42,6 @@ pub use provider::management_result::{
 };
 pub use provider::operation::{LinkCapabilities, LinkOperation};
 pub use provider::provider::LinkProvider;
-pub use provider::served_builds::SERVED_FIRMWARE_BUILDS;
 pub use provider::session::LinkSession;
 pub use provider::session::LinkSessionId;
 pub use provider::session::LinkSessionStatus;
