@@ -113,8 +113,10 @@ fn BrandWord(
 
 /// The wide brand lockup: mark + wordmark, one unit. Defaults to the in-app
 /// D3 treatment (white mark, "Light" animates). `compact` drops the wordmark
-/// and switches to the icon-only rule (animated triangle). `mono` is the
-/// one-color form for print/light contexts — set `color` on a parent.
+/// and switches to the icon-only rule (animated triangle). `marketing` runs
+/// the loud form: full-rainbow word AND the triangle cycles with it (accent
+/// when frozen). `mono` is the one-color form for print/light contexts —
+/// set `color` on a parent.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn LogoLockup(
@@ -134,7 +136,7 @@ pub fn LogoLockup(
             class: "tw:flex tw:flex-none tw:cursor-default tw:items-center {tone}",
             style: "gap:{gap}px",
             title: "LightPlayer",
-            LogoMark { size, animated: compact && !mono }
+            LogoMark { size, animated: (compact || marketing) && !mono }
             if !compact {
                 span { class: "tw:max-[560px]:hidden tw:flex",
                     BrandWord { word_px, mono, marketing }
