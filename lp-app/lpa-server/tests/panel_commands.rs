@@ -260,3 +260,112 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
 
     (server, project_path)
 }
+
+// ---------------------------------------------------------------------------
+
+/// The full authored path a panel control depends on, which no other test
+/// covers end to end: a shader uniform with `bindings: { glow: { source:
+/// "bus:glow" } }` must reach the probe as a CONSUMING Bus endpoint that
+/// carries a scope. That endpoint is the only thing Studio turns into a
+/// `UiPanelTarget`, so if the scope is absent the knob silently stays an
+/// ordinary slot editor and every panel behaviour downstream is untested.
+#[test]
+fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
+    let (mut server, project_path) = server_with_glow_shader_project("panel-authored-bind");
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.advance_frame(16).expect("tick");
+
+    let project = project_mut(&mut server, handle);
+    let graph = probe(project);
+
+    let consuming = graph
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && matches!(
+                    &binding.endpoint,
+                    lpc_wire::WireBindingEndpoint::Bus { channel, .. } if channel == "glow"
+                )
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no consuming binding to bus:glow; endpoints: {:?}",
+                graph
+                    .bindings
+                    .iter()
+                    .map(|b| (&b.direction, &b.endpoint))
+                    .collect::<alloc::vec::Vec<_>>()
+            )
+        });
+
+    let lpc_wire::WireBindingEndpoint::Bus { scope, .. } = &consuming.endpoint else {
+        panic!("checked above");
+    };
+    assert!(
+        scope.is_some(),
+        "the consuming endpoint carries its scope — Studio keys the panel \
+         target on (scope, channel), so a None here means no panel control"
+    );
+
+    // ...and the channel lists in that scope, which is what makes a control
+    // appear at all (modules.md R6: an unwritten channel still lists).
+    assert!(
+        graph.channels.iter().any(|c| c.name == "glow"),
+        "bus:glow lists even with no writer: {:?}",
+        graph
+            .channels
+            .iter()
+            .map(|c| &c.name)
+            .collect::<alloc::vec::Vec<_>>()
+    );
+}
+
+/// One shader whose panel-flagged `glow` uniform consumes `bus:glow` —
+/// the shape the G4 walk project uses.
+fn server_with_glow_shader_project(name: &str) -> (LpServer, LpPathBuf) {
+    let (mut server, project_path) = server_with_clock_project(name);
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("module.json").as_path(),
+            br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "idle": { "ref": "./idle.json" }
+  }
+}
+"#,
+        )
+        .expect("write module");
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("idle.json").as_path(),
+            br#"
+{
+  "kind": "Shader",
+  "source": "idle.glsl",
+  "float_mode": "fixed",
+  "bindings": { "glow": { "source": "bus:glow" } },
+  "consumed": {
+    "glow": {
+      "kind": "value", "value": "f32", "default": 0.5,
+      "min": 0, "max": 1, "label": "Glow", "panel": true
+    }
+  }
+}
+"#,
+        )
+        .expect("write shader");
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("idle.glsl").as_path(),
+            b"void main() { out_color = vec4(glow, glow, glow, 1.0); }",
+        )
+        .expect("write glsl");
+    (server, project_path)
+}
