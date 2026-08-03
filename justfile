@@ -54,10 +54,13 @@ c6_flash_size := "4mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
-# The one firmware build the Studio site serves (lp-fw/builds/<id>.json). The
-# browser provisioning picker gains per-build selection in roadmap M5; until
-# then this names the single `firmware/<id>/` directory that ships.
-studio_firmware_build := "esp32c6-4mb"
+# The firmware builds the Studio site serves are NOT listed here — they live
+# in lp-fw/builds/served.json, which `lpa-boards` embeds (the provisioning
+# picker's eligibility filter) and the Pages smoke check reads. One
+# deployment fact, three readers; a copy of the list in this file is how the
+# site came to offer a board it could not flash. `just studio-served-builds`
+# prints it; the recipes that package and copy firmware iterate it.
+served_builds_json := "lp-fw/builds/served.json"
 
 # Default recipe - show available commands
 default:
@@ -314,17 +317,23 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
     cp "${sidecar_dir}/fw_browser_bg.wasm" "{{ out_dir }}/pkg/fw_browser_bg.wasm"
 
     if [[ "{{ include_firmware }}" == "true" ]]; then
-        firmware_dir="{{ studio_assets_dir }}/firmware/{{ studio_firmware_build }}"
-        if [[ ! -f "${firmware_dir}/manifest.json" ]]; then
-            echo "missing Studio firmware assets in ${firmware_dir}" >&2
-            exit 1
-        fi
-        mkdir -p "{{ out_dir }}/firmware/{{ studio_firmware_build }}"
-        cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/{{ studio_firmware_build }}/manifest.json"
-        cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/{{ studio_firmware_build }}/"
+        # Every served build, no exceptions: the picker offers a board on the
+        # strength of this list, so an id missing from the artifact is a
+        # board Studio offers and then 404s on.
+        while read -r build_id; do
+            firmware_dir="{{ studio_assets_dir }}/firmware/${build_id}"
+            if [[ ! -f "${firmware_dir}/manifest.json" ]]; then
+                echo "missing Studio firmware assets for served build ${build_id} in ${firmware_dir}" >&2
+                echo "  run: just studio-firmware-package-served" >&2
+                exit 1
+            fi
+            mkdir -p "{{ out_dir }}/firmware/${build_id}"
+            cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/${build_id}/manifest.json"
+            cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/${build_id}/"
+        done < <(just studio-served-builds)
     fi
 
-studio-web-dev-build: install-wasm32-target studio-firmware-package-esp32c6
+studio-web-dev-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
@@ -405,22 +414,31 @@ claude-launch-json:
     EOF
     echo "wrote .claude/launch.json (studio-dev port ${port})"
 
-studio-dev: install-wasm32-target studio-firmware-package-esp32c6
+studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
     port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
     public_dir="target/dx/lpa-studio-web/debug/web/public"
     sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
-    firmware_dir="{{ studio_assets_dir }}/firmware/{{ studio_firmware_build }}"
+    # Read once, outside the 1 s loop — the served list does not change while
+    # a dev server runs, and shelling out to node every second would. Plain
+    # read loop, not `mapfile`: macOS's /bin/bash is 3.2.
+    served_builds=()
+    while read -r build_id; do
+        served_builds+=("${build_id}")
+    done < <(just studio-served-builds)
     sync_generated_assets() {
         [[ -d "${public_dir}" ]] || return 0
         mkdir -p "${public_dir}/pkg"
         cp "${sidecar_dir}/fw_browser.js" "${public_dir}/pkg/fw_browser.js"
         cp "${sidecar_dir}/fw_browser_bg.wasm" "${public_dir}/pkg/fw_browser_bg.wasm"
-        mkdir -p "${public_dir}/firmware/{{ studio_firmware_build }}"
-        cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/{{ studio_firmware_build }}/manifest.json"
-        cp "${firmware_dir}"/*.bin "${public_dir}/firmware/{{ studio_firmware_build }}/"
+        for build_id in "${served_builds[@]}"; do
+            firmware_dir="{{ studio_assets_dir }}/firmware/${build_id}"
+            mkdir -p "${public_dir}/firmware/${build_id}"
+            cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/${build_id}/manifest.json"
+            cp "${firmware_dir}"/*.bin "${public_dir}/firmware/${build_id}/"
+        done
         # Host settings layer (P4): machine-level settings become the app's
         # dev-settings.json (fetched at boot; 404 => no host layer). Edits
         # appear on the next reload via this 1s loop.
@@ -440,7 +458,14 @@ studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     echo "Storybook: http://127.0.0.1:${port}/#/stories"
     dx serve --web -p lpa-studio-web --features stories --port "${port}" --addr 127.0.0.1 --open false
 
-# Package a firmware variant for browser flashing / host flashing. Both are
+# Print the build ids the Studio site serves, one per line, from
+# lp-fw/builds/served.json — the same file `lpa-boards` embeds and the Pages
+# smoke check reads. Everything that packages or copies firmware iterates
+# this rather than naming builds.
+studio-served-builds:
+    @node -e 'console.log(JSON.parse(require("fs").readFileSync("{{ served_builds_json }}","utf8")).builds.join("\n"))'
+
+# Package a firmware variant for browser flashing / host flashing. All are
 # thin wrappers over `lp-cli firmware package`, which owns the build inputs
 # (lp-fw/builds/<id>.json) and EXTRACTS the manifest core from the image it
 # just built — there is no hand-written feature list or wireProto `sed` any
@@ -451,9 +476,6 @@ studio-firmware-package-esp32c6: install-rv32-target
 # The S3 sibling. lp-cli runs cargo in the crate dir so `rust-toolchain.toml`
 # selects Espressif's fork, but the fork's GNU binutils must already be on
 # PATH — that part only this recipe can do (see `_xt-gcc-dir`).
-#
-# Packaged but NOT served: the Studio site still ships the C6 image only. See
-# lp-fw/builds/README.md.
 studio-firmware-package-esp32s3:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -463,7 +485,38 @@ studio-firmware-package-esp32s3:
     fi
     cargo run -p lp-cli -- firmware package esp32s3-8mb
 
-studio-web-build: install-wasm32-target studio-firmware-package-esp32c6
+# The classic-ESP32 sibling. Same Espressif-fork story as the S3, different
+# GNU binutils prefix (xtensa-esp32-elf-, no `s3`).
+studio-firmware-package-esp32v3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cargo run -p lp-cli -- firmware package esp32v3-4mb
+
+# Package every build the site serves. Deliberately STRICT — a dev server
+# that quietly omitted an image would offer that board in the provisioning
+# picker and 404 at flash time, and the hardware walk runs against
+# `studio-dev`. Missing Xtensa toolchain? `_xt-gcc-dir` says how to fix it.
+studio-firmware-package-served:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    while read -r build_id; do
+        case "${build_id}" in
+            esp32c6-*) just studio-firmware-package-esp32c6 ;;
+            esp32s3-*) just studio-firmware-package-esp32s3 ;;
+            esp32v3-*) just studio-firmware-package-esp32v3 ;;
+            *)
+                echo "served.json lists ${build_id}, which has no packaging recipe" >&2
+                echo "  add studio-firmware-package-<chip> next to its siblings" >&2
+                exit 1
+                ;;
+        esac
+    done < <(just studio-served-builds)
+
+studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release

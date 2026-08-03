@@ -36,10 +36,10 @@ impl LinkFlashRegion {
     /// worse than a refusal in exactly the situation where the user is
     /// trying to rescue their work.
     pub fn lpfs_for_chip(chip_name: &str) -> Option<Self> {
-        let key = normalize_chip_name(chip_name);
+        let chip_id = super::chip::chip_id_from_reported(chip_name)?;
         LPFS_PARTITIONS
             .iter()
-            .find(|(chip, _)| key.contains(chip))
+            .find(|(chip, _)| *chip == chip_id)
             .map(|(_, region)| *region)
     }
 
@@ -52,9 +52,10 @@ impl LinkFlashRegion {
 /// The `lpfs` partition of every board LightPlayer ships a partition table
 /// for. Guarded against the tables themselves by the tests below.
 ///
-/// Keys are matched by substring against the normalized chip name, so a new
-/// entry must not be a substring of another one (`esp32` alone would swallow
-/// every board); today's keys are disjoint.
+/// Keys are canonical chip ids ([`super::chip::KNOWN_CHIP_IDS`]), compared
+/// for equality after the reported name is resolved to one. This used to be
+/// a substring test, which happened to work only because `esp32` had no
+/// entry — every reported name contains it.
 const LPFS_PARTITIONS: &[(&str, LinkFlashRegion)] = &[
     (
         "esp32c6",
@@ -71,16 +72,6 @@ const LPFS_PARTITIONS: &[(&str, LinkFlashRegion)] = &[
         },
     ),
 ];
-
-/// Reduce a reported chip name to lowercase alphanumerics so `esp32c6`,
-/// `ESP32-C6 (QFN32) (revision v0.2)` and `ESP32-C6` all answer the same.
-fn normalize_chip_name(chip_name: &str) -> String {
-    chip_name
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .map(|ch| ch.to_ascii_lowercase())
-        .collect()
-}
 
 #[cfg(test)]
 mod tests {

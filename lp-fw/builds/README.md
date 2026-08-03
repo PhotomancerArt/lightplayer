@@ -42,13 +42,38 @@ justfile recipes.
   studio-firmware-package-esp32s3` prepends them via `just _xt-gcc-dir`.
   Invoking `lp-cli firmware build esp32s3-8mb` bare-handed does not.
 
+## `served.json` — what the site actually ships
+
+`served.json` is not a build def. It is the **deployment** fact: which of
+these builds the Studio site copies into its assets, and therefore which
+boards the provisioning picker is allowed to offer.
+
+```json
+{ "format": 1, "builds": ["esp32c6-4mb", "esp32s3-8mb", "esp32v3-4mb"] }
+```
+
+It has a file rather than a constant because three readers need it and they
+are in three languages:
+
+- `lpa-boards` embeds it (`served_build_ids()`, `is_served()`) — the picker's
+  eligibility filter and the candidate set for chip→build selection.
+- the justfile packages and copies exactly these ids
+  (`just studio-served-builds` prints them;
+  `just studio-firmware-package-served` builds them).
+- `scripts/pages/static-site-smoke.mjs` fails a Pages artifact that is
+  missing any of their `firmware/<id>/manifest.json`.
+
+A copy of this list in a second place is how the site came to offer a board
+it could not flash. Adding an id means adding a build def, a
+`studio-firmware-package-<chip>` recipe, and — for a new ISA — the toolchain
+step in both deploy workflows.
+
 ## Distribution
 
 `lp-cli firmware package <id>` writes
 `target/studio-web-assets/firmware/<id>/` (merged image + `manifest.json`
-schemaVersion 2). Only **esp32c6-4mb** is copied into the Studio site /
-Pages artifact today; `esp32s3-8mb` packages correctly but nothing serves it
-yet.
+schemaVersion 2). `served.json` decides which of those directories reach the
+Studio site / Pages artifact.
 
 ## Consumers
 
