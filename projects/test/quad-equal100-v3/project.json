@@ -1,6 +1,6 @@
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "name": "Quad equal 100 v3",
   "nodes": {
     "clock": {
