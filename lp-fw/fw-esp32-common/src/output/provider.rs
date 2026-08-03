@@ -46,6 +46,15 @@ struct ChannelState {
     output: Box<dyn Ws281xOutput>,
     byte_count: u32,
     pipeline: DisplayPipeline,
+    /// The channel's own rendered frame, alive between writes.
+    ///
+    /// It used to be a `Vec` allocated inside every `write`, which is fine
+    /// while one handle is written at a time. It is not fine for a batched
+    /// transmission, where every channel's bytes must stay alive across the
+    /// whole batch — so the storage belongs to the channel, not to the call.
+    /// Sized from the channel's granted `byte_count`, so this is the same
+    /// memory the per-write allocation held, just held for longer.
+    frame: Vec<u8>,
 }
 
 /// ESP32 OutputProvider implementation.
@@ -116,12 +125,16 @@ impl OutputProvider for Esp32OutputProvider {
             "Esp32OutputProvider::open: Opened channel handle={handle_id}, endpoint={endpoint}, byte_count={byte_count}"
         );
 
+        let mut frame = Vec::new();
+        frame.resize(((byte_count / 3) * 3) as usize, 0);
+
         self.channels.borrow_mut().insert(
             handle_id,
             ChannelState {
                 output,
                 byte_count,
                 pipeline,
+                frame,
             },
         );
 
@@ -169,14 +182,21 @@ impl OutputProvider for Esp32OutputProvider {
             });
         }
 
-        let mut rmt_buffer = Vec::with_capacity(num_leds * 3);
-        rmt_buffer.resize(num_leds * 3, 0);
+        // The channel owns its frame storage, so a resize is the only time
+        // this allocates and a steady-state write allocates nothing at all.
+        channel.frame.resize(num_leds * 3, 0);
 
         channel.pipeline.write_frame(0, data);
         channel.pipeline.write_frame(FRAME_INTERVAL_US, data);
-        channel.pipeline.tick(MID_FRAME_US, &mut rmt_buffer);
+        let ChannelState {
+            output,
+            pipeline,
+            frame,
+            ..
+        } = channel;
+        pipeline.tick(MID_FRAME_US, frame);
 
-        channel.output.write(&rmt_buffer)
+        output.write(frame)
     }
 
     fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
