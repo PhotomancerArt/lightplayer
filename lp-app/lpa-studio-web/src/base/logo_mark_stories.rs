@@ -1,7 +1,7 @@
 //! Brand asset stories — the durable PNG mint.
 //!
 //! Every `screenshot` story here is a published brand asset (bare capture,
-//! `lg` only): marketing lockups, app-icon tiles, mono forms, the mark size
+//! `lg` only): the brand lockup, app-icon tiles, mono forms, the mark size
 //! sheet. Change `logo_mark.rs` and CI re-mints every PNG under
 //! `story-images/base__logo-mark__*`. The capture harness freezes CSS
 //! animations before mount, so animated treatments capture their canonical
@@ -16,18 +16,10 @@ use crate::base::{LogoLockup, LogoMark, LogoStacked};
 
 #[story(
     screenshot,
-    description = "Primary in-app lockup (D3): white datasheet-fine chip, 'Light' carries the rainbow. The canonical dark-surface brand asset."
+    description = "The brand lockup: white datasheet-fine chip, full-rainbow wordmark, triangle cycling with it (accent when frozen). One treatment everywhere — app chrome and readme hero alike."
 )]
 fn lockup() -> Element {
-    dark_stage(rsx! { LogoLockup { size: 64 } })
-}
-
-#[story(
-    screenshot,
-    description = "Marketing lockup (D): the full-rainbow wordmark for website/readme heroes."
-)]
-fn lockup_marketing() -> Element {
-    dark_stage(rsx! { LogoLockup { size: 110, marketing: true } })
+    dark_stage(rsx! { LogoLockup { size: 110 } })
 }
 
 #[story(

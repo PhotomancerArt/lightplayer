@@ -4828,8 +4828,7 @@ label:has(> input:not(:disabled)) {
     to { background-position: -300% 0; }
 }
 
-.lp-brand-light,
-.lp-brand-word-full {
+.lp-brand-word {
     background-image: linear-gradient(90deg, #5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e, #5fe08b);
     background-size: 300% 100%;
     -webkit-background-clip: text;
@@ -4840,8 +4839,7 @@ label:has(> input:not(:disabled)) {
 
 @media (prefers-reduced-motion: reduce) {
     .lp-brand-play-anim,
-    .lp-brand-light,
-    .lp-brand-word-full {
+    .lp-brand-word {
         animation: none;
     }
 }
