@@ -597,9 +597,6 @@
   .tw\:max-w-\[95\%\] {
     max-width: 95%;
   }
-  .tw\:max-w-\[200px\] {
-    max-width: 200px;
-  }
   .tw\:max-w-\[320px\] {
     max-width: 320px;
   }
@@ -1595,9 +1592,6 @@
   .tw\:text-\[11px\] {
     font-size: 11px;
   }
-  .tw\:text-\[12\.5px\] {
-    font-size: 12.5px;
-  }
   .tw\:text-\[13px\] {
     font-size: 13px;
   }
@@ -2441,11 +2435,6 @@
   }
   .tw\:max-\[560px\]\:hidden {
     @media (width < 560px) {
-      display: none;
-    }
-  }
-  .tw\:max-\[520px\]\:hidden {
-    @media (width < 520px) {
       display: none;
     }
   }
