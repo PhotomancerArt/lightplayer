@@ -18,7 +18,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use lpa_client::{ClientEvent, ClientIo, LpClient, ProjectDeployFile};
-use lpa_link::{DeviceDeadlines, DeviceEvent, DeviceLineOrigin, DeviceSession};
+use lpa_link::{
+    DeviceDeadlines, DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession,
+    LinkManagementRequest,
+};
 use lpc_model::HwEndpointSpec;
 use lpc_wire::server::RecoveryStatus;
 use lpc_wire::{
@@ -27,7 +30,6 @@ use lpc_wire::{
 };
 
 use crate::client::cli_connect::connect_serial_device;
-use crate::commands::upload::wait::wait_for_project_running;
 
 use super::schedule::{BenchSchedule, ScheduleStep, StepOutcome};
 use super::workload::BenchWorkload;
@@ -46,6 +48,9 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(60);
 /// Part of the metric definition — an OOM often arrives a few frames in, not
 /// at load.
 const SETTLE: Duration = Duration::from_secs(20);
+
+/// Gap between polls while waiting for the workload's first frames.
+const RENDER_POLL: Duration = Duration::from_millis(500);
 
 /// Gap between free-heap samples during the settle.
 const SETTLE_POLL: Duration = Duration::from_secs(2);
@@ -107,6 +112,20 @@ const OOM_BOOT_REPORT_PREFIX: &str = "crashed (oom)";
 /// firmware inconsistency is tracked separately in `docs/debt/`.
 const OOM_ALLOC_FAILURE_MESSAGE: &str = "memory allocation of";
 
+/// Console markers that say the workload is no longer doing its job.
+///
+/// After a step OOMs, the recovery ladder disables the offending node or
+/// quarantines the shader compile. Every later step then "survives" while
+/// rendering nothing — the frame counter still advances, the heap readings
+/// stop moving with LED count, and a bisect converges on a number that
+/// means nothing. Measured on the S3: 1200, 1400, 1500, 1550, 1575, 1587
+/// and 1593 LEDs all reported an identical 143k free / 96k used, because
+/// none of them were computing any LEDs at all.
+///
+/// A step that prints one of these is not a survival and not a death; it is
+/// a step that has to be re-run on a device whose ladder has been cleared.
+const DEGRADED_MARKERS: [&str; 2] = ["disabled after", "black fallback"];
+
 /// What the bench needs to know before it touches hardware.
 pub struct BenchPlan {
     /// Serial port, already chip-resolved.
@@ -123,6 +142,9 @@ pub struct BenchPlan {
     pub expected_commit: Option<String>,
     /// LED count the ramp starts from.
     pub start_leds: u32,
+    /// Known-good and known-bad counts from an earlier run, if any.
+    pub floor: Option<u32>,
+    pub ceiling: Option<u32>,
     /// Echo the device console to stderr.
     pub verbose: bool,
 }
@@ -253,7 +275,7 @@ async fn ramp(
     plan: &BenchPlan,
     console: &BenchConsole,
 ) -> Result<(Vec<BenchStepReport>, u32)> {
-    let mut schedule = BenchSchedule::new(plan.start_leds);
+    let mut schedule = BenchSchedule::seeded(plan.start_leds, plan.floor, plan.ceiling);
     let mut steps = Vec::new();
     let mut client = LpClient::new(session.client_io());
 
@@ -276,7 +298,56 @@ async fn ramp(
         let workload = BenchWorkload::new(leds, plan.endpoint.clone());
 
         let oom_reports_before = console.oom_report_count();
-        match run_step(&mut client, &workload).await {
+        let degraded_before = console.degraded_count();
+        let mut attempt = run_step(&mut client, &workload).await;
+
+        // A step whose workload the ladder disabled measured nothing. Clear
+        // the ladder and run it once more before believing either outcome.
+        if console.degraded_count() > degraded_before {
+            println!(
+                "       ↳ workload was disabled by the recovery ladder — clearing and retrying"
+            );
+            clear_recovery_ladder(session).await?;
+            reconnect(session, &plan.port).await?;
+            client = LpClient::new(session.client_io());
+            let degraded_retry = console.degraded_count();
+            attempt = run_step(&mut client, &workload).await;
+            if console.degraded_count() > degraded_retry {
+                // Degraded again, on a device whose ladder we just cleared —
+                // so this is not stale blame from an earlier step, it is
+                // this LED count failing on its own. The device survives
+                // because layer-1 recovery absorbs the crash and falls back
+                // to black; the workload does not. A count whose shader
+                // cannot compile without crashing has exceeded the board's
+                // memory, which is exactly what this metric measures, so it
+                // is a death — recorded only when the console also carries
+                // the allocation-failure evidence, never inferred.
+                if console.oom_report_count() > oom_reports_before {
+                    println!(
+                        "       ↳ out of memory during compile (workload disabled, device survived)"
+                    );
+                    schedule.record(leds, StepOutcome::Died);
+                    steps.push(BenchStepReport {
+                        leds,
+                        outcome: StepOutcome::Died,
+                        min_free_bytes: None,
+                        max_used_bytes: None,
+                        frames: 0,
+                    });
+                    clear_recovery_ladder(session).await?;
+                    reconnect(session, &plan.port).await?;
+                    client = LpClient::new(session.client_io());
+                    continue;
+                }
+                bail!(
+                    "at {leds} LEDs the workload stayed disabled after a cleared boot, but \
+                     nothing on the console said an allocation failed, so the cause is \
+                     unknown. Reporting instead of guessing at a boundary."
+                );
+            }
+        }
+
+        match attempt {
             Ok(settle) => {
                 println!("survived  {}", settle.describe());
                 schedule.record(leds, StepOutcome::Survived);
@@ -293,7 +364,6 @@ async fn ramp(
                 let verdict =
                     confirm_death(session, &plan.port, console, oom_reports_before, &candidate)
                         .await?;
-                client = LpClient::new(session.client_io());
                 match verdict {
                     DeathVerdict::Oom { boots_ago } => {
                         println!(
@@ -307,6 +377,12 @@ async fn ramp(
                             max_used_bytes: None,
                             frames: 0,
                         });
+                        // The crash left the ladder holding a grudge against
+                        // this workload; clear it, or every later step
+                        // "survives" while rendering nothing.
+                        clear_recovery_ladder(session).await?;
+                        reconnect(session, &plan.port).await?;
+                        client = LpClient::new(session.client_io());
                     }
                     DeathVerdict::Unexplained { recovery } => bail!(
                         "the device stopped answering at {leds} LEDs and the recovery ledger \
@@ -339,43 +415,45 @@ async fn run_step<Io: ClientIo>(
         .context("deploying the bench workload")?
         .into_value();
 
-    if let Err(waited) = wait_for_project_running(client, handle, RUN_TIMEOUT).await {
-        // `wait_for_project_running` gives up on the first unanswered poll
-        // window, but silence is not death: the classic's UART RX FIFO
-        // overflows under console pressure and drops whole requests
-        // (`[io_task] UART RX error: FifoOverflowed`), while the project
-        // itself renders on happily. Observed at 120 LEDs — a board doing 30
-        // fps reported as a candidate death. So before believing it, ask the
-        // device directly whether its frame counter is moving. Advancing
-        // frames are proof of life, and proof of life is proof of no OOM.
-        if !frames_are_advancing(client, handle).await {
-            return Err(waited);
-        }
-        eprintln!("       (no run evidence, but frames are advancing — continuing)");
-    }
+    wait_for_workload_rendering(client, handle).await?;
     settle(client, handle).await
 }
 
-/// Two frame-counter readings, apart, tolerating dropped polls. `true` only
-/// if the counter actually moved.
-async fn frames_are_advancing<Io: ClientIo>(
+/// Wait until the workload is demonstrably rendering: the project's own frame
+/// counter has moved.
+///
+/// This replaces `upload`'s `wait_for_project_running` for the bench.
+/// That helper wants a clean run-evidence exchange and gives up on the first
+/// unanswered poll window — but the classic's UART RX FIFO overflows under
+/// console pressure and drops whole requests
+/// (`[io_task] UART RX error: FifoOverflowed`) while the project renders on
+/// at 30 fps. Every single step on that board burned the full 60 s timeout
+/// before a follow-up probe rescued it, which is most of why a run took
+/// forty minutes.
+///
+/// An advancing frame counter is the evidence the metric actually cares
+/// about, it tolerates dropped polls for free, and it usually arrives within
+/// a couple of seconds.
+async fn wait_for_workload_rendering<Io: ClientIo>(
     client: &mut LpClient<Io>,
     handle: WireProjectHandle,
-) -> bool {
-    const PROBES: u32 = 6;
-    const PROBE_GAP: Duration = Duration::from_secs(2);
+) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + RUN_TIMEOUT;
     let mut first: Option<u64> = None;
-    for _ in 0..PROBES {
+    while tokio::time::Instant::now() < deadline {
         if let Some(frames) = read_frame_count(client, handle).await {
             match first {
                 None => first = Some(frames),
-                Some(earlier) if frames > earlier => return true,
+                Some(earlier) if frames > earlier => return Ok(()),
                 Some(_) => {}
             }
         }
-        tokio::time::sleep(PROBE_GAP).await;
+        tokio::time::sleep(RENDER_POLL).await;
     }
-    false
+    bail!(
+        "the workload never rendered a frame within {RUN_TIMEOUT:?} (deployed, but the \
+         frame counter never moved)"
+    )
 }
 
 /// The project's frame counter, or `None` if this poll did not come back.
@@ -599,6 +677,23 @@ async fn confirm_death_once(
     }
 }
 
+/// Force a fresh boot with a cleared recovery ledger.
+///
+/// A power-on-class reset invalidates the RTC recovery region outright
+/// (contents are undefined after power loss, so a lucky CRC match must not
+/// resurrect stale blame), which takes the quarantine and the boot counters
+/// with it. That is the only way to un-disable a workload the ladder has
+/// switched off — and until it is cleared, every later step "survives"
+/// while rendering nothing.
+async fn clear_recovery_ladder(session: &DeviceSession) -> Result<()> {
+    session
+        .manage(LinkManagementRequest::ResetRuntime, DeviceEventSink::noop())
+        .await
+        .map_err(|error| anyhow!("{error}"))
+        .context("resetting the device to clear its recovery ladder")?;
+    Ok(())
+}
+
 /// Rebuild the link, retrying: a board that just OOMed auto-loads the same
 /// project on the next boot and can take a few boots to reach safe mode.
 ///
@@ -678,6 +773,9 @@ struct BenchConsole {
     oom_stats: RefCell<Vec<String>>,
     /// `[RECOVERY] last run crashed (oom)` lines, newest last.
     oom_reports: RefCell<Vec<String>>,
+    /// Count of lines saying the workload has been disabled — see
+    /// [`DEGRADED_MARKERS`].
+    degraded: RefCell<usize>,
 }
 
 impl BenchConsole {
@@ -686,7 +784,14 @@ impl BenchConsole {
             verbose,
             oom_stats: RefCell::new(Vec::new()),
             oom_reports: RefCell::new(Vec::new()),
+            degraded: RefCell::new(0),
         }
+    }
+
+    /// How many "the workload is disabled" lines have been seen so far. A
+    /// step that pushes this up was not measuring what it claims to measure.
+    fn degraded_count(&self) -> usize {
+        *self.degraded.borrow()
     }
 
     fn oom_stats(&self) -> Vec<String> {
@@ -711,6 +816,9 @@ impl BenchConsole {
                 }
                 if is_oom_crash_report(line) {
                     self.oom_reports.borrow_mut().push(line.trim().to_string());
+                }
+                if DEGRADED_MARKERS.iter().any(|marker| line.contains(marker)) {
+                    *self.degraded.borrow_mut() += 1;
                 }
                 if self.verbose || *origin == DeviceLineOrigin::Link {
                     eprintln!("[device] {line}");

@@ -164,6 +164,15 @@ pub struct BenchArgs {
     /// 200 otherwise); only affects how many doubling steps the run costs.
     #[arg(long)]
     pub start: Option<u32>,
+    /// Highest LED count already known to work on this board and build.
+    /// Seeds the ramp so a re-run does not re-walk proven territory.
+    #[arg(long)]
+    pub floor: Option<u32>,
+    /// Lowest LED count already known to fail. With --floor this seeds the
+    /// bisect directly, which is the difference between a forty-minute run
+    /// and a five-minute one.
+    #[arg(long)]
+    pub ceiling: Option<u32>,
     /// Measurement store directory to write into. Defaults to measurements/
     /// under the repository root.
     #[arg(long)]

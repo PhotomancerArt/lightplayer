@@ -69,6 +69,24 @@ pub struct BenchSchedule {
 impl BenchSchedule {
     /// Start the ramp at `start` LEDs (a known-good count for the chip; see
     /// [`default_start_leds`]). Zero is not a strip, so it is clamped up.
+    /// Seed the schedule with an already-known bracket: `floor` survived and
+    /// `ceiling` died, both on this board and build. The ramp then goes
+    /// straight to bisecting between them.
+    ///
+    /// The results are recorded as if measured, which is exactly what they
+    /// are — just measured by an earlier run. Nothing else in the schedule
+    /// needs to know: every decision is derived from the results list.
+    pub fn seeded(start: u32, floor: Option<u32>, ceiling: Option<u32>) -> Self {
+        let mut schedule = Self::new(start);
+        if let Some(floor) = floor {
+            schedule.record(floor, StepOutcome::Survived);
+        }
+        if let Some(ceiling) = ceiling {
+            schedule.record(ceiling, StepOutcome::Died);
+        }
+        schedule
+    }
+
     pub fn new(start: u32) -> Self {
         Self {
             start: start.max(1),
@@ -343,5 +361,30 @@ mod tests {
         assert_eq!(default_start_leds("esp32"), 120);
         assert_eq!(default_start_leds("esp32c6"), 200);
         assert_eq!(default_start_leds("esp32s3"), 200);
+    }
+
+    /// A seeded bracket goes straight to bisecting: no re-walking a floor we
+    /// already paid for, which is where a re-run's minutes go.
+    #[test]
+    fn a_seeded_bracket_bisects_immediately() {
+        let schedule = BenchSchedule::seeded(480, Some(480), Some(720));
+        match schedule.next_step() {
+            ScheduleStep::Test(leds) => {
+                assert!(
+                    leds > 480 && leds < 720,
+                    "expected a midpoint inside the seeded bracket, got {leds}"
+                );
+            }
+            other => panic!("expected a bisect step, got {other:?}"),
+        }
+    }
+
+    /// Seeding is optional and additive: no seeds behaves exactly like `new`.
+    #[test]
+    fn seeding_nothing_is_a_plain_ramp() {
+        assert_eq!(
+            BenchSchedule::seeded(200, None, None).next_step(),
+            BenchSchedule::new(200).next_step()
+        );
     }
 }
