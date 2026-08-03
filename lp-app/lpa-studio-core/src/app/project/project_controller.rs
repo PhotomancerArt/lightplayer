@@ -2637,11 +2637,26 @@ impl ProjectController {
         // The root card is back (the flat-root reversal), so the sidebar
         // agrees with the workspace: the project root is the tree's one top
         // row and every other node hangs beneath it. The count includes the
-        // root, since it is now a row like any other.
+        // root, since it is now a row like any other. The root row wears
+        // the same display title as the root card and the pane (the
+        // manifest name when authored — the raw tree label is the storage
+        // folder's humanization, "Studio" for every library project).
+        let manifest = self.active_manifest();
+        let root_title = manifest
+            .as_ref()
+            .and_then(|manifest| manifest.name.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
         ProjectNodeTreeView::new(
             self.root_nodes
                 .iter()
-                .map(|node| self.node_tree_item(node, &edits))
+                .map(|node| {
+                    let mut item = self.node_tree_item(node, &edits);
+                    if let Some(title) = root_title {
+                        item.label = title.to_string();
+                    }
+                    item
+                })
                 .collect(),
             self.root_nodes.iter().map(count_nodes).sum(),
         )
