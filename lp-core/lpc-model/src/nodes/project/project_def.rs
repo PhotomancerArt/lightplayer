@@ -13,7 +13,11 @@ use crate::{MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/`div`
 ///   Q32 mode slots) with a single `float_mode` slot. Artifacts at version `1`
 ///   are refused, not migrated (alpha format posture: bump and refuse).
-pub const PROJECT_FORMAT_VERSION: u32 = 2;
+/// - `3` — output nodes replaced the single `endpoint` slot with a
+///   `channels` map of `{endpoint, count}` records, and every hardware
+///   endpoint spec's middle segment now names the target device (`local`)
+///   instead of the driver peripheral (`rmt`, `gpio`, `espnow`, `virtual`).
+pub const PROJECT_FORMAT_VERSION: u32 = 3;
 
 /// Authored root project node definition.
 ///
@@ -90,7 +94,7 @@ mod tests {
     fn project_def_deserializes_named_nodes() {
         let json = r#"{
             "kind": "Project",
-            "format": 2,
+            "format": 3,
             "name": "basic",
             "nodes": {
                 "texture": { "ref": "./texture.json" },
@@ -130,7 +134,7 @@ mod tests {
         };
         let text = NodeDef::Project(def).write_json(&registry()).unwrap();
         assert!(
-            text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 2"),
+            text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 3"),
             "{text}"
         );
     }
