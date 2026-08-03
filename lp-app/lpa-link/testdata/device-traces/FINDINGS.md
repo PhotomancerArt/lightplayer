@@ -60,3 +60,27 @@ for M6:
    broken paths — likely the `OpenProviderForRecovery` flow colliding
    with the already-attached session; M5's flow targeting is the natural
    home for the fix.
+
+## 2026-08-03 — s6-corrupt-lpfs-project, attempt 3
+
+- Expected: `sync:unreadable`.
+- Observed: the board came up CLEAN AND EMPTY — "Connected — nothing
+  loaded" plus "Name your device". 256 KB of garble did not corrupt a
+  project inside a mountable fs; it destroyed the fs, and the firmware
+  came up with a fresh one. The identity stamp went with it
+  (`/.lp/device.json` lives at the fs root), hence the naming prompt.
+  Pull classified `empty`.
+- Three attempts, three outcomes: 4 KB → connected clean (littlefs
+  redundancy absorbed it); 256 KB → `unresponsive` (firmware wedged
+  mounting it); 256 KB again → reformatted to `empty`. Where the damage
+  lands decides which.
+- **Conclusion: external partition corruption cannot deterministically
+  produce `unreadable`.** That state is for a filesystem that MOUNTS but
+  whose `project.json` is missing/unparseable. The scenario needs a
+  targeted corruption OVER THE WIRE — push a project, then overwrite
+  `project.json` with garbage via the filesystem API — leaving the fs
+  itself intact. Spec redesign, not a product bug.
+- Positive result worth keeping: a device whose storage was destroyed
+  came back USABLE (connect, name, push) rather than dead. That is the
+  right graceful degradation — and the contrast with attempt 2's wedge
+  is what makes that wedge worth its defect entry.

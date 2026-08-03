@@ -10,8 +10,8 @@
   ],
   "setup": [
     {
-      "describe": "Start from s3 (firmware + project), then garble 256 KB of the lpfs partition (4 KB was NOT enough \u2014 littlefs redundancy shrugged it off; see FINDINGS.md 2026-08-03)",
-      "run": "python3 -c \"import os,sys; sys.stdout.buffer.write(os.urandom(262144))\" > /tmp/lp-garbage.bin && espflash write-bin --port {port} 0x310000 /tmp/lp-garbage.bin",
+      "describe": "NEEDS REDESIGN (2026-08-03, three attempts \u2014 see FINDINGS.md): external partition garble cannot produce `unreadable`; it either bounces off littlefs redundancy, wedges the firmware, or reformats to empty. The right injection is OVER THE WIRE: start from s3 (firmware + project), then overwrite the loaded project's project.json with garbage via the filesystem API (lp-cli or a wire write), leaving the fs mountable. Until that exists, SKIP.",
+      "run": null,
       "verified": false
     }
   ],
