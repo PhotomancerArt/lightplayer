@@ -85,7 +85,8 @@ impl DeviceSession {
             classifier: RefCell::new(BootLineClassifier::new()),
         });
         shared.sink.emit(DeviceEvent::State {
-            state: DeviceState::Booting,
+            from: None,
+            to: DeviceState::Booting,
         });
         Ok(Self { shared })
     }
@@ -486,8 +487,11 @@ impl DeviceShared {
                 session.status = LinkSessionStatus::Error { message };
             }
         }
-        *self.state.borrow_mut() = next.clone();
-        self.sink.emit(DeviceEvent::State { state: next });
+        let from = std::mem::replace(&mut *self.state.borrow_mut(), next.clone());
+        self.sink.emit(DeviceEvent::State {
+            from: Some(from),
+            to: next,
+        });
     }
 
     /// Send one app-protocol frame on the current wire.
@@ -495,6 +499,9 @@ impl DeviceShared {
         &self,
         msg: lpc_wire::ClientMessage,
     ) -> Result<(), TransportError> {
+        if let Ok(frame) = lpc_wire::json::to_string(&msg) {
+            self.sink.emit(DeviceEvent::TxFrame { frame });
+        }
         #[cfg(feature = "device-session-host")]
         if let Some(transport) = self.host_transport() {
             let mut transport = transport.lock().await;
@@ -644,6 +651,9 @@ impl DeviceShared {
                 }
             }
             Err(error) => {
+                self.sink.emit(DeviceEvent::ParseAnomaly {
+                    detail: format!("malformed M! frame: {error}"),
+                });
                 self.sink.emit(DeviceEvent::LogLine {
                     line: format!("malformed M! frame: {error}"),
                     origin: DeviceLineOrigin::Link,

@@ -151,6 +151,9 @@ pub fn App() -> Element {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
         controller.set_on_entry(log_to_js_console);
+        // Device event trace (M0): persist lifecycle records across
+        // refreshes and stream to a capture sink when the URL asks.
+        crate::device_events_io::install(&mut controller);
         // Device-session deadlines (connect / readiness / request-idle) run
         // on browser timers; without this the core default fires every
         // deadline immediately.

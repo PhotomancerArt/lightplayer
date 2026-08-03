@@ -18,7 +18,10 @@ use crate::app::places::device_session::{self, DeviceContent, DeviceSyncState};
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
-use crate::core::log::{LogClock, LogFilter, LogRing};
+use crate::core::log::{
+    DeviceEventKind, DeviceEventLog, DeviceEventRecord, DeviceEventRecorder, LogClock, LogFilter,
+    LogRing,
+};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
@@ -74,6 +77,12 @@ pub struct StudioController {
     /// [`ConsoleCommand`]s. Display-side only: the ring keeps everything, the
     /// filter shapes the emitted [`UiConsoleView`].
     log_filter: LogFilter,
+    /// The device lifecycle event ring (M0 of the multi-device roadmap):
+    /// state transitions, connect-flow changes, pool lifecycle, management
+    /// phases, sweep decisions, parse anomalies — and raw RX/TX in capture
+    /// mode. `Rc` because the device controller and per-connect event
+    /// sinks record into it through [`DeviceEventRecorder`] clones.
+    device_events: Rc<std::cell::RefCell<DeviceEventLog>>,
     /// The injected wall clock that stamps [`UiLogDraft`]s at push time.
     /// Producers never stamp — see the `core::log` module docs.
     now_secs: LogClock,
@@ -202,13 +211,21 @@ impl StudioController {
     /// stepping fakes. Core takes the closure instead of reading a clock so
     /// the crate stays platform-free (P1).
     pub fn new(now_secs: impl Fn() -> f64 + 'static) -> Self {
+        let now_secs: LogClock = Rc::new(now_secs);
+        let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
+        let mut device = DeviceController::new();
+        device.set_event_recorder(DeviceEventRecorder::new(
+            Rc::clone(&device_events),
+            Rc::clone(&now_secs),
+        ));
         Self {
-            device: DeviceController::new(),
+            device,
             pool: RuntimePool::new(),
             project: ProjectController::new(),
             logs: LogRing::new(),
             log_filter: LogFilter::default(),
-            now_secs: Rc::new(now_secs),
+            device_events,
+            now_secs,
             #[cfg(test)]
             test_clock: None,
             on_entry: None,
@@ -479,6 +496,49 @@ impl StudioController {
         if let Some(hook) = &self.on_entry {
             hook(entry);
         }
+    }
+
+    /// Install the device-event mirror hook: sees every record accepted by
+    /// the device event log (M0). The web shell uses it to persist the
+    /// trace across refreshes and to stream capture-mode records to a
+    /// scenario-runner sink. Install before the actor takes ownership.
+    pub fn set_on_device_event(&mut self, hook: impl Fn(&DeviceEventRecord) + 'static) {
+        self.device_events.borrow_mut().set_on_record(hook);
+    }
+
+    /// Turn device-event capture mode (raw RX/TX recording) on or off.
+    pub fn set_device_event_capture(&mut self, capture: bool) {
+        self.device_events.borrow_mut().set_capture(capture);
+    }
+
+    /// Whether device-event capture mode is on.
+    pub fn device_event_capture(&self) -> bool {
+        self.device_events.borrow().capture()
+    }
+
+    /// The retained device event records as JSONL (the export affordance).
+    pub fn device_events_jsonl(&self) -> String {
+        self.device_events.borrow().to_jsonl()
+    }
+
+    /// Read access to the device event log (tests, diagnostics).
+    pub fn device_events(&self) -> std::cell::Ref<'_, DeviceEventLog> {
+        self.device_events.borrow()
+    }
+
+    /// Record one device event stamped with the controller's clock.
+    fn record_device_event(
+        &self,
+        session: Option<&str>,
+        endpoint: Option<&str>,
+        kind: DeviceEventKind,
+    ) {
+        self.device_events.borrow_mut().record(DeviceEventRecord {
+            t: (self.now_secs)(),
+            session: session.map(str::to_string),
+            endpoint: endpoint.map(str::to_string),
+            kind,
+        });
     }
 
     pub fn snapshot(&self) -> StudioSnapshot {
@@ -2191,6 +2251,13 @@ impl StudioController {
     /// remembered device (best effort; the hello reconciles identity).
     async fn run_auto_connect(&mut self, updates: UxUpdateSink) -> UiResult {
         if self.pool.device_session().is_some() {
+            self.record_device_event(
+                None,
+                None,
+                DeviceEventKind::Sweep {
+                    disposition: "skipped-device-attached".to_string(),
+                },
+            );
             return Ok(UiNotices::new());
         }
         if matches!(
@@ -2199,8 +2266,22 @@ impl StudioController {
                 | ConnectFlowState::Connecting { .. }
                 | ConnectFlowState::Retrying { .. }
         ) {
+            self.record_device_event(
+                None,
+                None,
+                DeviceEventKind::Sweep {
+                    disposition: "skipped-flow-busy".to_string(),
+                },
+            );
             return Ok(UiNotices::new());
         }
+        self.record_device_event(
+            None,
+            None,
+            DeviceEventKind::Sweep {
+                disposition: "ran".to_string(),
+            },
+        );
         let pending_uid = self.most_recently_seen_device_uid();
         let outcome = self.device.auto_connect_granted(pending_uid).await;
         self.settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates)
@@ -2421,7 +2502,16 @@ impl StudioController {
         {
             self.quiesce_lens();
         }
-        self.pool.remove_kind(kind);
+        if let Some(session) = self.pool.remove_kind(kind) {
+            self.record_device_event(
+                Some(&session.id().to_string()),
+                None,
+                DeviceEventKind::Pool {
+                    action: "clear-slot".to_string(),
+                    detail: format!("{kind:?}"),
+                },
+            );
+        }
     }
 
     /// Install a connected payload into the pool under the capacity
@@ -2441,8 +2531,20 @@ impl StudioController {
             .pool
             .lens_session()
             .is_some_and(|session| session.kind() == payload.kind());
+        let install_detail = format!("{:?}", payload.kind());
+        let install_endpoint = payload
+            .link_session()
+            .map(|session| session.endpoint_id.as_str().to_string());
         match self.pool.install(payload) {
             Ok(id) => {
+                self.record_device_event(
+                    Some(&id.to_string()),
+                    install_endpoint.as_deref(),
+                    DeviceEventKind::Pool {
+                        action: "install".to_string(),
+                        detail: install_detail,
+                    },
+                );
                 if lens_replaced {
                     self.project.reset();
                 }
@@ -4505,6 +4607,14 @@ impl StudioController {
         )));
         let managed_uid_for_events = managed_uid.clone();
         self.device_card_op = Some((managed_uid, Rc::clone(&card_op)));
+        self.record_device_event(
+            Some(&device_id.to_string()),
+            None,
+            DeviceEventKind::Mgmt {
+                phase: "start".to_string(),
+                label: spec.progress_label.to_string(),
+            },
+        );
         if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
             // The pool refuses a same-kind replace while this runs (DQ-A
@@ -4553,6 +4663,18 @@ impl StudioController {
         if let Some(session) = self.pool.session_mut(device_id) {
             session.set_operation(None);
         }
+        self.record_device_event(
+            Some(&device_id.to_string()),
+            None,
+            DeviceEventKind::Mgmt {
+                phase: "settle".to_string(),
+                label: format!(
+                    "{} — {}",
+                    spec.progress_label,
+                    if manage_result.is_ok() { "ok" } else { "failed" }
+                ),
+            },
+        );
         let management = match manage_result {
             Ok(management) => management,
             Err(error) => {
