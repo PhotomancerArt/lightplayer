@@ -19,8 +19,12 @@ pub struct UiPanelGroup {
     pub label: String,
     /// The scope this group presents, as a node path (`/`, `/plasma-1`).
     /// Together with a channel name this is a control's identity (panel.md
-    /// P1) and the key every reset gesture carries.
+    /// P1) — the DISPLAY half; the dispatchable half is [`Self::target`].
     pub scope: String,
+    /// The structured scope the group's reset gesture clears
+    /// (`WirePanelClearRequest::Scope`). `None` on story fixtures with no
+    /// runtime behind them — the reset affordance simply doesn't render.
+    pub target: Option<lpc_wire::WireScopeRef>,
     /// The scope's channels, in listing order.
     pub controls: Vec<UiPanelControlView>,
     /// Child modules' panels — presentation recursion (R8).
@@ -38,9 +42,16 @@ impl UiPanelGroup {
         Self {
             label: label.into(),
             scope: scope.into(),
+            target: None,
             controls: Vec::new(),
             groups: Vec::new(),
         }
+    }
+
+    /// Attach the structured scope the reset gesture dispatches against.
+    pub fn with_target(mut self, target: lpc_wire::WireScopeRef) -> Self {
+        self.target = Some(target);
+        self
     }
 
     /// Add this scope's own channels.

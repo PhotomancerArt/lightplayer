@@ -55,6 +55,17 @@ pub(crate) fn panel_clear_action(target: &UiPanelTarget) -> UiAction {
     )
 }
 
+/// Build the per-scope panel reset (panel.md P2 clear at scope
+/// granularity; descends per settled P-Q4) — the module panel's ↺.
+pub(crate) fn panel_clear_scope_action(scope: lpc_wire::WireScopeRef) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Scope { scope },
+        },
+    )
+}
+
 /// Build the per-slot revert action for a persisted (unsaved) edit.
 pub(crate) fn slot_revert_action(address: ProjectSlotAddress) -> UiAction {
     UiAction::from_op(

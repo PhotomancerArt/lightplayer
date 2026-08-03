@@ -1,41 +1,37 @@
-//! Panel gestures the spike's surfaces raise.
+//! Panel gestures the module surfaces raise.
 //!
-//! **M2 UX spike seam.** `docs/design/panel.md` P8 says the wire carries
-//! exactly two runtime ops — `PanelWrite { scope, channel, value }` and
-//! `PanelClear { scope?, channel? }` — and that Studio, play mode, phones,
-//! and future hardware inputs all speak only those. Neither op exists yet
-//! (M4 owns the engine runtime), so the spike's components raise this
-//! component-level gesture instead and the stories fake the resulting
-//! state. The variants are deliberately shaped like the two wire ops so
-//! the mapping at implementation time is mechanical:
-//!
-//! - [`PanelGesture::ClearControl`] → `PanelClear { scope, channel }`
-//! - [`PanelGesture::ClearScope`] → `PanelClear { scope }`
-//! - [`PanelGesture::SetAutoSave`] → the P11 auto-save toggle
+//! `docs/design/panel.md` P8: the wire carries exactly two runtime ops —
+//! `PanelWrite { scope, channel, value }` and `PanelClear { scope?,
+//! channel? }` — and Studio, play mode, phones, and future hardware inputs
+//! all speak only those. Widget VALUE writes don't come through here: the
+//! panel widgets carry the control's `UiPanelTarget` and dispatch
+//! `PanelWriteOp` themselves (the same `panel_or_slot_action` path the
+//! node-card controls use). What's left is the clear/reset family and the
+//! P11 auto-save toggle, raised as a component-level gesture and translated
+//! into `UiAction`s at ONE seam ([`crate::app::node::face::node_face_body`])
+//! so the panel components stay dispatch-agnostic and the stories can fake
+//! state by intercepting the same events.
 //!
 //! There is no group-disclosure gesture: nested groups are bordered
 //! clusters in a wrapping row and never collapse, so there is no view
 //! state to carry.
-//!
-//! Panel *writes* are NOT here: a knob drag still rides the existing
-//! `SlotEditOp::SetValue` path so the spike reuses knob v2 untouched. That
-//! is a spike shortcut, not a proposal — see the module face's doc.
+
+use lpa_studio_core::UiPanelTarget;
 
 /// One gesture raised by a panel surface.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PanelGesture {
-    /// Clear one control's panel writer, returning it to Read (P2).
+    /// Clear one control's panel writer, returning it to Read (P2). The
+    /// target carries the `(scope, channel)` identity verbatim.
     ClearControl {
-        /// The scope the control lives in.
-        scope: String,
-        /// The channel name within that scope.
-        channel: String,
+        /// The control's `(scope, channel)` write target.
+        target: UiPanelTarget,
     },
     /// Clear every panel writer under one scope — the per-module reset.
-    /// The lean (P-Q4) is that this descends into nested groups.
+    /// Descends into nested groups (settled P-Q4).
     ClearScope {
         /// The scope to clear.
-        scope: String,
+        scope: lpc_wire::WireScopeRef,
     },
     /// Flip panel-state auto-save (P11 — on by default).
     SetAutoSave(bool),

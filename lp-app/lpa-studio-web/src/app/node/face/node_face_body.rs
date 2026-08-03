@@ -21,6 +21,7 @@ use lpa_studio_core::{
 
 use crate::app::module::{ModuleFace, ModulePanel, PanelGesture};
 use crate::app::node::NodeDirtyTint;
+use crate::app::node::slot_edit_actions::{panel_clear_action, panel_clear_scope_action};
 use crate::base::Platform;
 
 use super::{FixtureFace, NodeCardDrawers, NodeCardSection, PlaylistFace, ShaderFace};
@@ -50,12 +51,31 @@ pub fn NodeFaceBody(
     add_node_menu: Option<UiAddNodeMenu>,
     #[props(default)] pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
-    /// M2 UX spike: panel gestures (reset, auto-save, group disclosure)
-    /// raised by a module face. `None` renders the panel display-only.
+    /// Panel-gesture override — stories fake state through this. In the
+    /// live app leave it `None`: gestures translate to the real panel ops
+    /// here (the ONE seam), riding `on_action`.
     #[props(default = None)]
     module_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    // The gesture→op seam (panel.md P8): clear gestures become the two
+    // wire-shaped ops. SetAutoSave has no wire arm yet (P3 owns it); the
+    // toggle only renders when a face carries `auto_save`, which no derived
+    // face does until then.
+    let module_panel = module_panel.or_else(|| {
+        let on_action = on_action?;
+        Some(EventHandler::new(
+            move |gesture: PanelGesture| match gesture {
+                PanelGesture::ClearControl { target } => {
+                    on_action.call(panel_clear_action(&target));
+                }
+                PanelGesture::ClearScope { scope } => {
+                    on_action.call(panel_clear_scope_action(scope));
+                }
+                PanelGesture::SetAutoSave(_) => {}
+            },
+        ))
+    });
     rsx! {
         // Full-bleed: sections reclaim the pane's padding and sit flush
         // under the header's bottom border.
