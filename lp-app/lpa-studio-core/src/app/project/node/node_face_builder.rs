@@ -171,7 +171,15 @@ fn fixture_power(sections: &[UiNodeSection]) -> Option<UiFixturePower> {
 
 /// First produced product row of the wanted kind; an `Empty`-kind row (the
 /// output exists but nothing resolved yet) is the stable-face fallback.
-fn product_of_kind(sections: &[UiNodeSection], kind: UiProductKind) -> Option<UiProducedProduct> {
+///
+/// Shared with the module-face derivation (`ProjectController::apply_module_faces`):
+/// a module's hero is its own `output` mirror, chosen by exactly the rule
+/// the shader hero uses, so the two heroes can never disagree about what
+/// "the visual this card produces" means.
+pub(in crate::app::project) fn product_of_kind(
+    sections: &[UiNodeSection],
+    kind: UiProductKind,
+) -> Option<UiProducedProduct> {
     let products = sections.iter().find_map(|section| match section {
         UiNodeSection::ProducedProducts(products) => Some(products),
         _ => None,
