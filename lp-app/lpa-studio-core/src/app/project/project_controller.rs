@@ -16,17 +16,17 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeCardUiState, NodeUiOp, PanelClearOp, PanelWriteOp, PendingAssetEdit, PendingEdit,
-    PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState, ProjectConnectResult,
-    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
-    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
-    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
-    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp, StudioOverlayMutation,
-    StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody,
-    UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView,
-    UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
-    UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent,
-    UxUpdateSink,
+    NodeCardUiState, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PendingAssetEdit,
+    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState,
+    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
+    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
+    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
+    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
+    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
+    UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -365,13 +365,22 @@ impl ProjectController {
         self.sync.as_ref()?.binding_graph()
     }
 
-    /// Project the binding-graph snapshot into the bus pane view.
+    /// Project ONE scope's slice of the binding-graph snapshot into the
+    /// wiring view its module card's drawer renders.
     ///
-    /// `None` before the first snapshot arrives; the pane shows its loading/
-    /// empty state. Node labels and focus actions come from the same node
-    /// controllers the project pane renders, so clicking a site lands on
-    /// exactly that node (D7 linked navigation).
-    pub fn ui_bus_view(&self) -> Option<crate::UiBusView> {
+    /// This is the sidebar bus pane's projection, scoped: the pane listed
+    /// every non-sink channel in the project at once, and the wiring drawer
+    /// lists the channels of the scope whose module owns the card. The row
+    /// shape is untouched (P3 relocates the bus surface, it does not
+    /// redesign it) — node labels and focus actions still come from the
+    /// same node controllers the project pane renders, so clicking a site
+    /// lands on exactly that node (D7 linked navigation).
+    ///
+    /// `None` before the first snapshot arrives; a scope with no channels
+    /// projects `Some` with an empty list, so the drawer can say so (a
+    /// module publishing nothing is a legitimate shape, not a loading
+    /// state).
+    pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
         let site = |index: &u32| -> Option<crate::UiBusSiteView> {
             let binding = graph.bindings.get(*index as usize)?;
@@ -385,31 +394,22 @@ impl ProjectController {
                 focus: node.map(node_focus_action),
             })
         };
-        let root_scope = graph
-            .channels
-            .iter()
-            .find(|channel| channel.primary_visual)
-            .and_then(|channel| channel.scope);
         let channels = graph
             .channels
             .iter()
             // Sink rows (playlist entries, wire 8) feed panel liveness only
-            // — the bus listing keeps R2's presentation: channels private
-            // to an entry never show as project wiring.
+            // — the wiring drawer keeps R2's presentation: channels private
+            // to an entry never show as project wiring. A sink scope can
+            // never equal a module scope, so this is belt-and-braces.
             .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
+            .filter(|channel| channel.scope == Some(scope))
             .map(|channel| crate::UiBusChannelView {
                 scope: channel.scope,
-                // Root-scope rows carry no label; embedded scopes label by
-                // their owner module's node label (display derivation is a
-                // client concern — the wire ships structure only).
-                scope_label: channel
-                    .scope
-                    .filter(|scope| Some(*scope) != root_scope)
-                    .map(|scope| {
-                        self.node_by_runtime_id(scope.owner())
-                            .map(|node| node.label().to_string())
-                            .unwrap_or_else(|| format!("node {}", scope.owner().0))
-                    }),
+                // No scope label: every row here belongs to the scope of
+                // the card the drawer hangs off, so the card header
+                // already carries the identity the sidebar pane had to
+                // spell out per row.
+                scope_label: None,
                 name: channel.name.clone(),
                 kind: channel.kind.map(|kind| format!("{kind:?}")),
                 value: channel
@@ -508,8 +508,28 @@ impl ProjectController {
         self.root_nodes.iter().find_map(|node| walk(node, id))
     }
 
-    /// Toggle the binding-graph probe on project reads (bus pane visible,
-    /// binding detail open, …).
+    /// Whether the server is saving panel state for this project
+    /// (panel.md P11), as of the last runtime read.
+    ///
+    /// The P11 switch's READ path. It rides `ServerRuntimeStatus` on the
+    /// ordinary project read Studio makes every refresh rather than a
+    /// message of its own, so the toggle converges exactly the way engaged
+    /// panel writers do — a rejected or racing write simply loses on the
+    /// next pull. `None` from a server that does not report it (an
+    /// engine-only read), which renders NO toggle rather than a wrong one.
+    pub fn panel_auto_save(&self) -> Option<bool> {
+        self.sync
+            .as_ref()?
+            .project_view()
+            .runtime
+            .as_ref()?
+            .server
+            .as_ref()?
+            .panel_auto_save
+    }
+
+    /// Toggle the binding-graph probe on project reads (module faces need
+    /// the graph, binding detail open, …).
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
         if let Some(sync) = self.sync.as_mut() {
             sync.set_binding_graph_subscribed(subscribed);
@@ -1732,9 +1752,14 @@ impl ProjectController {
             handle_id,
             inventory,
         };
-        // The bus pane ships with every loaded project, so its probe rides
-        // along from the first read (unsubscribing stays available for
-        // consumers without the pane).
+        // The binding-graph probe rides EVERY read of a ready project: the
+        // sidebar bus pane it was originally armed for is gone (P3), and
+        // what needs the graph now is the module-face derivation itself —
+        // panel control state, the wiring drawer, the scope's channels.
+        // Without a snapshot a module card has no face at all, so the
+        // subscription is a property of "a project is connected", not of
+        // any pane's visibility. (Unsubscribing stays available for
+        // consumers that render no faces.)
         let mut sync = ProjectSync::new();
         sync.set_binding_graph_subscribed(true);
         self.sync = Some(sync);
@@ -2205,6 +2230,7 @@ impl ProjectController {
                 &node.header.path,
                 view_sections(node),
                 &node.children,
+                node.card_ui.wiring_open,
             ) {
                 node.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -2227,6 +2253,7 @@ impl ProjectController {
                 &child.detail,
                 &child.sections,
                 &child.children,
+                child.card_ui.wiring_open,
             ) {
                 child.face = Some(crate::UiNodeFace::Module(face));
             }
@@ -2242,9 +2269,11 @@ impl ProjectController {
         path: &str,
         sections: &[crate::UiNodeSection],
         children: &[crate::UiNodeChild],
+        wiring_open: bool,
     ) -> Option<crate::UiModuleFace> {
         let address = ProjectNodeAddress::parse(path).ok()?;
-        let owner = self.node(&address)?.target().node_id;
+        let node = self.node(&address)?;
+        let owner = node.target().node_id;
         let scope = lpc_wire::WireScopeRef::Module { owner };
 
         let mut controls: Vec<crate::UiPanelControlView> = Vec::new();
@@ -2293,13 +2322,49 @@ impl ProjectController {
                 .with_target(scope)
                 .with_controls(controls)
                 .with_groups(groups),
-            // Wiring drawer, provenance, and the panel-state auto-save
-            // toggle are P3's work.
-            wiring: None,
-            wiring_open: false,
-            provenance: None,
-            auto_save: None,
+            // Bus-as-wiring, hung off the module that OWNS the scope — the
+            // sidebar bus pane's whole content, relocated (P3). `Some` even
+            // with no channels: the drawer's empty state explains scope
+            // publicity, and a module publishing nothing is a real shape.
+            wiring: self.ui_bus_view_for_scope(scope),
+            wiring_open,
+            provenance: self.module_provenance(node),
+            // The panel-state file is per project folder, so the switch
+            // belongs to the project's ROOT module and an embedded one
+            // repeats nothing (P11).
+            auto_save: self
+                .is_root_module(owner)
+                .then(|| self.panel_auto_save())
+                .flatten(),
         })
+    }
+
+    /// Whether `owner` is the project's root module — the one card that
+    /// presents project-level switches (today: panel auto-save).
+    fn is_root_module(&self, owner: NodeId) -> bool {
+        self.root_nodes
+            .first()
+            .is_some_and(|root| root.target().node_id == owner)
+    }
+
+    /// The compact provenance footer ("Yona · v0.4 · CC0-1.0"): the
+    /// authored [`lpc_model::nodes::ProvenanceDef`] fields the module's def
+    /// carries, present ones only, in declaration order. `None` when the
+    /// module authored none — most do not, and an empty rule line would be
+    /// worse than no line (§8).
+    fn module_provenance(&self, node: &NodeController) -> Option<String> {
+        let parts: Vec<String> = ["author", "version", "license", "created"]
+            .into_iter()
+            .filter_map(|field| {
+                // `OptionSlot<ValueSlot<String>>` under `OptionSlot<Provenance>`:
+                // both options contribute a `some` hop.
+                match def_slot_value(node, &["provenance", "some", field, "some"])? {
+                    lpc_model::LpValue::String(text) if !text.is_empty() => Some(text.clone()),
+                    _ => None,
+                }
+            })
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
     /// Which of the three panel states a control is in, and what owns its
@@ -2968,6 +3033,41 @@ impl ProjectController {
             lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
                 .with_notice(UiNotice::warning(format!(
                     "Couldn't reset panel control: {reason}"
+                ))),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Flip panel-state auto-save (panel.md P11) via
+    /// `WireProjectCommand::PanelAutoSave`. Same runtime-command posture as
+    /// [`Self::panel_write`]: the new value is not applied locally — it
+    /// arrives on the next read as `ServerRuntimeStatus::panel_auto_save`,
+    /// so a refused write can never leave the switch lying.
+    pub async fn set_panel_auto_save(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelAutoSaveOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let run = server
+            .panel_auto_save(
+                handle_id,
+                lpc_wire::WirePanelAutoSaveRequest {
+                    enabled: op.enabled,
+                },
+            )
+            .await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't change panel auto-save: {reason}"
                 ))),
         };
         Ok(ProjectEditRun {
@@ -4820,6 +4920,36 @@ fn view_sections(node: &UiNodeView) -> &[crate::UiNodeSection] {
         .unwrap_or_default()
 }
 
+/// The mirrored value of one of a node's **def** slots, addressed by its
+/// field-name path (e.g. `["provenance", "some", "author", "some"]`).
+///
+/// A read straight off the slot controllers the card walk already built —
+/// no new plumbing, which is what keeps the provenance footer cheap.
+/// `None` for an unauthored path, a structural slot, or a name the slot
+/// grammar rejects.
+fn def_slot_value<'a>(node: &'a NodeController, path: &[&str]) -> Option<&'a lpc_model::LpValue> {
+    fn descend<'a>(slots: &'a [SlotController], path: &[&str]) -> Option<&'a SlotController> {
+        let (head, rest) = path.split_first()?;
+        let slot = slots.iter().find(|slot| {
+            matches!(
+                slot.address().path.segments().last(),
+                Some(lpc_model::SlotPathSegment::Field(name)) if name.as_str() == *head
+            )
+        })?;
+        match rest.is_empty() {
+            true => Some(slot),
+            false => descend(slot.children(), rest),
+        }
+    }
+    // `node.slots()` holds one controller per slot ROOT; the def root's
+    // children are its field slots.
+    node.slots()
+        .iter()
+        .filter(|slot| slot.address().root == ProjectSlotRoot::Def)
+        .find_map(|root| descend(root.children(), path))
+        .and_then(SlotController::value)
+}
+
 /// Every widget control any face in a card subtree carries, depth-first.
 ///
 /// This is the module panel's whole input: a control's `panel_target` says
@@ -6357,7 +6487,7 @@ mod tests {
     }
 
     #[test]
-    fn ui_bus_view_projects_channels_with_labels_and_focus() {
+    fn ui_bus_view_for_scope_projects_channels_with_labels_and_focus() {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_test_slots(&mut view, 1, Revision::new(2), false);
         let mut project = ProjectController::new();
@@ -6365,6 +6495,11 @@ mod tests {
         project.apply_project_view(&view).unwrap();
 
         let node = lpc_model::NodeId::new(1);
+        let root_scope = lpc_wire::WireScopeRef::Module { owner: node };
+        let sink_scope = lpc_wire::WireScopeRef::Sink {
+            owner: node,
+            entry: 1,
+        };
         let graph = lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: vec![
@@ -6397,7 +6532,7 @@ mod tests {
             ],
             channels: vec![
                 lpc_wire::WireBusChannel {
-                    scope: None,
+                    scope: Some(root_scope),
                     name: "visual.out".to_string(),
                     kind: Some(lpc_model::Kind::Color),
                     providers: vec![1],
@@ -6413,10 +6548,7 @@ mod tests {
                 // liveness, but the bus listing and the binding picker
                 // must both leave it out (R2 presentation).
                 lpc_wire::WireBusChannel {
-                    scope: Some(lpc_wire::WireScopeRef::Sink {
-                        owner: node,
-                        entry: 1,
-                    }),
+                    scope: Some(sink_scope),
                     name: "glow".to_string(),
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![],
@@ -6439,11 +6571,23 @@ mod tests {
             "the picker never offers a sink-private channel"
         );
 
-        let bus = project.ui_bus_view().expect("bus view");
+        assert!(
+            project
+                .ui_bus_view_for_scope(sink_scope)
+                .expect("a graph is loaded")
+                .channels
+                .is_empty(),
+            "a sink scope never projects wiring, even when asked for by \
+             identity (R2 presentation) — the drawer belongs to modules"
+        );
+
+        let bus = project
+            .ui_bus_view_for_scope(root_scope)
+            .expect("wiring view for the root scope");
         assert_eq!(
             bus.channels.len(),
             1,
-            "the sink row stays off the bus listing"
+            "only this scope's channels list; the sink row stays out"
         );
         let channel = &bus.channels[0];
         assert_eq!(channel.name, "visual.out");
@@ -6458,6 +6602,15 @@ mod tests {
         // action (D7 linked navigation).
         assert_eq!(channel.readers[0].node_label, "Orbit");
         assert!(channel.readers[0].focus.is_some());
+        assert_eq!(
+            channel.scope,
+            Some(root_scope),
+            "rows keep the structured scope they were filtered by"
+        );
+        assert_eq!(
+            channel.scope_label, None,
+            "the card the drawer hangs off already names the scope"
+        );
     }
 
     #[test]
@@ -7345,8 +7498,8 @@ mod tests {
                     height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
                 }),
-                // The bus pane's binding-graph probe rides along on every
-                // loaded-project read.
+                // The binding-graph probe rides along on every
+                // loaded-project read — module faces cannot derive without it.
                 ProjectProbeRequest::BindingGraph(lpc_wire::BindingGraphProbeRequest {
                     include_values: true,
                 }),

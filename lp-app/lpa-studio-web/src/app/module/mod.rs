@@ -38,6 +38,8 @@ pub(crate) mod panel_state_stories;
 pub(crate) mod play_mode_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod playlist_panel_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod wiring_drawer_stories;
 
 pub use module_face::ModuleFace;
 pub use module_panel::{ModulePanel, NestedPanelGroup};

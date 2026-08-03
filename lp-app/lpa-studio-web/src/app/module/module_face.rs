@@ -13,10 +13,14 @@
 //!    is a legitimate shape (E6).
 //! 2. `panel` — bus-as-**controls** (R8): this scope's channels plus each
 //!    child module's panel as a nested group.
-//! 3. `wiring` — bus-as-**writers/readers** (today's sidebar bus-pane
-//!    content), as a drawer. The split is deliberate: controls are the
-//!    product surface, wiring is an authoring diagnostic.
-//! 4. provenance — a quiet footer line (§8).
+//! 3. `wiring` — bus-as-**writers/readers**, as a drawer: exactly the
+//!    retired sidebar bus pane's content, scoped to this module and hung
+//!    off it (P3). The split is deliberate: controls are the product
+//!    surface, wiring is an authoring diagnostic. Its open state is
+//!    core-owned (`NodeCardUiState::wiring_open`), like every other card
+//!    drawer.
+//! 4. provenance — a quiet footer line (§8), derived from the module def's
+//!    authored `ProvenanceDef` fields.
 //!
 //! **Children are NOT here.** They expand under the card as full sibling
 //! cards, via [`crate::app::node::NodeChildren`] — the grammar the playlist
@@ -33,17 +37,15 @@
 //! (`panel.md` P1), which the shared `(scope, channel)` identity keeps in
 //! lockstep.
 //!
-//! **Spike shortcut, not a proposal:** a knob drag still dispatches
-//! `SlotEditOp::SetValue` at the control's mock slot address, because that
-//! is what makes knob v2 work untouched. Panel writes are their own wire op
-//! (panel.md P8) and M4 routes them there; nothing in this face depends on
-//! which path carries the value.
+//! Widget writes ride their own wire op (`PanelWriteOp`, panel.md P8) via
+//! the control's `panel_target`; nothing in this face depends on which
+//! path carries the value.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiModuleFace as UiModuleFaceData};
+use lpa_studio_core::{NodeCardDrawer, NodeUiOp, UiAction, UiModuleFace as UiModuleFaceData};
 
 use crate::app::BusPaneBody;
-use crate::app::node::{NodeCardSection, ProductPreview};
+use crate::app::node::{NodeCardSection, ProductPreview, node_ui_action};
 
 use super::{ModulePanel, PanelGesture};
 
@@ -51,9 +53,11 @@ use super::{ModulePanel, PanelGesture};
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ModuleFace(
     face: UiModuleFaceData,
-    /// Toggle handler for the wiring drawer (spike-local view state).
+    /// The module's address path — the card UI state key the wiring
+    /// drawer's toggle op carries back. `None` in story fixtures that
+    /// render a face outside a card, where there is nothing to key.
     #[props(default = None)]
-    on_wiring_toggle: Option<EventHandler<()>>,
+    node: Option<String>,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
@@ -92,8 +96,15 @@ pub fn ModuleFace(
                 summary: wiring_summary,
                 open: Some(wiring_open),
                 on_toggle: move |()| {
-                    if let Some(handler) = on_wiring_toggle {
-                        handler.call(());
+                    // Core-owned disclosure, exactly like the other card
+                    // drawers: the op is keyed by the module's address so
+                    // the open state survives re-render and is e2e-drivable.
+                    if let (Some(handler), Some(node)) = (on_action, node.as_ref()) {
+                        handler.call(node_ui_action(NodeUiOp::SetDrawer {
+                            node: node.clone(),
+                            drawer: NodeCardDrawer::Wiring,
+                            open: !wiring_open,
+                        }));
                     }
                 },
                 div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:px-4 tw:py-3",

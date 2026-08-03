@@ -122,7 +122,14 @@ pub fn NodeFaceBody(
                 // advanced slot view lives on the individual child nodes,
                 // which are sibling cards below this one.
                 UiNodeFace::Module(module) => rsx! {
-                    ModuleFace { face: module, on_panel: module_panel, on_action }
+                    ModuleFace {
+                        face: module,
+                        // The wiring drawer's disclosure is core-owned like
+                        // every other drawer, keyed by this address.
+                        node: Some(node),
+                        on_panel: module_panel,
+                        on_action,
+                    }
                 },
                 // A leaf under a module: its bound slots ARE its face (R3).
                 // Same widgets and same panel state as the module panel
