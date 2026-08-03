@@ -63,10 +63,16 @@ function tracePath(id) {
 
 function captureStatus(id) {
   const file = tracePath(id);
-  if (!existsSync(file)) return { state: "missing" };
-  const stat = statSync(file);
-  if (stat.size === 0) return { state: "empty" };
-  return { state: "captured", when: stat.mtime.toISOString().slice(0, 16).replace("T", " ") };
+  if (existsSync(file) && statSync(file).size > 0) {
+    return { state: "captured", when: statSync(file).mtime.toISOString().slice(0, 16).replace("T", " ") };
+  }
+  // A filed FINDING (the run happened but did not do what the spec
+  // expects) is a visible state of its own — not silently "missing".
+  const failed = path.join(TRACE_DIR, `${id}.failed.jsonl`);
+  if (existsSync(failed)) {
+    return { state: "finding", when: statSync(failed).mtime.toISOString().slice(0, 16).replace("T", " ") };
+  }
+  return { state: "missing" };
 }
 
 function printStatus(scenarios) {
@@ -76,7 +82,10 @@ function printStatus(scenarios) {
     const setup = s.setup?.length
       ? s.setup.every((step) => step.verified) ? "scripted" : "scripted (unverified)"
       : "procedure only";
-    const status = cap.state === "captured" ? `captured ${cap.when}` : cap.state;
+    const status =
+      cap.state === "captured" ? `captured ${cap.when}`
+      : cap.state === "finding" ? `✗ finding ${cap.when} (FINDINGS.md)`
+      : cap.state;
     return [s.id, status, setup, s.board, s.title];
   });
   const widths = [0, 0, 0, 0];
@@ -325,7 +334,7 @@ async function menuPick(scenarios) {
   const firstMissing = scenarios.findIndex((s) => captureStatus(s.id).state !== "captured");
   for (const [index, s] of scenarios.entries()) {
     const cap = captureStatus(s.id);
-    const mark = cap.state === "captured" ? "✓" : " ";
+    const mark = cap.state === "captured" ? "✓" : cap.state === "finding" ? "✗" : " ";
     const hint = index === firstMissing ? "  ← Enter" : "";
     console.log(`  ${index + 1}. ${mark} ${s.id} — ${s.title}${hint}`);
   }
