@@ -352,7 +352,7 @@ fn attach_output_demand_root(
         .runtime_output_sink_buffer_id(out_id)
         .expect("output sink buffer");
     rt.services_mut()
-        .register_output_sink(sink, &OutputDef::new(endpoint));
+        .register_output_sink(sink, out_id, &OutputDef::new(endpoint));
     rt.add_binding(
         BindingDraft {
             source: BindingSource::Literal(LpValue::F32(0.0)),
@@ -399,7 +399,7 @@ fn attach_idle_output_sink(
         .runtime_output_sink_buffer_id(out_id)
         .expect("output sink buffer");
     rt.services_mut()
-        .register_output_sink(sink, &OutputDef::new(endpoint));
+        .register_output_sink(sink, out_id, &OutputDef::new(endpoint));
     (out_id, sink)
 }
 

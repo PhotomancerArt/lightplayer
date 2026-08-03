@@ -15,67 +15,139 @@ use lpc_hardware::{
     ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
 };
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::{HwEndpointSpec, Revision, TreePath};
+use lpc_model::{HwEndpointSpec, NodeId, Revision, TreePath};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
-/// Per-sink channel state for [`EngineServices`] output flushing.
+/// Every wire one output node drives from its single control buffer.
+///
+/// The node renders one flat buffer and the wires take slices of it in
+/// ascending channel-key order, so the set — not the wire — owns everything
+/// authored per node: the display options (shared by every wire, Q3) and the
+/// node identity every log and error carries.
 #[derive(Debug)]
-struct OutputSinkBinding {
-    endpoint: HwEndpointSpec,
+struct OutputSinkSet {
+    node: NodeId,
     display_options: Option<OutputDriverOptions>,
+    /// Wires in ascending channel-key order.
+    ///
+    /// Empty means "this output drives nothing": either it authors no
+    /// channels, or its channels could not be sliced (see
+    /// [`remainder_offender`]). An empty set is silent from then on — the
+    /// refusal is logged once, when the configuration is read.
+    wires: Vec<OutputWire>,
+}
+
+/// One authored channel of an output node: a slice of the node's control
+/// buffer, pushed to one hardware endpoint.
+///
+/// The slice lives here rather than in the endpoint spec on purpose: an
+/// endpoint names a wire and nothing else, so two wires are two distinct
+/// specs, and where each wire's pixels come from is the engine's business.
+#[derive(Debug)]
+struct OutputWire {
+    /// Authored channel key. Identifies the wire in logs and in the per-tick
+    /// diff, which matches wires by key so an edit to one leaves the others —
+    /// including their parking — untouched.
+    channel: u32,
+    endpoint: HwEndpointSpec,
+    /// First sample of the node's buffer this wire carries.
+    start_samples: u32,
+    /// Samples this wire carries, or `None` for "whatever is left".
+    ///
+    /// Only the last wire may take the remainder, so a single-channel output
+    /// with no authored count drives the whole buffer — exactly what every
+    /// output did before channels existed.
+    len_samples: Option<u32>,
     channel_handle: Option<OutputChannelHandle>,
     last_byte_count: Option<u32>,
-    /// Hardware generation observed when this sink's last open attempt failed,
-    /// or `None` while the sink has an open channel or a retry is due.
+    /// Hardware generation observed when this wire's last open attempt failed,
+    /// or `None` while the wire has an open channel or a retry is due.
     ///
-    /// A sink whose endpoint does not exist on the board — a project authored
+    /// A wire whose endpoint does not exist on the board — a project authored
     /// for four strips loaded onto a one-strip board, say — can never open, and
     /// re-attempting costs a full enumeration of every endpoint the drivers
-    /// offer. Parking on the generation means such a sink is asked once per
+    /// offer. Parking on the generation means such a wire is asked once per
     /// *hardware change* rather than once per frame, while a pin freed by
     /// another node still lights it on the very next flush.
     parked_at_generation: Option<u64>,
+    /// Buffer sample count the last truncation warning was issued for.
+    ///
+    /// An overflowing slice keeps overflowing every frame, so the warning is
+    /// rate-limited on the extent that caused it: loud once per shape, not
+    /// sixty times a second (the same bargain the LED cap makes).
+    truncated_at_samples: Option<u32>,
 }
 
-/// Failure while flushing one registered output sink.
+impl OutputWire {
+    fn new(planned: PlannedWire<'_>) -> Self {
+        Self {
+            channel: planned.channel,
+            endpoint: planned.endpoint.clone(),
+            start_samples: planned.start_samples,
+            len_samples: planned.len_samples,
+            channel_handle: None,
+            last_byte_count: None,
+            parked_at_generation: None,
+            truncated_at_samples: None,
+        }
+    }
+
+    fn matches(&self, planned: PlannedWire<'_>) -> bool {
+        self.channel == planned.channel
+            && self.endpoint == *planned.endpoint
+            && self.start_samples == planned.start_samples
+            && self.len_samples == planned.len_samples
+    }
+}
+
+/// One wire as the authored `channels` map describes it, before any runtime
+/// extent is known.
+#[derive(Clone, Copy)]
+struct PlannedWire<'a> {
+    channel: u32,
+    endpoint: &'a HwEndpointSpec,
+    start_samples: u32,
+    len_samples: Option<u32>,
+}
+
+/// Failure while flushing one wire of a registered output sink.
 ///
-/// A flush attempts every sink, so this always names the endpoint that failed:
-/// on a multi-channel board an unnamed error is unactionable, and the frame's
-/// other channels were flushed regardless.
+/// A flush attempts every wire of every sink, so this always names the node and
+/// the channel that failed: on a multi-channel board an unnamed error is
+/// unactionable, and the frame's other wires were flushed regardless.
 #[derive(Debug)]
 pub enum OutputFlushError {
     MisalignedPayload {
-        endpoint: HwEndpointSpec,
+        node: NodeId,
         buffer_id: RuntimeBufferId,
     },
     Provider {
+        node: NodeId,
+        channel: u32,
         endpoint: HwEndpointSpec,
         error: OutputError,
     },
 }
 
-impl OutputFlushError {
-    fn endpoint(&self) -> &HwEndpointSpec {
-        match self {
-            Self::MisalignedPayload { endpoint, .. } | Self::Provider { endpoint, .. } => endpoint,
-        }
-    }
-}
-
 impl fmt::Display for OutputFlushError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MisalignedPayload {
+            Self::MisalignedPayload { node, buffer_id } => write!(
+                f,
+                "output node {node} (buffer {buffer_id:?}): payload must be whole u16 RGB triplets (multiple of 6 bytes)",
+            ),
+            Self::Provider {
+                node,
+                channel,
                 endpoint,
-                buffer_id,
+                error,
             } => write!(
                 f,
-                "output {endpoint} (buffer {buffer_id:?}): payload must be whole u16 RGB triplets (multiple of 6 bytes)",
+                "output node {node} channel {channel} {endpoint}: {error}"
             ),
-            Self::Provider { endpoint, error } => write!(f, "output {endpoint}: {error}"),
         }
     }
 }
@@ -90,8 +162,14 @@ pub struct EngineServices {
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
-    /// Fixture-written buffers paired with authored output endpoint configuration.
-    output_sinks: HashMap<RuntimeBufferId, OutputSinkBinding>,
+    /// Fixture-written buffers paired with the wires their output node drives.
+    output_sinks: HashMap<RuntimeBufferId, OutputSinkSet>,
+    /// Scratch the flush decodes each node buffer into, once per frame.
+    ///
+    /// Kept across frames so the decode of a buffer several wires share costs
+    /// no allocation at all in the steady state — it used to be a fresh `Vec`
+    /// per sink per frame.
+    flush_samples: Vec<u16>,
 }
 
 /// Hardware button access used by runtime input nodes.
@@ -141,6 +219,7 @@ impl EngineServices {
             button_service: None,
             radio_service: None,
             output_sinks: HashMap::new(),
+            flush_samples: Vec::new(),
         }
     }
 
@@ -152,10 +231,12 @@ impl EngineServices {
     pub fn set_output_provider(&mut self, provider: Option<Box<dyn OutputProvider>>) {
         self.close_output_sinks();
         // A different provider is a different world: what the old one refused
-        // says nothing about what this one will do, so no sink stays parked
+        // says nothing about what this one will do, so no wire stays parked
         // across the swap.
         for sink in self.output_sinks.values_mut() {
-            sink.parked_at_generation = None;
+            for wire in &mut sink.wires {
+                wire.parked_at_generation = None;
+            }
         }
         self.output_provider = provider;
     }
@@ -184,66 +265,64 @@ impl EngineServices {
         self.radio_service.clone()
     }
 
-    /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush writes
-    /// them through [`OutputProvider`] for `config`'s hardware endpoint.
+    /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush slices
+    /// them across `config`'s channels and writes each slice through [`OutputProvider`].
     ///
     /// Insert the backing [`crate::resource::RuntimeBuffer`] with
     /// [`WithRevision::new`](lpc_model::WithRevision::new)([`Revision::default`], …)
     /// so untouched sinks do not match the post-tick revision until the fixture mutates them.
-    pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
-        let endpoint = endpoint_from_output_config(config);
-        warn_if_multi_channel(config, &endpoint);
-        let display_options = display_options_from_output_config(config);
+    pub fn register_output_sink(
+        &mut self,
+        buffer_id: RuntimeBufferId,
+        node: NodeId,
+        config: &OutputDef,
+    ) {
         if let Some(mut existing) = self.output_sinks.remove(&buffer_id) {
             self.close_output_sink(&mut existing);
         }
-        self.output_sinks.insert(
-            buffer_id,
-            OutputSinkBinding {
-                endpoint,
-                display_options,
-                channel_handle: None,
-                last_byte_count: None,
-                parked_at_generation: None,
-            },
-        );
+        let mut set = OutputSinkSet {
+            node,
+            display_options: display_options_from_output_config(config),
+            wires: Vec::new(),
+        };
+        self.reconcile_wires(&mut set, config, false);
+        self.output_sinks.insert(buffer_id, set);
     }
 
-    /// Re-read an output's authored configuration, reopening the channel only
-    /// if it actually changed.
+    /// Re-read an output's authored configuration, reopening only the wires
+    /// that actually changed.
     ///
     /// Called for every output on every tick, so the unchanged path — which is
-    /// nearly every call — must not allocate. The comparison borrows the
-    /// authored endpoint; only a genuine change pays for a copy of it.
-    pub fn update_output_sink_config(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
+    /// nearly every call — must not allocate. The comparison walks the authored
+    /// channels in key order against the wires already registered, borrowing
+    /// each endpoint; only a genuine change pays for a copy of one.
+    pub fn update_output_sink_config(
+        &mut self,
+        buffer_id: RuntimeBufferId,
+        node: NodeId,
+        config: &OutputDef,
+    ) {
         let display_options = display_options_from_output_config(config);
         let Some(existing) = self.output_sinks.get(&buffer_id) else {
-            self.register_output_sink(buffer_id, config);
+            self.register_output_sink(buffer_id, node, config);
             return;
         };
-        let endpoint_unchanged = match config.primary_endpoint() {
-            Some(endpoint) => existing.endpoint == *endpoint,
-            // Only an output with no authored channels reaches this arm, so
-            // minting the unset spec here never touches the hot path.
-            None => existing.endpoint == HwEndpointSpec::default(),
-        };
-        if endpoint_unchanged && output_options_eq(&existing.display_options, &display_options) {
+        // The display pipeline is built at open time, so a change to it
+        // reopens every wire; the wires themselves are compared one by one.
+        let options_unchanged = output_options_eq(&existing.display_options, &display_options);
+        if options_unchanged && existing.node == node && wires_match_config(&existing.wires, config)
+        {
             return;
         }
 
-        let mut existing = self
+        let mut set = self
             .output_sinks
             .remove(&buffer_id)
             .expect("output sink existed above");
-        self.close_output_sink(&mut existing);
-        existing.endpoint = endpoint_from_output_config(config);
-        warn_if_multi_channel(config, &existing.endpoint);
-        existing.display_options = display_options;
-        existing.last_byte_count = None;
-        // A re-authored endpoint is a fresh question for the hardware, so the
-        // sink stops waiting on a generation change it no longer cares about.
-        existing.parked_at_generation = None;
-        self.output_sinks.insert(buffer_id, existing);
+        set.node = node;
+        set.display_options = display_options;
+        self.reconcile_wires(&mut set, config, !options_unchanged);
+        self.output_sinks.insert(buffer_id, set);
     }
 
     pub fn unregister_output_sink(&mut self, buffer_id: RuntimeBufferId) {
@@ -264,10 +343,82 @@ impl EngineServices {
         let Some(mut boxed) = self.output_provider.take() else {
             return Ok(());
         };
-        let result =
-            flush_registered_sinks(boxed.as_mut(), revision, buffers, &mut self.output_sinks);
+        let result = flush_registered_sinks(
+            boxed.as_mut(),
+            revision,
+            buffers,
+            &mut self.output_sinks,
+            &mut self.flush_samples,
+        );
         self.output_provider = Some(boxed);
         result
+    }
+
+    /// Rebuild a sink set's wires from its authored channels, keeping every
+    /// wire the edit did not touch exactly as it was.
+    ///
+    /// Only the changed path runs this, so it may allocate. Matching by channel
+    /// key is what keeps parking per wire: re-authoring channel 2 must not send
+    /// channel 0 back to the hardware, and must not un-park channel 1 into
+    /// another hopeless open attempt.
+    fn reconcile_wires(&self, set: &mut OutputSinkSet, config: &OutputDef, force_reopen: bool) {
+        let mut previous = core::mem::take(&mut set.wires);
+
+        if let Some(offender) = remainder_offender(config) {
+            log::warn!(
+                "EngineServices: output node {} channel {offender} omits `count` but is not its \
+                 last channel; only the highest-keyed channel may take the remainder. This output \
+                 drives no wires until it is re-authored.",
+                set.node
+            );
+            for wire in &mut previous {
+                self.close_output_wire(wire);
+            }
+            return;
+        }
+
+        for (key, channel) in config.channels.entries.iter() {
+            if channel.count() == Some(0) {
+                log::warn!(
+                    "EngineServices: output node {} channel {key} ({}) authors a lamp count of 0; \
+                     it drives nothing and is skipped",
+                    set.node,
+                    channel.endpoint(),
+                );
+            }
+        }
+
+        let mut wires = Vec::with_capacity(config.channel_count());
+        for planned in planned_wires(config) {
+            let existing = previous
+                .iter()
+                .position(|wire| wire.channel == planned.channel);
+            match existing {
+                Some(index) => {
+                    let mut wire = previous.remove(index);
+                    if force_reopen || !wire.matches(planned) {
+                        // A re-sliced or re-pinned wire is a fresh question for
+                        // the hardware: the open channel is the wrong size or
+                        // the wrong pin, and whatever the old one was waiting
+                        // for no longer applies.
+                        self.close_output_wire(&mut wire);
+                        wire.endpoint = planned.endpoint.clone();
+                        wire.start_samples = planned.start_samples;
+                        wire.len_samples = planned.len_samples;
+                        wire.last_byte_count = None;
+                        wire.parked_at_generation = None;
+                        wire.truncated_at_samples = None;
+                    }
+                    wires.push(wire);
+                }
+                None => wires.push(OutputWire::new(planned)),
+            }
+        }
+
+        for wire in &mut previous {
+            self.close_output_wire(wire);
+        }
+        set.wires = wires;
     }
 
     fn close_output_sinks(&mut self) {
@@ -276,22 +427,33 @@ impl EngineServices {
         };
 
         for sink in self.output_sinks.values_mut() {
-            if let Some(handle) = sink.channel_handle.take() {
-                if let Err(error) = provider.close(handle) {
-                    log::warn!("EngineServices: failed to close output handle {handle:?}: {error}");
-                }
+            for wire in &mut sink.wires {
+                close_output_wire_with(provider, wire);
             }
         }
     }
 
-    fn close_output_sink(&self, sink: &mut OutputSinkBinding) {
+    fn close_output_sink(&self, sink: &mut OutputSinkSet) {
+        for wire in &mut sink.wires {
+            self.close_output_wire(wire);
+        }
+    }
+
+    fn close_output_wire(&self, wire: &mut OutputWire) {
         let Some(provider) = self.output_provider.as_deref() else {
+            // No provider ever opened it; drop the stale handle so a later
+            // provider does not inherit one it never issued.
+            wire.channel_handle = None;
             return;
         };
-        if let Some(handle) = sink.channel_handle.take() {
-            if let Err(error) = provider.close(handle) {
-                log::warn!("EngineServices: failed to close output handle {handle:?}: {error}");
-            }
+        close_output_wire_with(provider, wire);
+    }
+}
+
+fn close_output_wire_with(provider: &dyn OutputProvider, wire: &mut OutputWire) {
+    if let Some(handle) = wire.channel_handle.take() {
+        if let Err(error) = provider.close(handle) {
+            log::warn!("EngineServices: failed to close output handle {handle:?}: {error}");
         }
     }
 }
@@ -302,25 +464,86 @@ impl Drop for EngineServices {
     }
 }
 
-/// The one wire this output drives: its lowest-keyed channel's endpoint.
+/// Walk `channels` in ascending key order, deriving each wire's slice of the
+/// node's control buffer.
 ///
-/// An output with no authored channels falls back to the model's unset spec,
-/// which no driver resolves — the sink parks instead of silently lighting a
-/// default pin. Per-wire fan-out (P2) replaces this whole accessor.
-fn endpoint_from_output_config(config: &OutputDef) -> HwEndpointSpec {
-    config.primary_endpoint().cloned().unwrap_or_default()
+/// A channel's `count` is in lamps and a lamp is three samples; slices start
+/// where the previous one ended. A channel with no count takes the remainder,
+/// which only the last one may do — [`remainder_offender`] is the check, and
+/// this iterator assumes it has passed. Channels authoring zero lamps drive
+/// nothing and are dropped here (the warning is issued once, on the changed
+/// path, not by this iterator — it runs per tick).
+///
+/// Allocation-free by construction: endpoints are borrowed and the running
+/// offset lives in the iterator's own state, so the per-tick diff drives it
+/// directly.
+fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
+    let mut start = 0u32;
+    config
+        .channels
+        .entries
+        .iter()
+        .filter_map(move |(key, channel)| match channel.count() {
+            Some(0) => None,
+            Some(count) => {
+                let len = count.saturating_mul(3);
+                let wire = PlannedWire {
+                    channel: *key,
+                    endpoint: channel.endpoint(),
+                    start_samples: start,
+                    len_samples: Some(len),
+                };
+                start = start.saturating_add(len);
+                Some(wire)
+            }
+            None => Some(PlannedWire {
+                channel: *key,
+                endpoint: channel.endpoint(),
+                start_samples: start,
+                len_samples: None,
+            }),
+        })
 }
 
-/// The engine still drives exactly one wire per output. Authoring more
-/// channels is expressible in the model now but not yet honored, so say so
-/// when the configuration is read, not once per frame. P2 removes this.
-fn warn_if_multi_channel(config: &OutputDef, driven: &HwEndpointSpec) {
-    let channels = config.channel_count();
-    if channels > 1 {
-        log::warn!(
-            "EngineServices: output authors {channels} channels; multi-channel output not yet wired, driving channel 0 ({driven}) only"
-        );
+/// The key of the first channel that takes the remainder without being the
+/// last one, if any — the one authoring mistake that makes the slices
+/// undefined.
+///
+/// Two channels with no count cannot both be "the rest of the buffer", and a
+/// count-less channel in the middle leaves everything after it without a
+/// start. Rather than guess, the whole output is refused: a wrong strip lit is
+/// worse than a dark one, and the log names the channel to fix.
+fn remainder_offender(config: &OutputDef) -> Option<u32> {
+    let mut remainder: Option<u32> = None;
+    for wire in planned_wires(config) {
+        if let Some(previous) = remainder {
+            return Some(previous);
+        }
+        if wire.len_samples.is_none() {
+            remainder = Some(wire.channel);
+        }
     }
+    None
+}
+
+/// Do these wires already say exactly what the authored channels say?
+///
+/// The per-tick hot path: walks both sequences in key order without allocating
+/// or cloning, and answers "nothing to do" for the overwhelming majority of
+/// calls.
+fn wires_match_config(wires: &[OutputWire], config: &OutputDef) -> bool {
+    if remainder_offender(config).is_some() {
+        // A refused output holds no wires, and stays refused silently.
+        return wires.is_empty();
+    }
+    let mut planned = planned_wires(config);
+    for wire in wires {
+        match planned.next() {
+            Some(next) if wire.matches(next) => {}
+            _ => return false,
+        }
+    }
+    planned.next().is_none()
 }
 
 fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOptions> {
@@ -352,28 +575,33 @@ fn output_options_eq(
     }
 }
 
-/// Flush every dirty sink, then report the first failure.
+/// Flush every wire of every dirty sink, then report the first failure.
 ///
-/// Sinks are independent hardware channels and this map has no meaningful
-/// order, so a sink that fails to open or write must not cost the frame its
-/// other channels: returning early here made one unavailable endpoint look
-/// like a whole-project blackout, and which channels survived depended on hash
-/// order. Every failure is logged with its endpoint; the first is returned so
+/// Wires are independent hardware channels and this map has no meaningful
+/// order, so a wire that fails to open or write must not cost the frame its
+/// siblings: returning early here made one unavailable endpoint look like a
+/// whole-project blackout, and which channels survived depended on hash order.
+/// Every failure is logged with its node and channel; the first is returned so
 /// the tick still reports an error.
+///
+/// Each node's buffer is decoded **once**, into `samples`, and every wire of
+/// that node takes a sub-slice of it — the decode used to run per sink, which
+/// with N wires per node would have been N copies of the same buffer per frame.
 fn flush_registered_sinks(
     provider: &mut dyn OutputProvider,
     revision: Revision,
     buffers: &RuntimeBufferStore,
-    sinks: &mut HashMap<RuntimeBufferId, OutputSinkBinding>,
+    sinks: &mut HashMap<RuntimeBufferId, OutputSinkSet>,
+    samples: &mut Vec<u16>,
 ) -> Result<(), OutputFlushError> {
     let mut first_error: Option<OutputFlushError> = None;
     let mut failed = 0usize;
 
-    // Read once per flush, not once per sink: the answer is the same for every
-    // sink in the frame, and asking is a virtual call through the provider.
+    // Read once per flush, not once per wire: the answer is the same for every
+    // wire in the frame, and asking is a virtual call through the provider.
     //
     // Read it *before* any open in this flush, too. A successful open bumps the
-    // generation, so a value sampled afterwards would park a sink against a
+    // generation, so a value sampled afterwards would park a wire against a
     // number that already reflects this frame's own claims — and a release that
     // raced the open would be missed rather than retried.
     let generation = provider.hardware_generation();
@@ -391,14 +619,45 @@ fn flush_registered_sinks(
             continue;
         }
 
-        if sink.parked_at_generation == Some(generation) {
+        // Nothing to drive, or every wire is waiting on a hardware change:
+        // skip before paying for the decode.
+        if sink
+            .wires
+            .iter()
+            .all(|wire| wire.parked_at_generation == Some(generation))
+        {
             continue;
         }
 
-        if let Err(error) = flush_one_sink(provider, sink, *buffer_id, bytes, generation) {
+        if bytes.len() % 6 != 0 {
+            let error = OutputFlushError::MisalignedPayload {
+                node: sink.node,
+                buffer_id: *buffer_id,
+            };
             failed += 1;
             log::warn!("EngineServices: {error}");
             first_error.get_or_insert(error);
+            continue;
+        }
+
+        decode_bytes_as_u16_le_into(bytes, samples);
+
+        for wire in sink.wires.iter_mut() {
+            if wire.parked_at_generation == Some(generation) {
+                continue;
+            }
+            if let Err(error) = flush_one_wire(
+                provider,
+                sink.node,
+                wire,
+                sink.display_options.as_ref(),
+                samples,
+                generation,
+            ) {
+                failed += 1;
+                log::warn!("EngineServices: {error}");
+                first_error.get_or_insert(error);
+            }
         }
     }
 
@@ -407,8 +666,7 @@ fn flush_registered_sinks(
         Some(error) => {
             if failed > 1 {
                 log::warn!(
-                    "EngineServices: {failed} output sinks failed this frame; reporting {}",
-                    error.endpoint()
+                    "EngineServices: {failed} output wires failed this frame; reporting {error}"
                 );
             }
             Err(error)
@@ -416,94 +674,152 @@ fn flush_registered_sinks(
     }
 }
 
-fn flush_one_sink(
+fn flush_one_wire(
     provider: &mut dyn OutputProvider,
-    sink: &mut OutputSinkBinding,
-    buffer_id: RuntimeBufferId,
-    bytes: &[u8],
+    node: NodeId,
+    wire: &mut OutputWire,
+    display_options: Option<&OutputDriverOptions>,
+    samples: &[u16],
     generation: u64,
 ) -> Result<(), OutputFlushError> {
-    if bytes.len() % 6 != 0 {
-        return Err(OutputFlushError::MisalignedPayload {
-            endpoint: sink.endpoint.clone(),
-            buffer_id,
-        });
+    let Some(slice) = wire_slice(node, wire, samples) else {
+        return Ok(());
+    };
+    let byte_count = ((slice.len() / 3) * 3) as u32;
+
+    // Every provider refuses a write shorter than the channel it opened
+    // (`DataLengthMismatch`), so a wire whose slice shrank — a re-authored
+    // count, a smaller upstream extent — must give the channel back and take a
+    // right-sized one. Growth needs no reopen: providers resize upward on write.
+    if let Some(last) = wire.last_byte_count
+        && byte_count < last
+        && wire.channel_handle.is_some()
+    {
+        close_output_wire_with(provider, wire);
+        wire.last_byte_count = None;
     }
 
-    let u16_payload = decode_bytes_as_u16_le(bytes);
-    let led_triplets = u16_payload.len() / 3;
-    let byte_count = (led_triplets as u32).saturating_mul(3).max(3);
-
-    ensure_channel_open(provider, sink, byte_count, generation).map_err(|error| {
-        OutputFlushError::Provider {
-            endpoint: sink.endpoint.clone(),
+    ensure_channel_open(provider, wire, display_options, byte_count, generation).map_err(
+        |error| OutputFlushError::Provider {
+            node,
+            channel: wire.channel,
+            endpoint: wire.endpoint.clone(),
             error,
-        }
-    })?;
+        },
+    )?;
 
-    let handle = sink
+    let handle = wire
         .channel_handle
         .ok_or_else(|| OutputFlushError::Provider {
-            endpoint: sink.endpoint.clone(),
+            node,
+            channel: wire.channel,
+            endpoint: wire.endpoint.clone(),
             error: OutputError::InvalidConfig {
                 reason: String::from("internal: missing output handle after open"),
             },
         })?;
 
     provider
-        .write(handle, &u16_payload)
+        .write(handle, slice)
         .map_err(|error| OutputFlushError::Provider {
-            endpoint: sink.endpoint.clone(),
+            node,
+            channel: wire.channel,
+            endpoint: wire.endpoint.clone(),
             error,
         })?;
-    sink.last_byte_count = Some(byte_count.max(sink.last_byte_count.unwrap_or(3)));
+    wire.last_byte_count = Some(byte_count.max(wire.last_byte_count.unwrap_or(3)));
     Ok(())
 }
 
-fn decode_bytes_as_u16_le(bytes: &[u8]) -> Vec<u16> {
-    let mut out = Vec::with_capacity(bytes.len() / 2);
-    for chunk in bytes.chunks_exact(2) {
-        out.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+/// The samples this wire carries out of the node's decoded buffer, or `None`
+/// when the buffer holds nothing for it this frame.
+///
+/// The authored slice is what the project asked for; the buffer is what the
+/// graph produced, and it is upstream-driven, so the two disagree routinely
+/// (a shader resized, a fixture lost a path, the counts simply add up to more
+/// lamps than exist). Overflow is clamped rather than fatal — the wires that
+/// do have pixels must still light — but it is said out loud, once per extent.
+fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Option<&'a [u16]> {
+    let available = samples.len() as u32;
+    let wanted_end = match wire.len_samples {
+        Some(len) => wire.start_samples.saturating_add(len),
+        None => available,
+    };
+    let start = wire.start_samples.min(available);
+    let end = wanted_end.min(available);
+
+    if end < wanted_end {
+        if wire.truncated_at_samples != Some(available) {
+            log::warn!(
+                "EngineServices: output node {node} channel {} ({}) wants samples \
+                 {}..{wanted_end} but the control buffer holds {available}; \
+                 driving {} sample(s) of it",
+                wire.channel,
+                wire.endpoint,
+                wire.start_samples,
+                end.saturating_sub(start),
+            );
+            wire.truncated_at_samples = Some(available);
+        }
+    } else {
+        wire.truncated_at_samples = None;
     }
-    out
+
+    let len = ((end.saturating_sub(start)) / 3) * 3;
+    if len == 0 {
+        return None;
+    }
+    let start = start as usize;
+    Some(&samples[start..start + len as usize])
 }
 
-/// Open the sink's channel if it has none, parking it on failure.
+fn decode_bytes_as_u16_le_into(bytes: &[u8], out: &mut Vec<u16>) {
+    out.clear();
+    out.reserve(bytes.len() / 2);
+    out.extend(
+        bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])),
+    );
+}
+
+/// Open the wire's channel if it has none, parking it on failure.
 ///
 /// `generation` is the provider's hardware generation sampled before any open
-/// this flush; a sink that fails records it and is skipped until it changes.
+/// this flush; a wire that fails records it and is skipped until it changes.
 fn ensure_channel_open(
     provider: &dyn OutputProvider,
-    sink: &mut OutputSinkBinding,
+    wire: &mut OutputWire,
+    display_options: Option<&OutputDriverOptions>,
     byte_count: u32,
     generation: u64,
 ) -> Result<(), OutputError> {
-    if sink.channel_handle.is_some() {
+    if wire.channel_handle.is_some() {
         return Ok(());
     }
 
-    let bc = sink.last_byte_count.unwrap_or(3).max(byte_count).max(3);
+    let bc = wire.last_byte_count.unwrap_or(3).max(byte_count).max(3);
     let handle = match provider.open(
-        &sink.endpoint,
+        &wire.endpoint,
         bc,
         OutputFormat::Ws2811,
-        sink.display_options.clone(),
+        display_options.cloned(),
     ) {
         Ok(handle) => handle,
         Err(error) => {
-            sink.parked_at_generation = Some(generation);
+            wire.parked_at_generation = Some(generation);
             return Err(error);
         }
     };
 
-    if sink.parked_at_generation.take().is_some() {
+    if wire.parked_at_generation.take().is_some() {
         log::info!(
             "EngineServices: output {} recovered and is writing again",
-            sink.endpoint
+            wire.endpoint
         );
     }
-    sink.channel_handle = Some(handle);
-    sink.last_byte_count = Some(bc);
+    wire.channel_handle = Some(handle);
+    wire.last_byte_count = Some(bc);
     Ok(())
 }
 
@@ -513,10 +829,11 @@ mod tests {
     use alloc::rc::Rc;
     use alloc::string::ToString;
     use alloc::vec;
+    use alloc::vec::Vec;
 
     use lpc_hardware::OutputError;
-    use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-    use lpc_model::{HwEndpointSpec, OptionSlot, Revision, TreePath, WithRevision};
+    use lpc_model::nodes::output::{OutputChannelDef, OutputDef, OutputDriverOptionsConfig};
+    use lpc_model::{HwEndpointSpec, NodeId, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
@@ -539,7 +856,7 @@ mod tests {
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
         let endpoint = endpoint("ws281x:local:D10");
-        services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
+        services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint.clone()));
 
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -570,7 +887,7 @@ mod tests {
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
         let endpoint = endpoint("ws281x:local:D10");
-        services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
+        services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint.clone()));
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("initial flush");
@@ -583,7 +900,7 @@ mod tests {
             white_point: lpc_model::ValueSlot::new([0.5, 1.0, 1.0]),
             ..OutputDriverOptionsConfig::default()
         });
-        services.update_output_sink_config(buffer_id, &next);
+        services.update_output_sink_config(buffer_id, node(1), &next);
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("flush after config update");
@@ -608,7 +925,7 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
         let config = OutputDef::new(endpoint("ws281x:local:D10"));
-        services.register_output_sink(buffer_id, &config);
+        services.register_output_sink(buffer_id, node(1), &config);
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("initial flush opens the channel");
@@ -619,7 +936,7 @@ mod tests {
         let generation = provider.hardware_generation();
 
         for _ in 0..32 {
-            services.update_output_sink_config(buffer_id, &config);
+            services.update_output_sink_config(buffer_id, node(1), &config);
         }
 
         assert_eq!(
@@ -651,7 +968,7 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
         let endpoint = endpoint("ws281x:local:D10");
-        services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
+        services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint.clone()));
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("initial flush");
@@ -674,8 +991,8 @@ mod tests {
         let first = output_buffer(&mut buffers, Revision::new(1));
         let second = output_buffer(&mut buffers, Revision::new(1));
         let endpoint = endpoint("ws281x:local:D10");
-        services.register_output_sink(first, &OutputDef::new(endpoint.clone()));
-        services.register_output_sink(second, &OutputDef::new(endpoint.clone()));
+        services.register_output_sink(first, node(1), &OutputDef::new(endpoint.clone()));
+        services.register_output_sink(second, node(2), &OutputDef::new(endpoint.clone()));
 
         let err = services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -706,8 +1023,8 @@ mod tests {
         let second = output_buffer(&mut buffers, Revision::new(1));
         let first_endpoint = endpoint("ws281x:local:D10");
         let second_endpoint = endpoint("ws281x:local:GPIO19");
-        services.register_output_sink(first, &OutputDef::new(first_endpoint.clone()));
-        services.register_output_sink(second, &OutputDef::new(second_endpoint.clone()));
+        services.register_output_sink(first, node(1), &OutputDef::new(first_endpoint.clone()));
+        services.register_output_sink(second, node(2), &OutputDef::new(second_endpoint.clone()));
 
         let err = services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -748,10 +1065,10 @@ mod tests {
             endpoint("ws281x:local:D8"),
         ];
         let bad_buffer = output_buffer(&mut buffers, Revision::new(1));
-        services.register_output_sink(bad_buffer, &OutputDef::new(unknown.clone()));
+        services.register_output_sink(bad_buffer, node(1), &OutputDef::new(unknown.clone()));
         for spec in &good {
             let buffer_id = output_buffer(&mut buffers, Revision::new(1));
-            services.register_output_sink(buffer_id, &OutputDef::new(spec.clone()));
+            services.register_output_sink(buffer_id, node(9), &OutputDef::new(spec.clone()));
         }
 
         let err = services
@@ -792,6 +1109,7 @@ mod tests {
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
         services.register_output_sink(
             buffer_id,
+            node(1),
             &OutputDef::new(endpoint("ws281x:local:NOT-A-PIN")),
         );
 
@@ -827,8 +1145,8 @@ mod tests {
         let waiter = output_buffer(&mut buffers, Revision::new(1));
         let held = endpoint("ws281x:local:D10");
         let waiting = endpoint("ws281x:local:GPIO19");
-        services.register_output_sink(holder, &OutputDef::new(held.clone()));
-        services.register_output_sink(waiter, &OutputDef::new(waiting.clone()));
+        services.register_output_sink(holder, node(1), &OutputDef::new(held.clone()));
+        services.register_output_sink(waiter, node(2), &OutputDef::new(waiting.clone()));
 
         // The board has one RMT resource, so exactly one of these opens; drive
         // the flush until both have had their attempt.
@@ -872,13 +1190,14 @@ mod tests {
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
         services.register_output_sink(
             buffer_id,
+            node(1),
             &OutputDef::new(endpoint("ws281x:local:NOT-A-PIN")),
         );
         let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
         let generation_before = provider.hardware_generation();
 
         let good = endpoint("ws281x:local:D10");
-        services.update_output_sink_config(buffer_id, &OutputDef::new(good.clone()));
+        services.update_output_sink_config(buffer_id, node(1), &OutputDef::new(good.clone()));
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("the re-authored endpoint opens");
@@ -904,7 +1223,7 @@ mod tests {
         // The strict single-RMT board has no such pin; the permissive provider
         // that replaces it accepts any endpoint.
         let demo = endpoint("ws281x:local:D4");
-        services.register_output_sink(buffer_id, &OutputDef::new(demo.clone()));
+        services.register_output_sink(buffer_id, node(1), &OutputDef::new(demo.clone()));
         let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
         assert_eq!(strict.open_calls(), 1);
 
@@ -922,8 +1241,341 @@ mod tests {
         assert!(permissive.inner().is_endpoint_open(&demo));
     }
 
+    // ---- one node, many wires -------------------------------------------
+
+    /// The whole point of channels: one node, one buffer, N wires, each
+    /// carrying exactly its own lamps and nobody else's.
+    #[test]
+    fn one_node_slices_its_buffer_across_its_wires() {
+        let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
+            lpc_hardware::default_esp32s3_hardware_manifest(),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        // Six lamps: 2 + 3 authored, and the last channel takes what is left.
+        let buffer_id = ramp_buffer(&mut buffers, 6, Revision::new(1));
+        services.register_output_sink(buffer_id, node(1), &triple_channel_output());
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("every wire opens and writes");
+
+        assert_eq!(provider.open_channel_count(), 3);
+        assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 6));
+        assert_eq!(wire_data(&provider, "ws281x:local:D9"), ramp(6, 9));
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D8"),
+            ramp(15, 3),
+            "the highest-keyed channel omits its count, so it takes the remainder"
+        );
+    }
+
+    /// Two channels cannot both be "the rest of the buffer", and a count-less
+    /// channel in the middle leaves everything after it without a start. The
+    /// output is refused whole rather than lighting a guess — and it must not
+    /// panic, because this is authored data.
+    #[test]
+    fn an_output_with_two_remainder_channels_drives_nothing() {
+        let provider = Rc::new(MemoryOutputProvider::new_permissive());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = ramp_buffer(&mut buffers, 6, Revision::new(1));
+        let config = OutputDef::with_channels([
+            (0, OutputChannelDef::new(endpoint("ws281x:local:D10"))),
+            (1, OutputChannelDef::new(endpoint("ws281x:local:D9"))),
+        ]);
+        services.register_output_sink(buffer_id, node(1), &config);
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("a refused output is not a frame failure");
+
+        assert_eq!(
+            provider.open_channel_count(),
+            0,
+            "an output whose slices are undefined must not light a wire"
+        );
+
+        // And once the authoring is fixed, the very next tick drives it.
+        services.update_output_sink_config(buffer_id, node(1), &triple_channel_output());
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("the corrected output flushes");
+        assert_eq!(provider.open_channel_count(), 3);
+    }
+
+    /// Counts are authored; the buffer is whatever the graph produced. When
+    /// they disagree the wires that do have pixels must still light, so the
+    /// overflow is clamped — loudly — rather than fatal.
+    #[test]
+    fn slices_past_the_end_of_the_buffer_are_truncated_not_fatal() {
+        let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
+            lpc_hardware::default_esp32s3_hardware_manifest(),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        // Three lamps for a project that authored 2 + 3 + 4.
+        let buffer_id = ramp_buffer(&mut buffers, 3, Revision::new(1));
+        let config = OutputDef::with_channels([
+            (
+                0,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+            ),
+            (
+                1,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D9"), 3),
+            ),
+            (
+                2,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D8"), 4),
+            ),
+        ]);
+        services.register_output_sink(buffer_id, node(1), &config);
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("a short buffer must not fail the frame");
+
+        assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 6));
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D9"),
+            ramp(6, 3),
+            "the straddling wire carries the lamps that exist"
+        );
+        assert!(
+            !provider.is_endpoint_open(&endpoint("ws281x:local:D8")),
+            "a wire with no samples at all opens nothing"
+        );
+    }
+
+    /// Every provider refuses a write shorter than the channel it opened, so a
+    /// wire whose slice shrank must give the channel back and take a
+    /// right-sized one. Without the reopen this fails every frame, forever.
+    #[test]
+    fn a_shrunken_slice_reopens_the_channel() {
+        let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
+            lpc_hardware::default_esp32s3_hardware_manifest(),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = ramp_buffer(&mut buffers, 6, Revision::new(1));
+        let wide = OutputDef::with_channels([
+            (
+                0,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 4),
+            ),
+            (2, OutputChannelDef::new(endpoint("ws281x:local:D9"))),
+        ]);
+        services.register_output_sink(buffer_id, node(1), &wide);
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("initial flush");
+        let first = provider
+            .get_handle_for_endpoint(&endpoint("ws281x:local:D10"))
+            .expect("first handle");
+        assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 12));
+
+        let narrow = OutputDef::with_channels([
+            (
+                0,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+            ),
+            (2, OutputChannelDef::new(endpoint("ws281x:local:D9"))),
+        ]);
+        services.update_output_sink_config(buffer_id, node(1), &narrow);
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("the shrunken wire reopens instead of failing the write");
+
+        let second = provider
+            .get_handle_for_endpoint(&endpoint("ws281x:local:D10"))
+            .expect("second handle");
+        assert_ne!(first, second, "a narrower slice must reopen the channel");
+        assert_eq!(wire_data(&provider, "ws281x:local:D10"), ramp(0, 6));
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D9"),
+            ramp(6, 12),
+            "the remainder wire grew to cover what channel 0 gave up"
+        );
+    }
+
+    /// Parking is per wire, exactly as it was per sink: a channel the board
+    /// cannot give must not take its siblings down, and must not re-ask every
+    /// frame either.
+    #[test]
+    fn one_unopenable_wire_neither_blocks_nor_re_asks() {
+        let provider = Rc::new(CountingOutputProvider::new(
+            MemoryOutputProvider::with_hardware_manifest(
+                lpc_hardware::default_esp32s3_hardware_manifest(),
+            ),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = ramp_buffer(&mut buffers, 4, Revision::new(1));
+        let config = OutputDef::with_channels([
+            (
+                0,
+                OutputChannelDef::with_count(endpoint("ws281x:local:NOT-A-PIN"), 2),
+            ),
+            (1, OutputChannelDef::new(endpoint("ws281x:local:D10"))),
+        ]);
+        services.register_output_sink(buffer_id, node(1), &config);
+
+        let err = services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect_err("the missing pin is still reported");
+        assert!(
+            err.to_string().contains("node 1 channel 0"),
+            "the error must name the node and the channel, got: {err}"
+        );
+        assert_eq!(
+            wire_data(provider.inner(), "ws281x:local:D10"),
+            ramp(6, 6),
+            "the sibling wire flushed its own slice regardless"
+        );
+
+        // The sibling's successful claim bumped the hardware generation, so the
+        // parked wire is owed exactly one retry (the retry ADR's recovery
+        // path); after that nothing has changed and it stays quiet.
+        let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
+        let opens = provider.open_calls();
+        for _ in 0..8 {
+            services
+                .flush_dirty_output_sinks(Revision::new(1), &buffers)
+                .expect("a parked wire does not keep failing the frame");
+        }
+        assert_eq!(
+            provider.open_calls(),
+            opens,
+            "neither wire re-attempts while the hardware is unchanged"
+        );
+    }
+
+    /// Re-authoring one channel asks the hardware about that channel only. The
+    /// sink used to park as a unit, so editing any field un-parked every wire
+    /// and paid for a full enumeration per hopeless endpoint all over again.
+    #[test]
+    fn editing_one_wire_leaves_its_siblings_parked() {
+        let provider = Rc::new(CountingOutputProvider::new(
+            MemoryOutputProvider::with_hardware_manifest(
+                lpc_hardware::default_esp32s3_hardware_manifest(),
+            ),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedCountingProvider(Rc::clone(&provider)))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = ramp_buffer(&mut buffers, 4, Revision::new(1));
+        let missing = |zero: &str, one: &str| {
+            OutputDef::with_channels([
+                (
+                    0,
+                    OutputChannelDef::with_count(HwEndpointSpec::parse(zero).expect("spec"), 2),
+                ),
+                (
+                    1,
+                    OutputChannelDef::with_count(HwEndpointSpec::parse(one).expect("spec"), 2),
+                ),
+            ])
+        };
+        services.register_output_sink(
+            buffer_id,
+            node(1),
+            &missing("ws281x:local:NOT-A-PIN", "ws281x:local:ALSO-MISSING"),
+        );
+        let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
+        assert_eq!(provider.open_calls(), 2, "both wires had their one attempt");
+
+        // Fix channel 1 only.
+        services.update_output_sink_config(
+            buffer_id,
+            node(1),
+            &missing("ws281x:local:NOT-A-PIN", "ws281x:local:D10"),
+        );
+        let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
+
+        assert_eq!(
+            provider.open_calls(),
+            3,
+            "only the re-authored wire asked again; channel 0 is still parked"
+        );
+        assert!(
+            provider
+                .inner()
+                .is_endpoint_open(&endpoint("ws281x:local:D10"))
+        );
+    }
+
     fn endpoint(spec: &'static str) -> HwEndpointSpec {
         HwEndpointSpec::from_static(spec)
+    }
+
+    fn node(id: u32) -> NodeId {
+        NodeId::new(id)
+    }
+
+    /// Three wires over one buffer: 2 lamps, 3 lamps, and the remainder.
+    fn triple_channel_output() -> OutputDef {
+        OutputDef::with_channels([
+            (
+                0,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D10"), 2),
+            ),
+            (
+                1,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D9"), 3),
+            ),
+            (2, OutputChannelDef::new(endpoint("ws281x:local:D8"))),
+        ])
+    }
+
+    /// A node buffer of `lamps` RGB lamps whose samples count up from 1, so a
+    /// wire's slice is identifiable by value alone.
+    fn ramp_buffer(
+        store: &mut RuntimeBufferStore,
+        lamps: u32,
+        revision: Revision,
+    ) -> RuntimeBufferId {
+        let mut bytes = Vec::new();
+        for sample in ramp(0, lamps * 3) {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        store.insert(WithRevision::new(
+            revision,
+            RuntimeBuffer::output_channels_u16(lamps, bytes),
+        ))
+    }
+
+    /// The `len` samples of [`ramp_buffer`] starting at sample `start`.
+    fn ramp(start: u32, len: u32) -> Vec<u16> {
+        (start..start + len).map(|i| (i + 1) as u16).collect()
+    }
+
+    fn wire_data(provider: &MemoryOutputProvider, spec: &'static str) -> Vec<u16> {
+        let handle = provider
+            .get_handle_for_endpoint(&endpoint(spec))
+            .unwrap_or_else(|| panic!("{spec} never opened"));
+        provider
+            .get_data(handle)
+            .unwrap_or_else(|| panic!("{spec} opened but wrote nothing"))
     }
 
     fn output_buffer(store: &mut RuntimeBufferStore, revision: Revision) -> RuntimeBufferId {

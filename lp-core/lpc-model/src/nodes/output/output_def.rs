@@ -60,17 +60,6 @@ impl OutputDef {
         HwEndpointSpec::from_static(DEFAULT_OUTPUT_ENDPOINT_SPEC)
     }
 
-    /// Endpoint of the lowest-keyed channel, if the output has any.
-    ///
-    /// The engine still drives exactly one wire per output; this is the wire
-    /// it picks. Per-channel fan-out replaces this accessor.
-    pub fn primary_endpoint(&self) -> Option<&HwEndpointSpec> {
-        self.channels
-            .entries
-            .first_key_value()
-            .map(|(_, channel)| channel.endpoint())
-    }
-
     pub fn channel_count(&self) -> usize {
         self.channels.entries.len()
     }
@@ -135,7 +124,7 @@ mod tests {
     fn test_output_def_kind() {
         let def = OutputDef::new(HwEndpointSpec::from_static("ws281x:local:D10"));
         assert_eq!(def.kind(), NodeKind::Output);
-        assert_eq!(def.primary_endpoint().unwrap().as_str(), "ws281x:local:D10");
+        assert_eq!(channel_endpoint(&def, 0), "ws281x:local:D10");
     }
 
     #[test]
@@ -149,7 +138,7 @@ mod tests {
         let NodeDef::Output(def) = def else {
             panic!("expected output def");
         };
-        assert_eq!(def.primary_endpoint().unwrap().as_str(), "ws281x:local:D10");
+        assert_eq!(channel_endpoint(&def, 0), "ws281x:local:D10");
         let opts = def.options().unwrap();
         assert!((opts.white_point.value()[0] - 0.8).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
@@ -178,10 +167,6 @@ mod tests {
         let second = def.channels.entries.get(&2).expect("channel 2");
         assert_eq!(second.endpoint().as_str(), "ws281x:local:IO16");
         assert_eq!(second.count(), None);
-        assert_eq!(
-            def.primary_endpoint().unwrap().as_str(),
-            "ws281x:local:IO18"
-        );
 
         let written = NodeDef::Output(def).write_json(&registry()).expect("write");
         assert_eq!(
@@ -260,5 +245,14 @@ mod tests {
 
     fn registry() -> SlotShapeRegistry {
         SlotShapeRegistry::default()
+    }
+
+    fn channel_endpoint(def: &OutputDef, key: u32) -> &str {
+        def.channels
+            .entries
+            .get(&key)
+            .unwrap_or_else(|| panic!("channel {key}"))
+            .endpoint()
+            .as_str()
     }
 }
