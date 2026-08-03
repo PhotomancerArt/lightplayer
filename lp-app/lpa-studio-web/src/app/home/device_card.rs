@@ -2191,6 +2191,19 @@ fn wire_card_affordance(
                 strip_confirmation(action),
             ))
         }
+        // The firmware UPDATE keeps its gate, but as the card's own sheet
+        // — every other confirmed verb on this card does (D41), and the
+        // generic ActionButton path put a BROWSER confirm() in the middle
+        // of an otherwise card-resident flow (gate-1 sitting, 2026-08-03:
+        // "I got a browser confirm, which is weird").
+        DeviceDetailAffordance::Roster(affordance @ RosterAffordance::UpdateFirmware) => {
+            device_affordance_action(card, affordance).map(|action| {
+                CardRowAction::Sheet(
+                    CardSheetState::Confirm(CardVerb::Flash),
+                    strip_confirmation(action),
+                )
+            })
+        }
         DeviceDetailAffordance::Roster(affordance) => {
             device_affordance_action(card, affordance).map(CardRowAction::from_action)
         }
