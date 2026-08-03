@@ -8,9 +8,9 @@
 //!
 //! Motion rules (spike gates 1–3 2026-08-03; gate-4 post-merge collapsed
 //! the in-app/marketing split — the full-rainbow brand runs everywhere):
-//! - **Lockup**: the whole wordmark sweeps the LED rainbow and the play
-//!   triangle cycles with it (accent when frozen). Always on;
-//!   `prefers-reduced-motion` freezes everything.
+//! - **Lockup**: the whole wordmark sweeps the LED rainbow; the mark —
+//!   triangle included — stays quiet white (the word carries the light).
+//!   Always on; `prefers-reduced-motion` freezes everything.
 //! - **Icon-only forms** (favicon, avatar, app icon): the play triangle
 //!   cycles (`LogoMark { animated }`).
 //! - **Mono** (`mono: true`): everything `currentColor`, no motion.
@@ -88,11 +88,11 @@ fn BrandWord(word_px: u32, #[props(default = false)] mono: bool) -> Element {
     }
 }
 
-/// The wide brand lockup: mark + wordmark, one unit. The full brand
-/// treatment everywhere: rainbow wordmark, triangle cycling with it (accent
-/// when frozen). `compact` drops the wordmark (icon-only: triangle still
-/// cycles). `mono` is the one-color form for print/light contexts — set
-/// `color` on a parent.
+/// The wide brand lockup: mark + wordmark, one unit. The rainbow lives in
+/// the wordmark; the mark — triangle included — stays quiet `currentColor`.
+/// `compact` drops the wordmark and switches to the icon-only rule (the
+/// triangle cycles instead). `mono` is the one-color form for print/light
+/// contexts — set `color` on a parent.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn LogoLockup(
@@ -111,7 +111,7 @@ pub fn LogoLockup(
             class: "tw:flex tw:flex-none tw:cursor-default tw:items-center {tone}",
             style: "gap:{gap}px",
             title: "LightPlayer",
-            LogoMark { size, animated: !mono }
+            LogoMark { size, animated: compact && !mono }
             if !compact {
                 span { class: "tw:max-[560px]:hidden tw:flex",
                     BrandWord { word_px, mono }
@@ -137,7 +137,7 @@ pub fn LogoStacked(
             class: "tw:flex tw:flex-none tw:cursor-default tw:flex-col tw:items-center {tone}",
             style: "gap:{gap}px",
             title: "LightPlayer",
-            LogoMark { size, animated: !mono }
+            LogoMark { size }
             BrandWord { word_px, mono }
         }
     }
