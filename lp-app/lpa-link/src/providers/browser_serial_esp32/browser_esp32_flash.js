@@ -412,22 +412,22 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
   }
 }
 
-// Judge an erase by its OWN outcome, not by the flash-ID probe.
-//
-// The ID probe reads 0 and prints "Failed to communicate with the flash
-// chip" on ESP32-C6 rev 2 over USB-Serial-JTAG while real stub traffic
-// works — established on the bench 2026-07-31 (see f3586b9c8, which moved
-// the boot-control write to readback verification for this reason). That
-// commit left the erase path gated on the warning because "there is
-// nothing to read back after an erase"; it turns out there IS something
-// to check — esptool announces the chip erase it actually performed.
-//
-// Yona's walk 2026-08-02: erase logged the benign warning, then "Chip
-// erase completed successfully in 2.241s", and this gate failed the
-// operation anyway. So: a completion line is proof and outranks the
-// warning; without one, the warning is the best explanation we have and
-// is surfaced; with neither, `eraseFlash()` returned without throwing and
-// there is no evidence of failure to report.
+/// Judge an erase by its OWN outcome, not by the flash-ID probe.
+///
+/// The ID probe reads 0 and prints "Failed to communicate with the flash
+/// chip" on ESP32-C6 rev 2 over USB-Serial-JTAG while real stub traffic
+/// works — established on the bench 2026-07-31 (see f3586b9c8, which moved
+/// the boot-control write to readback verification for this reason). That
+/// commit left the erase path gated on the warning because "there is
+/// nothing to read back after an erase"; it turns out there IS something
+/// to check — esptool announces the chip erase it actually performed.
+///
+/// Yona's walk 2026-08-02: erase logged the benign warning, then "Chip
+/// erase completed successfully in 2.241s", and this gate failed the
+/// operation anyway. So: a completion line is proof and outranks the
+/// warning; without one, the warning is the best explanation we have and
+/// is surfaced; with neither, `eraseFlash()` returned without throwing and
+/// there is no evidence of failure to report.
 function assertEraseCompleted(logs, context) {
   const completed = logs.some((line) =>
     line.includes("Chip erase completed successfully")
@@ -555,14 +555,18 @@ async function loadEsptoolModule(esptoolModulePath) {
   }
 }
 
-// The chip id a reported name belongs to — the JS half of
-// `lpa_link::chip_id_from_reported`, over the table Rust hands in.
-//
-// Whole-string equality does not work here: esptool-js reports
-// "ESP32-C6 (QFN32) (revision v0.2)" and, for the classic, a die name
-// ("ESP32-D0WD-V3") that is not the chip id at all. Nor does a substring
-// test — every one of those strings contains "esp32". Prefix-matching an
-// ordered, most-specific-first table is what distinguishes them.
+/// The chip id a reported name belongs to — the JS half of
+/// `lpa_link::chip_id_from_reported`, over the table Rust hands in.
+///
+/// Whole-string equality does NOT work here, and this is not theoretical:
+/// esptool-js 0.6.0's `main()` returns `getChipDescription()`, which builds
+/// `"ESP32-C6 (revision 0)"`, `"ESP32-S3 (QFN56) (revision v0.2)"`, and for
+/// the classic a DIE name — `"ESP32-D0WDQ6"`, `"ESP32-U4WDH"`,
+/// `"ESP32-PICO-D4"` — never the bare id a manifest carries. Comparing
+/// normalized strings for equality therefore refuses EVERY real device.
+/// Nor does a substring test work: all of those contain "esp32", so a
+/// classic image would sail onto a C6. Prefix-matching an ordered,
+/// most-specific-first table is what distinguishes them.
 function chipIdFrom(reported, knownChipIds) {
   const normalized = String(reported ?? "")
     .toLowerCase()
@@ -573,12 +577,12 @@ function chipIdFrom(reported, knownChipIds) {
   return Array.from(knownChipIds ?? []).find((id) => normalized.startsWith(id)) ?? null;
 }
 
-// Refuse to write `manifest` onto `reportedChip`.
-//
-// An unresolvable chip on either side is NOT a match: esptool-js always
-// names the chip it synced with, so an absent or unrecognized name means
-// the handshake did not go the way this code assumes, and guessing there is
-// the same bet the guard exists to refuse.
+/// Refuse to write `manifest` onto `reportedChip`.
+///
+/// An unresolvable chip on either side is NOT a match: esptool-js always
+/// names the chip it synced with, so an absent or unrecognized name means
+/// the handshake did not go the way this code assumes, and guessing there
+/// is the same bet the guard exists to refuse.
 function assertChipMatchesManifest(reportedChip, manifest, manifestPath, knownChipIds) {
   const manifestChip = manifest.core?.target?.chip;
   const detected = chipIdFrom(reportedChip, knownChipIds);

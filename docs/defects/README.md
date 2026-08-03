@@ -210,6 +210,7 @@ the combination first being registered as a target.
 | precision-loss-at-a-seam | 2026-08-01 | [gamma-8bit-choke](2026-08-01-gamma-8bit-choke.md) | fixed | lpc-engine fixture node |
 | misattributed-symptom | 2026-08-01 | [classic-rmt-open-fault](2026-08-01-classic-rmt-open-fault.md) | fixed | lpc-shared DisplayPipeline + fw-esp32-common provider |
 | capacity-regression | 2026-08-01 | [classic-heap-regression-after-f32-merge](2026-08-01-classic-heap-regression-after-f32-merge.md) | fixed | lpc-engine resolver (payload caches) + fw-esp32v3 gate |
+| metadata-parsed-but-never-enforced | 2026-08-02 | [browser-flash-never-checks-the-chip](2026-08-02-browser-flash-never-checks-the-chip.md) | fixed | lpa-link browser_esp32_flash.js (flashFirmware) |
 | proxy-signal-outranks-the-real-outcome | 2026-08-02 | [erase-fails-a-successful-erase-on-flash-id-noise](2026-08-02-erase-fails-a-successful-erase-on-flash-id-noise.md) | fixed | lpa-link browser_esp32_flash.js (eraseDeviceFlash) |
 | allocator-refuses-a-request-it-can-serve | 2026-08-02 | [classic-oom-retry-succeeds](2026-08-02-classic-oom-retry-succeeds.md) | **open** | fw-esp32v3 esp-alloc/LLFF + lps-glsl typeck |
 | test-rig-lies-about-its-subject | 2026-08-01 | [xt-pipeline-rigs-declare-param-types-as-return-types](2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md) | fixed (f32 rig; Q32 rig outstanding) | lpvm-native tests + lpir::builder |
