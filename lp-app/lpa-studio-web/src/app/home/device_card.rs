@@ -1269,6 +1269,17 @@ fn status_tab_body(
                 detected_chip: card.detected_chip.clone(),
                 on_action,
             }
+        } else if !card.sim && card.state == RosterCardState::NeedsAName {
+            // The flashed-but-unstamped board names itself ON the card —
+            // the setup form's naming half, reused. The "Name it" button →
+            // sheet detour predates the on-card form (sitting feedback,
+            // 2026-08-03: "we moved mostly away from the little dialogs").
+            NameForm {
+                board_id: card.hardware.as_ref().and_then(|hw| hw.board_id.clone()),
+                detected_chip: card.detected_chip.clone(),
+                now_secs,
+                on_action,
+            }
         } else if recovery_face {
             RecoveryFace { card_key: card_key.to_string(), on_action }
         } else {
@@ -1659,7 +1670,61 @@ fn ConfirmSheet(action: UiAction, card_key: String, on_action: EventHandler<UiAc
     }
 }
 
-/// The name-stamping sheet (NeedsAName — spike round 3): input +
+/// The flashed-but-unstamped board's inline naming (NeedsAName): the
+/// SETUP FORM's naming half, reused — same voice ("Name your device"),
+/// same derived date + board/chip default, one primary verb, no dialog.
+/// The discriminator prefers what the board itself reports (`board_id`
+/// from the hello — the setup form's pick was stamped into
+/// /hardware.json), then the detected chip, then the bare fallback.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NameForm(
+    board_id: Option<String>,
+    detected_chip: Option<String>,
+    now_secs: Option<f64>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut typed_name = use_signal(|| None::<String>);
+    let discriminator = board_id
+        .as_deref()
+        .map(|id| board_slug(id).to_string())
+        .or_else(|| {
+            detected_chip
+                .as_deref()
+                .and_then(|chip| chip_id(chip).map(str::to_string))
+        })
+        .unwrap_or_else(|| "lightplayer".to_string());
+    let derived = default_setup_name(now_secs, &discriminator);
+    let name_value = typed_name().unwrap_or(derived);
+    let submit_name = name_value.clone();
+    rsx! {
+        div { class: "tw:mt-1 tw:grid tw:gap-3.5",
+            div {
+                label { class: "tw:mb-1 tw:block tw:text-sm tw:font-bold tw:text-strong-foreground",
+                    "Name your device"
+                }
+                input {
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    value: "{name_value}",
+                    oninput: move |event| typed_name.set(Some(event.value())),
+                }
+            }
+            CardSheetButton {
+                label: "Name device",
+                tone: SheetButtonTone::Primary,
+                onclick: move |_| {
+                    let value = submit_name.trim().to_string();
+                    if !value.is_empty() {
+                        on_action.call(home_action(HomeOp::NameDevice { name: value }));
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// The name-stamping sheet (retained for the title-bar naming path;
+/// the NeedsAName FACE now names inline via [`NameForm`]): input +
 /// Enter-to-save; naming stamps the uid and the card returns to Status.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
