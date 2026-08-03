@@ -13,6 +13,7 @@ use hashbrown::HashMap;
 use lpc_hardware::OutputError;
 use lpc_hardware::{
     ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
+    WS281X_MAX_LEDS_PER_CHANNEL, ws281x_capped_byte_count,
 };
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{HwEndpointSpec, NodeId, Revision, TreePath};
@@ -73,12 +74,20 @@ struct OutputWire {
     /// *hardware change* rather than once per frame, while a pin freed by
     /// another node still lights it on the very next flush.
     parked_at_generation: Option<u64>,
-    /// Buffer sample count the last truncation warning was issued for.
+    /// Buffer sample count the last buffer-underrun warning was issued for.
     ///
     /// An overflowing slice keeps overflowing every frame, so the warning is
     /// rate-limited on the extent that caused it: loud once per shape, not
     /// sixty times a second (the same bargain the LED cap makes).
     truncated_at_samples: Option<u32>,
+    /// Pre-cap sample count the last shared-cap warning was issued for.
+    ///
+    /// Distinct from `truncated_at_samples`: that one fires when the buffer
+    /// holds fewer samples than authored, this one fires when the wire wants
+    /// more samples than [`WS281X_MAX_LEDS_PER_CHANNEL`] ever grants, on host,
+    /// emulator, or device alike. Rate-limited the same way — loud once per
+    /// shape, not once per frame.
+    capped_at_samples: Option<u32>,
 }
 
 impl OutputWire {
@@ -92,6 +101,7 @@ impl OutputWire {
             last_byte_count: None,
             parked_at_generation: None,
             truncated_at_samples: None,
+            capped_at_samples: None,
         }
     }
 
@@ -378,13 +388,33 @@ impl EngineServices {
         }
 
         for (key, channel) in config.channels.entries.iter() {
-            if channel.count() == Some(0) {
-                log::warn!(
-                    "EngineServices: output node {} channel {key} ({}) authors a lamp count of 0; \
-                     it drives nothing and is skipped",
-                    set.node,
-                    channel.endpoint(),
-                );
+            match channel.count() {
+                Some(0) => {
+                    log::warn!(
+                        "EngineServices: output node {} channel {key} ({}) authors a lamp count \
+                         of 0; it drives nothing and is skipped",
+                        set.node,
+                        channel.endpoint(),
+                    );
+                }
+                // Authored-count validation, at registration rather than at the
+                // first flush: an explicit count above the shared cap is wrong
+                // the moment it is authored, whether or not a buffer has
+                // arrived yet to prove it at runtime. `wire_slice` enforces the
+                // actual grant every frame (it also covers the remainder
+                // channel, whose size is buffer-driven and unknowable here);
+                // this is the config-time half of the same warning.
+                Some(count) if count > WS281X_MAX_LEDS_PER_CHANNEL as u32 => {
+                    log::warn!(
+                        "EngineServices: output node {} channel {key} ({}) authors {count} \
+                         lamps, above the shared {WS281X_MAX_LEDS_PER_CHANNEL}-lamp per-channel \
+                         cap; it registers capped and drives only the first \
+                         {WS281X_MAX_LEDS_PER_CHANNEL} lamps",
+                        set.node,
+                        channel.endpoint(),
+                    );
+                }
+                _ => {}
             }
         }
 
@@ -408,6 +438,7 @@ impl EngineServices {
                         wire.last_byte_count = None;
                         wire.parked_at_generation = None;
                         wire.truncated_at_samples = None;
+                        wire.capped_at_samples = None;
                     }
                     wires.push(wire);
                 }
@@ -739,6 +770,14 @@ fn flush_one_wire(
 /// (a shader resized, a fixture lost a path, the counts simply add up to more
 /// lamps than exist). Overflow is clamped rather than fatal — the wires that
 /// do have pixels must still light — but it is said out loud, once per extent.
+///
+/// A second, independent clamp applies after: no wire may carry more than
+/// [`WS281X_MAX_LEDS_PER_CHANNEL`] lamps, the shared bound every
+/// [`lpc_shared::output::OutputProvider`] is granted through this one seam.
+/// Applying it here — rather than leaving it to each provider — is what makes
+/// host, emulator, and device agree on the same byte count for the same
+/// authored channel; a provider is free to keep its own copy as defense in
+/// depth, but this is the one that decides.
 fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Option<&'a [u16]> {
     let available = samples.len() as u32;
     let wanted_end = match wire.len_samples {
@@ -765,7 +804,28 @@ fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Op
         wire.truncated_at_samples = None;
     }
 
-    let len = ((end.saturating_sub(start)) / 3) * 3;
+    let requested = ((end.saturating_sub(start)) / 3) * 3;
+    // Samples and WS281x protocol bytes are the same count here — one 16-bit
+    // sample renders to one 8-bit protocol byte — so the byte-count helper
+    // applies to this sample count unchanged.
+    let (len, capped) = ws281x_capped_byte_count(requested);
+    if capped {
+        if wire.capped_at_samples != Some(requested) {
+            log::warn!(
+                "EngineServices: output node {node} channel {} ({}) wants {} lamp(s) but the \
+                 shared per-channel cap is {WS281X_MAX_LEDS_PER_CHANNEL} lamps; granting {} \
+                 lamp(s) of it",
+                wire.channel,
+                wire.endpoint,
+                requested / 3,
+                len / 3,
+            );
+            wire.capped_at_samples = Some(requested);
+        }
+    } else {
+        wire.capped_at_samples = None;
+    }
+
     if len == 0 {
         return None;
     }
@@ -1524,6 +1584,193 @@ mod tests {
         );
     }
 
+    // ---- shared per-channel cap (P3) --------------------------------------
+
+    /// The headline parity claim: a wire that wants more than the shared
+    /// 1024-lamp cap is truncated to exactly `1024*3` bytes, on the plain
+    /// memory provider — no protocol-specific behavior involved, just the
+    /// engine seam every provider goes through.
+    #[test]
+    fn a_1500_lamp_channel_truncates_to_the_shared_cap_on_the_memory_provider() {
+        let provider = Rc::new(MemoryOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = ramp_buffer(&mut buffers, 1500, Revision::new(1));
+        let endpoint = endpoint("ws281x:local:D10");
+        services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint.clone()));
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("a capped wire still opens and writes");
+
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D10"),
+            ramp(0, super::WS281X_MAX_LEDS_PER_CHANNEL as u32 * 3),
+            "only the first 1024 lamps reach the memory provider"
+        );
+    }
+
+    /// The same parity claim again, but through a provider that applies no
+    /// cap of its own — not even `MemoryOutputProvider`'s length bookkeeping,
+    /// just a bare recorder of what it was asked to open and write.
+    ///
+    /// This stands in for `fw-emu`'s `SyscallOutputProvider`, the other
+    /// non-capping provider N1 found (`fw-emu/src/output.rs:52`):
+    /// `SyscallOutputProvider` cannot be unit-tested on this host toolchain
+    /// today (`cargo test -p fw-emu` fails to link — the guest crate
+    /// `lp-riscv-emu-guest` defines its own `panic_impl`, which collides with
+    /// `std`'s under a host test binary; `fw-emu` is not in this phase's
+    /// validation package list for the same reason). What this test proves
+    /// instead: the engine seam hands *any* non-capping provider the exact
+    /// same capped byte count, so the guarantee does not depend on what the
+    /// provider does with it.
+    #[test]
+    fn a_1500_lamp_channel_truncates_identically_through_a_non_capping_provider() {
+        let provider = Rc::new(RecordingOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedRecordingProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = ramp_buffer(&mut buffers, 1500, Revision::new(1));
+        let endpoint = endpoint("ws281x:local:D10");
+        services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint));
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("a capped wire still opens and writes");
+
+        let cap_bytes = super::WS281X_MAX_LEDS_PER_CHANNEL as u32 * 3;
+        assert_eq!(
+            provider.opens(),
+            vec![cap_bytes],
+            "the provider must be asked to open exactly the capped byte count, never 1500*3"
+        );
+        assert_eq!(
+            provider.writes(),
+            vec![cap_bytes as usize],
+            "the provider must be handed exactly the capped sample count on write"
+        );
+    }
+
+    /// 375 and 1024 lamps both sit at or under the cap, so neither is
+    /// truncated — the DOD's explicit "uncapped everywhere" boundary case.
+    #[test]
+    fn channels_at_or_under_the_cap_open_uncapped() {
+        for lamps in [375u32, super::WS281X_MAX_LEDS_PER_CHANNEL as u32] {
+            let provider = Rc::new(MemoryOutputProvider::new());
+            let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+            services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+                &provider,
+            )))));
+
+            let mut buffers = RuntimeBufferStore::new();
+            let buffer_id = ramp_buffer(&mut buffers, lamps, Revision::new(1));
+            let endpoint = endpoint("ws281x:local:D10");
+            services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint.clone()));
+
+            services
+                .flush_dirty_output_sinks(Revision::new(1), &buffers)
+                .expect("flush");
+
+            assert_eq!(
+                wire_data(&provider, "ws281x:local:D10"),
+                ramp(0, lamps * 3),
+                "a {lamps}-lamp channel must not be truncated"
+            );
+        }
+    }
+
+    /// A dome-shaped project: five wires, 300 lamps each, none anywhere near
+    /// the 1024 cap. All five must open and carry exactly their own slice,
+    /// uncapped, with the offsets undisturbed by capping logic that never
+    /// fires.
+    #[test]
+    fn a_five_channel_dome_shaped_project_opens_every_wire_uncapped() {
+        let provider = Rc::new(MemoryOutputProvider::new_permissive());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = ramp_buffer(&mut buffers, 1500, Revision::new(1));
+        let config = OutputDef::with_channels((0..5).map(|i| {
+            (
+                i,
+                OutputChannelDef::with_count(
+                    HwEndpointSpec::parse(&alloc::format!("ws281x:local:D{i}")).expect("spec"),
+                    300,
+                ),
+            )
+        }));
+        services.register_output_sink(buffer_id, node(1), &config);
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("every strand opens and writes");
+
+        assert_eq!(provider.open_channel_count(), 5);
+        for i in 0..5u32 {
+            let spec = HwEndpointSpec::parse(&alloc::format!("ws281x:local:D{i}")).expect("spec");
+            let handle = provider
+                .get_handle_for_endpoint(&spec)
+                .unwrap_or_else(|| panic!("channel {i} never opened"));
+            assert_eq!(
+                provider.get_data(handle),
+                Some(ramp(i * 900, 900)),
+                "channel {i} must carry exactly its own 300 lamps, uncapped"
+            );
+        }
+    }
+
+    /// A channel authoring more than the cap must not corrupt where its
+    /// siblings start: the cap only trims what reaches the provider, the
+    /// buffer offsets downstream channels are computed from stay the full
+    /// authored count.
+    #[test]
+    fn a_capped_channel_does_not_shift_its_siblings_offset() {
+        let provider = Rc::new(MemoryOutputProvider::new_permissive());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        // Channel 0 authors 1500 lamps (over the cap); channel 1 takes the
+        // remainder — 3 lamps — starting where channel 0's *authored* extent
+        // ends, at sample 4500, not where its *capped* write ended.
+        let buffer_id = ramp_buffer(&mut buffers, 1503, Revision::new(1));
+        let config = OutputDef::with_channels([
+            (
+                0,
+                OutputChannelDef::with_count(endpoint("ws281x:local:D0"), 1500),
+            ),
+            (1, OutputChannelDef::new(endpoint("ws281x:local:D1"))),
+        ]);
+        services.register_output_sink(buffer_id, node(1), &config);
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("both wires open and write");
+
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D0"),
+            ramp(0, super::WS281X_MAX_LEDS_PER_CHANNEL as u32 * 3),
+            "channel 0 is capped to its first 1024 lamps"
+        );
+        assert_eq!(
+            wire_data(&provider, "ws281x:local:D1"),
+            ramp(1500 * 3, 9),
+            "channel 1 still starts after channel 0's full 1500-lamp authored extent"
+        );
+    }
+
     fn endpoint(spec: &'static str) -> HwEndpointSpec {
         HwEndpointSpec::from_static(spec)
     }
@@ -1663,6 +1910,67 @@ mod tests {
 
         fn hardware_generation(&self) -> u64 {
             self.0.hardware_generation()
+        }
+    }
+
+    /// Deliberately non-capping [`OutputProvider`]: it records what it is
+    /// asked to open and write and applies no bound of its own, unlike
+    /// `MemoryOutputProvider` (which at least validates length on write) or
+    /// `Esp32OutputProvider` (which keeps its own backstop). See
+    /// `a_1500_lamp_channel_truncates_identically_through_a_non_capping_provider`
+    /// for why this stands in for `fw-emu`'s `SyscallOutputProvider`.
+    struct RecordingOutputProvider {
+        opens: core::cell::RefCell<Vec<u32>>,
+        writes: core::cell::RefCell<Vec<usize>>,
+        next_handle: core::cell::Cell<i32>,
+    }
+
+    impl RecordingOutputProvider {
+        fn new() -> Self {
+            Self {
+                opens: core::cell::RefCell::new(Vec::new()),
+                writes: core::cell::RefCell::new(Vec::new()),
+                next_handle: core::cell::Cell::new(0),
+            }
+        }
+
+        fn opens(&self) -> Vec<u32> {
+            self.opens.borrow().clone()
+        }
+
+        fn writes(&self) -> Vec<usize> {
+            self.writes.borrow().clone()
+        }
+    }
+
+    struct SharedRecordingProvider(Rc<RecordingOutputProvider>);
+
+    impl OutputProvider for SharedRecordingProvider {
+        fn open(
+            &self,
+            _endpoint: &HwEndpointSpec,
+            byte_count: u32,
+            format: OutputFormat,
+            _options: Option<OutputDriverOptions>,
+        ) -> Result<OutputChannelHandle, OutputError> {
+            assert_eq!(format, OutputFormat::Ws2811);
+            self.0.opens.borrow_mut().push(byte_count);
+            let handle = self.0.next_handle.get();
+            self.0.next_handle.set(handle + 1);
+            Ok(OutputChannelHandle::new(handle))
+        }
+
+        fn write(&self, _handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
+            self.0.writes.borrow_mut().push(data.len());
+            Ok(())
+        }
+
+        fn close(&self, _handle: OutputChannelHandle) -> Result<(), OutputError> {
+            Ok(())
+        }
+
+        fn hardware_generation(&self) -> u64 {
+            0
         }
     }
 }
