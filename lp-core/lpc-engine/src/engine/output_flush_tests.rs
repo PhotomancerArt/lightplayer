@@ -431,7 +431,7 @@ fn bind_output_to_fixture(
 #[test]
 fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     let mem = Rc::new(MemoryOutputProvider::new());
-    let endpoint = endpoint("ws281x:rmt:D10");
+    let endpoint = endpoint("ws281x:local:D10");
 
     let path = TreePath::parse("/show.t").expect("path");
     let mut services = EngineServices::new(path.clone());
@@ -545,8 +545,8 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
 #[test]
 fn engine_output_idle_registered_sink_skips_second_pin() {
     let mem = Rc::new(MemoryOutputProvider::new());
-    let endpoint_written = endpoint("ws281x:rmt:D10");
-    let endpoint_idle = endpoint("ws281x:rmt:GPIO19");
+    let endpoint_written = endpoint("ws281x:local:D10");
+    let endpoint_idle = endpoint("ws281x:local:GPIO19");
 
     let path = TreePath::parse("/show.t").expect("path");
     let mut services = EngineServices::new(path.clone());
@@ -753,7 +753,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     )
     .unwrap();
 
-    let endpoint = endpoint("ws281x:rmt:D10");
+    let endpoint = endpoint("ws281x:local:D10");
     let (out_id, sink) =
         attach_output_demand_root(&mut rt, root, spine.clone(), frame, "out", endpoint.clone());
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);

@@ -84,7 +84,7 @@ mod tests {
                 &[
                     (
                         "project.json".to_string(),
-                        br#"{"kind":"Project","format":2,"name":"demo"}"#.to_vec(),
+                        br#"{"kind":"Project","format":3,"name":"demo"}"#.to_vec(),
                     ),
                     ("shader.glsl".to_string(), b"void main() {}".to_vec()),
                 ],

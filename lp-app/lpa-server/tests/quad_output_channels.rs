@@ -36,10 +36,10 @@ use lpfs::lp_path::LpPathBuf;
 
 /// `outputN.json` of the bring-up project, in chain order.
 const ENDPOINTS: [&str; 4] = [
-    "ws281x:rmt:D10",
-    "ws281x:rmt:D9",
-    "ws281x:rmt:D8",
-    "ws281x:rmt:D7",
+    "ws281x:local:D10",
+    "ws281x:local:D9",
+    "ws281x:local:D8",
+    "ws281x:local:D7",
 ];
 
 /// Frames rendered after a load: enough for the shader to compile and for the
@@ -171,7 +171,7 @@ fn project_json(chains: &[usize]) -> String {
         ));
     }
     format!(
-        "{{\"kind\": \"Project\", \"format\": 2, \"name\": \"Quad strips\", \"nodes\": {{{nodes}}}}}"
+        "{{\"kind\": \"Project\", \"format\": 3, \"name\": \"Quad strips\", \"nodes\": {{{nodes}}}}}"
     )
 }
 

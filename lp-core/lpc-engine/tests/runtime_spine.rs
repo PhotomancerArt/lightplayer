@@ -176,7 +176,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -443,7 +443,7 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -485,7 +485,7 @@ fn clock_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -517,7 +517,7 @@ fn shader_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "ref": "./shader.json"

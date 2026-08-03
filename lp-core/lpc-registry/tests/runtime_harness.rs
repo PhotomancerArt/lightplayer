@@ -90,7 +90,7 @@ fn fake_runtime_consumes_load_apply_and_commit_change_summaries() {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "ref": "./shader.json"

@@ -2060,7 +2060,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -2150,9 +2150,9 @@ mod tests {
     fn a_node_whose_definition_does_not_parse_is_marked_failed() {
         let fs = char_project(&[(
             "output",
-            // Endpoint specs are `capability:driver:config`; the config part
+            // Endpoint specs are `capability:target:config`; the config part
             // is empty here, exactly as a mis-edited `outputN.json` had it.
-            r#"{ "kind": "Output", "endpoint": "ws281x:rmt:",
+            r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:" } },
                  "bindings": { "input": { "source": "bus:control.out" } } }"#,
         )]);
 
@@ -2185,7 +2185,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -2282,7 +2282,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2310,7 +2310,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {
@@ -2461,7 +2461,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2591,7 +2591,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "def": {
@@ -2620,7 +2620,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2976,7 +2976,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -3019,7 +3019,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -3189,7 +3189,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3740,7 +3740,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3755,7 +3755,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1
 }
 "#,
@@ -3810,7 +3810,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3828,7 +3828,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {
@@ -3844,7 +3844,7 @@ mod tests {
             br#"
 {
   "kind": "ControlRadio",
-  "endpoint": "radio:virtual:0",
+  "endpoint": "radio:local:0",
   "channel": 1,
   "repeat_count": 2,
   "bindings": {
@@ -4103,7 +4103,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "name": "basic",
   "nodes": {
     "output": {
@@ -4169,7 +4169,11 @@ mod tests {
             br#"
 {
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": {
       "source": "bus:control.out"
@@ -4293,7 +4297,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let project = format!(
-            "{{\n  \"kind\": \"Project\",\n  \"format\": 2,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
+            "{{\n  \"kind\": \"Project\",\n  \"format\": 3,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
         );
         fs.write_file("/project.json".as_path(), project.as_bytes())
             .expect("project.json");
@@ -4546,7 +4550,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -4561,7 +4565,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {

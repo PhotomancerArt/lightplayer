@@ -511,7 +511,7 @@ fn face_e2e_server() -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -570,7 +570,11 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
@@ -617,7 +621,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "playlist": { "ref": "./playlist.json" },
@@ -661,7 +665,11 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }

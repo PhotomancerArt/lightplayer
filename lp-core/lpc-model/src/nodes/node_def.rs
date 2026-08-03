@@ -782,7 +782,7 @@ mod tests {
             &registry,
             r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
   "options": { "dithering_enabled": false }
 }"#,
         )
@@ -1076,7 +1076,7 @@ mod tests {
             &registry,
             r##"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "main": { "value": 0.25 } }
 }"##,
         )
@@ -1091,7 +1091,7 @@ mod tests {
             &registry,
             r##"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "main": { "target": "bus:control.out" } }
 }"##,
         )
