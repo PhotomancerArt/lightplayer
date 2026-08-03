@@ -212,6 +212,94 @@ fn probe_values_never_tick_sink_scope_producers() {
         h.shader_ticks("root_writer") > 0,
         "the root writer is what the probe resolves"
     );
+
+    // Wire 8: the sink scope's own row DOES list (panel liveness for entry
+    // children) — but its value is withheld, because resolving it would
+    // have rendered the entry. Same no-demand property, kept at the
+    // value-request seam instead of by omitting the row.
+    let sink_row = graph
+        .channels
+        .iter()
+        .find(|channel| {
+            channel.name == "visual.out"
+                && channel
+                    .scope
+                    .as_ref()
+                    .is_some_and(lpc_wire::WireScopeRef::is_sink)
+        })
+        .expect("the sink scope's channel row lists");
+    assert!(
+        sink_row.value.is_none(),
+        "a sink-producer-backed value is never resolved by a probe"
+    );
+}
+
+#[test]
+fn sink_channel_rows_carry_panel_writer_values_without_demand() {
+    // The §4.1 shape at the engine seam: a playlist entry's consumed-only
+    // channel lists as a sink row, an engaged panel writer surfaces on it
+    // as a Panel-origin provider with a resolvable (literal) value, and
+    // none of it ever ticks the entry's producer.
+    let mut h = EngineTestBuilder::new()
+        .shader("playlist_standin", output("outputs[0]", 0.0))
+        .shader("entry_shader", output("outputs[0]", 0.9))
+        .bind_bus("visual.out", produced_slot("entry_shader", "outputs[0]"))
+        .bind_input("entry_shader", "glow", bus("glow"))
+        .build();
+
+    let playlist_standin = h.node("playlist_standin");
+    let entry_shader = h.node("entry_shader");
+    assign_root_scope(&mut h, &[playlist_standin]);
+    let sink = ScopeRef::Sink {
+        owner: playlist_standin,
+        entry: 1,
+    };
+    place(&mut h, &[entry_shader], sink);
+    h.tick(16).expect("tick");
+    let before = h.shader_ticks("entry_shader");
+
+    let channel = lpc_model::ChannelName(alloc::string::String::from("glow"));
+    h.engine
+        .panel_write(sink, channel, lpc_model::LpValue::F32(0.7), None);
+
+    let result = h.engine.read_project_binding_graph_probe(
+        &h.registry,
+        BindingGraphProbeRequest {
+            include_values: true,
+        },
+    );
+    let BindingGraphProbeResult::Graph(graph) = result else {
+        panic!("expected graph result");
+    };
+    let glow = graph
+        .channels
+        .iter()
+        .find(|channel| channel.name == "glow")
+        .expect("the sink-consumed channel lists");
+    assert!(
+        glow.scope.as_ref().is_some_and(lpc_wire::WireScopeRef::is_sink),
+        "glow lists in the entry's sink scope: {:?}",
+        glow.scope
+    );
+    assert_eq!(
+        glow.value.as_ref().and_then(|value| value.value.clone()),
+        Some(lpc_model::LpValue::F32(0.7)),
+        "the engaged writer's literal resolves — no producer demand needed"
+    );
+    assert!(
+        glow.providers.iter().any(|index| {
+            graph
+                .bindings
+                .get(*index as usize)
+                .is_some_and(|binding| binding.origin == lpc_wire::WireBindingOrigin::Panel)
+        }),
+        "the writer surfaces as a Panel-origin provider row"
+    );
+    assert_eq!(
+        h.shader_ticks("entry_shader"),
+        before,
+        "none of this ticked the entry's producer"
+    );
 }
 
 #[test]

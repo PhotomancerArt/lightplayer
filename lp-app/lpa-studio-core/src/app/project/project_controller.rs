@@ -393,6 +393,10 @@ impl ProjectController {
         let channels = graph
             .channels
             .iter()
+            // Sink rows (playlist entries, wire 8) feed panel liveness only
+            // — the bus listing keeps R2's presentation: channels private
+            // to an entry never show as project wiring.
+            .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
             .map(|channel| crate::UiBusChannelView {
                 scope: channel.scope,
                 // Root-scope rows carry no label; embedded scopes label by
@@ -455,6 +459,10 @@ impl ProjectController {
                 graph
                     .channels
                     .iter()
+                    // Sink rows feed panel liveness, not the authoring
+                    // surface: a channel private to a playlist entry is not
+                    // something the picker should offer (R2 presentation).
+                    .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
                     .map(|channel| {
                         (
                             channel.name.clone(),
@@ -603,8 +611,8 @@ impl ProjectController {
             // the authoring surface is built, so Retarget/Unbind state never
             // carries the churning value (P6 item 1).
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
-                && let lpc_wire::WireBindingEndpoint::Bus { channel, .. } = &binding.endpoint
-                && let Some(live) = live_channel_value(graph, channel, binding.kind)
+                && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
+                && let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind)
             {
                 endpoint = endpoint.with_live_value(live);
             }
@@ -1414,7 +1422,7 @@ impl ProjectController {
             if binding.direction != lpc_wire::WireBindingDirection::Consumes {
                 continue;
             }
-            let lpc_wire::WireBindingEndpoint::Bus { channel, .. } = &binding.endpoint else {
+            let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint else {
                 continue;
             };
             let Some(slot) = binding.slot.as_ref() else {
@@ -1423,7 +1431,7 @@ impl ProjectController {
             let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
                 continue;
             };
-            let Some(live) = live_channel_value(graph, channel, binding.kind) else {
+            let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind) else {
                 continue;
             };
             updates.push((binding.node, name.as_str().to_string(), live));
@@ -4607,16 +4615,22 @@ fn count_nodes(node: &NodeController) -> usize {
 ///   also quantizes floats to ≤2 decimals before DTO entry).
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
+    scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
     binding_kind: lpc_model::Kind,
 ) -> Option<String> {
     if binding_kind == lpc_model::Kind::Instant {
         return None;
     }
-    let channel = graph
-        .channels
-        .iter()
-        .find(|channel| channel.name == channel_name)?;
+    // The reading is the CONSUMING endpoint's row — channels are keyed
+    // (scope, name) since wire 6, and a playlist entry's sink row (wire 8)
+    // must never be confused with an enclosing scope's same-named channel.
+    // A scope-less endpoint (pre-scope test fakes) falls back to the first
+    // name match.
+    let channel = graph.channels.iter().find(|channel| {
+        channel.name == channel_name
+            && (scope.is_none() || channel.scope.as_ref() == scope)
+    })?;
     if channel.kind == Some(lpc_model::Kind::Instant) {
         return None;
     }
@@ -6121,27 +6135,52 @@ mod tests {
                     kind: lpc_model::Kind::Color,
                 },
             ],
-            channels: vec![lpc_wire::WireBusChannel {
-                scope: None,
-                name: "visual.out".to_string(),
-                kind: Some(lpc_model::Kind::Color),
-                providers: vec![1],
-                consumers: vec![0],
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::F32(0.5)),
-                    error: None,
-                }),
-                primary_visual: true,
-            }],
+            channels: vec![
+                lpc_wire::WireBusChannel {
+                    scope: None,
+                    name: "visual.out".to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: vec![1],
+                    consumers: vec![0],
+                    value: Some(lpc_wire::WireBusChannelValue {
+                        revision: Revision::new(2),
+                        value: Some(LpValue::F32(0.5)),
+                        error: None,
+                    }),
+                    primary_visual: true,
+                },
+                // A playlist entry's sink row (wire 8): feeds panel
+                // liveness, but the bus listing and the binding picker
+                // must both leave it out (R2 presentation).
+                lpc_wire::WireBusChannel {
+                    scope: Some(lpc_wire::WireScopeRef::Sink {
+                        owner: node,
+                        entry: 1,
+                    }),
+                    name: "glow".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![],
+                    consumers: vec![],
+                    value: None,
+                    primary_visual: false,
+                },
+            ],
         };
         project
             .sync_mut()
             .unwrap()
             .set_binding_graph_for_test(graph);
 
+        assert!(
+            !project
+                .ui_channel_choices()
+                .iter()
+                .any(|choice| choice.name == "glow"),
+            "the picker never offers a sink-private channel"
+        );
+
         let bus = project.ui_bus_view().expect("bus view");
-        assert_eq!(bus.channels.len(), 1);
+        assert_eq!(bus.channels.len(), 1, "the sink row stays off the bus listing");
         let channel = &bus.channels[0];
         assert_eq!(channel.name, "visual.out");
         assert!(channel.primary_visual);
