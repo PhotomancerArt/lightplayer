@@ -211,8 +211,6 @@ async function runScenario(id, argPort) {
       response.end();
     });
   });
-  // CORS preflight for the browser's cross-origin POST.
-  sink.on("request", () => {});
   await new Promise((resolve) => sink.listen(0, "127.0.0.1", resolve));
   const sinkUrl = `http://127.0.0.1:${sink.address().port}/ingest`;
 
