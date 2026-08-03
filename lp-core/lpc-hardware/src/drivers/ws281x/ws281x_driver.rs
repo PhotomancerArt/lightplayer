@@ -10,7 +10,12 @@ use crate::{HardwareEndpointError, HwDriver, HwEndpoint, HwEndpointId};
 /// limit. This is deliberately the only definition — it used to be hand-copied
 /// into two firmware crates and drifted silently
 /// (docs/debt/output-channel-led-cap-silent-truncation.md).
-pub const WS281X_MAX_LEDS_PER_CHANNEL: usize = 256;
+///
+/// Enforced once, identically, at the engine's output-flush seam
+/// (`lpc-engine`'s `wire_slice`) so host, emulator, and device all grant the
+/// same byte count for the same authored channel; `Esp32OutputProvider` keeps
+/// its own check on top as defense-in-depth, not as the source of truth.
+pub const WS281X_MAX_LEDS_PER_CHANNEL: usize = 1024;
 
 /// Cap a requested frame's byte count to [`WS281X_MAX_LEDS_PER_CHANNEL`].
 ///
