@@ -9,11 +9,11 @@
 //   1. shows a status table (`just device-scenario`),
 //   2. runs THE SITTING (`just device-scenario run [id]`): ensures Studio is
 //      serving on this worktree's canonical port (reusing a live server or
-//      starting `just studio-dev` itself), opens ONE browser tab whose
-//      `?capture-sink=` streams to ONE persistent local sink, then loops
-//      scenarios — setup (foreground) → printed steps → capture → validate —
-//      until `q`. Enter-through is the happy path: next uncaptured scenario,
-//      first serial port, same tab.
+//      starting `just studio-dev` itself), then loops scenarios until `q` —
+//      setup (foreground, capture tab CLOSED so the port is free) → the tab
+//      opens at hand-off with `?capture-sink=` streaming to one persistent
+//      sink → printed steps → capture → validate. Enter-through is the
+//      happy path: next uncaptured scenario, first serial port.
 //
 // Design rules baked in (they have each broken a sitting before):
 //  - NOTHING touches the serial port during a capture — setup runs strictly
