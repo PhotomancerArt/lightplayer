@@ -636,6 +636,37 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
         },
     )));
     drive(actor.run_one_batch_for_test());
+
+    // GV fix 5, the jerky-drag fix: the very first snapshot after the
+    // dispatch — no RefreshProject, no probe — already shows the written
+    // value and reads engaged. Before the local echo the knob sat at its
+    // authored default until the round trip landed, which is what made a
+    // drag move at probe cadence.
+    let echo = view.try_recv().expect("the write itself emits a snapshot");
+    let playlist = node_by_kind(&echo, "Playlist");
+    let Some(UiNodeFace::Shader(face)) = &playlist.children[0].face else {
+        panic!("idle child keeps its face");
+    };
+    let echoed = control_labeled(face, "Glow");
+    assert_eq!(
+        echoed.live_value.as_deref(),
+        Some("0.9"),
+        "the panel's own write reads back before any probe"
+    );
+    assert!(
+        echoed
+            .panel_target
+            .as_ref()
+            .expect("target survives")
+            .engaged,
+        "and the control reads engaged at once"
+    );
+    assert_eq!(
+        editor_dirty(&echo),
+        (0, 0),
+        "the echo is display state — it stages nothing"
+    );
+
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("panel write emits a snapshot");
@@ -683,6 +714,116 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
     assert!(
         !glow.panel_target.as_ref().expect("target survives").engaged,
         "clearing releases the writer"
+    );
+}
+
+#[test]
+fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
+    // R9 / GV fix 2. A playlist entry's bindings resolve in the entry's
+    // SINK scope, which matches no module panel by scope — so fyeah's root
+    // panel rendered EMPTY while the idle shader card below it carried a
+    // live Glow knob. The active entry's controls now ride the root panel
+    // as their own group, labeled by the entry.
+    let server = Rc::new(RefCell::new(playlist_bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let face = module_face(&snapshot);
+    assert!(
+        face.panel.controls.is_empty(),
+        "nothing binds in the root scope itself: {:?}",
+        face.panel
+            .controls
+            .iter()
+            .map(|control| control.channel.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(face.panel.groups.len(), 1, "one group: the active entry");
+    let entry_group = &face.panel.groups[0];
+    assert_eq!(
+        entry_group.label, "idle",
+        "the group wears the ACTIVE entry's name"
+    );
+    let entry_scope = entry_group
+        .target
+        .expect("the entry group resets its own scope");
+    assert!(
+        entry_scope.is_sink(),
+        "the group targets the entry's SINK scope, got {entry_scope:?}"
+    );
+    assert_eq!(
+        entry_group
+            .controls
+            .iter()
+            .map(|control| control.channel.as_str())
+            .collect::<Vec<_>>(),
+        vec!["glow"],
+        "only the entry's authored-bound uniform is public"
+    );
+    let glow = &entry_group.controls[0];
+    assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);
+    let target = glow
+        .control
+        .panel_target
+        .clone()
+        .expect("the bubbled control keeps its own write target");
+    assert_eq!(target.scope, entry_scope);
+
+    // One control, two cards (P1): the entry card below carries the SAME one.
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    let Some(UiNodeFace::Shader(entry_face)) = &playlist.children[0].face else {
+        panic!("the entry card keeps its shader face");
+    };
+    assert_eq!(
+        control_labeled(entry_face, "Glow").panel_target,
+        Some(target.clone()),
+        "the group control and the entry card's knob share one identity"
+    );
+
+    // Engaging through the bubbled control flows back to BOTH views.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelWriteOp {
+            scope: target.scope,
+            channel: target.channel.clone(),
+            value: LpValue::F32(0.9),
+            ttl_ms: None,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel write emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let glow = &face.panel.groups[0].controls[0];
+    assert_eq!(
+        glow.state,
+        crate::UiPanelControlState::Engaged,
+        "the module panel's copy reads Held"
+    );
+    assert_eq!(glow.control.live_value.as_deref(), Some("0.9"));
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    let Some(UiNodeFace::Shader(entry_face)) = &playlist.children[0].face else {
+        panic!("the entry card keeps its shader face");
+    };
+    assert_eq!(
+        control_labeled(entry_face, "Glow").live_value.as_deref(),
+        Some("0.9"),
+        "and so does the entry card's knob"
     );
 }
 
