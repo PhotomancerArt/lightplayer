@@ -92,21 +92,25 @@ vec4 test_shared_struct_match_combined() {
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
 // @unsupported(wgpu.f32)
-// wasm.f32: the two f32 targets disagree. All uniforms default to zero, so this
-// evaluates normalize(vec3(0)) — 0/0 — and then max(NaN, 0.0). wasm.f32 returns
-// vec4(NaN..), interp.f32 returns vec4(0..).
+// All uniforms default to zero, so this evaluates normalize(vec3(0)) — 0/0 —
+// and then max(NaN, 0.0). The f32 targets legitimately disagree about the
+// result: wasm.f32 returns vec4(NaN..), interp.f32 returns vec4(0..).
 //
 // G1 answered this (2026-07-31): the authority is the product spec, not IEEE and
-// not silicon. docs/design/float.md §5 now classifies BOTH operations as
+// not silicon. docs/design/float.md §5 classifies BOTH operations as
 // **Unspecified** — `max` with a NaN operand (IEEE defines competing operations
 // and GLSL declares it undefined) and `normalize(vec3(0))` (a GLSL-undefined
-// library input). So neither target is wrong and there is nothing to fix here.
+// library input). Neither target is wrong.
 //
-// What is left is a disposition question, not a semantics one: float.md §5 rule
-// 3 says unspecified behavior is never asserted, so the f32 side of this
-// expectation should be retired rather than carried as @broken. Deferred out of
-// the G3 sweep because retiring it correctly needs the behavior of all five f32
-// targets, and the q32 assertion below must survive. See
-// g3-roadmap-final-review.md, "Follow-ups".
-// @broken(wasm.f32)
-// run: test_shared_struct_match_combined() ~= vec4(0.0, 0.0, 0.0, 0.0)
+// So the f32 expectation is **retired, not carried** (2026-08-02): float.md §5
+// rule 3 says unspecified behavior is never asserted, and `@broken` asserted it
+// while calling the disagreement a bug. Scoping the directive to `run[q32]:`
+// states the real rule — Q32 has one defined answer here and must keep hitting
+// it; the f32 tiers are free, so nothing asks them. Do not restore a `run[f32]:`
+// channel for this function: any value it could name would be one target's
+// opinion promoted to a spec.
+//
+// The five directives above stay unscoped on purpose — reading a zero-defaulted
+// uniform is Guaranteed in both modes, and only *this* function reaches the
+// undefined pair.
+// run[q32]: test_shared_struct_match_combined() ~= vec4(0.0, 0.0, 0.0, 0.0)

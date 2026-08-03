@@ -456,17 +456,27 @@ impl LpvmInstance for BrowserLpvmInstance {
         width: u32,
         height: u32,
     ) -> Result<(), Self::Error> {
-        // Deliberately still Q32-only, unlike lpvm-native's two backends: the
-        // CPU preview tier refuses Float on purpose, because the wasm emitter's
-        // f32 builtin id resolution is unimplemented and would produce an
-        // invalid module rather than a wrong one
-        // (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`). A Float
-        // shader previews on the GPU tier. Drop this guard when that resolution
-        // lands, not before.
+        // Deliberately still Q32-only, unlike lpvm-native's two backends — but
+        // NOT because anything is unimplemented. The emitter this tier shares
+        // with `rt_wasmtime` resolves f32 builtin ids fine (M5); the whole
+        // `wasm.f32` corpus compiles and runs, 850/850 files, 0 compile-fail.
+        // The old "no f32 builtin lowering" reason was measured false on
+        // 2026-08-02 — do not restate it.
+        //
+        // Two honest reasons this one stays. (1) On `rt_wasmtime`, the same
+        // emitted module rendered *one count low* against the rv32-emulator
+        // oracle with the guard removed — the known wasmtime last-bit
+        // divergence; see `rt_wasmtime/instance.rs`. (2) That was **not**
+        // measured here: this runtime executes in the browser's own wasm
+        // engine, so its numeric agreement is unverified rather than known-bad.
+        // Refusing is the conservative read of an unmeasured tier, and a Float
+        // shader still previews on the GPU tier. Lift this when someone
+        // actually measures the browser tier — not by analogy to wasmtime.
         if self.float_mode != FloatMode::Q32 {
             return Err(WasmError::runtime(
                 "BrowserLpvmInstance::call_render_texture requires FloatMode::Q32 \
-                 (the wasm CPU preview tier has no f32 builtin lowering yet)",
+                 (float shaders preview on the GPU tier; the CPU preview tier's \
+                 f32 numeric agreement is unverified)",
             ));
         }
 
@@ -498,11 +508,13 @@ impl LpvmInstance for BrowserLpvmInstance {
         out: &mut LpvmBuffer,
         count: u32,
     ) -> Result<(), Self::Error> {
-        // See `call_render_texture` for why this one stays.
+        // See `call_render_texture` for why this one stays — an unverified
+        // tier, not a missing capability.
         if self.float_mode != FloatMode::Q32 {
             return Err(WasmError::runtime(
                 "BrowserLpvmInstance::call_render_samples requires FloatMode::Q32 \
-                 (the wasm CPU preview tier has no f32 builtin lowering yet)",
+                 (float shaders preview on the GPU tier; the CPU preview tier's \
+                 f32 numeric agreement is unverified)",
             ));
         }
 

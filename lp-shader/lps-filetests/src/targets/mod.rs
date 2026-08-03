@@ -99,17 +99,22 @@ pub struct Target {
 /// `wasm.f32` is the first *native-code* f32 target: the `lpvm-wasm` backend has
 /// always had a `FloatMode::F32` emit path, but nothing ever executed it.
 ///
-/// It is **not** in [`DEFAULT_TARGETS`], and as of the roadmap's G3 sweep
-/// (2026-08-02) that is **inertia, not a technical blocker**. The original
-/// reason — `@lpfn`/`@glsl` imports resolving to Q32 builtin ids, so any file
-/// calling one produced an invalid module — was obsoleted by M5, which added
-/// `resolve_builtin_id_for_mode` and the tests in `lpvm-wasm/src/emit/imports.rs`
-/// that pin "no import ever resolves across modes" (including the load-bearing
-/// pointer-parameter case). Measured on main 2026-08-02: **850/850 files,
-/// 6345/6345 tests, 13.3 s**, 2 `@unimplemented` and 0 failures. Unlike the
-/// `xtn.*` targets it needs no cross-target artifact — wasmtime is already a
-/// test dependency. Promoting it is a CI-cost decision for the roadmap's owner,
-/// not a correctness one.
+/// It **is** in [`DEFAULT_TARGETS`] as of 2026-08-02. It was held out for a
+/// reason that had gone stale: `@lpfn`/`@glsl` imports resolving to Q32 builtin
+/// ids, so any file calling one produced an invalid module. M5 obsoleted that by
+/// adding `resolve_builtin_id_for_mode` plus the tests in
+/// `lpvm-wasm/src/emit/imports.rs` that pin "no import ever resolves across
+/// modes" (including the load-bearing pointer-parameter case); the roadmap's G3
+/// sweep identified the claim as stale, and the promotion is the follow-through.
+/// Measured on this base: **850/850 files, 6,345/6,345, 0 compile-fail, 2.6 s**,
+/// with `@glsl` (`builtins/trig-sin.glsl` 10/10) and `@lpfn` (`lpfn/` 89/89)
+/// specifically confirmed. Unlike the `xtn.*` targets it needs no cross-target
+/// artifact — wasmtime is already a test dependency.
+///
+/// That same stale claim also lived in `lpvm-wasm`'s runtime guards and in
+/// `docs/adr/2026-08-01-float-mode-reaches-the-device.md`; both now carry the
+/// measured correction. If you are about to write "wasm has no f32 builtin
+/// lowering" anywhere, it is false — check `wasm.f32` first.
 ///
 /// `xtn.f32` / `xtlpn.f32` are the **hardware-FPU** targets (roadmap M8): the
 /// same `lpvm-native` backend on `IsaTarget::Xtensa` in `FloatMode::F32`,
@@ -229,9 +234,17 @@ pub const ALL_TARGETS: &[Target] = &[
 
 /// Default targets for local `cargo test` / app runs: rv32n, rv32lpn (lps-glsl
 /// frontend — the primary on-device pipeline), rv32c (Cranelift), wasm (Q32),
-/// plus interp.f32 (the CI-runnable f32 gate — host LPIR interpretation; the
+/// interp.f32 (the CI-runnable f32 gate — host LPIR interpretation; the
 /// whole corpus carries triaged f32 expectations via `run[q32]:`/`run[f32]:`
-/// channels and per-target annotations).
+/// channels and per-target annotations), plus **`wasm.f32`**.
+///
+/// **`wasm.f32` joined the defaults 2026-08-02** (roadmap Q6's original intent,
+/// unblocked since M5). It is the only *native-code* f32 target that can run
+/// here: it needs no cross-target artifact, because wasmtime is already a test
+/// dependency. Measured on this base: **850/850 files, 6,345/6,345, 2.6 s** —
+/// cheap enough that keeping it on request was costing more in stale
+/// explanations than in CI seconds. The `xtn.*` and `rv32*.f32` targets stay on
+/// request for reasons that are still true (see [`ALL_TARGETS`]).
 ///
 /// **`xtn.q32` / `xtlpn.q32` are deliberately NOT here.** They are in
 /// [`ALL_TARGETS`] and run on request (`-t xtn.q32`). Two reasons: they need the
@@ -245,6 +258,7 @@ pub const DEFAULT_TARGETS: &[Target] = &[
     ALL_TARGETS[1],
     ALL_TARGETS[0],
     ALL_TARGETS[4],
+    ALL_TARGETS[8],
 ];
 
 /// Annotation kind for test directives.
@@ -592,11 +606,12 @@ mod tests {
 
     #[test]
     fn test_default_targets_order_matches_const() {
-        assert_eq!(DEFAULT_TARGETS.len(), 5);
+        assert_eq!(DEFAULT_TARGETS.len(), 6);
         assert_eq!(DEFAULT_TARGETS[0].name(), "rv32n.q32");
         assert_eq!(DEFAULT_TARGETS[1].name(), "rv32lpn.q32");
         assert_eq!(DEFAULT_TARGETS[2].name(), "rv32c.q32");
         assert_eq!(DEFAULT_TARGETS[3].name(), "wasm.q32");
         assert_eq!(DEFAULT_TARGETS[4].name(), "interp.f32");
+        assert_eq!(DEFAULT_TARGETS[5].name(), "wasm.f32");
     }
 }
