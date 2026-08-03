@@ -336,24 +336,51 @@ fn SetupForm(
 
     let boards = provisionable_boards();
     let detected = detected_chip.as_deref().and_then(chip_id);
-    // Chip-matching boards lead; the rest follow in the same grid (round 3:
-    // the card may grow — a long grid beats a disclosure nobody opens).
     let (matching, other): (Vec<&'static lpa_boards::BoardDisplayFile>, Vec<_>) = boards
         .iter()
         .partition(|board| detected.is_some() && detected == chip_id(&board.family));
-    let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if detected.is_none() {
-        boards.clone()
+    // A board for another chip CANNOT be flashed onto this device — the
+    // guard refuses it — so when the chip is known, the non-matching boards
+    // are collapsed rather than merely sorted after the matching ones.
+    //
+    // Round 3 of the M5 gate flattened this to one grid, correctly: only the
+    // C6 image was served then, so `other` was always empty and the
+    // disclosure was a control that never had anything behind it. Serving
+    // three builds made it non-empty, and a C6 user was shown four boards
+    // they cannot use (Yona, hardware walk 2026-08-02). The spike's original
+    // collapse is back, and now it earns its place.
+    let collapse_others = detected.is_some() && !other.is_empty();
+    let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if collapse_others {
+        if show_all() {
+            matching.into_iter().chain(other.iter().copied()).collect()
+        } else {
+            matching
+        }
     } else {
-        matching.into_iter().chain(other).collect()
+        boards.clone()
     };
     // Generic occupies the first cell, so the board capacity is one less;
     // the overflow cell fills the 12th (4 rows of 3).
     let capacity = SETUP_TILE_LIMIT - 1;
-    let overflow = ordered.len().saturating_sub(capacity);
-    let shown: Vec<_> = if show_all() || overflow == 0 {
+    let overflow = if collapse_others {
+        // The disclosure counts the other-chip boards, not grid overflow:
+        // "+4 other boards" is a different offer from "+4 more".
+        if show_all() { 0 } else { other.len() }
+    } else {
+        ordered.len().saturating_sub(capacity)
+    };
+    let shown: Vec<_> = if show_all() || overflow == 0 || collapse_others {
         ordered
     } else {
         ordered.into_iter().take(capacity).collect()
+    };
+    let overflow_label = if collapse_others {
+        // Name what is behind it. "+4 more" reads as truncation; these are
+        // boards for a different chip and the user should know that before
+        // opening it.
+        format!("+{overflow} other boards")
+    } else {
+        format!("+{overflow} more")
     };
 
     let picked = setup_board
@@ -418,7 +445,7 @@ fn SetupForm(
                     button {
                         class: "tw:flex tw:min-h-[4.5rem] tw:items-center tw:justify-center tw:rounded-lg tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:text-xs tw:text-subtle-foreground tw:hover:border-strong tw:hover:text-strong-foreground",
                         onclick: move |_| show_all.set(true),
-                        "+{overflow} more"
+                        "{overflow_label}"
                     }
                 }
             }
