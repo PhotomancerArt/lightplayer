@@ -1,0 +1,16 @@
+{
+  "id": "s9-two-boards",
+  "title": "Two boards attached, both connected (procedure)",
+  "board": "C6 + S3",
+  "needs": [],
+  "expect": [
+    "pool:install"
+  ],
+  "setup": [],
+  "manual": [
+    "Attach BOTH boards before opening Studio.",
+    "Open the printed Studio URL; connect the first board, then the second (the chooser must be reopened for it).",
+    "Both cards should render, distinctly titled by chip.",
+    "Press Enter here to finish the capture."
+  ]
+}

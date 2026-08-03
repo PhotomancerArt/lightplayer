@@ -1652,6 +1652,13 @@ watch-pr *args:
 hardware-list *args:
     cargo run -q -p lp-cli -- hardware list {{ args }}
 
+# Guided golden-trace capture runner (multi-device M8): status table with no
+# args; `run <id> [--port /dev/...]` sets a board to a known state, then
+# captures Studio's device-event stream to a committed trace fixture. See
+# scripts/device-scenarios/README.md.
+device-scenario *args:
+    node scripts/device-scenario.mjs {{ args }}
+
 # ============================================================================
 # Demo projects
 # ============================================================================

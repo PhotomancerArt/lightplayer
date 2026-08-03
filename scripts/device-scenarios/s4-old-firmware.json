@@ -1,0 +1,21 @@
+{
+  "id": "s4-old-firmware",
+  "title": "Old firmware (wire proto mismatch / pre-hello)",
+  "board": "C6",
+  "needs": [],
+  "expect": [
+    "state:incompatible(no-hello)|state:incompatible(proto-mismatch)"
+  ],
+  "setup": [
+    {
+      "describe": "Flash an ARCHIVED older firmware build (pre-wire-hello or older proto). Keep one under scratch/old-fw/ \u2014 build one from an old tag if missing (git log lp-fw/fw-esp32c6 for the proto bumps).",
+      "run": null,
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Open the printed Studio URL and Connect to this board.",
+    "The card should land Incompatible with the reflash affordance.",
+    "Press Enter here to finish the capture."
+  ]
+}
