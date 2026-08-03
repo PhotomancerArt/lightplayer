@@ -8,7 +8,7 @@
   ],
   "setup": [
     {
-      "describe": "Flash an ARCHIVED older firmware build (pre-wire-hello or older proto). Keep one under scratch/old-fw/ \u2014 build one from an old tag if missing (git log lp-fw/fw-esp32c6 for the proto bumps).",
+      "describe": "NOT AUTOMATED YET \u2014 no archived old build exists on this desk (2026-08-03 sitting). Planned automation: a FIXTURE build of the CURRENT firmware with a forced old wire proto \u2014 a cargo feature (e.g. fixture-old-proto) that sends proto = WIRE_PROTO_VERSION - 1 in the hello (and a fixture-no-hello variant that suppresses it). Same toolchain, no archived binaries, lands Incompatible(proto-mismatch)/(no-hello) deterministically. Until that exists, SKIP this scenario.",
       "run": null,
       "verified": false
     }

@@ -6,12 +6,12 @@
     "s3-current-fw-valid-project"
   ],
   "expect": [
-    "state:ready"
+    "sync:unreadable"
   ],
   "setup": [
     {
-      "describe": "Start from s3 (firmware + project), then garble the lpfs partition head so the project data is unreadable",
-      "run": "python3 -c \"import os,sys; sys.stdout.buffer.write(os.urandom(4096))\" > /tmp/lp-garbage.bin && espflash write-bin --port {port} 0x310000 /tmp/lp-garbage.bin",
+      "describe": "Start from s3 (firmware + project), then garble 256 KB of the lpfs partition (4 KB was NOT enough \u2014 littlefs redundancy shrugged it off; see FINDINGS.md 2026-08-03)",
+      "run": "python3 -c \"import os,sys; sys.stdout.buffer.write(os.urandom(262144))\" > /tmp/lp-garbage.bin && espflash write-bin --port {port} 0x310000 /tmp/lp-garbage.bin",
       "verified": false
     }
   ],
