@@ -42,5 +42,5 @@ pub(crate) mod playlist_panel_stories;
 pub use module_face::ModuleFace;
 pub use module_panel::{ModulePanel, NestedPanelGroup};
 pub use module_panel_control::ModulePanelControl;
-pub use panel_gesture::PanelGesture;
+pub use panel_gesture::{PanelGesture, panel_gesture_actions};
 pub use play_mode::PlayModeSurface;

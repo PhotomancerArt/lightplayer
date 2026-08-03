@@ -16,10 +16,20 @@
 //!                        that project (slug — the user-facing identifier —
 //!                        or a `prj_…` uid as fallback). A sim runtime's
 //!                        identity is its project (D37).
+//! #/sim/<key>/play       the SAME session, rendered as play mode (panel.md
+//!                        P12: the root module's panel, nothing else).
 //! #/device/<dev-uid>     the editor as a lens on that device's session;
 //!                        the project comes from the device.
+//! #/device/<uid>/play    likewise.
 //! #/stories[/<story-id>] the story book (dev)
 //! ```
+//!
+//! **Play is a lens ZOOM, not a different document.** `#/sim/x` and
+//! `#/sim/x/play` address the same runtime session, so every
+//! route-equivalence question ("is the view already showing this route?",
+//! "is the lens already bound here?") is asked through
+//! [`StudioRoute::same_session`], which ignores the flag. Toggling play must
+//! never re-open, re-attach, or reload anything.
 //!
 //! **The URL is the focused document** (the runtime-pool ADR's SDI
 //! record): the model is multi-document — N runtime sessions in the pool —
@@ -77,10 +87,12 @@ pub(crate) enum StudioRoute {
     /// The editor as a lens on THE sim session running this project. The
     /// key is the slug (preferred) or a `prj_…` uid (machine-stable
     /// fallback). Reload respawns the sim and loads the project.
-    Sim { key: String },
+    /// `play` renders that same session as play mode (`/play` suffix).
+    Sim { key: String, play: bool },
     /// The editor as a lens on this device's runtime session (`dev_…`
     /// uid). Reload connects the granted port (M1) and attaches.
-    Device { uid: String },
+    /// `play` renders that same session as play mode (`/play` suffix).
+    Device { uid: String, play: bool },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
     /// The standalone 2D mapping editor (project-free; edits
@@ -118,15 +130,25 @@ impl StudioRoute {
         let (path, _hash_query) = path.split_once('?').unwrap_or((path, ""));
         let mut segments = path.split('/').filter(|s| !s.is_empty());
         match segments.next() {
-            Some("sim") => match segments.next() {
-                Some(key) if segments.next().is_none() => StudioRoute::Sim {
+            Some("sim") => match (segments.next(), segments.next(), segments.next()) {
+                (Some(key), None, _) => StudioRoute::Sim {
                     key: key.to_string(),
+                    play: false,
+                },
+                (Some(key), Some("play"), None) => StudioRoute::Sim {
+                    key: key.to_string(),
+                    play: true,
                 },
                 _ => StudioRoute::Home,
             },
-            Some("device") => match segments.next() {
-                Some(uid) if segments.next().is_none() => StudioRoute::Device {
+            Some("device") => match (segments.next(), segments.next(), segments.next()) {
+                (Some(uid), None, _) => StudioRoute::Device {
                     uid: uid.to_string(),
+                    play: false,
+                },
+                (Some(uid), Some("play"), None) => StudioRoute::Device {
+                    uid: uid.to_string(),
+                    play: true,
                 },
                 _ => StudioRoute::Home,
             },
@@ -162,8 +184,10 @@ impl StudioRoute {
     pub(crate) fn hash(&self) -> String {
         match self {
             StudioRoute::Home => "#/".to_string(),
-            StudioRoute::Sim { key } => format!("#/sim/{key}"),
-            StudioRoute::Device { uid } => format!("#/device/{uid}"),
+            StudioRoute::Sim { key, play: false } => format!("#/sim/{key}"),
+            StudioRoute::Sim { key, play: true } => format!("#/sim/{key}/play"),
+            StudioRoute::Device { uid, play: false } => format!("#/device/{uid}"),
+            StudioRoute::Device { uid, play: true } => format!("#/device/{uid}/play"),
             StudioRoute::Stories { story_id: None } => "#/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("#/stories/{id}"),
             StudioRoute::MappingEditor => "#/mapping".to_string(),
@@ -181,12 +205,55 @@ impl StudioRoute {
     /// window renders honestly on the gallery's cards instead.
     pub(crate) fn sim_matches_view(&self, view: &UiStudioView) -> bool {
         match self {
-            StudioRoute::Sim { key } => {
+            StudioRoute::Sim { key, play: _ } => {
                 view.open_project_uid.as_deref() == Some(key)
                     || view.open_project_slug.as_deref() == Some(key)
             }
             _ => false,
         }
+    }
+
+    /// Whether two routes address the same runtime SESSION — play and
+    /// non-play are the same document at different zoom (panel.md P12), so
+    /// every "already here?" question uses this instead of `==`. Without it
+    /// the view→URL sync would see `#/sim/x/play` as a different route from
+    /// the lens's `#/sim/x` and rewrite the user straight back out of play.
+    pub(crate) fn same_session(&self, other: &StudioRoute) -> bool {
+        match (self, other) {
+            (StudioRoute::Sim { key: a, .. }, StudioRoute::Sim { key: b, .. }) => a == b,
+            (StudioRoute::Device { uid: a, .. }, StudioRoute::Device { uid: b, .. }) => a == b,
+            _ => self == other,
+        }
+    }
+
+    /// This route with play mode on/off; anything but a lens route is
+    /// returned unchanged (nothing else has a play zoom).
+    pub(crate) fn with_play(&self, play: bool) -> StudioRoute {
+        match self {
+            StudioRoute::Sim { key, .. } => StudioRoute::Sim {
+                key: key.clone(),
+                play,
+            },
+            StudioRoute::Device { uid, .. } => StudioRoute::Device {
+                uid: uid.clone(),
+                play,
+            },
+            other => other.clone(),
+        }
+    }
+
+    /// Whether this route renders play mode.
+    pub(crate) fn is_play(&self) -> bool {
+        matches!(
+            self,
+            StudioRoute::Sim { play: true, .. } | StudioRoute::Device { play: true, .. }
+        )
+    }
+
+    /// Whether this route is a lens on a runtime session (the routes that
+    /// have a play variant at all).
+    pub(crate) fn is_lens(&self) -> bool {
+        matches!(self, StudioRoute::Sim { .. } | StudioRoute::Device { .. })
     }
 }
 
@@ -201,12 +268,18 @@ impl StudioRoute {
 /// The caller gates on "the editor is showing" (`!view.panes.is_empty()`):
 /// mid-open views (lens claimed, mirror not yet built) must not rewrite
 /// the URL that requested them.
+///
+/// The lens knows nothing about play mode, so the bound route always reads
+/// `play: false`; the caller compares with [`StudioRoute::same_session`] and
+/// leaves a play URL alone.
 pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
     match view.lens.as_ref()? {
-        UiLensRuntime::Sim { project_key } => {
-            project_key.clone().map(|key| StudioRoute::Sim { key })
-        }
-        UiLensRuntime::Device { uid } => uid.clone().map(|uid| StudioRoute::Device { uid }),
+        UiLensRuntime::Sim { project_key } => project_key
+            .clone()
+            .map(|key| StudioRoute::Sim { key, play: false }),
+        UiLensRuntime::Device { uid } => uid
+            .clone()
+            .map(|uid| StudioRoute::Device { uid, play: false }),
     }
 }
 
@@ -391,12 +464,23 @@ mod tests {
             StudioRoute::Home,
             StudioRoute::Sim {
                 key: "2026-07-09-1421-basic".to_string(),
+                play: false,
+            },
+            StudioRoute::Sim {
+                key: "2026-07-09-1421-basic".to_string(),
+                play: true,
             },
             StudioRoute::Sim {
                 key: "prj_abc123".to_string(),
+                play: false,
             },
             StudioRoute::Device {
                 uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                play: false,
+            },
+            StudioRoute::Device {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                play: true,
             },
             StudioRoute::Stories { story_id: None },
             StudioRoute::Stories {
@@ -427,12 +511,88 @@ mod tests {
             "#/nope",
             "#/sim",
             "#/sim/prj_x/extra",
+            "#/sim/prj_x/play/extra",
             "#/device",
             "#/device/dev_x/extra",
+            "#/device/dev_x/play/extra",
             "#/mapping/extra",
         ] {
             assert_eq!(StudioRoute::parse(hash), StudioRoute::Home, "{hash:?}");
         }
+    }
+
+    #[test]
+    fn the_play_segment_parses_on_both_lens_routes() {
+        assert_eq!(
+            StudioRoute::parse("#/sim/basic/play"),
+            StudioRoute::Sim {
+                key: "basic".to_string(),
+                play: true
+            }
+        );
+        assert_eq!(
+            StudioRoute::parse("#/device/dev_a/play"),
+            StudioRoute::Device {
+                uid: "dev_a".to_string(),
+                play: true
+            }
+        );
+        // `play` is a suffix, never a key
+        assert_eq!(
+            StudioRoute::parse("#/sim/play"),
+            StudioRoute::Sim {
+                key: "play".to_string(),
+                play: false
+            }
+        );
+    }
+
+    /// Play is a lens ZOOM: toggling it must never read as a different
+    /// document, or the view→URL sync would bounce the user out of it.
+    #[test]
+    fn play_and_non_play_are_the_same_session() {
+        let editing = StudioRoute::Sim {
+            key: "basic".to_string(),
+            play: false,
+        };
+        let playing = editing.with_play(true);
+        assert_ne!(editing, playing);
+        assert!(editing.same_session(&playing));
+        assert!(playing.same_session(&editing));
+        assert!(playing.is_play() && !editing.is_play());
+        assert!(playing.is_lens() && editing.is_lens());
+        // a different project is a different session, play or not
+        assert!(!playing.same_session(&StudioRoute::Sim {
+            key: "other".to_string(),
+            play: true
+        }));
+        // and a device is never a sim
+        assert!(!playing.same_session(&StudioRoute::Device {
+            uid: "basic".to_string(),
+            play: true
+        }));
+        // non-lens routes have no play zoom and compare by equality
+        assert_eq!(StudioRoute::Home.with_play(true), StudioRoute::Home);
+        assert!(!StudioRoute::Home.is_lens());
+        assert!(StudioRoute::Home.same_session(&StudioRoute::Home));
+        assert!(!StudioRoute::Home.same_session(&editing));
+    }
+
+    /// The opening frame follows the session, not the zoom: a play URL on a
+    /// project the view has not reached yet still frames.
+    #[test]
+    fn sim_matches_view_ignores_play() {
+        let view = editor_view(Some(UiLensRuntime::Sim {
+            project_key: Some("basic".to_string()),
+        }))
+        .with_open_project(Some("prj_abc".to_string()), Some("basic".to_string()));
+        assert!(
+            StudioRoute::Sim {
+                key: "basic".to_string(),
+                play: true
+            }
+            .sim_matches_view(&view)
+        );
     }
 
     #[test]
@@ -521,7 +681,8 @@ mod tests {
         assert_eq!(
             lens_route(&view),
             Some(StudioRoute::Sim {
-                key: "2026-07-09-1421-basic".to_string()
+                key: "2026-07-09-1421-basic".to_string(),
+                play: false
             })
         );
     }
@@ -534,7 +695,8 @@ mod tests {
         assert_eq!(
             lens_route(&view),
             Some(StudioRoute::Device {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string()
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                play: false
             })
         );
     }
@@ -567,7 +729,8 @@ mod tests {
         for key in ["2026-07-09-1421-basic", "prj_abc"] {
             assert!(
                 StudioRoute::Sim {
-                    key: key.to_string()
+                    key: key.to_string(),
+                    play: false
                 }
                 .sim_matches_view(&view),
                 "{key}"
@@ -575,7 +738,8 @@ mod tests {
         }
         assert!(
             !StudioRoute::Sim {
-                key: "other".to_string()
+                key: "other".to_string(),
+                play: false
             }
             .sim_matches_view(&view)
         );
@@ -583,7 +747,8 @@ mod tests {
         // frame — sim_matches_view is deliberately false for them
         assert!(
             !StudioRoute::Device {
-                uid: "dev_aaaaaaaaaaaaaaaa".to_string()
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                play: false
             }
             .sim_matches_view(&view)
         );

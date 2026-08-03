@@ -19,9 +19,8 @@ use lpa_studio_core::{
     NodeCardUiState, UiAction, UiAddNodeMenu, UiNodeFace, UiNodeSection, UiPendingEdit,
 };
 
-use crate::app::module::{ModuleFace, ModulePanel, PanelGesture};
+use crate::app::module::{ModuleFace, ModulePanel, PanelGesture, panel_gesture_actions};
 use crate::app::node::NodeDirtyTint;
-use crate::app::node::slot_edit_actions::{panel_clear_action, panel_clear_scope_action};
 use crate::base::Platform;
 
 use super::{FixtureFace, NodeCardDrawers, NodeCardSection, PlaylistFace, ShaderFace};
@@ -53,29 +52,13 @@ pub fn NodeFaceBody(
     #[props(default)] dirty_tint: NodeDirtyTint,
     /// Panel-gesture override — stories fake state through this. In the
     /// live app leave it `None`: gestures translate to the real panel ops
-    /// here (the ONE seam), riding `on_action`.
+    /// through the shared [`panel_gesture_actions`] seam, riding
+    /// `on_action`.
     #[props(default = None)]
     module_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    // The gesture→op seam (panel.md P8): clear gestures become the two
-    // wire-shaped ops. SetAutoSave has no wire arm yet (P3 owns it); the
-    // toggle only renders when a face carries `auto_save`, which no derived
-    // face does until then.
-    let module_panel = module_panel.or_else(|| {
-        let on_action = on_action?;
-        Some(EventHandler::new(
-            move |gesture: PanelGesture| match gesture {
-                PanelGesture::ClearControl { target } => {
-                    on_action.call(panel_clear_action(&target));
-                }
-                PanelGesture::ClearScope { scope } => {
-                    on_action.call(panel_clear_scope_action(scope));
-                }
-                PanelGesture::SetAutoSave(_) => {}
-            },
-        ))
-    });
+    let module_panel = module_panel.or_else(|| Some(panel_gesture_actions(on_action?)));
     rsx! {
         // Full-bleed: sections reclaim the pane's padding and sit flush
         // under the header's bottom border.

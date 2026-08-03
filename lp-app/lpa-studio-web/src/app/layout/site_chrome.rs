@@ -73,6 +73,34 @@ pub fn SiteChrome(
     }
 }
 
+/// The play-mode toggle, shown in the right-hand cluster whenever a lens
+/// route is open (`docs/design/panel.md` P12). It is a plain hash link to
+/// the play variant of the CURRENT route — the same session at a different
+/// zoom — so the route listener sees no new document and nothing re-opens.
+///
+/// Deliberately not a nav tab: play is a mode of the Studio section, not a
+/// section of its own, so it borrows the tab's inactive styling (in play it
+/// takes the active treatment, which is what the mode being on looks like)
+/// and sits with the version chip instead of in the tab row.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn PlayToggle(href: String, playing: bool) -> Element {
+    let class = if playing {
+        NAV_TAB_ACTIVE
+    } else {
+        NAV_TAB_IDLE
+    };
+    let label = if playing { "Exit play" } else { "Play" };
+    rsx! {
+        a {
+            class: "{class}",
+            href: "{href}",
+            title: if playing { "Back to the editor" } else { "Play mode: the panel, full screen" },
+            "{label}"
+        }
+    }
+}
+
 /// One nav tab. Active: heading color + accent underline; inactive: subtle
 /// text that brightens on hover.
 #[component]
@@ -83,11 +111,7 @@ fn NavTab(
     active: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let class = if active {
-        "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']"
-    } else {
-        "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground"
-    };
+    let class = if active { NAV_TAB_ACTIVE } else { NAV_TAB_IDLE };
     rsx! {
         a {
             class: "{class}",
@@ -180,6 +204,11 @@ fn ToolCard(
         }
     }
 }
+
+/// Current-destination treatment: heading color plus the accent underline.
+const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
+/// Idle treatment: subtle text that brightens on hover.
+const NAV_TAB_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 
 const TOOLS_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 /// Rows are cards, not text links: fixed three-column grid so the title and
