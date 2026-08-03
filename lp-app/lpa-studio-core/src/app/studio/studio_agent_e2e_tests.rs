@@ -436,7 +436,7 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
         json!({ "source": SPEED_SHADER, "note": "add a speed control" }).to_string();
     let upsert_input = json!({
         "name": "speed", "label": "Speed", "default": 1.0,
-        "min": 0.0, "max": 4.0, "panel": true,
+        "min": 0.0, "max": 4.0,
     })
     .to_string();
     let verify_input = json!({ "note": "verify params" }).to_string();
@@ -582,7 +582,7 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
         .find(|record| record["name"] == "speed")
         .expect("speed record");
     assert_eq!(speed["label"], "Speed");
-    assert_eq!(speed["panel"], true);
+    assert_eq!(speed["bound"], true, "publicity is the binding (Q13)");
     assert_eq!(speed["min"], 0.0);
     assert_eq!(speed["max"], 4.0);
     assert_eq!(content["engine"]["status"], "ok", "{content}");
@@ -592,7 +592,8 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
     assert!(persisted > 0, "the upsert rides the Save-gated overlay");
 
     // The knob appears on the shader face via the EXISTING panel
-    // derivation — the def record alone makes it so.
+    // derivation: the uniform is wired to `bus:speed` (Q13 publicity) and
+    // the new def record supplies its range.
     let face = shader_face(&snapshot);
     let knob = face
         .controls

@@ -35,9 +35,6 @@ pub struct ShaderSlotDef {
     pub mapping: OptionSlot<ShaderSlotMappingDef>,
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
-    /// Marks this slot for the shader card's front panel (node-card Q3):
-    /// panel-flagged f32 value slots render as face knobs.
-    pub panel: OptionSlot<ValueSlot<bool>>,
     /// Display unit suffix rendered near the panel control's value
     /// (e.g. "Hz", "%").
     pub unit: OptionSlot<ValueSlot<String>>,
@@ -65,15 +62,8 @@ impl ShaderSlotDef {
             mapping: OptionSlot::none(),
             label: ValueSlot::new(String::from(label)),
             description: ValueSlot::new(String::from(description)),
-            panel: OptionSlot::none(),
             unit: OptionSlot::none(),
         }
-    }
-
-    /// Mark this slot for the shader card's front panel.
-    pub fn with_panel(mut self) -> Self {
-        self.panel = OptionSlot::some(ValueSlot::new(true));
-        self
     }
 
     /// Quantize this slot's panel control to whole multiples of `step`.
@@ -103,7 +93,6 @@ impl ShaderSlotDef {
             mapping: OptionSlot::some(mapping),
             label: ValueSlot::default(),
             description: ValueSlot::default(),
-            panel: OptionSlot::none(),
             unit: OptionSlot::none(),
         }
     }
@@ -427,8 +416,7 @@ mod tests {
   "min": 1,
   "max": 4,
   "label": "Count",
-  "description": "How many meteors",
-  "panel": true
+  "description": "How many meteors"
 }"#,
         );
 

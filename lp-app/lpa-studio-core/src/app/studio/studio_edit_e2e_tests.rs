@@ -2327,10 +2327,16 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // The shader publishes to the visual bus and a fixture consumes it —
     // without a consumer the shader never renders, so it would never
     // (re)compile and compile errors would never surface.
+    //
+    // `speed` is wired to a channel with no def record yet: that is the
+    // agent e2e's repair shape (declare the uniform, upsert the record) and,
+    // since Q13, the binding is also what will put the repaired param on the
+    // panel — publicity is the binding, not an authored flag.
     let shader_json = r#"{
   "kind": "Shader",
   "source": "shader.glsl",
   "bindings": {
+    "speed": { "source": "bus:speed" },
     "output": { "target": "bus:visual.out" }
   },
   "consumed": {

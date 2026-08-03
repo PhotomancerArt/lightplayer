@@ -22,7 +22,8 @@ pub struct UiPanelTarget {
     pub engaged: bool,
 }
 
-/// A front-panel control projected from a panel-flagged slot.
+/// A front-panel control projected from a slot that is on a panel —
+/// since Q13 that means a slot bound to a bus channel.
 ///
 /// Panel controls sit directly on the card (no box-in-box) and open the SAME
 /// detail popover as their slot row (hover-revealed corner ⓘ). A control

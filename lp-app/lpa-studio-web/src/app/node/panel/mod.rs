@@ -1,7 +1,7 @@
 //! Front-panel control widgets for node card faces.
 //!
 //! The panel is the face's gesture surface: knobs, faders, and toggles
-//! projected from panel-flagged slots ([`lpa_studio_core::UiPanelControl`]).
+//! projected from bound slots ([`lpa_studio_core::UiPanelControl`]).
 //! Fields follow the stateless slot-field pattern (`value, state, address,
 //! on_action`) and dispatch through the standard slot write path
 //! (`SlotEditOp::SetValue`), so drags coalesce exactly like slot editor
