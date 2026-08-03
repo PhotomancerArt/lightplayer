@@ -111,6 +111,38 @@ fn every_served_build_has_a_build_def() {
     }
 }
 
+/// `provisioning_build` compares its `normalized_chip` argument against
+/// these two fields verbatim, so they have to already BE normalized —
+/// lowercase alphanumerics, the form `lpa_link::normalize_chip_name`
+/// produces. A `chip.name` of `ESP32-C6` would silently match nothing and
+/// provisioning would fall back to the deployment default for that chip
+/// forever.
+#[test]
+fn chip_names_are_already_normalized() {
+    let normalized = |name: &str| {
+        name.chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect::<String>()
+            .to_ascii_lowercase()
+    };
+    for build in all_builds() {
+        assert_eq!(
+            normalized(&build.chip.name),
+            build.chip.name,
+            "build def {}: chip.name must be lowercase alphanumeric",
+            build.id
+        );
+    }
+    for board in all_boards() {
+        assert_eq!(
+            normalized(&board.family),
+            board.family,
+            "{}: family must be lowercase alphanumeric",
+            board.board_id
+        );
+    }
+}
+
 /// Features are read per **package** (one `manifest-core.expected.json` per
 /// firmware crate). Two build defs of the same package with different cargo
 /// features would make that fixture describe neither honestly — the day that

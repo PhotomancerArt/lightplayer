@@ -394,7 +394,7 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
     let (sink, events) = recording_sink();
 
     let outcome = session
-        .manage(LinkManagementRequest::FlashFirmware, sink)
+        .manage(LinkManagementRequest::FlashFirmware { build_id: None }, sink)
         .await
         .unwrap();
 
@@ -512,7 +512,7 @@ async fn scripted_manage_failure_sets_error_status_and_reconnect_recovers() {
 
     let error = session
         .manage(
-            LinkManagementRequest::FlashFirmware,
+            LinkManagementRequest::FlashFirmware { build_id: None },
             DeviceEventSink::noop(),
         )
         .await
@@ -694,7 +694,7 @@ async fn stale_blank_flash_lines_do_not_misclassify_the_post_flash_rebuild() {
 
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware,
+            LinkManagementRequest::FlashFirmware { build_id: None },
             DeviceEventSink::noop(),
         )
         .await
