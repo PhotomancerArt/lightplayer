@@ -577,7 +577,10 @@ function wordHTML(key, px, opts) {
     `<span class="w1">${a}</span><span class="w2">${b}</span></span>`;
 }
 function lockupHTML(state, markPx, wordPx, animCls) {
-  const gap = Math.round(markPx * 0.22); // tightened per gate feedback — one unit, not icon-beside-label
+  // Optical norm: mark→word gap ≈ 0.5× wordmark cap height, measured from the
+  // mark's VISUAL edge. The chip viewBox carries ~9% air on the right (pad
+  // overhang), so the CSS gap compensates: 0.12×mark + air ≈ 0.5×cap.
+  const gap = Math.round(markPx * 0.12);
   return `<span class="lockup ${animCls || ''}" style="gap:${gap}px">` +
     MARKS[state.mark].build(markPx) + wordHTML(state.font, wordPx) + `</span>`;
 }
@@ -638,7 +641,7 @@ for (const [k, f] of Object.entries(FONTS)) {
     (f.check ? `<span class="badge" data-check='${f.check}' hidden>FALLBACK</span>` : '') +
     `<div class="stage big">${wordHTML(k, 24)}</div>` +
     `<div class="stage bar">` +
-      `<span class="lockup" style="gap:5px">${MARKS.prod.build(22)}${wordHTML(k, 14)}</span>` +
+      `<span class="lockup" style="gap:3px">${MARKS.prod.build(22)}${wordHTML(k, 14)}</span>` +
     `</div>` +
     `<span class="cnote">${f.note}</span>`;
   el.addEventListener('click', () => { state.font = k; refreshSel(fontcards, k); renderSheet(); });
@@ -652,7 +655,7 @@ for (const [k, a] of Object.entries(ANIMS)) {
   el.className = 'card'; el.dataset.k = k; el.setAttribute('aria-pressed', String(k === state.anim));
   el.innerHTML = `<span class="cname">${a.label}</span>` +
     `<div class="stage" style="justify-content:center;padding:16px">` +
-      `<span class="lockup ${a.cls}" style="gap:7px">${MARKS.prod.build(34)}${wordHTML('inter', 20)}</span>` +
+      `<span class="lockup ${a.cls}" style="gap:5px">${MARKS.prod.build(34)}${wordHTML('inter', 20)}</span>` +
     `</div>` +
     `<span class="cnote">${a.note}</span>`;
   el.addEventListener('click', () => { state.anim = k; refreshSel(animcards, k); renderSheet(); });
