@@ -270,6 +270,13 @@ impl RuntimePool {
         self.sessions.values_mut().find(|session| session.is_sim())
     }
 
+    /// Remove ONE session by id (the targeted disconnect, multi-device
+    /// M3). The lens clears if it was on the removed session; the caller
+    /// closes the payload.
+    pub(crate) fn remove_session(&mut self, id: RuntimeId) -> Option<RuntimeSession> {
+        self.remove(id)
+    }
+
     fn remove(&mut self, id: RuntimeId) -> Option<RuntimeSession> {
         if self.lens == Some(id) {
             self.lens = None;

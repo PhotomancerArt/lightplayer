@@ -50,6 +50,11 @@ pub enum DeviceDetailAffordance {
     EraseDevice,
     /// Danger zone, offline registered device: forget it (D34 hygiene).
     ForgetDevice,
+    /// Danger zone, live device: close this board's session and drop its
+    /// card (multi-device M3 — with several boards attachable there must
+    /// be a way OUT per board; the board keeps running and reconnecting
+    /// adds it back). Wired only when the card carries a session key.
+    DisconnectDevice,
 }
 
 /// Everything the device builder may know, assembled from the card's
@@ -346,11 +351,17 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
         | RosterCardState::InUseElsewhere => forget().into_iter().collect(),
         RosterCardState::OperationInFlight { .. } => Vec::new(),
         // The setup form owns the install; erase is the short-circuit.
+        // Disconnect closes the live session (multi-device M3: per-board
+        // way out; the web wires it only when a session key exists).
         RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware => {
-            vec![DeviceDetailAffordance::EraseDevice]
+            vec![
+                DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
+            ]
         }
         RosterCardState::NotResponding => core::iter::once(DeviceDetailAffordance::FlashFirmware)
             .chain(forget())
+            .chain(core::iter::once(DeviceDetailAffordance::DisconnectDevice))
             .collect(),
         _ => {
             let mut rows = Vec::new();
@@ -368,6 +379,7 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
             }
             rows.push(DeviceDetailAffordance::FlashFirmware);
             rows.push(DeviceDetailAffordance::EraseDevice);
+            rows.push(DeviceDetailAffordance::DisconnectDevice);
             rows
         }
     };
@@ -456,6 +468,7 @@ mod tests {
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
             ]
         );
     }
@@ -528,6 +541,7 @@ mod tests {
                 DeviceDetailAffordance::BackUpFilesystem,
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
             ]
         );
     }

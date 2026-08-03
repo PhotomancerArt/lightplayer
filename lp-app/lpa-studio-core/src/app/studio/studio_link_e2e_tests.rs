@@ -2678,6 +2678,50 @@ fn two_fake_boards_render_two_cards_with_distinct_keys() {
     }
 }
 
+/// The Danger-zone disconnect targets ONE board (gate-1 sitting feedback,
+/// 2026-08-03: "I can't disconnect a device from the UI"): closing card B's
+/// session leaves board A attached — the pre-M3 op took every session down,
+/// sim included.
+#[test]
+fn disconnecting_one_board_leaves_the_other_attached() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new())),
+        FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new())),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &first_id).expect("first board connects");
+    connect_through_link(&mut studio, &second_id).expect("second board connects");
+
+    let home = studio.view().home.expect("gallery shows");
+    let keys: Vec<String> = home
+        .devices
+        .iter()
+        .filter(|card| !card.sim)
+        .filter_map(|card| card.session_key.clone())
+        .collect();
+    assert_eq!(keys.len(), 2, "two live boards to start");
+
+    drive(studio.dispatch(device_action(DeviceOp::DisconnectDevice {
+        session_key: Some(keys[1].clone()),
+    })))
+    .expect("disconnect dispatches");
+
+    let home = studio.view().home.expect("gallery still shows");
+    let remaining: Vec<String> = home
+        .devices
+        .iter()
+        .filter(|card| !card.sim)
+        .filter_map(|card| card.session_key.clone())
+        .collect();
+    assert_eq!(
+        remaining,
+        vec![keys[0].clone()],
+        "board A is untouched; only board B's card left"
+    );
+}
+
 fn studio_with_two_fake_devices(
     first: FakeDeviceScript,
     second: FakeDeviceScript,

@@ -183,6 +183,7 @@ mod tests {
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
             ]
         );
     }
