@@ -9058,7 +9058,11 @@ mod tests {
             .add_node_menu
             .as_ref()
             .expect("picker data rides the editor");
-        assert_eq!(menu.entries.len(), 10);
+        assert_eq!(
+            menu.entries.len(),
+            11,
+            "every instantiable kind, Module included"
+        );
 
         // Root children carry the ungated delete action with confirmation.
         let clock = root_children(&view)

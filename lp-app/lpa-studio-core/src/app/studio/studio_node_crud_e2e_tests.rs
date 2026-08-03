@@ -46,6 +46,9 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         (NodeKind::Shader, "shader", "shader"),
         (NodeKind::Texture, "texture", "texture"),
         (NodeKind::Playlist, "playlist", "playlist"),
+        // An embedded module (settled D-C): an empty child def whose node
+        // introduces a scope, creatable like anything else.
+        (NodeKind::Module, "module_2", "module"),
         (NodeKind::Clock, "clock_2", "clock"),
         (NodeKind::Fixture, "fixture_2", "fixture"),
         (NodeKind::Output, "output", "output"),
@@ -113,6 +116,28 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
             module.contains(&format!("\"{name}\"")),
             "module.json carries {name}: {module}"
         );
+    }
+
+    // The created embedded module wears the module face: an empty panel of
+    // its own scope, nested as a group on the root's panel would be once it
+    // has channels — for now the card itself is the assertion.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let created = workspace_cards(&snapshot)
+        .into_iter()
+        .find(|card| card.header.path.ends_with("/module_2.module"))
+        .expect("the embedded module card renders");
+    assert_eq!(created.header.kind, "Module");
+    match &created.face {
+        Some(crate::UiNodeFace::Module(face)) => {
+            assert!(
+                face.panel.is_empty(),
+                "a fresh module has no public channels yet"
+            );
+            assert!(face.panel.target.is_some(), "its scope is real");
+        }
+        other => panic!("embedded module derives a module face, got {other:?}"),
     }
 }
 
