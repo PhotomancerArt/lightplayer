@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed          # 2026-08-03, same branch (PR #255): poll loop now treats evaluation exceptions as not-ready
 found: 2026-08-03      # how: Validate Browser (x64) red on PR #255, green on rerun with no code change
 area: lp-fw/fw-browser/scripts/fw-browser-smoke-check.mjs (CI harness)
 class: test-harness-race
@@ -60,9 +60,10 @@ while (Date.now() < deadline) {
 if (lastError) throw lastError;   // never became readable
 ```
 
-Not applied yet: found while merging main ahead of the G4 hardware walk,
-and the branch was green and about to be used. The change is small and
-belongs to whoever next touches this harness.
+**Applied 2026-08-03** on the same branch, exactly as sketched: the
+polling window swallows evaluation exceptions (keeping the last one),
+and a deadline expiry with a standing exception raises it as the
+timeout's evidence.
 
 **Why it matters beyond one red check** — this failure mode is
 indistinguishable from a real browser-tier break at a glance, and the
