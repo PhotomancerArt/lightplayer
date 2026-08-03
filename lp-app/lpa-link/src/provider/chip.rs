@@ -23,11 +23,20 @@
 /// Chip ids this build recognizes, **most specific first**.
 ///
 /// Order is load-bearing: [`chip_id_from_reported`] takes the first prefix
-/// match, and bare `esp32` prefixes every other id, so it must stay last.
+/// match, so any id that is a prefix of another must come after it. Two
+/// pairs bite here — `esp32c61` before `esp32c6` (esptool-js reports the
+/// C61 as `ESP32-C61`, which starts with the C6's id), and bare `esp32`
+/// last, since it prefixes every one of them.
+/// `no_id_is_hidden_by_an_earlier_prefix` enforces the rule rather than
+/// trusting this comment.
+///
 /// Ids are in canonical espflash spelling — the same strings build defs use
-/// for `chip.name` and board sidecars use for `family`.
+/// for `chip.name` and board sidecars use for `family`. Chips with no
+/// LightPlayer build are still listed: resolving one is how the guard
+/// produces "this device is an ESP32-C3" instead of "unidentified".
 pub const KNOWN_CHIP_IDS: &[&str] = &[
-    "esp32c6", "esp32c3", "esp32c2", "esp32s3", "esp32s2", "esp32h2", "esp32p4", "esp32",
+    "esp32c61", "esp32c6", "esp32c5", "esp32c3", "esp32c2", "esp32s3", "esp32s2", "esp32h2",
+    "esp32p4", "esp32",
 ];
 
 /// Reduce a reported chip name to lowercase alphanumerics so `esp32c6` and
@@ -115,17 +124,61 @@ mod tests {
     }
 
     /// The ordering invariant, asserted rather than trusted: a C6 must never
-    /// resolve to the classic just because `esp32` prefixes it.
+    /// resolve to the classic just because `esp32` prefixes it, and a C61
+    /// must not resolve to the C6.
     #[test]
     fn a_more_specific_id_wins_over_the_bare_family() {
         assert!(!chip_ids_match("ESP32-C6 (QFN32) (revision v0.2)", "esp32"));
         assert!(!chip_ids_match("ESP32-D0WD-V3 (revision v3.0)", "esp32c6"));
         assert!(chip_ids_match("ESP32-D0WD-V3 (revision v3.0)", "esp32"));
+        assert_eq!(chip_id_from_reported("ESP32-C61"), Some("esp32c61"));
+        assert!(!chip_ids_match("ESP32-C61", "esp32c6"));
+    }
+
+    /// The ordering rule itself, over the whole table, so adding an id
+    /// cannot quietly shadow one already there. This is what makes the
+    /// hand-ordered list safe to extend.
+    #[test]
+    fn no_id_is_hidden_by_an_earlier_prefix() {
+        for (index, id) in KNOWN_CHIP_IDS.iter().enumerate() {
+            for earlier in &KNOWN_CHIP_IDS[..index] {
+                assert!(
+                    !id.starts_with(earlier),
+                    "{id} can never be reached: {earlier} precedes it and prefixes it"
+                );
+            }
+        }
         assert_eq!(
             KNOWN_CHIP_IDS.last(),
             Some(&"esp32"),
             "the bare family prefixes every other id and must be matched last"
         );
+    }
+
+    /// The exact strings esptool-js 0.6.0 produces, read out of the shipped
+    /// bundle's per-target `getChipDescription` (2026-08-02): the C6 appends
+    /// a revision, the S3 a package AND a revision, and the classic returns
+    /// a DIE name that never contains `esp32` as a standalone token. None of
+    /// the three equals the bare id a manifest carries, which is why the
+    /// guard cannot be an equality test.
+    #[test]
+    fn the_strings_esptool_js_actually_returns_all_resolve() {
+        for (reported, expected) in [
+            ("ESP32-C6 (revision 0)", "esp32c6"),
+            ("ESP32-S3 (QFN56) (revision v0.2)", "esp32s3"),
+            ("ESP32-S3-PICO-1 (LGA56) (revision v0.2)", "esp32s3"),
+            ("ESP32-D0WDQ6 (revision v1.0)", "esp32"),
+            ("ESP32-U4WDH (revision v3.0)", "esp32"),
+            ("ESP32-PICO-D4 (revision v1.0)", "esp32"),
+            ("ESP32-S0WD (revision v1.0)", "esp32"),
+        ] {
+            assert_eq!(
+                chip_id_from_reported(reported),
+                Some(expected),
+                "{reported}"
+            );
+            assert!(chip_ids_match(reported, expected), "{reported}");
+        }
     }
 
     #[test]

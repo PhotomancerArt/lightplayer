@@ -42,17 +42,29 @@ never from configuration. This is the same argument
 `LinkFlashRegion::lpfs_for_chip` already makes for partition offsets, and
 it is what makes provisioning work on a board nobody has identified yet.
 
-Consequence: reported chip names arrive in three spellings for the same
-silicon (`esp32c6`; `ESP32-C6 (QFN32) (revision v0.2)`; and, for the
-classic, the die name `ESP32-D0WD-V3 (revision v3.0)`). Neither string
-equality nor a substring test distinguishes them — every one of those
-strings contains `esp32`. `lpa_link::chip_id_from_reported` resolves a
-reported name against an ordered id table, most specific first, with bare
-`esp32` last; the ordering is the correctness argument and is asserted by
-a test. Every comparison — the flash guard, the `lpfs` region table, build
-selection, the picker's board-family matching — goes through it. The
-browser guard runs in JS, so the table crosses that boundary **as data
-from Rust** rather than as a second copy.
+Consequence: reported chip names arrive in several spellings for the same
+silicon, and **neither equality nor a substring test distinguishes them**.
+Read out of esptool-js 0.6.0's shipped per-target `getChipDescription`
+(2026-08-02), what `main()` actually returns is `ESP32-C6 (revision 0)`,
+`ESP32-S3 (QFN56) (revision v0.2)`, and — for the classic — a *die* name
+such as `ESP32-D0WDQ6 (revision v1.0)`. None equals the bare id a manifest
+carries, so equality refuses every real device; and all of them contain
+`esp32`, so a substring rule accepts a classic image on a C6. Both
+mistakes were made in this codebase before this ADR: the first in the
+guard as originally merged (#292), the second in
+`LinkFlashRegion::lpfs_for_chip`, which was safe only because `esp32` had
+no row in its table.
+
+`lpa_link::chip_id_from_reported` resolves a reported name against an
+ordered id table, most specific first, with bare `esp32` last. The
+ordering is the correctness argument, and it is enforced by a test over
+the whole table rather than by a comment, because two pairs already
+collide (`esp32c61`/`esp32c6`, and `esp32` with everything). Every
+comparison — the flash guard, the `lpfs` region table, build selection,
+the picker's board-family matching — goes through it. The browser guard
+runs in JS, so the table crosses that boundary **as data from Rust**
+rather than as a second copy: the JS half has no test harness in this
+repo, so anything duplicated there is untested by construction.
 
 ### A board pick that contradicts the chip is honoured, and refused
 

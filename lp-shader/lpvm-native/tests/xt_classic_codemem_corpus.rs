@@ -97,9 +97,11 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
         ref other => return Err(format!("render returns {other:?}")),
     };
 
-    // Q32 throughout, matching `compile_module` below: fw-esp32v3 ships
-    // without `float-f32`, so the classic's px path is Fixed-mode and these
-    // wrappers must be synthesised the same way the device synthesises them.
+    // `FloatMode::Q32` here is not a default — it is this test's contract. The
+    // module header promises "the same pipeline the device runs … in Q32", and
+    // the `compile_module` call below passes Q32 too. Passing `F32` would still
+    // compile but would silently measure a different code size, invalidating
+    // the byte-exact agreement with silicon this test exists to provide.
     lp_shader::synth::synthesise_render_texture(
         &mut ir,
         &mut meta,
