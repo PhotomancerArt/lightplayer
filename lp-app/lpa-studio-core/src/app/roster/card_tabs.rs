@@ -329,6 +329,8 @@ mod tests {
             fw: Some(&DEVICE_FW),
             hardware: Some(&DEVICE_HW),
             bundled_fw: None,
+            detected_chip: None,
+            port_label: None,
             now_secs: NOW,
         }
     }

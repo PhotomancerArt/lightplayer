@@ -1036,6 +1036,16 @@ impl StudioController {
             detected_chip: session
                 .hardware_session()
                 .and_then(|hardware| hardware.snapshot().detected_chip),
+            port_label: session.endpoint_label().map(|label| {
+                // Suffix the grant's short id ("port-2") so two identical
+                // VID:PID labels still read as different grants.
+                match session.payload().link_session().and_then(|link| {
+                    short_endpoint_id(link.endpoint_id.as_str()).map(str::to_string)
+                }) {
+                    Some(short) => format!("{label} · {short}"),
+                    None => label.to_string(),
+                }
+            }),
         }
     }
 
@@ -2525,8 +2535,31 @@ impl StudioController {
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
+                // Chrome's chooser cannot say which port is already
+                // connected (identical VID:PID, no OS path), so mis-picks
+                // are routine with several boards. The pool's per-endpoint
+                // rule makes the re-pick a clean reconnect; this notice
+                // makes it a VISIBLE one, so "I meant to add the other
+                // board" is diagnosable at a glance.
+                let repicked_live = kind == crate::RuntimeKind::Device
+                    && payload.link_session().is_some_and(|link| {
+                        self.pool.device_sessions().any(|session| {
+                            session
+                                .payload()
+                                .link_session()
+                                .is_some_and(|existing| existing.endpoint_id == link.endpoint_id)
+                        })
+                    });
                 let id = self.install_session(payload).await?;
-                self.attach_runtime(id, updates).await
+                let outcome = self.attach_runtime(id, updates).await?;
+                if repicked_live {
+                    Ok(outcome.with_notice(UiNotice::info(
+                        "That port was already connected — reconnected it. To add a \
+                         different board, pick another port in the chooser.",
+                    )))
+                } else {
+                    Ok(outcome)
+                }
             }
             Ok(DeviceOpenOutcome::SoftFailed) => {
                 // M6: the ladder's honest ending lives on the CARD
@@ -5113,6 +5146,16 @@ fn runtime_kind_for(provider_id: LinkProviderKind) -> crate::RuntimeKind {
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough
+/// The grant's short id for display: the trailing `port-N` of a
+/// browser-serial endpoint id ("browser-serial-esp32-port-2" → "port-2");
+/// `None` for ids without that shape (fake/host endpoints, whose full id
+/// adds nothing a label doesn't).
+fn short_endpoint_id(endpoint_id: &str) -> Option<&str> {
+    endpoint_id
+        .rfind("-port-")
+        .map(|index| &endpoint_id[index + 1..])
+}
+
 /// for tests; the web shell replaces it with crypto randomness via
 /// [`StudioController::set_random`].
 fn clock_fallback_random() -> [u8; 16] {

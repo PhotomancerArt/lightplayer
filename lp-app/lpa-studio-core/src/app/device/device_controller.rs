@@ -494,7 +494,7 @@ impl DeviceController {
             let mut retried = false;
             loop {
                 match self
-                    .connect_hardware_session(&connector, &endpoint_id)
+                    .connect_hardware_session(&connector, &endpoint_id, &endpoint.label)
                     .await
                 {
                     Ok(result) => break result,
@@ -562,6 +562,7 @@ impl DeviceController {
         &mut self,
         connector: &Rc<LinkConnector>,
         endpoint_id: &LinkEndpointId,
+        endpoint_label: &str,
     ) -> Result<(RuntimePayload, Vec<UiLogDraft>), UiError> {
         // Per-session console-log routing (runtime-pool P2): a fresh
         // buffer per attempt; the session payload carries it, and the
@@ -585,6 +586,7 @@ impl DeviceController {
                     RuntimePayload::Device(DeviceHandle::Session {
                         session,
                         console_logs,
+                        endpoint_label: endpoint_label.to_string(),
                     }),
                     logs,
                 ))

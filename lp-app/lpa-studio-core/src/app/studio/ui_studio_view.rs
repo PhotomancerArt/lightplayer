@@ -253,6 +253,7 @@ mod tests {
 
     fn card(uid: Option<&str>, state: RosterCardState) -> UiDeviceCard {
         UiDeviceCard {
+            port_label: None,
             session_key: None,
             uid: uid.map(str::to_string),
             name: "Board".to_string(),

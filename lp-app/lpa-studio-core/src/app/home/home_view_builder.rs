@@ -124,6 +124,12 @@ pub struct HomeDeviceEvidence {
     /// else the passive boot banner) — the setup form's board picker leads
     /// with boards matching it (M5).
     pub detected_chip: Option<String>,
+    /// The port as the app can name it ("ESP32 Serial (0x303a:0x1001) ·
+    /// port-2"): the endpoint's human label captured at connect plus the
+    /// grant's short id. Everything Web Serial exposes — the OS path never
+    /// reaches the page. Rendered on the card's Technical tab (gate-1
+    /// sitting, 2026-08-03: an unflashed card identified nothing).
+    pub port_label: Option<String>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -352,6 +358,7 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         RosterCardState::ConnectedEmpty
     };
     UiDeviceCard {
+        port_label: None,
         session_key: None,
         uid: None,
         name: "Simulator".to_string(),
@@ -453,6 +460,7 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         fw,
         hardware,
         detected_chip: live.detected_chip.clone(),
+        port_label: live.port_label.clone(),
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
         // after they already did it.
@@ -591,6 +599,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         connect: ConnectEvidence::Idle,
     });
     UiDeviceCard {
+        port_label: None,
         session_key: None,
         uid: Some(device.uid.clone()),
         name: device.name.clone(),
@@ -911,6 +920,7 @@ mod tests {
         };
         let cards = vec![
             UiDeviceCard {
+                port_label: None,
                 session_key: None,
                 uid: Some("dev_a".to_string()),
                 name: "one".to_string(),
@@ -926,6 +936,7 @@ mod tests {
                 detected_chip: None,
             },
             UiDeviceCard {
+                port_label: None,
                 session_key: None,
                 uid: Some("dev_a".to_string()),
                 name: "two".to_string(),

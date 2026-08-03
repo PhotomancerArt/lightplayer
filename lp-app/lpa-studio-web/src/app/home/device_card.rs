@@ -634,6 +634,8 @@ pub(crate) fn DeviceCard(
             fw: card.fw.as_ref(),
             hardware: card.hardware.as_ref(),
             bundled_fw: bundled_fw.as_ref(),
+            detected_chip: card.detected_chip.as_deref(),
+            port_label: card.port_label.as_deref(),
             now_secs: now,
         })
         .sections
