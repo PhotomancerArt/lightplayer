@@ -26,7 +26,7 @@
   "usb_bridge": "ch340k",
   "notes": [
     {
-      "text": "The IO12 terminal drives the onboard relay (GPIO12) — it is not an LED data output."
+      "text": "The IO13 terminal is a spare GPIO, not one of the four fused DATA outputs — it is not level-shifted, so a long run into 5 V pixels may be unreliable."
     },
     {
       "text": "The BOOT/RESET buttons are stacked: BOOT is the top button of the pair, RESET the bottom."
@@ -84,14 +84,18 @@
     ],
     "right": [
       {
-        "label": "IO12",
-        "role": "rsvd",
-        "gpio": 12,
+        "label": "IO13",
+        "role": "io",
+        "gpio": 13,
         "pad_style": "screw",
         "caps": [
           {
-            "text": "relay",
+            "text": "spare",
             "kind": "note"
+          },
+          {
+            "text": "not level-shifted",
+            "kind": "warn"
           }
         ]
       },
