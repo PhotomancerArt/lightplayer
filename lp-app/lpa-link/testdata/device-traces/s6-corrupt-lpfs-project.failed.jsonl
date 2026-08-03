@@ -1,124 +1,353 @@
-{"t":1785789646.981,"kind":"sweep","disposition":"ran"}
-{"t":1785789646.981,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
-{"t":1785789646.983,"kind":"flow","from":"discovering-endpoints","to":"selecting-provider"}
-{"t":1785789647.966,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
-{"t":1785789649.554,"kind":"flow","from":"discovering-endpoints","to":"selecting-endpoint"}
-{"t":1785789649.554,"kind":"flow","from":"selecting-endpoint","to":"connecting"}
-{"t":1785789649.776,"endpoint":"browser-serial-esp32-port-1","kind":"state","to":"booting"}
-{"t":1785789649.776,"kind":"flow","from":"connecting","to":"connected"}
-{"t":1785789649.777,"session":"runtime-1","endpoint":"browser-serial-esp32-port-1","kind":"pool","action":"install","detail":"Device"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=408000ESP-ROM:esp32c6-20220919"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x420d2338"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (33) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (109) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
-{"t":1785789649.78,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (171) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
-{"t":1785789650.115,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (531) esp_image: segment 4: paddr=001fbcf4 vaddr=40800464 size=12ac8h ( 76488) load\u001b[0m"}
-{"t":1785789650.126,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (549) esp_image: segment 5: paddr=0020e7c4 vaddr=40812f30 size=001e0h (   480) load\u001b[0m"}
-{"t":1785789650.137,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (554) boot: Loaded app from partition at offset 0x10000\u001b[0m"}
-{"t":1785789650.137,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (555) boot: Disabling RNG early entropy source...\u001b[0m"}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Initializing board..."}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Board initialized, starting runtime..."}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[RECOVERY] boot: cause=user-reset level=green safe_mode=false prior_boot_complete=true"}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms"}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Runtime started"}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] fw-esp32 starting..."}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Spawning I/O task..."}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] I/O task spawned"}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating StreamingMessageRouterTransport..."}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] StreamingMessageRouterTransport created"}
-{"t":1785789650.158,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Initializing RMT peripheral at 80MHz..."}
-{"t":1785789650.169,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] RMT peripheral initialized"}
-{"t":1785789650.169,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Flash filesystem mounted"}
-{"t":1785789650.265,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating output provider..."}
-{"t":1785789650.266,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Output provider created"}
-{"t":1785789650.266,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating LpServer instance..."}
-{"t":1785789650.276,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] LpServer created"}
-{"t":1785789650.501,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating time provider..."}
-{"t":1785789650.501,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Time provider created"}
-{"t":1785789650.501,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] fw-esp32 initialized, starting server loop... proto=5 commit=1ce45a201a29 dirty=false"}
-{"t":1785789650.605,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.605,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.605,"endpoint":"browser-serial-esp32-port-1","kind":"state","from":"booting","to":"ready"}
-{"t":1785789650.606,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":1,\"msg\":\"listLoadedProjects\"}"}
-{"t":1785789650.803,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)"}
-{"t":1785789650.803,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.803,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)"}
-{"t":1785789650.803,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.803,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)"}
-{"t":1785789650.803,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11"}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects"}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: found configured startup project: studio"}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: auto-loading /projects/studio"}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: [mem] boot auto_load before: 239732 B free / 60268 B used (234k / 58k)"}
-{"t":1785789650.839,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.879,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new start: 233k free / 59k used"}
-{"t":1785789650.879,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.879,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after root path: 233k free / 59k used"}
-{"t":1785789650.88,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.88,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after services: 233k free / 59k used"}
-{"t":1785789650.88,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.88,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after core project: 179k free / 113k used"}
-{"t":1785789650.88,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.88,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after graphics: 179k free / 113k used"}
-{"t":1785789650.88,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after wrapper: 179k free / 113k used"}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project_manager: Project loaded: studio"}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: [mem] boot auto_load after: 180656 B free / 119344 B used (176k / 116k)"}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/studio"}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.914,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6::hardware::espnow_radio_driver: [fw-esp32c6] ESP-NOW radio version=2 channel=11"}
-{"t":1785789650.948,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.953,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 2766 bytes)"}
-{"t":1785789650.953,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.953,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=120ms, lpir_inst_count=545, lpir_func_count=8, lpir_import_count=4, final_inst_count=1858, final_code_size=7432 bytes, float=fixed)"}
-{"t":1785789650.953,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.953,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:rmt:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=693"}
-{"t":1785789650.987,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.987,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened channel handle=1, endpoint=ws281x:rmt:D10, byte_count=693"}
-{"t":1785789650.987,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789650.987,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)"}
-{"t":1785789651.026,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789651.029,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":2,\"msg\":\"listLoadedProjects\"}"}
-{"t":1785789651.101,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789651.102,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":3,\"msg\":{\"filesystem\":{\"read\":{\"path\":\"/.lp/device.json\"}}}}"}
-{"t":1785789651.221,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789651.224,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":4,\"msg\":{\"filesystem\":{\"changesSince\":{\"prefix\":\"/projects/studio\",\"since\":0,\"cursor\":null}}}}"}
-{"t":1785789651.441,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789651.455,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":5,\"msg\":{\"filesystem\":{\"changesSince\":{\"prefix\":\"/projects/studio\",\"since\":0,\"cursor\":{\"path\":\"/fyeah.map2d.json\",\"offset\":4106}}}}}"}
-{"t":1785789651.678,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789651.691,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":6,\"msg\":{\"filesystem\":{\"changesSince\":{\"prefix\":\"/projects/studio\",\"since\":0,\"cursor\":{\"path\":\"/idle.glsl\",\"offset\":2366}}}}}"}
-{"t":1785789651.934,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
-{"t":1785789651.939,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":7,\"msg\":{\"filesystem\":{\"hashPackage\":{\"prefix\":\"/projects/studio\"}}}}"}
-{"t":1785789652.205,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785790119.247,"kind":"sweep","disposition":"ran"}
+{"t":1785790119.248,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
+{"t":1785790119.252,"kind":"flow","from":"discovering-endpoints","to":"selecting-endpoint"}
+{"t":1785790119.252,"kind":"flow","from":"selecting-endpoint","to":"connecting"}
+{"t":1785790119.463,"endpoint":"browser-serial-esp32-port-1","kind":"state","to":"booting"}
+{"t":1785790119.463,"kind":"flow","from":"connecting","to":"connected"}
+{"t":1785790119.464,"session":"runtime-1","endpoint":"browser-serial-esp32-port-1","kind":"pool","action":"install","detail":"Device"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=408000ESP-ROM:esp32c6-20220919"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x408703de"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (33) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (109) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790119.467,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (171) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790119.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790119.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790119.804,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (532) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790119.814,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790119.814,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790119.814,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790119.814,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790119.814,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790119.814,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790119.825,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790119.825,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790119.825,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790119.825,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790119.836,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790119.836,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790119.847,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790119.847,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790119.857,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790119.857,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790119.857,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790119.868,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790119.868,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790119.879,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790119.89,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790119.901,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790119.901,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790119.911,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790119.911,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790119.921,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790119.931,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790119.986,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790119.986,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790120.348,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790120.348,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790120.348,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (532) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790120.371,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790120.393,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790120.393,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790120.393,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790120.393,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790120.404,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790120.404,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790120.415,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790120.415,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790120.426,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790120.426,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790120.437,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790120.447,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790120.458,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790120.458,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790120.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790120.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790120.48,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790120.534,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790120.545,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790120.891,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790120.892,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790120.902,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790120.913,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790120.913,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790120.913,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790120.913,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790120.913,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790120.913,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790120.923,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790120.923,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790120.923,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790120.923,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790120.934,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790120.934,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790120.944,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790120.944,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790120.955,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790120.955,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790120.966,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790120.966,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790120.977,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790120.977,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790120.987,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790120.998,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790120.998,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790121.009,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790121.019,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790121.019,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790121.03,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790121.084,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790121.095,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790121.447,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790121.447,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790121.447,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (532) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790121.469,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790121.47,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790121.481,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790121.492,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790121.492,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790121.492,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790121.492,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790121.502,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790121.503,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790121.513,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790121.514,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790121.524,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790121.535,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790121.535,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790121.547,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790121.558,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790121.558,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790121.569,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790121.569,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790121.58,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790121.633,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790121.644,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790121.996,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790121.996,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790121.996,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790122.018,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790122.018,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790122.018,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790122.018,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790122.018,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790122.018,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790122.018,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790122.019,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790122.03,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790122.03,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790122.041,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790122.041,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790122.041,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790122.052,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790122.052,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790122.052,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790122.063,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790122.063,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790122.074,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790122.085,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790122.085,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790122.096,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790122.107,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790122.107,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790122.117,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790122.117,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790122.129,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790122.183,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790122.195,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790122.542,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790122.542,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790122.553,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (532) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790122.563,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790122.563,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790122.564,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790122.564,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790122.564,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790122.564,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790122.564,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790122.575,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790122.575,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790122.575,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790122.585,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790122.585,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790122.596,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790122.596,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790122.596,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790122.607,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790122.607,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790122.618,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790122.618,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790122.629,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790122.639,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790122.639,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790122.65,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790122.661,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790122.662,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790122.673,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790122.683,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790122.737,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790122.737,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790123.09,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790123.101,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790123.101,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (532) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790123.112,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790123.113,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790123.113,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790123.113,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790123.113,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790123.113,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790123.124,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790123.124,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790123.124,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790123.124,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790123.135,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790123.135,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790123.145,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790123.145,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790123.145,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790123.156,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790123.156,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790123.166,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790123.166,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790123.177,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790123.188,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790123.2,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790123.2,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790123.211,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790123.211,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790123.221,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790123.232,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790123.287,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790123.287,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790123.641,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790123.641,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790123.652,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790123.663,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790123.663,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790123.663,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790123.663,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790123.663,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790123.663,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790123.663,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790123.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790123.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790123.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790123.686,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790123.686,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790123.697,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790123.698,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790123.698,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790123.708,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790123.709,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790123.719,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790123.72,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790123.73,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790123.741,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790123.741,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790123.752,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790123.763,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790123.763,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790123.773,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790123.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790123.838,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790123.838,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790124.199,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790124.199,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790124.2,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790124.21,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790124.21,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790124.21,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790124.21,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790124.21,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790124.21,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790124.22,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790124.22,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790124.22,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790124.22,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790124.231,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790124.241,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790124.241,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790124.241,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790124.252,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790124.252,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790124.264,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790124.264,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790124.274,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790124.274,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790124.286,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790124.297,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790124.298,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790124.308,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790124.308,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790124.319,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785790124.33,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785790124.384,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785790124.384,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (170) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785790124.74,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (530) esp_image: invalid segment length 0xffffffff\u001b[0m"}
+{"t":1785790124.74,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: Factory app partition is not bootable\u001b[0m"}
+{"t":1785790124.751,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;31mE (531) boot: No bootable app partitions in the partition table\u001b[0m"}
+{"t":1785790124.761,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32c6-20220919"}
+{"t":1785790124.762,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785790124.762,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x3 (LP_SW_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785790124.762,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x4001974a"}
+{"t":1785790124.762,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785790124.762,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785790124.762,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785790124.773,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785790124.773,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785790124.773,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785790124.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785790124.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785790124.796,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785790124.796,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785790124.796,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (32) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785790124.807,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785790124.807,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785790124.818,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785790124.818,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785790124.829,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785790124.84,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785790124.84,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785790124.851,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785790124.862,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785790124.862,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785790124.873,"endpoint":"browser-serial-esp32-port-1","kind":"state","from":"booting","to":"unresponsive"}
