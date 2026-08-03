@@ -16,6 +16,11 @@ pub struct UiDeviceCard {
     /// `dev_…` uid when the device is registered; `None` for a live
     /// connection that has no stamped identity yet.
     pub uid: Option<String>,
+    /// The live session's pool identity (`RuntimeId` rendering), stable for
+    /// the session's life. `None` on registry-derived (offline) cards,
+    /// which always have a uid instead. The anonymous-card key fallback —
+    /// see [`Self::identity_key`].
+    pub session_key: Option<String>,
     pub name: String,
     /// Transport label ("USB" today; a different glyph for networked
     /// later). Empty while a connect is still resolving the provider.
@@ -67,17 +72,24 @@ impl UiDeviceCard {
     /// panics Dioxus — the 2026-07-15 crash). Registered/stamped cards
     /// key by uid; the (≤1) sim card by a reserved token.
     ///
-    /// FALLBACK CAVEAT (fork-flagged, upgrade before/with the morph):
-    /// an identity-less LIVE card (a board mid-provision, before its uid
-    /// is stamped) still falls back to its display NAME — a rename can
-    /// re-key it. The robust fix is to fall back to the session's
-    /// `RuntimeId` (stable across the session); that threads the id onto
-    /// the card and lands in the fork-coordination pass before P2.
+    /// ORDER IS LOAD-BEARING: `uid` stays FIRST. `CardUiState` is keyed by
+    /// this and must survive session replaces — a stamped board keying by
+    /// its (per-session) `RuntimeId` would drop its tab/sheet state on
+    /// every replace. Only the anonymous case uses `session_key`: an
+    /// identity-less LIVE card (a board mid-provision, before its uid is
+    /// stamped) keys by the session's `RuntimeId` so two anonymous boards
+    /// never collide — the name fallback used to erase the second board
+    /// via `dedupe_by_key` (both were "Connected device"; the multi-board
+    /// defect, 2026-08-02). The name remains only for cards with neither
+    /// (registry cards, which always have a uid, never reach it).
     pub fn identity_key(&self) -> &str {
         if self.sim {
             return "runtime-sim";
         }
-        self.uid.as_deref().unwrap_or(&self.name)
+        self.uid
+            .as_deref()
+            .or(self.session_key.as_deref())
+            .unwrap_or(&self.name)
     }
 
     /// Back-compat alias for keyed rendering — the same canonical key.

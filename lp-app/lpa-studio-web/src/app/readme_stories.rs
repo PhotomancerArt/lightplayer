@@ -198,6 +198,7 @@ fn readme_lens_card() -> UiDeviceCard {
         )
     };
     UiDeviceCard {
+        session_key: None,
         uid: None,
         name: "Simulator".to_string(),
         transport: String::new(),
@@ -264,6 +265,7 @@ fn readme_home_view() -> UiHomeView {
     ];
     let devices = vec![
         UiDeviceCard {
+            session_key: None,
             uid: None,
             name: "Simulator".to_string(),
             transport: String::new(),
@@ -281,6 +283,7 @@ fn readme_home_view() -> UiHomeView {
             detected_chip: None,
         },
         UiDeviceCard {
+            session_key: None,
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
             name: "Workbench ESP32".to_string(),
             transport: "USB".to_string(),
