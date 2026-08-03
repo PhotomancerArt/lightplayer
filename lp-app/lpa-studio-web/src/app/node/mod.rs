@@ -50,7 +50,7 @@ pub(crate) mod shader_face_stories;
 mod slot_affine2d_field;
 mod slot_detail_button;
 mod slot_dimensions_field;
-mod slot_edit_actions;
+pub(crate) mod slot_edit_actions;
 mod slot_fields;
 mod slot_gesture_fields;
 mod slot_issue_list;
