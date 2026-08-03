@@ -566,7 +566,7 @@ impl ProjectLoader {
                 })?;
             runtime
                 .services_mut()
-                .register_output_sink(sink_id, &config);
+                .register_output_sink(sink_id, node.id, &config);
             runtime.add_demand_root(node.id);
         }
 

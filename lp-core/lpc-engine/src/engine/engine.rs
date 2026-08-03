@@ -464,7 +464,7 @@ impl Engine {
             let Ok(NodeDef::Output(def)) = loaded_registry_def(registry, location) else {
                 continue;
             };
-            services.update_output_sink_config(buffer_id, def);
+            services.update_output_sink_config(buffer_id, entry.id, def);
         }
     }
 
