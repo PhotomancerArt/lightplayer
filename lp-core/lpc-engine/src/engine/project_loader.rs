@@ -2390,6 +2390,227 @@ mod tests {
         )
     }
 
+    fn examples_basic_fs() -> LpFsStd {
+        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/basic"))
+    }
+
+    /// The published output-channel bytes for the output node behind `path` —
+    /// the core-path end product the M4 differential tests compare.
+    fn output_buffer_bytes(rt: &Engine, path: &str) -> alloc::vec::Vec<u8> {
+        let out = node_for_def_path(rt, path).expect("output node");
+        let entry = rt.tree().get(out).expect("output entry");
+        let NodeEntryState::Alive(node) = entry.state.value() else {
+            panic!("output node alive");
+        };
+        let id = node
+            .runtime_output_sink_buffer_id()
+            .expect("output sink buffer");
+        rt.runtime_buffers()
+            .get(id)
+            .expect("runtime buffer")
+            .value()
+            .bytes
+            .clone()
+    }
+
+    fn loaded_basic_runtime() -> LoadedProjectRuntime {
+        let fs = examples_basic_fs();
+        let services = EngineServices::new(TreePath::parse("/basic.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load examples/basic");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        rt
+    }
+
+    /// Records every pressure broadcast the engine delivers, so tests can pin
+    /// WHEN the seam fires relative to compiles.
+    struct PressureProbe {
+        levels: Rc<core::cell::RefCell<alloc::vec::Vec<crate::node::PressureLevel>>>,
+    }
+
+    impl crate::node::NodeRuntime for PressureProbe {
+        fn destroy(
+            &mut self,
+            _ctx: &mut crate::node::DestroyCtx<'_>,
+        ) -> Result<(), crate::node::NodeError> {
+            Ok(())
+        }
+
+        fn handle_memory_pressure(
+            &mut self,
+            level: crate::node::PressureLevel,
+            _ctx: &mut crate::node::MemPressureCtx<'_>,
+        ) -> Result<(), crate::node::NodeError> {
+            self.levels.borrow_mut().push(level);
+            Ok(())
+        }
+    }
+
+    fn attach_pressure_probe(
+        rt: &mut Engine,
+    ) -> Rc<core::cell::RefCell<alloc::vec::Vec<crate::node::PressureLevel>>> {
+        let levels = Rc::new(core::cell::RefCell::new(alloc::vec::Vec::new()));
+        let root = rt.tree().root();
+        let frame = rt.revision();
+        let id = rt
+            .tree_mut()
+            .add_child(
+                root,
+                NodeName::parse("pressure_probe").expect("name"),
+                NodeName::parse("probe").expect("ty"),
+                lpc_wire::WireChildKind::Input {
+                    source: lpc_wire::WireSlotIndex(0),
+                },
+                lpc_model::NodeInvocation::new(lpc_model::ArtifactSpec::path("probe.json")),
+                frame,
+            )
+            .expect("add probe child");
+        rt.attach_runtime_node(
+            id,
+            alloc::boxed::Box::new(PressureProbe {
+                levels: Rc::clone(&levels),
+            }),
+            frame,
+        )
+        .expect("attach probe");
+        levels
+    }
+
+    /// M4 differential: after a `High` pressure broadcast at a safe point, the
+    /// next frame's published output bytes are bit-identical to an engine that
+    /// never dropped anything. Core path only — display-pipeline temporal
+    /// state (dither, interpolation) is firmware-side and exempt anyway; see
+    /// docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.md.
+    #[test]
+    fn memory_pressure_drop_and_rebuild_is_bit_identical_on_the_core_path() {
+        let warm = || {
+            let mut rt = loaded_basic_runtime();
+            // Frame 1 defers the shader compile (window request); frame 2
+            // opens the window, compiles, and renders for real.
+            rt.tick(40).expect("tick 1");
+            rt.tick(40).expect("tick 2");
+            rt
+        };
+
+        let mut reference = warm();
+        let mut dropped = warm();
+
+        dropped
+            .broadcast_memory_pressure(crate::node::PressureLevel::High)
+            .expect("broadcast pressure");
+
+        reference.tick(40).expect("reference tick");
+        dropped.tick(40).expect("dropped tick");
+
+        let expected = output_buffer_bytes(&reference, "/output.json");
+        let actual = output_buffer_bytes(&dropped, "/output.json");
+        assert!(
+            expected.iter().any(|byte| *byte != 0),
+            "reference output must not be black — a black baseline proves nothing"
+        );
+        assert_eq!(
+            expected, actual,
+            "state dropped under pressure must lazily rebuild to bit-identical output"
+        );
+    }
+
+    /// The boot path: the first frame defers the compile and requests a
+    /// window; the engine broadcasts exactly one `High` pressure at the top of
+    /// the next tick, and the compile runs inside that same frame.
+    #[test]
+    fn compile_window_broadcasts_pressure_before_the_boot_compile() {
+        let mut rt = loaded_basic_runtime();
+        let levels = attach_pressure_probe(&mut rt);
+
+        rt.tick(40).expect("boot tick");
+        assert!(
+            levels.borrow().is_empty(),
+            "no pressure before any node requested a compile window"
+        );
+        assert!(
+            output_buffer_bytes(&rt, "/output.json")
+                .iter()
+                .all(|byte| *byte == 0),
+            "the deferral frame renders the black fallback"
+        );
+
+        rt.tick(40).expect("window tick");
+        assert_eq!(
+            &*levels.borrow(),
+            &[crate::node::PressureLevel::High],
+            "exactly one High broadcast opens the compile window"
+        );
+        assert!(
+            output_buffer_bytes(&rt, "/output.json")
+                .iter()
+                .any(|byte| *byte != 0),
+            "the compile ran inside the window frame, after the broadcast"
+        );
+
+        rt.tick(40).expect("steady tick");
+        assert_eq!(
+            levels.borrow().len(),
+            1,
+            "steady state broadcasts nothing — the window is not a per-frame event"
+        );
+    }
+
+    /// The switch path: activating a playlist entry whose shader never
+    /// compiled requests a fresh window, and pressure fires again before that
+    /// compile — the worse peak the seam exists for (the transient would land
+    /// on already-allocated per-LED buffers).
+    #[test]
+    fn playlist_switch_requests_a_second_compile_window() {
+        let fs = examples_button_playlist_fs();
+        let fs: &dyn LpFs = &fs;
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let time = Rc::new(TestTimeProvider::new());
+        let time_provider: Rc<dyn TimeProvider> = time.clone();
+        let mut services =
+            EngineServices::new(TreePath::parse("/button_playlist.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_time_provider(Some(time_provider));
+
+        let mut rt =
+            ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let levels = attach_pressure_probe(&mut rt);
+
+        // Boot: deferral frame, then the window frame compiles the idle shader.
+        tick_with_test_time(&mut rt, &time, 16, "boot deferral");
+        tick_with_test_time(&mut rt, &time, 16, "boot window");
+        let boot_broadcasts = levels.borrow().len();
+        assert_eq!(boot_broadcasts, 1, "boot opens one compile window");
+
+        // Switch: the active-entry shader has never compiled. The switch
+        // frame defers it; the following tick must broadcast again.
+        control.set_pressed(HwAddress::gpio(20), true);
+        tick_with_test_time(&mut rt, &time, 16, "press candidate");
+        tick_with_test_time(&mut rt, &time, 30, "press stable — switch, deferral");
+        tick_with_test_time(&mut rt, &time, 16, "switch window");
+        assert_eq!(
+            levels.borrow().len(),
+            2,
+            "the playlist switch must open a second compile window"
+        );
+        assert!(
+            levels
+                .borrow()
+                .iter()
+                .all(|level| *level == crate::node::PressureLevel::High),
+            "compile windows broadcast High, never Critical"
+        );
+    }
+
     #[test]
     fn project_json_loads_into_runtime_with_expected_nodes() {
         let fs = flat_project();
@@ -3238,6 +3459,16 @@ mod tests {
         ))));
         let node = node_for_def_path(&rt, "/compute.json").expect("compute node");
 
+        // First resolve requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        rt.resolve_with_engine_host(
+            QueryKey::ProducedSlot {
+                node,
+                slot: SlotPath::parse("phase").expect("phase"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("warm-up resolve");
         let production = rt
             .resolve_with_engine_host(
                 QueryKey::ProducedSlot {
@@ -3325,6 +3556,16 @@ mod tests {
             assert!(rt.tree().get(id).expect("entry").state.value().is_alive());
         }
 
+        // First resolve requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        rt.resolve_with_engine_host(
+            QueryKey::ProducedSlot {
+                node: compute,
+                slot: SlotPath::parse("emitters").expect("emitters"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("warm-up resolve");
         let (emitters, _) = rt
             .resolve_with_engine_host(
                 QueryKey::ProducedSlot {

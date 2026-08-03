@@ -404,8 +404,18 @@ impl NodeRuntime for FixtureNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError> {
+        // Everything dropped here is rebuilt lazily by its ensure_* seam on
+        // the next render (`ensure_texture_area_mapping`,
+        // `ensure_direct_points`, `ensure_fixture_sample_points`,
+        // `ensure_fixture_sample_target`, `ensure_fixture_render_target`) —
+        // the memory-pressure contract guarantees nothing beyond that. The
+        // resolved mapping itself (`self.mapping`) is source-of-truth state,
+        // not a cache, and stays.
         self.precomputed = None;
         self.direct_points = None;
+        self.sample_points = None;
+        self.sample_target = None;
+        self.render_target = None;
         Ok(())
     }
 
