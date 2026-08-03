@@ -10,7 +10,6 @@ pub use browser_esp32_flash::{
 pub use browser_serial::{BrowserSerialPortHandle, granted_ports, install_serial_events};
 pub use browser_serial_esp32_options::{
     BrowserSerialEsp32Options, DEFAULT_ESPTOOL_MODULE_PATH, DEFAULT_FIRMWARE_BASE_PATH,
-    DEFAULT_FIRMWARE_BUILD_ID,
 };
 pub use provider::{BrowserSerialEsp32Provider, descriptor};
 
