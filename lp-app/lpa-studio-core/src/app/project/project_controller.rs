@@ -2311,13 +2311,50 @@ impl ProjectController {
             })
             .collect();
 
+        // The module's own visual mirror (R7); a module with no visual
+        // simply has no hero (E6). The mirror ROW supplies identity and
+        // meta, but its bytes ride the scope's resolved `visual.out`
+        // product: the mirror's own product ref is outside the preview
+        // stream (only the primary visual and the focused node's products
+        // are tracked), so without this rehoming the root hero renders
+        // black while the shader card below it is live.
+        let mut preview = super::node::node_face_builder::product_of_kind(
+            sections,
+            crate::UiProductKind::Visual,
+        );
+        if let Some(hero) = preview.as_mut()
+            && let Some(product) = graph
+                .channels
+                .iter()
+                .find(|channel| {
+                    channel.scope == Some(scope)
+                        && channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL
+                })
+                .and_then(|channel| channel.value.as_ref())
+                .and_then(|value| value.value.as_ref())
+                .and_then(|value| match value {
+                    lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
+                        Some(UiProductRef::from_product_ref(*product))
+                    }
+                    _ => None,
+                })
+            && let Some(bytes) = self
+                .sync
+                .as_ref()
+                .and_then(|sync| sync.product_preview(&product))
+        {
+            hero.preview = bytes.clone();
+            let primary = self.primary_visual_product();
+            hero.tracking = if primary.as_ref() == Some(&product) {
+                crate::UiProductTrackingState::Tracking
+            } else {
+                crate::UiProductTrackingState::Paused
+            };
+            hero.product = Some(product);
+        }
+
         Some(crate::UiModuleFace {
-            // The module's own visual mirror (R7); a module with no visual
-            // simply has no hero (E6).
-            preview: super::node::node_face_builder::product_of_kind(
-                sections,
-                crate::UiProductKind::Visual,
-            ),
+            preview,
             panel: crate::UiPanelGroup::new(label, path)
                 .with_target(scope)
                 .with_controls(controls)
