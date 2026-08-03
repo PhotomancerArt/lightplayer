@@ -109,6 +109,15 @@ function ask(question) {
       rl.close();
       resolve(answer.trim());
     };
+    // Ctrl-C means QUIT, not "empty answer": without this, readline just
+    // closes the prompt, the close-handler resolved "", and the sitting
+    // marched forward as if Enter had been pressed (2026-08-03). Any
+    // in-flight capture is safe — it lives in the .partial until a
+    // deliberate finish.
+    rl.on("SIGINT", () => {
+      console.log("\n(interrupted — partial captures are preserved as .partial files)");
+      process.exit(130);
+    });
     rl.question(question, settle);
     // A closed stdin (piped runs, Ctrl-D) must end the prompt, not hang it.
     rl.on("close", () => settle(""));
