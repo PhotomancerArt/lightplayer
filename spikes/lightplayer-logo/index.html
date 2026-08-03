@@ -596,7 +596,7 @@ const ANIMS = {
 /* ============================== state =============================== */
 /* URL hash preseeds everything, e.g. #mark=escapes&font=circuit&anim=rword&canvas=light
    — handy for pointing at an exact composition in gate feedback. */
-const state = { mark: 'tech', font: 'inter', anim: 'hover' };
+const state = { mark: 'tech', font: 'inter', anim: 'rword' };
 const hash = new URLSearchParams(location.hash.slice(1));
 for (const k of ['mark', 'font', 'anim']) {
   const v = hash.get(k);
@@ -675,9 +675,9 @@ function renderSheet() {
     <div class="body tall stage">${lockupHTML(state, 52, 30, a)}</div>
   </div>
   <div class="tile">
-    <span class="tname">Top bar · 22px</span>
+    <span class="tname">Top bar · 22px — always hover-gated (gate-1)</span>
     <div class="body"><div class="topbar" style="width:100%">
-      ${lockupHTML(state, 22, 13.5, a)}
+      ${lockupHTML(state, 22, 13.5, ANIMS.hover.cls)}
       <span class="nav"><span class="on">Project</span><span>Devices</span><span>Output</span></span>
       <span class="right"><span class="pill">LIVE</span></span>
     </div></div>
