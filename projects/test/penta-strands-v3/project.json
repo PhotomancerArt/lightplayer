@@ -1,0 +1,19 @@
+{
+  "kind": "Project",
+  "format": 3,
+  "name": "Penta strands",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    }
+  }
+}
