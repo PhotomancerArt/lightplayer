@@ -40,3 +40,20 @@ than bolted on.
 **Not** a rendering bug: do not "fix" it by making the chip appear in stories
 only, and do not delete the comparison logic — it is correct and wanted. See
 roadmap `2026-08-01-1200-firmware-manifest`, M3.
+
+**Update 2026-08-02** — "fetch `./firmware/<build-id>/manifest.json`" now has
+to answer *which* build id, and the honest default changed. The site serves
+three (`lp-fw/builds/served.json`), so a single fetched manifest is the right
+comparison for one chip and wrong for the other two: on an S3 it would
+compare the device against the C6 image's commit and advise an "update" that
+is really a different ISA. Resolve the build from the device's own chip
+through `lpa_boards::provisioning_build_id(None, chip)` — the same function
+provisioning uses — and fetch that one, or say nothing when it resolves to
+`None`. Cheaper than it sounds: the chip is already on the card as
+`UiDeviceCard.detected_chip`, and `ServerHello` carries it for a Ready link.
+
+This is also why the gap did **not** become a live wrong-image bug when
+chip→build selection landed: nothing supplies `bundled_fw`, so there was no
+hardcoded C6 comparison in production to correct. The plumbing job simply
+grew a correctness requirement it did not have when this entry was filed.
+See `docs/adr/2026-08-02-flash-image-selected-from-the-discovered-chip.md`.

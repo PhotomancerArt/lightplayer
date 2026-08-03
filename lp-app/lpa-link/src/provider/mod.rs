@@ -9,6 +9,7 @@
 //! serial ports, browser workers, spawned host runtimes, and protocol handles
 //! stay owned by the provider implementation that created them.
 
+pub mod chip;
 pub mod connection;
 pub mod diagnostic;
 pub mod endpoint;
@@ -21,5 +22,4 @@ pub mod management_request;
 pub mod management_result;
 pub mod operation;
 pub mod provider;
-pub mod served_builds;
 pub mod session;

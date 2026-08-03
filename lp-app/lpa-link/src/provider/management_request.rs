@@ -7,8 +7,19 @@ use crate::LinkOperation;
 pub enum LinkManagementRequest {
     /// Reset or reboot the endpoint/runtime without erasing user data.
     ResetRuntime,
-    /// Flash the provider's configured firmware image.
-    FlashFirmware,
+    /// Flash a firmware image.
+    ///
+    /// `build_id` names a firmware build def (`lp-fw/builds/<id>.json`),
+    /// which is also the directory the packaged image ships in —
+    /// `firmware/<id>/manifest.json`. `None` means "the provider's
+    /// deployment default", which is a real answer for an endpoint whose
+    /// chip is not known yet; the provider's flash-time chip guard refuses
+    /// the default if it turns out to be the wrong ISA.
+    ///
+    /// Which build a device *should* get is app policy, not provider
+    /// policy: `lpa_boards::provisioning_build_id` computes it from the
+    /// chip (necessary) and the picked board (refinement).
+    FlashFirmware { build_id: Option<String> },
     /// Erase device flash so the endpoint returns to a blank state.
     EraseDeviceFlash,
     /// Erase the raw device filesystem partition below the running server.
@@ -59,7 +70,7 @@ impl LinkManagementRequest {
     pub fn operation(&self) -> LinkOperation {
         match self {
             Self::ResetRuntime => LinkOperation::Reset,
-            Self::FlashFirmware => LinkOperation::FlashFirmware,
+            Self::FlashFirmware { .. } => LinkOperation::FlashFirmware,
             Self::EraseDeviceFlash => LinkOperation::EraseDeviceFlash,
             Self::EraseRawFilesystem => LinkOperation::WriteRawFilesystem,
             Self::ReadRawFilesystem => LinkOperation::ReadRawFilesystem,
