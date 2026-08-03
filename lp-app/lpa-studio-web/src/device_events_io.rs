@@ -219,9 +219,7 @@ fn capture_sink_url() -> Option<String> {
         if key != "capture-sink" {
             continue;
         }
-        let url = js_sys::decode_uri_component(value)
-            .ok()?
-            .as_string()?;
+        let url = js_sys::decode_uri_component(value).ok()?.as_string()?;
         if url.starts_with("http://") || url.starts_with("https://") {
             return Some(url);
         }

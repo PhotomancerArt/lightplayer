@@ -114,8 +114,11 @@ impl UiDeviceCard {
         }
         match target_uid {
             Some(uid) => self.uid.as_deref() == Some(uid),
-            // A uid-less op belongs to THE anonymous hardware session (there
-            // is at most one), so it rides any uid-less card — including the
+            // A uid-less op belongs to the anonymous hardware session the
+            // id-less op seam resolves (the OLDEST — ⚠️ interim: with
+            // several anonymous boards attached this rule is ambiguous and
+            // the op can render on more than one card; M4's per-session op
+            // targeting replaces it), so it rides any uid-less card — including the
             // Offline card that `op_in_flight` pins when the session dies
             // mid-op. The offline exclusion only guards uid'd REGISTRY cards
             // of other devices from adopting a stray anonymous op. Before

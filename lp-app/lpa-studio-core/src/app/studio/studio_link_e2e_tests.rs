@@ -2630,6 +2630,78 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
     assert_eq!(manifest["partitionOffset"], 0x0031_0000);
 }
 
+/// Two boards attached at once (multi-device M3): the roster renders one
+/// card per live session, keyed distinctly even while BOTH are anonymous —
+/// the exact shape that used to erase the second board (its name was its
+/// render key and both were "Connected device"; 2026-08-02 walk).
+///
+/// This helper + test pair is the roadmap's agentic substitute for
+/// physically plugging in two boards; M4/M5 build their op-targeting and
+/// connect-flow regressions on it.
+#[test]
+fn two_fake_boards_render_two_cards_with_distinct_keys() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new())),
+        FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new())),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &first_id).expect("first board connects");
+    connect_through_link(&mut studio, &second_id).expect("second board connects");
+
+    let home = studio.view().home.expect("no project open — gallery shows");
+    let boards: Vec<_> = home.devices.iter().filter(|card| !card.sim).collect();
+    assert_eq!(
+        boards.len(),
+        2,
+        "both live boards render (states: {:?})",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_ne!(
+        boards[0].render_key(),
+        boards[1].render_key(),
+        "anonymous boards key by session, never by name"
+    );
+    // Both unstamped empty boards reached the post-pull state — the second
+    // session is fully live, not a stub of the first.
+    for card in &boards {
+        assert_eq!(
+            card.state,
+            crate::RosterCardState::NeedsAName,
+            "an unstamped empty board asks for a name"
+        );
+    }
+}
+
+fn studio_with_two_fake_devices(
+    first: FakeDeviceScript,
+    second: FakeDeviceScript,
+) -> (
+    StudioController,
+    (FakeEsp32Device, FakeEsp32Device),
+    LinkEndpointId,
+    LinkEndpointId,
+) {
+    let first_id = LinkEndpointId::new("fake-device-0");
+    let second_id = LinkEndpointId::new("fake-device-1");
+    let provider = FakeProvider::new()
+        .with_device_endpoint(first_id.clone(), "Fake ESP32 A (scripted)", first)
+        .with_device_endpoint(second_id.clone(), "Fake ESP32 B (scripted)", second);
+    let first_device = provider.device(&first_id).expect("first device registered");
+    let second_device = provider
+        .device(&second_id)
+        .expect("second device registered");
+    let mut registry = LinkProviderRegistry::new();
+    registry.insert(provider);
+    let studio = StudioController::with_link_registry_for_test(|| 1.0, registry);
+    (studio, (first_device, second_device), first_id, second_id)
+}
+
 fn studio_with_fake_device(
     script: FakeDeviceScript,
 ) -> (StudioController, FakeEsp32Device, LinkEndpointId) {
