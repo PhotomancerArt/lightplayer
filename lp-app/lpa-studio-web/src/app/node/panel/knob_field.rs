@@ -82,11 +82,16 @@ pub fn KnobField(
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let editable = wired.is_some();
+    // Gestures start from the CURRENT reading — the live/held value when
+    // the channel has one, the authored value otherwise. Anchoring drags
+    // and key steps at the raw authored `value` made the first touch of a
+    // live control snap it back to the authored default (GV2 bug).
+    let base = live_value.unwrap_or(value);
     // A stepped knob renders ON its grid: an integer knob points at 2, never
     // between 2 and 3, whichever off-grid value (a stale authored default, a
     // continuous bus reading) is behind it. Gestures still start from the raw
     // `value` so repeated arrow presses never stall on a rounding boundary.
-    let shown = knob_snap(live_value.unwrap_or(value), min, step);
+    let shown = knob_snap(base, min, step);
     let frac = knob_fraction(shown, min, max);
     let arc_len = frac * 100.0;
     let pointer_deg = knob_pointer_deg(frac);
@@ -115,14 +120,14 @@ pub fn KnobField(
             tabindex: if editable { "0" } else { "-1" },
             aria_valuemin: "{min}",
             aria_valuemax: "{max}",
-            aria_valuenow: "{knob_snap(value, min, step)}",
+            aria_valuenow: "{shown}",
             title: "{invalid_title}",
             onkeydown: move |event| {
                 let Some((address, handler)) = key_wiring.clone() else {
                     return;
                 };
                 let multiplier = if event.modifiers().shift() { 10.0 } else { 1.0 };
-                let Some(next) = knob_key_value(value, &event.key(), multiplier, min, max, step)
+                let Some(next) = knob_key_value(base, &event.key(), multiplier, min, max, step)
                 else {
                     return;
                 };
@@ -134,7 +139,7 @@ pub fn KnobField(
                     return;
                 }
                 capture_field_pointer(&event);
-                drag.set(Some((event.data().client_coordinates().y, value)));
+                drag.set(Some((event.data().client_coordinates().y, base)));
             },
             onpointermove: move |event| {
                 let Some((anchor_y, anchor_value)) = drag() else {
