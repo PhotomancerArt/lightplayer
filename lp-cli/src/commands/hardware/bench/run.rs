@@ -38,16 +38,6 @@ use super::workload::BenchWorkload;
 /// nothing is left behind either).
 pub const BENCH_PROJECT_ID: &str = "soft-limit-bench";
 
-/// Decoy project deployed once before the ramp. It sorts lexically BEFORE
-/// [`BENCH_PROJECT_ID`], so a crash-reboot's lexical-first auto-load picks
-/// this 3-LED idle project instead of re-loading the killer workload — the
-/// boot loop observed on the first real C6 bench (auto-load killer -> OOM ->
-/// cascading panic, ladder never quarantined) cannot recur.
-pub const BENCH_IDLE_PROJECT_ID: &str = "aaa-bench-idle";
-
-/// LED count of the decoy. Small enough to be loadable in any post-OOM state.
-const IDLE_LEDS: u32 = 3;
-
 /// How long a deployed workload gets to render its first frame. Generous: on
 /// a cold cache the device compiles the shader first.
 const RUN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -89,6 +79,34 @@ const OOM_MAX_BOOTS_AGO: u32 = 5;
 /// place they can be picked up.
 const OOM_STATS_PREFIX: &str = "[RECOVERY] oom stats:";
 
+/// Console line the boot report prints when the PREVIOUS run died of an OOM.
+///
+/// This, not the heartbeat, is the dependable oracle. The heartbeat carries
+/// the ledger only while the crash is still the *last* thing that happened;
+/// by the time the bench has ridden out the crash-loop and reconnected, the
+/// recovery ladder has usually quarantined the offender and completed a
+/// clean boot, at which point the heartbeat reports nothing at all. Observed
+/// on the C6 at 1600 LEDs: five boots, four ledger OOMs on the console, and
+/// a final heartbeat with no recovery report — a real OOM the bench then
+/// refused to classify. The boot report prints on every boot and the console
+/// feed survives the reconnect, so it sees all of them.
+const OOM_BOOT_REPORT_PREFIX: &str = "crashed (oom)";
+
+/// The other way an out-of-memory death is reported.
+///
+/// `fw-esp32s3` has no `recovery/panic_path.rs` (its siblings do), so an
+/// allocation failure reaches the ledger as a generic `panic` carrying
+/// Rust's default message rather than as `CrashCause::Oom` with heap stats.
+/// Measured on silicon at 1600 LEDs: five crashes, every one of them
+/// `crashed (panic): ... memory allocation of 38400 bytes failed`.
+///
+/// A failed allocation IS the device saying it ran out of memory, whatever
+/// the ledger labelled it, so the bench accepts this as evidence — matched
+/// on the message, never on the shape of a transport error, and recorded
+/// verbatim in the record's notes so a reader can audit the call. The
+/// firmware inconsistency is tracked separately in `docs/debt/`.
+const OOM_ALLOC_FAILURE_MESSAGE: &str = "memory allocation of";
+
 /// What the bench needs to know before it touches hardware.
 pub struct BenchPlan {
     /// Serial port, already chip-resolved.
@@ -97,6 +115,12 @@ pub struct BenchPlan {
     pub expected_package: String,
     /// Where the workload drives its LEDs.
     pub endpoint: HwEndpointSpec,
+    /// Commit the packaged image under test was built from, when a package
+    /// is on disk. The hello must agree: espflash dies mid-write on some
+    /// boards (silently, on the classic), leaving an older image that boots
+    /// and answers — and measuring that would label a record with a build
+    /// that is not the one under test.
+    pub expected_commit: Option<String>,
     /// LED count the ramp starts from.
     pub start_leds: u32,
     /// Echo the device console to stderr.
@@ -110,6 +134,11 @@ pub struct BenchStepReport {
     /// Lowest free heap seen while settling, in bytes. The full trend is
     /// printed live as the step runs; the summary table keeps the worst point.
     pub min_free_bytes: Option<u32>,
+    /// Highest heap `used` seen while settling, in bytes. Across the ramp
+    /// the (leds, used) series is a straight line whose slope is the
+    /// per-LED cost and whose intercept is fixed + compile residency —
+    /// the two numbers memory work actually needs.
+    pub max_used_bytes: Option<u32>,
     /// Frames rendered by the end of the step.
     pub frames: u64,
 }
@@ -124,6 +153,8 @@ pub struct BenchOutcome {
     pub fw_dirty: bool,
     /// `[RECOVERY] oom stats:` lines scraped from the console, newest last.
     pub oom_stats: Vec<String>,
+    /// `[RECOVERY] last run crashed (oom)` boot reports, newest last.
+    pub oom_reports: Vec<String>,
 }
 
 /// Run the whole ramp on a current-thread runtime.
@@ -159,7 +190,11 @@ async fn run_bench_async(plan: BenchPlan) -> Result<BenchOutcome> {
     let hello = session
         .hello()
         .context("the device became ready without a hello")?;
-    check_image(&hello, &plan.expected_package)?;
+    check_image(
+        &hello,
+        &plan.expected_package,
+        plan.expected_commit.as_deref(),
+    )?;
     println!(
         "device: {} @ {}{} (proto {})",
         hello.build.package,
@@ -168,12 +203,7 @@ async fn run_bench_async(plan: BenchPlan) -> Result<BenchOutcome> {
         hello.proto
     );
 
-    {
-        let mut client = LpClient::new(session.client_io());
-        deploy_idle_decoy(&mut client, &plan.endpoint).await?;
-    }
-
-    let result = ramp(&session, &plan).await;
+    let result = ramp(&session, &plan, &console).await;
     let _ = session.close().await;
 
     let (steps, boundary_leds) = result?;
@@ -183,13 +213,18 @@ async fn run_bench_async(plan: BenchPlan) -> Result<BenchOutcome> {
         fw_commit: hello.build.commit.clone(),
         fw_dirty: hello.build.dirty,
         oom_stats: console.oom_stats(),
+        oom_reports: console.oom_reports(),
     })
 }
 
 /// The image on the board must be the build being measured, or the record
 /// would name a build that never ran. The bench does not flash: which image is
 /// under test is the operator's decision.
-fn check_image(hello: &ServerHello, expected_package: &str) -> Result<()> {
+fn check_image(
+    hello: &ServerHello,
+    expected_package: &str,
+    expected_commit: Option<&str>,
+) -> Result<()> {
     if hello.build.package != expected_package {
         bail!(
             "the board is running `{}`, but this bench measures `{expected_package}` — \
@@ -198,11 +233,26 @@ fn check_image(hello: &ServerHello, expected_package: &str) -> Result<()> {
             hello.build.package
         );
     }
+    if let Some(expected) = expected_commit
+        && hello.build.commit != expected
+    {
+        bail!(
+            "the board is running commit `{}`, but the packaged image is `{expected}` — \
+             reflash before benching. (espflash can die mid-write and leave an older \
+             image that boots and answers; a record written now would name the wrong \
+             build.)",
+            hello.build.commit
+        );
+    }
     Ok(())
 }
 
 /// Walk the schedule until it has a boundary.
-async fn ramp(session: &DeviceSession, plan: &BenchPlan) -> Result<(Vec<BenchStepReport>, u32)> {
+async fn ramp(
+    session: &DeviceSession,
+    plan: &BenchPlan,
+    console: &BenchConsole,
+) -> Result<(Vec<BenchStepReport>, u32)> {
     let mut schedule = BenchSchedule::new(plan.start_leds);
     let mut steps = Vec::new();
     let mut client = LpClient::new(session.client_io());
@@ -225,6 +275,7 @@ async fn ramp(session: &DeviceSession, plan: &BenchPlan) -> Result<(Vec<BenchSte
         flush_stdout();
         let workload = BenchWorkload::new(leds, plan.endpoint.clone());
 
+        let oom_reports_before = console.oom_report_count();
         match run_step(&mut client, &workload).await {
             Ok(settle) => {
                 println!("survived  {}", settle.describe());
@@ -233,12 +284,15 @@ async fn ramp(session: &DeviceSession, plan: &BenchPlan) -> Result<(Vec<BenchSte
                     leds,
                     outcome: StepOutcome::Survived,
                     min_free_bytes: settle.min_free_bytes(),
+                    max_used_bytes: settle.max_used_bytes(),
                     frames: settle.frames,
                 });
             }
             Err(candidate) => {
                 println!("lost the device ({candidate:#})");
-                let verdict = confirm_death(session, &plan.port, &candidate).await?;
+                let verdict =
+                    confirm_death(session, &plan.port, console, oom_reports_before, &candidate)
+                        .await?;
                 client = LpClient::new(session.client_io());
                 match verdict {
                     DeathVerdict::Oom { boots_ago } => {
@@ -250,6 +304,7 @@ async fn ramp(session: &DeviceSession, plan: &BenchPlan) -> Result<(Vec<BenchSte
                             leds,
                             outcome: StepOutcome::Died,
                             min_free_bytes: None,
+                            max_used_bytes: None,
                             frames: 0,
                         });
                     }
@@ -263,31 +318,6 @@ async fn ramp(session: &DeviceSession, plan: &BenchPlan) -> Result<(Vec<BenchSte
             }
         }
     }
-}
-
-/// Deploy the decoy (see [`BENCH_IDLE_PROJECT_ID`]) and prove it runs — it
-/// is what every crash-reboot will auto-load for the rest of the run.
-async fn deploy_idle_decoy<Io: ClientIo>(
-    client: &mut LpClient<Io>,
-    endpoint: &HwEndpointSpec,
-) -> Result<()> {
-    let workload = BenchWorkload {
-        led_count: IDLE_LEDS,
-        endpoint: endpoint.clone(),
-    };
-    let files: Vec<ProjectDeployFile> = workload
-        .files()?
-        .into_iter()
-        .map(|file| ProjectDeployFile::new(file.name, file.contents.into_bytes()))
-        .collect();
-    let handle = client
-        .deploy_project_files(BENCH_IDLE_PROJECT_ID, files)
-        .await
-        .map_err(|error| anyhow!("{error}"))
-        .context("deploying the idle decoy")?
-        .into_value();
-    wait_for_project_running(client, handle, RUN_TIMEOUT).await?;
-    Ok(())
 }
 
 /// One step: deploy, wait for a frame, settle. Any failure is a candidate
@@ -309,18 +339,80 @@ async fn run_step<Io: ClientIo>(
         .context("deploying the bench workload")?
         .into_value();
 
-    wait_for_project_running(client, handle, RUN_TIMEOUT).await?;
+    if let Err(waited) = wait_for_project_running(client, handle, RUN_TIMEOUT).await {
+        // `wait_for_project_running` gives up on the first unanswered poll
+        // window, but silence is not death: the classic's UART RX FIFO
+        // overflows under console pressure and drops whole requests
+        // (`[io_task] UART RX error: FifoOverflowed`), while the project
+        // itself renders on happily. Observed at 120 LEDs — a board doing 30
+        // fps reported as a candidate death. So before believing it, ask the
+        // device directly whether its frame counter is moving. Advancing
+        // frames are proof of life, and proof of life is proof of no OOM.
+        if !frames_are_advancing(client, handle).await {
+            return Err(waited);
+        }
+        eprintln!("       (no run evidence, but frames are advancing — continuing)");
+    }
     settle(client, handle).await
+}
+
+/// Two frame-counter readings, apart, tolerating dropped polls. `true` only
+/// if the counter actually moved.
+async fn frames_are_advancing<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    handle: WireProjectHandle,
+) -> bool {
+    const PROBES: u32 = 6;
+    const PROBE_GAP: Duration = Duration::from_secs(2);
+    let mut first: Option<u64> = None;
+    for _ in 0..PROBES {
+        if let Some(frames) = read_frame_count(client, handle).await {
+            match first {
+                None => first = Some(frames),
+                Some(earlier) if frames > earlier => return true,
+                Some(_) => {}
+            }
+        }
+        tokio::time::sleep(PROBE_GAP).await;
+    }
+    false
+}
+
+/// The project's frame counter, or `None` if this poll did not come back.
+async fn read_frame_count<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    handle: WireProjectHandle,
+) -> Option<u64> {
+    let events = client.project_read(handle, runtime_request()).await.ok()?;
+    events
+        .into_value()
+        .into_iter()
+        .find_map(|event| match event {
+            ProjectReadEvent::Query {
+                event: ProjectReadQueryEvent::Runtime(runtime),
+                ..
+            } => Some(runtime.project.frame_num),
+            _ => None,
+        })
 }
 
 /// Free-heap and frame observations over one settle window.
 #[derive(Default)]
 struct Settle {
     free_samples: Vec<u32>,
+    /// Heap `used` while the workload renders. The ramp's (leds, used)
+    /// series gives per-LED cost as its slope and fixed+compile residency
+    /// as its intercept — more useful to memory work than the boundary
+    /// alone. Sampled, like `free`, from `ServerRuntimeStatus.memory`.
+    used_samples: Vec<u32>,
     frames: u64,
 }
 
 impl Settle {
+    fn max_used_bytes(&self) -> Option<u32> {
+        self.used_samples.iter().copied().max()
+    }
+
     fn min_free_bytes(&self) -> Option<u32> {
         self.free_samples.iter().copied().min()
     }
@@ -388,6 +480,7 @@ async fn settle<Io: ClientIo>(
                     observed.frames = runtime.project.frame_num;
                     if let Some(memory) = runtime.server.and_then(|server| server.memory) {
                         observed.free_samples.push(memory.free_bytes);
+                        observed.used_samples.push(memory.used_bytes);
                     }
                 }
                 _ => {}
@@ -425,18 +518,28 @@ enum DeathVerdict {
 async fn confirm_death(
     session: &DeviceSession,
     port: &str,
+    console: &BenchConsole,
+    oom_reports_before: usize,
     candidate: &anyhow::Error,
 ) -> Result<DeathVerdict> {
     const CONFIRM_CYCLES: u32 = 5;
     let mut last: Option<anyhow::Error> = None;
     for cycle in 1..=CONFIRM_CYCLES {
-        match confirm_death_once(session, port, candidate).await {
+        match confirm_death_once(session, port, console, oom_reports_before, candidate).await {
             Ok(verdict) => return Ok(verdict),
             Err(error) => {
+                // A cycle that failed may still have carried the boot report
+                // past us on the console; that is an answer, not a failure.
+                if console.oom_report_count() > oom_reports_before {
+                    return Ok(DeathVerdict::Oom { boots_ago: 1 });
+                }
                 eprintln!("       death-confirmation cycle {cycle}/{CONFIRM_CYCLES}: {error:#}");
                 last = Some(error);
             }
         }
+    }
+    if console.oom_report_count() > oom_reports_before {
+        return Ok(DeathVerdict::Oom { boots_ago: 1 });
     }
     Err(last.unwrap()).with_context(|| {
         format!("confirming a candidate death after {CONFIRM_CYCLES} cycles: {candidate:#}")
@@ -446,11 +549,19 @@ async fn confirm_death(
 async fn confirm_death_once(
     session: &DeviceSession,
     port: &str,
+    console: &BenchConsole,
+    oom_reports_before: usize,
     candidate: &anyhow::Error,
 ) -> Result<DeathVerdict> {
     reconnect(session, port)
         .await
         .with_context(|| format!("recovering from a candidate death: {candidate:#}"))?;
+
+    // The device's own boot report, printed since this step began. Consulted
+    // before the heartbeat because it is durable: see OOM_BOOT_REPORT_PREFIX.
+    if console.oom_report_count() > oom_reports_before {
+        return Ok(DeathVerdict::Oom { boots_ago: 1 });
+    }
 
     let mut client = LpClient::new(session.client_io());
     let Some(recovery) = first_heartbeat_recovery(&mut client).await? else {
@@ -462,7 +573,12 @@ async fn confirm_death_once(
     };
 
     match &recovery.last_crash {
-        Some(crash) if crash.cause == "oom" && crash.boots_ago <= OOM_MAX_BOOTS_AGO => {
+        Some(crash)
+            if (crash.cause == "oom"
+                || (crash.cause == "panic"
+                    && crash.message.contains(OOM_ALLOC_FAILURE_MESSAGE)))
+                && crash.boots_ago <= OOM_MAX_BOOTS_AGO =>
+        {
             Ok(DeathVerdict::Oom {
                 boots_ago: crash.boots_ago,
             })
@@ -560,6 +676,8 @@ async fn first_heartbeat_recovery<Io: ClientIo>(
 struct BenchConsole {
     verbose: bool,
     oom_stats: RefCell<Vec<String>>,
+    /// `[RECOVERY] last run crashed (oom)` lines, newest last.
+    oom_reports: RefCell<Vec<String>>,
 }
 
 impl BenchConsole {
@@ -567,6 +685,7 @@ impl BenchConsole {
         Self {
             verbose,
             oom_stats: RefCell::new(Vec::new()),
+            oom_reports: RefCell::new(Vec::new()),
         }
     }
 
@@ -574,11 +693,24 @@ impl BenchConsole {
         self.oom_stats.borrow().clone()
     }
 
+    /// How many OOM boot reports have been seen so far. A step that dies and
+    /// pushes this count up died of an OOM, whatever the heartbeat says.
+    fn oom_report_count(&self) -> usize {
+        self.oom_reports.borrow().len()
+    }
+
+    fn oom_reports(&self) -> Vec<String> {
+        self.oom_reports.borrow().clone()
+    }
+
     fn observe(&self, event: &DeviceEvent) {
         match event {
             DeviceEvent::LogLine { line, origin } => {
                 if let Some((_, stats)) = line.split_once(OOM_STATS_PREFIX) {
                     self.oom_stats.borrow_mut().push(stats.trim().to_string());
+                }
+                if is_oom_crash_report(line) {
+                    self.oom_reports.borrow_mut().push(line.trim().to_string());
                 }
                 if self.verbose || *origin == DeviceLineOrigin::Link {
                     eprintln!("[device] {line}");
@@ -592,6 +724,19 @@ impl BenchConsole {
             DeviceEvent::Progress { .. } => {}
         }
     }
+}
+
+/// Does this console line report a crash the bench should read as an OOM?
+///
+/// Two accepted forms: the ledger's own `oom` classification, and an
+/// allocation-failure panic from a build that does not classify (see
+/// [`OOM_ALLOC_FAILURE_MESSAGE`]).
+fn is_oom_crash_report(line: &str) -> bool {
+    if !line.contains("run crashed (") {
+        return false;
+    }
+    line.contains(OOM_BOOT_REPORT_PREFIX)
+        || (line.contains("crashed (panic)") && line.contains(OOM_ALLOC_FAILURE_MESSAGE))
 }
 
 fn flush_stdout() {
@@ -628,9 +773,9 @@ mod tests {
     /// build that never ran.
     #[test]
     fn a_mismatched_image_is_refused_with_the_flash_instruction() {
-        assert!(check_image(&hello("fw-esp32c6"), "fw-esp32c6").is_ok());
+        assert!(check_image(&hello("fw-esp32c6"), "fw-esp32c6", None).is_ok());
 
-        let error = check_image(&hello("fw-esp32v3"), "fw-esp32c6")
+        let error = check_image(&hello("fw-esp32v3"), "fw-esp32c6", None)
             .unwrap_err()
             .to_string();
         assert!(error.contains("fw-esp32v3"), "{error}");
@@ -654,19 +799,42 @@ mod tests {
         assert_eq!(names(120), names(3_000));
     }
 
+    /// Both firmware wordings for an out-of-memory death are evidence; a
+    /// plain panic is not. Lines are verbatim from silicon (C6 and S3).
+    #[test]
+    fn oom_crash_reports_are_recognised_in_both_firmware_wordings() {
+        assert!(is_oom_crash_report(
+            "[RECOVERY] last run crashed (oom): at node:/x/shader-compile:glsl: \
+             alloc 8280 bytes failed (align 1) in shader node: compile"
+        ));
+        assert!(is_oom_crash_report(
+            "[RECOVERY] previous run crashed (panic): at node:/soft_limit_be: \
+             memory allocation of 38400 bytes failed (at alloc.rs:553)"
+        ));
+        // A panic that is not an allocation failure says nothing about memory.
+        assert!(!is_oom_crash_report(
+            "[RECOVERY] last run crashed (panic): at node:/x: lock is not reentrant"
+        ));
+        // Ordinary console noise is not a crash report.
+        assert!(!is_oom_crash_report("[MEM] free=138648 used=39528"));
+    }
+
     /// The trend line is what an operator reads to see a step approaching the
     /// wall, so it must survive a device that reports no heap stats.
     #[test]
     fn the_settle_summary_reports_the_heap_trend() {
         let observed = Settle {
             free_samples: Vec::from([120 * 1024, 96 * 1024]),
+            used_samples: Vec::from([40 * 1024, 64 * 1024]),
             frames: 240,
         };
         assert_eq!(observed.min_free_bytes(), Some(96 * 1024));
+        assert_eq!(observed.max_used_bytes(), Some(64 * 1024));
         assert_eq!(observed.describe(), "frames 240  free 120k 96k");
 
         let quiet = Settle {
             free_samples: Vec::new(),
+            used_samples: Vec::new(),
             frames: 12,
         };
         assert_eq!(quiet.min_free_bytes(), None);
