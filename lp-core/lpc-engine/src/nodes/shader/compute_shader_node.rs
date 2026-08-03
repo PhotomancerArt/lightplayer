@@ -51,6 +51,9 @@ pub struct ComputeShaderNode {
     compilation_error: Option<String>,
     /// True until the current source/config gets its one compile attempt.
     needs_compile: bool,
+    /// Compile-window deferral state — same protocol as `shader_node.rs`.
+    compile_window_requested: bool,
+    compile_window: Option<Revision>,
     state: ComputeShaderState,
 }
 
@@ -71,6 +74,8 @@ impl ComputeShaderNode {
             shader: None,
             compilation_error: None,
             needs_compile: true,
+            compile_window_requested: false,
+            compile_window: None,
             state,
         }
     }
@@ -121,6 +126,16 @@ impl ComputeShaderNode {
         if !self.needs_compile {
             return Ok(self.shader.is_some());
         }
+
+        // Compile-window deferral (memory-pressure seam) — same protocol and
+        // at-most-once progress guarantee as `shader_node.rs::ensure_compiled`;
+        // see the comment there and
+        // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
+        if self.compile_window != Some(ctx.revision()) && !self.compile_window_requested {
+            self.compile_window_requested = true;
+            return Ok(self.shader.is_some());
+        }
+        self.compile_window_requested = false;
 
         let graphics = ctx
             .graphics()
@@ -329,7 +344,18 @@ impl NodeRuntime for ComputeShaderNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
+        // Nothing droppable — see the sibling comment in `shader_node.rs`.
         Ok(())
+    }
+
+    fn wants_compile_window(&self) -> bool {
+        self.compile_window_requested
+    }
+
+    fn open_compile_window(&mut self, revision: Revision) {
+        // Unused windows expire — see the sibling comment in `shader_node.rs`.
+        self.compile_window_requested = false;
+        self.compile_window = Some(revision);
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
@@ -505,6 +531,18 @@ mod tests {
     fn compute_node_executes_and_publishes_dynamic_state() {
         let (mut engine, registry, node_id) = build_compute_engine();
 
+        // First resolve requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        resolve_with_engine_host(
+            &mut engine,
+            &registry,
+            QueryKey::ProducedSlot {
+                node: node_id,
+                slot: SlotPath::parse("phase").expect("phase path"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("warm-up resolve");
         let phase = resolve_with_engine_host(
             &mut engine,
             &registry,

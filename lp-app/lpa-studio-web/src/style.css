@@ -4806,3 +4806,52 @@ label:has(> input:not(:disabled)) {
     font-weight: 800;
     fill: #e4c065;
 }
+
+/* ==========================================================================
+   Brand — LogoMark / LogoLockup (src/base/logo_mark.rs)
+
+   Motion rules from the logo spike (gates 1-3): in-app, ONLY the word
+   "Light" sweeps the LED rainbow; icon-only marks cycle the play triangle
+   instead; marketing surfaces run the full-rainbow wordmark. The triangle
+   cycle STARTS on the brand accent and the gradient rests at its left edge,
+   so frozen frames (story captures, reduced motion) look canonical.
+   ========================================================================== */
+
+@keyframes lp-brand-play-cycle {
+    0%, 100% { fill: #7be0b2; }
+    17% { fill: #53c6f2; }
+    33% { fill: #a58af7; }
+    50% { fill: #ff5d5d; }
+    67% { fill: #ffab4a; }
+    83% { fill: #f5e04e; }
+}
+
+.lp-brand-play-anim {
+    /* Base fill IS the frozen frame: when the animation is disabled (story
+       capture freeze, prefers-reduced-motion), the triangle rests on the
+       brand accent rather than falling back to currentColor. */
+    fill: #7be0b2;
+    animation: lp-brand-play-cycle 8s linear infinite;
+}
+
+@keyframes lp-brand-sweep {
+    to { background-position: -300% 0; }
+}
+
+.lp-brand-light,
+.lp-brand-word-full {
+    background-image: linear-gradient(90deg, #5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e, #5fe08b);
+    background-size: 300% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: lp-brand-sweep 7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lp-brand-play-anim,
+    .lp-brand-light,
+    .lp-brand-word-full {
+        animation: none;
+    }
+}
