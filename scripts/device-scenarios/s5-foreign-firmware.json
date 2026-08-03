@@ -8,12 +8,12 @@
   ],
   "setup": [
     {
-      "describe": "Fetch a WLED release image (the foreign firmware a real user is most likely to have). Set WLED_URL to the asset for your board from https://github.com/wled/WLED/releases \u2014 e.g. the ESP32-S3 4MB build. Pinned by URL on purpose: a moving 'latest' would silently change what this fixture captured.",
-      "run": "test -n \"${WLED_URL:-}\" && curl -fL --proto '=https' --tlsv1.2 -o /tmp/wled.bin \"$WLED_URL\" && ls -l /tmp/wled.bin",
+      "describe": "Fetch WLED 16.0.1 for the ESP32-S3 8MB (the foreign firmware a real user is most likely to have). Version PINNED, not 'latest': a moving release would silently change what this fixture captured. For the classic instead, swap the asset to WLED_16.0.1_ESP32.bin.",
+      "run": "curl -fL --proto '=https' --tlsv1.2 -o /tmp/wled.bin https://github.com/wled/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-S3_8MB_qspi.bin && ls -l /tmp/wled.bin",
       "verified": false
     },
     {
-      "describe": "Flash it at 0x0 (WLED release binaries are FULL images: bootloader + partitions + app). This overwrites LightPlayer entirely \u2014 that is the point.",
+      "describe": "Flash it at 0x0 (WLED release binaries are FULL images: bootloader + partitions + app). This overwrites LightPlayer entirely \u2014 that is the point; s2/s3 put it back.",
       "run": "espflash write-bin --port {port} 0x0 /tmp/wled.bin",
       "verified": false
     }
