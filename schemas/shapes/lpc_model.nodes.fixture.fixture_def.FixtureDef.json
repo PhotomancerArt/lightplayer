@@ -317,8 +317,7 @@
                   "id": 1575082113,
                   "meta": {
                     "description": "Fixture output brightness (0-255).",
-                    "label": "Brightness",
-                    "panel": true
+                    "label": "Brightness"
                   },
                   "ty": "u32"
                 }

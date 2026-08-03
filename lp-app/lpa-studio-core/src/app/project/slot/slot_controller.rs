@@ -1130,7 +1130,6 @@ impl SlotController {
             if let Some(description) = shape.meta.description.as_ref() {
                 value = value.with_detail(description.clone());
             }
-            value.panel = shape.meta.panel;
             if let Some(unit) = shape.meta.unit.as_ref() {
                 value = value.with_unit(ui_slot_unit(unit));
             }

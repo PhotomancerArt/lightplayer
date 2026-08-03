@@ -321,7 +321,7 @@ fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
     );
 }
 
-/// One shader whose panel-flagged `glow` uniform consumes `bus:glow` —
+/// One shader whose `glow` uniform consumes `bus:glow` —
 /// the shape the G4 walk project uses.
 fn server_with_glow_shader_project(name: &str) -> (LpServer, LpPathBuf) {
     let (mut server, project_path) = server_with_clock_project(name);
@@ -353,7 +353,7 @@ fn server_with_glow_shader_project(name: &str) -> (LpServer, LpPathBuf) {
   "consumed": {
     "glow": {
       "kind": "value", "value": "f32", "default": 0.5,
-      "min": 0, "max": 1, "label": "Glow", "panel": true
+      "min": 0, "max": 1, "label": "Glow"
     }
   }
 }

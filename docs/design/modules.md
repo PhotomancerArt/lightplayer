@@ -194,8 +194,9 @@ promoted between levels.
 
 - A **leaf node's** panel presents its public (bound) slots. Publicity
   (R3) is the one gesture that puts a control on a panel — this
-  **subsumes the legacy `panel: bool` slot flag**: "add to panel" *means*
-  "bind to a channel". (Widget choice, step, unit remain slot meta.)
+  **subsumes the legacy `panel: bool` slot flag** — deleted outright in
+  P2: "add to panel" *means* "bind to a channel". (Widget choice, step,
+  unit remain slot meta.)
 - A **module's** panel presents its scope's channel list — which is the
   aggregate of its children's publicity — plus each child module's panel
   as a **nested group** (presentation recursion). Two embedded instances
@@ -534,10 +535,11 @@ Copy-on-extract per R14.
 - **Q11:** → moved to `panel.md` P6 (merge/tiebreak rules); ratify there.
 - **Q12:** → resolved by the latch model: grabbing authored-driven
   channels is core behavior (`panel.md` P2/P5), not an increment.
-- **Q13:** R8 subsumes the `panel: bool` slot flag under publicity — a
-  leaf node's knobs are exactly its bound slots, and "add to panel" is
-  the binding gesture. Confirm the flag (and `ShaderSlotDef.panel`) is
-  deleted rather than kept as a parallel card-local mechanism.
+- **Q13:** SETTLED — IMPLEMENTED (2026-08-03, P2): the flag is deleted,
+  not kept in parallel. `ShaderSlotDef.panel`, `SlotMeta.panel` and their
+  DTO/agent surfaces are gone; a shader uniform reaches a panel exactly
+  when its binding derives a `(scope, channel)` panel target, and the
+  fixture face's brightness fader is that face's own named affordance.
 - `panel.md` carries its own register (P-Q1–P-Q4: slew defaults,
   three-state affordance requirement, state-file versioning/flush,
   clear-all vs sink scopes).

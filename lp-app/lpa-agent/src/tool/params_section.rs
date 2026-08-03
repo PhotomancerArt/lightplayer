@@ -92,9 +92,6 @@ fn def_record_json(def: &ParamDefRecord) -> Value {
             obj.insert(key.into(), json!(round_sig4(value)));
         }
     }
-    if def.panel {
-        obj.insert("panel".into(), json!(true));
-    }
     if let Some(unit) = &def.unit {
         obj.insert("unit".into(), json!(unit));
     }
@@ -160,7 +157,6 @@ mod tests {
             min: Some(0.0),
             max: None,
             step: Some(1.0),
-            panel: true,
             unit: Some("x".into()),
             bound: false,
         }];
@@ -171,7 +167,6 @@ mod tests {
         assert_eq!(record["min"], 0.0);
         assert!(record.get("max").is_none(), "absent options omitted");
         assert!(record.get("bound").is_none(), "false flags omitted");
-        assert_eq!(record["panel"], true);
         assert_eq!(record["step"], 1.0, "the knob's quantization is visible");
         assert_eq!(record["unit"], "x");
         // Declared side is unavailable without a compile; no orphan diff.

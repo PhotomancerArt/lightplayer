@@ -3,7 +3,7 @@
 //!
 //! Reuses the edit-e2e harness (`InProcessServerIo`, `drive`,
 //! `project_action`): a real `LpServer` loads a clock + shader + fixture +
-//! output project whose shader carries a panel-flagged `speed` uniform.
+//! output project whose shader carries a bus-bound `speed` uniform.
 //! Asserts the controller-side face derivation end-to-end — shader knob and
 //! fixture fader present with real addresses — and that knob/fader
 //! `SetValue` dispatches ride the SAME overlay path the slot editors use
@@ -51,12 +51,12 @@ fn node_faces_derive_and_edit_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
-    // -- shader face: knob from the panel-flagged uniform ------------------
+    // -- shader face: knobs from the bound uniforms ------------------------
     let shader = node_by_kind(&snapshot, "Shader");
     let Some(UiNodeFace::Shader(face)) = &shader.face else {
         panic!("shader node derives a shader face, got {:?}", shader.face);
     };
-    assert_eq!(face.controls.len(), 2, "both panel-flagged uniforms");
+    assert_eq!(face.controls.len(), 2, "both bound uniforms");
     let knob = control_labeled(face, "Speed");
     assert_eq!(knob.label, "Speed");
     assert_eq!(
@@ -491,14 +491,18 @@ fn playlist_with_unresolvable_active_entry_keeps_all_children() {
 
 #[test]
 fn a_bound_panel_uniform_keeps_an_interactive_control() {
-    // The §4.1 regression shape (fyeah-sign): `glow` is panel-flagged AND
-    // bound to `bus:glow`, `speed` is panel-flagged and unbound. The bound
-    // knob must stay a working control — it derives a panel target (the
-    // command-channel write path) AND keeps the editable, addressed authored
-    // default underneath (modules.md R6: the authored default is what an
-    // unwritten channel resolves to, so it stays reachable). Nothing pinned
-    // interactivity before: the knob rendered correctly bound and dispatched
-    // nothing when turned.
+    // The §4.1 regression shape (fyeah-sign): `glow` is bound to
+    // `bus:glow`, `speed` is bound to nothing. The bound knob must stay a
+    // working control — it derives a panel target (the command-channel write
+    // path) AND keeps the editable, addressed authored default underneath
+    // (modules.md R6: the authored default is what an unwritten channel
+    // resolves to, so it stays reachable). Nothing pinned interactivity
+    // before: the knob rendered correctly bound and dispatched nothing when
+    // turned.
+    //
+    // Q13 (binding is publicity) also makes `speed` the negative case: with
+    // the authored `panel` flag deleted, an unbound uniform has no control
+    // at all.
     let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -521,11 +525,15 @@ fn a_bound_panel_uniform_keeps_an_interactive_control() {
         panic!("shader node derives a shader face, got {:?}", shader.face);
     };
 
-    // The unbound control: the ordinary slot-edit path, as a baseline.
-    let speed = control_labeled(face, "Speed");
-    assert!(speed.panel_target.is_none(), "unbound ⇒ no panel target");
-    assert!(speed.state.editable, "unbound control is editable");
-    assert!(speed.address.is_some(), "unbound control is addressed");
+    // The unbound uniform: not on the panel at all (Q13).
+    assert!(
+        face.controls.iter().all(|control| control.label != "Speed"),
+        "an unbound uniform gets no knob, got {:?}",
+        face.controls
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>()
+    );
 
     // The bound control derives its (scope, channel) write target…
     let glow = control_labeled(face, "Glow");
@@ -722,9 +730,8 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
         vec!["glow"],
-        "only the BOUND uniform lists — `speed` is panel-flagged but wired \
-         to nothing, and panel membership is scope publicity, not a panel \
-         flag"
+        "only the BOUND uniform lists — `speed` is wired to nothing, and \
+         panel membership is scope publicity (Q13), never an authored flag"
     );
     let glow = &face.panel.controls[0];
     assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);
@@ -850,6 +857,8 @@ fn face_e2e_server() -> LpServer {
   "kind": "Shader",
   "source": "shader.glsl",
   "bindings": {
+    "speed": { "source": "bus:speed" },
+    "count": { "source": "bus:count" },
     "output": { "target": "bus:visual.out" }
   },
   "consumed": {
@@ -860,8 +869,7 @@ fn face_e2e_server() -> LpServer {
       "min": 0,
       "max": 3,
       "label": "Speed",
-      "description": "Gradient speed multiplier",
-      "panel": true
+      "description": "Gradient speed multiplier"
     },
     "count": {
       "kind": "value",
@@ -870,8 +878,7 @@ fn face_e2e_server() -> LpServer {
       "min": 1,
       "max": 4,
       "label": "Count",
-      "description": "How many bands",
-      "panel": true
+      "description": "How many bands"
     }
   }
 }"#;
@@ -923,8 +930,8 @@ fn face_e2e_server() -> LpServer {
 
 const BOUND_GLOW_PROJECT_DIR: &str = "/projects/bound-glow-e2e";
 
-/// The fyeah-sign shape: `glow` panel-flagged AND bound to `bus:glow`,
-/// `speed` panel-flagged and unbound. Both uniforms feed the shader so the
+/// The fyeah-sign shape: `glow` bound to `bus:glow`, `speed` unbound (and
+/// therefore, since Q13, not on any panel). Both uniforms feed the shader so the
 /// compile stays honest.
 const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform float glow;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, glow, 0.5, 1.0);\n}\n";
 
@@ -970,8 +977,7 @@ fn bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 3,
       "label": "Speed",
-      "description": "Animation speed multiplier",
-      "panel": true
+      "description": "Animation speed multiplier"
     },
     "glow": {
       "kind": "value",
@@ -980,8 +986,7 @@ fn bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 1,
       "label": "Glow",
-      "description": "Rainbow highlight intensity",
-      "panel": true
+      "description": "Rainbow highlight intensity"
     }
   }
 }"#;
@@ -1079,8 +1084,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 3,
       "label": "Speed",
-      "description": "Animation speed multiplier",
-      "panel": true
+      "description": "Animation speed multiplier"
     },
     "glow": {
       "kind": "value",
@@ -1089,8 +1093,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 1,
       "label": "Glow",
-      "description": "Rainbow highlight intensity",
-      "panel": true
+      "description": "Rainbow highlight intensity"
     }
   }
 }"#;
