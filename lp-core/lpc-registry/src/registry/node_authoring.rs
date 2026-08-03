@@ -135,7 +135,8 @@ impl ProjectRegistry {
                 "node body is not valid UTF-8".into(),
             )
         })?;
-        let def = NodeDef::read_json(ctx.shapes, text).map_err(|err| {
+        // Parse for validation only — any kind that parses is creatable.
+        let _def = NodeDef::read_json(ctx.shapes, text).map_err(|err| {
             reject(
                 MutationRejectionReason::InvalidBody,
                 format!("node body does not parse as a node definition: {err}"),
