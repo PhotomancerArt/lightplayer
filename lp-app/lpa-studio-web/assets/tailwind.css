@@ -210,6 +210,9 @@
   .tw\:mt-5 {
     margin-top: calc(var(--tw-spacing) * 5);
   }
+  .tw\:mr-1 {
+    margin-right: calc(var(--tw-spacing) * 1);
+  }
   .tw\:-mb-4 {
     margin-bottom: calc(var(--tw-spacing) * -4);
   }
@@ -368,6 +371,9 @@
   }
   .tw\:max-h-60 {
     max-height: calc(var(--tw-spacing) * 60);
+  }
+  .tw\:max-h-64 {
+    max-height: calc(var(--tw-spacing) * 64);
   }
   .tw\:max-h-72 {
     max-height: calc(var(--tw-spacing) * 72);
@@ -2218,6 +2224,20 @@
         @supports (color: color-mix(in lab, red, red)) {
           background-color: color-mix(in oklab, var(--tw-color-card-subtle) 70%, transparent);
         }
+      }
+    }
+  }
+  .tw\:hover\:bg-status-attention-bg {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-status-attention-bg);
+      }
+    }
+  }
+  .tw\:hover\:bg-status-bound-bg {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-status-bound-bg);
       }
     }
   }

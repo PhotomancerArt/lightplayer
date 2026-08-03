@@ -33,6 +33,8 @@ mod node_pane;
 pub(crate) mod node_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod node_story_fixtures;
+#[cfg(feature = "stories")]
+pub(crate) mod output_face_stories;
 mod panel;
 #[cfg(feature = "stories")]
 pub(crate) mod playlist_face_stories;
@@ -85,7 +87,8 @@ pub(crate) use binding_authoring_section::BindingAuthoringSection;
 pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
 pub use face::{
-    FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, PlaylistFace, ShaderFace,
+    FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, OutputFace, PlaylistFace,
+    ShaderFace,
 };
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
