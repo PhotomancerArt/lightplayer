@@ -42,7 +42,8 @@ pub use display_manifest::{
 pub use firmware_join::{
     BUILD_DEF_SOURCES, BuildChip, BuildFeatureSummary, CompatibilityBasis, CompatibleBuild,
     FirmwareBuild, NoBuildReason, all_builds, build_by_id, build_features, compatible_builds,
-    compatible_builds_for, feature_summary, no_build_reason, no_build_reason_for, node_kind_label,
+    compatible_builds_for, feature_summary, is_served, no_build_reason, no_build_reason_for,
+    node_kind_label, served_build_ids,
 };
 pub use geometry::{DiagramMode, DiagramOptions, PinSwatch, WiredConnection};
 pub use runtime_manifests::{RUNTIME_MANIFEST_SOURCES, runtime_manifest_json};

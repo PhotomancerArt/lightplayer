@@ -21,5 +21,4 @@ pub mod management_request;
 pub mod management_result;
 pub mod operation;
 pub mod provider;
-pub mod served_builds;
 pub mod session;

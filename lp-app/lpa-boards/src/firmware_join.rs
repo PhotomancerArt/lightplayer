@@ -54,6 +54,17 @@ pub const BUILD_DEF_SOURCES: &[(&str, &str)] = &[
     ),
 ];
 
+/// The deployment's served-build list (`lp-fw/builds/served.json`).
+///
+/// Which images the Studio site actually ships is a **deployment** fact, not
+/// board data — but it is a statement about build defs, so it lives beside
+/// them and is drift-tested against them here. It has one file rather than
+/// one constant because three languages read it: this crate, the justfile
+/// recipes that package and copy `firmware/<id>/`, and the Pages smoke
+/// check. Two hand-maintained copies of it in two languages is exactly the
+/// class of bug that let the site offer a board it could not flash.
+const SERVED_BUILDS_SOURCE: &str = include_str!("../../../lp-fw/builds/served.json");
+
 /// `(package, manifest_core_fixture)` for every firmware package a build def
 /// names. The fixture is the CI-verified projection of the manifest core
 /// embedded in that package's image.
@@ -122,6 +133,34 @@ pub fn all_builds() -> &'static [FirmwareBuild] {
 
 pub fn build_by_id(build_id: &str) -> Option<&'static FirmwareBuild> {
     all_builds().iter().find(|build| build.id == build_id)
+}
+
+/// The build ids this Studio deployment serves, in `served.json` order.
+///
+/// The provisioning picker's eligibility filter: a board is only offered
+/// when one of its compatible builds ([`compatible_builds_for`]) is in this
+/// list, because flashing has to be real rather than aspirational. Also the
+/// candidate set [`provisioning_build_id`] chooses from.
+pub fn served_build_ids() -> &'static [String] {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ServedFile {
+        format: u32,
+        builds: Vec<String>,
+    }
+
+    static SERVED: OnceLock<Vec<String>> = OnceLock::new();
+    SERVED.get_or_init(|| {
+        let file: ServedFile = serde_json::from_str(SERVED_BUILDS_SOURCE)
+            .unwrap_or_else(|error| panic!("embedded served.json: {error}"));
+        assert_eq!(file.format, 1, "served.json: unsupported format");
+        file.builds
+    })
+}
+
+/// Whether the deployment serves an image for `build_id`.
+pub fn is_served(build_id: &str) -> bool {
+    served_build_ids().iter().any(|id| id == build_id)
 }
 
 /// The features compiled into `package`'s firmware, from its checked-in

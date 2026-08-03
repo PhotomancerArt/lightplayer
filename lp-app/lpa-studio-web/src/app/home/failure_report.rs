@@ -99,7 +99,7 @@ pub(crate) fn failure_report(card: &UiDeviceCard, op: &CardOp) -> Option<String>
     push_kv(
         &mut out,
         "  served firmware",
-        &lpa_link::SERVED_FIRMWARE_BUILDS.join(", "),
+        &lpa_boards::served_build_ids().join(", "),
     );
 
     if card.console_tail.is_empty() {

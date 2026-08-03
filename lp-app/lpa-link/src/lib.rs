@@ -39,7 +39,6 @@ pub use provider::management_result::{
 };
 pub use provider::operation::{LinkCapabilities, LinkOperation};
 pub use provider::provider::LinkProvider;
-pub use provider::served_builds::SERVED_FIRMWARE_BUILDS;
 pub use provider::session::LinkSession;
 pub use provider::session::LinkSessionId;
 pub use provider::session::LinkSessionStatus;
