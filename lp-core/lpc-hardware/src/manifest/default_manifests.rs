@@ -190,6 +190,41 @@ mod tests {
         }
     }
 
+    /// The top-right screw terminal is IO13, silkscreened "spare" — read off
+    /// the physical board and then driven on silicon (2026-08-02: WS281x
+    /// frames byte-identical to the host oracle, strip lit). This corrects an
+    /// earlier entry that called it IO12/relay and withheld it as the MTDI
+    /// strap; GPIO13 is MTCK, not a strap, so that objection was against a
+    /// pin this board does not expose.
+    #[test]
+    fn default_esp32v3_manifest_offers_io13_spare_terminal() {
+        let manifest = default_esp32v3_hardware_manifest();
+
+        let io13 = manifest
+            .resource(&HwAddress::gpio(13))
+            .expect("gpio13 (the spare screw terminal) must be declared");
+        assert_eq!(io13.display_label(), "IO13");
+        assert!(
+            io13.reserved_reason().is_none(),
+            "IO13 is claimable — it carries no strap/boot risk"
+        );
+        // The wrong entry must not come back: GPIO12 (MTDI strap) is not a
+        // terminal on this board.
+        assert!(
+            manifest.resource(&HwAddress::gpio(12)).is_none(),
+            "gpio12 is not exposed by this board and must stay absent"
+        );
+        // And no fifth /rmt/ws281xK rides along: plan_for_declared(5) gives
+        // every channel 1 block — a 40 µs refill deadline against a start-path
+        // masking cost measured at up to 69 µs on this board
+        // (docs/adr/2026-08-02-classic-hli-refill.md). Declaring a fifth
+        // channel would not add one; it would break the working four.
+        assert!(
+            manifest.resource(&HwAddress::rmt_ws281x(4)).is_none(),
+            "a 5th RMT channel cannot be deadline-funded on the classic"
+        );
+    }
+
     /// The omissions are the point of this profile, so they are asserted rather
     /// than left to a comment: each pin here is one somebody could plausibly
     /// guess into the manifest, and guessing wrong shorts a pin.
