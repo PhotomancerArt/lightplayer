@@ -394,7 +394,10 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
     let (sink, events) = recording_sink();
 
     let outcome = session
-        .manage(LinkManagementRequest::FlashFirmware { build_id: None }, sink)
+        .manage(
+            LinkManagementRequest::FlashFirmware { build_id: None },
+            sink,
+        )
         .await
         .unwrap();
 

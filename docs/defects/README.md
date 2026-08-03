@@ -204,6 +204,7 @@ the combination first being registered as a target.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
 | opt-in-degradation | 2026-08-01 | [xt-builtins-image-strands-just-test](2026-08-01-xt-builtins-image-strands-just-test.md) | fixed | justfile (`ci-prereqs`/`test`) + build-builtins-xt.sh + lpvm-native tests |
 | config-masked-defect | 2026-08-01 | [xtlpn-f32-loses-writes-to-value-parameters](2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md) | fixed | lpvm-native lowering (lower_f32.rs) |
 | precision-loss-at-a-seam | 2026-08-01 | [gamma-8bit-choke](2026-08-01-gamma-8bit-choke.md) | fixed | lpc-engine fixture node |

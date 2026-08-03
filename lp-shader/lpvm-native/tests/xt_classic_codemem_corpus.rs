@@ -97,11 +97,25 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
         ref other => return Err(format!("render returns {other:?}")),
     };
 
-    lp_shader::synth::synthesise_render_texture(&mut ir, &mut meta, render_fn_index, format)
-        .map_err(|e| format!("synth render_texture: {e:?}"))?;
+    // Q32 throughout, matching `compile_module` below: fw-esp32v3 ships
+    // without `float-f32`, so the classic's px path is Fixed-mode and these
+    // wrappers must be synthesised the same way the device synthesises them.
+    lp_shader::synth::synthesise_render_texture(
+        &mut ir,
+        &mut meta,
+        render_fn_index,
+        format,
+        FloatMode::Q32,
+    )
+    .map_err(|e| format!("synth render_texture: {e:?}"))?;
     if format == TextureStorageFormat::Rgba16Unorm {
-        lp_shader::synth::synthesise_render_samples_rgba16(&mut ir, &mut meta, render_fn_index)
-            .map_err(|e| format!("synth render_samples: {e:?}"))?;
+        lp_shader::synth::synthesise_render_samples_rgba16(
+            &mut ir,
+            &mut meta,
+            render_fn_index,
+            FloatMode::Q32,
+        )
+        .map_err(|e| format!("synth render_samples: {e:?}"))?;
     }
 
     // `fuel: true` is `NativeCompileOptions`'s default and what the device
