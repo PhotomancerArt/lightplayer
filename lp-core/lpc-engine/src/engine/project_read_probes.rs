@@ -113,24 +113,25 @@ impl Engine {
             let _ = entry;
         }
 
-        // Channels list PER SCOPE (wire 6): same-named channels in
+        // Channels list PER SCOPE (wire 8): same-named channels in
         // different scopes are distinct entries, and display strings are a
-        // client concern. Sink scopes never list — the modeled R2 property,
-        // honored here by enumerating non-sink scopes rather than by
-        // filtering rows out after the fact. A scope-less tree (test
-        // harness without assigned scopes) falls back to the flat listing.
+        // client concern. Sink scopes list too — a playlist entry's panel
+        // control reads its live/engaged state off the entry's own
+        // (scope, channel) row (panel.md §3, the per-entry held value) —
+        // but presentation surfaces (the bus listing, binding pickers)
+        // are expected to filter `scope.is_sink()` rows out: R2 keeps sink
+        // channels invisible to enclosing READERS, which is a resolution
+        // property, not a wire omission. Non-sink scopes list first so
+        // name-keyed readers keep finding the enclosing row. A scope-less
+        // tree (test harness without assigned scopes) falls back to the
+        // flat listing.
         let scopes: Vec<Option<crate::node::ScopeRef>> = {
-            let non_sink: Vec<_> = self
-                .tree()
-                .scopes()
-                .into_iter()
-                .filter(|scope| !scope.is_sink())
-                .map(Some)
-                .collect();
-            if non_sink.is_empty() {
+            let mut all: Vec<_> = self.tree().scopes();
+            all.sort_by_key(|scope| scope.is_sink());
+            if all.is_empty() {
                 alloc::vec![None]
             } else {
-                non_sink
+                all.into_iter().map(Some).collect()
             }
         };
         let root_scope = self.tree().node_scope(self.tree().root());
@@ -197,7 +198,9 @@ impl Engine {
                 .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied())
                 .collect();
 
-                let value = request.include_values.then(|| {
+                let value = (request.include_values
+                    && self.bus_probe_value_is_sink_demand_free(scope, &name))
+                .then(|| {
                     match self.resolve_bus_channel_value(registry, scope, &name) {
                         Ok(production) => WireBusChannelValue {
                             revision,
@@ -235,6 +238,44 @@ impl Engine {
             bindings,
             channels,
         })
+    }
+
+    /// Whether resolving `(scope, channel)`'s value from a probe stays free
+    /// of sink-scope demand — the R2 no-demand property ("a probe pull must
+    /// never render an inactive playlist entry"), kept at the value-request
+    /// seam now that sink scopes list their channel rows.
+    ///
+    /// Mirrors the resolution walk (panel overlay included): the value is
+    /// resolvable when the WINNING provider level is either a panel writer
+    /// (a literal — no demand), a non-sink level (probe demand on enclosing
+    /// producers is today's accepted behavior), all-literal sink providers,
+    /// or nothing at all (a provider-less channel resolves without ticking
+    /// anything). Only a sink level winning with a producer-backed source
+    /// is refused — that value would have rendered the entry.
+    fn bus_probe_value_is_sink_demand_free(
+        &self,
+        scope: Option<crate::node::ScopeRef>,
+        channel: &ChannelName,
+    ) -> bool {
+        let Some(mut scope) = scope else {
+            return true;
+        };
+        loop {
+            if self.panel_writers().get(scope, channel).is_some() {
+                return true;
+            }
+            let candidates = self.tree().providers_for_bus_in_scope(scope, channel);
+            if !candidates.is_empty() {
+                return !scope.is_sink()
+                    || candidates
+                        .iter()
+                        .all(|(_, entry)| matches!(entry.source, BindingSource::Literal(_)));
+            }
+            match self.tree().parent_scope(scope) {
+                Some(parent) => scope = parent,
+                None => return true,
+            }
+        }
     }
 
     pub(super) fn read_project_control_product_probe(
