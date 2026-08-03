@@ -196,6 +196,11 @@ impl NodeRuntime for OutputNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
+        // Fully re-established on the next consume: the resolve path resizes
+        // to the control extent and renders the whole target. The runtime
+        // buffer this publishes into is deliberately NOT touched — its
+        // lifecycle belongs to the sink registration path.
+        self.control_samples = Vec::new();
         Ok(())
     }
 }

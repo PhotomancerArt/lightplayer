@@ -15,10 +15,14 @@
 //!   it came from — dropping the buffer does NOT free it; the engine that
 //!   allocated the span owns that lifetime.
 
+#[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
 use alloc::vec::Vec;
 
 enum Inner {
-    /// Emitted code executing in place out of its own allocation.
+    /// Emitted code executing in place out of its own allocation. Classic-ESP32
+    /// firmware (`xt-placed-code` on Xtensa) has no I-bus view of the heap, so
+    /// there this placement — and [`JitBuffer::from_code`] — cannot exist.
+    #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
     Heap { code: Vec<u8> },
     /// Code installed at a fixed executable address; `exec_base` is already
     /// an execute (I-bus) address. The span belongs to an EXTERNAL arena the
@@ -54,6 +58,7 @@ pub struct JitBuffer {
 }
 
 impl JitBuffer {
+    #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
     pub(crate) fn from_code(code: Vec<u8>) -> Self {
         Self {
             inner: Inner::Heap { code },
@@ -84,6 +89,7 @@ impl JitBuffer {
     #[must_use]
     pub fn len(&self) -> usize {
         match &self.inner {
+            #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
             Inner::Heap { code } => code.len(),
             Inner::Placed { len, .. } => *len,
             #[cfg(feature = "xt-placed-code")]
@@ -125,6 +131,7 @@ impl JitBuffer {
         debug_assert!(offset <= self.len());
         debug_assert!(offset % 4 == 0);
         match &self.inner {
+            #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
             Inner::Heap { code } => {
                 let write = unsafe { code.as_ptr().add(offset) };
                 crate::exec_addr::exec_addr(write as usize) as *const u8

@@ -924,7 +924,14 @@ fn boot_task(shared: Rc<RefCell<SharedState>>, index: usize, generation: u32) ->
         shared.workers[index].state = match result {
             Ok(worker) => WorkerState::Ready(Rc::new(RefCell::new(worker))),
             Err(reason) => {
-                log::warn!("preview host: worker {index} boot failed: {reason}");
+                // An aborted wasm fetch is the page tearing down mid-boot
+                // (refresh/navigation/HMR), not a preview defect — keep it
+                // off the warn channel so a reload stays quiet.
+                if super::is_teardown_abort_reason(&reason) {
+                    log::debug!("preview host: worker {index} boot aborted by page teardown");
+                } else {
+                    log::warn!("preview host: worker {index} boot failed: {reason}");
+                }
                 WorkerState::Dead(reason)
             }
         };
