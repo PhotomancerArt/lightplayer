@@ -90,14 +90,15 @@ and nobody has done it.**
 
 Three separable steps, cheapest first:
 
-1. **`direct_points` keeps only the channel** (12 → 4 B/LED). `point.channel` is
-   the only field read per frame; the coordinates are needed solely when
-   rebuilding the graphics `sample_points` buffer. Gate that rebuild on
-   `(mapping_version, width, height)` and regenerate coordinates transiently.
-   Contained to `fixture_node.rs`. ⚠️ the invalidation key must include
-   `width`/`height` — `ensure_direct_points` currently keys on mapping version
-   alone, and a stale-coordinate bug here fails silently (same failure mode as
-   [`s3-frame-cost-scales-per-fixture`](s3-frame-cost-scales-per-fixture.md)).
+1. ~~**`direct_points` keeps only the channel** (12 → 4 B/LED).~~ **PAID DOWN
+   2026-08-03** (PR #303): `direct_channels: Vec<u32>` is the only resident
+   per-lamp state; coordinates regenerate transiently when the sample-point
+   buffer's `(mapping_version, width, height, count)` key changes — which
+   also killed an every-frame coords-Vec alloc + buffer rewrite (8 B/LED of
+   transient churn per frame). The key lives inside the handle's Option so a
+   memory-pressure drop invalidates both atomically; a rewrite-only-on-key
+   test pins both behaviours. Measured: frame retained −1,928 B at 241 LEDs
+   (exactly 8 B/LED).
 2. **Render straight into the runtime buffer** (−6 B/LED). Requires the control
    render target contract (`ControlRenderTarget { samples: &'a mut [u16] }`) to
    admit a byte-backed target, which touches every control node.
@@ -128,3 +129,8 @@ Three separable steps, cheapest first:
 - **2026-08-02** — 13 B/LED of the 89.5 paid down in #285 (conditional
   `DisplayPipeline` buffers, 9; `direct_points` right-sizing, 4). The three
   steps above are what remains.
+- **2026-08-03** — step 1 paid down in PR #303 (−8 B/LED resident, −8 B/LED
+  per-frame transient churn). Step 2 is deferred while PR #301's P2 rewrites
+  the flush path it would touch; the u16→u8 copy it targets gained a third
+  leg worth collapsing with it (flush decodes the bytes back to u16
+  per frame). Step 3 remains the schema question.

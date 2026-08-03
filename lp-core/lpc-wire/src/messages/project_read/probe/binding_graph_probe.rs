@@ -83,13 +83,49 @@ pub enum WireBindingDirection {
     Publishes,
 }
 
+/// Structured identity of one bus scope on the wire (modules.md R1/R2).
+///
+/// Owners are runtime node ids from the same tree the probe ships, so
+/// clients key scoped channels structurally and derive any display string
+/// themselves (the engine never flattens scope into a label).
+#[derive(
+    Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum WireScopeRef {
+    /// The scope a module node introduces around its project children.
+    Module { owner: NodeId },
+    /// The anonymous sink scope one playlist entry wraps its child in.
+    /// Sink channels never surface in probe listings; the variant exists
+    /// so endpoints can still name one structurally.
+    Sink { owner: NodeId, entry: u32 },
+}
+
+impl WireScopeRef {
+    pub fn owner(&self) -> NodeId {
+        match self {
+            Self::Module { owner } | Self::Sink { owner, .. } => *owner,
+        }
+    }
+
+    pub fn is_sink(&self) -> bool {
+        matches!(self, Self::Sink { .. })
+    }
+}
+
 /// The remote side of an effective binding.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireBindingEndpoint {
-    /// A bus channel by name.
-    Bus { channel: String },
+    /// A bus channel, scoped: for a publishing endpoint the scope the
+    /// write lands in; for a consuming endpoint the scope its resolution
+    /// starts from (writer-shadowing walks outward from there, R5).
+    Bus {
+        scope: Option<WireScopeRef>,
+        channel: String,
+    },
     /// Another node's slot.
     NodeSlot { node: NodeId, slot: SlotPath },
     /// An authored literal value.
@@ -103,6 +139,8 @@ pub enum WireBindingEndpoint {
 pub enum WireBindingOrigin {
     /// Authored in project data.
     Authored,
+    /// An engaged panel writer (lazy runtime state, never authored).
+    Panel,
     /// Materialized from default binding policy (fallback priority).
     Default,
 }
@@ -111,6 +149,11 @@ pub enum WireBindingOrigin {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WireBusChannel {
+    /// The scope this channel entry lists in (R3: a channel exists in the
+    /// scope of the slots bound to it). Same-named channels in different
+    /// scopes are distinct entries. `None` only from scope-less engines
+    /// (test fakes).
+    pub scope: Option<WireScopeRef>,
     /// Channel name (`time`, `trigger`, `visual.out`, …).
     pub name: String,
     /// Established channel kind, when any binding declared one.
@@ -123,6 +166,10 @@ pub struct WireBusChannel {
     pub consumers: Vec<u32>,
     /// Resolved current value, present when the request asked for values.
     pub value: Option<WireBusChannelValue>,
+    /// Engine-reported root-scope role: true for THE channel the root
+    /// module's output interface mirrors (the project's primary visual).
+    /// Consumers must key off this flag, never off the channel name.
+    pub primary_visual: bool,
 }
 
 /// A channel's resolved value (or the resolution failure) at the snapshot
@@ -155,6 +202,9 @@ mod tests {
                 slot: Some(SlotPath::parse("trigger").unwrap()),
                 direction: WireBindingDirection::Consumes,
                 endpoint: WireBindingEndpoint::Bus {
+                    scope: Some(WireScopeRef::Module {
+                        owner: NodeId::new(0),
+                    }),
                     channel: "trigger".to_string(),
                 },
                 origin: WireBindingOrigin::Authored,
@@ -162,6 +212,9 @@ mod tests {
                 kind: Kind::Instant,
             }],
             channels: vec![WireBusChannel {
+                scope: Some(WireScopeRef::Module {
+                    owner: NodeId::new(0),
+                }),
                 name: "trigger".to_string(),
                 kind: Some(Kind::Instant),
                 providers: vec![],
@@ -171,6 +224,7 @@ mod tests {
                     value: None,
                     error: None,
                 }),
+                primary_visual: false,
             }],
         };
         let result = BindingGraphProbeResult::Graph(graph.clone());
@@ -185,6 +239,10 @@ mod tests {
     fn endpoint_variants_round_trip() {
         for endpoint in [
             WireBindingEndpoint::Bus {
+                scope: Some(WireScopeRef::Sink {
+                    owner: NodeId::new(3),
+                    entry: 7,
+                }),
                 channel: "visual.out".to_string(),
             },
             WireBindingEndpoint::NodeSlot {

@@ -23,12 +23,12 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
     DeviceController, DeviceOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PlaylistActivateOp, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
-    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
-    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiNotice, UiPaneView, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
-    UxUpdate, UxUpdateSink,
+    NodeRemoveOp, NodeRevertOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
+    ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot,
+    ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
+    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiResult, UiStatus,
+    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -2115,6 +2115,14 @@ impl StudioController {
                 let op = action.into_op::<PlaylistActivateOp>()?;
                 return self.execute_playlist_activate_op(op).await;
             }
+            if action.op_as::<PanelWriteOp>().is_some() {
+                let op = action.into_op::<PanelWriteOp>()?;
+                return self.execute_panel_write_op(op).await;
+            }
+            if action.op_as::<PanelClearOp>().is_some() {
+                let op = action.into_op::<PanelClearOp>()?;
+                return self.execute_panel_clear_op(op).await;
+            }
             if action.op_as::<NodeCreateOp>().is_some() {
                 let op = action.into_op::<NodeCreateOp>()?;
                 return self.execute_node_create_op(op).await;
@@ -3267,6 +3275,24 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.activate_playlist_entry(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Panel-control gesture: dispatch the `(scope, channel)` panel write
+    /// down the runtime command channel (no overlay, no dirty flag).
+    async fn execute_panel_write_op(&mut self, op: PanelWriteOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.panel_write(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_panel_clear_op(&mut self, op: PanelClearOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.panel_clear(server, op).await
         };
         self.record_project_edit_run(run)
     }
@@ -6109,7 +6135,7 @@ mod tests {
             .unwrap();
         let product = VisualProduct::new(NodeId::new(3), 0);
         let target = ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
-            ProjectNodeAddress::new(TreePath::parse("/demo.project/orbit.shader").unwrap()),
+            ProjectNodeAddress::new(TreePath::parse("/demo.module/orbit.shader").unwrap()),
             NodeId::new(3),
         ));
         let action = UiAction::from_op(target.node_id(), ProjectEditorOp::Focus);
@@ -6368,7 +6394,7 @@ mod tests {
 
     fn single_product_project_view(node_id: u32) -> ProjectView {
         let revision = Revision::new(1);
-        let path = TreePath::parse("/demo.project/orbit.shader").unwrap();
+        let path = TreePath::parse("/demo.module/orbit.shader").unwrap();
         let state_shape = SlotShapeId::new(700);
         let mut view = ProjectView::new();
         view.tree.insert(TreeEntryView::new(

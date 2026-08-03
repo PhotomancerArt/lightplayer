@@ -297,7 +297,7 @@
           "type": "integer"
         },
         "kind": {
-          "const": "Project"
+          "const": "Module"
         },
         "name": {
           "type": "string"
@@ -385,7 +385,17 @@
         },
         "controls": {
           "additionalProperties": false,
-          "properties": {},
+          "properties": {
+            "rate": {
+              "type": "number"
+            },
+            "running": {
+              "type": "boolean"
+            },
+            "scrub_offset_seconds": {
+              "type": "number"
+            }
+          },
           "type": "object"
         },
         "kind": {

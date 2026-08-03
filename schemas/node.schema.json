@@ -108,6 +108,24 @@
       },
       "type": "object"
     },
+    "lpc_model::nodes::module::channel_meta_def::ChannelMetaDef": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "lpc_model::nodes::output::output_channel_def::OutputChannelDef": {
       "additionalProperties": false,
       "properties": {
@@ -195,6 +213,24 @@
             "type": "integer"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::provenance_def::ProvenanceDef": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "created": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -305,16 +341,26 @@
     {
       "additionalProperties": false,
       "properties": {
-        "format": {
-          "maximum": 4294967295,
-          "minimum": 0,
-          "type": "integer"
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "exports": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "kind": {
-          "const": "Project"
+          "const": "Module"
         },
-        "name": {
-          "type": "string"
+        "meta": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::module::channel_meta_def::ChannelMetaDef"
+          },
+          "type": "object"
         },
         "nodes": {
           "additionalProperties": {
@@ -348,8 +394,8 @@
           },
           "type": "object"
         },
-        "uid": {
-          "type": "string"
+        "provenance": {
+          "$ref": "#/$defs/lpc_model::nodes::provenance_def::ProvenanceDef"
         }
       },
       "required": [

@@ -4,7 +4,10 @@
       {
         "default_bind": "bus:visual.out",
         "name": "output",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },
@@ -23,7 +26,10 @@
       },
       {
         "name": "entry_time",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },
@@ -40,7 +46,10 @@
       },
       {
         "name": "entry_progress",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },
@@ -57,7 +66,10 @@
       },
       {
         "name": "active_entry",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },

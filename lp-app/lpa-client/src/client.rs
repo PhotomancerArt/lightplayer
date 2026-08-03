@@ -456,6 +456,48 @@ where
         }
     }
 
+    /// Engage (or update) a panel writer at `(scope, channel)` — the
+    /// runtime command channel, so nothing is staged and nothing turns
+    /// dirty. A stale gesture comes back as a normal `Rejected`.
+    pub async fn project_panel_write(
+        &mut self,
+        handle: WireProjectHandle,
+        request: lpc_wire::WirePanelWriteRequest,
+    ) -> ClientResult<ClientOutcome<lpc_wire::WirePanelCommandResponse>> {
+        let response = self
+            .project_command(handle, WireProjectCommand::PanelWrite { request })
+            .await?;
+        match response.value {
+            WireProjectCommandResponse::PanelWrite { response: value } => {
+                Ok(ClientOutcome::new(value, response.events))
+            }
+            other => Err(ClientError::unexpected_response(
+                "project.panel_write",
+                other,
+            )),
+        }
+    }
+
+    /// Clear engaged panel writers: one control, one scope, or everything.
+    pub async fn project_panel_clear(
+        &mut self,
+        handle: WireProjectHandle,
+        request: lpc_wire::WirePanelClearRequest,
+    ) -> ClientResult<ClientOutcome<lpc_wire::WirePanelCommandResponse>> {
+        let response = self
+            .project_command(handle, WireProjectCommand::PanelClear { request })
+            .await?;
+        match response.value {
+            WireProjectCommandResponse::PanelClear { response: value } => {
+                Ok(ClientOutcome::new(value, response.events))
+            }
+            other => Err(ClientError::unexpected_response(
+                "project.panel_clear",
+                other,
+            )),
+        }
+    }
+
     /// Dispatch a runtime node command (playlist activate-entry, future sim
     /// pokes) and return the server's accepted/rejected outcome.
     pub async fn project_node_command(

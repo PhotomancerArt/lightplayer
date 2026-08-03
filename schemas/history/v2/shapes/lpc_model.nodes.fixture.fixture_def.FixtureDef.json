@@ -353,7 +353,7 @@
             "some": {
               "value": {
                 "shape": {
-                  "editor": "power",
+                  "editor": "plain",
                   "id": 1801252664,
                   "meta": {
                     "description": "Lamp type and supply budget used to limit output current.",

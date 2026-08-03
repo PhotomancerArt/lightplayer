@@ -35,8 +35,8 @@ pub const DEFAULT_WAIT_TIMEOUT_SECS: u64 = 30;
 enum RunEvidence {
     /// No settled state yet: keep polling.
     Pending,
-    /// The project rendered at least one frame with no node error observed
-    /// in the same read.
+    /// The project rendered past the compile window with no node error
+    /// observed in the same read.
     Running,
     /// A node (e.g. a shader) reported a definitive failure. Terminal: do
     /// not keep polling.
@@ -117,7 +117,15 @@ fn evaluate_run_evidence(events: &[ProjectReadEvent]) -> RunEvidence {
                 event: ProjectReadQueryEvent::Runtime(runtime),
                 ..
             } => {
-                if runtime.project.frame_num > 0 {
+                // Frame 1 proves nothing: shader compiles defer one frame
+                // for the memory-pressure compile window (ADR
+                // 2026-08-03-memory-pressure-at-compile-safe-points), so the
+                // first frame renders fallback before any compile attempt.
+                // By the end of frame 2 every initially-demanded shader has
+                // made its attempt, and a failure is on its node status —
+                // which this scan returns as `Error` before `Running` is
+                // ever produced, wherever it appears in the stream.
+                if runtime.project.frame_num > 1 {
                     rendered = true;
                 }
             }
@@ -209,8 +217,14 @@ mod tests {
     }
 
     #[test]
-    fn running_once_a_frame_has_rendered() {
+    fn frame_one_is_still_pending_it_precedes_the_compile_window() {
         let events = vec![runtime_event(3, 1)];
+        assert_eq!(evaluate_run_evidence(&events), RunEvidence::Pending);
+    }
+
+    #[test]
+    fn running_once_a_frame_past_the_compile_window_has_rendered() {
+        let events = vec![runtime_event(3, 2)];
         assert_eq!(evaluate_run_evidence(&events), RunEvidence::Running);
     }
 
@@ -251,7 +265,7 @@ mod tests {
 
         let events = vec![
             node_status_event(1, NodeRuntimeStatus::Warn("slow frame".into())),
-            runtime_event(3, 1),
+            runtime_event(3, 2),
         ];
         assert_eq!(evaluate_run_evidence(&events), RunEvidence::Running);
     }

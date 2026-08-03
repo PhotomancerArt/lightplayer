@@ -200,7 +200,10 @@ mod tests {
     }
 
     fn id(table: &mut QueryInternTable, name: &str) -> QueryId {
-        table.intern(&QueryKey::Bus(ChannelName(String::from(name))))
+        table.intern(&QueryKey::Bus {
+            scope: None,
+            channel: ChannelName(String::from(name)),
+        })
     }
 
     #[test]

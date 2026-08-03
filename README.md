@@ -1,8 +1,10 @@
-# LightPlayer
+<p align="center">
+  <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup-marketing__lg.png" alt="LightPlayer" width="720">
+</p>
 
 LightPlayer is an open platform for LED art: author effects as GLSL shaders in a browser studio,
 preview them in a built-in simulator, and run them on real hardware — where they are JIT-compiled
-to native RISC-V code on the device itself.
+to native code on the device itself.
 
 **Try it now at [lightplayer.app](https://lightplayer.app)** — the Studio runs entirely in your
 browser, and the built-in simulator means you don't need any hardware to start playing.
@@ -11,13 +13,10 @@ browser, and the built-in simulator means you don't need any hardware to start p
 
 ![Studio home — the simulator and devices running projects, your library, and examples](lp-app/lpa-studio-web/story-images/studio__readme__home-gallery__lg.png)
 
-*Screenshots are CI-maintained UI captures from the story test suite — they update automatically
-as the app changes.*
-
 **What makes it different:**
 
-- **GLSL, compiled on the device.** A full compiler stack (GLSL → LPIR → native RV32) runs on the
-  microcontroller, executing shaders in Q16.16 fixed point — no floating-point unit required.
+- **GLSL, compiled on the device.** A full compiler stack (GLSL → LPIR → native machine code) runs
+  on the microcontroller, executing shaders in Q16.16 fixed point — no floating-point unit required.
 - **Studio in your browser.** Live previews, node-based project editing, and AI-assisted shader
   authoring (bring your own API key). The built-in simulator runs the real firmware as a WASM
   worker — no hardware needed to try everything.
@@ -31,7 +30,7 @@ as the app changes.*
 
 LightPlayer is in **alpha**. A determined tester can get real value today: author GLSL effects in
 the browser studio, run them in the simulator without hardware, and drive WS2812-class strips from
-an ESP32-C6 over USB. Expect rough edges and breaking changes — there are no project-format or
+an ESP32-family board over USB. Expect rough edges and breaking changes — there are no project-format or
 protocol compatibility promises yet. The Studio requires a Chromium-based browser (it uses
 WebSerial and OPFS). Issue reports are welcome.
 
@@ -64,9 +63,13 @@ just demo
 just demo -- <example-name>   # run other examples
 ```
 
-# Run on hardware (ESP32-C6)
+# Run on hardware
 
-To flash firmware, push the `examples/basic` project over USB serial, and run it on real hardware:
+LightPlayer runs on ESP32-family boards — ESP32-C6, ESP32-S3, and classic ESP32 — with the
+supported-board list at **[lightplayer.app/#/boards](https://lightplayer.app/#/boards)**.
+
+The quickest demo path uses an ESP32-C6. To flash firmware, push the `examples/basic` project over
+USB serial, and run it on real hardware:
 
 ```bash
 just demo-esp32c6-host

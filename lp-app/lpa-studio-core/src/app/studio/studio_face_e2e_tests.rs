@@ -489,6 +489,195 @@ fn playlist_with_unresolvable_active_entry_keeps_all_children() {
     );
 }
 
+#[test]
+fn a_bound_panel_uniform_keeps_an_interactive_control() {
+    // The §4.1 regression shape (fyeah-sign): `glow` is panel-flagged AND
+    // bound to `bus:glow`, `speed` is panel-flagged and unbound. The bound
+    // knob must stay a working control — it derives a panel target (the
+    // command-channel write path) AND keeps the editable, addressed authored
+    // default underneath (modules.md R6: the authored default is what an
+    // unwritten channel resolves to, so it stays reachable). Nothing pinned
+    // interactivity before: the knob rendered correctly bound and dispatched
+    // nothing when turned.
+    let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let shader = node_by_kind(&snapshot, "Shader");
+    let Some(UiNodeFace::Shader(face)) = &shader.face else {
+        panic!("shader node derives a shader face, got {:?}", shader.face);
+    };
+
+    // The unbound control: the ordinary slot-edit path, as a baseline.
+    let speed = control_labeled(face, "Speed");
+    assert!(speed.panel_target.is_none(), "unbound ⇒ no panel target");
+    assert!(speed.state.editable, "unbound control is editable");
+    assert!(speed.address.is_some(), "unbound control is addressed");
+
+    // The bound control derives its (scope, channel) write target…
+    let glow = control_labeled(face, "Glow");
+    assert!(
+        glow.panel_target.is_some(),
+        "a bound panel uniform derives a panel target end to end; aspects: {:?}",
+        glow.aspects
+    );
+    assert!(glow.bound(), "the control wears the bound treatment");
+
+    // …AND is still interactive. The widgets gate every gesture on an
+    // editable state plus a dispatch route, so a readonly state or a missing
+    // address+target is EXACTLY the inert-knob bug.
+    assert!(
+        glow.state.editable,
+        "a bound panel control must stay editable — a readonly state makes \
+         the widget dispatch nothing: {:?}",
+        glow.state
+    );
+    assert_eq!(
+        glow.address
+            .as_ref()
+            .map(|address| address.path.to_string()),
+        Some("consumed[glow].default.some".to_string()),
+        "the authored default stays addressed under the binding (R6 \
+         fallback + advanced-editor edits)"
+    );
+    assert_eq!(
+        glow.value.kind,
+        UiSlotValueKind::F32(0.5),
+        "the authored default value survives the binding"
+    );
+}
+
+#[test]
+fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
+    // The EXACT fyeah-sign shape: the glow shader is not a root child — it
+    // is playlist entry 1's node, so its card renders as the playlist's
+    // child and its binding resolves inside the entry's sink scope. This is
+    // the placement Yona actually turned the inert knob in; the flat-child
+    // case above passes on its own.
+    let server = Rc::new(RefCell::new(playlist_bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    assert_eq!(playlist.children.len(), 1, "the idle entry renders");
+    let idle = &playlist.children[0];
+    let Some(UiNodeFace::Shader(face)) = &idle.face else {
+        panic!("idle child derives a shader face, got {:?}", idle.face);
+    };
+
+    let glow = control_labeled(face, "Glow");
+    assert!(
+        glow.panel_target.is_some(),
+        "a bound panel uniform inside a playlist entry derives a panel \
+         target; aspects: {:?}",
+        glow.aspects
+    );
+    assert!(
+        glow.state.editable,
+        "the bound control stays editable inside the entry: {:?}",
+        glow.state
+    );
+    assert_eq!(
+        glow.address
+            .as_ref()
+            .map(|address| address.path.to_string()),
+        Some("consumed[glow].default.some".to_string()),
+        "the authored default stays addressed under the binding"
+    );
+    assert_eq!(glow.value.kind, UiSlotValueKind::F32(0.5));
+
+    // Turn the knob for real: the EXACT op the widget dispatches
+    // (`panel_or_slot_action` with a target present) must engage a writer
+    // on the real server and flow back into the control as the live
+    // reading. This is the interactivity assertion §4.1 was missing —
+    // everything above can hold while a turned knob still does nothing.
+    let target = glow.panel_target.clone().expect("checked above");
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelWriteOp {
+            scope: target.scope,
+            channel: target.channel.clone(),
+            value: LpValue::F32(0.9),
+            ttl_ms: None,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel write emits a snapshot");
+
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    let Some(UiNodeFace::Shader(face)) = &playlist.children[0].face else {
+        panic!("idle child keeps its face");
+    };
+    let glow = control_labeled(face, "Glow");
+    assert_eq!(
+        glow.live_value.as_deref(),
+        Some("0.9"),
+        "the engaged writer's value flows back as the live reading"
+    );
+    let target = glow.panel_target.clone().expect("target survives");
+    assert!(
+        target.engaged,
+        "the control reads engaged (drives the clear affordance)"
+    );
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (0, 0),
+        "a panel write stages nothing in the overlay"
+    );
+
+    // …and the clear releases it (the ↺ path).
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Channel {
+                scope: target.scope,
+                channel: target.channel.clone(),
+            },
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("clear emits a snapshot");
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    let Some(UiNodeFace::Shader(face)) = &playlist.children[0].face else {
+        panic!("idle child keeps its face");
+    };
+    let glow = control_labeled(face, "Glow");
+    assert!(
+        !glow.panel_target.as_ref().expect("target survives").engaged,
+        "clearing releases the writer"
+    );
+}
+
 // -- harness -----------------------------------------------------------------
 
 const PROJECT_DIR: &str = "/projects/face-e2e";
@@ -509,9 +698,9 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = r#"{
-  "kind": "Project",
-  "format": 3,
+    let project_json = "{\n  \"format\": 4\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -581,6 +770,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let files: &[(&str, &str)] = &[
         ("project.json", project_json),
+        ("module.json", module_json),
         ("clock.json", clock_json),
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),
@@ -597,6 +787,224 @@ fn face_e2e_server() -> LpServer {
     server
         .load_project(PROJECT_DIR.as_path())
         .expect("load face-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
+const BOUND_GLOW_PROJECT_DIR: &str = "/projects/bound-glow-e2e";
+
+/// The fyeah-sign shape: `glow` panel-flagged AND bound to `bus:glow`,
+/// `speed` panel-flagged and unbound. Both uniforms feed the shader so the
+/// compile stays honest.
+const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform float glow;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, glow, 0.5, 1.0);\n}\n";
+
+fn bound_glow_e2e_server() -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+
+    let project_json = "{\n  \"format\": 4\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "output": { "ref": "./output.json" }
+  }
+}"#;
+    let clock_json = r#"{
+  "kind": "Clock",
+  "controls": { "running": true, "rate": 1.0 }
+}"#;
+    let shader_json = r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "bindings": {
+    "glow": { "source": "bus:glow" },
+    "output": { "target": "bus:visual.out" }
+  },
+  "consumed": {
+    "speed": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "label": "Speed",
+      "description": "Animation speed multiplier",
+      "panel": true
+    },
+    "glow": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "label": "Glow",
+      "description": "Rainbow highlight intensity",
+      "panel": true
+    }
+  }
+}"#;
+    let fixture_json = r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 4, "height": 4 },
+  "bindings": {
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
+  }
+}"#;
+    let output_json = r#"{
+  "kind": "Output",
+  "channels": {
+    "0": { "endpoint": "ws281x:local:D10" }
+  },
+  "bindings": {
+    "input": { "source": "bus:control.out" }
+  }
+}"#;
+    let files: &[(&str, &str)] = &[
+        ("project.json", project_json),
+        ("module.json", module_json),
+        ("clock.json", clock_json),
+        ("shader.json", shader_json),
+        ("fixture.json", fixture_json),
+        ("output.json", output_json),
+        ("shader.glsl", BOUND_GLOW_SHADER),
+    ];
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(
+                format!("{BOUND_GLOW_PROJECT_DIR}/{name}").as_path(),
+                body.as_bytes(),
+            )
+            .expect("write project file");
+    }
+    server
+        .load_project(BOUND_GLOW_PROJECT_DIR.as_path())
+        .expect("load bound-glow-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
+const PLAYLIST_BOUND_GLOW_DIR: &str = "/projects/playlist-bound-glow-e2e";
+
+/// fyeah-sign's nesting: the bound-glow shader is playlist entry 1's node.
+fn playlist_bound_glow_e2e_server() -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+
+    let project_json = "{\n  \"format\": 4\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "playlist": { "ref": "./playlist.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "output": { "ref": "./output.json" }
+  }
+}"#;
+    let clock_json = r#"{
+  "kind": "Clock",
+  "controls": { "running": true, "rate": 1.0 }
+}"#;
+    let playlist_json = r#"{
+  "kind": "Playlist",
+  "bindings": {
+    "time": { "source": "bus:time" }
+  },
+  "idle_entry": 1,
+  "entries": {
+    "1": { "name": "idle", "node": { "ref": "./idle.json" } }
+  }
+}"#;
+    let idle_json = r#"{
+  "kind": "Shader",
+  "source": "idle.glsl",
+  "bindings": {
+    "glow": { "source": "bus:glow" }
+  },
+  "consumed": {
+    "speed": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 3,
+      "label": "Speed",
+      "description": "Animation speed multiplier",
+      "panel": true
+    },
+    "glow": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "label": "Glow",
+      "description": "Rainbow highlight intensity",
+      "panel": true
+    }
+  }
+}"#;
+    let fixture_json = r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 4, "height": 4 },
+  "bindings": {
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
+  }
+}"#;
+    let output_json = r#"{
+  "kind": "Output",
+  "channels": {
+    "0": { "endpoint": "ws281x:local:D10" }
+  },
+  "bindings": {
+    "input": { "source": "bus:control.out" }
+  }
+}"#;
+    let files: &[(&str, &str)] = &[
+        ("project.json", project_json),
+        ("module.json", module_json),
+        ("clock.json", clock_json),
+        ("playlist.json", playlist_json),
+        ("idle.json", idle_json),
+        ("idle.glsl", BOUND_GLOW_SHADER),
+        ("fixture.json", fixture_json),
+        ("output.json", output_json),
+    ];
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(
+                format!("{PLAYLIST_BOUND_GLOW_DIR}/{name}").as_path(),
+                body.as_bytes(),
+            )
+            .expect("write project file");
+    }
+    server
+        .load_project(PLAYLIST_BOUND_GLOW_DIR.as_path())
+        .expect("load playlist-bound-glow-e2e project");
     server.advance_frame(16).expect("tick");
     server
 }
@@ -619,9 +1027,9 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = r#"{
-  "kind": "Project",
-  "format": 3,
+    let project_json = "{\n  \"format\": 4\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "playlist": { "ref": "./playlist.json" },
@@ -676,6 +1084,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let files: &[(&str, &str)] = &[
         ("project.json", project_json),
+        ("module.json", module_json),
         ("clock.json", clock_json),
         ("playlist.json", playlist_json.as_str()),
         ("idle.json", idle_json),
@@ -718,9 +1127,9 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = r#"{
-  "kind": "Project",
-  "format": 3,
+    let project_json = "{\n  \"format\": 4\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -770,6 +1179,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let files: &[(&str, &str)] = &[
         ("project.json", project_json),
+        ("module.json", module_json),
         ("clock.json", clock_json),
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),

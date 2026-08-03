@@ -39,8 +39,8 @@ mod ui_slot_value;
 
 pub use face::{
     UiFixtureFace, UiFixturePower, UiNodeFace, UiOutputBoardFacts, UiOutputChannelRow,
-    UiOutputFace, UiOutputPin, UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
-    UiShaderFace,
+    UiOutputFace, UiOutputPin, UiPanelControl, UiPanelTarget, UiPanelWidget, UiPlaylistEntry,
+    UiPlaylistFace, UiShaderFace,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};

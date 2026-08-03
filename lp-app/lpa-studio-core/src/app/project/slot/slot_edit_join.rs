@@ -443,7 +443,7 @@ mod tests {
     use super::*;
 
     fn node() -> ProjectNodeAddress {
-        ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap()
+        ProjectNodeAddress::parse("/demo.module/pixels.fixture").unwrap()
     }
 
     fn at(path: &str) -> ProjectSlotAddress {
@@ -569,7 +569,7 @@ mod tests {
         assert!(debug_entry.summary.is_clean());
         assert!(
             join.dirty_summary_for_node(
-                &ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap()
+                &ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap()
             )
             .is_clean(),
             "entries only count for their own node"
@@ -581,7 +581,7 @@ mod tests {
         // Two Debug overrides on this node, one persisted edit, one Debug
         // override on ANOTHER node: the debug channel counts three overall
         // and two here, while the dirty summary sees only the persisted one.
-        let other = ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap();
+        let other = ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap();
         let buffer = BTreeMap::from([(at("brightness"), PendingEdit::pending(LpValue::F32(0.9)))]);
         let overlay = BTreeMap::from([
             (
@@ -676,7 +676,7 @@ mod tests {
         assert_eq!(join.unmapped_asset_dirty_summary(), one_persisted);
         assert!(
             join.dirty_summary_for_node(
-                &ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap()
+                &ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap()
             )
             .is_clean(),
             "asset entries only count for their owning node"

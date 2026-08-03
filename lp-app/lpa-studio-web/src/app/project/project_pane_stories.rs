@@ -448,7 +448,7 @@ fn pending_edit(
     phase: UiPendingEditPhase,
 ) -> UiPendingEdit {
     let address = ProjectSlotAddress::new(
-        ProjectNodeAddress::parse("/demo.project/orbit.shader").expect("valid story node address"),
+        ProjectNodeAddress::parse("/demo.module/orbit.shader").expect("valid story node address"),
         ProjectSlotRoot::def(),
         SlotPath::parse(path).expect("valid story slot path"),
     );

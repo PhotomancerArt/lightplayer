@@ -398,7 +398,7 @@ mod tests {
 
     fn entry_address(path: &str) -> ProjectSlotAddress {
         ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(split_map_entry(&entry_address("mapping.paths")), None);
         assert_eq!(split_map_entry(&entry_address("paths[3].diameter")), None);
         let root = ProjectSlotAddress::root(
-            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
             ProjectSlotRoot::def(),
         );
         assert_eq!(split_map_entry(&root), None);

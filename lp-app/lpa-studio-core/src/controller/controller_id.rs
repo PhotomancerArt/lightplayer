@@ -161,13 +161,13 @@ mod tests {
     fn child_accepts_model_path_punctuation() {
         let node_id = ControllerId::new("studio|project")
             .child("path")
-            .child("/demo.project/orbit.shader")
+            .child("/demo.module/orbit.shader")
             .child("slot")
             .child(r#"params["phase.offset"].label"#);
 
         assert_eq!(
             node_id.as_str(),
-            r#"studio|project|path|/demo.project/orbit.shader|slot|params["phase.offset"].label"#
+            r#"studio|project|path|/demo.module/orbit.shader|slot|params["phase.offset"].label"#
         );
     }
 

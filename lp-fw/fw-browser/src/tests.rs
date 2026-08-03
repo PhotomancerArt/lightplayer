@@ -647,14 +647,15 @@ fn load_project_tolerates_library_artifacts() {
         let project_fs = build_smoke_project();
         for (path, mut content) in collect_project_files(&project_fs.borrow()) {
             if add_uid && path == "project.json" {
-                // canonical insertion: kind stays first (streaming codec)
+                // canonical insertion: format stays first, uid second
+                // (ProjectManifest::write_json field order).
                 let text = String::from_utf8(content).unwrap();
                 let patched = text.replacen(
-                    "\"kind\": \"Project\",",
-                    "\"kind\": \"Project\",\n  \"uid\": \"prj_0000000000000042\",",
+                    "\"format\": 4",
+                    "\"format\": 4,\n  \"uid\": \"prj_0000000000000042\"",
                     1,
                 );
-                assert_ne!(patched, text, "kind anchor not found in manifest");
+                assert_ne!(patched, text, "format anchor not found in manifest");
                 content = patched.into_bytes();
             }
             let full_path = format!("/projects/{label}/{path}").as_path_buf();

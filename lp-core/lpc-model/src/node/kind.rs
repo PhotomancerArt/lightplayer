@@ -5,7 +5,7 @@
 /// being removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum NodeKind {
-    Project,
+    Module,
     Button,
     Clock,
     Texture,
@@ -24,7 +24,7 @@ impl NodeKind {
     /// variant without extending it is caught by
     /// [`tests::all_is_total_and_in_declaration_order`].
     pub const ALL: [NodeKind; 11] = [
-        NodeKind::Project,
+        NodeKind::Module,
         NodeKind::Button,
         NodeKind::Clock,
         NodeKind::Texture,
@@ -49,7 +49,7 @@ mod tests {
     fn all_is_total_and_in_declaration_order() {
         const fn index_in_all(kind: NodeKind) -> usize {
             match kind {
-                NodeKind::Project => 0,
+                NodeKind::Module => 0,
                 NodeKind::Button => 1,
                 NodeKind::Clock => 2,
                 NodeKind::Texture => 3,

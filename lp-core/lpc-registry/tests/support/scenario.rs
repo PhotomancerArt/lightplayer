@@ -32,7 +32,7 @@ impl RegistryScenario {
             shapes: SlotShapeRegistry::default(),
             next_revision: 1,
         };
-        let load = scenario.load_root("/project.json");
+        let load = scenario.load_root("/module.json");
         (scenario, load)
     }
 
@@ -46,6 +46,10 @@ impl RegistryScenario {
 
     pub fn fs(&self) -> &LpFsMemory {
         &self.fs
+    }
+
+    pub fn write_container_manifest(&mut self) {
+        self.write_file("/project.json", b"{\n  \"format\": 4\n}\n");
     }
 
     pub fn write_file(&mut self, path: &str, bytes: impl AsRef<[u8]>) {

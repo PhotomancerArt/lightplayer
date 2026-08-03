@@ -22,7 +22,9 @@
             "fields": [
               {
                 "name": "running",
-                "role": "debug",
+                "policy": {
+                  "persistence": "transient"
+                },
                 "shape": {
                   "value": {
                     "shape": {
@@ -36,7 +38,9 @@
               },
               {
                 "name": "rate",
-                "role": "debug",
+                "policy": {
+                  "persistence": "transient"
+                },
                 "shape": {
                   "value": {
                     "shape": {
@@ -56,7 +60,9 @@
               },
               {
                 "name": "scrub_offset_seconds",
-                "role": "debug",
+                "policy": {
+                  "persistence": "transient"
+                },
                 "shape": {
                   "value": {
                     "shape": {

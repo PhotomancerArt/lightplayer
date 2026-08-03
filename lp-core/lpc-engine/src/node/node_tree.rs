@@ -306,6 +306,178 @@ impl<N> RuntimeNodeTree<N> {
         self.binding_index.channels()
     }
 
+    /// The bus scope `node` inhabits (modules.md R1). `None` for the root
+    /// module — no scope contains it — and for unknown nodes. Answered
+    /// from structural entry state, so it holds for `Pending`/`Failed`
+    /// nodes and across payload reattach.
+    pub fn scope_of(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        self.get(node).and_then(|entry| entry.scope)
+    }
+
+    /// The module scope `node` introduces around its project children,
+    /// when it is a module-kinded node (the root always introduces the
+    /// root scope). Playlist nodes introduce per-entry SINK scopes
+    /// instead — those surface through their children's [`Self::scope_of`].
+    pub fn scope_introduced_by(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        self.get(node)
+            .filter(|entry| entry.introduces_scope)
+            .map(|entry| crate::node::ScopeRef::Module { owner: entry.id })
+    }
+
+    /// Every scope in the tree: each introducer's module scope plus every
+    /// sink scope some node inhabits. Sorted and deduplicated so callers
+    /// get a stable listing.
+    pub fn scopes(&self) -> Vec<crate::node::ScopeRef> {
+        let mut scopes = Vec::new();
+        for entry in self.entries() {
+            if entry.introduces_scope {
+                scopes.push(crate::node::ScopeRef::Module { owner: entry.id });
+            }
+            if let Some(scope @ crate::node::ScopeRef::Sink { .. }) = entry.scope {
+                scopes.push(scope);
+            }
+        }
+        scopes.sort();
+        scopes.dedup();
+        scopes
+    }
+
+    /// The scope a node's bus READS resolve from: scope INTRODUCERS read
+    /// inward (R7 — a module republishing an inner channel reads it from
+    /// the scope it introduces; the root's unscoped reads are root-scope
+    /// reads); every other node reads from the scope it inhabits.
+    pub fn bus_read_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        self.scope_introduced_by(node)
+            .or_else(|| self.node_scope(node))
+    }
+
+    /// The channels listed in `scope` (R3 — a public slot's channel exists
+    /// in the slot's scope): a publishing endpoint lists where the write
+    /// lands (the owner's inhabited scope, R4), a consuming endpoint where
+    /// its resolution starts (the owner's read scope). Listing only —
+    /// resolution is the scoped-key walk.
+    pub fn scope_channels(
+        &self,
+        scope: crate::node::ScopeRef,
+    ) -> Vec<(ChannelName, lpc_model::Kind)> {
+        let mut channels: Vec<(ChannelName, lpc_model::Kind)> = Vec::new();
+        for binding in self.bindings() {
+            if let crate::dataflow::binding::BindingTarget::BusChannel(channel) = &binding.target {
+                if self.node_scope(binding.owner) == Some(scope)
+                    && !channels.iter().any(|(existing, _)| existing == channel)
+                {
+                    channels.push((channel.clone(), binding.kind));
+                }
+            }
+            if let crate::dataflow::binding::BindingSource::BusChannel(channel) = &binding.source {
+                if self.bus_read_scope(binding.owner) == Some(scope)
+                    && !channels.iter().any(|(existing, _)| existing == channel)
+                {
+                    channels.push((channel.clone(), binding.kind));
+                }
+            }
+        }
+        channels.sort_by(|(a, _), (b, _)| a.cmp(b));
+        channels
+    }
+
+    /// Providers of `channel` whose write lands in `scope` — the LISTING
+    /// counterpart of the shadowing walk, for probes showing one scope's
+    /// wiring.
+    pub fn providers_for_bus_in_scope(
+        &self,
+        scope: crate::node::ScopeRef,
+        channel: &ChannelName,
+    ) -> Vec<(BindingRef, &BindingEntry)> {
+        self.providers_for_bus(channel)
+            .into_iter()
+            .filter(|(_, entry)| self.node_scope(entry.owner) == Some(scope))
+            .collect()
+    }
+
+    /// Consumers of `channel` whose read starts in `scope`.
+    pub fn consumers_for_bus_in_scope(
+        &self,
+        scope: crate::node::ScopeRef,
+        channel: &ChannelName,
+    ) -> Vec<(BindingRef, &BindingEntry)> {
+        self.consumers_for_bus(channel)
+            .into_iter()
+            .filter(|(_, entry)| self.bus_read_scope(entry.owner) == Some(scope))
+            .collect()
+    }
+
+    /// The bus scope `node` writes into and reads from: its inhabited
+    /// scope (R4 — produces write locally; module nodes reside in their
+    /// PARENT scope, so their own endpoints land there). The root module
+    /// inhabits nothing and operates in the scope it introduces.
+    pub fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        let entry = self.get(node)?;
+        if let Some(scope) = entry.scope {
+            return Some(scope);
+        }
+        entry
+            .introduces_scope
+            .then_some(crate::node::ScopeRef::Module { owner: entry.id })
+    }
+
+    /// The scope enclosing `scope`: for a module scope, the scope its
+    /// owner inhabits; for a playlist entry's sink scope, the playlist's
+    /// scope. `None` at the root.
+    pub fn parent_scope(&self, scope: crate::node::ScopeRef) -> Option<crate::node::ScopeRef> {
+        match scope {
+            crate::node::ScopeRef::Module { owner } => self.get(owner)?.scope,
+            crate::node::ScopeRef::Sink { owner, .. } => self.node_scope(owner),
+        }
+    }
+
+    /// Writer-shadowing provider lookup (R5): the provider set for a bus
+    /// read performed from `scope` is the nearest enclosing scope with at
+    /// least one provider for the channel, walking outward from `scope` to
+    /// the root. Demand never walks INTO a scope, which is what keeps sink
+    /// scopes invisible to enclosing readers by construction (R2). A
+    /// scopeless read (`None`) answers with the flat provider set — the
+    /// pre-scope behavior test fakes rely on.
+    pub fn providers_for_bus_read(
+        &self,
+        scope: Option<crate::node::ScopeRef>,
+        channel: &ChannelName,
+    ) -> Vec<(BindingRef, &BindingEntry)> {
+        let Some(mut scope) = scope else {
+            return self.providers_for_bus(channel);
+        };
+        loop {
+            let candidates: Vec<(BindingRef, &BindingEntry)> = self
+                .binding_index
+                .bus_targets(channel)
+                .iter()
+                .copied()
+                .filter_map(|binding_ref| {
+                    binding_by_ref(&self.nodes, binding_ref).map(|entry| (binding_ref, entry))
+                })
+                .filter(|(_, entry)| self.node_scope(entry.owner) == Some(scope))
+                .collect();
+            if !candidates.is_empty() {
+                return candidates;
+            }
+            match self.parent_scope(scope) {
+                Some(parent) => scope = parent,
+                None => return Vec::new(),
+            }
+        }
+    }
+
+    /// The stable persisted identity of `scope` (`<scope-path>` — see
+    /// [`crate::node::ScopeRef::persist_path`] for the stability
+    /// rationale). `None` when the owner is unknown.
+    pub fn scope_persist_path(
+        &self,
+        scope: crate::node::ScopeRef,
+    ) -> Option<alloc::string::String> {
+        self.get(scope.owner())
+            .map(|entry| scope.persist_path(&entry.path))
+    }
+
     /// Resolve the binding for one consumed slot, if one exists.
     ///
     /// When multiple owners bind the same consumed slot, the owner closest to
