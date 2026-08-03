@@ -970,6 +970,10 @@ impl StudioController {
             None => self.gallery_connect_evidence(),
         };
         let device = crate::app::home::HomeDeviceEvidence {
+            session_key: self
+                .pool
+                .device_session()
+                .map(|session| session.id().to_string()),
             sync: self.device_sync().cloned(),
             link: self.device_state(),
             connect,

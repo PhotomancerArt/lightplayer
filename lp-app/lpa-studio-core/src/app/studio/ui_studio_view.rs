@@ -253,6 +253,7 @@ mod tests {
 
     fn card(uid: Option<&str>, state: RosterCardState) -> UiDeviceCard {
         UiDeviceCard {
+            session_key: None,
             uid: uid.map(str::to_string),
             name: "Board".to_string(),
             transport: "USB".to_string(),
