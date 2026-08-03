@@ -203,6 +203,42 @@ mod tests {
     }
 
     #[test]
+    fn heap_budget_matches_windowed_report_figures() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let meta_path = dir.path().join("meta.json");
+        std::fs::write(
+            &meta_path,
+            r#"{ "collectors": { "alloc": { "heap_start": 0, "heap_size": 1024 } }, "symbols": [] }"#,
+        )
+        .expect("write meta");
+
+        let trace_path = dir.path().join("heap-trace.jsonl");
+        let mut f = std::fs::File::create(&trace_path).expect("create trace");
+        for line in [
+            r#"{"t":"A","ptr":16,"sz":8,"ic":1,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"shader-compile","kind":"B","cycle":10,"ic":1}"#,
+            r#"{"t":"A","ptr":32,"sz":100,"ic":2,"frames":[],"free":0}"#,
+            r#"{"t":"D","ptr":16,"sz":8,"ic":3,"frames":[],"free":0}"#,
+            r#"{"t":"A","ptr":64,"sz":50,"ic":4,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"shader-compile","kind":"E","cycle":40,"ic":4}"#,
+        ] {
+            writeln!(f, "{line}").expect("write line");
+        }
+        drop(f);
+
+        let budget = super::heap_budget(&trace_path, &meta_path).expect("budget");
+        assert_eq!(budget.len(), 1);
+        let w = &budget[0];
+        assert_eq!(w.name, "shader-compile");
+        assert_eq!(w.open_count, 1);
+        assert_eq!(w.transient, 142);
+        assert_eq!(w.retained, 142);
+        assert_eq!(w.largest_alloc, 100);
+    }
+
+    #[test]
     fn resolve_static_symbol_is_demangled_and_shortened() {
         // v0-mangled (symbol still encodes legacy crate `lp_engine`): FixtureRuntime in lpc_engine::legacy, NodeRuntime in lpc_runtime
         let mangled = "_RNvXs_NtNtNtCs3HTnIBYoJaQ_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render";
@@ -433,6 +469,40 @@ impl Collector for AllocCollector {
 }
 
 const DEFAULT_REPORT_TOP: usize = 20;
+
+/// Machine-readable per-window budget figures, extracted from the same trace
+/// replay that renders the report. Consumed by the heap-budget ratchet gate
+/// (`just heap-budget-check`), which compares them against a checked-in
+/// measured record.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WindowBudget {
+    pub name: String,
+    pub open_count: u64,
+    /// Peak live bytes above the live-at-open baseline, maximised across
+    /// openings — the transient cost of whatever the window does.
+    pub transient: u64,
+    /// Live bytes at close minus at open, maximised across openings and
+    /// floored at zero — what the window leaves resident.
+    pub retained: u64,
+    /// Largest single allocation request seen inside the window.
+    pub largest_alloc: u32,
+}
+
+/// Replay the trace and return per-window budget figures in first-open order.
+pub fn heap_budget(trace_path: &Path, meta_path: &Path) -> io::Result<Vec<WindowBudget>> {
+    let report = analyze_heap_trace(trace_path, meta_path, 0)?;
+    Ok(report
+        .windows
+        .iter()
+        .map(|(name, w)| WindowBudget {
+            name: name.clone(),
+            open_count: w.open_count,
+            transient: w.transient,
+            retained: w.retained.max(0) as u64,
+            largest_alloc: w.largest_alloc,
+        })
+        .collect())
+}
 
 // --- Trace replay + stats (mirrors lp-cli profile heap analysis) ---
 
