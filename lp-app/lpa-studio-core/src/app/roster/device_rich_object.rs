@@ -79,6 +79,13 @@ pub struct DeviceRichInput<'a> {
     /// Studio's bundled firmware image, when the packaged manifest is on
     /// hand — the advisory chip comparison's other half.
     pub bundled_fw: Option<&'a BundledFirmware>,
+    /// Chip identity from passive/probe evidence — a Technical line even
+    /// before any firmware hello exists (gate-1 sitting, 2026-08-03: an
+    /// unflashed card's Technical tab identified nothing but "USB").
+    pub detected_chip: Option<&'a str>,
+    /// The port as the app can name it (endpoint label + grant short id).
+    /// Web Serial never exposes the OS path, so this is the whole truth.
+    pub port_label: Option<&'a str>,
     /// f64 epoch seconds for status-line recency copy.
     pub now_secs: f64,
 }
@@ -217,6 +224,19 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
     let mut lines = Vec::new();
     if let Some(uid) = input.uid {
         lines.push(RichLine::new("uid", uid));
+    }
+    // Everything knowable about an unprovisioned board rides here too
+    // (gate-1 sitting, 2026-08-03): before any firmware hello the tab
+    // showed only "transport USB", which identified nothing — with two
+    // boards attached, nothing on screen said which was which beyond the
+    // title. Web Serial never exposes the OS port path or manufacturer
+    // strings, so chip (boot banner / probe) + endpoint label (VID:PID +
+    // grant id) is the complete honest set.
+    if let Some(chip) = input.detected_chip {
+        lines.push(RichLine::new("chip", chip));
+    }
+    if let Some(port) = input.port_label {
+        lines.push(RichLine::new("port", port));
     }
     if !input.transport.is_empty() {
         lines.push(RichLine::new("transport", input.transport));
@@ -428,6 +448,42 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An UNFLASHED board's Technical tab identifies the device with
+    /// everything Web Serial can honestly say — chip + port label — not
+    /// just "transport USB" (gate-1 sitting, 2026-08-03: with two boards
+    /// attached, nothing beyond the title said which was which).
+    #[test]
+    fn an_unflashed_board_gets_chip_and_port_technical_lines() {
+        let state = RosterCardState::ReadyToSetUp;
+        let mut fixture = input(&state);
+        fixture.uid = None;
+        fixture.fw = None;
+        fixture.hardware = None;
+        fixture.project_name = None;
+        fixture.detected_chip = Some("esp32c6");
+        fixture.port_label = Some("ESP32 Serial (0x303a:0x1001) · port-2");
+
+        let view = device_rich_object(&fixture);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .expect("technical section exists pre-hello");
+        let lines: Vec<(&str, &str)> = technical
+            .lines
+            .iter()
+            .map(|line| (line.label.as_str(), line.value.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ("chip", "esp32c6"),
+                ("port", "ESP32 Serial (0x303a:0x1001) · port-2"),
+                ("transport", "USB"),
+            ]
+        );
+    }
 
     #[test]
     fn running_behind_live_device_sections_and_rollup() {
@@ -678,6 +734,8 @@ mod tests {
             fw: Some(&DEVICE_FW),
             hardware: Some(&DEVICE_HW),
             bundled_fw: None,
+            detected_chip: None,
+            port_label: None,
             now_secs: NOW,
         }
     }

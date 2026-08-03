@@ -43,6 +43,11 @@ pub struct UiDeviceCard {
     /// board picker leads with matching boards. Distinct from
     /// `hardware.board_id` (the device's own post-provision report).
     pub detected_chip: Option<String>,
+    /// The port as the app can name it (endpoint label + grant short id,
+    /// e.g. "ESP32 Serial (0x303a:0x1001) · port-2") — the Technical tab's
+    /// identification line. `None` on registry (offline) cards and stubs.
+    /// Web Serial never exposes the OS path; this is the whole truth.
+    pub port_label: Option<String>,
     /// Device-level safe-mode output ceiling (0–255) reported by the live
     /// session's heartbeat. A power cycle is the only exit, so the card
     /// must both flag the state AND say how to leave it. `None` when the

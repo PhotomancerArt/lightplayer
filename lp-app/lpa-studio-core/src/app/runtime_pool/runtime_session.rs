@@ -106,6 +106,13 @@ pub enum DeviceHandle {
         /// buffered per session (runtime-pool P2) and drained into the
         /// studio log ring by dispatch settles and status heartbeats.
         console_logs: Rc<RefCell<Vec<UiLogDraft>>>,
+        /// The endpoint's human label as the connect flow knew it
+        /// ("ESP32 Serial (0x303a:0x1001)") — captured at connect because
+        /// Web Serial exposes only VID:PID, and this string is everything
+        /// the browser will ever say about which physical port this is.
+        /// The card's Technical tab renders it (gate-1 sitting,
+        /// 2026-08-03: an unflashed card showed nothing identifying).
+        endpoint_label: String,
     },
     #[cfg(test)]
     Stub(StubDevice),
@@ -134,6 +141,15 @@ impl DeviceHandle {
     pub fn session(&self) -> Option<&DeviceSession> {
         match self {
             Self::Session { session, .. } => Some(session),
+            #[cfg(test)]
+            Self::Stub(_) => None,
+        }
+    }
+
+    /// The endpoint's human label captured at connect (`None` for stubs).
+    pub fn endpoint_label(&self) -> Option<&str> {
+        match self {
+            Self::Session { endpoint_label, .. } => Some(endpoint_label),
             #[cfg(test)]
             Self::Stub(_) => None,
         }
@@ -295,6 +311,17 @@ impl RuntimeSession {
     pub fn hardware_session(&self) -> Option<&DeviceSession> {
         match &self.payload {
             RuntimePayload::Device(handle) => handle.session(),
+            RuntimePayload::Sim(_) => None,
+        }
+    }
+
+    /// The endpoint's human label captured at connect, when this is a
+    /// device session holding a live handle. Everything Web Serial will
+    /// ever say about which physical port this is (VID:PID — the OS path
+    /// is not exposed to pages).
+    pub fn endpoint_label(&self) -> Option<&str> {
+        match &self.payload {
+            RuntimePayload::Device(handle) => handle.endpoint_label(),
             RuntimePayload::Sim(_) => None,
         }
     }
