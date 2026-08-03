@@ -1363,6 +1363,13 @@ impl StudioController {
                             },
                         }));
                     }
+                    self.record_device_event(
+                        Some(&id.to_string()),
+                        None,
+                        DeviceEventKind::Sync {
+                            content: "unreadable".to_string(),
+                        },
+                    );
                     self.mark_dirty();
                     return;
                 }
@@ -1373,6 +1380,13 @@ impl StudioController {
         }
         match self.absorb_device_pull(pulled).await {
             Ok(state) => {
+                self.record_device_event(
+                    Some(&id.to_string()),
+                    None,
+                    DeviceEventKind::Sync {
+                        content: device_content_label(&state.content).to_string(),
+                    },
+                );
                 if let Some(session) = self.device_session_by_id(id) {
                     session.set_device_sync(Some(state));
                 }
@@ -5146,6 +5160,18 @@ fn runtime_kind_for(provider_id: LinkProviderKind) -> crate::RuntimeKind {
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough
+/// A pulled device content's classification as the event trace spells it
+/// (part of the JSONL contract — extend, do not rename).
+fn device_content_label(content: &DeviceContent) -> &'static str {
+    match content {
+        DeviceContent::Empty => "empty",
+        DeviceContent::Known { .. } => "known",
+        DeviceContent::Adopted { .. } => "adopted",
+        DeviceContent::PendingIdentity { .. } => "pending-identity",
+        DeviceContent::Unreadable { .. } => "unreadable",
+    }
+}
+
 /// The grant's short id for display: the trailing `port-N` of a
 /// browser-serial endpoint id ("browser-serial-esp32-port-2" → "port-2");
 /// `None` for ids without that shape (fake/host endpoints, whose full id

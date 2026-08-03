@@ -75,6 +75,12 @@ pub enum DeviceEventKind {
     Mgmt { phase: String, label: String },
     /// One auto-connect sweep decision.
     Sweep { disposition: String },
+    /// A connect-as-pull settled: the device content's classification
+    /// ("known", "adopted", "empty", "pending-identity", "unreadable").
+    /// Added 2026-08-03 (gate-1 sitting): the corrupt-lpfs scenario's
+    /// outcome was invisible in the trace — state transitions alone cannot
+    /// say what the pull concluded.
+    Sync { content: String },
     /// A line/frame parse anomaly (malformed `M!` frame, mid-frame cut).
     Anomaly { detail: String },
     /// One raw serial line read from the device (capture mode only).
@@ -139,6 +145,10 @@ impl Serialize for DeviceEventRecord {
             DeviceEventKind::Sweep { disposition } => {
                 map.serialize_entry("kind", "sweep")?;
                 map.serialize_entry("disposition", disposition)?;
+            }
+            DeviceEventKind::Sync { content } => {
+                map.serialize_entry("kind", "sync")?;
+                map.serialize_entry("content", content)?;
             }
             DeviceEventKind::Anomaly { detail } => {
                 map.serialize_entry("kind", "anomaly")?;
