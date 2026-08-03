@@ -188,7 +188,9 @@
   .a-rword .word .tri-a { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
   /* D2 · rainbow "Light" only — "Player" holds still (gate-2 A/B) */
   .a-rwordl .mark .play { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
-  /* D3 · like D2 but the play triangle also holds still (accent) */
+  /* D3 · full-white mark (triangle included); ONLY the word "Light" moves */
+  .a-rwordt .mark .play { fill: var(--stage-mark); animation: none; }
+  .a-rwordt .mark .ring { stroke: var(--stage-mark); }
   .a-rwordl .word .w1, .a-rwordt .word .w1 {
     background: linear-gradient(90deg,var(--r1),var(--r2),var(--r3),var(--r4),var(--r5),var(--r6),var(--r1));
     background-size: 300% 100%;
@@ -604,7 +606,7 @@ const ANIMS = {
   flow:  { label: 'C · Signal flow', cls: 'a-flow', note: 'Data streams in the left pads and out the right; the play breathes as frames pass through.' },
   rword: { label: 'D · Rainbow wordmark — full', cls: 'a-rword', note: 'The loud one. Gate-1: “great, but a tiny bit distracting in an actual app” — kept for marketing surfaces; in-app it becomes F.' },
   rwordl: { label: 'D2 · Rainbow “Light” only', cls: 'a-rwordl', note: 'Gate-2 A/B vs D: “Player” holds still in the strong ink; only “Light” (and the play) carry the rainbow. Calmer, anchors the name.' },
-  rwordt: { label: 'D3 · “Light” only, static play', cls: 'a-rwordt', note: 'D2 minus the triangle: the play holds the accent; ONLY the word “Light” moves. The most restrained rainbow.' },
+  rwordt: { label: 'D3 · “Light” only, all-white mark', cls: 'a-rwordt', note: 'Mark goes full white — triangle included. ONLY the word “Light” moves. The chip is hardware; the light is in the name.' },
   glow:  { label: 'E · Breathe', cls: 'a-glow', note: 'No rainbow — the accent play softly blooms, like a status LED idling.' },
   hover: { label: 'F · Hover rainbow', cls: 'a-hover', note: 'Static brand; hover plays the full D treatment (rainbow word + play). The in-app candidate per gate-1.' },
 };
