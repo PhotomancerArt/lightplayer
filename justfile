@@ -1163,6 +1163,20 @@ _fw-size-check name chip flash_size elf partition margin doc:
         exit 1
     fi
 
+# Heap-budget ratchet: per-window heap deltas (project-load, shader-compile,
+# frame, …) measured on the RV32 emulator vs the checked-in measured record
+# (scripts/heap-budget-record.json). A ratchet, not a ceiling — fails on any
+# growth beyond the margin; an intentional increase re-baselines explicitly
+# with `just heap-budget-baseline` so the growth lands in the PR diff.
+# The emulator is deterministic, so the default margin is 0%. Never widen the
+# margin to make the gate pass. Fidelity limits: docs/heap-budget-gate.md.
+heap-budget-check margin_pct="0": install-rv32-target
+    scripts/heap-budget-check.sh check {{ margin_pct }}
+
+# Regenerate the heap-budget measured record from the current tree.
+heap-budget-baseline: install-rv32-target
+    scripts/heap-budget-check.sh baseline
+
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
 # but rustc still emits the object containing .stack_sizes before that point.

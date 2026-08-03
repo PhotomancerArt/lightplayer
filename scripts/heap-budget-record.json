@@ -1,0 +1,32 @@
+{
+  "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
+  "recorded": "2026-08-03",
+  "commit": "9b2051071",
+  "mode": "startup",
+  "projects": {
+    "examples/basic": {
+      "windows": {
+        "project-load": {
+          "transient": 37783,
+          "retained": 33753,
+          "largest_alloc": 6144
+        },
+        "frame": {
+          "transient": 80645,
+          "retained": 18469,
+          "largest_alloc": 20480
+        },
+        "shader-compile": {
+          "transient": 80381,
+          "retained": 13416,
+          "largest_alloc": 12288
+        },
+        "shader-link": {
+          "transient": 8737,
+          "retained": 8689,
+          "largest_alloc": 8280
+        }
+      }
+    }
+  }
+}

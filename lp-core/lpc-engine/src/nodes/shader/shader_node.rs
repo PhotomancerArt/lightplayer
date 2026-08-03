@@ -80,6 +80,15 @@ pub struct ShaderNode {
     /// yet. Cleared after one attempt regardless of outcome, so a broken
     /// source never recompiles per frame.
     needs_compile: bool,
+    /// True when a render was denied a compile because no compile window was
+    /// open. Polled by the engine ([`NodeRuntime::wants_compile_window`]) to
+    /// broadcast memory pressure before the next tick.
+    compile_window_requested: bool,
+    /// The frame a compile window is open for. A compile only runs when this
+    /// matches the rendering frame, which makes the window expire with the
+    /// frame — a stale window from a tick where this node was not demanded
+    /// must not authorize a compile long after the pressure broadcast.
+    compile_window: Option<Revision>,
     state: ShaderState,
 }
 
@@ -99,6 +108,8 @@ impl ShaderNode {
             compilation_error: None,
             black_fallback_frames: 0,
             needs_compile: true,
+            compile_window_requested: false,
+            compile_window: None,
             state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
     }
@@ -146,6 +157,26 @@ impl ShaderNode {
         if !self.needs_compile {
             return Ok(self.shader.is_some());
         }
+
+        // Compile-window deferral (memory-pressure seam). The first render
+        // that wants a compile only REQUESTS a window and renders
+        // keep-last-good (or black, before the first compile). The engine
+        // broadcasts memory pressure at the top of the next tick — dropping
+        // rebuildable per-LED state so this compile's transient does not
+        // land on top of it — and opens the window for exactly that frame.
+        //
+        // Progress guarantee: the deferral happens AT MOST ONCE per compile.
+        // If the request is still standing at the next render (a host that
+        // resolves renders without driving `Engine::tick` never opens
+        // windows), the compile proceeds without one rather than deferring
+        // forever. On tick-driven hosts the window always opens before the
+        // second render, so pressure still precedes every compile there.
+        // See docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
+        if self.compile_window != Some(ctx.revision()) && !self.compile_window_requested {
+            self.compile_window_requested = true;
+            return Ok(self.shader.is_some());
+        }
+        self.compile_window_requested = false;
 
         let graphics = ctx
             .graphics()
@@ -368,7 +399,23 @@ impl NodeRuntime for ShaderNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
+        // Nothing droppable: `shader` is the compiled product (keep-last-good
+        // contract, not a rebuildable cache), and the source string is the
+        // input for the next compile.
         Ok(())
+    }
+
+    fn wants_compile_window(&self) -> bool {
+        self.compile_window_requested
+    }
+
+    fn open_compile_window(&mut self, revision: Revision) {
+        // Cleared even if this node is not demanded this frame: an unused
+        // window expires, and the node simply re-requests on its next
+        // demanded frame. Leaving the request set would re-broadcast
+        // pressure every tick for a node nothing is rendering.
+        self.compile_window_requested = false;
+        self.compile_window = Some(revision);
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
@@ -1182,6 +1229,20 @@ mod tests {
         };
         resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off).expect("resolve");
 
+        // First render requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        engine
+            .render_texture_for_test(
+                &registry,
+                rid,
+                &crate::products::visual::RenderTextureRequest {
+                    width: 8,
+                    height: 8,
+                    format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.5,
+                },
+            )
+            .expect("warm-up render");
         let texture = engine
             .render_texture_for_test(
                 &registry,
@@ -1218,6 +1279,9 @@ mod tests {
             ShaderDef::default(),
             shader_asset_text(source, Revision::new(1)),
         );
+        // The engine opens compile windows during tick; these node-level
+        // tests stand in for it so the single render below compiles.
+        node.open_compile_window(Revision::new(1));
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
             Revision::new(1),
@@ -1266,6 +1330,9 @@ mod tests {
             ShaderDef::default(),
             shader_asset_text(source, Revision::new(1)),
         );
+        // The engine opens compile windows during tick; these node-level
+        // tests stand in for it so the single render below compiles.
+        node.open_compile_window(Revision::new(1));
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
             Revision::new(1),
@@ -1381,6 +1448,20 @@ mod tests {
             ResolveLogLevel::Off,
         )
         .expect("resolve");
+        // First render requests a compile window (deferral); the second
+        // makes the (failing) compile attempt.
+        engine
+            .render_texture_for_test(
+                &registry,
+                rid,
+                &crate::products::visual::RenderTextureRequest {
+                    width: 8,
+                    height: 8,
+                    format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.5,
+                },
+            )
+            .expect("warm-up render");
         let texture = engine
             .render_texture_for_test(
                 &registry,
@@ -1445,6 +1526,9 @@ mod tests {
             ShaderDef::default(),
             shader_asset_text(DEMO_GLSL, Revision::new(1)),
         );
+        // The engine opens compile windows during tick; these node-level
+        // tests stand in for it so the single render below compiles.
+        node.open_compile_window(Revision::new(1));
         let product = VisualProduct::new(NodeId::new(1), 0);
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
@@ -1531,6 +1615,9 @@ mod tests {
             ShaderDef::default(),
             shader_asset_text(DEMO_GLSL, Revision::new(1)),
         );
+        // The engine opens compile windows during tick; these node-level
+        // tests stand in for it so the single render below compiles.
+        node.open_compile_window(Revision::new(1));
         let product = VisualProduct::new(NodeId::new(1), 0);
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
@@ -1614,6 +1701,9 @@ mod tests {
                 def,
                 shader_asset_text(DEMO_GLSL, Revision::new(1)),
             );
+            // The engine opens compile windows during tick; these node-level
+            // tests stand in for it so the single render below compiles.
+            node.open_compile_window(Revision::new(1));
             let mut ctx = crate::node::RenderContext::new(
                 NodeId::new(1),
                 Revision::new(1),
@@ -1665,6 +1755,9 @@ mod tests {
             def,
             shader_asset_text(DEMO_GLSL, Revision::new(1)),
         );
+        // The engine opens compile windows during tick; these node-level
+        // tests stand in for it so the single render below compiles.
+        node.open_compile_window(Revision::new(1));
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
             Revision::new(1),

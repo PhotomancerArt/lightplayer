@@ -193,6 +193,22 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
     let symbolizer =
         symbolizer_from_meta_json_str(&meta_json).with_context(|| "parse meta.json symbolizer")?;
 
+    if requested.iter().any(|c| c == "alloc") {
+        let trace_path = trace_dir.join("heap-trace.jsonl");
+        let budget = lp_emu_core::profile::alloc::heap_budget(&trace_path, &meta_path)
+            .context("extract heap budget figures")?;
+        let budget_json = serde_json::json!({
+            "heap_size": heap_size,
+            "windows": budget,
+        });
+        let budget_path = trace_dir.join("budget.json");
+        std::fs::write(
+            &budget_path,
+            serde_json::to_string_pretty(&budget_json).context("serialize budget.json")?,
+        )
+        .with_context(|| format!("write {}", budget_path.display()))?;
+    }
+
     if let Some(cpu) = session
         .collectors()
         .iter()

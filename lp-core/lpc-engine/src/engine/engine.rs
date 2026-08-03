@@ -500,6 +500,31 @@ impl Engine {
         result
     }
 
+    /// Broadcast memory pressure to every alive node.
+    ///
+    /// ⚠️ Only call at a safe point — a moment where no render borrow into any
+    /// node-owned buffer is live. The engine calls this at the top of a tick
+    /// when a compile window was requested; embedders may also call it between
+    /// ticks (e.g. from an allocation-failure retry hook, OUTSIDE the
+    /// allocator lock). Anything a node drops here must be rebuilt lazily on
+    /// its next render — that is the contract in
+    /// `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+    pub fn broadcast_memory_pressure(
+        &mut self,
+        level: crate::node::PressureLevel,
+    ) -> Result<(), EngineError> {
+        let revision = self.revision;
+        for entry in self.tree.entries_mut() {
+            let node_id = entry.id;
+            if let NodeEntryState::Alive(node) = entry.state.get_mut() {
+                let mut ctx = crate::node::MemPressureCtx::new(node_id, revision);
+                node.handle_memory_pressure(level, &mut ctx)
+                    .map_err(|err| EngineError::node(node_id, err))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Re-read every output's authored configuration for this tick.
     ///
     /// The tree and the services are borrowed as separate fields so the defs
@@ -544,6 +569,28 @@ impl Engine {
             > 0
         {
             self.resolver.invalidate_structure();
+        }
+
+        // Compile window (memory-pressure seam). A shader node that wanted a
+        // compile last frame deferred it and requested a window. The top of a
+        // tick is a safe point — no render borrow into any per-LED buffer is
+        // live — so drop rebuildable state across the whole tree NOW, then
+        // open this frame's window. Demand order inside the tick guarantees
+        // the compile runs before the fixture seams rebuild what was dropped:
+        // the fixture resolves its visual input (where the shader compiles)
+        // before `ensure_direct_points`/sample-buffer allocation. See
+        // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
+        let window_wanted = self.tree.entries().any(|entry| {
+            matches!(entry.state.value(), NodeEntryState::Alive(node) if node.wants_compile_window())
+        });
+        if window_wanted {
+            self.broadcast_memory_pressure(crate::node::PressureLevel::High)?;
+            let revision = self.revision;
+            for entry in self.tree.entries_mut() {
+                if let NodeEntryState::Alive(node) = entry.state.get_mut() {
+                    node.open_compile_window(revision);
+                }
+            }
         }
 
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
