@@ -4768,3 +4768,31 @@ label:has(> input:not(:disabled)) {
 .lp-debug-title {
     color: var(--studio-status-debug-text);
 }
+
+/* ---- board callouts (M2b) ---------------------------------------------
+   Anatomy gold, but LOUDER than the anatomy annotation they grew from: an
+   instruction someone follows at the desk competes with the pin rows
+   behind it, so the leader is solid and ends in a filled arrowhead rather
+   than fading into a dot. Still gold, never attention-orange — a callout
+   explains, it does not alarm (M2b gate). */
+.lpb-callout-line {
+    stroke: #e4c065;
+    stroke-width: 1.6;
+    fill: none;
+}
+
+.lpb-callout-head {
+    fill: #e4c065;
+}
+
+.lpb-callout-label {
+    font-family: var(--studio-font-sans);
+    font-weight: 600;
+    font-size: 9px;
+    fill: #f0d488;
+}
+
+.lpb-callout-step {
+    font-weight: 800;
+    fill: #e4c065;
+}
