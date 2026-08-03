@@ -14,8 +14,10 @@
     }
   ],
   "manual": [
-    "Open the printed Studio URL and Connect \u2014 the CH34x port should now APPEAR in the chooser (M2).",
-    "Let the card settle; parse-anomaly events here are evidence for the serial-interleaving defect.",
-    "Press Enter here to finish the capture."
-  ]
+    "Click Connect \u2014 the CH34x port should now APPEAR in the chooser (M2).",
+    "Let the card settle; parse-anomaly events here are evidence for the serial-interleaving defect."
+  ],
+  "port_filter": {
+    "kind_contains": "CH34x"
+  }
 }

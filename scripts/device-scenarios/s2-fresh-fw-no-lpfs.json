@@ -24,8 +24,10 @@
     }
   ],
   "manual": [
-    "Open the printed Studio URL and Connect to this board.",
-    "The card should reach Ready and ask for a name (unstamped, empty).",
-    "Press Enter here to finish the capture."
-  ]
+    "Connect to this board.",
+    "The card should reach Ready and ask for a name (unstamped, empty)."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
 }

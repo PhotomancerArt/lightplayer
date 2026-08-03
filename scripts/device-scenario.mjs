@@ -135,29 +135,80 @@ function listPorts() {
   }
 }
 
-async function pickPort(argPort) {
+/// Board verification + selection (a real, checkable step): list ports
+/// passively, narrow by the spec's port_filter (e.g. the classic scenario
+/// insists on the CH34x bridge), auto-select when exactly one matches —
+/// the Enter-through path involves no prompt at all.
+async function pickPort(argPort, spec) {
   if (argPort) return argPort;
-  console.log("\nListing attached serial ports (passive — nothing is opened or reset;");
-  console.log("first run may take a couple of minutes while lp-cli builds)…\n");
-  const ports = listPorts();
-  if (ports.length === 0) {
-    console.log("  (no ports found — is a board plugged in?)");
-    const answer = await ask("\nPaste the /dev/... path, or Enter to skip: ");
+  console.log("(listing ports passively — nothing is opened or reset;");
+  console.log(" first run may take a couple of minutes while lp-cli builds)");
+  const all = listPorts();
+  const wanted = spec?.port_filter?.kind_contains ?? null;
+  const matching = wanted ? all.filter((port) => port.kind?.includes(wanted)) : all;
+  if (all.length === 0) {
+    console.log("  ✗ no serial ports found — plug the board in.");
+    const answer = await ask("Paste the /dev/... path once attached, or Enter to skip: ");
     return answer || null;
   }
-  for (const [index, port] of ports.entries()) {
+  if (wanted && matching.length === 0) {
+    console.log(`  ✗ no attached port matches "${wanted}" (this scenario needs: ${spec.board}).`);
+    for (const port of all) console.log(`      have: ${port.port}  (${port.kind})`);
+    const answer = await ask("Attach the right board and Enter to re-check, or paste a /dev/... path: ");
+    if (answer) return answer;
+    return pickPort(argPort, spec);
+  }
+  if (matching.length === 1) {
+    const only = matching[0];
+    const serial = only.serial_number ? ` · ${only.serial_number}` : "";
+    console.log(`  ✓ one matching board: ${only.port}  (${only.kind}${serial})`);
+    return only.port;
+  }
+  for (const [index, port] of matching.entries()) {
     const serial = port.serial_number ? ` · ${port.serial_number}` : "";
     console.log(`  ${index + 1}. ${port.port}  (${port.kind}${serial})`);
   }
-  // Enter = the first port: the happy path is Enter-through.
-  const answer = await ask("\nWhich port is the scenario board on? (number [1], /dev/... path, or 's' to skip): ");
-  if (!answer) return ports[0].port;
+  const answer = await ask("Several match — which one? (number [1], /dev/... path, or 's' to skip): ");
+  if (!answer) return matching[0].port;
   if (answer === "s") return null;
   const number = Number.parseInt(answer, 10);
-  if (Number.isInteger(number) && number >= 1 && number <= ports.length) {
-    return ports[number - 1].port;
+  if (Number.isInteger(number) && number >= 1 && number <= matching.length) {
+    return matching[number - 1].port;
   }
   return answer;
+}
+
+/// Whether anything holds the serial device open (Chrome with a connected
+/// tab, a wedged espflash). lsof reads kernel tables — it never opens or
+/// resets the port, so this check is safe mid-sitting.
+function portHeldBy(portPath) {
+  try {
+    const out = execSync(`lsof -t ${JSON.stringify(portPath)}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return out.split("\n").map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/// The "ensure the tabs are closed" step, made VERIFIABLE: we cannot see
+/// browser tabs, but we can see whether the port is actually free — which
+/// is what the step is for.
+async function ensurePortFree(portPath) {
+  for (;;) {
+    const holders = portHeldBy(portPath);
+    if (holders.length === 0) {
+      console.log(`  ✓ ${portPath} is free.`);
+      return true;
+    }
+    const who = holders.map((pid) => {
+      try { return `${pid} (${execSync(`ps -p ${pid} -o comm=`, { encoding: "utf8" }).trim().split("/").pop()})`; }
+      catch { return pid; }
+    }).join(", ");
+    console.log(`  ✗ ${portPath} is HELD by: ${who}`);
+    console.log("    Close the Studio tab (or Disconnect the board on its card's Danger tab).");
+    const answer = await ask("    Enter to re-check · s = proceed anyway: ");
+    if (answer === "s") return true;
+  }
 }
 
 // --- Studio lifecycle -----------------------------------------------------
@@ -413,18 +464,28 @@ async function runOne(spec, state, argPort, studioUrl) {
     console.log(`Builds on: ${dep} (make sure the board is in that state, or run it first)`);
   }
 
-  // Only scenarios whose setup actually touches the serial port need a
-  // port — and they need it FREE: with the session's Studio tab open, a
-  // connected board holds the port, so the user must Disconnect first
-  // (the card's Danger tab — that affordance exists for exactly this).
+  // Sequential, checkable steps (sitting feedback, 2026-08-03): board →
+  // port free → setup → tab → do-and-record. Scenarios whose setup never
+  // touches the serial port (procedure scenarios) skip straight to the
+  // tab — s7 (unplug mid-op) WANTS the board connected already.
   const needs_port = (spec.setup ?? []).some((step) => step.run?.includes("{port}"));
+  const total = needs_port ? 5 : 2;
+  let step = 0;
+  const banner = (title) => {
+    step += 1;
+    console.log(`\n— step ${step}/${total}: ${title}`);
+  };
+
   if (needs_port) {
-    await ask(
-      "\nSetup is about to use the serial port — the browser must not hold it: \n" +
-      "CLOSE the Studio capture tab (or at least Disconnect the board on its \n" +
-      "card's Danger tab). Enter when the port is free… ",
-    );
-    const port = await pickPort(argPort);
+    banner(`the board (${spec.board})`);
+    const port = await pickPort(argPort, spec);
+    if (port) {
+      banner("the port must be free (close the Studio tab / Disconnect the card)");
+      await ensurePortFree(port);
+    } else {
+      step += 1; // keep numbering honest when the port check is skipped
+    }
+    banner("setup — putting the board into the known state");
     if (!runSetup(spec, port)) {
       return false;
     }
@@ -439,14 +500,15 @@ async function runOne(spec, state, argPort, studioUrl) {
   const records = [];
   state.active = { records, partial };
 
-  console.log("\n— hand-off: the port is free; opening the capture tab now:");
-  console.log(`\n    ${studioUrl}\n`);
+  banner("opening the capture tab (automated)");
+  console.log(`    ${studioUrl}`);
   if (process.platform === "darwin" && process.stdout.isTTY) {
     spawnSync("open", [studioUrl]);
+    console.log("    ✓ opened.");
   }
-  console.log("— in that tab:");
-  for (const [index, step] of (spec.manual ?? []).entries()) {
-    console.log(`  ${index + 1}. ${step}`);
+  banner("in that tab — then the capture records itself:");
+  for (const [index, manual] of (spec.manual ?? []).entries()) {
+    console.log(`  ${index + 1}. ${manual}`);
   }
   await ask("\nPress Enter here when the scenario is done… ");
   state.active = null;

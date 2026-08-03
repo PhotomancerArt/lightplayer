@@ -16,8 +16,10 @@
     }
   ],
   "manual": [
-    "Open the printed Studio URL and Connect to this board.",
-    "The card should surface the unreadable/recovery path, not hang on Checking.",
-    "Press Enter here to finish the capture."
-  ]
+    "Connect to this board.",
+    "The card should surface the unreadable/recovery path, not hang on Checking."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
 }

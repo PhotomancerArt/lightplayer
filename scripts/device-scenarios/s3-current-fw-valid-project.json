@@ -16,9 +16,11 @@
     }
   ],
   "manual": [
-    "Open the printed Studio URL and Connect to this board.",
+    "Connect to this board.",
     "Name the board, then push an example project onto it from the gallery.",
-    "Wait until the card shows the running project.",
-    "Press Enter here to finish the capture."
-  ]
+    "Wait until the card shows the running project."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
 }
