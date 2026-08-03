@@ -80,7 +80,9 @@ fn known_device_connects_and_classifies_at_head_through_the_link() {
         ),
         "protocol attached"
     );
-    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     assert_eq!(
         sync.identity
             .as_ref()
@@ -137,7 +139,9 @@ fn attaching_a_device_with_a_loaded_project_never_opens_the_editor() {
         "hardware attach observes only — the editor must not open, got {:?}",
         snapshot.project.state
     );
-    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!(
             "running copy classifies for the card, got {:?}",
@@ -180,7 +184,9 @@ fn device_running_from_a_non_default_storage_dir_classifies_not_empty() {
 
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
 
-    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     let DeviceContent::Known { relation, slug, .. } = &sync.content else {
         panic!(
             "the running copy must classify from its real dir, got {:?}",
@@ -260,7 +266,7 @@ fn card_native_stamp_and_push_through_the_link() {
     drive(studio.settle_library());
 
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
-    let sync = studio.device_sync().expect("pull landed");
+    let sync = studio.device_sync_for_test().expect("pull landed");
     assert_eq!(sync.content, DeviceContent::Empty, "fresh device is empty");
     // the gallery narrates the unstamped board as Needs-a-name
     let home = studio.view().home.expect("no project open — gallery shows");
@@ -284,7 +290,9 @@ fn card_native_stamp_and_push_through_the_link() {
         },
     )))
     .unwrap();
-    let sync = studio.device_sync().expect("re-pulled after stamp");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("re-pulled after stamp");
     assert_eq!(
         sync.identity
             .as_ref()
@@ -299,7 +307,7 @@ fn card_native_stamp_and_push_through_the_link() {
         key: summary.uid.to_string(),
     })))
     .unwrap();
-    let sync = studio.device_sync().expect("re-pulled after push");
+    let sync = studio.device_sync_for_test().expect("re-pulled after push");
     assert_eq!(
         sync.identity
             .as_ref()
@@ -342,7 +350,7 @@ fn pull_waits_for_server_started_marker_and_first_frame() {
          and the first M! frame"
     );
     assert_eq!(
-        studio.device_sync().map(|sync| &sync.content),
+        studio.device_sync_for_test().map(|sync| &sync.content),
         Some(&DeviceContent::Empty),
         "the pull still ran — after readiness"
     );
@@ -358,7 +366,9 @@ fn fresh_device_pulls_as_empty_not_unreadable() {
 
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
 
-    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     assert_eq!(sync.identity, None);
     assert_eq!(
         sync.content,
@@ -538,9 +548,11 @@ fn disconnect_mid_pull_is_nonfatal_and_erase_stays_reachable() {
     device.set_failure_plan(
         FakeFailurePlan::none().with_disconnect_after_bytes(device.served_bytes() + 64),
     );
-    drive(studio.refresh_device_sync());
+    drive(studio.refresh_device_sync_for_test());
 
-    let sync = studio.device_sync().expect("failed pull leaves a state");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("failed pull leaves a state");
     assert!(
         matches!(sync.content, DeviceContent::Unreadable { .. }),
         "mid-pull disconnect surfaces as unreadable, got {:?}",
@@ -792,7 +804,7 @@ fn reconnect_after_gone_rebuilds_the_link_to_ready() {
     device.set_failure_plan(
         FakeFailurePlan::none().with_disconnect_after_bytes(device.served_bytes()),
     );
-    drive(studio.refresh_device_sync());
+    drive(studio.refresh_device_sync_for_test());
     assert!(
         matches!(studio.device_state_for_test(), Some(DeviceState::Gone)),
         "a dead stream marks the session Gone, got {:?}",
@@ -909,7 +921,9 @@ fn device_rename_reconciles_registry_name_over_the_link() {
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
 
-    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     assert_eq!(
         sync.identity
             .as_ref()
@@ -937,7 +951,7 @@ fn device_rename_reconciles_registry_name_over_the_link() {
     );
     assert_eq!(
         studio
-            .device_sync()
+            .device_sync_for_test()
             .and_then(|sync| sync.identity.as_ref())
             .map(|identity| identity.name.as_str()),
         Some("Porch sign"),
@@ -1008,7 +1022,7 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
     assert!(
         matches!(
-            studio.device_sync().map(|sync| &sync.content),
+            studio.device_sync_for_test().map(|sync| &sync.content),
             Some(DeviceContent::Known { .. })
         ),
         "the device classifies before the open"
@@ -1039,11 +1053,16 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
 
     // Both sessions in the pool; the lens (editor mirror) is on the sim.
     let pool = studio.runtime_pool_for_test();
-    assert!(pool.device_session().is_some(), "device session survives");
+    assert!(
+        pool.oldest_device_session().is_some(),
+        "device session survives"
+    );
     assert!(pool.sim_session().is_some(), "sim session exists");
     assert_eq!(pool.lens(), Some(sim_id), "the editor is a lens on the sim");
     // The device session is still classified: device_sync intact.
-    let sync = studio.device_sync().expect("device_sync survives the open");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("device_sync survives the open");
     let DeviceContent::Known { slug, relation, .. } = &sync.content else {
         panic!("device stays classified, got {:?}", sync.content);
     };
@@ -1086,7 +1105,7 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     let device_tail_has = |studio: &StudioController, message: &str| {
         studio
             .runtime_pool_for_test()
-            .device_session()
+            .oldest_device_session()
             .expect("a device session is attached")
             .console_tail()
             .iter()
@@ -1160,7 +1179,7 @@ fn push_replaces_the_running_project_with_a_different_one() {
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
     assert!(
         matches!(
-            studio.device_sync().map(|sync| &sync.content),
+            studio.device_sync_for_test().map(|sync| &sync.content),
             Some(DeviceContent::Known { slug, .. }) if slug == &porch.slug
         ),
         "the device runs the known project"
@@ -1172,12 +1191,14 @@ fn push_replaces_the_running_project_with_a_different_one() {
     .expect("pushing a different project succeeds");
     assert!(
         matches!(
-            studio.device_sync().map(|sync| &sync.content),
+            studio.device_sync_for_test().map(|sync| &sync.content),
             Some(DeviceContent::Known { slug, relation: lpc_history::SyncRelation::AtHead, .. })
                 if slug == &other.slug
         ),
         "the device now runs the other project at its head, got {:?}",
-        studio.device_sync().map(|sync| sync.content.clone())
+        studio
+            .device_sync_for_test()
+            .map(|sync| sync.content.clone())
     );
 }
 
@@ -1226,11 +1247,14 @@ fn detach_lens_keeps_sessions_and_reattach_rebuilds_the_mirror() {
         assert_eq!(pool.lens(), None, "the lens is released");
         let sim = pool.sim_session().expect("sim session survives");
         assert!(sim.is_connected(), "sim wire client stays attached");
-        assert!(pool.device_session().is_some(), "device session survives");
+        assert!(
+            pool.oldest_device_session().is_some(),
+            "device session survives"
+        );
     }
     assert!(
         matches!(
-            studio.device_sync().map(|sync| &sync.content),
+            studio.device_sync_for_test().map(|sync| &sync.content),
             Some(DeviceContent::Known { .. })
         ),
         "device reconcile state is intact across the detach"
@@ -1275,11 +1299,14 @@ fn stop_sim_destroys_the_sim_session_and_keeps_the_device() {
     {
         let pool = studio.runtime_pool_for_test();
         assert!(pool.sim_session().is_none(), "the sim session is gone");
-        assert!(pool.device_session().is_some(), "the device session stays");
+        assert!(
+            pool.oldest_device_session().is_some(),
+            "the device session stays"
+        );
         assert_eq!(pool.lens(), None);
     }
     assert!(
-        studio.device_sync().is_some(),
+        studio.device_sync_for_test().is_some(),
         "device reconcile state survives stop-sim"
     );
 
@@ -1552,7 +1579,7 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
 
     let device_id = {
         let pool = studio.runtime_pool_for_test();
-        let device_id = pool.device_session().expect("device session").id();
+        let device_id = pool.oldest_device_session().expect("device session").id();
         assert_eq!(
             pool.lens(),
             Some(device_id),
@@ -1632,7 +1659,7 @@ fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
     .expect("the D29 op opens the device project");
     let device_id = studio
         .runtime_pool_for_test()
-        .device_session()
+        .oldest_device_session()
         .expect("device session")
         .id();
     assert_eq!(
@@ -1857,7 +1884,7 @@ fn runtime_reset_from_the_editor_keeps_the_lens_bound() {
     .expect("the D29 op opens the device project");
     let device_id = studio
         .runtime_pool_for_test()
-        .device_session()
+        .oldest_device_session()
         .expect("device session")
         .id();
 
@@ -1888,7 +1915,7 @@ fn d29_click_with_a_sim_project_open_moves_the_lens_and_keeps_the_sim() {
     .expect("the D29 op connects the device's running project");
 
     let pool = studio.runtime_pool_for_test();
-    let device_id = pool.device_session().expect("device session").id();
+    let device_id = pool.oldest_device_session().expect("device session").id();
     assert_eq!(pool.lens(), Some(device_id), "the lens moved to the device");
     let sim = pool
         .sim_session()
@@ -1972,13 +1999,18 @@ fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
         Some(sim_id),
         "attaching a device does NOT steal the lens from the sim"
     );
-    assert!(pool.device_session().is_some(), "device session installed");
+    assert!(
+        pool.oldest_device_session().is_some(),
+        "device session installed"
+    );
     // The sim mirror is untouched…
     let view = studio.view();
     assert!(view.home.is_none(), "the editor stayed open");
     assert_eq!(slot_value_display(find_slot(&view, "controls.rate")), "1");
     // …and the device reconciled in the background on its own client.
-    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let sync = studio
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     assert!(
         matches!(&sync.content, DeviceContent::Known { .. }),
         "device classified while the lens stayed on the sim, got {:?}",
@@ -2013,7 +2045,7 @@ fn device_route_attaches_the_existing_session_by_uid() {
 
     let device_id = {
         let pool = studio.runtime_pool_for_test();
-        let device_id = pool.device_session().expect("device session").id();
+        let device_id = pool.oldest_device_session().expect("device session").id();
         assert_eq!(pool.lens(), Some(device_id), "the lens is on the device");
         device_id
     };
@@ -2037,7 +2069,7 @@ fn device_route_attaches_the_existing_session_by_uid() {
     .expect_err("a mismatched uid refuses");
     let pool = studio.runtime_pool_for_test();
     assert_eq!(
-        pool.device_session().map(crate::RuntimeSession::id),
+        pool.oldest_device_session().map(crate::RuntimeSession::id),
         Some(device_id),
         "the attached session survives the refusal"
     );
@@ -2165,14 +2197,14 @@ fn push_from_card_narrates_operation_in_flight_and_settles() {
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
     assert!(
         matches!(
-            studio.device_sync().map(|sync| &sync.content),
+            studio.device_sync_for_test().map(|sync| &sync.content),
             Some(DeviceContent::Known {
                 relation: lpc_history::SyncRelation::Behind,
                 ..
             })
         ),
         "device classifies Behind, got {:?}",
-        studio.device_sync().map(|sync| &sync.content)
+        studio.device_sync_for_test().map(|sync| &sync.content)
     );
 
     // Capture the progressive views the dispatch emits: the card must
@@ -2218,19 +2250,19 @@ fn push_from_card_narrates_operation_in_flight_and_settles() {
     // Running-up-to-date again.
     assert!(
         matches!(
-            studio.device_sync().map(|sync| &sync.content),
+            studio.device_sync_for_test().map(|sync| &sync.content),
             Some(DeviceContent::Known {
                 relation: lpc_history::SyncRelation::AtHead,
                 ..
             })
         ),
         "device is at head after the push, got {:?}",
-        studio.device_sync().map(|sync| &sync.content)
+        studio.device_sync_for_test().map(|sync| &sync.content)
     );
     let pool = studio.runtime_pool_for_test();
     assert!(
         !pool
-            .device_session()
+            .oldest_device_session()
             .expect("device session")
             .op_in_flight(),
         "the operation cleared"
@@ -2423,7 +2455,7 @@ fn diverged_board_fixture(
 fn connect_auto_fast_forwards_a_pure_board_extension() {
     let (mut studio, _device, endpoint_id, _uid) = diverged_board_fixture(false);
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
-    let sync = studio.device_sync().expect("device state cached");
+    let sync = studio.device_sync_for_test().expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -2452,7 +2484,7 @@ fn connect_auto_fast_forwards_a_pure_board_extension() {
 fn connect_keeps_a_true_fork_for_the_user() {
     let (mut studio, _device, endpoint_id, _uid) = diverged_board_fixture(true);
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
-    let sync = studio.device_sync().expect("device state cached");
+    let sync = studio.device_sync_for_test().expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };

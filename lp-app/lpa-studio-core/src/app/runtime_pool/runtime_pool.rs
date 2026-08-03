@@ -16,9 +16,10 @@
 //!   [`RuntimePool::lens_session_mut`] — the session the editor is a lens
 //!   on.
 //! - **Session-targeted** ops (device flows, deploy, reconcile) resolve
-//!   [`RuntimePool::device_session_mut`] — the OLDEST DEVICE-kind
-//!   session, regardless of where the lens is. Interim (M3): these become
-//!   id-addressed in M4; until then device ops land on the oldest board.
+//!   [`RuntimePool::device_session_mut`] BY ID — the board the user
+//!   clicked, regardless of where the lens is (M4). Kind is asserted on
+//!   the resolved session, so a device flow can never land on the sim
+//!   even when handed the sim's id.
 
 use std::collections::BTreeMap;
 
@@ -234,11 +235,15 @@ impl RuntimePool {
         self.sessions.get_mut(&id).ok_or_else(missing_session)
     }
 
-    /// The OLDEST DEVICE-kind session (install order). Interim (M3): with
-    /// [`DEVICE_SESSION_CAPACITY`] > 1 this id-less read is a legacy seam —
-    /// M4 re-targets its call sites by `RuntimeId`. Evidence builds iterate
-    /// [`Self::device_sessions`] instead.
-    pub fn device_session(&self) -> Option<&RuntimeSession> {
+    /// The OLDEST DEVICE-kind session (install order).
+    ///
+    /// ⚠️ NOT an operation seam — operations address a session by id
+    /// ([`Self::device_session_mut`], M4). What survives here is the
+    /// CONNECT flow's remaining app-singular reads (the sweep guard, the
+    /// settle path, the recovery open): those run before a session exists,
+    /// so they have no id to name. **M5 owns retiring them**; nothing else
+    /// should call this.
+    pub fn oldest_device_session(&self) -> Option<&RuntimeSession> {
         self.sessions.values().find(|session| session.is_device())
     }
 
@@ -248,16 +253,27 @@ impl RuntimePool {
         self.sessions.values().filter(|session| session.is_device())
     }
 
-    /// The session-targeted resolution seam: device-session, deploy, and
-    /// reconcile ops resolve their client through here. Kind-filtered —
-    /// device flows never land on the sim, no matter where the lens is.
-    /// Interim (M3): resolves the OLDEST device session; M4 gives it a
-    /// `RuntimeId` parameter so ops address the board the user clicked.
-    pub fn device_session_mut(&mut self) -> Result<&mut RuntimeSession, UiError> {
-        self.sessions
-            .values_mut()
-            .find(|session| session.is_device())
-            .ok_or_else(missing_session)
+    /// The session-targeted resolution seam (M4): device-session, deploy,
+    /// and reconcile ops resolve their client through here, naming the
+    /// board the user clicked.
+    ///
+    /// Kind is asserted on the RESOLVED session, never used as the lookup
+    /// strategy — device flows never land on the sim, no matter where the
+    /// lens is, and never by lookup luck. Handing this a sim id is a
+    /// programming error in the caller's targeting, so it reports as one
+    /// rather than silently resolving something else.
+    pub fn device_session_mut(&mut self, id: RuntimeId) -> Result<&mut RuntimeSession, UiError> {
+        let session = self.sessions.get_mut(&id).ok_or_else(missing_session)?;
+        if !session.is_device() {
+            return Err(not_a_device(id));
+        }
+        Ok(session)
+    }
+
+    /// The DEVICE session `id`, immutably — same kind assertion as
+    /// [`Self::device_session_mut`], for the read half of a targeted flow.
+    pub fn device_session(&self, id: RuntimeId) -> Option<&RuntimeSession> {
+        self.sessions.get(&id).filter(|session| session.is_device())
     }
 
     /// The ≤1 SIM-kind session.
@@ -310,6 +326,13 @@ fn missing_session() -> UiError {
     UiError::MissingSession("server client is not connected".to_string())
 }
 
+/// A device op named a session that exists but is not a device (M4). The
+/// "device flows never land on the sim" guarantee, as an error rather than
+/// a silent re-resolution.
+fn not_a_device(id: RuntimeId) -> UiError {
+    UiError::UnsupportedAction(format!("runtime {id} is not a device"))
+}
+
 #[cfg(test)]
 mod tests {
     use lpa_link::DeviceState;
@@ -340,9 +363,15 @@ mod tests {
         // deliberately move the editor call `set_lens`.
         assert_eq!(pool.lens(), Some(device));
         // Kind-filtered views resolve their own kinds.
-        assert_eq!(pool.device_session().map(RuntimeSession::id), Some(device));
+        assert_eq!(
+            pool.oldest_device_session().map(RuntimeSession::id),
+            Some(device)
+        );
         assert_eq!(pool.sim_session().map(RuntimeSession::id), Some(sim));
-        assert_eq!(pool.device_session_mut().expect("device seam").id(), device);
+        assert_eq!(
+            pool.device_session_mut(device).expect("device seam").id(),
+            device
+        );
     }
 
     #[test]
@@ -401,10 +430,13 @@ mod tests {
             ));
         }
         assert_eq!(pool.device_sessions().count(), DEVICE_SESSION_CAPACITY);
-        // Install (id) order, and the id-less seams resolve the OLDEST.
+        // Install (id) order; the connect flow's remaining read takes the OLDEST.
         let yielded: Vec<_> = pool.device_sessions().map(RuntimeSession::id).collect();
         assert_eq!(yielded, ids);
-        assert_eq!(pool.device_session().map(RuntimeSession::id), Some(ids[0]));
+        assert_eq!(
+            pool.oldest_device_session().map(RuntimeSession::id),
+            Some(ids[0])
+        );
 
         // One past capacity evicts oldest-first.
         let overflow = install(
@@ -414,7 +446,7 @@ mod tests {
         assert_eq!(pool.device_sessions().count(), DEVICE_SESSION_CAPACITY);
         assert!(pool.session(ids[0]).is_none(), "the oldest was evicted");
         assert_eq!(
-            pool.device_session().map(RuntimeSession::id),
+            pool.oldest_device_session().map(RuntimeSession::id),
             Some(ids[1]),
             "the seam now resolves the new oldest"
         );
@@ -474,7 +506,10 @@ mod tests {
             .expect_err("busy replace refuses");
         assert!(refusal.message.contains("still running"));
         assert!(matches!(refusal.payload, RuntimePayload::Device(_)));
-        assert_eq!(pool.device_session().map(RuntimeSession::id), Some(oldest));
+        assert_eq!(
+            pool.oldest_device_session().map(RuntimeSession::id),
+            Some(oldest)
+        );
 
         // A DIFFERENT kind still installs (the busy session is not replaced).
         let sim = install(&mut pool, RuntimePayload::stub_sim_for_test());
@@ -538,32 +573,44 @@ mod tests {
         ));
     }
 
+    /// The "device flows never land on the sim" guarantee, now that the
+    /// seam takes an id (M4): the kind filter moved from the LOOKUP to an
+    /// assertion on the resolved session, so it has to hold even when the
+    /// caller hands it the sim's own id — which is exactly the mistake an
+    /// id-taking seam makes possible and the id-less one could not.
     #[test]
-    fn device_seam_is_kind_filtered_in_p2() {
+    fn the_device_seam_refuses_a_sim_id() {
         let mut pool = RuntimePool::new();
+        let absent = RuntimeId::new(99);
         assert!(matches!(
-            pool.device_session_mut(),
+            pool.device_session_mut(absent),
             Err(UiError::MissingSession(_))
         ));
 
-        // A sole SIM session no longer resolves through the device-targeted
-        // seam (P2): device flows never land on the sim.
-        install(&mut pool, RuntimePayload::stub_sim_for_test());
-        assert!(matches!(
-            pool.device_session_mut(),
-            Err(UiError::MissingSession(_))
-        ));
-        assert!(pool.device_session().is_none());
+        let sim_id = install(&mut pool, RuntimePayload::stub_sim_for_test());
+        assert!(
+            matches!(
+                pool.device_session_mut(sim_id),
+                Err(UiError::UnsupportedAction(ref message))
+                    if message.contains("is not a device")
+            ),
+            "a device flow handed the sim's id must be refused, not re-resolved"
+        );
+        assert!(pool.device_session(sim_id).is_none());
+        assert!(pool.oldest_device_session().is_none());
 
         let device_id = install(
             &mut pool,
             RuntimePayload::stub_device_for_test(DeviceState::Gone),
         );
-        assert_eq!(pool.device_session_mut().expect("device").id(), device_id);
         assert_eq!(
-            pool.device_session().map(RuntimeSession::id),
-            Some(device_id)
+            pool.device_session_mut(device_id).expect("device").id(),
+            device_id
         );
+        // And the sim's id STILL refuses with a device attached — the
+        // refusal is about the named session, never about what else the
+        // pool happens to hold.
+        assert!(pool.device_session_mut(sim_id).is_err());
         assert!(pool.sim_session().is_some(), "the sim coexists");
     }
 
@@ -593,7 +640,8 @@ mod tests {
             RuntimePayload::stub_device_for_test(DeviceState::Booting),
         );
         assert_eq!(
-            pool.device_session().and_then(RuntimeSession::device_uid),
+            pool.oldest_device_session()
+                .and_then(RuntimeSession::device_uid),
             None
         );
 

@@ -507,8 +507,10 @@ fn device_connect_pulls_classifies_and_adopts() {
     controller.attach_library(host.clone());
 
     // 1) unknown uid + stamped identity → adoption
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     assert_eq!(
         sync.identity
             .as_ref()
@@ -533,8 +535,10 @@ fn device_connect_pulls_classifies_and_adopts() {
 
     // 2) reconnect: now the uid is known and the hashes match → AtHead,
     //    no second adoption
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, slug, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -553,8 +557,10 @@ fn device_connect_pulls_classifies_and_adopts() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known {
         relation, observed, ..
     } = &sync.content
@@ -623,7 +629,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
 
     // connect-as-pull adopts, then the device copy changes behind our
     // back → Diverged (the EditedOnDevice card)
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
     {
         let server = server.borrow();
         server
@@ -634,8 +640,10 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -648,7 +656,9 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         DeployOp::AdoptDeviceCopy,
     )))
     .expect("adopt works straight from the card sheet");
-    let sync = controller.device_sync().expect("device state cached");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -670,7 +680,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
         DeployOp::KeepBothFork,
@@ -733,7 +743,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
     controller.attach_library(host.clone());
     drive(controller.settle_library());
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
 
     let deploy_action = |op: DeployOp| UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op);
 
@@ -741,7 +751,9 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     // name sheet is the stamping surface; there is no dialog — this
     // test runs with a project open, so the card mapping itself is
     // pinned by the roster tests and the link e2e)
-    let sync = controller.device_sync().expect("connect-as-pull landed");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     assert_eq!(sync.identity, None, "unstamped");
     assert_eq!(sync.content, DeviceContent::Empty, "empty");
 
@@ -838,7 +850,9 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
         .expect("association recorded");
     assert_eq!(association.project, summary.uid);
 
-    let sync = controller.device_sync().expect("re-pulled after push");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("re-pulled after push");
     assert!(
         matches!(
             &sync.content,
