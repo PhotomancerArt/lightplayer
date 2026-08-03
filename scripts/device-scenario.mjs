@@ -23,7 +23,7 @@
 //  - The runner never starts or re-ports the Studio dev server; it prints
 //    the URL of the one `just studio-dev` is already serving.
 
-import { readdirSync, readFileSync, existsSync, statSync, mkdirSync, appendFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, statSync, mkdirSync, appendFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { spawnSync, execSync } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -100,10 +100,10 @@ function listPorts() {
   // Passive by design: `hardware list` never opens a port and cannot hang
   // or reset a board. NEVER swap this for a --probe.
   try {
-    const out = execSync("cargo run -q -p lp-cli -- hardware list", { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
-    return out.trim();
+    const out = execSync("cargo run -q -p lp-cli -- hardware list --json", { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+    return JSON.parse(out);
   } catch {
-    return "(hardware list failed — is the workspace built?)";
+    return [];
   }
 }
 
@@ -111,9 +111,23 @@ async function pickPort(argPort) {
   if (argPort) return argPort;
   console.log("\nListing attached serial ports (passive — nothing is opened or reset;");
   console.log("first run may take a couple of minutes while lp-cli builds)…\n");
-  console.log(listPorts().split("\n").map((l) => `  ${l}`).join("\n"));
-  const answer = await ask("\nWhich port is the scenario board on? (paste the /dev/... path, or Enter to skip): ");
-  return answer || null;
+  const ports = listPorts();
+  if (ports.length === 0) {
+    console.log("  (no ports found — is a board plugged in?)");
+    const answer = await ask("\nPaste the /dev/... path, or Enter to skip: ");
+    return answer || null;
+  }
+  for (const [index, port] of ports.entries()) {
+    const serial = port.serial_number ? ` · ${port.serial_number}` : "";
+    console.log(`  ${index + 1}. ${port.port}  (${port.kind}${serial})`);
+  }
+  const answer = await ask("\nWhich port is the scenario board on? (number, /dev/... path, or Enter to skip): ");
+  if (!answer) return null;
+  const number = Number.parseInt(answer, 10);
+  if (Number.isInteger(number) && number >= 1 && number <= ports.length) {
+    return ports[number - 1].port;
+  }
+  return answer;
 }
 
 function runSetup(spec, port) {
@@ -174,14 +188,30 @@ function validate(spec, records) {
   return failures;
 }
 
+/// Resolve a scenario by exact id, short id ("s2" → "s2-fresh-fw-no-lpfs";
+/// first-segment equality keeps "s1" from colliding with "s10"), or a
+/// unique prefix.
+function resolveScenario(scenarios, query) {
+  const exact = scenarios.find((s) => s.id === query);
+  if (exact) return exact;
+  const bySegment = scenarios.filter((s) => s.id.split("-")[0] === query);
+  if (bySegment.length === 1) return bySegment[0];
+  const byPrefix = scenarios.filter((s) => s.id.startsWith(query));
+  if (byPrefix.length === 1) return byPrefix[0];
+  const candidates = bySegment.length > 1 ? bySegment : byPrefix;
+  if (candidates.length > 1) {
+    console.error(`'${query}' is ambiguous:`);
+    for (const s of candidates) console.error(`  ${s.id}`);
+  } else {
+    console.error(`Unknown scenario '${query}'. Known:`);
+    for (const s of scenarios) console.error(`  ${s.id}`);
+  }
+  process.exit(1);
+}
+
 async function runScenario(id, argPort) {
   const scenarios = loadScenarios();
-  const spec = scenarios.find((s) => s.id === id);
-  if (!spec) {
-    console.error(`Unknown scenario '${id}'. Known:`);
-    for (const s of scenarios) console.error(`  ${s.id}`);
-    process.exit(1);
-  }
+  const spec = resolveScenario(scenarios, id);
   console.log(`\n=== ${spec.id} — ${spec.title}`);
   console.log(`Board: ${spec.board}`);
   for (const dep of spec.needs ?? []) {
@@ -192,11 +222,16 @@ async function runScenario(id, argPort) {
   runSetup(spec, port);
 
   // The capture sink: Studio (M0 capture mode) POSTs JSONL batches here;
-  // every line is appended to the trace file as it arrives, so a crash or
-  // an abandoned sitting still leaves everything received so far.
+  // every line is appended AS IT ARRIVES, so a crash or an abandoned
+  // sitting still leaves everything received so far. It appends to a
+  // .partial file and only replaces the real capture on a non-empty
+  // finish — re-running a scenario and aborting must never destroy a
+  // previous golden trace (nearly happened 2026-08-03: a dry run
+  // truncated the fixture before anything arrived).
   mkdirSync(TRACE_DIR, { recursive: true });
   const file = tracePath(spec.id);
-  writeFileSync(file, "");
+  const partial = `${file}.partial`;
+  writeFileSync(partial, "");
   const records = [];
   const sink = createServer((request, response) => {
     let body = "";
@@ -206,7 +241,7 @@ async function runScenario(id, argPort) {
       for (const line of lines) {
         try { records.push(JSON.parse(line)); } catch { /* keep raw anyway */ }
       }
-      if (lines.length) appendFileSync(file, lines.join("\n") + "\n");
+      if (lines.length) appendFileSync(partial, lines.join("\n") + "\n");
       response.writeHead(204, { "access-control-allow-origin": "*" });
       response.end();
     });
@@ -225,6 +260,14 @@ async function runScenario(id, argPort) {
   await ask("\nPress Enter here when the scenario is done… ");
   sink.close();
 
+  if (records.length > 0) {
+    renameSync(partial, file);
+  } else {
+    rmSync(partial, { force: true });
+    if (existsSync(file)) {
+      console.log(`\n(nothing arrived — the previous capture at ${path.relative(ROOT, file)} is untouched)`);
+    }
+  }
   console.log(`\nCaptured ${records.length} events → ${path.relative(ROOT, file)}`);
   console.log("\nWhat the trace says happened:");
   console.log(summarize(records));
