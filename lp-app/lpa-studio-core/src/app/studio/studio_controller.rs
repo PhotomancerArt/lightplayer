@@ -4344,12 +4344,38 @@ impl StudioController {
                 .and_then(lpa_link::chip_id_from_reported)
             {
                 Some(chip) => format!("this {chip} device"),
-                None => "this device".to_string(),
+                None => "this device (its chip could not be identified)".to_string(),
             };
-            return Err(UiError::UnsupportedAction(format!(
-                "No firmware image matches {subject}. Pick your board in the setup form — \
+            let message = format!(
+                "No firmware image matches {subject}. Pick your board on the set-up form — \
                  and if it is not listed, this Studio build ships no image for that chip."
-            )));
+            );
+            // The refusal must land ON THE CARD, not only in the console —
+            // the gate-1 sitting hit exactly this: "console did say there
+            // was no firmware, but nothing in the UI said that" (Yona,
+            // 2026-08-03). The card-owned op flow's Failed phase is the
+            // surface the user is already looking at, and it carries the
+            // copy-details affordance.
+            let uid = self
+                .device_sync()
+                .and_then(|sync| sync.identity.as_ref())
+                .map(|identity| identity.uid.clone());
+            self.device_card_op = Some((
+                uid,
+                Rc::new(RefCell::new(crate::CardOp::failed(
+                    "Flashing firmware",
+                    message.clone(),
+                    "Back to set up",
+                ))),
+            ));
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                message.clone(),
+            ));
+            self.mark_dirty();
+            updates.emit(UxUpdate::View(self.view()));
+            return Ok(UiNotices::new().with_notice(UiNotice::warning(message)));
         };
         let build_id = Some(build_id);
         let mut outcome = self
