@@ -67,6 +67,8 @@ pub fn handle_bench(args: BenchArgs) -> Result<()> {
         expected_commit,
         endpoint,
         start_leds,
+        floor: args.floor,
+        ceiling: args.ceiling,
         verbose: args.verbose,
     })?;
 
