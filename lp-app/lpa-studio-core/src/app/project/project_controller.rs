@@ -1431,7 +1431,8 @@ impl ProjectController {
             let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
                 continue;
             };
-            let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind) else {
+            let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind)
+            else {
                 continue;
             };
             updates.push((binding.node, name.as_str().to_string(), live));
@@ -4628,8 +4629,7 @@ fn live_channel_value(
     // A scope-less endpoint (pre-scope test fakes) falls back to the first
     // name match.
     let channel = graph.channels.iter().find(|channel| {
-        channel.name == channel_name
-            && (scope.is_none() || channel.scope.as_ref() == scope)
+        channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
     })?;
     if channel.kind == Some(lpc_model::Kind::Instant) {
         return None;
@@ -6180,7 +6180,11 @@ mod tests {
         );
 
         let bus = project.ui_bus_view().expect("bus view");
-        assert_eq!(bus.channels.len(), 1, "the sink row stays off the bus listing");
+        assert_eq!(
+            bus.channels.len(),
+            1,
+            "the sink row stays off the bus listing"
+        );
         let channel = &bus.channels[0];
         assert_eq!(channel.name, "visual.out");
         assert!(channel.primary_visual);

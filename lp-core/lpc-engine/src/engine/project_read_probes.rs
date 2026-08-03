@@ -200,8 +200,8 @@ impl Engine {
 
                 let value = (request.include_values
                     && self.bus_probe_value_is_sink_demand_free(scope, &name))
-                .then(|| {
-                    match self.resolve_bus_channel_value(registry, scope, &name) {
+                .then(
+                    || match self.resolve_bus_channel_value(registry, scope, &name) {
                         Ok(production) => WireBusChannelValue {
                             revision,
                             value: production.value_leaf().map(|leaf| leaf.value().clone()),
@@ -212,8 +212,8 @@ impl Engine {
                             value: None,
                             error: Some(format!("{error:?}")),
                         },
-                    }
-                });
+                    },
+                );
 
                 // Root-scope role, decided engine-side ONCE: the primary
                 // visual is the root scope's listing of the vocabulary
