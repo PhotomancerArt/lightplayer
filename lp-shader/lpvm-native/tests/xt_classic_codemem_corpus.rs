@@ -97,11 +97,27 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
         ref other => return Err(format!("render returns {other:?}")),
     };
 
-    lp_shader::synth::synthesise_render_texture(&mut ir, &mut meta, render_fn_index, format)
-        .map_err(|e| format!("synth render_texture: {e:?}"))?;
+    // `FloatMode::Q32` here is not a default — it is this test's contract. The
+    // module header promises "the same pipeline the device runs … in Q32", and
+    // the `compile_module` call below passes Q32 too. Passing `F32` would still
+    // compile but would silently measure a different code size, invalidating
+    // the byte-exact agreement with silicon this test exists to provide.
+    lp_shader::synth::synthesise_render_texture(
+        &mut ir,
+        &mut meta,
+        render_fn_index,
+        format,
+        FloatMode::Q32,
+    )
+    .map_err(|e| format!("synth render_texture: {e:?}"))?;
     if format == TextureStorageFormat::Rgba16Unorm {
-        lp_shader::synth::synthesise_render_samples_rgba16(&mut ir, &mut meta, render_fn_index)
-            .map_err(|e| format!("synth render_samples: {e:?}"))?;
+        lp_shader::synth::synthesise_render_samples_rgba16(
+            &mut ir,
+            &mut meta,
+            render_fn_index,
+            FloatMode::Q32,
+        )
+        .map_err(|e| format!("synth render_samples: {e:?}"))?;
     }
 
     // `fuel: true` is `NativeCompileOptions`'s default and what the device
