@@ -1589,12 +1589,19 @@ impl ProjectController {
 
     /// Project the synced controller tree into the project editor shell DTO.
     ///
-    /// Flat-root workspace (P6): a tree root never renders as a workspace
-    /// card — its child panes are the top-level `nodes` entries, and the
-    /// root's own config slot rows ride `root_slots` into the project pane's
-    /// detail popup ("Project settings"). The project-level [`DirtySummary`]
-    /// therefore walks the controllers (root included) rather than summing
-    /// the card headers, so root-slot edits (a project rename) still count.
+    /// **Root card restored** (`docs/design/modules.md` §5, the flat-root
+    /// reversal): the tree root IS the single top-level `nodes` entry, and
+    /// every other node rides its `UiNodeView::children` as a nested card.
+    /// The root now does something — it wears the module face, whose panel
+    /// is the root scope's channel list — so hiding it stopped making
+    /// sense.
+    ///
+    /// Its own config slot rows still ride `root_slots` into the project
+    /// pane's detail popup ("Project settings"); moving them onto the
+    /// restored card is a later step. The project-level [`DirtySummary`]
+    /// keeps walking the controllers (root included) rather than summing
+    /// the card headers, so root-slot edits (a project rename) still count
+    /// exactly once.
     pub fn editor_view(
         &self,
         project_id: &str,
@@ -1614,7 +1621,6 @@ impl ProjectController {
         let mut nodes = self
             .root_nodes
             .iter()
-            .flat_map(NodeController::children)
             .map(|node| {
                 node.ui_node_with_product_previews(
                     &product_preview,
@@ -1638,6 +1644,10 @@ impl ProjectController {
             // playlist's picker honest with the project pane's.
             self.gate_add_node_menus(node);
         }
+        // Module faces derive LAST: a module's panel aggregates the panel
+        // targets its finished subtree carries, so every card below it must
+        // already be built (and card-UI-overlaid) before it can be read.
+        self.apply_module_faces(&mut nodes);
         let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
         gate_add_node_menu(
             &mut root_add_node_menu,
@@ -2144,9 +2154,191 @@ impl ProjectController {
     /// see the session; the gate therefore lands here, at the one place
     /// that knows the lens, so a playlist's "+" agrees with the project
     /// pane's.
+    ///
+    /// The walk descends the nested-card tree: after the flat-root reversal
+    /// a playlist is always a [`crate::UiNodeChild`] under the root card, so
+    /// an un-recursed gate would leave every playlist picker ungated.
     fn gate_add_node_menus(&self, node: &mut UiNodeView) {
         if let Some(menu) = node.add_node_menu.as_mut() {
             gate_add_node_menu(menu, self.lens_device_features.as_deref());
+        }
+        self.gate_child_add_node_menus(&mut node.children);
+    }
+
+    fn gate_child_add_node_menus(&self, children: &mut [crate::UiNodeChild]) {
+        for child in children {
+            if let Some(menu) = child.add_node_menu.as_mut() {
+                gate_add_node_menu(menu, self.lens_device_features.as_deref());
+            }
+            self.gate_child_add_node_menus(&mut child.children);
+        }
+    }
+
+    /// Derive the **module face** for every module card in the workspace
+    /// (`docs/design/modules.md` §5, `docs/design/panel.md` P1).
+    ///
+    /// A module card's face is its output mirror plus its scope's panel; the
+    /// panel's controls are exactly the widget controls its subtree already
+    /// derived whose `panel_target` names THIS module's scope. Nothing is
+    /// re-derived here — a knob appears on the module panel and on its own
+    /// card as the SAME `UiPanelControl`, which is what keeps one control's
+    /// two views in lockstep.
+    ///
+    /// The walk is bottom-up: a child module's panel is a nested group on
+    /// its parent's, so children must be finished first.
+    ///
+    /// Nothing derives without a binding-graph snapshot — panel state
+    /// (following / at default) is read off the graph's channel rows, and a
+    /// face that guessed them would be worse than no face.
+    fn apply_module_faces(&self, nodes: &mut [UiNodeView]) {
+        let Some(graph) = self.binding_graph() else {
+            return;
+        };
+        for node in nodes {
+            self.apply_child_module_faces(&mut node.children, graph);
+            if node.header.kind != MODULE_KIND_LABEL {
+                continue;
+            }
+            if let Some(face) = self.module_face(
+                graph,
+                &node.header.title,
+                &node.header.path,
+                view_sections(node),
+                &node.children,
+            ) {
+                node.face = Some(crate::UiNodeFace::Module(face));
+            }
+        }
+    }
+
+    fn apply_child_module_faces(
+        &self,
+        children: &mut [crate::UiNodeChild],
+        graph: &lpc_wire::WireBindingGraph,
+    ) {
+        for child in children {
+            self.apply_child_module_faces(&mut child.children, graph);
+            if child.kind != MODULE_KIND_LABEL {
+                continue;
+            }
+            if let Some(face) = self.module_face(
+                graph,
+                &child.label,
+                &child.detail,
+                &child.sections,
+                &child.children,
+            ) {
+                child.face = Some(crate::UiNodeFace::Module(face));
+            }
+        }
+    }
+
+    /// One module card's face. `None` when the card's address resolves to no
+    /// controller (a card built from a tree the controllers no longer carry).
+    fn module_face(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        label: &str,
+        path: &str,
+        sections: &[crate::UiNodeSection],
+        children: &[crate::UiNodeChild],
+    ) -> Option<crate::UiModuleFace> {
+        let address = ProjectNodeAddress::parse(path).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        let scope = lpc_wire::WireScopeRef::Module { owner };
+
+        let mut controls: Vec<crate::UiPanelControlView> = Vec::new();
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for control in subtree_panel_controls(children) {
+            let Some(target) = control
+                .panel_target
+                .as_ref()
+                .filter(|target| target.scope == scope)
+            else {
+                continue;
+            };
+            // One (scope, channel) is ONE control (panel.md P1) however many
+            // cards below consume it; the first one found wins.
+            if !seen.insert(target.channel.clone()) {
+                continue;
+            }
+            let (state, source) = self.panel_control_state(graph, scope, target);
+            controls.push(crate::UiPanelControlView {
+                channel: target.channel.clone(),
+                control: control.clone(),
+                state,
+                source,
+            });
+        }
+
+        // Presentation recursion (R8): each direct child module's finished
+        // panel rides along as a nested group. Nothing is promoted — the
+        // group still belongs to the child's own scope.
+        let groups = children
+            .iter()
+            .filter_map(|child| match &child.face {
+                Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
+                _ => None,
+            })
+            .collect();
+
+        Some(crate::UiModuleFace {
+            // The module's own visual mirror (R7); a module with no visual
+            // simply has no hero (E6).
+            preview: super::node::node_face_builder::product_of_kind(
+                sections,
+                crate::UiProductKind::Visual,
+            ),
+            panel: crate::UiPanelGroup::new(label, path)
+                .with_target(scope)
+                .with_controls(controls)
+                .with_groups(groups),
+            // Wiring drawer, provenance, and the panel-state auto-save
+            // toggle are P3's work.
+            wiring: None,
+            wiring_open: false,
+            provenance: None,
+            auto_save: None,
+        })
+    }
+
+    /// Which of the three panel states a control is in, and what owns its
+    /// displayed value while it is reading (`docs/design/panel.md` P2).
+    fn panel_control_state(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: lpc_wire::WireScopeRef,
+        target: &crate::UiPanelTarget,
+    ) -> (crate::UiPanelControlState, Option<String>) {
+        if target.engaged {
+            // The panel itself holds the channel; "who drives it" is this
+            // control, so there is nothing else to name.
+            return (crate::UiPanelControlState::Engaged, None);
+        }
+        let automation = graph
+            .channels
+            .iter()
+            .find(|channel| channel.scope == Some(scope) && channel.name == target.channel)
+            .and_then(|channel| {
+                channel.providers.iter().find_map(|index| {
+                    let binding = graph.bindings.get(*index as usize)?;
+                    // A Panel-origin provider is a writer this very panel
+                    // engaged; it can never be what the control "follows".
+                    (binding.origin != lpc_wire::WireBindingOrigin::Panel).then(|| {
+                        self.node_by_runtime_id(binding.node)
+                            .map(|node| node.label().to_string())
+                            .unwrap_or_else(|| format!("node {}", binding.node.0))
+                    })
+                })
+            });
+        match automation {
+            Some(source) => (crate::UiPanelControlState::ReadFollowing, Some(source)),
+            // No writer anywhere: the consuming slot falls back to its own
+            // authored default (R6), which is exactly what the widget shows.
+            None => (
+                crate::UiPanelControlState::ReadDefault,
+                Some("authored default".to_string()),
+            ),
         }
     }
 
@@ -2198,20 +2390,16 @@ impl ProjectController {
 
     fn node_tree_view(&self) -> ProjectNodeTreeView {
         let edits = self.slot_edit_join();
-        // Flat-root: the project root is the project pane, not a tree row —
-        // its children are the tree's top-level items, matching the workspace
-        // (which renders `root_nodes.flat_map(children)` as the top panes).
+        // The root card is back (the flat-root reversal), so the sidebar
+        // agrees with the workspace: the project root is the tree's one top
+        // row and every other node hangs beneath it. The count includes the
+        // root, since it is now a row like any other.
         ProjectNodeTreeView::new(
             self.root_nodes
                 .iter()
-                .flat_map(NodeController::children)
                 .map(|node| self.node_tree_item(node, &edits))
                 .collect(),
-            self.root_nodes
-                .iter()
-                .flat_map(NodeController::children)
-                .map(count_nodes)
-                .sum(),
+            self.root_nodes.iter().map(count_nodes).sum(),
         )
     }
 
@@ -3574,6 +3762,16 @@ impl ProjectController {
     /// pattern). `None` when the node's attachment site cannot be resolved
     /// (no delete affordance is offered).
     pub fn node_remove_action(&self, address: &ProjectNodeAddress) -> Option<UiAction> {
+        // The ROOT is never deletable. Since the flat-root reversal it
+        // renders as a card like any other, so it would otherwise wear a
+        // Delete button that removes the project itself — and a root has no
+        // attachment site to remove it from. A one-segment tree path IS the
+        // root (`/demo.module`); `resolve_remove_site` also refuses it (no
+        // parent), but the guard is stated here so the affordance can never
+        // reappear through a different resolution path.
+        if address.path().0.len() <= 1 {
+            return None;
+        }
         let preflight = self.node_remove_preflight(address)?;
         Some(
             UiAction::from_op(
@@ -4604,6 +4802,58 @@ fn root_node_ids(view: &ProjectView) -> Vec<NodeId> {
 
 fn count_nodes(node: &NodeController) -> usize {
     1 + node.children().iter().map(count_nodes).sum::<usize>()
+}
+
+/// The card kind label module nodes wear (`node_kind_label`: `module`,
+/// `project`, and `show` all read as one kind).
+const MODULE_KIND_LABEL: &str = "Module";
+
+/// The main tab's anatomy sections for a built card, empty for a card whose
+/// body is text.
+fn view_sections(node: &UiNodeView) -> &[crate::UiNodeSection] {
+    node.tabs
+        .first()
+        .and_then(|tab| match &tab.body {
+            crate::UiNodeTabBody::Sections(sections) => Some(sections.as_slice()),
+            crate::UiNodeTabBody::Text { .. } => None,
+        })
+        .unwrap_or_default()
+}
+
+/// Every widget control any face in a card subtree carries, depth-first.
+///
+/// This is the module panel's whole input: a control's `panel_target` says
+/// which scope it belongs to, so membership is read off the controls
+/// themselves rather than re-derived from the tree shape. The walk descends
+/// through nested modules too — a leaf deep inside an embedded module can
+/// consume a channel that resolves in an OUTER scope (R5), and that control
+/// belongs on the outer module's panel.
+fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPanelControl> {
+    fn face_controls<'a>(
+        face: Option<&'a crate::UiNodeFace>,
+        out: &mut Vec<&'a crate::UiPanelControl>,
+    ) {
+        match face {
+            Some(crate::UiNodeFace::Shader(shader)) => out.extend(shader.controls.iter()),
+            Some(crate::UiNodeFace::Fixture(fixture)) => out.push(&fixture.brightness),
+            Some(crate::UiNodeFace::Controls(group)) => {
+                out.extend(group.controls.iter().map(|view| &view.control));
+            }
+            // A module's own panel controls are its subtree's, already
+            // collected by this walk; a playlist face carries entry chips,
+            // not controls.
+            Some(crate::UiNodeFace::Module(_) | crate::UiNodeFace::Playlist(_)) | None => {}
+        }
+    }
+    fn walk<'a>(children: &'a [crate::UiNodeChild], out: &mut Vec<&'a crate::UiPanelControl>) {
+        for child in children {
+            face_controls(child.face.as_ref(), out);
+            walk(&child.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(children, &mut out);
+    out
 }
 
 /// The live reading for a consumed bus channel, prepared for display on a
@@ -5788,16 +6038,21 @@ mod tests {
         // never the literal project id or the word "project".
         assert_eq!(view.project_name, "Demo");
         assert_eq!(view.handle_id, 7);
-        // Flat-root: the tree omits the project root too — its children are
-        // the tree's top-level items, matching the workspace cards.
-        assert_eq!(view.tree.total_count, 2);
-        assert_eq!(view.tree.roots[0].label, "Clock");
-        assert_eq!(view.tree.roots[1].label, "Orbit");
-        assert_eq!(view.nodes.len(), 2);
-        assert_eq!(view.nodes[0].header.title, "Clock");
-        assert_eq!(view.nodes[1].header.title, "Orbit");
+        // Root card restored: the root is the tree's one top row (and is
+        // counted like any other), with the project's nodes beneath it —
+        // the sidebar mirrors the workspace exactly.
+        assert_eq!(view.tree.total_count, 3);
+        assert_eq!(view.tree.roots.len(), 1);
+        assert_eq!(view.tree.roots[0].label, "Demo");
+        assert_eq!(view.tree.roots[0].children[0].label, "Clock");
+        assert_eq!(view.tree.roots[0].children[1].label, "Orbit");
+        assert_eq!(view.nodes.len(), 1, "one top-level card: the root module");
+        assert_eq!(view.nodes[0].header.title, "Demo");
+        let cards = root_children(&view);
+        assert_eq!(cards[0].label, "Clock");
+        assert_eq!(cards[1].label, "Orbit");
 
-        let target = ProjectEditorTarget::parse(&view.tree.roots[1].action.node_id())
+        let target = ProjectEditorTarget::parse(&view.tree.roots[0].children[1].action.node_id())
             .expect("tree action should be typed");
         assert_eq!(
             target,
@@ -5817,6 +6072,13 @@ mod tests {
         let view = project.editor_view("studio-demo", 7, &inventory);
 
         assert_eq!(view.project_name, "studio-demo");
+    }
+
+    /// The workspace's nested cards. Since the flat-root reversal the
+    /// editor carries ONE top-level card — the root module — and every
+    /// other node rides its `children`.
+    fn root_children(view: &ProjectEditorView) -> &[crate::UiNodeChild] {
+        &view.nodes.first().expect("the root module card").children
     }
 
     /// Dispatch a `NodeUi` mutation exactly as the web does: through the
@@ -5856,8 +6118,9 @@ mod tests {
         );
 
         let view = project.editor_view("studio-demo", 7, &inventory);
+        let cards = root_children(&view);
         assert_eq!(
-            view.nodes[1].card_ui,
+            cards[1].card_ui,
             NodeCardUiState {
                 code_open: true,
                 agent_collapsed: true,
@@ -5866,7 +6129,7 @@ mod tests {
             "the Orbit pane wears its saved card UI state"
         );
         assert_eq!(
-            view.nodes[0].card_ui,
+            cards[0].card_ui,
             NodeCardUiState::default(),
             "state is keyed per node — the Clock pane stays fresh"
         );
@@ -5899,9 +6162,9 @@ mod tests {
             },
         );
         let collapsed = project.editor_view("studio-demo", 7, &inventory);
-        assert!(collapsed.nodes[1].card_ui.agent_collapsed);
+        assert!(root_children(&collapsed)[1].card_ui.agent_collapsed);
         assert_eq!(
-            collapsed.nodes[1].card_ui.composer_draft,
+            root_children(&collapsed)[1].card_ui.composer_draft,
             "make it pulse slowly"
         );
 
@@ -5913,9 +6176,10 @@ mod tests {
             },
         );
         let expanded = project.editor_view("studio-demo", 7, &inventory);
-        assert!(!expanded.nodes[1].card_ui.agent_collapsed);
+        assert!(!root_children(&expanded)[1].card_ui.agent_collapsed);
         assert_eq!(
-            expanded.nodes[1].card_ui.composer_draft, "make it pulse slowly",
+            root_children(&expanded)[1].card_ui.composer_draft,
+            "make it pulse slowly",
             "expanding never clears the mirrored draft"
         );
     }
@@ -5940,7 +6204,7 @@ mod tests {
 
         let view = project.editor_view("studio-demo", 8, &inventory);
         assert_eq!(
-            view.nodes[1].card_ui,
+            root_children(&view)[1].card_ui,
             NodeCardUiState::default(),
             "card UI state follows the loaded project"
         );
@@ -8794,14 +9058,16 @@ mod tests {
         // Clean project: no header actions — adding rides the tree row and
         // the workspace button, both fed by the picker data on the view.
         assert!(view.header_actions.is_empty());
-        let menu = view.add_node_menu.expect("picker data rides the editor");
+        let menu = view
+            .add_node_menu
+            .as_ref()
+            .expect("picker data rides the editor");
         assert_eq!(menu.entries.len(), 10);
 
         // Root children carry the ungated delete action with confirmation.
-        let clock = view
-            .nodes
+        let clock = root_children(&view)
             .iter()
-            .find(|node| node.node_id == "/demo.module/clock.clock")
+            .find(|child| child.detail == "/demo.module/clock.clock")
             .expect("clock card");
         let delete = clock
             .header_actions
@@ -8815,6 +9081,17 @@ mod tests {
         assert!(
             delete.action.op_as::<crate::NodeRemoveOp>().is_some(),
             "delete dispatches NodeRemoveOp"
+        );
+
+        // …and the ROOT card never does: deleting the project from its own
+        // card is not an affordance, and the root has no attachment site to
+        // be removed from.
+        assert!(
+            !view.nodes[0]
+                .header_actions
+                .iter()
+                .any(|action| action.icon == "remove"),
+            "the restored root card offers no Delete"
         );
     }
 
@@ -10034,20 +10311,21 @@ mod tests {
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert_eq!(
             editor.dirty, expected,
-            "root-own edits count without a card"
+            "root-own edits count without a child card"
         );
-        // Flat-root workspace: the childless root renders no card; its rows
-        // (map dirty included) ride `root_slots` into the project popup.
-        assert!(editor.nodes.is_empty());
+        // The childless root is the one workspace card; its rows (map dirty
+        // included) still ride `root_slots` into the project popup.
+        assert_eq!(editor.nodes.len(), 1);
+        assert!(editor.nodes[0].children.is_empty());
         let entries = editor
             .root_slots
             .iter()
             .find(|slot| slot.label == "Entries")
             .expect("root settings carry the map row");
         assert_eq!(entries.state.dirty, UiNodeDirtyState::Dirty);
-        // Flat-root: a childless root has no tree rows; its own dirt shows on
-        // the project pane (editor.dirty + root_slots above), not the tree.
-        assert!(editor.tree.roots.is_empty());
+        // The root is a tree row again, so its own dirt shows there too.
+        assert_eq!(editor.tree.roots.len(), 1);
+        assert_eq!(editor.tree.roots[0].dirty, expected);
     }
 
     #[test]
@@ -11287,15 +11565,22 @@ mod tests {
         );
 
         let editor = project.editor_view("demo", 1, &ProjectInventorySummary::default());
-        // Flat-root: the tree's top-level items are the project root's
-        // children (the root is the project pane, not a tree row).
-        let roots = &editor.tree.roots;
-        assert_eq!(roots[0].dirty, one_persisted, "group bubbles the edit");
+        // The root is the tree's one top row again, so the bubbling chain
+        // is one level longer: root → group → leaf.
+        let root = &editor.tree.roots[0];
+        assert_eq!(root.dirty, one_persisted, "the root row bubbles the edit");
         assert_eq!(
-            roots[0].children[0].dirty, one_persisted,
+            root.children[0].dirty, one_persisted,
+            "group bubbles the edit"
+        );
+        assert_eq!(
+            root.children[0].children[0].dirty, one_persisted,
             "grandchild carries its own edit"
         );
-        assert!(roots[1].dirty.is_clean(), "sibling branch stays clean");
+        assert!(
+            root.children[1].dirty.is_clean(),
+            "sibling branch stays clean"
+        );
         assert_eq!(editor.dirty, one_persisted);
         assert_eq!(project.dirty_summary(), one_persisted);
     }
@@ -11324,17 +11609,19 @@ mod tests {
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert_eq!(editor.dirty, expected);
         assert!(!editor.dirty.is_clean(), "failed edits need attention");
-        // Flat-root workspace: the childless root renders no card; its
-        // failed row rides `root_slots`.
-        assert!(editor.nodes.is_empty());
+        // The childless root is the one workspace card; its failed row
+        // still rides `root_slots`.
+        assert_eq!(editor.nodes.len(), 1);
+        assert!(editor.nodes[0].children.is_empty());
         let brightness = editor
             .root_slots
             .iter()
             .find(|slot| slot.label == "Brightness")
             .expect("root settings carry the brightness row");
         assert_eq!(brightness.state.dirty, UiNodeDirtyState::Error);
-        // Flat-root: root-own dirt is on the project pane, not the tree.
-        assert!(editor.tree.roots.is_empty());
+        // The root is a tree row again, carrying its own failed edit.
+        assert_eq!(editor.tree.roots.len(), 1);
+        assert_eq!(editor.tree.roots[0].dirty, expected);
         assert_eq!(
             editor
                 .header_actions
@@ -11353,9 +11640,10 @@ mod tests {
         assert!(project.dirty_summary().is_clean());
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert!(editor.dirty.is_clean());
-        // Flat-root workspace: the childless root has no card, but its rows
-        // ride `root_slots` (clean here).
-        assert!(editor.nodes.is_empty());
+        // The childless root is the one workspace card; its rows ride
+        // `root_slots` (clean here).
+        assert_eq!(editor.nodes.len(), 1);
+        assert!(editor.nodes[0].children.is_empty());
         assert!(!editor.root_slots.is_empty());
         assert!(
             editor
@@ -11363,8 +11651,9 @@ mod tests {
                 .iter()
                 .all(|slot| slot.state.dirty == UiNodeDirtyState::Clean)
         );
-        // Flat-root: a childless root contributes no tree rows.
-        assert!(editor.tree.roots.is_empty());
+        // A childless root is still exactly one tree row.
+        assert_eq!(editor.tree.roots.len(), 1);
+        assert!(editor.tree.roots[0].children.is_empty());
         // No header actions on a clean project (adding rides the node list).
         assert!(editor.header_actions.is_empty());
     }
@@ -11452,10 +11741,9 @@ mod tests {
 
     /// Regression parity: the project-level summary surfaced on the editor
     /// DTO equals the standalone walk and the tree-root DTO sum — one
-    /// aggregation everywhere. The workspace cards exclude the root (flat
-    /// root), so the card sum covers only non-root edits: here both edits
-    /// are root-own, the card list is empty, and `editor.dirty` still counts
-    /// them.
+    /// aggregation everywhere. With the root card restored the root IS the
+    /// one card and the one tree row, so both sums see the root-own edits
+    /// directly.
     #[test]
     fn editor_view_dirty_agrees_with_walk_and_dto_sums() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
@@ -11474,15 +11762,14 @@ mod tests {
             persisted: 1,
             failed: 0,
         };
-        // editor.dirty, the standalone walk, and dirty_summary agree — one
-        // aggregation over everything. The tree (like the cards) excludes the
-        // root, so with both edits root-own the tree contributes nothing;
-        // dirty_grandchild_bubbles covers the tree-carries-non-root-dirt case.
+        // editor.dirty, the standalone walk, dirty_summary, the tree-root
+        // sum and the card sum all agree — one aggregation over everything.
         let tree_sum: DirtySummary = editor.tree.roots.iter().map(|root| root.dirty).sum();
+        let card_sum: DirtySummary = editor.nodes.iter().map(|node| node.header.dirty).sum();
         assert_eq!(editor.dirty, expected);
         assert_eq!(project.dirty_summary(), expected);
-        assert!(tree_sum.is_clean(), "root-own edits are not tree rows");
-        assert!(editor.nodes.is_empty(), "root-own edits have no card");
+        assert_eq!(tree_sum, expected, "the root row carries root-own edits");
+        assert_eq!(card_sum, expected, "and so does the root card");
     }
 
     /// Root (1) → group (2) + clock sibling (4), group → leaf shader (3).

@@ -18,7 +18,7 @@ use serde_json::json;
 
 use crate::app::studio::studio_edit_e2e_tests::{
     ASSET_SHADER_V1, InProcessServerIo, asset_e2e_server, drive, editor_dirty, find_asset_editor,
-    project_action,
+    project_action, workspace_cards,
 };
 use crate::{
     AgentTaskFuture, ProjectOp, SettingsCommand, StudioActor, StudioCommand, StudioController,
@@ -775,19 +775,13 @@ fn tool_result_json(request: &TurnRequest) -> serde_json::Value {
     serde_json::from_str(&content).expect("tool result is json")
 }
 
-/// The shader node's face DTO.
+/// The shader node's face DTO. The shader is a NESTED card since the
+/// flat-root reversal, so the scan walks the promoted card tree.
 fn shader_face(view: &UiStudioView) -> crate::UiShaderFace {
-    view.panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            crate::UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane")
-        .nodes
-        .iter()
-        .find_map(|node| match &node.face {
-            Some(crate::UiNodeFace::Shader(face)) => Some(face.clone()),
+    workspace_cards(view)
+        .into_iter()
+        .find_map(|card| match card.face {
+            Some(crate::UiNodeFace::Shader(face)) => Some(face),
             _ => None,
         })
         .expect("shader node carries a face")
@@ -803,20 +797,7 @@ fn agent_view(view: &UiStudioView) -> UiAgentView {
 /// The decorated agent chat DTO on the shader node's card face (node-card
 /// P3: the face's agent section).
 fn face_agent_view(view: &UiStudioView) -> UiAgentView {
-    let editor = view
-        .panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            crate::UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane");
-    editor
-        .nodes
-        .iter()
-        .find_map(|node| match &node.face {
-            Some(crate::UiNodeFace::Shader(face)) => face.agent.clone(),
-            _ => None,
-        })
+    shader_face(view)
+        .agent
         .expect("shader face carries the agent chat DTO")
 }

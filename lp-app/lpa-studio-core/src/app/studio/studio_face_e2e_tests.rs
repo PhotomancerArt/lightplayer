@@ -22,14 +22,14 @@ use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
 use crate::app::studio::studio_edit_e2e_tests::{
-    InProcessServerIo, drive, editor_dirty, project_action,
+    InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
 use crate::{
     ControllerId, NodeCardUiState, NodeUiOp, PlaylistActivateOp, ProjectController,
     ProjectEditorOp, ProjectEditorTarget, ProjectOp, ProjectSlotAddress, SlotEditOp, StudioActor,
     StudioCommand, StudioController, StudioServerClient, UiAction, UiLogLevel, UiNodeDirtyState,
     UiNodeFace, UiNodeView, UiPanelControl, UiPanelWidget, UiPlaylistFace, UiSlotValueKind,
-    UiStudioView, UiViewContent,
+    UiStudioView,
 };
 
 #[test]
@@ -678,6 +678,140 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
     );
 }
 
+#[test]
+fn the_root_module_card_derives_its_panel_from_scoped_channels() {
+    // The flat-root reversal made the root module a real card, and this is
+    // what it is FOR: its face carries the root scope's panel, derived from
+    // the binding graph and the panel targets its subtree already produced
+    // (`docs/design/modules.md` R8, `panel.md` P1). Nothing is mock-fed.
+    let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    // -- one top-level card: the root module, wearing the module face -------
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.nodes.len(), 1, "one top-level workspace card");
+    let root_card = &editor.nodes[0];
+    assert_eq!(root_card.header.kind, "Module");
+    assert_eq!(root_card.header.title, editor.project_name);
+    let face = module_face(&snapshot);
+
+    // -- the panel: the root scope's channels, and only those ---------------
+    let scope = face.panel.target.expect("the root panel targets its scope");
+    assert!(
+        matches!(scope, lpc_wire::WireScopeRef::Module { .. }),
+        "the root scope is a module scope, got {scope:?}"
+    );
+    assert_eq!(
+        face.panel
+            .controls
+            .iter()
+            .map(|control| control.channel.as_str())
+            .collect::<Vec<_>>(),
+        vec!["glow"],
+        "only the BOUND uniform lists — `speed` is panel-flagged but wired \
+         to nothing, and panel membership is scope publicity, not a panel \
+         flag"
+    );
+    let glow = &face.panel.controls[0];
+    assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);
+    assert_eq!(
+        glow.source.as_deref(),
+        Some("authored default"),
+        "nothing writes the channel, so the consuming slot's own default is \
+         what the control displays (R6)"
+    );
+    assert_eq!(glow.control.value.kind, UiSlotValueKind::F32(0.5));
+    let target = glow
+        .control
+        .panel_target
+        .clone()
+        .expect("a module-panel control dispatches panel writes");
+    assert_eq!(target.scope, scope);
+    assert_eq!(target.channel, "glow");
+
+    // -- one control, two cards (P1): the shader card carries the SAME one --
+    let shader = node_by_kind(&snapshot, "Shader");
+    assert!(
+        root_card
+            .children
+            .iter()
+            .any(|child| child.kind == "Shader"),
+        "the shader card renders below the root card"
+    );
+    let Some(UiNodeFace::Shader(shader_face)) = &shader.face else {
+        panic!("shader card keeps its own face");
+    };
+    assert_eq!(
+        control_labeled(shader_face, "Glow").panel_target,
+        Some(target.clone()),
+        "the knob on the shader card and the control on the module panel \
+         share one (scope, channel) identity"
+    );
+
+    // -- engaging a writer: the module panel reads Held ----------------------
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelWriteOp {
+            scope: target.scope,
+            channel: target.channel.clone(),
+            value: LpValue::F32(0.9),
+            ttl_ms: None,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel write emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let glow = &face.panel.controls[0];
+    assert_eq!(
+        glow.state,
+        crate::UiPanelControlState::Engaged,
+        "the engaged writer reads Held on the module panel"
+    );
+    assert_eq!(
+        glow.control.live_value.as_deref(),
+        Some("0.9"),
+        "and the held value flows back as the live reading"
+    );
+
+    // -- the module's own reset: clear at scope granularity (P2) ------------
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Scope { scope },
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel clear emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let glow = &face.panel.controls[0];
+    assert_eq!(
+        glow.state,
+        crate::UiPanelControlState::ReadDefault,
+        "resetting the module releases its writer"
+    );
+    assert_eq!(glow.source.as_deref(), Some("authored default"));
+}
+
 // -- harness -----------------------------------------------------------------
 
 const PROJECT_DIR: &str = "/projects/face-e2e";
@@ -1128,24 +1262,29 @@ fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
         .collect()
 }
 
-fn node_by_kind<'a>(view: &'a UiStudioView, kind: &str) -> &'a UiNodeView {
-    let editor = view
-        .panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane");
-    editor
-        .nodes
-        .iter()
-        .find(|node| node.header.kind == kind)
-        .unwrap_or_else(|| panic!("project carries a {kind} node"))
+/// The one card of `kind`, anywhere in the nested card tree. Since the
+/// flat-root reversal every non-root card is a `UiNodeChild` under the root
+/// module's card, so this promotes as it descends.
+fn node_by_kind(view: &UiStudioView, kind: &str) -> UiNodeView {
+    card_matching(view, kind, |card| card.header.kind == kind)
 }
 
-fn playlist_face(view: &UiStudioView) -> &UiPlaylistFace {
-    let Some(UiNodeFace::Playlist(face)) = &node_by_kind(view, "Playlist").face else {
+/// The root module card's face.
+fn module_face(view: &UiStudioView) -> crate::UiModuleFace {
+    let Some(UiNodeFace::Module(face)) = project_editor(view)
+        .nodes
+        .first()
+        .expect("the root module card")
+        .face
+        .clone()
+    else {
+        panic!("the root card wears a module face");
+    };
+    face
+}
+
+fn playlist_face(view: &UiStudioView) -> UiPlaylistFace {
+    let Some(UiNodeFace::Playlist(face)) = node_by_kind(view, "Playlist").face else {
         panic!("playlist face present");
     };
     face
@@ -1160,16 +1299,16 @@ fn control_labeled<'a>(face: &'a crate::UiShaderFace, label: &str) -> &'a UiPane
         .unwrap_or_else(|| panic!("shader face carries a {label} control"))
 }
 
-fn shader_knob(view: &UiStudioView) -> &UiPanelControl {
-    let Some(UiNodeFace::Shader(face)) = &node_by_kind(view, "Shader").face else {
+fn shader_knob(view: &UiStudioView) -> UiPanelControl {
+    let Some(UiNodeFace::Shader(face)) = node_by_kind(view, "Shader").face else {
         panic!("shader face present");
     };
-    control_labeled(face, "Speed")
+    control_labeled(&face, "Speed").clone()
 }
 
-fn fixture_fader(view: &UiStudioView) -> &UiPanelControl {
-    let Some(UiNodeFace::Fixture(face)) = &node_by_kind(view, "Fixture").face else {
+fn fixture_fader(view: &UiStudioView) -> UiPanelControl {
+    let Some(UiNodeFace::Fixture(face)) = node_by_kind(view, "Fixture").face else {
         panic!("fixture face present");
     };
-    &face.brightness
+    face.brightness
 }
