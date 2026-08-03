@@ -383,9 +383,10 @@
 <h2><span class="n">3</span> Motion &amp; rainbow — how alive is the brand?</h2>
 <p class="sub">
   All CSS/SVG (portable to the Dioxus component). Cards A–C animate only the mark;
-  D lights the wordmark too; F is the restrained option — static until hovered.
+  D/D2/D3 light the wordmark too (full · “Player” still · mark all-white, only “Light” moves);
+  F is the restrained option — static until hovered.
   All respect the <b>Motion</b> and <b>Speed</b> controls; “Hover” gates every concept behind hover.
-  Shown on the production mark + current font for comparability. Click to feed §4.
+  Shown on the chosen H·Datasheet-fine mark + Inter. Click to feed §4.
 </p>
 <div class="agrid" id="animcards"></div>
 
@@ -656,7 +657,7 @@ for (const [k, f] of Object.entries(FONTS)) {
     (f.check ? `<span class="badge" data-check='${f.check}' hidden>FALLBACK</span>` : '') +
     `<div class="stage big">${wordHTML(k, 24)}</div>` +
     `<div class="stage bar">` +
-      `<span class="lockup" style="gap:3px">${MARKS.prod.build(22)}${wordHTML(k, 14)}</span>` +
+      `<span class="lockup" style="gap:3px">${MARKS.tech.build(22)}${wordHTML(k, 14)}</span>` +
     `</div>` +
     `<span class="cnote">${f.note}</span>`;
   el.addEventListener('click', () => { state.font = k; refreshSel(fontcards, k); renderSheet(); });
@@ -670,7 +671,7 @@ for (const [k, a] of Object.entries(ANIMS)) {
   el.className = 'card'; el.dataset.k = k; el.setAttribute('aria-pressed', String(k === state.anim));
   el.innerHTML = `<span class="cname">${a.label}</span>` +
     `<div class="stage" style="justify-content:center;padding:16px">` +
-      `<span class="lockup ${a.cls}" style="gap:5px">${MARKS.prod.build(34)}${wordHTML('inter', 20)}</span>` +
+      `<span class="lockup ${a.cls}" style="gap:5px">${MARKS.tech.build(34)}${wordHTML('inter', 20)}</span>` +
     `</div>` +
     `<span class="cnote">${a.note}</span>`;
   el.addEventListener('click', () => { state.anim = k; refreshSel(animcards, k); renderSheet(); });
