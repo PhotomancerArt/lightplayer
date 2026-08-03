@@ -61,7 +61,7 @@ pub use app::node::{
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
 pub use app::preview_host::{
     PreviewHostConfig, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
-    PreviewTier,
+    PreviewTier, is_teardown_abort_reason,
 };
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
