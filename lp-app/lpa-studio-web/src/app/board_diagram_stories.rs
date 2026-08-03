@@ -10,8 +10,8 @@
 use dioxus::prelude::*;
 use lpa_boards::geometry::{BoardLayout, DiagramOptions};
 use lpa_boards::{
-    BoardDiagram, BoardDisplayFile, BoardsCatalogPage, DiagramMargin, DiagramMode, HostOs,
-    PinSwatch, WiredConnection, all_boards, board_by_id,
+    BoardCallout, BoardDiagram, BoardDisplayFile, BoardsCatalogPage, DiagramMargin, DiagramMode,
+    HostOs, PinSwatch, WiredConnection, all_boards, board_by_id,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -416,6 +416,71 @@ pub(crate) fn firmware_detail_no_build() -> Element {
             BoardsCatalogPage {
                 os: HostOs::MacOs,
                 initial_board: Some("quinled/dig-uno".to_string()),
+            }
+        }
+    }
+}
+
+// ---- callouts (M2b) ------------------------------------------------------
+
+#[story(
+    description = "The recovery ritual on the C6 devkit, as numbered steps with bold arrows: hold BOOT, then plug in USB. Gold, not attention-orange — a callout explains rather than alarms (M2b gate). BOOT and RST sit side by side, which is exactly why prose fails and an arrow does not."
+)]
+pub(crate) fn callout_boot_button() -> Element {
+    rsx! {
+        BoardFigure {
+            BoardDiagram {
+                board: board("espressif/esp32-c6-devkitc-1"),
+                u: 13.0,
+                scale: 1.25,
+                callouts: vec![
+                    BoardCallout::step(1, lpa_boards::CalloutTarget::Button("BOOT".into()), "Hold BOOT"),
+                    BoardCallout::step(2, lpa_boards::CalloutTarget::Usb("USB".into()), "Plug in USB"),
+                ],
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The stacked-button case that motivated M2b (DOM-Z-102: BOOT sits physically ON TOP of RST). The 2D drawing can only place them adjacent, so the step TEXT carries the disambiguation the picture cannot."
+)]
+pub(crate) fn callout_stacked_buttons() -> Element {
+    rsx! {
+        BoardFigure {
+            BoardDiagram {
+                board: board("domraem/dom-z-102"),
+                u: 12.0,
+                scale: 1.15,
+                callouts: vec![
+                    BoardCallout::step(
+                        1,
+                        lpa_boards::CalloutTarget::Button("BOOT".into()),
+                        "Hold BOOT (the TOP button)",
+                    ),
+                    BoardCallout::step(
+                        2,
+                        lpa_boards::CalloutTarget::Button("RST".into()),
+                        "Tap RST (the BOTTOM button)",
+                    ),
+                ],
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A callout addressing a PIN rather than a button (DOM-Z-102 IO18): pin discovery and wiring help point at pads the same way. Anchors resolve against the same layout the renderer walks, so the dot lands on the drawn pad."
+)]
+pub(crate) fn callout_pin() -> Element {
+    rsx! {
+        BoardFigure {
+            BoardDiagram {
+                board: board("domraem/dom-z-102"),
+                mode: DiagramMode::Caps,
+                u: 12.0,
+                scale: 1.15,
+                callouts: vec![BoardCallout::gpio(18, "Wire your first strip here")],
             }
         }
     }

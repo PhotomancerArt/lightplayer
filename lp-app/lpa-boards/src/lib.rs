@@ -18,6 +18,7 @@
 //! `firmware_join.rs` and
 //! `docs/adr/2026-08-01-firmware-manifest-architecture.md`.
 
+mod callout;
 mod catalog;
 #[cfg(feature = "diagram")]
 mod catalog_page;
@@ -29,6 +30,7 @@ pub mod geometry;
 mod runtime_manifests;
 pub mod usb_bridge;
 
+pub use callout::{BoardCallout, CalloutPlacement, CalloutTarget};
 pub use catalog::{DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id};
 #[cfg(feature = "diagram")]
 pub use catalog_page::BoardsCatalogPage;
