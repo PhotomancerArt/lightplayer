@@ -208,6 +208,7 @@ where
                     &mut meta,
                     render_fn_index,
                     self.output_format,
+                    self.params.float_mode,
                 ) {
                     Ok(name) => name,
                     Err(err) => {
@@ -222,6 +223,7 @@ where
                             &mut ir,
                             &mut meta,
                             render_fn_index,
+                            self.params.float_mode,
                         ) {
                             Ok(name) => Some(name),
                             Err(err) => {

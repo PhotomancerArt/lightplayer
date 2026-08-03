@@ -20,8 +20,8 @@ compile/execute path to solve build, size, or `no_std` issues.
 Chip-generic firmware logic (server loop, transport, logger, boot, output
 provider, littlefs glue) lives in `fw-esp32-common` and is consumed here;
 this crate keeps only what is genuinely ESP32-C6: board init, RMT register
-code, USB-Serial-JTAG, recovery backend + `panic=unwind`/`__eh_frame`
-machinery, and the hardware test harnesses (see
+code, USB-Serial-JTAG, the recovery backend and abort-tier panic path, and
+the hardware test harnesses (see
 `docs/adr/2026-07-29-per-chip-fw-toolchains.md` for the seam rules).
 Shared firmware plumbing belongs in `fw-core`. Host-local runtime lifecycle
 belongs in `fw-host`. Browser Studio simulation belongs in `fw-browser`.

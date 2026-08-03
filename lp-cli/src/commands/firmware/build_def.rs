@@ -213,34 +213,66 @@ mod tests {
     }
 
     /// The flash size lives in three places that cannot read each other: the
-    /// build def (canonical), the justfile's `s3_flash_size`, and the crate's
+    /// build def (canonical), a justfile var, and the crate's
     /// `.cargo/config.toml` runner. Mismatched values boot-loop a board with
     /// "exceeds flash chip size" (ADR 2026-07-30-esp32s3-partition-floor), so
     /// the mirrors are pinned here rather than left to a comment.
+    ///
+    /// Covers every chip. It used to check only the S3, and the C6 was the one
+    /// that paid for that: its runner carried neither `--flash-size` NOR
+    /// `--partition-table` until 2026-08-02, so `cargo run` flashed a
+    /// DEFAULT partition table over the real one — dropping `lpfs` (user
+    /// content) and `bootctl` silently, since the app still boots from
+    /// 0x10000. A desk jig was found in exactly that state.
     #[test]
     fn flash_size_mirrors_agree_with_the_defs() {
         let repo_root = find_repo_root().unwrap();
-        let def = load_build_def(&repo_root, "esp32s3-8mb").unwrap();
-        let expected = format!("--flash-size {}", def.flash_size_arg());
-
         let justfile = std::fs::read_to_string(repo_root.join("justfile")).unwrap();
-        assert!(
-            justfile.contains(&format!("s3_flash_size := \"{}\"", def.flash_size_arg())),
-            "justfile s3_flash_size drifted from lp-fw/builds/{}.json",
-            def.id
-        );
 
-        let runner = std::fs::read_to_string(
-            def.crate_dir(&repo_root)
-                .unwrap()
-                .join(".cargo/config.toml"),
-        )
-        .unwrap();
-        assert!(
-            runner.contains(&expected),
-            "fw-esp32s3 .cargo/config.toml runner drifted from lp-fw/builds/{}.json",
-            def.id
-        );
+        for (id, just_var) in [
+            ("esp32s3-8mb", "s3_flash_size"),
+            ("esp32v3-4mb", "v3_flash_size"),
+            ("esp32c6-4mb", "c6_flash_size"),
+        ] {
+            let def = load_build_def(&repo_root, id).unwrap();
+            assert!(
+                justfile.contains(&format!("{just_var} := \"{}\"", def.flash_size_arg())),
+                "justfile {just_var} drifted from lp-fw/builds/{id}.json"
+            );
+
+            let config = std::fs::read_to_string(
+                def.crate_dir(&repo_root)
+                    .unwrap()
+                    .join(".cargo/config.toml"),
+            )
+            .unwrap();
+            // Match the `runner = ...` LINE, not the file. These configs carry
+            // long comments that name the very flags being asserted, so a
+            // whole-file `contains` passes on the prose while the runner is
+            // wrong — verified by mutation: deleting `--partition-table` from
+            // the runner did not fail this test until it was narrowed here.
+            let runner = config
+                .lines()
+                .map(str::trim_start)
+                .find(|line| line.starts_with("runner") && line.contains("espflash flash"))
+                .unwrap_or_else(|| {
+                    panic!("{}: no espflash runner in .cargo/config.toml", def.package)
+                });
+            assert!(
+                runner.contains(&format!("--flash-size {}", def.flash_size_arg())),
+                "{} runner has no/wrong --flash-size vs lp-fw/builds/{id}.json:\n  {runner}",
+                def.package
+            );
+            // The partition table is the other half, and the one whose absence
+            // is silent: a wrong --flash-size boot-loops loudly, a missing
+            // --partition-table just quietly erases lpfs and bootctl.
+            assert!(
+                runner.contains("--partition-table"),
+                "{} runner passes no --partition-table; espflash will substitute a \
+                 default table and drop lpfs/bootctl:\n  {runner}",
+                def.package
+            );
+        }
     }
 
     /// The checked-in defs parse, and their ids match their file names.

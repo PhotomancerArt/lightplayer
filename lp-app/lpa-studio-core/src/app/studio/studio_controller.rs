@@ -929,6 +929,9 @@ impl StudioController {
                 .pool
                 .device_session()
                 .and_then(|session| session.recovery_status().cloned()),
+            detected_chip: self
+                .hardware_session()
+                .and_then(|session| session.snapshot().detected_chip),
         };
         let sim = self
             .pool
@@ -1783,6 +1786,49 @@ impl StudioController {
         Ok(identity)
     }
 
+    /// Write the chosen board's runtime manifest to the device's
+    /// `/hardware.json` (board-selection D4): fs ROOT, same wire as the
+    /// identity stamp above. The firmware's loader reads it at boot, so
+    /// the pin map takes effect on the device's NEXT restart. The picker
+    /// only offers boards with a checked-in runtime manifest; a display-
+    /// only id reaching here degrades honestly instead of writing junk.
+    async fn run_hardware_stamp(&mut self, board_id: &str) -> Result<(), UiError> {
+        use lpc_model::AsLpPath;
+        let manifest_json = lpa_boards::runtime_manifest_json(board_id).ok_or_else(|| {
+            UiError::UnsupportedAction(format!(
+                "board {board_id} has no checked-in runtime manifest"
+            ))
+        })?;
+        {
+            let server = self.pool.device_session_mut()?.client_mut()?;
+            let logs = server
+                .fs_write(
+                    crate::app::places::DEVICE_HARDWARE_MANIFEST_PATH.as_path(),
+                    manifest_json.as_bytes(),
+                )
+                .await?;
+            self.record_logs(logs);
+        }
+        // The gallery remembers the board (roster cache, M6 reads it for
+        // card art). Only an identified device has a registry row.
+        if let Some(identity) = self.device_sync().and_then(|sync| sync.identity.clone()) {
+            let now = (self.now_secs)();
+            if let Ok(host) = self.library_host() {
+                let mut entry = device_session::registry_entry_for(
+                    &identity,
+                    self.transport_label().unwrap_or_default(),
+                    now,
+                );
+                entry.board_id = Some(board_id.to_string());
+                if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
+                    log::warn!("device registry board upsert failed: {error}");
+                }
+                self.request_library_refresh();
+            }
+        }
+        Ok(())
+    }
+
     /// Push a library head to the device: hash-verified replace-and-load,
     /// then the push event + association. Identity lives at the device's
     /// fs root, so the storage-dir replace never touches it. The library
@@ -2099,9 +2145,10 @@ impl StudioController {
                     })?;
                 self.connect_server_from_link(id, updates).await
             }
-            DeviceOp::ProvisionFirmware { setup_name } => {
-                self.provision_firmware(updates, setup_name).await
-            }
+            DeviceOp::ProvisionFirmware {
+                setup_name,
+                board_id,
+            } => self.provision_firmware(updates, setup_name, board_id).await,
             DeviceOp::WipeProject => self.wipe_project().await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::BootSafeOnce => self.boot_safe_once(updates).await,
@@ -2570,6 +2617,9 @@ impl StudioController {
             // card re-derives its honest state on the next view build.
             CardUiOp::ClearOp { .. } => {
                 self.device_card_op = None;
+            }
+            CardUiOp::SelectSetupBoard { card, board_id } => {
+                self.card_ui.entry(card).or_default().setup_board = board_id;
             }
         }
         self.mark_dirty();
@@ -4059,6 +4109,7 @@ impl StudioController {
         &mut self,
         updates: UxUpdateSink,
         setup_name: Option<String>,
+        board_id: Option<String>,
     ) -> UiResult {
         // A flash performed while the chip sits in ROM download mode is a
         // different flow, and the difference is the ENDING: the board does
@@ -4119,6 +4170,27 @@ impl StudioController {
                 Err(error) => {
                     outcome = outcome.with_notice(UiNotice::info(format!(
                         "Firmware installed, but naming failed: {error} — name it from its card."
+                    )));
+                }
+            }
+        }
+        // The setup form's board choice lands on the device as
+        // `/hardware.json` (D4) — after the identity stamp so the registry
+        // row exists to cache the board. Generic choice (`None`) writes
+        // nothing: the compiled-in default stands. Failure degrades
+        // honestly — the flash and name stand; the pin map just stays
+        // default until the board is set again.
+        if let Some(board_id) = board_id.filter(|id| !id.trim().is_empty()) {
+            match self.run_hardware_stamp(&board_id).await {
+                Ok(()) => {
+                    outcome = outcome.with_notice(UiNotice::info(format!(
+                        "Board set to {board_id} — the pin map loads on the next restart."
+                    )));
+                }
+                Err(error) => {
+                    outcome = outcome.with_notice(UiNotice::info(format!(
+                        "Firmware installed, but board setup failed: {error} — \
+                         the compiled-in default pin map stands."
                     )));
                 }
             }

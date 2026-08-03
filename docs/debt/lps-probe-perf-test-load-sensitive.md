@@ -62,6 +62,22 @@ already recorded in story-capture-pipeline.md).
   cost of the ambiguity was real even so — two gate cycles and a
   firmware build spent deciding whether to believe a stopwatch.
 
+- 2026-08-02 — M5 provisioning-gate session: `perf_4096_render_evals_under_10s_debug`
+  took **10.998 s** against the 10 s bound with the worktree dev server and a
+  story-PNG capture running; the same test passed at **7.86 s** in isolation
+  moments later. Third sighting of the same shape; no code in the failing
+  crate had changed.
+
+- 2026-08-02 (second, M5 merge gate) — 10.49 s under a concurrent story
+  capture; 4.04 s isolated minutes later. **This one masked a real
+  failure**: `test-rust-core` aborting means `just test` never reaches
+  `test-studio-host`, so a genuine compile break in `lpa-studio-web`
+  (a stale test call after a signature change) shipped to CI unseen and
+  failed there instead. The flake's cost is no longer just a re-run —
+  it hides the recipes behind it. Workaround while it stands: when
+  `test-rust-core` fails on this test alone, re-run the LATER recipes
+  explicitly (`just test-studio-host`) before believing the tree.
+
 **Exit criteria** — The default suite contains no load-sensitive
 wall-clock assert: the perf measurement either moves behind an opt-in
 feature/recipe (perf job), switches to a load-insensitive proxy (eval

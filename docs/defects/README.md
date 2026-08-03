@@ -208,7 +208,10 @@ the combination first being registered as a target.
 | config-masked-defect | 2026-08-01 | [xtlpn-f32-loses-writes-to-value-parameters](2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md) | fixed | lpvm-native lowering (lower_f32.rs) |
 | precision-loss-at-a-seam | 2026-08-01 | [gamma-8bit-choke](2026-08-01-gamma-8bit-choke.md) | fixed | lpc-engine fixture node |
 | misattributed-symptom | 2026-08-01 | [classic-rmt-open-fault](2026-08-01-classic-rmt-open-fault.md) | fixed | lpc-shared DisplayPipeline + fw-esp32-common provider |
-| capacity-regression | 2026-08-01 | [classic-heap-regression-after-f32-merge](2026-08-01-classic-heap-regression-after-f32-merge.md) | **open** | unattributed (3 f32 PRs are the candidates) |
+| capacity-regression | 2026-08-01 | [classic-heap-regression-after-f32-merge](2026-08-01-classic-heap-regression-after-f32-merge.md) | fixed | lpc-engine resolver (payload caches) + fw-esp32v3 gate |
+| metadata-parsed-but-never-enforced | 2026-08-02 | [browser-flash-never-checks-the-chip](2026-08-02-browser-flash-never-checks-the-chip.md) | fixed | lpa-link browser_esp32_flash.js (flashFirmware) |
+| proxy-signal-outranks-the-real-outcome | 2026-08-02 | [erase-fails-a-successful-erase-on-flash-id-noise](2026-08-02-erase-fails-a-successful-erase-on-flash-id-noise.md) | fixed | lpa-link browser_esp32_flash.js (eraseDeviceFlash) |
+| allocator-refuses-a-request-it-can-serve | 2026-08-02 | [classic-oom-retry-succeeds](2026-08-02-classic-oom-retry-succeeds.md) | **open** | fw-esp32v3 esp-alloc/LLFF + lps-glsl typeck |
 | test-rig-lies-about-its-subject | 2026-08-01 | [xt-pipeline-rigs-declare-param-types-as-return-types](2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md) | fixed (f32 rig; Q32 rig outstanding) | lpvm-native tests + lpir::builder |
 | model-conflation | 2026-08-01 | [xt-f32-builtins-exhaust-the-emulator-code-region](2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md) | fixed | lp-xt-emu (board/memory) + lps-builtins-xt-app + lpvm-native/rt_emu |
 | upstream-toolchain-limitation | 2026-08-01 | [xtensa-backend-cannot-select-float-constant-pool](2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md) | **open** (worked around) | lps-builtins + esp Rust toolchain |
@@ -252,6 +255,7 @@ the combination first being registered as a target.
 | stale-measurement | 2026-07-27 | [code-editor-gutter-misaligned](2026-07-27-code-editor-gutter-misaligned.md) | fixed | lpa-studio-web/base/code_editor |
 | inline-emit-stack-imbalance | 2026-07-27 | [wasm-q32-fabs-stack-leak](2026-07-27-wasm-q32-fabs-stack-leak.md) | fixed | lpvm-wasm emit (+ lpvm-cranelift trunc) |
 | untested-path | 2026-07-27 | [cranelift-q32-floor-ceil](2026-07-27-cranelift-q32-floor-ceil.md) | fixed | lpvm-cranelift q32_emit (rv32c) |
+| untested-path | 2026-08-02 | [f32-shader-cannot-render-a-frame](2026-08-02-f32-shader-cannot-render-a-frame.md) | fixed | lpvm hot path (native JIT, wasmtime, browser) |
 | silent-drop | 2026-07-28 | [flash-progress-never-reached-the-ui](2026-07-28-flash-progress-never-reached-the-ui.md) | fixed | lpa-studio-core (actor/controller) |
 | silent-drop | 2026-07-31 | [loader-silently-drops-unparseable-nodes](2026-07-31-loader-silently-drops-unparseable-nodes.md) | fixed | lpc-engine loader + flush + virtual ws281x |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |

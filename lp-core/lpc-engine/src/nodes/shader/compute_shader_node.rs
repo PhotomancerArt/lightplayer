@@ -19,7 +19,6 @@ use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::QueryKey;
-use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, TickContext,
@@ -161,10 +160,10 @@ impl ComputeShaderNode {
         self.compilation_error = None;
         let compile_start_ms = ctx.now_ms();
         lpc_shared::backtrace::set_oom_context("compute shader node: compile");
-        let compile_result = catch_panic("panic during compute shader compilation", || {
-            graphics.compile_compute_shader(desc)
-        })
-        .and_then(|result| result.map_err(|error| format!("{error}")));
+        // Terminal on every target — see the sibling comment in `shader_node.rs`.
+        let compile_result = graphics
+            .compile_compute_shader(desc)
+            .map_err(|error| format!("{error}"));
         lpc_shared::backtrace::clear_oom_context();
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
 

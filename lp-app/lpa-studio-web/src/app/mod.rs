@@ -10,6 +10,7 @@ pub(crate) mod board_diagram_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod board_editor_stories;
 pub mod bus;
+pub mod docs;
 pub mod home;
 pub mod layout;
 #[cfg(feature = "stories")]
@@ -23,6 +24,7 @@ pub mod roster;
 pub(crate) mod story_fixtures;
 
 pub use bus::BusPaneBody;
+pub use docs::DocsPage;
 pub use home::{HomeGallery, ProjectOpeningFrame};
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;

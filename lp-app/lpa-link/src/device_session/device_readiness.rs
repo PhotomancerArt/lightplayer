@@ -60,6 +60,7 @@ pub struct BootLineClassifier {
     rom_download_mode_count: usize,
     safe_to_replace_firmware_count: usize,
     server_started: bool,
+    detected_chip: Option<String>,
 }
 
 impl BootLineClassifier {
@@ -70,6 +71,9 @@ impl BootLineClassifier {
     pub fn observe_line(&mut self, line: impl Into<String>) {
         let line = line.into();
         let normalized = line.to_ascii_lowercase();
+        if self.detected_chip.is_none() {
+            self.detected_chip = chip_from_boot_line(&normalized);
+        }
         if normalized.contains("invalid header: 0xffffffff") {
             self.invalid_blank_header_count += 1;
         }
@@ -124,6 +128,14 @@ impl BootLineClassifier {
 
     pub fn recent_lines(&self) -> &[String] {
         &self.recent_lines
+    }
+
+    /// Chip identity from PASSIVE boot output, when a banner named one
+    /// ("esp32c6"-style, lowercased). Free evidence — no probe, no reboot —
+    /// which is what makes it usable on every connect (the SYNC probe is
+    /// not; see `device_link_mode`).
+    pub fn detected_chip(&self) -> Option<&str> {
+        self.detected_chip.as_deref()
     }
 
     /// The most specific no-firmware reason observed so far.
@@ -216,6 +228,29 @@ fn recent_line_summary(recent_lines: &[String]) -> Option<String> {
     Some(recent_lines[start..].join(" | "))
 }
 
+/// Chip identity from one normalized (lowercased) boot line.
+///
+/// Modern ESP32 ROMs (C3/C6/S3/...) print `ESP-ROM:esp32c6-20220919` on
+/// every reset — including the blank-flash boot loop, which is exactly the
+/// card that needs it. The classic ESP32's LX6 ROM predates that banner;
+/// its first-stage loader prints a fixed build date instead.
+fn chip_from_boot_line(normalized: &str) -> Option<String> {
+    if let Some(rest) = normalized.split("esp-rom:").nth(1) {
+        let chip: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if chip.starts_with("esp32") {
+            return Some(chip);
+        }
+    }
+    // The classic ESP32 ROM banner: `ets Jun  8 2016 00:22:57`.
+    if normalized.contains("ets jun  8 2016") {
+        return Some("esp32".to_string());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use lpc_wire::{BuildFacts, HardwareFacts, ServerMessage};
@@ -272,6 +307,27 @@ mod tests {
                 reason: NoFirmwareReason::BlankOrErasedFlash,
             }
         );
+    }
+
+    #[test]
+    fn chip_identity_reads_from_passive_banners() {
+        let mut classifier = BootLineClassifier::new();
+        classifier.observe_line("ESP-ROM:esp32c6-20220919");
+        assert_eq!(classifier.detected_chip(), Some("esp32c6"));
+
+        // First sighting wins; later lines don't churn it.
+        classifier.observe_line("ESP-ROM:esp32s3-20210327");
+        assert_eq!(classifier.detected_chip(), Some("esp32c6"));
+
+        // The classic ESP32 ROM has no ESP-ROM banner — its fixed build
+        // date is the signature.
+        let mut classic = BootLineClassifier::new();
+        classic.observe_line("ets Jun  8 2016 00:22:57");
+        assert_eq!(classic.detected_chip(), Some("esp32"));
+
+        let mut silent = BootLineClassifier::new();
+        silent.observe_line("[INIT] fw-esp32 starting...");
+        assert_eq!(silent.detected_chip(), None);
     }
 
     #[test]

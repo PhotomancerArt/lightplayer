@@ -619,12 +619,11 @@ impl LpvmInstance for NativeJitInstance {
     ) -> Result<(), Self::Error> {
         self.reset_globals();
 
-        if self.module.inner.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeJitInstance::call_render_texture requires FloatMode::Q32",
-            ))));
-        }
-
+        // No float-mode guard: the entry's own ABI is integers only (guest
+        // pointer, width, height), and the mode-dependent half — decoding the
+        // Q16.16 pixel walk into whatever an F32 lane holds — lives in the
+        // synthesised body (`lp-shader`'s `Q16CoordDecoder`), which compiled
+        // for this module's mode.
         let entry = self.resolve_render_texture(fn_name)?;
 
         // Pass guest addresses as bit patterns: RV32 ABI registers are 32 bits
@@ -668,12 +667,8 @@ impl LpvmInstance for NativeJitInstance {
     ) -> Result<(), Self::Error> {
         self.reset_globals();
 
-        if self.module.inner.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeJitInstance::call_render_samples requires FloatMode::Q32",
-            ))));
-        }
-
+        // See `call_render_texture`: `points` stays Q16.16 and `out` stays
+        // RGBA16 in both modes, so this boundary is mode-independent.
         let entry = self.resolve_render_samples(fn_name)?;
         let points_offset = (points.guest_base() as u32) as i32;
         let out_offset = (out.guest_base() as u32) as i32;

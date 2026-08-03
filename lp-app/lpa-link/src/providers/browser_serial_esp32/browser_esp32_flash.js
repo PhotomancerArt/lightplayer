@@ -80,6 +80,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath, onE
 
     try {
       const chipName = await loader.main();
+      assertImageMatchesChip(chipName, manifest, manifestPath);
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
@@ -168,7 +169,7 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
         percent: 50,
       });
       await loader.eraseFlash();
-      assertNoFlashCommunicationWarning(logs, "Device erase");
+      assertEraseCompleted(logs, "Device erase");
       pushProgress(progress, onEvent, {
         label: "Device flash erased",
         completedSteps: 3,
@@ -391,7 +392,63 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
   }
 }
 
-function assertNoFlashCommunicationWarning(logs, context) {
+/// Refuse to write an image built for a different chip.
+///
+/// The bootloader handshake already told us what is on the wire and the
+/// manifest already says what the image is for; until 2026-08-02 nothing
+/// compared them, so flashing an S3 or a classic ESP32 from Studio wrote
+/// the C6 image onto it with no warning (Studio serves one build today —
+/// see SERVED_FIRMWARE_BUILDS). The device is recoverable, but it will not
+/// boot and nothing says why.
+///
+/// Only a DEFINITE mismatch refuses. When either side is unidentifiable we
+/// proceed as before rather than inventing a new way to block a legitimate
+/// flash — this guard exists to catch the wrong image, not to gate on
+/// imperfect detection.
+function assertImageMatchesChip(chipName, manifest, manifestPath) {
+  const connected = normalizeChipName(chipName);
+  const image = normalizeChipName(manifest.core?.target?.chip);
+  if (!connected || !image || connected === image) {
+    return;
+  }
+  throw new Error(
+    `This firmware is built for ${manifest.core.target.chip}, but the ` +
+      `connected device is ${chipName}. Flashing it would leave the board ` +
+      `unable to boot. (image: ${manifestPath})`
+  );
+}
+
+/// Chip names arrive in two dialects — the bootloader says "ESP32-C6",
+/// build manifests say "esp32c6". Compare on alphanumerics only.
+function normalizeChipName(name) {
+  return String(name ?? "")
+    .replace(/[^0-9a-z]/gi, "")
+    .toLowerCase();
+}
+
+/// Judge an erase by its OWN outcome, not by the flash-ID probe.
+///
+/// The ID probe reads 0 and prints "Failed to communicate with the flash
+/// chip" on ESP32-C6 rev 2 over USB-Serial-JTAG while real stub traffic
+/// works — established on the bench 2026-07-31 (see f3586b9c8, which moved
+/// the boot-control write to readback verification for this reason). That
+/// commit left the erase path gated on the warning because "there is
+/// nothing to read back after an erase"; it turns out there IS something
+/// to check — esptool announces the chip erase it actually performed.
+///
+/// Yona's walk 2026-08-02: erase logged the benign warning, then "Chip
+/// erase completed successfully in 2.241s", and this gate failed the
+/// operation anyway. So: a completion line is proof and outranks the
+/// warning; without one, the warning is the best explanation we have and
+/// is surfaced; with neither, `eraseFlash()` returned without throwing and
+/// there is no evidence of failure to report.
+function assertEraseCompleted(logs, context) {
+  const completed = logs.some((line) =>
+    line.includes("Chip erase completed successfully")
+  );
+  if (completed) {
+    return;
+  }
   const warning = logs.find((line) =>
     line.includes("Failed to communicate with the flash chip") ||
     line.includes("Flash ID: 0")
