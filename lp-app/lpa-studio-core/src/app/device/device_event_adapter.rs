@@ -121,7 +121,7 @@ pub(crate) fn management_event_sink(
     updates: UxUpdateSink,
     captured_logs: Rc<RefCell<Vec<UiLogDraft>>>,
     card_op: Rc<RefCell<crate::CardOp>>,
-    card_uid: Option<String>,
+    session_key: String,
     awaiting_detail: &'static str,
 ) -> DeviceEventSink {
     // Publishing the op slot is two steps that must not come apart: the
@@ -135,7 +135,7 @@ pub(crate) fn management_event_sink(
         move |op: crate::CardOp| {
             *card_op.borrow_mut() = op.clone();
             updates.emit(UxUpdate::CardOp {
-                uid: card_uid.clone(),
+                session_key: session_key.clone(),
                 op,
             });
         }
@@ -298,7 +298,7 @@ mod tests {
             sink_updates,
             Rc::clone(&captured),
             Rc::clone(&card_op),
-            Some("dev_abc".to_string()),
+            "runtime-3".to_string(),
             "Waiting for firmware boot",
         );
 
@@ -330,8 +330,8 @@ mod tests {
                 updates.as_slice(),
                 [
                     UxUpdate::Log(_),
-                    UxUpdate::CardOp { uid, op },
-                ] if uid.as_deref() == Some("dev_abc")
+                    UxUpdate::CardOp { session_key, op },
+                ] if session_key == "runtime-3"
                     && *op == crate::CardOp::new("Writing…", Some(42))
             ),
             "a progress tick mirrors the log and publishes the card op: {updates:?}"
@@ -350,7 +350,7 @@ mod tests {
             updates,
             Rc::new(RefCell::new(Vec::new())),
             Rc::clone(&card_op),
-            None,
+            "runtime-1".to_string(),
             "Checking for LightPlayer firmware",
         );
 
@@ -367,8 +367,9 @@ mod tests {
         assert!(
             matches!(
                 emitted.borrow().first(),
-                Some(UxUpdate::CardOp { uid: None, op })
-                    if *op == crate::CardOp::awaiting("Checking for LightPlayer firmware")
+                Some(UxUpdate::CardOp { session_key, op })
+                    if session_key == "runtime-1"
+                        && *op == crate::CardOp::awaiting("Checking for LightPlayer firmware")
             ),
             "the phase change reaches the live card, not just the slot"
         );

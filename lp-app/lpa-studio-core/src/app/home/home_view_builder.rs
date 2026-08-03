@@ -684,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pinned_anonymous_card_takes_the_uid_less_op() {
+    fn the_pinned_anonymous_card_takes_its_own_sessions_op() {
         // The two halves of the recovery-write ending, together: the pin
         // keeps the anonymous card alive, AND the awaiting op rides it —
         // half a fix showed the user a bare "Not seen yet" with no
@@ -692,19 +692,28 @@ mod tests {
         let evidence = HomeDeviceEvidence {
             link: Some(DeviceState::Gone),
             op_in_flight: true,
+            session_key: Some("runtime-1".to_string()),
             ..HomeDeviceEvidence::default()
         };
         let card = live_device_card(&evidence).expect("pinned");
         assert!(
-            card.takes_card_op(None),
+            card.takes_card_op("runtime-1"),
             "the instruction must ride the pinned card"
         );
+        assert!(
+            !card.takes_card_op("runtime-2"),
+            "another board's op is not this card's business"
+        );
 
-        // A REGISTERED offline card (uid'd) must not adopt a stray
-        // anonymous op — that guard is what the old rule was for.
-        let mut registered = card.clone();
-        registered.uid = Some("dev_other".to_string());
-        assert!(!registered.takes_card_op(None));
+        // A REGISTERED offline card carries no session, so it cannot adopt
+        // a stray op — the guard the old uid-less rule needed a special
+        // case for is now structural.
+        let registered = UiDeviceCard {
+            session_key: None,
+            uid: Some("dev_other".to_string()),
+            ..card.clone()
+        };
+        assert!(!registered.takes_card_op("runtime-1"));
     }
 
     #[test]

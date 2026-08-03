@@ -102,38 +102,32 @@ impl UiDeviceCard {
         self.identity_key()
     }
 
-    /// Whether the CARD-OWNED op flow aimed at `target_uid` rides THIS
-    /// card (state-flow model §2). The managed device's stamped uid
-    /// addresses its card directly; an identity-less blank board (mid
-    /// first-provision, no uid yet) has its op ride the live —
-    /// non-offline — hardware card.
+    /// Whether the CARD-OWNED op flow running on `session_key` rides THIS
+    /// card (state-flow model §2). An operation belongs to the session it
+    /// runs on, and a card belongs to at most one session — so this is an
+    /// exact match (M4).
+    ///
+    /// WHY `session_key` AND NOT `identity_key()`: a blank board's card
+    /// key IS its session key, but the moment a flash stamps an identity
+    /// the same card's key becomes its `uid` — `identity_key` puts uid
+    /// first. An op keyed by the card key would lose its card at the exact
+    /// instant the flash succeeded. `session_key` is set on every live
+    /// card and does not move when the uid lands.
+    ///
+    /// It still rides an OFFLINE card: `op_in_flight` deliberately pins a
+    /// card whose session went `Gone` mid-op, and the pinned card is
+    /// exactly where the "unplug the board and plug it back in"
+    /// instruction has to appear (bench, 2026-07-31 — half a fix showed a
+    /// bare "Not seen yet" with no instruction). Registry cards of other
+    /// devices carry no `session_key`, so they cannot adopt a stray op.
     ///
     /// The ONE rule, shared by the two places that must agree: the
     /// controller's view build (`overlay_card_ui`) and the actor's
     /// progressive patch ([`crate::UiStudioView::apply_card_op`]). They
     /// drifted apart once already — a flash's progress reached neither
     /// surface — so both call here.
-    pub fn takes_card_op(&self, target_uid: Option<&str>) -> bool {
-        if self.sim {
-            return false;
-        }
-        match target_uid {
-            Some(uid) => self.uid.as_deref() == Some(uid),
-            // A uid-less op belongs to the anonymous hardware session the
-            // id-less op seam resolves (the OLDEST — ⚠️ interim: with
-            // several anonymous boards attached this rule is ambiguous and
-            // the op can render on more than one card; M4's per-session op
-            // targeting replaces it), so it rides any uid-less card — including the
-            // Offline card that `op_in_flight` pins when the session dies
-            // mid-op. The offline exclusion only guards uid'd REGISTRY cards
-            // of other devices from adopting a stray anonymous op. Before
-            // pinned anonymous cards existed, "not offline" was equivalent;
-            // once a recovery write killed its own session, the pinned card
-            // was offline, the op refused to ride it, and the user got a
-            // bare "Not seen yet" instead of the replug instruction (bench,
-            // 2026-07-31 — bootloader-mode arm).
-            None => self.uid.is_none() || !matches!(self.state, RosterCardState::Offline { .. }),
-        }
+    pub fn takes_card_op(&self, session_key: &str) -> bool {
+        !self.sim && self.session_key.as_deref() == Some(session_key)
     }
 }
 

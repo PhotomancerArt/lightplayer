@@ -284,10 +284,10 @@ where
                         publisher.send(view.clone());
                     }
                 }
-                UxUpdate::CardOp { uid, op } => {
+                UxUpdate::CardOp { session_key, op } => {
                     let mut live = live.borrow_mut();
                     if let Some(view) = live.as_mut() {
-                        view.apply_card_op(uid.as_deref(), op);
+                        view.apply_card_op(&session_key, op);
                         publisher.send(view.clone());
                     }
                 }

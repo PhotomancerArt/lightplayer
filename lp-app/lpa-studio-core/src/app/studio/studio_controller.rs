@@ -138,16 +138,24 @@ pub struct StudioController {
     /// never re-reads. The in-place `op` is NOT stored here — it derives
     /// live from the session's `operation_label`.
     card_ui: std::collections::HashMap<String, crate::CardUiState>,
-    /// The hardware card's CARD-OWNED op flow (state-flow model §2): set
-    /// at management dispatch, fed by the manage event sink, and — the
-    /// point (I1) — NOT cleared when the session dies, because heavy ops
-    /// sever the very session that used to narrate them. `Failed` stays
-    /// until the user takes its one exit (`CardUiOp::ClearOp`). Keyed by
-    /// the managed device's stamped uid when it has one (`None` = an
-    /// identity-less blank board — the op then rides the live non-sim
-    /// card). One slot because the pool holds one hardware session; this
-    /// grows into a per-identity map with the pool.
-    device_card_op: Option<(Option<String>, Rc<RefCell<crate::CardOp>>)>,
+    /// The CARD-OWNED op flows in flight (state-flow model §2), one per
+    /// managed SESSION: set at management dispatch, fed by the manage
+    /// event sink, and — the point (I1) — NOT cleared when the session
+    /// dies, because heavy ops sever the very session that used to
+    /// narrate them. `Failed` stays until the user takes its one exit
+    /// (`CardUiOp::ClearOp`).
+    ///
+    /// Keyed by `RuntimeId` (M4), not by the card key: a first-provision
+    /// flash STAMPS a uid mid-op, which moves the card's
+    /// `identity_key()` from its session key to that uid — an op keyed by
+    /// the card key would lose its card at the instant the flash
+    /// succeeded. The session id does not move.
+    ///
+    /// The one thing a session id does not survive is the replug that
+    /// ends a recovery write: the board comes back on the same ENDPOINT
+    /// under a new session. [`Self::migrate_card_op`] carries the flow
+    /// across, because the endpoint is the physical board's continuity.
+    device_card_ops: std::collections::BTreeMap<crate::RuntimeId, Rc<RefCell<crate::CardOp>>>,
     /// The most recent finished device filesystem backup, carried on the
     /// home view until the shell downloads it. Kept (rather than emitted and
     /// forgotten) because the view is a full snapshot; `device_backup_seq` is
@@ -240,7 +248,7 @@ impl StudioController {
             pending_open: None,
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
-            device_card_op: None,
+            device_card_ops: std::collections::BTreeMap::new(),
             device_backup: None,
             device_backup_seq: 0,
             sim_crash_reboot_at: None,
@@ -986,7 +994,6 @@ impl StudioController {
             .collect();
         let flow_connect = self.gallery_connect_evidence();
         let pending_uid = self.device.pending_reconnect_uid().map(str::to_string);
-        let op_in_flight = self.device_card_op.is_some();
         match devices.first_mut() {
             Some(first) => {
                 // An in-flight operation on the session owns its card's
@@ -996,13 +1003,14 @@ impl StudioController {
                     first.connect = flow_connect;
                 }
                 first.pending_uid = pending_uid;
-                first.op_in_flight = op_in_flight;
             }
             None => {
+                // No session, so no op to pin: `op_in_flight` stays false
+                // here. It is evidence of work on A SESSION, and this
+                // entry is evidence of work with none.
                 devices.push(crate::app::home::HomeDeviceEvidence {
                     connect: flow_connect,
                     pending_uid,
-                    op_in_flight,
                     ..Default::default()
                 });
             }
@@ -1042,6 +1050,10 @@ impl StudioController {
         };
         crate::app::home::HomeDeviceEvidence {
             session_key: Some(session.id().to_string()),
+            // THIS session's card-owned op (M4) — the pin that keeps the
+            // card alive through a `Gone` link belongs to the board the
+            // op runs on, never to whichever board attached first.
+            op_in_flight: self.device_card_ops.contains_key(&session.id()),
             sync: session.device_sync().cloned(),
             link: session.device_state(),
             connect,
@@ -1056,7 +1068,6 @@ impl StudioController {
             pushed_at,
             pending_uid: None,
             console_tail: session.console_tail().iter().cloned().collect(),
-            op_in_flight: false,
             recovery: session.recovery_status().cloned(),
             detected_chip: session
                 .hardware_session()
@@ -1325,6 +1336,47 @@ impl StudioController {
         self.pool
             .device_session(id)
             .and_then(crate::RuntimeSession::device_sync)
+    }
+
+    /// Carry a card-owned op flow across a same-endpoint session replace.
+    ///
+    /// The flow is keyed by session (M4), and the replug that ENDS a
+    /// recovery write mints a new session for the same physical board —
+    /// so without this the "unplug the board and plug it back in"
+    /// instruction would vanish at the exact moment the user obeyed it
+    /// (the shape of the 2026-07-31 bench regression). The endpoint is
+    /// the board's continuity across a replug; the `RuntimeId` is not.
+    fn migrate_card_op(&mut self, replaced: Option<crate::RuntimeId>, installed: crate::RuntimeId) {
+        let Some(replaced) = replaced.filter(|old| *old != installed) else {
+            return;
+        };
+        if let Some(flow) = self.device_card_ops.remove(&replaced) {
+            self.device_card_ops.insert(installed, flow);
+        }
+    }
+
+    /// The live device session a CARD KEY names, if any.
+    ///
+    /// One vocabulary for op targeting (M4): `UiDeviceCard::identity_key()`
+    /// is a stamped device's `dev_…` uid, or an anonymous board's session
+    /// key — and this resolves both, session key first, because that is
+    /// the key an unstamped board wears. A registry (offline) card's uid
+    /// resolves to nothing, which is correct: there is no session to
+    /// operate on.
+    fn device_id_for_card_key(&self, card_key: &str) -> Option<crate::RuntimeId> {
+        self.pool
+            .device_sessions()
+            .find(|session| session.id().to_string() == card_key)
+            .or_else(|| {
+                self.pool.device_sessions().find(|session| {
+                    session
+                        .device_sync()
+                        .and_then(|sync| sync.identity.as_ref())
+                        .is_some_and(|identity| identity.uid == card_key)
+                        || session.device_uid().as_deref() == Some(card_key)
+                })
+            })
+            .map(crate::RuntimeSession::id)
     }
 
     /// ⚠️ P1 SCAFFOLD — the target every flow used before M4 gave it one.
@@ -2726,8 +2778,16 @@ impl StudioController {
         let install_endpoint = payload
             .link_session()
             .map(|session| session.endpoint_id.as_str().to_string());
+        // Which session (if any) this install is about to REPLACE at the
+        // same endpoint — read before the install, because that is the
+        // only moment both ids exist. A card-owned op flow rides across
+        // (see `migrate_card_op`).
+        let replaced = payload
+            .link_session()
+            .and_then(|link| self.pool.endpoint_session(&link.endpoint_id));
         match self.pool.install(payload) {
             Ok(id) => {
+                self.migrate_card_op(replaced, id);
                 self.record_device_event(
                     Some(&id.to_string()),
                     install_endpoint.as_deref(),
@@ -2901,10 +2961,13 @@ impl StudioController {
             CardUiOp::CloseSheet { card } => {
                 self.card_ui.entry(card).or_default().sheet = None;
             }
-            // The failed op's ONE exit (model §2 I4): drop the flow; the
-            // card re-derives its honest state on the next view build.
-            CardUiOp::ClearOp { .. } => {
-                self.device_card_op = None;
+            // The failed op's ONE exit (model §2 I4): drop THAT card's
+            // flow; the card re-derives its honest state on the next view
+            // build. Another board's op in flight is untouched.
+            CardUiOp::ClearOp { card } => {
+                if let Some(id) = self.device_id_for_card_key(&card) {
+                    self.device_card_ops.remove(&id);
+                }
             }
             CardUiOp::SelectSetupBoard { card, board_id } => {
                 self.card_ui.entry(card).or_default().setup_board = board_id;
@@ -2925,11 +2988,13 @@ impl StudioController {
         }
         // The CARD-OWNED op flow first (model §2, I1): it survives the
         // session the op severed, so it outranks session-derived
-        // narration. Targeting: the stamped uid when the managed device
-        // had one; an identity-less blank board's op rides the live
-        // (non-offline) hardware card.
-        if let Some((target_uid, slot)) = self.device_card_op.as_ref()
-            && card.takes_card_op(target_uid.as_deref())
+        // narration. Targeting is the managed SESSION (M4) — matched
+        // through the one shared rule, `takes_card_op`.
+        if let Some(slot) = self
+            .device_card_ops
+            .iter()
+            .find(|(id, _)| card.takes_card_op(&id.to_string()))
+            .map(|(_, slot)| slot)
         {
             card.ui.op = Some(slot.borrow().clone());
             return card;
@@ -4454,18 +4519,14 @@ impl StudioController {
             // 2026-08-03). The card-owned op flow's Failed phase is the
             // surface the user is already looking at, and it carries the
             // copy-details affordance.
-            let uid = self
-                .device_sync_for(device_id)
-                .and_then(|sync| sync.identity.as_ref())
-                .map(|identity| identity.uid.clone());
-            self.device_card_op = Some((
-                uid,
+            self.device_card_ops.insert(
+                device_id,
                 Rc::new(RefCell::new(crate::CardOp::failed(
                     "Flashing firmware",
                     message.clone(),
                     "Back to set up",
                 ))),
-            ));
+            );
             self.push_log(UiLogDraft::new(
                 UiLogLevel::Warn,
                 UiLogOrigin::Studio,
@@ -4889,20 +4950,16 @@ impl StudioController {
         if severed_lens {
             self.project.reset();
         }
-        // The CARD-OWNED op flow starts here (model §2): the slot lives on
-        // the controller, keyed by the managed device's stamped uid, and
-        // survives whatever happens to the session below (I1). The event
-        // sink feeds it; the settle half flips it to Failed or clears it.
-        let managed_uid = self
-            .device_sync_for(device_id)
-            .and_then(|sync| sync.identity.as_ref())
-            .map(|identity| identity.uid.clone());
+        // The CARD-OWNED op flow starts here (model §2): the flow lives
+        // on the controller, keyed by the managed SESSION, and survives
+        // whatever happens to that session below (I1). The event sink
+        // feeds it; the settle half flips it to Failed or clears it.
         let card_op = Rc::new(RefCell::new(crate::CardOp::new(
             format!("{}…", spec.progress_label),
             None,
         )));
-        let managed_uid_for_events = managed_uid.clone();
-        self.device_card_op = Some((managed_uid, Rc::clone(&card_op)));
+        let session_key = device_id.to_string();
+        self.device_card_ops.insert(device_id, Rc::clone(&card_op));
         self.record_device_event(
             Some(&device_id.to_string()),
             None,
@@ -4933,7 +4990,7 @@ impl StudioController {
             updates.clone(),
             Rc::clone(&captured_logs),
             Rc::clone(&card_op),
-            managed_uid_for_events.clone(),
+            session_key.clone(),
             spec.reconnect_detail,
         );
         let manage_result = {
@@ -4944,7 +5001,7 @@ impl StudioController {
                         session.set_operation(None);
                     }
                     // The op never started — clean abort, no Failed render.
-                    self.device_card_op = None;
+                    self.device_card_ops.remove(&device_id);
                     return Err(UiError::MissingSession(
                         "no hardware device session for management".to_string(),
                     ));
@@ -5008,7 +5065,7 @@ impl StudioController {
         // snapshot would otherwise carry the phase change.
         *card_op.borrow_mut() = crate::CardOp::awaiting(spec.reconnect_detail);
         updates.emit(UxUpdate::CardOp {
-            uid: managed_uid_for_events,
+            session_key: session_key.clone(),
             op: card_op.borrow().clone(),
         });
         self.mark_dirty();
@@ -5042,7 +5099,7 @@ impl StudioController {
                 } else {
                     // Landed (I3): the flow ends; the card re-derives and its
                     // Status tab announces what's next.
-                    self.device_card_op = None;
+                    self.device_card_ops.remove(&device_id);
                 }
             }
             // The device was never going to come back by itself. Stay in
@@ -5570,6 +5627,58 @@ mod tests {
         ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTarget, ProjectState,
         ProjectSyncPhase, ServerState, StudioServerClient,
     };
+
+    /// A card-owned op flow rides across a same-ENDPOINT session replace
+    /// (M4 P2).
+    ///
+    /// The flow is keyed by session, and the replug that ENDS a recovery
+    /// write brings the board back as a NEW session on the same endpoint.
+    /// Without the migration the "unplug the board and plug it back in"
+    /// instruction would vanish at the exact moment the user obeyed it —
+    /// the shape of the 2026-07-31 bench regression, which the pre-M4
+    /// uid-less rule survived only by accident.
+    #[test]
+    fn a_card_op_flow_follows_its_board_across_a_replug() {
+        let mut studio = StudioController::new(|| 1.0);
+        let first = studio
+            .pool
+            .install(RuntimePayload::stub_device_for_test(
+                lpa_link::DeviceState::Bootloader,
+            ))
+            .unwrap_or_else(|_| panic!("first attach"));
+        studio.device_card_ops.insert(
+            first,
+            Rc::new(RefCell::new(crate::CardOp::awaiting("Replug the board"))),
+        );
+
+        // The replug: the board comes back on the same endpoint, so the
+        // pool replaces `first` with a session of its own.
+        let second = studio
+            .pool
+            .install(RuntimePayload::stub_device_for_test(
+                lpa_link::DeviceState::Booting,
+            ))
+            .unwrap_or_else(|_| panic!("re-attach"));
+        assert_ne!(second, first, "a replug mints a new session");
+        studio.migrate_card_op(Some(first), second);
+
+        assert!(
+            !studio.device_card_ops.contains_key(&first),
+            "the dead session keeps nothing"
+        );
+        assert_eq!(
+            *studio.device_card_ops[&second].borrow(),
+            crate::CardOp::awaiting("Replug the board"),
+            "the instruction survives onto the board that came back"
+        );
+
+        // A replace that is NOT a same-endpoint one (no outgoing session)
+        // leaves the newcomer's card clean — a fresh board must not
+        // inherit somebody else's instruction.
+        studio.device_card_ops.clear();
+        studio.migrate_card_op(None, second);
+        assert!(studio.device_card_ops.is_empty());
+    }
 
     #[test]
     fn streamed_logs_publish_on_a_throttle_not_per_batch() {
