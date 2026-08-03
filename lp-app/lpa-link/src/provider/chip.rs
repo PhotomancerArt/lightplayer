@@ -83,10 +83,18 @@ mod tests {
             "esp32-c6",
             "ESP32-C6 (QFN32) (revision v0.2)",
         ] {
-            assert_eq!(chip_id_from_reported(reported), Some("esp32c6"), "{reported}");
+            assert_eq!(
+                chip_id_from_reported(reported),
+                Some("esp32c6"),
+                "{reported}"
+            );
         }
         for reported in ["esp32s3", "ESP32-S3 (QFN56) (revision v0.2)"] {
-            assert_eq!(chip_id_from_reported(reported), Some("esp32s3"), "{reported}");
+            assert_eq!(
+                chip_id_from_reported(reported),
+                Some("esp32s3"),
+                "{reported}"
+            );
         }
     }
 

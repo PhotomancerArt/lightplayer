@@ -330,7 +330,10 @@ async fn provider_manage_runs_scripted_flash_and_erase_transitions() {
     let device = provider.device(&endpoint_id).unwrap();
 
     let flashed = provider
-        .manage(session.id(), LinkManagementRequest::FlashFirmware { build_id: None })
+        .manage(
+            session.id(),
+            LinkManagementRequest::FlashFirmware { build_id: None },
+        )
         .await
         .unwrap();
     assert!(matches!(flashed, LinkManagementResult::FlashFirmware(_)));
@@ -383,13 +386,19 @@ async fn scripted_manage_failure_fails_the_next_operation_once() {
     let session = provider.connect(&endpoint_id).await.unwrap();
 
     let failed = provider
-        .manage(session.id(), LinkManagementRequest::FlashFirmware { build_id: None })
+        .manage(
+            session.id(),
+            LinkManagementRequest::FlashFirmware { build_id: None },
+        )
         .await;
     assert!(matches!(failed, Err(crate::LinkError::Other { .. })));
 
     // The failure is one-shot: the retry succeeds.
     let retried = provider
-        .manage(session.id(), LinkManagementRequest::FlashFirmware { build_id: None })
+        .manage(
+            session.id(),
+            LinkManagementRequest::FlashFirmware { build_id: None },
+        )
         .await;
     assert!(retried.is_ok());
 

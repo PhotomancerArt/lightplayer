@@ -664,9 +664,15 @@ mod tests {
     #[test]
     fn a_picked_board_selects_its_own_build() {
         let s3 = board("seeed/xiao-esp32-s3-plus");
-        assert_eq!(picked(Some(&s3), Some("esp32s3"), ALL_SERVED), Some("esp32s3-8mb"));
+        assert_eq!(
+            picked(Some(&s3), Some("esp32s3"), ALL_SERVED),
+            Some("esp32s3-8mb")
+        );
         let classic = board("domraem/dom-z-102");
-        assert_eq!(picked(Some(&classic), Some("esp32"), ALL_SERVED), Some("esp32v3-4mb"));
+        assert_eq!(
+            picked(Some(&classic), Some("esp32"), ALL_SERVED),
+            Some("esp32v3-4mb")
+        );
     }
 
     /// The generic-install path, and the common one: no board picked, but
@@ -674,9 +680,15 @@ mod tests {
     /// single-image flow write a C6 image onto everything.
     #[test]
     fn a_detected_chip_alone_resolves_a_build() {
-        assert_eq!(picked(None, Some("esp32s3"), ALL_SERVED), Some("esp32s3-8mb"));
+        assert_eq!(
+            picked(None, Some("esp32s3"), ALL_SERVED),
+            Some("esp32s3-8mb")
+        );
         assert_eq!(picked(None, Some("esp32"), ALL_SERVED), Some("esp32v3-4mb"));
-        assert_eq!(picked(None, Some("esp32c6"), ALL_SERVED), Some("esp32c6-4mb"));
+        assert_eq!(
+            picked(None, Some("esp32c6"), ALL_SERVED),
+            Some("esp32c6-4mb")
+        );
     }
 
     /// A pick that contradicts the chip is HONOURED, and the flash-time
