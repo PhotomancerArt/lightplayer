@@ -3,7 +3,10 @@
     "fields": [
       {
         "name": "down",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },
@@ -21,7 +24,10 @@
       },
       {
         "name": "held",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },
@@ -39,7 +45,10 @@
       },
       {
         "name": "up",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },

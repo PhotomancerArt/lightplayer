@@ -31,7 +31,7 @@ pub use ui_fixture_face::UiFixtureFace;
 pub use ui_fixture_power::UiFixturePower;
 pub use ui_node_face::UiNodeFace;
 pub use ui_output_face::{UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin};
-pub use ui_panel_control::UiPanelControl;
+pub use ui_panel_control::{UiPanelControl, UiPanelTarget};
 pub use ui_panel_widget::UiPanelWidget;
 pub use ui_playlist_entry::UiPlaylistEntry;
 pub use ui_playlist_face::UiPlaylistFace;

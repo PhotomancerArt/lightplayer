@@ -33,6 +33,21 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 8: sink scopes list on the probe surface — `WireBusChannel` rows now
+///   include playlist-entry sink scopes (same shape; new content
+///   contract), which is what carries a bound panel control's live value
+///   and engaged state for entry children. Presentation surfaces filter
+///   `scope.is_sink()` rows; probe value resolution refuses values whose
+///   winning provider is a sink-scope producer (R2 no-demand).
+/// - 7: structured scope on the probe surface — `WireBusChannel` gains
+///   `scope` (channels list per scope) and `WireBindingEndpoint::Bus`
+///   carries the endpoint's scope; display strings become a client
+///   concern. Same train: `WireProjectCommand::PanelWrite`/`PanelClear`
+///   (the `(scope, channel)` panel command surface) and
+///   `WireBindingOrigin::Panel`.
+/// - 6: node kind `project` renamed to `module` — `NodeKind::Module`
+///   serializes as `"Module"` in inventory frames, and `TreePath`
+///   segments carry `.module` instead of `.project`.
 /// - 5: `ServerHello` reshaped into distinct build and hardware facts.
 ///   `fw: FwProvenance` is gone: its four provenance fields moved onto
 ///   `build: BuildFacts` alongside the build's `LpFeature` list, and
@@ -50,7 +65,7 @@ use serde::{Deserialize, Serialize};
 ///   runtime command channel (playlist activate-entry;
 ///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
 /// - 1: hello handshake introduced.
-pub const WIRE_PROTO_VERSION: u32 = 5;
+pub const WIRE_PROTO_VERSION: u32 = 8;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

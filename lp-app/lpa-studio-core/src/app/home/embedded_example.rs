@@ -32,7 +32,7 @@ pub fn embedded_examples() -> &'static [EmbeddedExample] {
     &[EmbeddedExample {
         id: DEMO_PROJECT_ID,
         name: "Fyeah Sign",
-        kind: "Project",
+        kind: "Module",
     }]
 }
 
@@ -52,7 +52,7 @@ mod tests {
     fn demo_example_is_embedded_with_files() {
         let example = embedded_example(DEMO_PROJECT_ID).expect("demo example is embedded");
         assert_eq!(example.name, "Fyeah Sign");
-        assert_eq!(example.kind, "Project");
+        assert_eq!(example.kind, "Module");
         let files = example.files();
         assert!(
             files

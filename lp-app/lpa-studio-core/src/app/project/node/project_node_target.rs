@@ -25,7 +25,7 @@ mod tests {
 
     #[test]
     fn target_keeps_address_and_runtime_id_separate() {
-        let address = ProjectNodeAddress::parse("/demo.project/orbit.shader").unwrap();
+        let address = ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap();
         let target = ProjectNodeTarget::new(address.clone(), NodeId::new(7));
 
         assert_eq!(target.address, address);

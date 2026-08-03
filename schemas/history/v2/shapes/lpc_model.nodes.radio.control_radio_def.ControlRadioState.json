@@ -3,7 +3,10 @@
     "fields": [
       {
         "name": "output",
-        "role": "state",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
         "semantics": {
           "direction": "produced"
         },

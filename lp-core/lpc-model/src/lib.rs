@@ -110,23 +110,22 @@ pub use node::{
 };
 pub use nodes::{
     ArtifactPathResolutionError, Brightness, ButtonDef, ButtonDefView, ButtonState,
-    ButtonStateView, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder,
-    ComputeShaderDef, ComputeShaderDefView, ControlRadioDef, ControlRadioDefView,
-    ControlRadioState, ControlRadioStateView, FixtureDef, FixtureDefView, FixtureDiagnosticMode,
-    FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView, FloatMode, FluidDef,
-    FluidDefView, FluidEmitter, FluidState, InvocationSite, LampType, MappingConfig,
-    NodeDefParseError, NodeStarter, OutputChannelDef, OutputChannelDefView, OutputDef,
-    OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
-    PROJECT_FORMAT_VERSION, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
-    PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView,
-    ProjectFormatProbe, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView,
-    ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef,
-    ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,
-    ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat,
-    TextureState, TextureStateView, generate_compute_shader_header, glsl_type_for_lp_type,
-    node_def_asset_ref, read_project_format_json, resolve_artifact_specifier,
-    set_node_def_asset_ref, shader_panel_step, starter_def_for_kind, starter_for_kind,
-    starter_project_files,
+    ButtonStateView, ChannelMetaDef, ChannelMetaDefView, ClockControls, ClockDef, ClockDefView,
+    ClockState, ColorOrder, ComputeShaderDef, ComputeShaderDefView, ControlRadioDef,
+    ControlRadioDefView, ControlRadioState, ControlRadioStateView, FixtureDef, FixtureDefView,
+    FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, FixtureState, FixtureStateView,
+    FloatMode, FluidDef, FluidDefView, FluidEmitter, FluidState, InvocationSite, LampType,
+    MappingConfig, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter, OutputChannelDef,
+    OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
+    PlaylistEntryView, PlaylistState, PlaylistStateView, ProvenanceDef, STARTER_SHADER_GLSL,
+    STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
+    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderStateView,
+    ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
+    generate_compute_shader_header, glsl_type_for_lp_type, node_def_asset_ref,
+    resolve_artifact_specifier, set_node_def_asset_ref, shader_panel_step, starter_def_for_kind,
+    starter_for_kind, starter_project_files,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
@@ -142,9 +141,10 @@ pub use project::overlay_mutation::{
     StoredSlotEdit,
 };
 pub use project::{
-    ChangeSummary, CommitResult, LocationSeg, MutationBatchResults, MutationResult, NodeAttachSite,
-    NodeUseLocation, ProjectChangeSummary, ProjectConfig, ProjectInventory, ProjectNode,
-    ProjectNodeOrigin, ProjectNodePlacement, ProjectTree, Revision,
+    ChangeSummary, CommitResult, LocationSeg, ManifestParseError, MutationBatchResults,
+    MutationResult, NodeAttachSite, NodeUseLocation, PROJECT_FORMAT_VERSION, ProjectChangeSummary,
+    ProjectConfig, ProjectInventory, ProjectManifest, ProjectNode, ProjectNodeOrigin,
+    ProjectNodePlacement, ProjectTree, Revision,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};

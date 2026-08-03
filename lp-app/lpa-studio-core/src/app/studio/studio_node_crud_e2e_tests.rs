@@ -110,12 +110,12 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         fixture_def.contains("Map2d") && fixture_def.contains("fixture_2.map2d.json"),
         "fixture def references its mapping document: {fixture_def}"
     );
-    // Project root gained every key (the collision case as `clock_2`).
-    let manifest = read_file(&server, "project.json");
+    // The root module gained every key (the collision case as `clock_2`).
+    let module = read_file(&server, "module.json");
     for (_, name, _) in cases {
         assert!(
-            manifest.contains(&format!("\"{name}\"")),
-            "project.json carries {name}: {manifest}"
+            module.contains(&format!("\"{name}\"")),
+            "module.json carries {name}: {module}"
         );
     }
 }

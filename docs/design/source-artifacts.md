@@ -26,7 +26,7 @@ satisfies this):
 
 ```json
 {
-  "kind": "Project",
+  "kind": "Module",
   "format": 1,
   "name": "example",
   "nodes": {

@@ -18,7 +18,7 @@ fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consume
 
     assert_eq!(graph.root, root);
     assert_eq!(graph.nodes.len(), 9);
-    assert_eq!(graph.nodes[&root].def_location, root_def("/project.json"));
+    assert_eq!(graph.nodes[&root].def_location, root_def("/module.json"));
     assert_project_child(
         graph.nodes.get(&playlist).unwrap(),
         "playlist",
@@ -65,8 +65,7 @@ fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
     let (registry, _) = load_inline_project(
         r#"
 {
-  "kind": "Project",
-  "format": 3,
+  "kind": "Module",
   "nodes": {
     "a": {
       "ref": "./shader.json"
@@ -112,8 +111,7 @@ fn missing_children_are_graph_nodes() {
     let (registry, _) = load_inline_project(
         r#"
 {
-  "kind": "Project",
-  "format": 3,
+  "kind": "Module",
   "nodes": {
     "missing": {
       "ref": "./missing.json"
@@ -174,7 +172,9 @@ fn load_inline_project(
     let shapes = lpc_model::SlotShapeRegistry::default();
     let ctx = ParseCtx { shapes: &shapes };
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), project.as_bytes())
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 4\n}\n")
+        .unwrap();
+    fs.write_file_mut(LpPath::new("/module.json"), project.as_bytes())
         .unwrap();
     for (path, contents) in json_files {
         fs.write_file_mut(LpPath::new(path), contents.as_bytes())
@@ -188,7 +188,7 @@ fn load_inline_project(
     registry
         .load_root(
             &fs,
-            LpPath::new("/project.json"),
+            LpPath::new("/module.json"),
             lpc_model::Revision::new(1),
             &ctx,
         )

@@ -896,6 +896,9 @@
   .tw\:gap-8 {
     gap: calc(var(--tw-spacing) * 8);
   }
+  .tw\:gap-10 {
+    gap: calc(var(--tw-spacing) * 10);
+  }
   .tw\:gap-\[18px\] {
     gap: 18px;
   }
@@ -1337,9 +1340,6 @@
   .tw\:bg-\[linear-gradient\(270deg\,var\(--studio-status-working-bg\)_0\%\,var\(--studio-status-working-bg\)_34\%\,transparent_100\%\)\] {
     background-image: linear-gradient(270deg,var(--studio-status-working-bg) 0%,var(--studio-status-working-bg) 34%,transparent 100%);
   }
-  .tw\:fill-accent {
-    fill: var(--tw-color-accent);
-  }
   .tw\:object-cover {
     object-fit: cover;
   }
@@ -1366,6 +1366,15 @@
   }
   .tw\:p-6 {
     padding: calc(var(--tw-spacing) * 6);
+  }
+  .tw\:p-8 {
+    padding: calc(var(--tw-spacing) * 8);
+  }
+  .tw\:p-10 {
+    padding: calc(var(--tw-spacing) * 10);
+  }
+  .tw\:p-12 {
+    padding: calc(var(--tw-spacing) * 12);
   }
   .tw\:p-\[18px\] {
     padding: 18px;
@@ -1597,9 +1606,6 @@
   }
   .tw\:text-\[11px\] {
     font-size: 11px;
-  }
-  .tw\:text-\[13px\] {
-    font-size: 13px;
   }
   .tw\:text-\[15px\] {
     font-size: 15px;

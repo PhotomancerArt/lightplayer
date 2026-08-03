@@ -3,6 +3,11 @@
   "source": "idle.glsl",
   "render_order": 0,
   "float_mode": "fixed",
+  "bindings": {
+    "glow": {
+      "source": "bus:glow"
+    }
+  },
   "consumed": {
     "time": {
       "kind": "value",

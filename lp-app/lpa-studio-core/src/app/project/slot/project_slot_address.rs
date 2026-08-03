@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn root_slot_address_uses_root_path() {
         let address = ProjectSlotAddress::root(
-            ProjectNodeAddress::parse("/demo.project/orbit.shader").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
             ProjectSlotRoot::def(),
         );
 
@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn child_addresses_extend_the_path_in_place() {
         let map = ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/pixels.fixture").unwrap(),
             ProjectSlotRoot::def(),
             SlotPath::parse("mapping").unwrap(),
         );
@@ -101,8 +101,8 @@ mod tests {
 
     #[test]
     fn strictly_under_requires_same_node_root_and_proper_path_prefix() {
-        let node = ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap();
-        let other_node = ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap();
+        let node = ProjectNodeAddress::parse("/demo.module/pixels.fixture").unwrap();
+        let other_node = ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap();
         let at = |path: &str| {
             ProjectSlotAddress::new(
                 node.clone(),

@@ -7,6 +7,12 @@ pub fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {
         .unwrap();
 }
 
+/// Write the `/project.json` container manifest every loadable project
+/// needs post-mitosis (the root module node lives in `/module.json`).
+pub fn write_container_manifest(fs: &mut LpFsMemory) {
+    write_file(fs, "/project.json", "{\n  \"format\": 4\n}\n");
+}
+
 pub fn load_shader_project() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
     write_file(

@@ -1,19 +1,4 @@
 {
-  "kind": "Project",
-  "format": 3,
-  "name": "fw-browser smoke",
-  "nodes": {
-    "clock": {
-      "ref": "./clock.json"
-    },
-    "fixture": {
-      "ref": "./fixture.json"
-    },
-    "output": {
-      "ref": "./output.json"
-    },
-    "shader": {
-      "ref": "./shader.json"
-    }
-  }
+  "format": 4,
+  "name": "fw-browser smoke"
 }

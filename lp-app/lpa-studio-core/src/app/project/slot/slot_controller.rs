@@ -1671,7 +1671,7 @@ mod tests {
 
     fn slot_address(path: &str) -> ProjectSlotAddress {
         ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/pixels.fixture").unwrap(),
             ProjectSlotRoot::def(),
             lpc_model::SlotPath::parse(path).unwrap(),
         )

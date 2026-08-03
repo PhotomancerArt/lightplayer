@@ -30,9 +30,9 @@
 //! falls back to the continuous rendering.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{ProjectSlotAddress, UiAction, UiSlotFieldState};
+use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
 
-use crate::app::node::slot_edit_actions::slot_set_value_action;
+use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::{capture_field_pointer, field_wiring};
 
 use super::PanelEmit;
@@ -62,6 +62,11 @@ pub fn KnobField(
     #[props(default = false)]
     bound: bool,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
+    /// Panel-write target: when present, gestures dispatch `PanelWriteOp`
+    /// at this `(scope, channel)` (the runtime command channel) instead of
+    /// editing the authored default at `address`.
+    #[props(default = None)]
+    panel_target: Option<UiPanelTarget>,
     /// Value family the drag dispatches (`F32` default; integer slots
     /// round).
     #[props(default)]
@@ -89,6 +94,8 @@ pub fn KnobField(
     let down_wiring = wired.clone();
     let move_wiring = wired.clone();
     let key_wiring = wired;
+    let move_target = panel_target.clone();
+    let key_target = panel_target;
     // Drag anchor: pointer y and value at pointerdown; None while idle.
     let mut drag = use_signal(|| None::<(f64, f32)>);
 
@@ -111,7 +118,7 @@ pub fn KnobField(
                     return;
                 };
                 event.prevent_default();
-                handler.call(slot_set_value_action(address, emit.lp_value(next)));
+                handler.call(panel_or_slot_action(&key_target, address, emit.lp_value(next)));
             },
             onpointerdown: move |event| {
                 if down_wiring.is_none() {
@@ -139,7 +146,7 @@ pub fn KnobField(
                     max,
                     step,
                 );
-                handler.call(slot_set_value_action(address, emit.lp_value(next)));
+                handler.call(panel_or_slot_action(&move_target, address, emit.lp_value(next)));
             },
             onpointerup: move |_| drag.set(None),
             onpointercancel: move |_| drag.set(None),
@@ -459,9 +466,9 @@ mod tests {
     use lpa_studio_core::UiSlotFieldState;
 
     use super::{
-        CONTINUOUS_TICKS, TICK_INNER_RADIUS, TICK_OUTER_RADIUS, knob_arc_chunks, knob_drag_value,
-        knob_fraction, knob_key_step, knob_key_value, knob_pointer_deg, knob_snap, knob_tick_x,
-        knob_tick_y, knob_value_stroke,
+        TICK_INNER_RADIUS, TICK_OUTER_RADIUS, knob_arc_chunks, knob_drag_value, knob_fraction,
+        knob_key_step, knob_key_value, knob_pointer_deg, knob_snap, knob_tick_x, knob_tick_y,
+        knob_value_stroke,
     };
 
     #[test]

@@ -611,7 +611,7 @@ mod tests {
 
     #[test]
     fn event_stream_chunks_runtime_buffer_payloads() {
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let buffer_id = engine.runtime_buffers_mut().insert(WithRevision::new(
             Revision::new(1),
             RuntimeBuffer::raw(vec![42; 5 * 1024]),
@@ -819,21 +819,24 @@ mod tests {
 
         // Mutate the overlay at revision 9; the next read must report it.
         // `mutate` validates like the batch path (W9), so the edit must be a
-        // real one: load a minimal project root and stage a value on `name`,
-        // ProjectDef's one writable authored field.
+        // real one: load a minimal root MODULE and stage an authored export.
+        // Post-mitosis `nodes` is role `Fixed` (dedicated ops own it) and the
+        // identity fields live in the container manifest, so `exports` is the
+        // writable authored map this probe can touch.
         let mut fs = lpfs::LpFsMemory::new();
-        fs.write_file_mut(
-            lpfs::LpPath::new("/project.json"),
-            br#"{"kind": "Project", "format": 3}"#,
-        )
-        .expect("write project root");
+        // Both halves: the container manifest gates the load (D-A refuses a
+        // project without one), the root module carries the def.
+        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 4}"#)
+            .expect("write container manifest");
+        fs.write_file_mut(lpfs::LpPath::new("/module.json"), br#"{"kind": "Module"}"#)
+            .expect("write root module");
         let ctx = lpc_registry::ParseCtx {
             shapes: h.engine.slot_shapes(),
         };
         h.registry
             .load_root(
                 &fs,
-                lpfs::LpPath::new("/project.json"),
+                lpfs::LpPath::new("/module.json"),
                 Revision::new(8),
                 &ctx,
             )
@@ -842,10 +845,10 @@ mod tests {
             .mutate(
                 &fs,
                 lpc_model::MutationOp::PutSlotEdit {
-                    artifact: lpc_model::ArtifactLocation::file("/project.json"),
+                    artifact: lpc_model::ArtifactLocation::file("/module.json"),
                     edit: lpc_model::SlotEdit::assign_value(
-                        lpc_model::SlotPath::parse("name.some").expect("slot path"),
-                        lpc_model::LpValue::String(alloc::string::String::from("overlay probe")),
+                        lpc_model::SlotPath::parse("exports[glow]").expect("slot path"),
+                        lpc_model::LpValue::String(alloc::string::String::from("bus:glow")),
                     ),
                 },
                 Revision::new(9),
@@ -1193,6 +1196,11 @@ mod tests {
         let mut registry = ProjectRegistry::new();
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
+            lpfs::LpPath::new("/project.json"),
+            b"{\n  \"format\": 4\n}\n",
+        )
+        .expect("write container manifest");
+        fs.write_file_mut(
             lpfs::LpPath::new("/clock.json"),
             br#"{ "kind": "Clock", "controls": { "rate": 1.0 } }"#,
         )
@@ -1331,7 +1339,7 @@ mod tests {
 
     fn empty_registry_engine() -> (Engine, ProjectRegistry) {
         (
-            Engine::new(TreePath::parse("/shapes.project").unwrap()),
+            Engine::new(TreePath::parse("/shapes.module").unwrap()),
             ProjectRegistry::new(),
         )
     }
@@ -1450,7 +1458,7 @@ mod tests {
     fn mutating_one_resource_sends_exactly_that_resource() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1493,7 +1501,7 @@ mod tests {
     fn removing_a_resource_emits_membership_without_it() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1539,7 +1547,7 @@ mod tests {
     fn unchanged_resources_send_no_summaries_or_membership() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1562,7 +1570,7 @@ mod tests {
     fn by_refs_payload_bypasses_since() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1598,7 +1606,7 @@ mod tests {
     fn fresh_read_includes_all_resources() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));

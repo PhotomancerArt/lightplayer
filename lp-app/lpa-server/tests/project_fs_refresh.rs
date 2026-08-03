@@ -117,10 +117,16 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         .base_fs_mut()
         .write_file(
             project_file(name, "project.json").as_path(),
+            b"{\n  \"format\": 4\n}\n",
+        )
+        .expect("write container manifest");
+    server
+        .base_fs_mut()
+        .write_file(
+            project_file(name, "module.json").as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 3,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"

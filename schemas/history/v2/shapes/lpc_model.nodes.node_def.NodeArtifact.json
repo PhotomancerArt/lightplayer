@@ -3,10 +3,10 @@
     "meta": {},
     "variants": [
       {
-        "name": "Project",
+        "name": "Module",
         "shape": {
           "ref": {
-            "id": 2328756067
+            "id": 3041613592
           }
         }
       },

@@ -11,9 +11,9 @@
 //! drag flood per address).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{ProjectSlotAddress, UiAction, UiSlotFieldState};
+use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
 
-use crate::app::node::slot_edit_actions::slot_set_value_action;
+use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::field_wiring;
 
 use super::PanelEmit;
@@ -36,6 +36,10 @@ pub fn HFaderField(
     #[props(default = false)]
     bound: bool,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
+    /// Panel-write target: when present, gestures dispatch `PanelWriteOp`
+    /// at this `(scope, channel)` instead of editing the authored default.
+    #[props(default = None)]
+    panel_target: Option<UiPanelTarget>,
     /// Value family the drag dispatches (`F32` default; integer slots
     /// round).
     #[props(default)]
@@ -80,7 +84,8 @@ pub fn HFaderField(
                         if let (Some((address, handler)), Ok(next)) =
                             (wired.clone(), event.value().parse::<f32>())
                         {
-                            handler.call(slot_set_value_action(address, emit.lp_value(next)));
+                            handler
+                                .call(panel_or_slot_action(&panel_target, address, emit.lp_value(next)));
                         }
                     },
                 }

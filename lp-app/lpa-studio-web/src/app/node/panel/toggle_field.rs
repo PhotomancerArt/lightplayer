@@ -2,13 +2,14 @@
 //!
 //! Good-green is worn ONLY by the on/valid state (Studio convention: green
 //! means good/valid — never selection, never binding). A bound toggle keeps
-//! its violet ring on the pill regardless of on/off. Click dispatches
-//! `SlotEditOp::SetValue` with the flipped value.
+//! its violet ring on the pill regardless of on/off. Click dispatches the
+//! flipped value — a panel write when the control targets a bus channel,
+//! a slot edit otherwise.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiSlotFieldState};
+use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
 
-use crate::app::node::slot_edit_actions::slot_set_value_action;
+use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::field_wiring;
 
 #[component]
@@ -25,6 +26,11 @@ pub fn ToggleField(
     #[props(default = false)]
     bound: bool,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
+    /// Panel-write target: when present, a click dispatches `PanelWriteOp`
+    /// flipping the SHOWN (live) state at this `(scope, channel)` instead
+    /// of editing the authored default.
+    #[props(default = None)]
+    panel_target: Option<UiPanelTarget>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
@@ -45,7 +51,12 @@ pub fn ToggleField(
             onclick: move |event| {
                 event.stop_propagation();
                 if let Some((address, handler)) = wired.clone() {
-                    handler.call(slot_set_value_action(address, LpValue::Bool(!value)));
+                    // A panel-targeted click flips the SHOWN state (the
+                    // live value it drives); the slot path flips the
+                    // authored default it edits.
+                    let flip = if panel_target.is_some() { !shown } else { !value };
+                    handler
+                        .call(panel_or_slot_action(&panel_target, address, LpValue::Bool(flip)));
                 }
             },
             span { class: "{thumb_class}" }

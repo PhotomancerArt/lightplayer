@@ -2562,9 +2562,17 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new()
             .with_project_files(vec![
+                // Post-mitosis shape: the container manifest carries the
+                // format/name, the root MODULE carries the node map. A
+                // pre-mitosis single `project.json` is refused outright
+                // (D-A), which would leave the device unidentified here.
                 (
                     "project.json".to_string(),
-                    br#"{"kind":"Project","name":"sign","nodes":{}}"#.to_vec(),
+                    br#"{"format":4,"name":"sign"}"#.to_vec(),
+                ),
+                (
+                    "module.json".to_string(),
+                    br#"{"kind":"Module","nodes":{}}"#.to_vec(),
                 ),
                 ("shader.glsl".to_string(), b"void main() {}".to_vec()),
             ])
@@ -2703,8 +2711,11 @@ fn project_files(marker: &str) -> Vec<(String, Vec<u8>)> {
     vec![
         (
             "project.json".to_string(),
-            format!(r#"{{"kind":"Project","format":3,"name":"Porch {marker}","nodes":{{}}}}"#)
-                .into_bytes(),
+            format!(r#"{{"format":4,"name":"Porch {marker}"}}"#).into_bytes(),
+        ),
+        (
+            "module.json".to_string(),
+            br#"{"kind":"Module","nodes":{}}"#.to_vec(),
         ),
         ("shader.glsl".to_string(), marker.as_bytes().to_vec()),
     ]

@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn node_ui_is_foreground_class_local_mutation() {
         let op = ProjectEditorOp::NodeUi(crate::NodeUiOp::SetAgentCollapsed {
-            node: "/demo.project/orbit.shader".into(),
+            node: "/demo.module/orbit.shader".into(),
             collapsed: true,
         });
         assert_eq!(

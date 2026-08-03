@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn attach_targets_compare_by_site() {
         let playlist = UiAttachTarget::Playlist {
-            node: ProjectNodeAddress::parse("/demo.project/loop.playlist").unwrap(),
+            node: ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap(),
         };
         assert_ne!(UiAttachTarget::ProjectRoot, playlist);
         assert_eq!(playlist.clone(), playlist);

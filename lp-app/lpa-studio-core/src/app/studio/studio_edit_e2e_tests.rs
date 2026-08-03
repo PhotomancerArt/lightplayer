@@ -57,24 +57,23 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 
     // Flat-root workspace over the real wire: the project root renders no
     // card (the clock and fixture panes are the top-level entries) and the
-    // root's own slots ride `root_slots` with the `Fixed` role
-    // on `format`/`nodes` intact; `name` stays editable.
+    // Post-mitosis the root module def carries ONLY `nodes` (role `Fixed`);
+    // format/uid/name live in the project.json container manifest, so they
+    // must NOT surface as root slots.
     let editor = project_editor(&snapshot);
     assert_eq!(editor.nodes.len(), 2, "two child panes, no root card");
     let root_slot = |path: &str| {
-        editor
-            .root_slots
-            .iter()
-            .find(|slot| {
-                slot.address
-                    .as_ref()
-                    .is_some_and(|address| address.path.to_string() == path)
-            })
-            .unwrap_or_else(|| panic!("root settings should carry {path}"))
+        editor.root_slots.iter().find(|slot| {
+            slot.address
+                .as_ref()
+                .is_some_and(|address| address.path.to_string() == path)
+        })
     };
-    assert!(!root_slot("format").state.editable);
-    assert!(!root_slot("nodes").state.editable);
-    assert!(root_slot("name").state.editable);
+    assert!(!root_slot("nodes").expect("nodes root slot").state.editable);
+    assert!(
+        root_slot("format").is_none() && root_slot("name").is_none(),
+        "container-manifest fields must not surface as root slots"
+    );
 
     // D3/D4 over the real wire: the clock's three `controls.*` Debug fields
     // land FLAT in the node's Debug section — no "Controls" record row in
@@ -471,7 +470,12 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"kind":"Project","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+        )
+        .unwrap();
+        fs.write_file(
+            format!("{device_project_dir}/module.json").as_path(),
+            br#"{"kind":"Module","nodes":{}}"#,
         )
         .unwrap();
         fs.write_file(
@@ -589,7 +593,12 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"kind":"Project","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+        )
+        .unwrap();
+        fs.write_file(
+            format!("{device_project_dir}/module.json").as_path(),
+            br#"{"kind":"Module","nodes":{}}"#,
         )
         .unwrap();
         fs.write_file(
@@ -2343,9 +2352,9 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = r#"{
-  "kind": "Project",
-  "format": 3,
+    let project_json = "{\n  \"format\": 4\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -2362,6 +2371,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
 }"#;
     let files: &[(&str, &str)] = &[
         ("project.json", project_json),
+        ("module.json", module_json),
         ("clock.json", clock_json),
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),
@@ -2421,11 +2431,11 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
+        ("project.json", "{\n  \"format\": 4\n}\n"),
         (
-            "project.json",
+            "module.json",
             r#"{
-  "kind": "Project",
-  "format": 3,
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "pixels": { "ref": "./fixture.json" }

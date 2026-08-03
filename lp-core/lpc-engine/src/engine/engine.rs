@@ -18,7 +18,6 @@ use lpc_shared::time::TimeProvider;
 use lpc_wire::{ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, NodeRuntimeStatus};
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
-use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
@@ -61,6 +60,10 @@ pub struct Engine {
     services: EngineServices,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
+    /// Engaged panel writers (panel.md P1–P4). A side store on purpose:
+    /// `apply_project_changes` rebuilds bindings from defs and must never
+    /// destroy an engaged control.
+    panel_writers: crate::dataflow::panel_writers::PanelWriterStore,
     /// Device-level safe-mode output ceiling, Q16 (`None` = no clamp).
     ///
     /// DEVICE state, not project data: set by the embedder (firmware, from a
@@ -96,6 +99,7 @@ impl Engine {
             services,
             demand_roots: Vec::new(),
             graphics: None,
+            panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
             safe_output_clamp_q16: None,
             #[cfg(debug_assertions)]
             last_structural_check: None,
@@ -222,8 +226,7 @@ impl Engine {
 
         match state {
             NodeEntryState::Alive(mut runtime) => {
-                let bus = Bus::new();
-                let mut ctx = crate::node::DestroyCtx::new(node, frame, &bus);
+                let mut ctx = crate::node::DestroyCtx::new(node, frame);
                 runtime
                     .destroy(&mut ctx)
                     .map_err(|err| EngineError::node(node, err))?;
@@ -276,6 +279,62 @@ impl Engine {
     }
 
     /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
+    /// Engage (or update) a panel writer (panel.md P1/P2): latched until
+    /// an explicit clear, landing in `scope` at panel priority. Changes
+    /// the winning provider set, so cached routes are invalidated.
+    pub fn panel_write(
+        &mut self,
+        scope: crate::node::ScopeRef,
+        channel: lpc_model::ChannelName,
+        value: lpc_model::LpValue,
+        ttl_ms: Option<u32>,
+    ) {
+        // Momentary liveness (panel.md P14): the deadline is an engine-time
+        // instant; renewal is just another write with a fresh TTL.
+        let expires_at_ms = ttl_ms.map(|ttl| self.frame_time.total_ms as u64 + u64::from(ttl));
+        self.panel_writers
+            .set(scope, channel, value, self.revision, expires_at_ms);
+        self.resolver.invalidate_structure();
+    }
+
+    /// Clear every engaged writer everywhere — sink scopes included
+    /// (settled P-Q4). Returns the count.
+    pub fn panel_clear_all(&mut self) -> usize {
+        let cleared = self.panel_writers.clear_all();
+        if cleared > 0 {
+            self.resolver.invalidate_structure();
+        }
+        cleared
+    }
+
+    /// Clear one engaged panel writer (panel.md P3). Returns whether
+    /// anything was engaged.
+    pub fn panel_clear(
+        &mut self,
+        scope: crate::node::ScopeRef,
+        channel: &lpc_model::ChannelName,
+    ) -> bool {
+        let cleared = self.panel_writers.clear(scope, channel);
+        if cleared {
+            self.resolver.invalidate_structure();
+        }
+        cleared
+    }
+
+    /// Clear every engaged writer in `scope`; returns the count.
+    pub fn panel_clear_scope(&mut self, scope: crate::node::ScopeRef) -> usize {
+        let cleared = self.panel_writers.clear_scope(scope);
+        if cleared > 0 {
+            self.resolver.invalidate_structure();
+        }
+        cleared
+    }
+
+    /// The engaged panel writers (probes, persistence).
+    pub fn panel_writers(&self) -> &crate::dataflow::panel_writers::PanelWriterStore {
+        &self.panel_writers
+    }
+
     pub fn set_graphics(&mut self, graphics: Option<Arc<dyn LpGraphics>>) {
         self.graphics = graphics;
     }
@@ -396,16 +455,17 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        let project =
-            format!("{{ \"kind\": \"Project\", \"format\": 3, \"nodes\": {{ {node_lines} }} }}");
-        fs.write_file("/project.json".as_path(), project.as_bytes())
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+            .map_err(|e| e.to_string())?;
+        let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
+        fs.write_file("/module.json".as_path(), module.as_bytes())
             .map_err(|e| e.to_string())?;
 
         let ctx = ParseCtx {
             shapes: &self.slot_shapes,
         };
         registry
-            .load_root(&fs, "/project.json".as_path(), frame, &ctx)
+            .load_root(&fs, "/module.json".as_path(), frame, &ctx)
             .map_err(|e| format!("{e:?}"))?;
 
         for (index, (node_id, _)) in defs.iter().enumerate() {
@@ -438,6 +498,31 @@ impl Engine {
         })();
         lp_perf::emit_end!(lp_perf::EVENT_FRAME);
         result
+    }
+
+    /// Broadcast memory pressure to every alive node.
+    ///
+    /// ⚠️ Only call at a safe point — a moment where no render borrow into any
+    /// node-owned buffer is live. The engine calls this at the top of a tick
+    /// when a compile window was requested; embedders may also call it between
+    /// ticks (e.g. from an allocation-failure retry hook, OUTSIDE the
+    /// allocator lock). Anything a node drops here must be rebuilt lazily on
+    /// its next render — that is the contract in
+    /// `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+    pub fn broadcast_memory_pressure(
+        &mut self,
+        level: crate::node::PressureLevel,
+    ) -> Result<(), EngineError> {
+        let revision = self.revision;
+        for entry in self.tree.entries_mut() {
+            let node_id = entry.id;
+            if let NodeEntryState::Alive(node) = entry.state.get_mut() {
+                let mut ctx = crate::node::MemPressureCtx::new(node_id, revision);
+                node.handle_memory_pressure(level, &mut ctx)
+                    .map_err(|err| EngineError::node(node_id, err))?;
+            }
+        }
+        Ok(())
     }
 
     /// Re-read every output's authored configuration for this tick.
@@ -476,6 +561,37 @@ impl Engine {
         self.revision = advance_revision();
         self.frame_time =
             FrameTime::new(delta_ms, self.frame_time.total_ms.saturating_add(delta_ms));
+        // Momentary panel writers despawn on expiry (panel.md P14) — the
+        // despawn IS the release fallback for a dropped client.
+        if self
+            .panel_writers
+            .despawn_expired(self.frame_time.total_ms as u64)
+            > 0
+        {
+            self.resolver.invalidate_structure();
+        }
+
+        // Compile window (memory-pressure seam). A shader node that wanted a
+        // compile last frame deferred it and requested a window. The top of a
+        // tick is a safe point — no render borrow into any per-LED buffer is
+        // live — so drop rebuildable state across the whole tree NOW, then
+        // open this frame's window. Demand order inside the tick guarantees
+        // the compile runs before the fixture seams rebuild what was dropped:
+        // the fixture resolves its visual input (where the shader compiles)
+        // before `ensure_direct_points`/sample-buffer allocation. See
+        // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
+        let window_wanted = self.tree.entries().any(|entry| {
+            matches!(entry.state.value(), NodeEntryState::Alive(node) if node.wants_compile_window())
+        });
+        if window_wanted {
+            self.broadcast_memory_pressure(crate::node::PressureLevel::High)?;
+            let revision = self.revision;
+            for entry in self.tree.entries_mut() {
+                if let NodeEntryState::Alive(node) = entry.state.get_mut() {
+                    node.open_compile_window(revision);
+                }
+            }
+        }
 
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
         let trace = ResolveTrace::new(ResolveLogLevel::Off);
@@ -489,6 +605,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -557,6 +674,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -583,7 +701,10 @@ impl Engine {
         registry: &ProjectRegistry,
         channel: &str,
     ) -> Result<VisualProduct, SessionResolveError> {
-        let key = QueryKey::Bus(lpc_model::ChannelName(channel.to_string()));
+        let key = QueryKey::Bus {
+            scope: self.tree.node_scope(self.tree.root()),
+            channel: lpc_model::ChannelName(channel.to_string()),
+        };
         let fid = self.revision;
         let mut resolver_tmp = core::mem::replace(&mut self.resolver, Resolver::new());
         // A forced-fresh read, not an invalidation: the caller wants values
@@ -603,6 +724,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -656,6 +778,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -677,6 +800,7 @@ impl Engine {
     pub(crate) fn resolve_bus_channel_value(
         &mut self,
         registry: &ProjectRegistry,
+        scope: Option<crate::node::ScopeRef>,
         channel: &ChannelName,
     ) -> Result<Production, SessionResolveError> {
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
@@ -693,6 +817,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -703,7 +828,14 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
-        let result = session.resolve(&mut host, &QueryKey::Bus(channel.clone()));
+        let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
+        let result = session.resolve(
+            &mut host,
+            &QueryKey::Bus {
+                scope,
+                channel: channel.clone(),
+            },
+        );
         self.resolver = resolver;
         result
     }
@@ -724,6 +856,7 @@ impl Engine {
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             registry,
+            panel_writers: &self.panel_writers,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -739,9 +872,38 @@ impl Engine {
 }
 
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
+/// The synthetic provider an engaged panel writer contributes: a literal
+/// source at panel priority, owned by the scope's introducing node. The
+/// binding ref uses a sentinel index — panel writers live in the side
+/// store, never in any node's binding set.
+fn panel_provider(
+    tree: &RuntimeNodeTree<Box<dyn NodeRuntime>>,
+    scope: crate::node::ScopeRef,
+    channel: &lpc_model::ChannelName,
+    writer: &crate::dataflow::panel_writers::PanelWriter,
+) -> (BindingRef, crate::dataflow::binding::BindingEntry) {
+    let kind = tree
+        .bus_channels()
+        .find(|(name, _)| *name == channel)
+        .map(|(_, kind)| kind)
+        .unwrap_or(lpc_model::Kind::Ratio);
+    (
+        BindingRef::new(scope.owner(), usize::MAX),
+        crate::dataflow::binding::BindingEntry {
+            source: crate::dataflow::binding::BindingSource::Literal(writer.value.clone()),
+            target: crate::dataflow::binding::BindingTarget::BusChannel(channel.clone()),
+            priority: crate::dataflow::binding::BindingPriority::panel(),
+            kind,
+            version: writer.written_at,
+            owner: scope.owner(),
+        },
+    )
+}
+
 struct EngineResolveHost<'a> {
     tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     registry: &'a ProjectRegistry,
+    panel_writers: &'a crate::dataflow::panel_writers::PanelWriterStore,
     producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -960,7 +1122,7 @@ impl ResolveHost for EngineResolveHost<'_> {
             QueryKey::ConsumedSlotAccessor { node, accessor } => {
                 self.produce_consumed_slot_accessor(*node, accessor)
             }
-            QueryKey::Bus(_) => Err(SessionResolveError::other(
+            QueryKey::Bus { .. } => Err(SessionResolveError::other(
                 "engine host cannot satisfy bus query",
             )),
         }
@@ -988,15 +1150,49 @@ impl ResolveHost for EngineResolveHost<'_> {
             .collect()
     }
 
+    fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
+        // Reading scope (R7 export semantics): introducers read inward,
+        // everyone else reads the scope they inhabit. Write-side provider
+        // classification stays on `NodeTree::node_scope` (R4).
+        self.tree.bus_read_scope(node)
+    }
+
     fn providers_for_bus(
         &self,
+        scope: Option<crate::node::ScopeRef>,
         channel: &lpc_model::ChannelName,
     ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
-        self.tree
-            .providers_for_bus(channel)
-            .into_iter()
-            .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
-            .collect()
+        // The R5 walk with the panel overlay (panel.md P4): at each scope,
+        // an engaged panel writer REPLACES the scope's provider set —
+        // including for ByKey merge channels, where max priority wins
+        // rather than merging — and an engaged scope counts as "has a
+        // writer" for shadowing even when nothing authored writes there.
+        let Some(mut scope) = scope else {
+            return self
+                .tree
+                .providers_for_bus_read(None, channel)
+                .into_iter()
+                .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+                .collect();
+        };
+        loop {
+            if let Some(writer) = self.panel_writers.get(scope, channel) {
+                return alloc::vec![panel_provider(self.tree, scope, channel, writer)];
+            }
+            let candidates: Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> = self
+                .tree
+                .providers_for_bus_in_scope(scope, channel)
+                .into_iter()
+                .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+                .collect();
+            if !candidates.is_empty() {
+                return candidates;
+            }
+            match self.tree.parent_scope(scope) {
+                Some(parent) => scope = parent,
+                None => return Vec::new(),
+            }
+        }
     }
 
     fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
@@ -1962,6 +2158,7 @@ pub(crate) fn resolve_with_engine_host(
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         registry,
+        panel_writers: &eng.panel_writers,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -2001,6 +2198,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         registry,
+        panel_writers: &eng.panel_writers,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -2273,7 +2471,10 @@ mod tests {
         let out = path("outputs[0]");
 
         let (_, trace) = h
-            .resolve_with_trace(QueryKey::Bus(lpc_model::ChannelName(String::from("video"))))
+            .resolve_with_trace(QueryKey::Bus {
+                scope: None,
+                channel: lpc_model::ChannelName(String::from("video")),
+            })
             .expect("resolve with trace");
 
         assert!(trace_has_value_origin_path(
@@ -2328,14 +2529,14 @@ mod tests {
             Err(NodeError::msg("intentional tick failure"))
         }
 
-        fn destroy(&mut self, _ctx: &mut crate::node::DestroyCtx<'_>) -> Result<(), NodeError> {
+        fn destroy(&mut self, _ctx: &mut crate::node::DestroyCtx) -> Result<(), NodeError> {
             Ok(())
         }
 
         fn handle_memory_pressure(
             &mut self,
             _level: crate::node::PressureLevel,
-            _ctx: &mut crate::node::MemPressureCtx<'_>,
+            _ctx: &mut crate::node::MemPressureCtx,
         ) -> Result<(), NodeError> {
             Ok(())
         }

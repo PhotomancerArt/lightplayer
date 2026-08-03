@@ -206,11 +206,13 @@ mod tests {
         let mut runtime = HostRuntime::start_memory().unwrap();
         let client = TokioLpClient::new_shared(runtime.client_transport());
 
-        // Manifest missing `format: 1` fails to load server-side.
+        // Pre-mitosis root shape (`kind`/`nodes`) written directly as the
+        // container manifest: the container manifest gate rejects unknown
+        // fields, so this fails to load server-side.
         client
             .fs_write(
                 "/projects/bad/project.json".as_path(),
-                br#"{ "kind": "Project", "nodes": {} }"#.to_vec(),
+                br#"{ "kind": "Module", "nodes": {} }"#.to_vec(),
             )
             .await
             .unwrap();

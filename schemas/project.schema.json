@@ -2,55 +2,24 @@
   "$id": "https://lightplayer.dev/schemas/project.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "Workspace identity of a project folder: format version, library uid, and display name. Not a node artifact — the root module node lives in module.json.",
   "properties": {
     "format": {
-      "const": 3
-    },
-    "kind": {
-      "const": "Project"
+      "const": 4,
+      "title": "Authored format version"
     },
     "name": {
+      "title": "Human-readable project name",
       "type": "string"
     },
-    "nodes": {
-      "additionalProperties": {
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "properties": {
-              "unset": {
-                "description": "Unit slot: any value is accepted and ignored on read; written as {}."
-              }
-            },
-            "required": [
-              "unset"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "ref": {
-                "description": "Path to an authored artifact file.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "ref"
-            ],
-            "type": "object"
-          }
-        ]
-      },
-      "type": "object"
-    },
     "uid": {
+      "title": "Stable project identity (prj_…, base-62)",
       "type": "string"
     }
   },
   "required": [
-    "kind",
     "format"
   ],
+  "title": "LightPlayer project container manifest",
   "type": "object"
 }
