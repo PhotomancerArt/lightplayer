@@ -148,7 +148,7 @@ fn PanelControlBody(
             let action = panel_clear_action(target);
             rsx! {
                 button {
-                    class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:text-status-bound-foreground tw:opacity-70 tw:hover:opacity-100",
+                    class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:text-status-bound-foreground tw:opacity-70 tw:hover:opacity-100",
                     r#type: "button",
                     title: "Release the held panel value",
                     onclick: move |event| {
@@ -179,7 +179,9 @@ fn PanelControlBody(
         "authored value"
     };
     let readout = rsx! {
-        span { class: "{READOUT_CLASS} {readout_class}",
+        // `relative` so the engaged clear hangs past the readout without
+        // occupying layout — its appearance must not reflow the row (GV2).
+        span { class: "tw:relative {READOUT_CLASS} {readout_class}",
             span { title: readout_title, "{control.shown_display()}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
             {clear}

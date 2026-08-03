@@ -135,7 +135,7 @@ pub fn ModulePanelControl(
     let reset = rsx! {
         if engaged && let Some(target) = reset_target && let Some(handler) = on_panel {
             button {
-                class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
+                class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
                 r#type: "button",
                 title: "Reset {reset_label} — drop the held value and follow the project again",
                 aria_label: "Reset {reset_label}",
@@ -154,7 +154,10 @@ pub fn ModulePanelControl(
     let anchor_label = label_visual(&control.label, label_class);
 
     let label = rsx! {
-        span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1",
+        // `relative` so the engaged reset can hang off the label's right
+        // edge WITHOUT occupying layout — its appearance must not reflow
+        // the control (GV2).
+        span { class: "tw:relative tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1",
             SlotDetailButton {
                 label: control.label.clone(),
                 aspects,

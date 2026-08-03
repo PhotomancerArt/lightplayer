@@ -165,6 +165,9 @@
   .tw\:left-\[19px\] {
     left: 19px;
   }
+  .tw\:left-full {
+    left: 100%;
+  }
   .tw\:z-10 {
     z-index: 10;
   }

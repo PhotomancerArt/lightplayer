@@ -53,9 +53,13 @@ pub fn HFaderField(
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
+    // The gesture surface tracks the CURRENT reading — grabbing the thumb
+    // of a live control must start from what the fill shows, not snap back
+    // to the authored default underneath (GV2 bug, same as the knob).
+    let base = live_value.unwrap_or(value);
     // The fill rides the step grid the native input's thumb already snaps
     // to, so a stepped fader never shows fill and thumb in different places.
-    let frac = knob_fraction(knob_snap(live_value.unwrap_or(value), min, step), min, max);
+    let frac = knob_fraction(knob_snap(base, min, step), min, max);
     let input_class = fader_input_class(bound, engaged);
     let fill_style = fader_fill_style(frac, &state, bound, engaged);
     let slot_style = fader_slot_style(&state, bound, engaged);
@@ -82,7 +86,7 @@ pub fn HFaderField(
                     min: "{min}",
                     max: "{max}",
                     step: "{step}",
-                    value: "{value}",
+                    value: "{base}",
                     disabled,
                     title: "{invalid_title}",
                     oninput: move |event| {
