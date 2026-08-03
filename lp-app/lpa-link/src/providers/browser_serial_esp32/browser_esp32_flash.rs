@@ -73,6 +73,7 @@ extern "C" {
         port_id: u32,
         manifest_path: &str,
         esptool_module_path: &str,
+        known_chip_ids: &Array,
         on_event: &Function,
     ) -> Promise;
 
@@ -119,10 +120,18 @@ pub async fn flash_firmware_with_events(
     events: LinkManagementEventSink,
 ) -> Result<BrowserEsp32FlashResult, LinkError> {
     let on_event = management_event_callback(events);
+    // The chip-id table crosses the boundary as data. The guard's ordering
+    // invariant (most specific first, bare `esp32` last) is asserted in
+    // `provider::chip`'s tests; a JS-side copy would be untested by them.
+    let known_chip_ids: Array = crate::KNOWN_CHIP_IDS
+        .iter()
+        .map(|id| JsValue::from_str(id))
+        .collect();
     let value = JsFuture::from(js_flash_firmware(
         port_id,
         manifest_path,
         esptool_module_path,
+        &known_chip_ids,
         on_event.as_ref().unchecked_ref(),
     ))
     .await

@@ -49,7 +49,7 @@ these builds the Studio site copies into its assets, and therefore which
 boards the provisioning picker is allowed to offer.
 
 ```json
-{ "format": 1, "builds": ["esp32c6-4mb"] }
+{ "format": 1, "builds": ["esp32c6-4mb", "esp32s3-8mb", "esp32v3-4mb"] }
 ```
 
 It has a file rather than a constant because three readers need it and they

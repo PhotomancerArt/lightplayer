@@ -4283,13 +4283,16 @@ impl StudioController {
     /// `None` — nothing picked and nothing detected — leaves the provider on
     /// its deployment default, and the guard catches it if that is wrong.
     fn provisioning_build_id(&self, board_id: Option<&str>) -> Option<String> {
+        // `detected_chip` arrives in either of two spellings — the ROM boot
+        // banner's `esp32c6`, or the bootloader probe's esptool-js
+        // description `ESP32-C6 (QFN32) (revision v0.2)` — so it has to be
+        // resolved to an id, not merely lowercased.
         let detected_chip = self
             .hardware_session()
             .and_then(|session| session.snapshot().detected_chip)
-            .map(|chip| lpa_link::normalize_chip_name(&chip));
+            .and_then(|chip| lpa_link::chip_id_from_reported(&chip));
         let board = board_id.and_then(lpa_boards::board_by_id);
-        lpa_boards::provisioning_build_id(board, detected_chip.as_deref())
-            .map(|build_id| build_id.to_string())
+        lpa_boards::provisioning_build_id(board, detected_chip).map(|build_id| build_id.to_string())
     }
 
     fn device_is_in_recovery_mode(&self) -> bool {

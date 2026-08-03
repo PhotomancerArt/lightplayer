@@ -40,7 +40,7 @@ use crate::{
 /// only while exactly one image existed; the day a second one shipped it
 /// would have declared "C6" while writing an S3 image.
 fn manifest_chip(target_chip: &str) -> Option<Chip> {
-    match crate::normalize_chip_name(target_chip).as_str() {
+    match crate::chip_id_from_reported(target_chip)? {
         "esp32c6" => Some(Chip::Esp32c6),
         "esp32s3" => Some(Chip::Esp32s3),
         "esp32" => Some(Chip::Esp32),
@@ -429,9 +429,7 @@ fn assert_chip_matches_manifest(
     manifest: &LinkFirmwareManifest,
 ) -> Result<(), LinkError> {
     let detected_name = detected.to_string();
-    if crate::normalize_chip_name(&detected_name)
-        == crate::normalize_chip_name(&manifest.target_chip)
-    {
+    if crate::chip_ids_match(&detected_name, &manifest.target_chip) {
         return Ok(());
     }
     Err(LinkError::other(format!(

@@ -26,7 +26,10 @@ pub use provider::endpoint::LinkEndpoint;
 pub use provider::endpoint::LinkEndpointId;
 pub use provider::endpoint::LinkEndpointStatus;
 pub use provider::error::LinkError;
-pub use provider::flash_region::{LinkFlashRegion, normalize_chip_name};
+pub use provider::chip::{
+    KNOWN_CHIP_IDS, chip_id_from_reported, chip_ids_match, normalize_chip_name,
+};
+pub use provider::flash_region::LinkFlashRegion;
 pub use provider::log::{LinkLogEntry, LinkLogLevel};
 pub use provider::management_event::{
     LinkManagementEvent, LinkManagementEventSink, emit_management_result_events,

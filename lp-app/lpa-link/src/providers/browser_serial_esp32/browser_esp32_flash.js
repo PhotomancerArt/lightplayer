@@ -55,7 +55,22 @@ export async function probeTarget(portId, esptoolModulePath) {
   }
 }
 
-export async function flashFirmware(portId, manifestPath, esptoolModulePath, onEvent) {
+/**
+ * Flash the merged image described by `manifestPath`.
+ *
+ * `knownChipIds` is `lpa_link::KNOWN_CHIP_IDS`, passed in rather than
+ * restated here: it is an ordered table (most specific id first, bare
+ * `esp32` last) whose ordering is the correctness argument for the chip
+ * guard, and a second copy of it in another language is precisely the kind
+ * of drift that lets a wrong image through.
+ */
+export async function flashFirmware(
+  portId,
+  manifestPath,
+  esptoolModulePath,
+  knownChipIds,
+  onEvent,
+) {
   if (!isSupported()) {
     throw new Error("Web Serial firmware flashing is not supported in this browser.");
   }
@@ -85,7 +100,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath, onE
       // the last moment anything can stop a C6 image from being written
       // onto an S3 — after `writeFlash` the board is already bricked-ish
       // and the user has no idea why. Refuse loudly instead.
-      assertChipMatchesManifest(chipName, manifest, manifestPath);
+      assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
@@ -540,27 +555,34 @@ async function loadEsptoolModule(esptoolModulePath) {
   }
 }
 
-// Reduce a chip name to lowercase alphanumerics. The Rust twin is
-// `lpa_link::normalize_chip_name`; this copy exists because the compare
-// happens where the loader does, and both of its inputs (esptool-js's
-// banner, the manifest's own `core.target.chip`) are already JS-visible.
-// Keep the two definitions identical.
-function normalizeChip(name) {
-  return String(name ?? "")
+// The chip id a reported name belongs to — the JS half of
+// `lpa_link::chip_id_from_reported`, over the table Rust hands in.
+//
+// Whole-string equality does not work here: esptool-js reports
+// "ESP32-C6 (QFN32) (revision v0.2)" and, for the classic, a die name
+// ("ESP32-D0WD-V3") that is not the chip id at all. Nor does a substring
+// test — every one of those strings contains "esp32". Prefix-matching an
+// ordered, most-specific-first table is what distinguishes them.
+function chipIdFrom(reported, knownChipIds) {
+  const normalized = String(reported ?? "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  return Array.from(knownChipIds ?? []).find((id) => normalized.startsWith(id)) ?? null;
 }
 
 // Refuse to write `manifest` onto `reportedChip`.
 //
-// A reported chip of `null` is NOT treated as a match: esptool-js always
-// names the chip it synced with, so an absent name means the handshake did
-// not go the way this code assumes, and guessing there is the same bet the
-// guard exists to refuse.
-function assertChipMatchesManifest(reportedChip, manifest, manifestPath) {
+// An unresolvable chip on either side is NOT a match: esptool-js always
+// names the chip it synced with, so an absent or unrecognized name means
+// the handshake did not go the way this code assumes, and guessing there is
+// the same bet the guard exists to refuse.
+function assertChipMatchesManifest(reportedChip, manifest, manifestPath, knownChipIds) {
   const manifestChip = manifest.core?.target?.chip;
-  const detected = normalizeChip(reportedChip);
-  const expected = normalizeChip(manifestChip);
+  const detected = chipIdFrom(reportedChip, knownChipIds);
+  const expected = chipIdFrom(manifestChip, knownChipIds);
   if (detected && detected === expected) {
     return;
   }
