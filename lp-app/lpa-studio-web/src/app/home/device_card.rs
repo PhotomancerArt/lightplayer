@@ -1140,12 +1140,31 @@ fn console_tab_body(tail: &[UiLogEntry]) -> Element {
             p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
                 "No console output yet."
             }
+            {trace_footer()}
         };
     }
     rsx! {
         div { class: "ux-console-lines",
             for entry in tail {
                 div { class: console_line_class(entry.level), "{entry.message}" }
+            }
+        }
+        {trace_footer()}
+    }
+}
+
+/// The device-trace export affordance (M0): copies the lifecycle event
+/// trace — including the PREVIOUS session's, which survives the refresh
+/// that "fixed" the jank — as JSONL to the clipboard.
+fn trace_footer() -> Element {
+    rsx! {
+        div { class: "tw:mt-1.5 tw:flex tw:justify-end",
+            button {
+                class: "ux-card-op-copy",
+                r#type: "button",
+                title: "Copy the device lifecycle event trace (this session and the previous one) as JSONL",
+                onclick: move |_| crate::device_events_io::copy_trace(),
+                "Copy device trace"
             }
         }
     }

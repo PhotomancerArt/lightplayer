@@ -62,3 +62,21 @@ pub enum ConnectFlowState {
         issue: UiIssue,
     },
 }
+
+impl ConnectFlowState {
+    /// Compact, stable label for event-log records (part of the JSONL trace
+    /// contract — extend, do not rename).
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::SelectingProvider { .. } => "selecting-provider",
+            Self::DiscoveringEndpoints { .. } => "discovering-endpoints",
+            Self::SelectingEndpoint { .. } => "selecting-endpoint",
+            Self::Connecting { .. } => "connecting",
+            Self::Retrying { .. } => "retrying",
+            Self::PortHeld { .. } => "port-held",
+            Self::Unresponsive { .. } => "unresponsive",
+            Self::Connected { .. } => "connected",
+            Self::Failed { .. } => "failed",
+        }
+    }
+}

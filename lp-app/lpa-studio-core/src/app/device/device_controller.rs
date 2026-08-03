@@ -38,6 +38,7 @@ use crate::app::device::connect_choices::{provider_auto_connects, provider_choic
 use crate::app::device::device_event_adapter::console_event_sink;
 use crate::app::device::link_ux::{link_session_logs, map_link_error};
 use crate::app::runtime_pool::runtime_session::DeviceHandle;
+use crate::core::log::{DeviceEventKind, DeviceEventRecorder};
 use crate::{
     ConnectFlowState, ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, EndpointChoice,
     ProgressState, RuntimePayload, SimAttachment, UiError, UiIssue, UiLogDraft,
@@ -75,6 +76,11 @@ pub struct DeviceController {
     /// window before the payload lands in the pool — and failed connects,
     /// whose captured boot chatter would otherwise be lost.
     pending_device_logs: Rc<RefCell<Vec<UiLogDraft>>>,
+    /// The device event log's recording handle: every flow transition is
+    /// recorded through [`Self::set_flow`], and each hardware connect's
+    /// console sink records through a clone. Noop until the studio
+    /// controller installs the shared recorder.
+    events: DeviceEventRecorder,
 }
 
 /// Outcome of [`DeviceController::open_provider`].
@@ -114,7 +120,33 @@ impl DeviceController {
             timers: DeviceTimers::new(|_| Box::pin(std::future::ready(()))),
             pending_device_logs: Rc::new(RefCell::new(Vec::new())),
             pending_reconnect_uid: None,
+            events: DeviceEventRecorder::noop(),
         }
+    }
+
+    /// Install the shared device event recorder (studio controller wiring).
+    pub(crate) fn set_event_recorder(&mut self, events: DeviceEventRecorder) {
+        self.events = events;
+    }
+
+    /// The one funnel for flow transitions: records `from → to` in the
+    /// device event log, then applies. Every non-constructor flow
+    /// assignment goes through here so a trace shows the connect flow's
+    /// whole story.
+    fn set_flow(&mut self, next: ConnectFlowState) {
+        let from = self.flow.label();
+        let to = next.label();
+        if from != to {
+            self.events.record(
+                None,
+                None,
+                DeviceEventKind::Flow {
+                    from: from.to_string(),
+                    to: to.to_string(),
+                },
+            );
+        }
+        self.flow = next;
     }
 
     /// Install the platform's timer factory for device-session deadlines
@@ -148,10 +180,10 @@ impl DeviceController {
 
     fn reset_to_provider_selection(&mut self, issue: Option<UiIssue>) {
         self.pending_reconnect_uid = None;
-        self.flow = ConnectFlowState::SelectingProvider {
+        self.set_flow(ConnectFlowState::SelectingProvider {
             providers: provider_choices(&self.registry),
             issue,
-        };
+        });
     }
 
     fn recover_to_provider_selection(&mut self, message: impl Into<String>) {
@@ -161,9 +193,9 @@ impl DeviceController {
 
     /// Mark the flow failed (surfaced as the gallery issue chip).
     pub fn fail(&mut self, message: impl Into<String>) {
-        self.flow = ConnectFlowState::Failed {
+        self.set_flow(ConnectFlowState::Failed {
             issue: UiIssue::new(message),
-        };
+        });
     }
 
     /// Open a provider: discover endpoints into the picker state, and
@@ -194,10 +226,10 @@ impl DeviceController {
         &mut self,
         provider_id: LinkProviderKind,
     ) -> Result<(), UiError> {
-        self.flow = ConnectFlowState::DiscoveringEndpoints {
+        self.set_flow(ConnectFlowState::DiscoveringEndpoints {
             provider_id,
             progress: ProgressState::new("Discovering endpoints"),
-        };
+        });
 
         let result = match self.registry.create_connector(provider_id) {
             Ok(connector) => connector.discover().await.map_err(map_link_error),
@@ -216,22 +248,22 @@ impl DeviceController {
             return Err(UiError::Link(message));
         }
 
-        self.flow = ConnectFlowState::SelectingEndpoint {
+        self.set_flow(ConnectFlowState::SelectingEndpoint {
             provider_id,
             endpoints: endpoints
                 .into_iter()
                 .map(EndpointChoice::from_endpoint)
                 .collect(),
-        };
+        });
         Ok(())
     }
 
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
     async fn open_browser_serial_provider(&mut self) -> Result<DeviceOpenOutcome, UiError> {
-        self.flow = ConnectFlowState::DiscoveringEndpoints {
+        self.set_flow(ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Requesting browser serial access"),
-        };
+        });
 
         let result = match self
             .registry
@@ -260,10 +292,10 @@ impl DeviceController {
         };
         let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
         let endpoint_id = endpoint_choice.id.clone();
-        self.flow = ConnectFlowState::SelectingEndpoint {
+        self.set_flow(ConnectFlowState::SelectingEndpoint {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
-        };
+        });
         self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
             .await
     }
@@ -295,10 +327,10 @@ impl DeviceController {
         uid: Option<String>,
     ) -> Result<DeviceOpenOutcome, UiError> {
         self.pending_reconnect_uid = uid;
-        self.flow = ConnectFlowState::DiscoveringEndpoints {
+        self.set_flow(ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Finding granted serial ports"),
-        };
+        });
 
         let result = match self
             .registry
@@ -327,10 +359,10 @@ impl DeviceController {
         };
         let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
         let endpoint_id = endpoint_choice.id.clone();
-        self.flow = ConnectFlowState::SelectingEndpoint {
+        self.set_flow(ConnectFlowState::SelectingEndpoint {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
-        };
+        });
         self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
             .await
     }
@@ -359,10 +391,10 @@ impl DeviceController {
         pending_uid: Option<String>,
     ) -> Result<DeviceOpenOutcome, UiError> {
         self.pending_reconnect_uid = pending_uid;
-        self.flow = ConnectFlowState::DiscoveringEndpoints {
+        self.set_flow(ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Finding granted serial ports"),
-        };
+        });
         let result = match self
             .registry
             .create_connector(LinkProviderKind::BrowserSerialEsp32)
@@ -393,10 +425,10 @@ impl DeviceController {
         };
         let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
         let endpoint_id = endpoint_choice.id.clone();
-        self.flow = ConnectFlowState::SelectingEndpoint {
+        self.set_flow(ConnectFlowState::SelectingEndpoint {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
-        };
+        });
         self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
             .await
     }
@@ -437,10 +469,10 @@ impl DeviceController {
                 summary: "Open this endpoint.".to_string(),
                 status: lpa_link::LinkEndpointStatus::Available,
             });
-        self.flow = ConnectFlowState::Connecting {
+        self.set_flow(ConnectFlowState::Connecting {
             endpoint: endpoint.clone(),
             progress: ProgressState::new("Opening link session"),
-        };
+        });
 
         let connector = match self.registry.create_connector(provider_id) {
             Ok(connector) => connector,
@@ -469,9 +501,9 @@ impl DeviceController {
                     Err(error) if is_port_held_error(&error) => {
                         // D32 soft failure: the card shows In-use-
                         // elsewhere; the tick-cadence retry takes over.
-                        self.flow = ConnectFlowState::PortHeld {
+                        self.set_flow(ConnectFlowState::PortHeld {
                             endpoint: endpoint.clone(),
-                        };
+                        });
                         return Ok(DeviceOpenOutcome::SoftFailed);
                     }
                     Err(error) if !retried => {
@@ -487,10 +519,10 @@ impl DeviceController {
                                 error.message()
                             ),
                         ));
-                        self.flow = ConnectFlowState::Retrying {
+                        self.set_flow(ConnectFlowState::Retrying {
                             endpoint: endpoint.clone(),
                             progress: ProgressState::new("Resetting and retrying"),
-                        };
+                        });
                         self.timers.sleep(CONNECT_RETRY_BACKOFF).await;
                     }
                     Err(error) => {
@@ -501,9 +533,9 @@ impl DeviceController {
                             crate::UiLogOrigin::Link,
                             format!("device not responding: {}", error.message()),
                         ));
-                        self.flow = ConnectFlowState::Unresponsive {
+                        self.set_flow(ConnectFlowState::Unresponsive {
                             endpoint: endpoint.clone(),
-                        };
+                        });
                         return Ok(DeviceOpenOutcome::SoftFailed);
                     }
                 }
@@ -513,14 +545,14 @@ impl DeviceController {
         let session = payload
             .link_session()
             .unwrap_or_else(|| unreachable!("connect_endpoint builds live sessions only"));
-        self.flow = ConnectFlowState::Connected {
+        self.set_flow(ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(
                 provider_id,
                 session.endpoint_id.as_str(),
                 session.id().as_str(),
                 endpoint.label,
             ),
-        };
+        });
         Ok(DeviceOpenOutcome::Connected { payload, logs })
     }
 
@@ -538,7 +570,11 @@ impl DeviceController {
         // boot chatter would otherwise be lost).
         let console_logs = Rc::new(RefCell::new(Vec::new()));
         self.pending_device_logs = Rc::clone(&console_logs);
-        let sink = console_event_sink(Rc::clone(&console_logs));
+        let sink = console_event_sink(
+            Rc::clone(&console_logs),
+            self.events.clone(),
+            Some(endpoint_id.as_str().to_string()),
+        );
         match DeviceSession::connect(Rc::clone(connector), endpoint_id, self.timers.clone(), sink)
             .await
         {
@@ -615,14 +651,14 @@ impl DeviceController {
     /// Mark the flow `Connected` (Fake provider vocabulary, matching the
     /// old `set_state(Connected) + set_active_connection` seam).
     pub(crate) fn set_stub_connected_flow_for_test(&mut self) {
-        self.flow = ConnectFlowState::Connected {
+        self.set_flow(ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(
                 LinkProviderKind::Fake,
                 "fake-runtime",
                 "fake-session",
                 "Fake runtime",
             ),
-        };
+        });
     }
 
     /// Poll timers for host tests: each sleep completes when its wall-clock
