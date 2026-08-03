@@ -406,7 +406,7 @@ function fileFinding(spec, records, failures, partial, note) {
 /// Run one scenario inside the sitting: setup (with the port-held guard),
 /// hand-off steps, capture, validate. Returns false only when setup
 /// failed (the session continues either way).
-async function runOne(spec, state, argPort) {
+async function runOne(spec, state, argPort, studioUrl) {
   console.log(`\n=== ${spec.id} — ${spec.title}`);
   console.log(`Board: ${spec.board}`);
   for (const dep of spec.needs ?? []) {
@@ -420,8 +420,9 @@ async function runOne(spec, state, argPort) {
   const needs_port = (spec.setup ?? []).some((step) => step.run?.includes("{port}"));
   if (needs_port) {
     await ask(
-      "\nSetup is about to use the serial port. If this board is connected in \n" +
-      "Studio, Disconnect it first (card → Danger tab → Disconnect). Enter when free… ",
+      "\nSetup is about to use the serial port — the browser must not hold it: \n" +
+      "CLOSE the Studio capture tab (or at least Disconnect the board on its \n" +
+      "card's Danger tab). Enter when the port is free… ",
     );
     const port = await pickPort(argPort);
     if (!runSetup(spec, port)) {
@@ -438,12 +439,18 @@ async function runOne(spec, state, argPort) {
   const records = [];
   state.active = { records, partial };
 
-  console.log("\n— in the Studio tab (the one this sitting opened — it keeps streaming):");
+  console.log("\n— hand-off: the port is free; opening the capture tab now:");
+  console.log(`\n    ${studioUrl}\n`);
+  if (process.platform === "darwin" && process.stdout.isTTY) {
+    spawnSync("open", [studioUrl]);
+  }
+  console.log("— in that tab:");
   for (const [index, step] of (spec.manual ?? []).entries()) {
     console.log(`  ${index + 1}. ${step}`);
   }
   await ask("\nPress Enter here when the scenario is done… ");
   state.active = null;
+  console.log("\n(close the Studio tab before the next scenario's setup — an open tab holds the port)");
 
   console.log(`\nCaptured ${records.length} events.`);
   console.log("\nWhat the trace says happened:");
@@ -496,11 +503,14 @@ async function sitting(initialId, argPort) {
   await new Promise((resolve) => sink.listen(0, "127.0.0.1", resolve));
   const sinkUrl = `http://127.0.0.1:${sink.address().port}/ingest`;
   const studioUrl = `http://localhost:${studio.port}/?capture-sink=${encodeURIComponent(sinkUrl)}`;
-  console.log(`\nStudio, capture armed:\n\n    ${studioUrl}\n`);
-  if (process.platform === "darwin" && process.stdout.isTTY) {
-    spawnSync("open", [studioUrl]);
-    console.log("(opened in your browser — keep using that ONE tab for every scenario)");
-  }
+  // Deliberately NOT opened here: Studio's load-time auto-connect sweep
+  // takes the serial port the moment the tab exists, which is exactly
+  // when setup needs the port free (sitting feedback, 2026-08-03 — "the
+  // browser steals the port"). Each scenario opens the tab AFTER its
+  // setup releases the port, and asks for it to be closed again before
+  // the next one.
+  console.log(`\nStudio is up (port ${studio.port}). The capture tab opens per-scenario,`);
+  console.log("AFTER setup — keep it closed while setup runs.");
 
   let pending = initialId ?? null;
   for (;;) {
@@ -514,7 +524,7 @@ async function sitting(initialId, argPort) {
       if (spec === "quit") break;
       if (!spec) continue;
     }
-    await runOne(spec, state, argPort);
+    await runOne(spec, state, argPort, studioUrl);
     const next = await ask("\nNext scenario (number/id, Enter = menu, q = quit): ");
     if (next === "q") break;
     pending = next || null;
