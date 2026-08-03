@@ -204,7 +204,7 @@ fn setup_card(detected_chip: Option<&str>, setup_board: Option<&str>) -> Element
 }
 
 #[story(
-    description = "Setup form with a detected C6 (boot-banner evidence): only the C6 boards are offered, because a board for another chip cannot be flashed onto this device — the guard refuses it. The other-chip boards are behind '+N other boards'; the generic fallback is the dashed cell."
+    description = "Setup form with a detected C6 (boot-banner evidence): only the C6 boards are offered, because a board for another chip cannot be flashed onto this device — the guard refuses it. Other-chip boards are not offered at all (gate-1 sitting 2026-08-03); the generic fallback is the dashed cell."
 )]
 fn setup_board_picker_detected_c6() -> Element {
     sheet(vec![setup_card(Some("esp32c6"), None)])

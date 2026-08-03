@@ -336,52 +336,37 @@ fn SetupForm(
 
     let boards = provisionable_boards();
     let detected = detected_chip.as_deref().and_then(chip_id);
-    let (matching, other): (Vec<&'static lpa_boards::BoardDisplayFile>, Vec<_>) = boards
-        .iter()
-        .partition(|board| detected.is_some() && detected == chip_id(&board.family));
     // A board for another chip CANNOT be flashed onto this device — the
-    // guard refuses it — so when the chip is known, the non-matching boards
-    // are collapsed rather than merely sorted after the matching ones.
-    //
-    // Round 3 of the M5 gate flattened this to one grid, correctly: only the
-    // C6 image was served then, so `other` was always empty and the
-    // disclosure was a control that never had anything behind it. Serving
-    // three builds made it non-empty, and a C6 user was shown four boards
-    // they cannot use (Yona, hardware walk 2026-08-02). The spike's original
-    // collapse is back, and now it earns its place.
-    let collapse_others = detected.is_some() && !other.is_empty();
-    let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if collapse_others {
-        if show_all() {
-            matching.into_iter().chain(other.iter().copied()).collect()
-        } else {
-            matching
-        }
-    } else {
-        boards.clone()
+    // guard refuses it — so when the chip is known, the other-chip boards
+    // are not offered AT ALL. The 2026-08-02 walk collapsed them behind a
+    // "+N other boards" disclosure; the 2026-08-03 gate-1 sitting judged
+    // even that wrong — a disclosure reads as "more applicable choices",
+    // and everything behind it was a dead end. When the chip is UNKNOWN
+    // (no banner, unresolved report), the full list stands: detection, not
+    // the catalog, is the uncertain half then.
+    let applicable: Vec<&'static lpa_boards::BoardDisplayFile> = match detected {
+        Some(chip) => boards
+            .iter()
+            .filter(|board| chip_id(&board.family) == Some(chip))
+            .copied()
+            .collect(),
+        None => boards.clone(),
     };
     // Generic occupies the first cell, so the board capacity is one less;
-    // the overflow cell fills the 12th (4 rows of 3).
+    // the overflow cell fills the 12th (4 rows of 3). Plain grid
+    // truncation — every tile behind it IS applicable.
     let capacity = SETUP_TILE_LIMIT - 1;
-    let overflow = if collapse_others {
-        // The disclosure counts the other-chip boards, not grid overflow:
-        // "+4 other boards" is a different offer from "+4 more".
-        if show_all() { 0 } else { other.len() }
+    let overflow = if show_all() {
+        0
     } else {
-        ordered.len().saturating_sub(capacity)
+        applicable.len().saturating_sub(capacity)
     };
-    let shown: Vec<_> = if show_all() || overflow == 0 || collapse_others {
-        ordered
+    let shown: Vec<_> = if overflow == 0 {
+        applicable
     } else {
-        ordered.into_iter().take(capacity).collect()
+        applicable.into_iter().take(capacity).collect()
     };
-    let overflow_label = if collapse_others {
-        // Name what is behind it. "+4 more" reads as truncation; these are
-        // boards for a different chip and the user should know that before
-        // opening it.
-        format!("+{overflow} other boards")
-    } else {
-        format!("+{overflow} more")
-    };
+    let overflow_label = format!("+{overflow} more");
 
     let picked = setup_board
         .as_deref()
@@ -402,21 +387,18 @@ fn SetupForm(
 
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-3.5",
-            div {
-                // The headline carries the chip, replacing the generic
-                // status line AND the old "BOARD detected:" label.
-                p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
-                    if let Some(chip) = &detected_chip {
-                        "Set up "
-                        span { style: "color: var(--edge-tint);", "{chip_display(chip)}" }
-                        " device"
-                    } else {
-                        "Set up this device"
-                    }
-                }
-                p { class: "tw:m-0 tw:mt-0.5 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
-                    "Select your board — or install generic and choose later"
-                }
+            // ONE line, and it is the ask (recovered from the parked
+            // card-labels branch, d7a881424). The card TITLE already names
+            // the chip (M1's chip-based title), so a "Set up ESP32-C6
+            // device" headline directly beneath it said the same thing
+            // twice. What went with it was the "or install generic and
+            // choose later" half: picking the board is not a decision to
+            // defer — generic writes no `/hardware.json`, so a device set
+            // up that way has no pin map until someone comes back for it.
+            // The offer is still there in the dashed cell, without the
+            // copy inviting people to take it.
+            p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+                "Select your board"
             }
             div { class: "tw:grid tw:grid-cols-3 tw:gap-2",
                 // Generic leads: it is the no-decision outcome, and it has
@@ -450,11 +432,14 @@ fn SetupForm(
                 }
             }
             div {
-                label { class: "tw:mb-1 tw:block tw:text-xs tw:font-semibold tw:text-subtle-foreground",
-                    "Device name"
+                // Same voice and same weight as "Select your board": the
+                // form is two asks in a row, and a quiet field LABEL beside
+                // a bold instruction read as two different kinds of thing.
+                label { class: "tw:mb-1 tw:block tw:text-sm tw:font-bold tw:text-strong-foreground",
+                    "Name your device"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-xs tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
                     value: "{name_value}",
                     oninput: move |event| typed_name.set(Some(event.value())),
                 }
@@ -482,20 +467,6 @@ fn SetupForm(
 /// boards overflow — one is the "+N more" cell (gate round 3: the card is
 /// allowed to grow, but not without bound).
 const SETUP_TILE_LIMIT: usize = 11;
-
-/// A chip id as the headline shows it (`esp32c6` → `ESP32-C6`); unknown
-/// shapes pass through uppercased rather than being dropped.
-fn chip_display(chip: &str) -> String {
-    match chip_id(chip) {
-        Some("esp32c6") => "ESP32-C6".to_string(),
-        Some("esp32s3") => "ESP32-S3".to_string(),
-        Some("esp32c3") => "ESP32-C3".to_string(),
-        // The classic. Its probe answer is a die name — `ESP32-D0WD-V3
-        // (revision v3.0)` — which is not what the headline should read.
-        Some("esp32") => "ESP32".to_string(),
-        _ => chip.to_ascii_uppercase(),
-    }
-}
 
 /// One tile in the board grid: the board's own drawing over its name.
 /// `board: None` is the generic fallback, drawn as a dashed placeholder.
@@ -2333,7 +2304,7 @@ fn grow_button_class(push_right: bool) -> &'static str {
 
 #[cfg(test)]
 mod setup_name_tests {
-    use super::{board_slug, chip_display, default_setup_name};
+    use super::{board_slug, default_setup_name};
 
     /// Sortable date first (gate round 2), then the most specific thing
     /// known about the device.
@@ -2355,15 +2326,5 @@ mod setup_name_tests {
     fn board_slug_drops_the_vendor() {
         assert_eq!(board_slug("seeed/xiao-esp32-c6"), "xiao-esp32-c6");
         assert_eq!(board_slug("dom-z-102"), "dom-z-102");
-    }
-
-    /// The headline names the chip the way a datasheet does; anything
-    /// unrecognized still shows rather than vanishing.
-    #[test]
-    fn chip_display_is_datasheet_shaped() {
-        assert_eq!(chip_display("esp32c6"), "ESP32-C6");
-        assert_eq!(chip_display("ESP32-S3"), "ESP32-S3");
-        assert_eq!(chip_display("esp32"), "ESP32");
-        assert_eq!(chip_display("rp2040"), "RP2040");
     }
 }
