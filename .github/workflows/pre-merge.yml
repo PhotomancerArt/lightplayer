@@ -811,6 +811,13 @@ jobs:
           just ci-prereqs
           just $recipes schema-check
 
+      # Heap-budget ratchet: emulator window deltas vs the checked-in
+      # measured record. Deterministic, 0% margin; re-baseline explicitly
+      # with `just heap-budget-baseline`. See docs/heap-budget-gate.md.
+      # Runs after the tests so lp-cli and fw-emu reuse warm deps.
+      - name: Heap budget ratchet
+        run: cd lp2025 && just heap-budget-check
+
       - name: sccache stats
         if: always()
         shell: bash
