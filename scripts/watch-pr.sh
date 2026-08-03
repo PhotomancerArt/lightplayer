@@ -21,7 +21,11 @@ set -euo pipefail
 #   - stacked PR: bases other than main get NO CI until retargeted
 #   - GITHUB_TOKEN pushes (e.g. the story-baseline auto-commit) trigger no runs
 
-REGISTER_TIMEOUT="${WATCH_PR_REGISTER_TIMEOUT:-300}"   # seconds to wait for checks to appear
+# GitHub also reports an EMPTY check list transiently during run transitions
+# (right after a push replaces the head commit, or while a check suite
+# re-registers), so emptiness only counts against this timeout while it is
+# consecutive — any sighting of checks resets the clock.
+REGISTER_TIMEOUT="${WATCH_PR_REGISTER_TIMEOUT:-600}"   # consecutive-empty seconds before giving up
 POLL_INTERVAL="${WATCH_PR_POLL_INTERVAL:-15}"          # seconds between polls
 
 mode="checks"
@@ -63,21 +67,45 @@ if [[ "$base" != "main" ]]; then
   echo "note: base is '$base', not main — stacked PRs get no CI until retargeted." >&2
 fi
 
-deadline=$((SECONDS + REGISTER_TIMEOUT))
-while [[ "$(view statusCheckRollup '.statusCheckRollup | length')" == "0" ]]; do
-  if ((SECONDS >= deadline)); then
-    cat >&2 <<EOF
+no_ci_diagnostic() {
+  cat >&2 <<EOF
 no checks registered after ${REGISTER_TIMEOUT}s. Likely causes:
   - path-filtered CI: no workflow job matches this diff (.github/workflows)
   - stacked PR: base '$base' — CI only runs against main; retarget the PR
   - the last push was made with GITHUB_TOKEN (e.g. story-baseline
     auto-commit), which never triggers workflows — push any commit to kick CI
 EOF
-    exit 2
-  fi
-  sleep "$POLL_INTERVAL"
-done
+}
 
-# --fail-fast exits on the first failed required check; exit status reflects
-# the outcome (0 green, nonzero otherwise).
-exec gh pr checks "${pr_args[@]}" --watch --fail-fast --interval "$POLL_INTERVAL"
+# empty_deadline is set while the check list is empty and cleared the moment
+# checks appear, so only CONSECUTIVE emptiness exhausts REGISTER_TIMEOUT.
+empty_deadline=""
+while true; do
+  if [[ "$(view statusCheckRollup '.statusCheckRollup | length')" == "0" ]]; then
+    [[ -n "$empty_deadline" ]] || empty_deadline=$((SECONDS + REGISTER_TIMEOUT))
+    if ((SECONDS >= empty_deadline)); then
+      no_ci_diagnostic
+      exit 2
+    fi
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
+  empty_deadline=""
+
+  # --fail-fast exits on the first failed required check; exit status reflects
+  # the outcome (0 green, nonzero otherwise). Output is captured because the
+  # watch itself can die with "no checks reported" when the list goes empty
+  # mid-run — that is the same transient state as above, so re-enter the poll
+  # loop instead of passing gh's failure through.
+  if out="$(gh pr checks "${pr_args[@]}" --watch --fail-fast --interval "$POLL_INTERVAL" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if ((rc != 0)) && [[ "$out" == *"no checks reported"* ]]; then
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
+  [[ -n "$out" ]] && printf '%s\n' "$out"
+  exit "$rc"
+done
