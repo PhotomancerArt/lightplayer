@@ -4817,6 +4817,10 @@ label:has(> input:not(:disabled)) {
 }
 
 .lp-brand-play-anim {
+    /* Base fill IS the frozen frame: when the animation is disabled (story
+       capture freeze, prefers-reduced-motion), the triangle rests on the
+       brand accent rather than falling back to currentColor. */
+    fill: #7be0b2;
     animation: lp-brand-play-cycle 8s linear infinite;
 }
 
