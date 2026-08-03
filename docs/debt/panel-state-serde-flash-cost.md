@@ -61,6 +61,19 @@ is no RISC-V `nm` on this machine, but the ELF32 symbol table is a
 - 2026-08-02 — filed. P10 (panel persistence) measured at −50,512 B on
   the C6. Accepted for now: the size gate passes with 2.3× its required
   margin, and the fix was out of P10's scope.
+- 2026-08-03 — **pressure released, duplication unchanged.** Main
+  flipped the ESP32 profile to `panic = "abort"` with `opt-level = "z"`
+  overrides; the C6 image went 3,003,104 B → 2,169,520 B and headroom
+  142,624 B → **976,208 B**. Re-measured on the current image by symbol
+  class rather than by diff: the `serde_json` LpValue codec is
+  **24,912 B** across 14 symbols, the hand-rolled `slot_codec` beside it
+  is 15,970 B, and panel state's own code is only 5,694 B. So the
+  *shape* of the waste is confirmed — the expensive thing is the
+  duplicate codec, not the feature — while the urgency is much lower.
+  Note the earlier −50,512 B figure was a build-to-build diff under the
+  old profile and is not comparable to these absolute sums; both are
+  recorded rather than reconciled, because the actionable number is the
+  24,912 B duplicate.
 
 **Exit criteria** — panel state encodes/decodes `LpValue` through
 `slot_codec` (`read_lp_value` / `write_lp_value`), which is already in
