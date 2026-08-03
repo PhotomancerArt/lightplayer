@@ -74,7 +74,14 @@ const LPFS_PARTITIONS: &[(&str, LinkFlashRegion)] = &[
 
 /// Reduce a reported chip name to lowercase alphanumerics so `esp32c6`,
 /// `ESP32-C6 (QFN32) (revision v0.2)` and `ESP32-C6` all answer the same.
-fn normalize_chip_name(chip_name: &str) -> String {
+///
+/// The one Rust implementation. Chip names reach this crate from three
+/// reporters that spell them differently — espflash's `Chip` Display
+/// (`esp32c6`), esptool-js's chatty banner (`ESP32-C6 (QFN32) (revision
+/// v0.2)`), and the boot-line classifier's ROM banner — and every
+/// comparison between them has to agree, or a guard passes on one path and
+/// fails on another.
+pub fn normalize_chip_name(chip_name: &str) -> String {
     chip_name
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric())

@@ -537,11 +537,13 @@ fn BoardTile(
 
 /// Normalize a chip name for family matching: probe answers say
 /// "ESP32-C6", boot banners say "esp32c6", board families say "esp32c6".
+///
+/// Deliberately the SAME function the flash guard compares with
+/// (`lpa_link::normalize_chip_name`). A picker that matched boards by one
+/// rule while the guard refused images by another would offer a board and
+/// then refuse to flash it.
 fn normalize_chip(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_ascii_lowercase()
+    lpa_link::normalize_chip_name(name)
 }
 
 /// The boards the picker offers: a build this deployment SERVES exists for
