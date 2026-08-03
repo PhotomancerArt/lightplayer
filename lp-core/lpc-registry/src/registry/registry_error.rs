@@ -17,6 +17,13 @@ pub enum RegistryError {
         expected: u32,
         found: Option<u32>,
     },
+    /// The `project.json` container manifest is missing or unreadable.
+    ///
+    /// A hard refuse, never a skip: the manifest carries the format gate,
+    /// so a project without one is unloadable by construction (D-A).
+    Manifest {
+        message: String,
+    },
 }
 
 impl core::fmt::Display for RegistryError {
@@ -42,9 +49,12 @@ impl core::fmt::Display for RegistryError {
             } => {
                 write!(
                     f,
-                    "project root is missing the top-level `format` key \
+                    "project manifest is missing the top-level `format` key \
                      (expected {expected}); regenerate or upgrade the project"
                 )
+            }
+            Self::Manifest { message } => {
+                write!(f, "project manifest: {message}")
             }
         }
     }

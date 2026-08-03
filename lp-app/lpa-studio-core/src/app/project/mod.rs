@@ -58,9 +58,9 @@ pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
     NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
-    ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
-    UiNodeRemovePreflight,
+    NodeRemoveOp, NodeRevertOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress,
+    ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry,
+    UiAttachTarget, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;
@@ -69,7 +69,7 @@ pub use project_controller::{
 };
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
-pub use project_editor_view::ProjectEditorView;
+pub use project_editor_view::{ProjectEditorView, UiProjectManifest};
 pub use project_inventory_summary::ProjectInventorySummary;
 pub use project_node_tree_view::{
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,

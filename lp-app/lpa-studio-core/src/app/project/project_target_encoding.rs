@@ -177,12 +177,12 @@ mod tests {
     #[test]
     fn node_target_round_trips_with_node_id_and_path() {
         let root = ControllerId::new("studio|project");
-        let target = node_target(3, "/demo.project/orbit.shader");
+        let target = node_target(3, "/demo.module/orbit.shader");
         let id = node_target_id(&root, &target);
 
         assert_eq!(
             id.as_str(),
-            "studio|project|node|nid|3|path|/demo.project/orbit.shader"
+            "studio|project|node|nid|3|path|/demo.module/orbit.shader"
         );
         assert_eq!(
             decode_typed_project_target(&tail(&id)).unwrap(),
@@ -193,13 +193,13 @@ mod tests {
     #[test]
     fn root_slot_target_round_trips() {
         let root = ControllerId::new("studio|project");
-        let target = node_target(3, "/demo.project/orbit.shader");
+        let target = node_target(3, "/demo.module/orbit.shader");
         let slot = ProjectSlotAddress::root(target.address.clone(), ProjectSlotRoot::def());
         let id = slot_target_id(&root, &target, &slot);
 
         assert_eq!(
             id.as_str(),
-            "studio|project|node|nid|3|path|/demo.project/orbit.shader|slot|def|root"
+            "studio|project|node|nid|3|path|/demo.module/orbit.shader|slot|def|root"
         );
         assert_eq!(
             decode_typed_project_target(&tail(&id)).unwrap(),
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn field_slot_path_target_round_trips() {
         let root = ControllerId::new("studio|project");
-        let target = node_target(3, "/demo.project/orbit.shader");
+        let target = node_target(3, "/demo.module/orbit.shader");
         let slot = ProjectSlotAddress::new(
             target.address.clone(),
             ProjectSlotRoot::def(),
@@ -220,7 +220,7 @@ mod tests {
 
         assert_eq!(
             id.as_str(),
-            "studio|project|node|nid|3|path|/demo.project/orbit.shader|slot|def|path|config.brightness"
+            "studio|project|node|nid|3|path|/demo.module/orbit.shader|slot|def|path|config.brightness"
         );
         assert_eq!(
             decode_typed_project_target(&tail(&id)).unwrap(),
@@ -231,14 +231,14 @@ mod tests {
     #[test]
     fn string_map_key_with_dots_round_trips() {
         let root = ControllerId::new("studio|project");
-        let target = node_target(3, "/demo.project/orbit.shader");
+        let target = node_target(3, "/demo.module/orbit.shader");
         let path = SlotPath::parse(r#"params["phase.offset"].label"#).unwrap();
         let slot = ProjectSlotAddress::new(target.address.clone(), ProjectSlotRoot::def(), path);
         let id = slot_target_id(&root, &target, &slot);
 
         assert_eq!(
             id.as_str(),
-            r#"studio|project|node|nid|3|path|/demo.project/orbit.shader|slot|def|path|params["phase.offset"].label"#
+            r#"studio|project|node|nid|3|path|/demo.module/orbit.shader|slot|def|path|params["phase.offset"].label"#
         );
         assert_eq!(
             decode_typed_project_target(&tail(&id)).unwrap(),
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn payload_escaping_round_trips_pipe_and_percent() {
         let root = ControllerId::new("studio|project");
-        let target = node_target(3, "/demo.project/orbit.shader");
+        let target = node_target(3, "/demo.module/orbit.shader");
         let path = SlotPath::parse("params")
             .unwrap()
             .child_segment(SlotPathSegment::Key(SlotMapKey::String("a|b%".to_string())));
@@ -258,7 +258,7 @@ mod tests {
 
         assert_eq!(
             id.as_str(),
-            "studio|project|node|nid|3|path|/demo.project/orbit.shader|slot|def|path|params[a%7Cb%25]"
+            "studio|project|node|nid|3|path|/demo.module/orbit.shader|slot|def|path|params[a%7Cb%25]"
         );
         assert_eq!(
             decode_typed_project_target(&tail(&id)).unwrap(),
@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn numeric_map_key_round_trips() {
         let root = ControllerId::new("studio|project");
-        let target = node_target(3, "/demo.project/orbit.shader");
+        let target = node_target(3, "/demo.module/orbit.shader");
         let path = SlotPath::parse("touches")
             .unwrap()
             .child_segment(SlotPathSegment::Key(SlotMapKey::U32(2)));
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn other_slot_root_round_trips() {
         let root = ControllerId::new("studio|project");
-        let target = node_target(3, "/demo.project/orbit.shader");
+        let target = node_target(3, "/demo.module/orbit.shader");
         let slot = ProjectSlotAddress::root(
             target.address.clone(),
             ProjectSlotRoot::Other("runtime|debug%root".to_string()),
@@ -294,7 +294,7 @@ mod tests {
 
         assert_eq!(
             id.as_str(),
-            "studio|project|node|nid|3|path|/demo.project/orbit.shader|slot|other:runtime%7Cdebug%25root|root"
+            "studio|project|node|nid|3|path|/demo.module/orbit.shader|slot|other:runtime%7Cdebug%25root|root"
         );
         assert_eq!(
             decode_typed_project_target(&tail(&id)).unwrap(),

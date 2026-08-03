@@ -69,6 +69,13 @@ impl BindingPriority {
         Self(-1000)
     }
 
+    /// Engaged panel writers sit above authored bindings within their
+    /// scope (panel.md P4): the user's hand outranks the project's wiring
+    /// until an explicit clear.
+    pub fn panel() -> Self {
+        Self(1000)
+    }
+
     pub fn as_i32(self) -> i32 {
         self.0
     }

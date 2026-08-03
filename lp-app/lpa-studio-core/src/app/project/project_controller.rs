@@ -16,16 +16,17 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeCardUiState, NodeUiOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
-    PlaylistActivateOp, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotEditOp, StudioOverlayMutation, StudioProjectReadOutcome,
-    StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError,
-    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
-    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
-    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
+    NodeCardUiState, NodeUiOp, PanelClearOp, PanelWriteOp, PendingAssetEdit, PendingEdit,
+    PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState, ProjectConnectResult,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp, StudioOverlayMutation,
+    StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody,
+    UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView,
+    UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent,
+    UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -384,10 +385,31 @@ impl ProjectController {
                 focus: node.map(node_focus_action),
             })
         };
+        let root_scope = graph
+            .channels
+            .iter()
+            .find(|channel| channel.primary_visual)
+            .and_then(|channel| channel.scope);
         let channels = graph
             .channels
             .iter()
+            // Sink rows (playlist entries, wire 8) feed panel liveness only
+            // — the bus listing keeps R2's presentation: channels private
+            // to an entry never show as project wiring.
+            .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
             .map(|channel| crate::UiBusChannelView {
+                scope: channel.scope,
+                // Root-scope rows carry no label; embedded scopes label by
+                // their owner module's node label (display derivation is a
+                // client concern — the wire ships structure only).
+                scope_label: channel
+                    .scope
+                    .filter(|scope| Some(*scope) != root_scope)
+                    .map(|scope| {
+                        self.node_by_runtime_id(scope.owner())
+                            .map(|node| node.label().to_string())
+                            .unwrap_or_else(|| format!("node {}", scope.owner().0))
+                    }),
                 name: channel.name.clone(),
                 kind: channel.kind.map(|kind| format!("{kind:?}")),
                 value: channel
@@ -396,7 +418,7 @@ impl ProjectController {
                     .and_then(|value| value.value.as_ref())
                     .map(format_lp_value),
                 value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
-                primary_visual: channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL,
+                primary_visual: channel.primary_visual,
                 writers: channel.providers.iter().filter_map(site).collect(),
                 readers: channel.consumers.iter().filter_map(site).collect(),
             })
@@ -417,7 +439,7 @@ impl ProjectController {
         let channel = graph
             .channels
             .iter()
-            .find(|channel| channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL)?;
+            .find(|channel| channel.primary_visual)?;
         let value = channel.value.as_ref()?.value.as_ref()?;
         let lpc_model::LpValue::Product(product) = value else {
             return None;
@@ -437,6 +459,10 @@ impl ProjectController {
                 graph
                     .channels
                     .iter()
+                    // Sink rows feed panel liveness, not the authoring
+                    // surface: a channel private to a playlist entry is not
+                    // something the picker should offer (R2 presentation).
+                    .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
                     .map(|channel| {
                         (
                             channel.name.clone(),
@@ -585,10 +611,23 @@ impl ProjectController {
             // the authoring surface is built, so Retarget/Unbind state never
             // carries the churning value (P6 item 1).
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
-                && let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint
-                && let Some(live) = live_channel_value(graph, channel, binding.kind)
+                && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
+                && let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind)
             {
                 endpoint = endpoint.with_live_value(live);
+            }
+            // A consumed bus channel is a panel-write target (panel.md P1):
+            // the control built over this wiring dispatches PanelWrite at
+            // this (scope, channel) instead of editing the authored default.
+            if binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
+                && let Some(scope) = scope
+            {
+                endpoint = endpoint.with_panel_target(crate::UiPanelTarget {
+                    scope: *scope,
+                    channel: channel.clone(),
+                    engaged: panel_writer_engaged(graph, scope, channel),
+                });
             }
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
                 .with_description("Runtime slot wired by binding; it has no authored value here.")
@@ -612,7 +651,7 @@ impl ProjectController {
         endpoint: &lpc_wire::WireBindingEndpoint,
     ) -> crate::UiBindingEndpoint {
         match endpoint {
-            lpc_wire::WireBindingEndpoint::Bus { channel } => {
+            lpc_wire::WireBindingEndpoint::Bus { channel, .. } => {
                 crate::UiBindingEndpoint::new(format!("bus:{channel}"))
             }
             lpc_wire::WireBindingEndpoint::NodeSlot { node, slot } => {
@@ -1383,7 +1422,7 @@ impl ProjectController {
             if binding.direction != lpc_wire::WireBindingDirection::Consumes {
                 continue;
             }
-            let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint else {
+            let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint else {
                 continue;
             };
             let Some(slot) = binding.slot.as_ref() else {
@@ -1392,7 +1431,8 @@ impl ProjectController {
             let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
                 continue;
             };
-            let Some(live) = live_channel_value(graph, channel, binding.kind) else {
+            let Some(live) = live_channel_value(graph, scope.as_ref(), channel, binding.kind)
+            else {
                 continue;
             };
             updates.push((binding.node, name.as_str().to_string(), live));
@@ -1628,6 +1668,7 @@ impl ProjectController {
         .with_project_name(self.project_name(project_id))
         .with_channel_choices(self.ui_channel_choices())
         .with_root_slots(root_slots)
+        .with_manifest(self.active_manifest())
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
         .with_debug_overrides(edits.debug_override_count())
@@ -2483,6 +2524,22 @@ impl ProjectController {
         }
     }
 
+    /// The container-manifest identity of the open library package, for the
+    /// project popup's read-only settings rows. `None` when no library
+    /// package backs the running project (demo path, unknown device
+    /// project) or the manifest fails to parse — the popup then skips the
+    /// identity rows rather than rendering a broken section.
+    pub fn active_manifest(&self) -> Option<crate::UiProjectManifest> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        let fields = crate::app::library::package_manifest::read_manifest(&*view).ok()?;
+        Some(crate::UiProjectManifest {
+            format: fields.format,
+            uid: fields.uid,
+            name: fields.name,
+        })
+    }
+
     /// The `prj_…` uid of the open library package, when the running
     /// project is backed by one.
     pub fn active_library_uid(&self) -> Option<String> {
@@ -2659,6 +2716,71 @@ impl ProjectController {
             WireNodeCommandResponse::Rejected { reason } => UiNotices::new().with_notice(
                 UiNotice::warning(format!("Couldn't activate entry {}: {reason}", op.entry)),
             ),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Engage (or update) the panel writer for `(scope, channel)` via
+    /// `WireProjectCommand::PanelWrite` — the runtime command channel, so
+    /// no overlay entry, no dirty flag, no Save-panel row. Quiet on
+    /// acceptance — the engaged badge and live value follow through the
+    /// tightened refresh ticks; a rejection comes back as a warning notice.
+    pub async fn panel_write(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelWriteOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let run = server
+            .panel_write(
+                handle_id,
+                lpc_wire::WirePanelWriteRequest {
+                    scope: op.scope,
+                    channel: op.channel.clone(),
+                    value: op.value,
+                    ttl_ms: op.ttl_ms,
+                },
+            )
+            .await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't set panel control {}: {reason}",
+                    op.channel
+                ))),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Clear engaged panel writers (one control, one scope, or all) via
+    /// `WireProjectCommand::PanelClear`. Same runtime-command posture as
+    /// [`Self::panel_write`].
+    pub async fn panel_clear(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelClearOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let run = server.panel_clear(handle_id, op.request).await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't reset panel control: {reason}"
+                ))),
         };
         Ok(ProjectEditRun {
             notices,
@@ -4494,21 +4616,48 @@ fn count_nodes(node: &NodeController) -> usize {
 ///   also quantizes floats to ≤2 decimals before DTO entry).
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
+    scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
     binding_kind: lpc_model::Kind,
 ) -> Option<String> {
     if binding_kind == lpc_model::Kind::Instant {
         return None;
     }
-    let channel = graph
-        .channels
-        .iter()
-        .find(|channel| channel.name == channel_name)?;
+    // The reading is the CONSUMING endpoint's row — channels are keyed
+    // (scope, name) since wire 6, and a playlist entry's sink row (wire 8)
+    // must never be confused with an enclosing scope's same-named channel.
+    // A scope-less endpoint (pre-scope test fakes) falls back to the first
+    // name match.
+    let channel = graph.channels.iter().find(|channel| {
+        channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
+    })?;
     if channel.kind == Some(lpc_model::Kind::Instant) {
         return None;
     }
     let value = channel.value.as_ref()?.value.as_ref()?;
     crate::app::project::format_live_scalar(value)
+}
+
+/// Whether a panel writer is engaged for `(scope, channel)`: the probe
+/// surfaces one as a Panel-origin provider row on the scoped channel
+/// listing, so engagement reads from the graph the UI already pulls.
+fn panel_writer_engaged(
+    graph: &lpc_wire::WireBindingGraph,
+    scope: &lpc_wire::WireScopeRef,
+    channel_name: &str,
+) -> bool {
+    graph
+        .channels
+        .iter()
+        .find(|channel| channel.scope.as_ref() == Some(scope) && channel.name == channel_name)
+        .is_some_and(|channel| {
+            channel.providers.iter().any(|index| {
+                graph
+                    .bindings
+                    .get(*index as usize)
+                    .is_some_and(|binding| binding.origin == lpc_wire::WireBindingOrigin::Panel)
+            })
+        })
 }
 
 /// Collect `node` and every descendant controller (preorder) into `out`.
@@ -5284,7 +5433,7 @@ mod tests {
     fn project_view_keeps_existing_focus_when_syncing() {
         let mut project = ProjectController::new();
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = node_address("/demo.project/orbit.shader");
+        let orbit = node_address("/demo.module/orbit.shader");
 
         clear_node_focus(&mut project.root_nodes);
         project.node_mut(&orbit).unwrap().state_mut().focused = true;
@@ -5293,7 +5442,7 @@ mod tests {
         assert!(project.node(&orbit).unwrap().state().focused);
         assert!(
             !project
-                .node(&node_address("/demo.project/clock.clock"))
+                .node(&node_address("/demo.module/clock.clock"))
                 .unwrap()
                 .state()
                 .focused
@@ -5302,7 +5451,7 @@ mod tests {
 
     #[test]
     fn node_update_preserves_local_state_and_refreshes_runtime_id() {
-        let address = node_address("/demo.project/orbit.shader");
+        let address = node_address("/demo.module/orbit.shader");
         let mut project = ProjectController::new();
         project
             .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
@@ -5335,15 +5484,15 @@ mod tests {
         let mut project = ProjectController::new();
         project
             .apply_project_view(&root_view(&[
-                (1, "/demo.project/a.shader"),
-                (2, "/demo.project/b.shader"),
+                (1, "/demo.module/a.shader"),
+                (2, "/demo.module/b.shader"),
             ]))
             .unwrap();
 
         project
             .apply_project_view(&root_view(&[
-                (3, "/demo.project/c.shader"),
-                (1, "/demo.project/a.shader"),
+                (3, "/demo.module/c.shader"),
+                (1, "/demo.module/a.shader"),
             ]))
             .unwrap();
 
@@ -5357,7 +5506,7 @@ mod tests {
         );
         assert!(
             project
-                .node(&node_address("/demo.project/b.shader"))
+                .node(&node_address("/demo.module/b.shader"))
                 .is_none()
         );
     }
@@ -5403,7 +5552,7 @@ mod tests {
                     event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
                         deltas: vec![lpc_wire::WireTreeDelta::Created {
                             id: NodeId::new(1),
-                            path: TreePath::parse("/demo.project").unwrap(),
+                            path: TreePath::parse("/demo.module").unwrap(),
                             parent: None,
                             child_kind: None,
                             children: Vec::new(),
@@ -5439,7 +5588,7 @@ mod tests {
         project.apply_project_view(&view).unwrap();
 
         let node = project
-            .node(&node_address("/demo.project/orbit.shader"))
+            .node(&node_address("/demo.module/orbit.shader"))
             .unwrap();
         assert_eq!(
             node.slots()
@@ -5453,7 +5602,7 @@ mod tests {
 
     #[test]
     fn slot_update_preserves_local_state() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let brightness = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -5485,7 +5634,7 @@ mod tests {
 
     #[test]
     fn record_to_scalar_shape_change_removes_stale_slot_children() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let root = ProjectSlotAddress::root(node.clone(), ProjectSlotRoot::def());
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_test_slots(&mut view, 1, Revision::new(2), false);
@@ -5504,7 +5653,7 @@ mod tests {
 
     #[test]
     fn map_entry_changes_reconcile_keyed_slot_children() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_map_slot(&mut view, 1, Revision::new(2), &["a", "b"]);
         let mut project = ProjectController::new();
@@ -5559,7 +5708,7 @@ mod tests {
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 2, Revision::new(4));
         project.apply_project_view(&view).unwrap();
-        let node = node_address("/demo.project");
+        let node = node_address("/demo.module");
         project.node_mut(&node).unwrap().state_mut().focused = true;
         project.node_mut(&node).unwrap().state_mut().collapsed = true;
 
@@ -5567,8 +5716,8 @@ mod tests {
 
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].header.title, "Demo");
-        assert_eq!(nodes[0].header.kind, "Project");
-        assert_eq!(nodes[0].header.path, "/demo.project");
+        assert_eq!(nodes[0].header.kind, "Module");
+        assert_eq!(nodes[0].header.path, "/demo.module");
         assert_eq!(nodes[0].header.status.label, "Running");
         assert!(nodes[0].focused);
         assert!(nodes[0].collapsed);
@@ -5589,7 +5738,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Clock", "Orbit"]
         );
-        assert_eq!(nodes[0].children[0].detail, "/demo.project/clock.clock");
+        assert_eq!(nodes[0].children[0].detail, "/demo.module/clock.clock");
         assert!(!nodes[0].children[0].sections.is_empty());
     }
 
@@ -5599,7 +5748,7 @@ mod tests {
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 3, Revision::new(4));
         project.apply_project_view(&view).unwrap();
-        let child_address = node_address("/demo.project/orbit.shader");
+        let child_address = node_address("/demo.module/orbit.shader");
         project
             .node_mut(&child_address)
             .unwrap()
@@ -5653,7 +5802,7 @@ mod tests {
         assert_eq!(
             target,
             ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
-                node_address("/demo.project/orbit.shader"),
+                node_address("/demo.module/orbit.shader"),
                 NodeId::new(3),
             ))
         );
@@ -5688,7 +5837,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = "/demo.project/orbit.shader".to_string();
+        let orbit = "/demo.module/orbit.shader".to_string();
 
         dispatch_node_ui(
             &mut project,
@@ -5733,7 +5882,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = "/demo.project/orbit.shader".to_string();
+        let orbit = "/demo.module/orbit.shader".to_string();
 
         dispatch_node_ui(
             &mut project,
@@ -5780,7 +5929,7 @@ mod tests {
         dispatch_node_ui(
             &mut project,
             NodeUiOp::SetDraft {
-                node: "/demo.project/orbit.shader".to_string(),
+                node: "/demo.module/orbit.shader".to_string(),
                 draft: "stale draft".to_string(),
             },
         );
@@ -5801,7 +5950,7 @@ mod tests {
     fn nested_child_cards_wear_their_own_card_ui_overlay() {
         let mut project = ProjectController::new();
         project.apply_node_ui_op(NodeUiOp::SetDrawer {
-            node: "/demo.project/list.playlist/glow.shader".to_string(),
+            node: "/demo.module/list.playlist/glow.shader".to_string(),
             drawer: crate::NodeCardDrawer::Advanced,
             open: true,
         });
@@ -5811,12 +5960,12 @@ mod tests {
         let mut children = vec![crate::UiNodeChild::new(
             "List",
             "Playlist",
-            "/demo.project/list.playlist",
+            "/demo.module/list.playlist",
         )];
         children[0].children = vec![crate::UiNodeChild::new(
             "Glow",
             "Shader",
-            "/demo.project/list.playlist/glow.shader",
+            "/demo.module/list.playlist/glow.shader",
         )];
 
         project.overlay_child_card_ui(&mut children);
@@ -5965,6 +6114,7 @@ mod tests {
                     slot: Some(SlotPath::parse("input").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Consumes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "visual.out".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Authored,
@@ -5977,6 +6127,7 @@ mod tests {
                     slot: Some(SlotPath::parse("output").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Publishes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "visual.out".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -5984,25 +6135,56 @@ mod tests {
                     kind: lpc_model::Kind::Color,
                 },
             ],
-            channels: vec![lpc_wire::WireBusChannel {
-                name: "visual.out".to_string(),
-                kind: Some(lpc_model::Kind::Color),
-                providers: vec![1],
-                consumers: vec![0],
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::F32(0.5)),
-                    error: None,
-                }),
-            }],
+            channels: vec![
+                lpc_wire::WireBusChannel {
+                    scope: None,
+                    name: "visual.out".to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: vec![1],
+                    consumers: vec![0],
+                    value: Some(lpc_wire::WireBusChannelValue {
+                        revision: Revision::new(2),
+                        value: Some(LpValue::F32(0.5)),
+                        error: None,
+                    }),
+                    primary_visual: true,
+                },
+                // A playlist entry's sink row (wire 8): feeds panel
+                // liveness, but the bus listing and the binding picker
+                // must both leave it out (R2 presentation).
+                lpc_wire::WireBusChannel {
+                    scope: Some(lpc_wire::WireScopeRef::Sink {
+                        owner: node,
+                        entry: 1,
+                    }),
+                    name: "glow".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![],
+                    consumers: vec![],
+                    value: None,
+                    primary_visual: false,
+                },
+            ],
         };
         project
             .sync_mut()
             .unwrap()
             .set_binding_graph_for_test(graph);
 
+        assert!(
+            !project
+                .ui_channel_choices()
+                .iter()
+                .any(|choice| choice.name == "glow"),
+            "the picker never offers a sink-private channel"
+        );
+
         let bus = project.ui_bus_view().expect("bus view");
-        assert_eq!(bus.channels.len(), 1);
+        assert_eq!(
+            bus.channels.len(),
+            1,
+            "the sink row stays off the bus listing"
+        );
         let channel = &bus.channels[0];
         assert_eq!(channel.name, "visual.out");
         assert!(channel.primary_visual);
@@ -6036,6 +6218,7 @@ mod tests {
                     slot: Some(SlotPath::parse("seconds").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Publishes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "time".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -6048,6 +6231,7 @@ mod tests {
                     slot: Some(SlotPath::parse("time").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Consumes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "time".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -6116,6 +6300,7 @@ mod tests {
                 slot: Some(SlotPath::parse("seconds").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Publishes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "other".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6201,6 +6386,7 @@ mod tests {
             revision: Revision::new(2),
             bindings: Vec::new(),
             channels: vec![lpc_wire::WireBusChannel {
+                scope: None,
                 name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
                 kind: Some(lpc_model::Kind::Color),
                 providers: Vec::new(),
@@ -6210,6 +6396,7 @@ mod tests {
                     value,
                     error: None,
                 }),
+                primary_visual: true,
             }],
         }
     }
@@ -6358,7 +6545,7 @@ mod tests {
         );
 
         // An explicit opt-out still wins over the sim policy.
-        let address = node_address("/demo.project/orbit.shader");
+        let address = node_address("/demo.module/orbit.shader");
         project
             .node_mut(&address)
             .unwrap()
@@ -6384,6 +6571,7 @@ mod tests {
                 slot: Some(SlotPath::parse("time").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "time".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6419,6 +6607,7 @@ mod tests {
                 slot: Some(SlotPath::parse("time").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "time".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6431,7 +6620,7 @@ mod tests {
 
     fn orbit_def_address(path: &str) -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -6565,18 +6754,22 @@ mod tests {
             bindings: Vec::new(),
             channels: vec![
                 lpc_wire::WireBusChannel {
+                    scope: None,
                     name: "time".to_string(),
                     kind: Some(lpc_model::Kind::Instant),
                     providers: vec![0],
                     consumers: vec![1],
                     value: None,
+                    primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
+                    scope: None,
                     name: "wobble".to_string(),
                     kind: None,
                     providers: vec![0],
                     consumers: Vec::new(),
                     value: None,
+                    primary_visual: false,
                 },
             ],
         };
@@ -6619,6 +6812,7 @@ mod tests {
                 slot: Some(SlotPath::parse(slot).unwrap()),
                 direction,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "visual.out".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Authored,
@@ -6673,6 +6867,7 @@ mod tests {
                 slot: Some(SlotPath::parse(slot).unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: channel.to_string(),
                 },
                 origin,
@@ -6682,6 +6877,7 @@ mod tests {
         };
         let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
             lpc_wire::WireBusChannel {
+                scope: None,
                 name: name.to_string(),
                 kind: Some(kind),
                 providers: Vec::new(),
@@ -6691,6 +6887,7 @@ mod tests {
                     value: Some(LpValue::F32(value)),
                     error: None,
                 }),
+                primary_visual: false,
             }
         };
         project
@@ -6757,17 +6954,12 @@ mod tests {
     #[test]
     fn playlist_children_visual_products_stay_tracked_for_entry_thumbs() {
         let mut view = ProjectView::new();
-        let mut playlist = node_entry(
-            1,
-            "/demo.project/list.playlist",
-            None,
-            NodeRuntimeStatus::Ok,
-        );
+        let mut playlist = node_entry(1, "/demo.module/list.playlist", None, NodeRuntimeStatus::Ok);
         playlist.children = vec![NodeId::new(2)];
         view.tree.insert(playlist);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/list.playlist/glow.shader",
+            "/demo.module/list.playlist/glow.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -6778,7 +6970,7 @@ mod tests {
         // The child picks up default focus (only shader in the tree) which
         // would subscribe ALL its products; pin it unsubscribed so the
         // assertion isolates the warming path.
-        let child = crate::ProjectNodeAddress::parse("/demo.project/list.playlist/glow.shader")
+        let child = crate::ProjectNodeAddress::parse("/demo.module/list.playlist/glow.shader")
             .expect("valid address");
         project
             .node_mut(&child)
@@ -6801,7 +6993,7 @@ mod tests {
 
     #[test]
     fn binding_removal_clears_bound_state_on_refresh() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let time = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -6827,7 +7019,7 @@ mod tests {
 
     #[test]
     fn focused_default_node_subscribes_product_preview_probes() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -7038,7 +7230,7 @@ mod tests {
 
     #[test]
     fn projected_ui_value_updates_while_slot_state_is_preserved() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let brightness = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -7136,18 +7328,18 @@ mod tests {
 
     fn tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/orbit.shader",
+            "/demo.module/orbit.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -7156,24 +7348,24 @@ mod tests {
 
     fn fixture_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3), NodeId::new(4)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/orbit.shader",
+            "/demo.module/orbit.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             4,
-            "/demo.project/pixels.fixture",
+            "/demo.module/pixels.fixture",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -7182,18 +7374,18 @@ mod tests {
 
     fn clock_output_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/dmx.output",
+            "/demo.module/dmx.output",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -7203,7 +7395,7 @@ mod tests {
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {
         let mut view = ProjectView::new();
         view.tree
-            .insert(node_entry(id, "/demo.project/orbit.shader", None, status));
+            .insert(node_entry(id, "/demo.module/orbit.shader", None, status));
         view
     }
 
@@ -8018,7 +8210,7 @@ mod tests {
 
     fn brightness_address() -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse("brightness").unwrap(),
         )
@@ -8026,7 +8218,7 @@ mod tests {
 
     fn rate_address() -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse("rate").unwrap(),
         )
@@ -8327,18 +8519,18 @@ mod tests {
         // pending; it lands with the next applied view that contains the
         // created node.
         let mut view = three_level_tree_view();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(4), NodeId::new(9)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             9,
-            "/demo.project/clock_2.clock",
+            "/demo.module/clock_2.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         project.apply_project_view(&view).unwrap();
         let created = project
-            .node(&node_address("/demo.project/clock_2.clock"))
+            .node(&node_address("/demo.module/clock_2.clock"))
             .expect("created node landed");
         assert!(created.state().focused, "the created node takes focus");
     }
@@ -8408,7 +8600,7 @@ mod tests {
         ]);
 
         let run = block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
         )
         .unwrap();
         // The scripted refresh carried no tree events, so the controllers
@@ -8478,10 +8670,8 @@ mod tests {
             authoring_inventory_read_response(4),
             mutation_response(5, vec![accepted(1), accepted(2)], 7),
         ]);
-        block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
-        )
-        .unwrap();
+        block_on_ready(project.remove_node(&mut client, &node_address("/demo.module/clock.clock")))
+            .unwrap();
         // Restore the controller tree (the scripted refresh carried no tree
         // events) so the site address resolves its def artifact.
         project
@@ -8490,7 +8680,7 @@ mod tests {
 
         // Revert the NodeRemoved row exactly as the save panel would.
         let site = crate::ProjectSlotAddress::new(
-            node_address("/demo.project"),
+            node_address("/demo.module"),
             ProjectSlotRoot::def(),
             SlotPath::parse("nodes[clock]").unwrap(),
         );
@@ -8559,7 +8749,7 @@ mod tests {
             )]);
 
         let run = block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
         )
         .unwrap();
 
@@ -8582,7 +8772,7 @@ mod tests {
         // carries no playlist slot mirror), so no wire op is sent.
         let run = block_on_ready(project.remove_node(
             &mut client,
-            &node_address("/demo.project/group.playlist/leaf.shader"),
+            &node_address("/demo.module/group.playlist/leaf.shader"),
         ))
         .unwrap();
 
@@ -8611,7 +8801,7 @@ mod tests {
         let clock = view
             .nodes
             .iter()
-            .find(|node| node.node_id == "/demo.project/clock.clock")
+            .find(|node| node.node_id == "/demo.module/clock.clock")
             .expect("clock card");
         let delete = clock
             .header_actions
@@ -8958,7 +9148,7 @@ mod tests {
     fn set_value_outside_def_root_fails_client_side() {
         let (mut project, mut client, sent) = editable_project_with_scripted_client(Vec::new());
         let state_address = crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::state(),
             SlotPath::parse("output").unwrap(),
         );
@@ -9128,7 +9318,7 @@ mod tests {
 
     fn structural_address(path: &str) -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -9282,7 +9472,7 @@ mod tests {
         assert!(!project.dirty_summary().is_clean());
 
         let run = block_on_ready(
-            project.revert_node_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+            project.revert_node_edits(&mut client, &node_address("/demo.module/orbit.shader")),
         )
         .unwrap();
 
@@ -9337,7 +9527,7 @@ mod tests {
         );
 
         let run = block_on_ready(
-            project.revert_node_edits(&mut client, &node_address("/demo.project/other.clock")),
+            project.revert_node_edits(&mut client, &node_address("/demo.module/other.clock")),
         )
         .unwrap();
 
@@ -9386,7 +9576,7 @@ mod tests {
         assert_eq!(
             actions[0].action.op_as::<crate::NodeRevertOp>(),
             Some(&crate::NodeRevertOp {
-                node: node_address("/demo.project/orbit.shader"),
+                node: node_address("/demo.module/orbit.shader"),
             })
         );
     }
@@ -9497,8 +9687,7 @@ mod tests {
         let dirty_before = project.dirty_summary();
 
         let run = block_on_ready(
-            project
-                .clear_node_debug_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+            project.clear_node_debug_edits(&mut client, &node_address("/demo.module/orbit.shader")),
         )
         .unwrap();
 
@@ -9557,8 +9746,7 @@ mod tests {
         );
 
         let run = block_on_ready(
-            project
-                .clear_node_debug_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+            project.clear_node_debug_edits(&mut client, &node_address("/demo.module/orbit.shader")),
         )
         .unwrap();
 
@@ -9588,7 +9776,7 @@ mod tests {
         // A buffered (un-acked) debug edit joins the acked one in the sweep.
         project.insert_pending_edit_for_test(
             crate::ProjectSlotAddress::new(
-                node_address("/demo.project/orbit.shader"),
+                node_address("/demo.module/orbit.shader"),
                 ProjectSlotRoot::def(),
                 SlotPath::parse("rate").unwrap(),
             ),
@@ -11068,7 +11256,7 @@ mod tests {
         project.apply_project_view(&view).unwrap();
         project.insert_pending_edit_for_test(
             crate::ProjectSlotAddress::new(
-                node_address("/demo.project/group.playlist/leaf.shader"),
+                node_address("/demo.module/group.playlist/leaf.shader"),
                 ProjectSlotRoot::def(),
                 SlotPath::parse("brightness").unwrap(),
             ),
@@ -11300,12 +11488,12 @@ mod tests {
     /// Root (1) → group (2) + clock sibling (4), group → leaf shader (3).
     fn three_level_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(4)];
         view.tree.insert(root);
         let mut group = node_entry(
             2,
-            "/demo.project/group.playlist",
+            "/demo.module/group.playlist",
             Some(1),
             NodeRuntimeStatus::Ok,
         );
@@ -11313,13 +11501,13 @@ mod tests {
         view.tree.insert(group);
         view.tree.insert(node_entry(
             3,
-            "/demo.project/group.playlist/leaf.shader",
+            "/demo.module/group.playlist/leaf.shader",
             Some(2),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             4,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));

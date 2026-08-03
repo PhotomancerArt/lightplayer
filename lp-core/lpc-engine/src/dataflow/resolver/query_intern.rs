@@ -62,8 +62,9 @@ impl Hasher for FnvHasher {
 fn hash_query(query: &QueryKey) -> u64 {
     let mut hasher = FnvHasher::default();
     match query {
-        QueryKey::Bus(channel) => {
+        QueryKey::Bus { scope, channel } => {
             hasher.write_u8(0);
+            scope.hash(&mut hasher);
             channel.hash(&mut hasher);
         }
         QueryKey::ProducedSlot { node, slot } => {
@@ -163,7 +164,10 @@ mod tests {
     use lpc_model::{ChannelName, NodeId};
 
     fn bus(name: &str) -> QueryKey {
-        QueryKey::Bus(ChannelName(String::from(name)))
+        QueryKey::Bus {
+            scope: None,
+            channel: ChannelName(String::from(name)),
+        }
     }
 
     fn produced(node: u32, slot: &str) -> QueryKey {

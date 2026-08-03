@@ -65,6 +65,10 @@ no format bump semantics to preserve (alpha). Inventory:
 - Studio copy: users "open a project", "add a module", browse "Effects".
 - "Plugin" is rejected (connotes third-party binaries / dynamic loading).
 
+> Status: the kind/type rename (`ModuleDef`, `NodeKind::Module`, kind
+> strings `Module`/`module`, tree paths `.module`, schemas, corpora,
+> wire bump) landed 2026-08-01. The file split (§6) is the next phase.
+
 ## 3. Bus rules (normative)
 
 ### R1 — Modules introduce scopes, structurally
@@ -175,6 +179,12 @@ public input is an *invitation*, not an error.
 Inputs need no counterpart: consumed inheritance (R5) already lets a host
 feed a module's inner consumers with zero authoring (see E6).
 
+> Status: implemented 2026-08-01 (engine C1–C3) — structural scopes,
+> scoped resolver keys with writer-shadowing, the module mirror runtime
+> (root included), automatic publish + authored exports, and the
+> engine-reported primary-visual role. See
+> `docs/adr/2026-08-01-scoped-bus-engine-architecture.md`.
+
 ### R8 — The panel: one concept, every node, derived from publicity
 
 The **panel** is a first-class per-node concept, not a feature of
@@ -238,7 +248,7 @@ restoring R5/R6 resolution and dropping the persisted entries.
 
 ### R13 — Persistence *(summary — normative: panel.md P10/P11)*
 
-Panel state persists by default to `.lp/state.json` (§6) with throttled
+Panel state persists by default to `.lp/panel.json` (§6) with throttled
 writes (≥ ~10 s, flash preservation), auto-save on by default, and
 restore **before first render** on boot. Never in authored artifacts.
 
@@ -451,7 +461,7 @@ my-project/
 │     ├─ module.json     #   (no project.json, no format — see below)
 │     └─ …
 └─ .lp/                  # the ONE framework-owned dir: never authored,
-   └─ state.json         #   always safe to delete (panel state per R13;
+   └─ panel.json         #   always safe to delete (panel state per R13;
                          #   future caches/locks land here, never beside content)
 ```
 
@@ -470,13 +480,18 @@ my-project/
   in-tree dir.
 - `.lp/` is a project-folder concept; the device keeps its own filesystem
   conventions and needs only the panel-state *data*, not the layout.
-- `state.json` shape (proposed, Q3): a versioned map of
+- `panel.json` shape (proposed, Q3): a versioned map of
   `scope-path / channel → { value, engaged }`. Scope paths are node
   paths, so vendoring/renames invalidate entries gracefully (unknown
   paths are dropped on load).
 - Relative `node:` refs and file-relative artifact refs survive vendoring
   by construction — a module folder's internal wiring is
   location-independent.
+
+> Status: the project.json/module.json split, the container-manifest
+> format gate (missing manifest = hard refuse, format bumped to 3), and
+> the split schemas landed 2026-08-01. `.lp/panel.json` arrives with the
+> panel phases.
 
 ## 7. Bus vocabulary — under discovery
 
@@ -492,20 +507,30 @@ Known vocabulary pressure beyond scalars: **touch/gesture sets** (E7 —
 multi-point, per-touch identity; shape question tracked as panel.md
 P-Q5) and the `phase` convention (panel.md P3).
 
-## 8. Provenance (proposed field set — Q7)
+## 8. Provenance (field set settled — Q7)
 
 `author`, `version`, `license`, `created` (ISO date). Optional on any
 node and on `project.json`; skip-if-default; no semver semantics yet.
 Copy-on-extract per R14.
 
+> Status: landed 2026-08-01 as `ProvenanceDef` (module defs carry it;
+> the container manifest carries the same four keys at its top level).
+> Copy-on-extract mechanics arrive with the vendoring flows.
+
 ## 9. Open questions (G1 redline register)
 
 - **Q3:** → specced as `panel.md` P8/P11 (wire ops, state file shape);
   ratify there.
-- **Q7:** provenance field set (§8) — enough? (`description`/`homepage`
-  deferred?)
-- **Q10:** bare-module-folder open assumes current format (§6) — fine for
-  alpha?
+- **Q7:** SETTLED (2026-08-01, implementation P3): the §8 four-field set
+  as proposed (`author`/`version`/`license`/`created`); `description`/
+  `homepage` deferred until a real need shows up in the registry/import
+  flow.
+- **Q10:** SETTLED (2026-08-01, implementation P2): format is a
+  container-level concept. A module folder inside a project is gated by
+  the project's container manifest; the loader never re-runs the gate for
+  child artifacts (pinned by test). Bare-module-folder standalone opening
+  keeps the §6 assume-current posture; import-time gating arrives with
+  the registry/import flow.
 - **Q11:** → moved to `panel.md` P6 (merge/tiebreak rules); ratify there.
 - **Q12:** → resolved by the latch model: grabbing authored-driven
   channels is core behavior (`panel.md` P2/P5), not an increment.

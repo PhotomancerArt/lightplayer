@@ -14,6 +14,7 @@ use alloc::vec::Vec;
 use lpc_model::{ChannelName, NodeId, Revision, SlotMerge, SlotPath};
 
 use crate::dataflow::binding::{BindingEntry, BindingRef};
+use crate::node::ScopeRef;
 
 /// Engine or test fake that can satisfy demand for uncached queries.
 pub trait ResolveHost {
@@ -45,7 +46,24 @@ pub trait ResolveHost {
         SlotMerge::Latest
     }
 
-    fn providers_for_bus(&self, _channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+    /// The bus scope `node` writes into and reads from (its inhabited
+    /// scope; the root module reads its own introduced scope). `None`
+    /// means the host has no scope model — test fakes — and every read
+    /// shares the unscoped key.
+    fn node_scope(&self, _node: NodeId) -> Option<ScopeRef> {
+        None
+    }
+
+    /// The winning provider set for a bus read performed from `scope`:
+    /// writer-shadowing (modules.md R5) resolves outward to the nearest
+    /// enclosing scope with at least one provider — entirely host-side, so
+    /// the resolver itself stays scope-dumb. `scope: None` (scopeless
+    /// hosts) answers with the flat provider set.
+    fn providers_for_bus(
+        &self,
+        _scope: Option<ScopeRef>,
+        _channel: &ChannelName,
+    ) -> Vec<(BindingRef, BindingEntry)> {
         Vec::new()
     }
 

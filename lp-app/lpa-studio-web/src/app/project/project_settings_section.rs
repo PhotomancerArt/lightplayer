@@ -1,69 +1,59 @@
 //! The project popup's "Project settings" rows.
 //!
-//! **Deliberately not the generic `SlotRecordEditor`.** The project root's
-//! own slots are the project's *identity*, and the generic slot machinery
-//! dresses identity as authoring: option-presence toggles on `uid`, a full
-//! map editor for the `nodes` table, edit chrome on rows nothing may edit.
-//! A demo walk read that as "the Studio lets you retype your project's
-//! uid" — which, until 2026-07-28, it did (`ProjectDef::uid` carried the
-//! default writable policy).
+//! **Deliberately not the generic `SlotRecordEditor`.** The project's own
+//! identity is not authoring, and the generic slot machinery dresses it as
+//! such: option-presence toggles on `uid`, a full map editor for the
+//! `nodes` table, edit chrome on rows nothing may edit. A demo walk read
+//! that as "the Studio lets you retype your project's uid" — which, until
+//! 2026-07-28, it did.
 //!
-//! So this section renders four purpose-built rows instead:
+//! Post-mitosis the identity (`format` / `uid` / `name`) no longer lives in
+//! a def at all: it is the `project.json` container manifest — library-owned
+//! workspace metadata, never authored def slots — so this section renders it
+//! read-only from [`UiProjectManifest`]. Rename happens where the identity
+//! lives: the home gallery's rename, which patches the manifest
+//! (`LibraryStore::rename`).
 //!
-//! - **Name** — the one authored field, an inline [`StringSlotField`] so it
-//!   keeps the shared edit dispatch, dirty affordance, and invalid state.
-//! - **Format** — read-only; only the loader gate and a future offline
-//!   upgrader own it.
-//! - **UID** — read-only, with a copy button (identity is the thing you
-//!   actually want on your clipboard when reporting a problem).
-//! - **Nodes** — read-only, collapsed to a **count**. The map itself is the
-//!   node tree, which is the pane's whole body; repeating it as a slot
-//!   editor in the popup was noise.
-//!
-//! `uid`, `format`, and `nodes` all carry role `Fixed` in
-//! `lpc_model::ProjectDef`, so the read-only presentation here agrees with
-//! the model rather than merely hiding a writable slot.
+//! - **Name / Format / UID** — read-only, from the manifest. UID keeps its
+//!   copy button (identity is the thing you actually want on your clipboard
+//!   when reporting a problem).
+//! - **Nodes** — the one root-def row left, collapsed to a **count**. The
+//!   map itself is the node tree, which is the pane's whole body; repeating
+//!   it as a slot editor in the popup was noise. It carries role `Fixed` in
+//!   `lpc_model::ModuleDef`, so the read-only presentation agrees with the
+//!   model rather than merely hiding a writable slot.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiConfigSlot, UiConfigSlotBody, UiSlotValueKind};
+use lpa_studio_core::{UiConfigSlot, UiConfigSlotBody, UiProjectManifest};
 
-use crate::app::node::StringSlotField;
 use crate::base::{StudioIcon, StudioIconName};
 
-/// The project root's identity rows, in a fixed order that does not depend
-/// on the slot tree's field order.
+/// The project's identity rows, in a fixed order that does not depend on
+/// the slot tree's field order.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectSettingsSection(
+    /// The container-manifest identity, when a library package backs the
+    /// open project.
+    #[props(default)]
+    manifest: Option<UiProjectManifest>,
     /// The project root node's own config slots (`ProjectEditorView::root_slots`).
+    #[props(default)]
     root_slots: Vec<UiConfigSlot>,
-    on_action: EventHandler<UiAction>,
 ) -> Element {
-    let name = row(&root_slots, "name");
-    let format = row(&root_slots, "format");
-    let uid = row(&root_slots, "uid");
     let nodes = row(&root_slots, "nodes");
+    let manifest = manifest.unwrap_or_default();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
-            if let Some(name) = name {
-                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-3 tw:text-xs tw:leading-snug",
-                    span { class: "tw:flex-none tw:font-bold tw:text-subtle-foreground", "Name" }
-                    span { class: "tw:min-w-0 tw:flex-1 tw:text-right",
-                        StringSlotField {
-                            value: string_value(name).unwrap_or_default(),
-                            state: name.state.clone(),
-                            address: name.address.clone(),
-                            on_action,
-                        }
-                    }
-                }
+            if let Some(name) = manifest.name {
+                ReadOnlyRow { label: "Name", value: name }
             }
-            if let Some(format) = format {
-                ReadOnlyRow { label: "Format", value: display_value(format) }
+            if let Some(format) = manifest.format {
+                ReadOnlyRow { label: "Format", value: format.to_string() }
             }
-            if let Some(uid) = uid {
-                ReadOnlyRow { label: "UID", value: display_value(uid), copyable: true }
+            if let Some(uid) = manifest.uid {
+                ReadOnlyRow { label: "UID", value: uid, copyable: true }
             }
             if let Some(nodes) = nodes {
                 ReadOnlyRow { label: "Nodes", value: node_count_label(nodes) }
@@ -105,29 +95,6 @@ fn row<'a>(root_slots: &'a [UiConfigSlot], key: &str) -> Option<&'a UiConfigSlot
     root_slots.iter().find(|slot| slot.key == key)
 }
 
-/// A value row's raw string, for the editable name field.
-fn string_value(slot: &UiConfigSlot) -> Option<String> {
-    match &slot.body {
-        UiConfigSlotBody::Value(value) => match &value.kind {
-            UiSlotValueKind::String(text) => Some(text.clone()),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// A row's formatted display string; an absent optional reads as an em
-/// dash rather than the slot machinery's "unset".
-fn display_value(slot: &UiConfigSlot) -> String {
-    match &slot.body {
-        UiConfigSlotBody::Value(value) => match value.kind {
-            UiSlotValueKind::Unset => "—".to_string(),
-            _ => value.display.clone(),
-        },
-        _ => "—".to_string(),
-    }
-}
-
 /// The `nodes` map collapsed to a count — the map's contents are the node
 /// tree in the pane body, not popup material.
 fn node_count_label(slot: &UiConfigSlot) -> String {
@@ -143,7 +110,7 @@ fn node_count_label(slot: &UiConfigSlot) -> String {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{UiSlotFieldState, UiSlotValue};
+    use lpa_studio_core::{UiConfigSlot, UiSlotValue};
 
     use super::*;
 
@@ -154,59 +121,13 @@ mod tests {
         assert_eq!(node_count_label(&nodes_row(4)), "4 nodes");
     }
 
-    #[test]
-    fn absent_optionals_read_as_a_dash_not_unset() {
-        let unset = UiConfigSlot::value("uid", "UID", UiSlotValue::unset());
-        assert_eq!(display_value(&unset), "—");
-        // A structural row with no value body degrades the same way.
-        assert_eq!(display_value(&nodes_row(2)), "—");
-    }
-
-    #[test]
-    fn rows_are_found_by_field_key_regardless_of_slot_order() {
-        let slots = vec![
-            UiConfigSlot::value("format", "Format", UiSlotValue::u32(1)),
-            UiConfigSlot::value("name", "Name", UiSlotValue::string("Demo")),
-        ];
-        assert_eq!(
-            row(&slots, "name").map(display_value).as_deref(),
-            Some("Demo")
-        );
-        assert_eq!(
-            row(&slots, "format").map(display_value).as_deref(),
-            Some("1")
-        );
-        assert!(
-            row(&slots, "notes").is_none(),
-            "no such field on ProjectDef"
-        );
-    }
-
-    #[test]
-    fn only_string_value_rows_yield_an_editable_name() {
-        let named = UiConfigSlot::value("name", "Name", UiSlotValue::string("Demo"));
-        assert_eq!(string_value(&named).as_deref(), Some("Demo"));
-        // A u32 row must not be coerced into the text field.
-        let format = UiConfigSlot::value("format", "Format", UiSlotValue::u32(1));
-        assert_eq!(string_value(&format), None);
-    }
-
-    #[test]
-    fn identity_rows_carry_the_models_read_only_policy() {
-        // Guards the P1 model change: if `uid` ever goes writable again,
-        // the fixture stops matching the model and this fails.
-        let uid = UiConfigSlot::value("uid", "UID", UiSlotValue::string("prj_abc"))
-            .with_state(UiSlotFieldState::readonly());
-        assert!(!uid.state.editable);
-    }
-
     fn nodes_row(count: usize) -> UiConfigSlot {
         let fields = (0..count)
             .map(|index| {
                 UiConfigSlot::value(
-                    format!("nodes[n{index}]"),
-                    format!("n{index}"),
-                    UiSlotValue::string("./n.json"),
+                    format!("node{index}"),
+                    format!("node{index}"),
+                    UiSlotValue::string("x"),
                 )
             })
             .collect();

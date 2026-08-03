@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn node_clear_debug_is_editor_foreground_class_with_clear_meta() {
         let op = NodeClearDebugOp {
-            node: ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            node: ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
         };
 
         assert_eq!(

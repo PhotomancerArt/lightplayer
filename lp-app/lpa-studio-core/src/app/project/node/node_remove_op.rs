@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn node_remove_is_editor_foreground_class_with_destructive_meta() {
         let op = NodeRemoveOp {
-            node: ProjectNodeAddress::parse("/demo.project/orbit.shader").unwrap(),
+            node: ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
         };
 
         assert_eq!(

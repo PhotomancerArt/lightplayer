@@ -29,12 +29,19 @@ fn test_fs_changes_not_repeated() {
     let project_name = "test-project";
     let project_path = "/projects".as_path_buf().join(project_name);
 
-    // Create project.json
+    // Create the container manifest and root module artifact
     server
         .base_fs_mut()
         .write_file(
             project_path.join("project.json").as_path(),
-            b"{ \"kind\": \"Project\", \"format\": 2, \"name\": \"test\" }\n",
+            b"{\n  \"format\": 3,\n  \"name\": \"test\"\n}\n",
+        )
+        .unwrap();
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("module.json").as_path(),
+            b"{ \"kind\": \"Module\", \"nodes\": {} }\n",
         )
         .unwrap();
 

@@ -511,7 +511,7 @@ pub fn feature_summary(build: &FirmwareBuild) -> Option<BuildFeatureSummary> {
 /// user-facing product names, not identifiers.
 pub fn node_kind_label(kind: NodeKind) -> &'static str {
     match kind {
-        NodeKind::Project => "Project",
+        NodeKind::Module => "Module",
         NodeKind::Button => "Button",
         NodeKind::Clock => "Clock",
         NodeKind::Texture => "Texture",

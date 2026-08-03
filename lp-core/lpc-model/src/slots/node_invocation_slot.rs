@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn node_invocation_round_trips_unset_form() {
         let text = r#"{
-  "kind": "Project",
+  "kind": "Module",
   "nodes": {
     "placeholder": { "unset": {} }
   }
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn node_invocation_round_trips_ref_form() {
         let text = r#"{
-  "kind": "Project",
+  "kind": "Module",
   "nodes": {
     "shader": { "ref": "./shader.json" }
   }

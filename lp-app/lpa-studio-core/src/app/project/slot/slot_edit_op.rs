@@ -150,7 +150,7 @@ mod tests {
 
     fn test_address() -> ProjectSlotAddress {
         ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
             ProjectSlotRoot::def(),
             SlotPath::parse("controls.rate").unwrap(),
         )

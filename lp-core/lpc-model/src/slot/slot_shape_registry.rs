@@ -899,7 +899,7 @@ mod tests {
 
         assert_eq!(snapshot.shapes.len(), 1);
         assert!(next.is_some());
-        let project_shape = <crate::ProjectDef as crate::StaticSlotShape>::SHAPE_ID;
+        let project_shape = <crate::ModuleDef as crate::StaticSlotShape>::SHAPE_ID;
         assert!(!registry.contains(&project_shape));
     }
 

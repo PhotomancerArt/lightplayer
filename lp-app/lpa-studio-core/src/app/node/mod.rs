@@ -38,8 +38,8 @@ mod ui_slot_unit;
 mod ui_slot_value;
 
 pub use face::{
-    UiFixtureFace, UiFixturePower, UiNodeFace, UiPanelControl, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiShaderFace,
+    UiFixtureFace, UiFixturePower, UiNodeFace, UiPanelControl, UiPanelTarget, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiShaderFace,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
