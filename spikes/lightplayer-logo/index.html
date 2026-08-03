@@ -186,6 +186,15 @@
     animation-delay: calc(var(--i,0) * calc(-.22s/var(--spd)));
   }
   .a-rword .word .tri-a { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
+  /* D2 · rainbow "Light" only — "Player" holds still (gate-2 A/B) */
+  .a-rwordl .mark .play { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
+  .a-rwordl .word .w1 {
+    background: linear-gradient(90deg,var(--r1),var(--r2),var(--r3),var(--r4),var(--r5),var(--r6),var(--r1));
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent !important;
+    animation: kf-sweep calc(7s/var(--spd)) linear infinite;
+  }
   /* E · breathe */
   .a-glow .mark .play { animation: kf-glow calc(3.2s/var(--spd)) ease-in-out infinite; }
   /* F · hover rainbow: static until hovered, then the full D treatment
@@ -304,6 +313,7 @@
   <br><b>Gate-1 decisions (2026-08-03):</b> rainbow wordmark = hover state in-app (concept F), loud D
   reserved for marketing surfaces; chip goes <b>white + more technical</b> (Chip tint/stroke controls,
   mark H); wordmark stays a basic sans — no need to get fancy.
+  <b>Gate-2:</b> mark = <b>H·Datasheet fine</b> (confirmed); D vs D2 (“Player” holds still) under judgment.
 </p>
 
 <div class="controls">
@@ -591,7 +601,8 @@ const ANIMS = {
   rplay: { label: 'A · LED lens', cls: 'a-rplay', note: 'Only the play cycles through the LED rainbow. The chip stays quiet; the pixel is alive.' },
   chase: { label: 'B · Pad chase', cls: 'a-chase', note: 'The four pads pulse in rotation, each holding its own hue — an addressable chain in miniature.' },
   flow:  { label: 'C · Signal flow', cls: 'a-flow', note: 'Data streams in the left pads and out the right; the play breathes as frames pass through.' },
-  rword: { label: 'D · Rainbow wordmark', cls: 'a-rword', note: 'The loud one. Gate-1: “great, but a tiny bit distracting in an actual app” — kept for marketing surfaces; in-app it becomes F.' },
+  rword: { label: 'D · Rainbow wordmark — full', cls: 'a-rword', note: 'The loud one. Gate-1: “great, but a tiny bit distracting in an actual app” — kept for marketing surfaces; in-app it becomes F.' },
+  rwordl: { label: 'D2 · Rainbow “Light” only', cls: 'a-rwordl', note: 'Gate-2 A/B vs D: “Player” holds still in the strong ink; only “Light” (and the play) carry the rainbow. Calmer, anchors the name.' },
   glow:  { label: 'E · Breathe', cls: 'a-glow', note: 'No rainbow — the accent play softly blooms, like a status LED idling.' },
   hover: { label: 'F · Hover rainbow', cls: 'a-hover', note: 'Static brand; hover plays the full D treatment (rainbow word + play). The in-app candidate per gate-1.' },
 };
