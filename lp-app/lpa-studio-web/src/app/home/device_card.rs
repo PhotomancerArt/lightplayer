@@ -547,9 +547,10 @@ fn normalize_chip(name: &str) -> String {
 }
 
 /// The boards the picker offers: a build this deployment SERVES exists for
-/// the board (`SERVED_FIRMWARE_BUILDS` — flashing is real, not aspirational)
-/// AND its runtime manifest is checked in (the `/hardware.json` write needs
-/// the bytes). Display-only catalog boards stay out until both land.
+/// the board (`lp-fw/builds/served.json` — flashing is real, not
+/// aspirational) AND its runtime manifest is checked in (the
+/// `/hardware.json` write needs the bytes). Display-only catalog boards stay
+/// out until both land.
 fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
     lpa_boards::all_boards()
         .iter()
@@ -557,9 +558,7 @@ fn provisionable_boards() -> Vec<&'static lpa_boards::BoardDisplayFile> {
             lpa_boards::runtime_manifest_json(&board.board_id).is_some()
                 && lpa_boards::compatible_builds_for(board)
                     .iter()
-                    .any(|candidate| {
-                        lpa_link::SERVED_FIRMWARE_BUILDS.contains(&candidate.build.id.as_str())
-                    })
+                    .any(|candidate| lpa_boards::is_served(&candidate.build.id))
         })
         .collect()
 }
