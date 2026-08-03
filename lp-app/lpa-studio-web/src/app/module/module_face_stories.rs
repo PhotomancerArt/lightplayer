@@ -88,7 +88,7 @@ fn embedded_module() -> Element {
 }
 
 #[story(
-    description = "Bus split, drawer half: the wiring drawer open on the root module — every channel in this scope with its writers and readers, i.e. exactly today's sidebar bus-pane content, now hung off the module that owns the scope. The panel above is the same bus presented for playing. Left as-is this round; the bus/wiring view gets its own UX spike."
+    description = "Bus split, drawer half: the wiring drawer open on the root module — every channel in this scope with its writers and readers, i.e. exactly the retired sidebar bus pane's content, now hung off the module that owns the scope. The panel above is the same bus presented for playing. The rows themselves are unchanged (see studio/module/wiring-drawer/*); the bus/wiring view gets its own UX spike."
 )]
 fn wiring_drawer_open() -> Element {
     let mut face = held_root_face();
@@ -120,7 +120,7 @@ fn nested_groups() -> Element {
 }
 
 #[story(
-    description = "The workspace column with the sidebar bus pane GONE: the root module card heads the column and the bus lives on it — controls on the face, wiring in the drawer — with the project's nodes below it as the sibling cards they always were. Compare against studio/bus/bus-pane/fyeah-sign, which is what this replaces."
+    description = "The workspace column with the sidebar bus pane GONE — deleted in P3, not hidden: the root module card heads the column and the bus lives on it, controls on the face and wiring in the drawer, with the project's nodes below it as the sibling cards they always were."
 )]
 fn workspace_no_bus_pane() -> Element {
     let mut view = held_root_view();

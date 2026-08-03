@@ -6,8 +6,9 @@
 //! plus overlay mirror keep the DTO value stable until the server acks.
 
 use lpa_studio_core::{
-    ControllerId, LpValue, NodeClearDebugOp, PanelClearOp, PanelWriteOp, ProjectController,
-    ProjectNodeAddress, ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction, UiPanelTarget,
+    ControllerId, LpValue, NodeClearDebugOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    ProjectController, ProjectNodeAddress, ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction,
+    UiPanelTarget,
 };
 
 /// Build the `SetValue` action a field dispatches on input.
@@ -63,6 +64,17 @@ pub(crate) fn panel_clear_scope_action(scope: lpc_wire::WireScopeRef) -> UiActio
         PanelClearOp {
             request: lpc_wire::WirePanelClearRequest::Scope { scope },
         },
+    )
+}
+
+/// Build the panel-state auto-save toggle (panel.md P11). Project-level,
+/// so it takes no scope — the root module's panel is the one that presents
+/// it, and the server's answer arrives on the next read rather than being
+/// applied locally.
+pub(crate) fn panel_auto_save_action(enabled: bool) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        PanelAutoSaveOp { enabled },
     )
 }
 

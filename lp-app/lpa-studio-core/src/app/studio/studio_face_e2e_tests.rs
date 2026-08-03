@@ -750,6 +750,66 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     assert_eq!(target.scope, scope);
     assert_eq!(target.channel, "glow");
 
+    // -- the wiring drawer: the sidebar bus pane's content, relocated -------
+    // Same rows the pane listed (writers → readers, focus affordances),
+    // scoped to the module that owns them, and closed by default because
+    // wiring is the authoring diagnostic and the panel is the product.
+    let wiring = face.wiring.clone().expect("the root face carries wiring");
+    assert!(
+        !face.wiring_open,
+        "the drawer starts closed (NodeCardUiState default)"
+    );
+    let glow_row = wiring
+        .channels
+        .iter()
+        .find(|channel| channel.name == "glow")
+        .expect("the glow channel is wiring on the root scope");
+    assert_eq!(
+        glow_row.scope,
+        Some(scope),
+        "the drawer lists this scope's channels only"
+    );
+    assert_eq!(
+        glow_row.readers.len(),
+        1,
+        "the shader reads it: {:?}",
+        glow_row.readers
+    );
+    assert!(
+        glow_row.readers[0].focus.is_some(),
+        "site rows keep their focus affordance (D7 linked navigation)"
+    );
+
+    // -- provenance: the authored §8 fields, present ones only -------------
+    assert_eq!(
+        face.provenance.as_deref(),
+        Some("Yona \u{b7} v0.4 \u{b7} CC0-1.0"),
+        "the footer joins the authored provenance fields and skips the \
+         unauthored `created`"
+    );
+
+    // -- the P11 auto-save switch: present, and only on the ROOT -----------
+    assert_eq!(
+        face.auto_save,
+        Some(true),
+        "the root module presents panel auto-save, on by default, carried \
+         back on the read's ServerRuntimeStatus"
+    );
+
+    // Opening the drawer is a core-owned card-UI op, exactly like the
+    // other drawers — disclosure survives the next snapshot.
+    handle.tx.send(node_ui_command(NodeUiOp::SetDrawer {
+        node: root_card.header.path.clone(),
+        drawer: crate::NodeCardDrawer::Wiring,
+        open: true,
+    }));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the drawer toggle emits a snapshot");
+    assert!(
+        module_face(&snapshot).wiring_open,
+        "the wiring drawer's open state rides the face DTO"
+    );
+
     // -- one control, two cards (P1): the shader card carries the SAME one --
     let shader = node_by_kind(&snapshot, "Shader");
     assert!(
@@ -817,6 +877,23 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
         "resetting the module releases its writer"
     );
     assert_eq!(glow.source.as_deref(), Some("authored default"));
+
+    // -- the P11 auto-save switch flips through the wire (no local echo) ----
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelAutoSaveOp { enabled: false },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the toggle emits a snapshot");
+    assert_eq!(
+        module_face(&snapshot).auto_save,
+        Some(false),
+        "the new value arrives on the next read's ServerRuntimeStatus — \
+         nothing is applied optimistically, so a refusal can't leave the \
+         switch lying"
+    );
 }
 
 // -- harness -----------------------------------------------------------------
@@ -949,6 +1026,9 @@ fn bound_glow_e2e_server() -> LpServer {
     );
 
     let project_json = "{\n  \"format\": 3\n}\n";
+    // Authored provenance (R14/§8): the root face's footer line is derived
+    // from these, and the omitted `created` proves the join skips absent
+    // fields rather than leaving a dangling separator.
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -956,6 +1036,11 @@ fn bound_glow_e2e_server() -> LpServer {
     "shader": { "ref": "./shader.json" },
     "pixels": { "ref": "./fixture.json" },
     "output": { "ref": "./output.json" }
+  },
+  "provenance": {
+    "author": "Yona",
+    "version": "v0.4",
+    "license": "CC0-1.0"
   }
 }"#;
     let clock_json = r#"{

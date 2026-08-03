@@ -1,8 +1,11 @@
-//! Bus pane view DTOs: channels, values, and linked writer/reader sites.
+//! Bus **wiring** view DTOs: channels, values, and linked writer/reader
+//! sites. Rendered by the module card's wiring drawer, one view per scope
+//! (P3 — the sidebar bus pane these were built for is gone).
 
 use crate::{UiAction, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 
-/// The bus pane body: every channel referenced by at least one binding.
+/// One scope's wiring: every channel of that scope referenced by at least
+/// one binding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiBusView {
     /// Channels in wire order (binding-index discovery order).

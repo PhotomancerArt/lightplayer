@@ -399,6 +399,21 @@ impl Project {
         }
     }
 
+    /// Dispatch the panel-state auto-save toggle (panel.md P11). Always
+    /// accepted: the flag is project-level state with no scope to be stale
+    /// about, and [`Self::set_panel_auto_save`] is idempotent. The
+    /// engaged-writer count rides back so the toggle answers in exactly
+    /// the shape the other panel commands do.
+    pub fn panel_auto_save_command(
+        &mut self,
+        request: &lpc_wire::WirePanelAutoSaveRequest,
+    ) -> lpc_wire::WirePanelCommandResponse {
+        self.set_panel_auto_save(request.enabled);
+        lpc_wire::WirePanelCommandResponse::Accepted {
+            engaged: self.engine().panel_writers().len() as u32,
+        }
+    }
+
     pub fn mutate_overlay(
         &mut self,
         request: WireOverlayMutationRequest,

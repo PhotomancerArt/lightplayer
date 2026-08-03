@@ -84,6 +84,7 @@ pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;
 pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
+pub(crate) use face::node_ui_action;
 pub use face::{
     FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, PlaylistFace, ShaderFace,
 };

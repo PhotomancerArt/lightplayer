@@ -20,7 +20,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiPanelTarget};
 
-use crate::app::node::slot_edit_actions::{panel_clear_action, panel_clear_scope_action};
+use crate::app::node::slot_edit_actions::{
+    panel_auto_save_action, panel_clear_action, panel_clear_scope_action,
+};
 
 /// One gesture raised by a panel surface.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,13 +43,10 @@ pub enum PanelGesture {
     SetAutoSave(bool),
 }
 
-/// The gesture→op seam (panel.md P8): clear gestures become the two
-/// wire-shaped ops, riding the given action dispatcher. Every live mount of
-/// a panel surface builds its handler here, so Studio and play mode speak
-/// exactly the same ops.
-///
-/// `SetAutoSave` has no wire arm yet (P3 owns it); the toggle only renders
-/// when a face carries `auto_save`, which no derived face does until then.
+/// The gesture→op seam (panel.md P8): every gesture becomes a wire-shaped
+/// op, riding the given action dispatcher. Every live mount of a panel
+/// surface builds its handler here, so Studio and play mode speak exactly
+/// the same ops.
 pub fn panel_gesture_actions(on_action: EventHandler<UiAction>) -> EventHandler<PanelGesture> {
     EventHandler::new(move |gesture: PanelGesture| match gesture {
         PanelGesture::ClearControl { target } => {
@@ -56,6 +55,8 @@ pub fn panel_gesture_actions(on_action: EventHandler<UiAction>) -> EventHandler<
         PanelGesture::ClearScope { scope } => {
             on_action.call(panel_clear_scope_action(scope));
         }
-        PanelGesture::SetAutoSave(_) => {}
+        PanelGesture::SetAutoSave(enabled) => {
+            on_action.call(panel_auto_save_action(enabled));
+        }
     })
 }
