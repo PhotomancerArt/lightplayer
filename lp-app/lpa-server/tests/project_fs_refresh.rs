@@ -120,7 +120,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
             br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"

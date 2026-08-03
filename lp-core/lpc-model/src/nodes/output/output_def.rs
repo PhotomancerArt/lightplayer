@@ -1,6 +1,11 @@
-use crate::{BindingDefs, ControlProductSlot, HwEndpointSpec, OptionSlot, Slotted, ValueSlot};
+use lp_collection::VecMap;
 
-pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
+use super::OutputChannelDef;
+use crate::{
+    BindingDefs, ControlProductSlot, HwEndpointSpec, MapSlot, OptionSlot, Slotted, ValueSlot,
+};
+
+pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:local:D10";
 
 /// Authored hardware output node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -10,10 +15,14 @@ pub struct OutputDef {
     /// value (declared so the wiring is first-class schema, roadmap D8).
     #[slot(consumed, default_bind = "bus:control.out")]
     pub input: ControlProductSlot,
-    pub endpoint: ValueSlot<HwEndpointSpec>,
+    /// Physical wires this output drives, keyed by channel index.
+    ///
+    /// The node's single control product is split across the channels in key
+    /// order, each taking its authored `count` of lamps.
+    pub channels: MapSlot<u32, OutputChannelDef>,
     /// Authored slot bindings for output inputs.
     pub bindings: BindingDefs,
-    /// Optional display pipeline options.
+    /// Optional display pipeline options, shared by every channel.
     pub options: OptionSlot<OutputDriverOptionsConfig>,
     /// Light every channel of this output solid white, bypassing the graph.
     ///
@@ -27,10 +36,20 @@ pub struct OutputDef {
 impl OutputDef {
     pub const KIND: &'static str = "output";
 
+    /// An output driving `endpoint` as its only wire (no count = whole extent).
     pub fn new(endpoint: HwEndpointSpec) -> Self {
+        Self::with_channels([(0, OutputChannelDef::new(endpoint))])
+    }
+
+    /// An output driving the given `(channel index, channel)` pairs.
+    pub fn with_channels(channels: impl IntoIterator<Item = (u32, OutputChannelDef)>) -> Self {
+        let mut entries = VecMap::new();
+        for (index, channel) in channels {
+            entries.insert(index, channel);
+        }
         Self {
             input: ControlProductSlot::default(),
-            endpoint: ValueSlot::new(endpoint),
+            channels: MapSlot::new(entries),
             bindings: BindingDefs::default(),
             options: OptionSlot::none(),
             test_pattern: ValueSlot::new(false),
@@ -41,8 +60,19 @@ impl OutputDef {
         HwEndpointSpec::from_static(DEFAULT_OUTPUT_ENDPOINT_SPEC)
     }
 
-    pub fn endpoint(&self) -> &HwEndpointSpec {
-        self.endpoint.value()
+    /// Endpoint of the lowest-keyed channel, if the output has any.
+    ///
+    /// The engine still drives exactly one wire per output; this is the wire
+    /// it picks. Per-channel fan-out replaces this accessor.
+    pub fn primary_endpoint(&self) -> Option<&HwEndpointSpec> {
+        self.channels
+            .entries
+            .first_key_value()
+            .map(|(_, channel)| channel.endpoint())
+    }
+
+    pub fn channel_count(&self) -> usize {
+        self.channels.entries.len()
     }
 
     pub fn kind(&self) -> crate::NodeKind {
@@ -103,27 +133,62 @@ mod tests {
 
     #[test]
     fn test_output_def_kind() {
-        let def = OutputDef::new(HwEndpointSpec::from_static("ws281x:rmt:D10"));
+        let def = OutputDef::new(HwEndpointSpec::from_static("ws281x:local:D10"));
         assert_eq!(def.kind(), NodeKind::Output);
-        assert_eq!(def.endpoint().as_str(), "ws281x:rmt:D10");
+        assert_eq!(def.primary_endpoint().unwrap().as_str(), "ws281x:local:D10");
     }
 
     #[test]
     fn test_output_def_endpoint_json_deserialize() {
         let json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
   "options": { "white_point": [0.8, 1.0, 1.0], "dithering_enabled": false }
 }"#;
         let def = NodeDef::read_json(&registry(), json).unwrap();
         let NodeDef::Output(def) = def else {
             panic!("expected output def");
         };
-        assert_eq!(def.endpoint().as_str(), "ws281x:rmt:D10");
+        assert_eq!(def.primary_endpoint().unwrap().as_str(), "ws281x:local:D10");
         let opts = def.options().unwrap();
         assert!((opts.white_point.value()[0] - 0.8).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
         assert!(*opts.interpolation_enabled.value());
+    }
+
+    #[test]
+    fn output_def_channels_round_trip_json() {
+        let json = r#"{
+  "kind": "Output",
+  "channels": {
+    "0": { "endpoint": "ws281x:local:IO18", "count": 100 },
+    "2": { "endpoint": "ws281x:local:IO16" }
+  }
+}"#;
+
+        let def = NodeDef::read_json(&registry(), json).unwrap();
+
+        let NodeDef::Output(def) = def else {
+            panic!("expected output def");
+        };
+        assert_eq!(def.channel_count(), 2);
+        let first = def.channels.entries.get(&0).expect("channel 0");
+        assert_eq!(first.endpoint().as_str(), "ws281x:local:IO18");
+        assert_eq!(first.count(), Some(100));
+        let second = def.channels.entries.get(&2).expect("channel 2");
+        assert_eq!(second.endpoint().as_str(), "ws281x:local:IO16");
+        assert_eq!(second.count(), None);
+        assert_eq!(
+            def.primary_endpoint().unwrap().as_str(),
+            "ws281x:local:IO18"
+        );
+
+        let written = NodeDef::Output(def).write_json(&registry()).expect("write");
+        assert_eq!(
+            NodeDef::read_json(&registry(), &written).expect("re-read"),
+            NodeDef::read_json(&registry(), json).expect("re-read source"),
+            "channels survive a write/read round trip: {written}"
+        );
     }
 
     #[test]
@@ -135,6 +200,19 @@ mod tests {
         assert!(format!("{err}").contains("pin"));
     }
 
+    /// Format 2 authored a single top-level `endpoint`. Format 3 replaced it
+    /// with `channels`, and the loader must say so rather than silently
+    /// producing an output with no wires (A1: version-and-refuse, never
+    /// migrate).
+    #[test]
+    fn output_def_rejects_legacy_endpoint_json() {
+        let json = r#"{ "kind": "Output", "endpoint": "ws281x:local:D10" }"#;
+
+        let err = NodeDef::read_json(&registry(), json).unwrap_err();
+
+        assert!(format!("{err}").contains("endpoint"), "{err}");
+    }
+
     #[test]
     fn generated_output_def_view_compiles() {
         let registry = SlotShapeRegistry::default();
@@ -144,8 +222,8 @@ mod tests {
         assert_eq!(view.registry_revision(), registry.revision());
         assert!(view.is_valid_for(&registry));
         assert_eq!(
-            view.endpoint().path(),
-            &SlotPath::parse("endpoint").unwrap()
+            view.channels().path(),
+            &SlotPath::parse("channels").unwrap()
         );
         assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
     }
@@ -167,7 +245,7 @@ mod tests {
 
     #[test]
     fn authored_test_pattern_is_ignored() {
-        let json = r#"{ "kind": "Output", "endpoint": "ws281x:rmt:D10", "test_pattern": true }"#;
+        let json = r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:D10" } }, "test_pattern": true }"#;
 
         let def = NodeDef::read_json(&registry(), json).unwrap();
 

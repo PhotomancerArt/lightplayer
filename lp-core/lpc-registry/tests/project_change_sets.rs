@@ -61,7 +61,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         br#"
 {
   "kind": "Project",
-  "format": 2
+  "format": 3
 }
 "#,
     );
@@ -80,7 +80,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -112,7 +112,7 @@ fn missing_referenced_def_recovers_when_file_is_created() {
         br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -265,7 +265,7 @@ fn changing_project_child_ref_reports_node_use_definition_change() {
         br#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "name": "fyeah-sign",
   "nodes": {
     "output": {
@@ -312,7 +312,11 @@ fn same_kind_body_value_edit_does_not_report_node_use_change() {
         br#"
 {
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": {
       "source": "bus:control.out"

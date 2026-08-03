@@ -2093,7 +2093,7 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
     // P5, over the real wire: `OutputDef.test_pattern` is `SlotRole::Debug`,
     // and NOTHING output-specific exists in the UI layer — the same
     // role-keyed partition that gives the Clock its Debug section (P3) gives
-    // the output card one, with the toggle in it. `endpoint` stays a Setting.
+    // the output card one, with the toggle in it. Channel endpoints stay Settings.
     let server = Rc::new(RefCell::new(asset_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -2137,10 +2137,10 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
         "a Debug slot is writable — that is the whole point of the toggle"
     );
     assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
-    let endpoint = find_slot(&snapshot, "endpoint");
+    let endpoint = find_slot(&snapshot, "channels[0].endpoint");
     assert!(
         !endpoint.state.debug,
-        "the endpoint is authored config, not debug"
+        "a channel endpoint is authored config, not debug"
     );
 }
 
@@ -2334,14 +2334,18 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // provider accepts any authored endpoint.
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
 }"#;
     let project_json = r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -2421,7 +2425,7 @@ pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
             "project.json",
             r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "pixels": { "ref": "./fixture.json" }

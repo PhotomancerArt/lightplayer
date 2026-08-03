@@ -189,7 +189,7 @@ pub(crate) fn debug_section_vs_unsaved() -> Element {
 }
 
 #[story(
-    description = "The P5 proof case, hardware mode: an Output card whose one Debug field is `test_pattern`. Expanded with the override ACTIVE — the strip on `ws281x:rmt:D10` is solid white and the engine skips the graph resolve entirely for this output. The card wears the `debug 1` marking, the striped header offers Clear, and the row carries the hazard tint; endpoint and driver options stay above under `Settings`. Nothing here is output-specific UI: the section is derived from `SlotRole::Debug` (P1) by the same partition that produces the Clock's (P3)."
+    description = "The P5 proof case, hardware mode: an Output card whose one Debug field is `test_pattern`. Expanded with the override ACTIVE — the strip on `ws281x:local:D10` is solid white and the engine skips the graph resolve entirely for this output. The card wears the `debug 1` marking, the striped header offers Clear, and the row carries the hazard tint; endpoint and driver options stay above under `Settings`. Nothing here is output-specific UI: the section is derived from `SlotRole::Debug` (P1) by the same partition that produces the Clock's (P3)."
 )]
 pub(crate) fn output_debug_test_pattern_active() -> Element {
     rsx! {

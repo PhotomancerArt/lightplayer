@@ -824,7 +824,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            br#"{"kind": "Project", "format": 2}"#,
+            br#"{"kind": "Project", "format": 3}"#,
         )
         .expect("write project root");
         let ctx = lpc_registry::ParseCtx {

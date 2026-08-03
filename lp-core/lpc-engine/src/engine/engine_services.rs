@@ -192,6 +192,7 @@ impl EngineServices {
     /// so untouched sinks do not match the post-tick revision until the fixture mutates them.
     pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
         let endpoint = endpoint_from_output_config(config);
+        warn_if_multi_channel(config, &endpoint);
         let display_options = display_options_from_output_config(config);
         if let Some(mut existing) = self.output_sinks.remove(&buffer_id) {
             self.close_output_sink(&mut existing);
@@ -220,9 +221,13 @@ impl EngineServices {
             self.register_output_sink(buffer_id, config);
             return;
         };
-        if existing.endpoint == *config.endpoint()
-            && output_options_eq(&existing.display_options, &display_options)
-        {
+        let endpoint_unchanged = match config.primary_endpoint() {
+            Some(endpoint) => existing.endpoint == *endpoint,
+            // Only an output with no authored channels reaches this arm, so
+            // minting the unset spec here never touches the hot path.
+            None => existing.endpoint == HwEndpointSpec::default(),
+        };
+        if endpoint_unchanged && output_options_eq(&existing.display_options, &display_options) {
             return;
         }
 
@@ -232,6 +237,7 @@ impl EngineServices {
             .expect("output sink existed above");
         self.close_output_sink(&mut existing);
         existing.endpoint = endpoint_from_output_config(config);
+        warn_if_multi_channel(config, &existing.endpoint);
         existing.display_options = display_options;
         existing.last_byte_count = None;
         // A re-authored endpoint is a fresh question for the hardware, so the
@@ -296,8 +302,25 @@ impl Drop for EngineServices {
     }
 }
 
+/// The one wire this output drives: its lowest-keyed channel's endpoint.
+///
+/// An output with no authored channels falls back to the model's unset spec,
+/// which no driver resolves — the sink parks instead of silently lighting a
+/// default pin. Per-wire fan-out (P2) replaces this whole accessor.
 fn endpoint_from_output_config(config: &OutputDef) -> HwEndpointSpec {
-    config.endpoint().clone()
+    config.primary_endpoint().cloned().unwrap_or_default()
+}
+
+/// The engine still drives exactly one wire per output. Authoring more
+/// channels is expressible in the model now but not yet honored, so say so
+/// when the configuration is read, not once per frame. P2 removes this.
+fn warn_if_multi_channel(config: &OutputDef, driven: &HwEndpointSpec) {
+    let channels = config.channel_count();
+    if channels > 1 {
+        log::warn!(
+            "EngineServices: output authors {channels} channels; multi-channel output not yet wired, driving channel 0 ({driven}) only"
+        );
+    }
 }
 
 fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOptions> {
@@ -515,7 +538,7 @@ mod tests {
             Revision::new(1),
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
-        let endpoint = endpoint("ws281x:rmt:D10");
+        let endpoint = endpoint("ws281x:local:D10");
         services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
 
         services
@@ -546,7 +569,7 @@ mod tests {
             Revision::new(1),
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
-        let endpoint = endpoint("ws281x:rmt:D10");
+        let endpoint = endpoint("ws281x:local:D10");
         services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -584,14 +607,14 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
-        let config = OutputDef::new(endpoint("ws281x:rmt:D10"));
+        let config = OutputDef::new(endpoint("ws281x:local:D10"));
         services.register_output_sink(buffer_id, &config);
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("initial flush opens the channel");
         let handle = provider
             .inner()
-            .get_handle_for_endpoint(&endpoint("ws281x:rmt:D10"))
+            .get_handle_for_endpoint(&endpoint("ws281x:local:D10"))
             .expect("channel handle");
         let generation = provider.hardware_generation();
 
@@ -607,7 +630,7 @@ mod tests {
         assert_eq!(
             provider
                 .inner()
-                .get_handle_for_endpoint(&endpoint("ws281x:rmt:D10")),
+                .get_handle_for_endpoint(&endpoint("ws281x:local:D10")),
             Some(handle)
         );
         assert_eq!(
@@ -627,7 +650,7 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
-        let endpoint = endpoint("ws281x:rmt:D10");
+        let endpoint = endpoint("ws281x:local:D10");
         services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -650,7 +673,7 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let first = output_buffer(&mut buffers, Revision::new(1));
         let second = output_buffer(&mut buffers, Revision::new(1));
-        let endpoint = endpoint("ws281x:rmt:D10");
+        let endpoint = endpoint("ws281x:local:D10");
         services.register_output_sink(first, &OutputDef::new(endpoint.clone()));
         services.register_output_sink(second, &OutputDef::new(endpoint.clone()));
 
@@ -681,8 +704,8 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let first = output_buffer(&mut buffers, Revision::new(1));
         let second = output_buffer(&mut buffers, Revision::new(1));
-        let first_endpoint = endpoint("ws281x:rmt:D10");
-        let second_endpoint = endpoint("ws281x:rmt:GPIO19");
+        let first_endpoint = endpoint("ws281x:local:D10");
+        let second_endpoint = endpoint("ws281x:local:GPIO19");
         services.register_output_sink(first, &OutputDef::new(first_endpoint.clone()));
         services.register_output_sink(second, &OutputDef::new(second_endpoint.clone()));
 
@@ -718,11 +741,11 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         // The board has no such pin, so this sink can never open — unlike a
         // contention failure, it stays failed however the map is ordered.
-        let unknown = endpoint("ws281x:rmt:NOT-A-PIN");
+        let unknown = endpoint("ws281x:local:NOT-A-PIN");
         let good = [
-            endpoint("ws281x:rmt:D10"),
-            endpoint("ws281x:rmt:D9"),
-            endpoint("ws281x:rmt:D8"),
+            endpoint("ws281x:local:D10"),
+            endpoint("ws281x:local:D9"),
+            endpoint("ws281x:local:D8"),
         ];
         let bad_buffer = output_buffer(&mut buffers, Revision::new(1));
         services.register_output_sink(bad_buffer, &OutputDef::new(unknown.clone()));
@@ -736,7 +759,7 @@ mod tests {
             .expect_err("the unknown endpoint must still be reported");
 
         assert!(
-            err.to_string().contains("ws281x:rmt:NOT-A-PIN"),
+            err.to_string().contains("ws281x:local:NOT-A-PIN"),
             "the flush error must name the sink that failed, got: {err}"
         );
         for spec in &good {
@@ -767,7 +790,10 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
-        services.register_output_sink(buffer_id, &OutputDef::new(endpoint("ws281x:rmt:NOT-A-PIN")));
+        services.register_output_sink(
+            buffer_id,
+            &OutputDef::new(endpoint("ws281x:local:NOT-A-PIN")),
+        );
 
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -799,8 +825,8 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let holder = output_buffer(&mut buffers, Revision::new(1));
         let waiter = output_buffer(&mut buffers, Revision::new(1));
-        let held = endpoint("ws281x:rmt:D10");
-        let waiting = endpoint("ws281x:rmt:GPIO19");
+        let held = endpoint("ws281x:local:D10");
+        let waiting = endpoint("ws281x:local:GPIO19");
         services.register_output_sink(holder, &OutputDef::new(held.clone()));
         services.register_output_sink(waiter, &OutputDef::new(waiting.clone()));
 
@@ -844,11 +870,14 @@ mod tests {
 
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
-        services.register_output_sink(buffer_id, &OutputDef::new(endpoint("ws281x:rmt:NOT-A-PIN")));
+        services.register_output_sink(
+            buffer_id,
+            &OutputDef::new(endpoint("ws281x:local:NOT-A-PIN")),
+        );
         let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
         let generation_before = provider.hardware_generation();
 
-        let good = endpoint("ws281x:rmt:D10");
+        let good = endpoint("ws281x:local:D10");
         services.update_output_sink_config(buffer_id, &OutputDef::new(good.clone()));
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -874,7 +903,7 @@ mod tests {
         let buffer_id = output_buffer(&mut buffers, Revision::new(1));
         // The strict single-RMT board has no such pin; the permissive provider
         // that replaces it accepts any endpoint.
-        let demo = endpoint("ws281x:rmt:D4");
+        let demo = endpoint("ws281x:local:D4");
         services.register_output_sink(buffer_id, &OutputDef::new(demo.clone()));
         let _ = services.flush_dirty_output_sinks(Revision::new(1), &buffers);
         assert_eq!(strict.open_calls(), 1);

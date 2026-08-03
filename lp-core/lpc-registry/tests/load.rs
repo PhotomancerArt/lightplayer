@@ -25,7 +25,7 @@ fn load_root_discovers_root_external_and_asset_entries() {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -108,7 +108,7 @@ fn load_root_reports_parse_error_for_inline_child_def() {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "def": {
@@ -145,7 +145,7 @@ fn load_root_keeps_missing_referenced_def_as_error_entry() {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "ref": "./missing.json"
@@ -178,7 +178,7 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -223,7 +223,7 @@ fn load_root_accepts_current_project_format() {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {}
 }
 "#,

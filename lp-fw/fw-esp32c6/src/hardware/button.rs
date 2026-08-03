@@ -68,7 +68,7 @@ impl ButtonDriver for Esp32GpioButtonDriver {
                 continue;
             }
             let address = resource.address().clone();
-            let spec = button_gpio_spec(resource.display_label());
+            let spec = button_local_spec(resource.display_label());
             endpoints.push(HwEndpoint::new(
                 Self::endpoint_id(&address),
                 spec,
@@ -184,8 +184,8 @@ fn gpio_number(address: &HwAddress) -> Result<u8, HardwareEndpointError> {
     Ok(gpio)
 }
 
-fn button_gpio_spec(config: &str) -> HwEndpointSpec {
-    HwEndpointSpec::parse(alloc::format!("button:gpio:{config}"))
+fn button_local_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(alloc::format!("button:local:{config}"))
         .expect("manifest display label should form a valid endpoint spec")
 }
 

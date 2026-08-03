@@ -24,7 +24,8 @@ pub use node_def::{
     NodeDefWriteError, ProjectFormatProbe, read_project_format_json, resolve_artifact_specifier,
 };
 pub use output::{
-    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
+    OutputChannelDef, OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    OutputDriverOptionsConfigView,
 };
 pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,

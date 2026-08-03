@@ -1094,7 +1094,7 @@ mod tests {
         assert_eq!(rejection.reason, MutationRejectionReason::InvalidBody);
         assert_nothing_written(&fs, "/new.json");
 
-        let project_body = br#"{ "kind": "Project", "format": 2, "nodes": {} }"#;
+        let project_body = br#"{ "kind": "Project", "format": 3, "nodes": {} }"#;
         let rejection = create(
             &fs,
             &mut registry,
@@ -1584,7 +1584,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -1609,7 +1609,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "playlist": { "ref": "./playlist.json" }
   }
@@ -1646,7 +1646,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": { "ref": "./shader.json" }
   }
@@ -1676,7 +1676,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "a": { "ref": "./a.json" },
     "b": { "ref": "./b.json" }
@@ -1709,7 +1709,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "playlist": { "ref": "./playlist.json" }
   }

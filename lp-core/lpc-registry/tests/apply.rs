@@ -24,7 +24,7 @@ fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -68,7 +68,7 @@ fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
         r#"
 {
   "kind": "Project",
-  "format": 2,
+  "format": 3,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
