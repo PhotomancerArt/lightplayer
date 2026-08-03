@@ -107,7 +107,15 @@ self.onmessage = async (event) => {
     if (handleIfInstanceFatal(error)) {
       return;
     }
-    console.error("[fw-browser-worker]", error);
+    // A page teardown (refresh/navigation/HMR) aborts the in-flight wasm
+    // fetch mid-boot; that is expected churn, not a worker defect — keep
+    // it off the error channel. The host sees the status message either
+    // way and classifies it the same.
+    if (isTeardownAbort(error)) {
+      console.debug("[fw-browser-worker] boot aborted by page teardown:", String(error));
+    } else {
+      console.error("[fw-browser-worker]", error);
+    }
     self.postMessage({
       kind: "status",
       status: "error",
@@ -115,6 +123,18 @@ self.onmessage = async (event) => {
     });
   }
 };
+
+// Mirrors lpa-studio-core's `is_teardown_abort_reason`: browser wordings
+// for an aborted fetch/compile (Chrome, Firefox, Safari).
+function isTeardownAbort(error) {
+  const text = String(error?.message || error).toLowerCase();
+  return (
+    text.includes("loading was aborted") ||
+    text.includes("compilation aborted") ||
+    text.includes("the operation was aborted") ||
+    text.includes("fetch is aborted")
+  );
+}
 
 async function boot(label, modulePath, wasmPath, mode) {
   if (!booted) {
