@@ -90,7 +90,9 @@ pub fn ModulePanelControl(
 ) -> Element {
     let aspects = view.detail_aspects(&scope);
     let UiPanelControlView {
-        channel,
+        // The channel rides inside `control.panel_target` for dispatch;
+        // the bare name is only the map key upstream.
+        channel: _,
         control,
         state,
         source: _,
@@ -119,13 +121,14 @@ pub fn ModulePanelControl(
         "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-1"
     };
 
-    let reset_scope = scope.clone();
-    let reset_channel = channel.clone();
+    let reset_target = control.panel_target.clone();
     let reset_label = control.label.clone();
     // Reset is a GESTURE, so it sits beside the label on the face rather
-    // than inside the popup — one click, always.
+    // than inside the popup — one click, always. It needs a real
+    // `(scope, channel)` target to dispatch against, so a fixture control
+    // without one renders no reset even when staged as engaged.
     let reset = rsx! {
-        if engaged && let Some(handler) = on_panel {
+        if engaged && let Some(target) = reset_target && let Some(handler) = on_panel {
             button {
                 class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-attention-foreground tw:opacity-70 tw:hover:opacity-100",
                 r#type: "button",
@@ -134,8 +137,7 @@ pub fn ModulePanelControl(
                 onclick: move |event| {
                     event.stop_propagation();
                     handler.call(PanelGesture::ClearControl {
-                        scope: reset_scope.clone(),
-                        channel: reset_channel.clone(),
+                        target: target.clone(),
                     });
                 },
                 StudioIcon { name: StudioIconName::Revert, size: 10 }
@@ -228,6 +230,7 @@ fn ModulePanelControlBody(
                     bound: following,
                     engaged,
                     address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
                 }
@@ -254,6 +257,7 @@ fn ModulePanelControlBody(
                     bound: following,
                     engaged,
                     address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
                 }
@@ -272,6 +276,7 @@ fn ModulePanelControlBody(
                         bound: following,
                         engaged,
                         address: control.address.clone(),
+                        panel_target: control.panel_target.clone(),
                         on_action,
                     }
                 }

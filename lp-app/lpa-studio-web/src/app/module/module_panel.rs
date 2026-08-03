@@ -76,17 +76,19 @@ pub fn ModulePanel(
 
     let held = panel.engaged_total();
     let scope = panel.scope.clone();
+    let target = panel.target;
     let row_gap = if play { "tw:gap-6" } else { "tw:gap-4" };
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:px-4 tw:py-3",
             // Module-level affordances, upper right: quiet chrome beside
             // the controls, never competing with them. Reset only exists
-            // when there is something to clear.
+            // when there is something to clear (and a real scope to clear
+            // it in — fixture panels without a target render no reset).
             if held > 0 || auto_save.is_some() {
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-1.5",
-                    if held > 0 && let Some(handler) = on_panel {
-                        PanelResetButton { scope: scope.clone(), held, on_panel: handler }
+                    if held > 0 && let Some(target) = target && let Some(handler) = on_panel {
+                        PanelResetButton { scope: scope.clone(), target, held, on_panel: handler }
                     }
                     if let Some(auto_save) = auto_save {
                         AutoSaveToggle { auto_save, on_panel }
@@ -162,6 +164,7 @@ pub fn NestedPanelGroup(
     let held = group.engaged_total();
     let aspects = group.detail_aspects();
     let scope = group.scope.clone();
+    let target = group.target;
     let label = group.label.clone();
     let heading_class = if held > 0 {
         "tw:truncate tw:text-[0.62rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-status-attention-foreground"
@@ -201,8 +204,8 @@ pub fn NestedPanelGroup(
                     trigger_open_class: GROUP_LABEL_TRIGGER_CLASS.to_string(),
                     on_action,
                 }
-                if held > 0 && let Some(handler) = on_panel {
-                    PanelResetButton { scope: scope.clone(), held, on_panel: handler }
+                if held > 0 && let Some(target) = target && let Some(handler) = on_panel {
+                    PanelResetButton { scope: scope.clone(), target, held, on_panel: handler }
                 }
             }
             div { class: "tw:grid tw:min-w-0 tw:gap-3",
@@ -247,7 +250,14 @@ pub fn NestedPanelGroup(
 /// carries the whole sentence, so the chrome does not have to.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PanelResetButton(scope: String, held: usize, on_panel: EventHandler<PanelGesture>) -> Element {
+fn PanelResetButton(
+    /// Display path for the tooltip sentence.
+    scope: String,
+    /// The structured scope the clear dispatches against.
+    target: lpc_wire::WireScopeRef,
+    held: usize,
+    on_panel: EventHandler<PanelGesture>,
+) -> Element {
     let noun = if held == 1 { "control" } else { "controls" };
     let label = format!(
         "Reset {held} held {noun} in {scope} — panel writers are dropped and the project drives again"
@@ -260,7 +270,7 @@ fn PanelResetButton(scope: String, held: usize, on_panel: EventHandler<PanelGest
             aria_label: "{label}",
             onclick: move |event| {
                 event.stop_propagation();
-                on_panel.call(PanelGesture::ClearScope { scope: scope.clone() });
+                on_panel.call(PanelGesture::ClearScope { scope: target });
             },
             StudioIcon { name: StudioIconName::Revert, size: 11 }
             // The count, small enough to read as an annotation on the

@@ -37,6 +37,45 @@ pub(crate) const ROOT_SCOPE: &str = "/aurora.module";
 pub(crate) const PLASMA_1_SCOPE: &str = "/aurora.module/plasma_1.module";
 pub(crate) const PLASMA_2_SCOPE: &str = "/aurora.module/plasma_2.module";
 
+/// The structured scope behind each fixture scope path — what the real
+/// derivation carries on `UiPanelGroup::target` and every control's
+/// `panel_target`, so the reset/clear affordances render and the story
+/// handlers can resolve a gesture back to its display scope.
+pub(crate) fn scope_target(scope: &str) -> lpc_wire::WireScopeRef {
+    let module = |owner: u32| lpc_wire::WireScopeRef::Module {
+        owner: lpa_studio_core::NodeId::new(owner),
+    };
+    // The playlist fixture's two entries are SINK scopes — two identities
+    // for one channel name, which is the whole E2 point.
+    let sink = |entry: u32| lpc_wire::WireScopeRef::Sink {
+        owner: lpa_studio_core::NodeId::new(4),
+        entry,
+    };
+    match scope {
+        ROOT_SCOPE => module(1),
+        PLASMA_1_SCOPE => module(2),
+        PLASMA_2_SCOPE => module(3),
+        "/aurora.module/set.playlist/drift.shader" => sink(0),
+        "/aurora.module/set.playlist/whirl.shader" => sink(1),
+        other => panic!("unknown fixture scope {other}"),
+    }
+}
+
+/// The display path a structured fixture scope stands for (the reverse of
+/// [`scope_target`]).
+pub(crate) fn scope_display(target: &lpc_wire::WireScopeRef) -> &'static str {
+    match target {
+        lpc_wire::WireScopeRef::Module { owner } => match owner.0 {
+            1 => ROOT_SCOPE,
+            2 => PLASMA_1_SCOPE,
+            3 => PLASMA_2_SCOPE,
+            other => panic!("unknown fixture scope owner {other}"),
+        },
+        lpc_wire::WireScopeRef::Sink { entry: 0, .. } => "/aurora.module/set.playlist/drift.shader",
+        lpc_wire::WireScopeRef::Sink { .. } => "/aurora.module/set.playlist/whirl.shader",
+    }
+}
+
 /// A story-only slot address, so the widgets render wired and their drags
 /// dispatch into the story's own handler.
 fn spike_address(node: &str, slot: &str) -> ProjectSlotAddress {
@@ -65,7 +104,11 @@ fn knob(
             widget: UiPanelWidget::Knob { min, max, step },
             value: UiSlotValue::f32(value),
             live_value: None,
-            panel_target: None,
+            panel_target: Some(lpa_studio_core::UiPanelTarget {
+                scope: scope_target(scope),
+                channel: channel.to_string(),
+                engaged: false,
+            }),
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
@@ -87,7 +130,11 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
             },
             value: UiSlotValue::f32(value),
             live_value: None,
-            panel_target: None,
+            panel_target: Some(lpa_studio_core::UiPanelTarget {
+                scope: scope_target(scope),
+                channel: channel.to_string(),
+                engaged: false,
+            }),
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
@@ -105,7 +152,11 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
             widget: UiPanelWidget::Toggle,
             value: UiSlotValue::bool(value),
             live_value: None,
-            panel_target: None,
+            panel_target: Some(lpa_studio_core::UiPanelTarget {
+                scope: scope_target(scope),
+                channel: channel.to_string(),
+                engaged: false,
+            }),
             unit: None,
             state: UiSlotFieldState::editable(),
             aspects: Vec::new(),
@@ -138,13 +189,15 @@ fn plasma_panel(scope: &str, speed: UiPanelControlView) -> UiPanelGroup {
     // The group's LABEL carries the instance identity now that the scope
     // path has moved into the heading's detail popup — two copies of one
     // effect have to be tellable apart from the rule alone.
-    UiPanelGroup::new(instance_label(scope), scope).with_controls(vec![
-        speed,
-        at_default(
-            knob(scope, "hue", "hue", 0.32, 0.0, 1.0, None),
-            "authored default",
-        ),
-    ])
+    UiPanelGroup::new(instance_label(scope), scope)
+        .with_target(scope_target(scope))
+        .with_controls(vec![
+            speed,
+            at_default(
+                knob(scope, "hue", "hue", 0.32, 0.0, 1.0, None),
+                "authored default",
+            ),
+        ])
 }
 
 /// "plasma 1" from `/aurora.module/plasma_1.module` — the embedded node's
@@ -268,6 +321,7 @@ pub(crate) const HELD: &[(&str, &str, f32)] = &[
 /// groups are two independent presentations of the same effect.
 pub(crate) fn root_panel() -> UiPanelGroup {
     UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
         .with_controls(root_controls())
         .with_groups(vec![
             plasma_read_panel(PLASMA_1_SCOPE),
@@ -354,11 +408,13 @@ pub(crate) fn root_children() -> Vec<UiNodeChild> {
             "Button",
             "button.json",
             "value → bus:speed",
-            UiPanelGroup::new("Master speed", ROOT_SCOPE).with_controls(vec![following(
-                knob(ROOT_SCOPE, "speed", "value", 0.62, 0.0, 1.0, None),
-                "0.62",
-                "this node writes it",
-            )]),
+            UiPanelGroup::new("Master speed", ROOT_SCOPE)
+                .with_target(scope_target(ROOT_SCOPE))
+                .with_controls(vec![following(
+                    knob(ROOT_SCOPE, "speed", "value", 0.62, 0.0, 1.0, None),
+                    "0.62",
+                    "this node writes it",
+                )]),
         ),
         module_child(
             "plasma_1",
@@ -383,10 +439,12 @@ pub(crate) fn root_children() -> Vec<UiNodeChild> {
             "Fixture",
             "fixture.json",
             "241 LEDs · input ← bus:visual.out",
-            UiPanelGroup::new("halo", ROOT_SCOPE).with_controls(vec![at_default(
-                fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
-                "authored 200",
-            )]),
+            UiPanelGroup::new("halo", ROOT_SCOPE)
+                .with_target(scope_target(ROOT_SCOPE))
+                .with_controls(vec![at_default(
+                    fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+                    "authored 200",
+                )]),
         ),
     ]
 }
@@ -598,10 +656,12 @@ pub(crate) fn entry_panel(entry: u32) -> UiPanelGroup {
         0 => ("Drift", 0.5_f32, 1.0_f32),
         _ => ("Whirl", 6.5_f32, 10.0_f32),
     };
-    UiPanelGroup::new(label, scope.clone()).with_controls(vec![at_default(
-        knob(&scope, "speed", label, value, 0.0, max, None),
-        "authored default",
-    )])
+    UiPanelGroup::new(label, scope.clone())
+        .with_target(scope_target(&scope))
+        .with_controls(vec![at_default(
+            knob(&scope, "speed", label, value, 0.0, max, None),
+            "authored default",
+        )])
 }
 
 /// Entry A's panel with its knob already held at 0.35 — the tweak that has
@@ -620,55 +680,57 @@ pub(crate) fn entry_held_panel(entry: u32) -> UiPanelGroup {
 /// One panel holding exactly the three states, side by side, for the
 /// P-Q2 comparison.
 pub(crate) fn three_state_panel() -> UiPanelGroup {
-    UiPanelGroup::new("Panel states", ROOT_SCOPE).with_controls(vec![
-        at_default(
-            knob(
-                ROOT_SCOPE,
-                "palette",
-                "at default",
-                2.0,
-                1.0,
-                4.0,
-                Some(1.0),
+    UiPanelGroup::new("Panel states", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![
+            at_default(
+                knob(
+                    ROOT_SCOPE,
+                    "palette",
+                    "at default",
+                    2.0,
+                    1.0,
+                    4.0,
+                    Some(1.0),
+                ),
+                "nothing writes it",
             ),
-            "nothing writes it",
-        ),
-        following(
-            knob(ROOT_SCOPE, "hue", "following", 0.41, 0.0, 1.0, None),
-            "0.41",
-            "lfo · hue",
-        ),
-        engaged(
-            knob(ROOT_SCOPE, "speed", "engaged", 0.82, 0.0, 1.0, None),
-            "lfo · speed",
-        ),
-        at_default(
-            toggle(ROOT_SCOPE, "mirror", "at default", false),
-            "nothing writes it",
-        ),
-        {
-            let mut view = toggle(ROOT_SCOPE, "beat", "following", false);
-            view.control.live_value = Some("true".to_string());
-            view.with_state(UiPanelControlState::ReadFollowing, Some("audio · beat"))
-        },
-        engaged(
-            toggle(ROOT_SCOPE, "strobe", "engaged", true),
-            "audio · beat",
-        ),
-        at_default(
-            fader(ROOT_SCOPE, "brightness", "at default", 200.0, 255.0),
-            "nothing writes it",
-        ),
-        following(
-            fader(ROOT_SCOPE, "master", "following", 180.0, 255.0),
-            "180",
-            "dimmer · out",
-        ),
-        engaged(
-            fader(ROOT_SCOPE, "held", "engaged", 96.0, 255.0),
-            "authored 200",
-        ),
-    ])
+            following(
+                knob(ROOT_SCOPE, "hue", "following", 0.41, 0.0, 1.0, None),
+                "0.41",
+                "lfo · hue",
+            ),
+            engaged(
+                knob(ROOT_SCOPE, "speed", "engaged", 0.82, 0.0, 1.0, None),
+                "lfo · speed",
+            ),
+            at_default(
+                toggle(ROOT_SCOPE, "mirror", "at default", false),
+                "nothing writes it",
+            ),
+            {
+                let mut view = toggle(ROOT_SCOPE, "beat", "following", false);
+                view.control.live_value = Some("true".to_string());
+                view.with_state(UiPanelControlState::ReadFollowing, Some("audio · beat"))
+            },
+            engaged(
+                toggle(ROOT_SCOPE, "strobe", "engaged", true),
+                "audio · beat",
+            ),
+            at_default(
+                fader(ROOT_SCOPE, "brightness", "at default", 200.0, 255.0),
+                "nothing writes it",
+            ),
+            following(
+                fader(ROOT_SCOPE, "master", "following", 180.0, 255.0),
+                "180",
+                "dimmer · out",
+            ),
+            engaged(
+                fader(ROOT_SCOPE, "held", "engaged", 96.0, 255.0),
+                "authored 200",
+            ),
+        ])
 }
 
 // -------------------------------------------------------- walkable state
@@ -764,14 +826,18 @@ impl PanelSpike {
                     face.auto_save = Some(*next);
                 }
             }
-            PanelGesture::ClearControl { scope, channel } => {
-                self.restore(|group_scope, view| group_scope == scope && view.channel == *channel);
+            PanelGesture::ClearControl { target } => {
+                let scope = scope_display(&target.scope);
+                self.restore(|group_scope, view| {
+                    group_scope == scope && view.channel == target.channel
+                });
             }
             // "Reset means reset": the clear descends into nested groups
             // (panel.md P-Q4's lean), which is why a scope prefix match is
             // the right test rather than equality.
             PanelGesture::ClearScope { scope } => {
-                self.restore(|group_scope, _| group_scope.starts_with(scope.as_str()));
+                let scope = scope_display(&scope);
+                self.restore(|group_scope, _| group_scope.starts_with(scope));
             }
         }
     }
@@ -811,6 +877,9 @@ fn engage_group(group: &mut UiPanelGroup, scope: &str, channel: &str, value: f32
 fn hold(view: &mut UiPanelControlView, value: f32) {
     view.control.value = UiSlotValue::f32(value);
     view.state = UiPanelControlState::Engaged;
+    if let Some(target) = view.control.panel_target.as_mut() {
+        target.engaged = true;
+    }
 }
 
 /// Visit every panel control in a card and everything below it, carrying
@@ -876,7 +945,7 @@ mod tests {
 
     use super::{
         HELD, PLASMA_1_SCOPE, PLASMA_2_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face,
-        root_module_node_view,
+        root_module_node_view, scope_target,
     };
     use crate::app::module::PanelGesture;
 
@@ -907,7 +976,7 @@ mod tests {
         assert_eq!(spike.face().panel.engaged_total(), 2);
 
         spike.apply_gesture(&PanelGesture::ClearScope {
-            scope: ROOT_SCOPE.to_string(),
+            scope: scope_target(ROOT_SCOPE),
         });
 
         assert_eq!(
@@ -921,8 +990,11 @@ mod tests {
     fn clearing_one_control_leaves_its_siblings_alone() {
         let mut spike = spike();
         spike.apply_gesture(&PanelGesture::ClearControl {
-            scope: PLASMA_1_SCOPE.to_string(),
-            channel: "speed".to_string(),
+            target: lpa_studio_core::UiPanelTarget {
+                scope: scope_target(PLASMA_1_SCOPE),
+                channel: "speed".to_string(),
+                engaged: true,
+            },
         });
 
         assert_eq!(spike.face().panel.groups[0].engaged_total(), 0);
