@@ -724,6 +724,9 @@ pub(crate) fn render_product_skeleton(
                                 extent.rows.saturating_mul(extent.samples_per_row)
                             ));
                         }
+                        ProductRef::Time(_) => {
+                            ui.small("lazy");
+                        }
                     });
                 });
             });
@@ -795,6 +798,7 @@ fn product_kind_label(product: ProductRef) -> &'static str {
     match product {
         ProductRef::Visual(_) => "visual product",
         ProductRef::Control(_) => "control product",
+        ProductRef::Time(_) => "time product",
     }
 }
 

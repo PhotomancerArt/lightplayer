@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use lpc_model::{
     ControlDisplayLayout, ControlExtent, ControlProduct, ControlSampleLayout, NodeId, ProductRef,
-    VisualProduct,
+    TimeProduct, VisualProduct,
 };
 
 use crate::{
@@ -80,6 +80,8 @@ pub enum UiProductRef {
         rows: u32,
         samples_per_row: u32,
     },
+    /// Queryable timebase material produced by a node output.
+    Time { node_id: u32, output: u32 },
 }
 
 impl UiProductRef {
@@ -89,6 +91,7 @@ impl UiProductRef {
         match product {
             ProductRef::Visual(product) => Self::from_visual_product(product),
             ProductRef::Control(product) => Self::from_control_product(product),
+            ProductRef::Time(product) => Self::from_time_product(product),
         }
     }
 
@@ -113,6 +116,15 @@ impl UiProductRef {
         }
     }
 
+    /// Convert a time product into a UI identity.
+    #[must_use]
+    pub fn from_time_product(product: TimeProduct) -> Self {
+        Self::Time {
+            node_id: product.node().0,
+            output: product.output(),
+        }
+    }
+
     /// Convert this identity back into a visual product when possible.
     #[must_use]
     pub fn visual_product(self) -> Option<VisualProduct> {
@@ -120,7 +132,16 @@ impl UiProductRef {
             Self::Visual { node_id, output } => {
                 Some(VisualProduct::new(NodeId::new(node_id), output))
             }
-            Self::Control { .. } => None,
+            Self::Control { .. } | Self::Time { .. } => None,
+        }
+    }
+
+    /// Convert this identity back into a time product when possible.
+    #[must_use]
+    pub fn time_product(self) -> Option<TimeProduct> {
+        match self {
+            Self::Time { node_id, output } => Some(TimeProduct::new(NodeId::new(node_id), output)),
+            Self::Visual { .. } | Self::Control { .. } => None,
         }
     }
 
@@ -138,7 +159,7 @@ impl UiProductRef {
                 output,
                 ControlExtent::new(rows, samples_per_row),
             )),
-            Self::Visual { .. } => None,
+            Self::Visual { .. } | Self::Time { .. } => None,
         }
     }
 }

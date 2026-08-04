@@ -435,6 +435,9 @@ impl ProjectSync {
                         ));
                     }
                 }
+                // Time products have no Studio preview surface yet: nothing to
+                // probe or watch.
+                UiProductRef::Time { .. } => {}
             }
         }
         probes

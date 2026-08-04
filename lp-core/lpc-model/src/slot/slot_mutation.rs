@@ -888,7 +888,8 @@ pub fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
         | (LpValue::Resource(_), LpType::Resource) => true,
         (LpValue::Product(product), LpType::Product(kind)) => match (product, kind) {
             (crate::ProductRef::Visual(_), ProductKind::Visual)
-            | (crate::ProductRef::Control(_), ProductKind::Control) => true,
+            | (crate::ProductRef::Control(_), ProductKind::Control)
+            | (crate::ProductRef::Time(_), ProductKind::Time) => true,
             _ => false,
         },
         (LpValue::Array(values), LpType::Array(item_ty, len)) => {

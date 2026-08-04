@@ -56,6 +56,7 @@ pub mod resources;
 pub mod server;
 pub mod slots;
 pub mod sync;
+pub mod time;
 
 #[cfg(feature = "schema-gen")]
 mod schema_gen_smoke;
@@ -130,7 +131,7 @@ pub use nodes::{
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
     ControlProduct, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind,
-    ProductRef, VisualProduct,
+    ProductRef, TimeProduct, VisualProduct,
 };
 pub use project::overlay::{
     ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
@@ -154,8 +155,8 @@ pub use slot::{
     ColorOrderSlot, ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32,
     PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder,
     RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
-    SlotValueShape, ToLpValue, U32List, U32ListSlot, ValueEditorHint, ValueRootError,
-    VisualProductSlot, Xy, XySlot,
+    SlotValueShape, TimeProductSlot, ToLpValue, U32List, U32ListSlot, ValueEditorHint,
+    ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,
@@ -182,4 +183,5 @@ pub use slot::{
     role_matches_direction, set_slot_option_none, set_slot_option_some_default, set_slot_value,
     set_slot_variant_default, slot_data_revision,
 };
+pub use time::{SECONDS_SHAPE_NAME, seconds_shape, static_seconds_shape};
 pub use value::value_path::ValuePath;
