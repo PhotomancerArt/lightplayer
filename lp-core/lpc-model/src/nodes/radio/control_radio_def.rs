@@ -1,6 +1,6 @@
 use crate::{BindingDefs, ControlMessage, HwEndpointSpec, MapSlot, Slotted, ValueSlot};
 
-pub const DEFAULT_CONTROL_RADIO_ENDPOINT_SPEC: &str = "radio:espnow:0";
+pub const DEFAULT_CONTROL_RADIO_ENDPOINT_SPEC: &str = "radio:local:0";
 pub const DEFAULT_CONTROL_RADIO_CHANNEL: u32 = 1;
 pub const DEFAULT_CONTROL_RADIO_REPEAT_COUNT: u32 = 3;
 pub const DEFAULT_CONTROL_RADIO_WIFI_CHANNEL: u32 = 0;
@@ -11,7 +11,7 @@ pub struct ControlRadioDef {
     /// Authored slot bindings for control radio input and output.
     pub bindings: BindingDefs,
 
-    /// Hardware endpoint spec, for example `radio:espnow:0`.
+    /// Hardware endpoint spec, for example `radio:local:0`.
     pub endpoint: ValueSlot<HwEndpointSpec>,
 
     /// Logical LightPlayer radio channel.

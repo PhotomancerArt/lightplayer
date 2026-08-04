@@ -1,0 +1,12 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {}
+}

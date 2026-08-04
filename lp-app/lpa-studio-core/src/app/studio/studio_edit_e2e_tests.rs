@@ -483,7 +483,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":3,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -606,7 +606,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":3,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -2115,7 +2115,7 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
     // P5, over the real wire: `OutputDef.test_pattern` is `SlotRole::Debug`,
     // and NOTHING output-specific exists in the UI layer — the same
     // role-keyed partition that gives the Clock its Debug section (P3) gives
-    // the output card one, with the toggle in it. `endpoint` stays a Setting.
+    // the output card one, with the toggle in it. Channel endpoints stay Settings.
     let server = Rc::new(RefCell::new(asset_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -2159,10 +2159,10 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
         "a Debug slot is writable — that is the whole point of the toggle"
     );
     assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
-    let endpoint = find_slot(&snapshot, "endpoint");
+    let endpoint = find_slot(&snapshot, "channels[0].endpoint");
     assert!(
         !endpoint.state.debug,
-        "the endpoint is authored config, not debug"
+        "a channel endpoint is authored config, not debug"
     );
 }
 
@@ -2362,12 +2362,16 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // provider accepts any authored endpoint.
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 3\n}\n";
+    let project_json = "{\n  \"format\": 4\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2446,7 +2450,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 3\n}\n"),
+        ("project.json", "{\n  \"format\": 4\n}\n"),
         (
             "module.json",
             r#"{

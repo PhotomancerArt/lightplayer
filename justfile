@@ -575,7 +575,7 @@ schema-check:
 format-bump:
     #!/usr/bin/env bash
     set -euo pipefail
-    const_file="lp-core/lpc-model/src/nodes/module/module_def.rs"
+    const_file="lp-core/lpc-model/src/project/manifest.rs"
     version=$(sed -n 's/^pub const PROJECT_FORMAT_VERSION: u32 = \([0-9][0-9]*\);.*$/\1/p' "$const_file")
     if [[ -z "$version" ]]; then
         echo "error: could not parse PROJECT_FORMAT_VERSION from $const_file" >&2
@@ -590,9 +590,14 @@ format-bump:
     mkdir -p "$dest/fixtures"
     cp schemas/*.schema.json "$dest/"
     cp -R schemas/shapes "$dest/shapes"
-    cp projects/test/fyeah-sign/project.json "$dest/fixtures/project.json"
-    cp projects/test/fyeah-sign/playlist.json "$dest/fixtures/playlist.json"
-    cp projects/test/fyeah-sign/blast.json "$dest/fixtures/blast.json"
+    # Fixture projects, one directory each. Keep at least one single-output
+    # project AND one multi-output project so a future upgrader is never
+    # exercised against a one-shape-only corpus.
+    for fixture_project in projects/test/fyeah-sign projects/test/quad-strips-v3; do
+        name=$(basename "$fixture_project")
+        mkdir -p "$dest/fixtures/$name"
+        cp "$fixture_project"/*.json "$dest/fixtures/$name/"
+    done
     echo
     echo "Snapshotted format v${version} into ${dest}/."
     echo

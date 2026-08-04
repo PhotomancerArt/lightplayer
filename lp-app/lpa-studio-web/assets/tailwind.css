@@ -221,6 +221,9 @@
   .tw\:mt-5 {
     margin-top: calc(var(--tw-spacing) * 5);
   }
+  .tw\:mr-1 {
+    margin-right: calc(var(--tw-spacing) * 1);
+  }
   .tw\:-mb-4 {
     margin-bottom: calc(var(--tw-spacing) * -4);
   }
@@ -391,6 +394,9 @@
   }
   .tw\:max-h-60 {
     max-height: calc(var(--tw-spacing) * 60);
+  }
+  .tw\:max-h-64 {
+    max-height: calc(var(--tw-spacing) * 64);
   }
   .tw\:max-h-72 {
     max-height: calc(var(--tw-spacing) * 72);

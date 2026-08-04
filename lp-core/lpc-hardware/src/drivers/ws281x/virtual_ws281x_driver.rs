@@ -117,7 +117,7 @@ impl VirtualWs281xDriver {
                 if !resource.supports(HwCapability::GpioOutput) {
                     continue;
                 }
-                if self.endpoint_id(&ws281x_rmt_spec(resource.display_label())) == *endpoint_id {
+                if self.endpoint_id(&ws281x_local_spec(resource.display_label())) == *endpoint_id {
                     return Ok(resource.address().clone());
                 }
             }
@@ -152,7 +152,7 @@ impl Ws281xDriver for VirtualWs281xDriver {
                 continue;
             }
             let address = resource.address().clone();
-            let spec = ws281x_rmt_spec(resource.display_label());
+            let spec = ws281x_local_spec(resource.display_label());
             endpoints.push(HwEndpoint::new(
                 self.endpoint_id(&spec),
                 spec,
@@ -294,7 +294,7 @@ fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
     }
 }
 
-fn ws281x_rmt_spec(config: &str) -> HwEndpointSpec {
-    HwEndpointSpec::parse(format!("ws281x:rmt:{config}"))
+fn ws281x_local_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(format!("ws281x:local:{config}"))
         .expect("manifest display label should form a valid endpoint spec")
 }

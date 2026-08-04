@@ -455,7 +455,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
@@ -549,7 +549,7 @@ impl Engine {
             let Ok(NodeDef::Output(def)) = loaded_registry_def(registry, location) else {
                 continue;
             };
-            services.update_output_sink_config(buffer_id, def);
+            services.update_output_sink_config(buffer_id, entry.id, def);
         }
     }
 

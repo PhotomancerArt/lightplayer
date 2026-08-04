@@ -77,7 +77,7 @@ impl ButtonDriver for VirtualButtonDriver {
                 continue;
             }
             let address = resource.address().clone();
-            let spec = button_gpio_spec(resource.display_label());
+            let spec = button_local_spec(resource.display_label());
             endpoints.push(HwEndpoint::new(
                 self.endpoint_id(&address),
                 spec,
@@ -112,8 +112,8 @@ impl ButtonDriver for VirtualButtonDriver {
     }
 }
 
-fn button_gpio_spec(config: &str) -> HwEndpointSpec {
-    HwEndpointSpec::parse(alloc::format!("button:gpio:{config}"))
+fn button_local_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(alloc::format!("button:local:{config}"))
         .expect("manifest display label should form a valid endpoint spec")
 }
 

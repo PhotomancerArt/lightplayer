@@ -11,10 +11,11 @@ use lpa_studio_core::{
     ProjectSlotRoot, SlotPath, UiAction, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
     UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor, UiAssetEditorKind,
     UiBindingEndpoint, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview, UiProductPreviewFrame,
-    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState, UiSlotSourceState,
-    UiSlotUnit, UiSlotValue, UiStatus,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts, UiOutputChannelRow,
+    UiOutputFace, UiOutputPin, UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
+    UiProducedProduct, UiProductPreview, UiProductPreviewFrame, UiProductTrackingState,
+    UiShaderFace, UiShaderUniform, UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue,
+    UiStatus,
 };
 
 use crate::app::node::node_story_fixtures::{
@@ -577,6 +578,148 @@ pub(crate) fn empty_playlist_node_view() -> UiNodeView {
     view
 }
 
+// -- output face ---------------------------------------------------------------
+
+/// The output card's node address — every channel edit address hangs off it.
+const OUTPUT_NODE_PATH: &str = "/fyeah_sign.show/strips.output";
+
+/// Story-only slot address on the output card, so the channel rows render
+/// wired (dispatch goes to the story's no-op handler).
+fn output_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse(OUTPUT_NODE_PATH).expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
+
+/// One wire as `node_face_builder` derives it: the endpoint verbatim, its
+/// pin label, and the two edit addresses. `count: None` is the remainder
+/// channel, which by the same rule as the builder carries NO count address
+/// (an absent option has nothing to write to until it is included).
+pub(crate) fn output_channel(key: u32, pin: &str, count: Option<u32>) -> UiOutputChannelRow {
+    UiOutputChannelRow {
+        key,
+        endpoint_display: format!("ws281x:local:{pin}"),
+        pin_label: pin.to_string(),
+        gpio: None,
+        count,
+        resolved_count: count,
+        slice_start: None,
+        endpoint_address: Some(output_slot_address(&format!("channels[{key}].endpoint"))),
+        count_address: count.map(|_| output_slot_address(&format!("channels[{key}].count.some"))),
+    }
+}
+
+/// Hand the channels their slice starts exactly the way the builder's
+/// `resolve_authored_slices` does: a count advances the cursor, and the
+/// count-less wire takes the remainder.
+fn resolve_story_slices(channels: &mut [UiOutputChannelRow]) {
+    let mut start = Some(0u32);
+    for channel in channels {
+        channel.slice_start = start;
+        match channel.count {
+            Some(count) => start = start.map(|start| start.saturating_add(count)),
+            None => start = None,
+        }
+    }
+}
+
+/// The board facts the decoration pass fills, derived from the real embedded
+/// display manifest so a story cannot drift from the catalog: every
+/// output-eligible pin, RAILS AND SCREW TERMINALS alike (the terminals list
+/// is separate and easy to drop), with each channel's claim marked.
+fn output_board_facts(board_id: &str, channels: &[UiOutputChannelRow]) -> UiOutputBoardFacts {
+    let board = lpa_boards::board_by_id(board_id).expect("board in the embedded catalog");
+    let pins = board
+        .pins()
+        .map(|pin| (&pin.label, pin.role, pin.gpio))
+        .chain(
+            board
+                .hw
+                .terminals
+                .iter()
+                .map(|terminal| (&terminal.label, terminal.role, terminal.gpio)),
+        )
+        .filter(|(_, role, _)| role.output_eligible())
+        .filter_map(|(label, _, gpio)| {
+            Some(UiOutputPin {
+                assigned_to: channels
+                    .iter()
+                    .find(|channel| channel.pin_label == *label)
+                    .map(|channel| channel.key),
+                label: label.clone(),
+                gpio: u32::from(gpio?),
+            })
+        })
+        .collect();
+    UiOutputBoardFacts {
+        board_id: board.board_id.clone(),
+        display_name: board.display_name.clone(),
+        pins,
+    }
+}
+
+/// A complete output face, assembled the way builder-then-decoration
+/// assembles one: slices from the authored counts, board facts and each
+/// wire's GPIO from the known board, and the incoming extent resolving the
+/// remainder wire.
+pub(crate) fn output_face(
+    board_id: Option<&str>,
+    mut channels: Vec<UiOutputChannelRow>,
+    total_lamps: Option<u32>,
+    span_boundaries: Vec<u32>,
+) -> UiOutputFace {
+    resolve_story_slices(&mut channels);
+    let board = board_id.map(|board_id| output_board_facts(board_id, &channels));
+    if let Some(board) = &board {
+        for channel in &mut channels {
+            channel.gpio = board
+                .pins
+                .iter()
+                .find(|pin| pin.label == channel.pin_label)
+                .map(|pin| pin.gpio);
+        }
+    }
+    let mut face = UiOutputFace {
+        channels,
+        channels_address: Some(output_slot_address("channels")),
+        input_binding: Some("bus:show.control".to_string()),
+        total_lamps: None,
+        span_boundaries,
+        board,
+    };
+    if let Some(total) = total_lamps {
+        face.resolve_extent(total);
+    }
+    face
+}
+
+/// Advanced-drawer sections for the output card — the same rows the face
+/// derives from, so the drawer stays the free-text fallback for anything the
+/// face does not offer (a pin no board declares, a hand-written endpoint).
+pub(crate) fn output_sections() -> Vec<UiNodeSection> {
+    vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value("input", "Input", UiSlotValue::string("Show control")).with_source(
+            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:show.control")),
+        ),
+        UiConfigSlot::value("options", "Options", UiSlotValue::string("GRB · gamma 2.2")),
+        UiConfigSlot::value("test_pattern", "Test pattern", UiSlotValue::string("off")),
+    ])]
+}
+
+/// A full output node card view with the face installed.
+pub(crate) fn output_node_view(face: UiOutputFace, summary: &str) -> UiNodeView {
+    let header = UiNodeHeader::new("Strips", "Output", OUTPUT_NODE_PATH)
+        .with_source("strips.json")
+        .with_status(UiStatus::good("Running"))
+        .with_summary(summary);
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(output_sections())])
+        .with_node_id("output-strips");
+    view.face = Some(UiNodeFace::Output(face));
+    view
+}
+
 /// The M5 face-editor fixture: the mapping asset's inline-editor plumbing
 /// with the document body pre-resolved (no fetch round-trip in stories).
 pub(crate) fn map2d_fixture_face_editing(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
@@ -597,4 +740,73 @@ pub(crate) fn map2d_fixture_face_editing(doc: &lpc_mapping::Map2dDoc) -> UiFixtu
         agent: None,
     });
     face
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{output_channel, output_face};
+
+    /// The output fixtures do real parsing (slot paths) and real catalog
+    /// lookups (`board_by_id`), both behind `expect`. Nothing else runs them
+    /// on the host — a story only fails in the capture browser — so this is
+    /// the guard that keeps a renamed board or a rejected path shape from
+    /// reaching CI as a blank baseline.
+    #[test]
+    fn the_output_fixtures_assemble_the_way_the_real_derivation_does() {
+        let face = output_face(
+            Some("domraem/dom-z-102"),
+            vec![
+                output_channel(0, "IO18", Some(280)),
+                output_channel(1, "IO2", None),
+            ],
+            Some(1500),
+            vec![0, 280],
+        );
+
+        assert_eq!(
+            face.channels[0].gpio,
+            Some(18),
+            "IO18 resolves on the desk board"
+        );
+        assert_eq!(face.channels[0].slice_start, Some(0));
+        assert_eq!(face.channels[1].slice_start, Some(280));
+        assert_eq!(
+            face.channels[1].resolved_count,
+            Some(1220),
+            "the count-less wire takes what is left of the 1500"
+        );
+        let board = face
+            .board
+            .as_ref()
+            .expect("the desk board is in the catalog");
+        assert!(!board.display_name.is_empty());
+        let assigned: Vec<(&str, Option<u32>)> = board
+            .pins
+            .iter()
+            .map(|pin| (pin.label.as_str(), pin.assigned_to))
+            .collect();
+        assert_eq!(
+            assigned,
+            [
+                ("IO13", None),
+                ("IO18", Some(0)),
+                ("IO16", None),
+                ("IO14", None),
+                ("IO2", Some(1)),
+            ]
+        );
+
+        // The other board a story draws: its LED outputs live in the separate
+        // terminals list, which a naive `pins()` walk drops entirely.
+        let dig_uno = output_face(
+            Some("quinled/dig-uno"),
+            vec![output_channel(0, "LED1", None)],
+            Some(241),
+            Vec::new(),
+        );
+        assert!(
+            dig_uno.channels[0].gpio.is_some(),
+            "LED1 is an eligible pin"
+        );
+    }
 }
