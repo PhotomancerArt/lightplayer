@@ -1129,6 +1129,9 @@
   .tw\:border-\[var\(--studio-color-border-strong\)\] {
     border-color: var(--studio-color-border-strong);
   }
+  .tw\:border-\[var\(--studio-status-attention-border\)\] {
+    border-color: var(--studio-status-attention-border);
+  }
   .tw\:border-\[var\(--studio-status-bound-border\)\] {
     border-color: var(--studio-status-bound-border);
   }
@@ -1238,6 +1241,12 @@
     background-color: var(--studio-color-accent);
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab,var(--studio-color-accent) 45%,var(--studio-color-surface-muted));
+    }
+  }
+  .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-status-attention-text\)_45\%\,var\(--studio-color-surface-muted\)\)\] {
+    background-color: var(--studio-status-attention-text);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab,var(--studio-status-attention-text) 45%,var(--studio-color-surface-muted));
     }
   }
   .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-status-bound-text\)_45\%\,var\(--studio-color-surface-muted\)\)\] {

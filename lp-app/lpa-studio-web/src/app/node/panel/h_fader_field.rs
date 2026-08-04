@@ -6,10 +6,9 @@
 //! grip (20 × 24, vertical gradient + center hairline) — a native range
 //! input stretched invisibly over the slot supplies the gesture surface
 //! while `.ux-hfader` in `style.css` draws the thumb. Accent fill normally,
-//! the violet bound family when the backing slot is bound; ENGAGED marks
-//! only the grip (amber ring) — the track keeps its family. Dispatches
-//! `SlotEditOp::SetValue` with `oninput` semantics (the actor coalesces the
-//! drag flood per address).
+//! the violet bound family when the backing slot is bound, amber when a
+//! panel writer holds the channel. Dispatches `SlotEditOp::SetValue` with
+//! `oninput` semantics (the actor coalesces the drag flood per address).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
@@ -63,8 +62,8 @@ pub fn HFaderField(
     let frac = knob_fraction(knob_snap(base, min, step), min, max);
     let input_class = fader_input_class(bound, engaged);
     let fill_style = fader_fill_style(frac);
-    let fill_class = fader_fill_class(&state, bound);
-    let slot_class = fader_slot_class(&state, bound);
+    let fill_class = fader_fill_class(&state, bound, engaged);
+    let slot_class = fader_slot_class(&state, bound, engaged);
     let step = step.map_or_else(|| "any".to_string(), |step| step.to_string());
     let invalid_title = state.invalid.clone().unwrap_or_default();
 
@@ -138,13 +137,20 @@ pub(crate) fn fader_input_class(bound: bool, engaged: bool) -> &'static str {
     }
 }
 
-/// The value fill's color class by status family: violet when bound, error
-/// when invalid, accent otherwise (green stays valid-only). Engaged does
-/// NOT recolor the fill — the grip's amber ring (`is-engaged`) and the
-/// reset glyph are the whole engaged treatment (GF gate: the track stays
-/// the same as the other controls; the orange highlights are plenty).
-pub(crate) fn fader_fill_class(state: &UiSlotFieldState, bound: bool) -> &'static str {
-    if bound {
+/// The value fill's color class by status family: amber when engaged (a
+/// panel writer holds the channel — the rail wears the capture), violet
+/// when bound, error when invalid, accent otherwise (green stays
+/// valid-only). STATIC classes on purpose: the colors used to ride a
+/// compound dynamic inline style and attribute diffing mangled it (the
+/// GF-gate track glitch); only the numeric width stays dynamic.
+pub(crate) fn fader_fill_class(
+    state: &UiSlotFieldState,
+    bound: bool,
+    engaged: bool,
+) -> &'static str {
+    if engaged {
+        "tw:bg-[color-mix(in_oklab,var(--studio-status-attention-text)_45%,var(--studio-color-surface-muted))]"
+    } else if bound {
         "tw:bg-[color-mix(in_oklab,var(--studio-status-bound-text)_45%,var(--studio-color-surface-muted))]"
     } else if state.invalid.is_some() {
         "tw:bg-[color-mix(in_oklab,var(--studio-status-error-text)_45%,var(--studio-color-surface-muted))]"
@@ -154,8 +160,14 @@ pub(crate) fn fader_fill_class(state: &UiSlotFieldState, bound: bool) -> &'stati
 }
 
 /// The slot's border-color class, same families as the fill.
-pub(crate) fn fader_slot_class(state: &UiSlotFieldState, bound: bool) -> &'static str {
-    if bound {
+pub(crate) fn fader_slot_class(
+    state: &UiSlotFieldState,
+    bound: bool,
+    engaged: bool,
+) -> &'static str {
+    if engaged {
+        "tw:border-[var(--studio-status-attention-border)]"
+    } else if bound {
         "tw:border-[var(--studio-status-bound-border)]"
     } else if state.invalid.is_some() {
         "tw:border-[var(--studio-status-error-border)]"
@@ -187,28 +199,28 @@ mod tests {
 
     #[test]
     fn bound_fader_wears_the_violet_family() {
-        let fill = fader_fill_class(&UiSlotFieldState::editable(), true);
+        let fill = fader_fill_class(&UiSlotFieldState::editable(), true, false);
         assert!(fill.contains("--studio-status-bound-text"));
-        let slot = fader_slot_class(&UiSlotFieldState::editable(), true);
+        let slot = fader_slot_class(&UiSlotFieldState::editable(), true, false);
         assert!(slot.contains("--studio-status-bound-border"));
         assert!(fader_input_class(true, false).contains("is-bound"));
         assert!(!fader_input_class(false, false).contains("is-bound"));
     }
 
     #[test]
-    fn engaged_keeps_the_track_family_and_marks_only_the_grip() {
-        // GF gate: engagement is the grip's amber ring + the reset glyph;
-        // the track keeps its status family (accent, or violet when the
-        // fader still follows a binding) instead of flooding pale amber.
-        let fill = fader_fill_class(&UiSlotFieldState::editable(), false);
-        assert!(fill.contains("--studio-color-accent"));
-        assert!(!fill.contains("attention"));
+    fn engaged_fader_wears_amber_over_the_bound_violet() {
+        // Same rule as the knob: a captured fader has stopped following its
+        // binding, so the engaged family wins (panel.md P-Q2) — and the
+        // amber rides a STATIC class, never a compound inline style.
+        let fill = fader_fill_class(&UiSlotFieldState::editable(), true, true);
+        assert!(fill.contains("--studio-status-attention-text"));
+        assert!(!fill.contains("bound"));
         assert!(fader_input_class(true, true).contains("is-engaged"));
     }
 
     #[test]
     fn invalid_fill_wears_the_error_family_when_unbound() {
         let state = UiSlotFieldState::editable().with_invalid("too bright");
-        assert!(fader_fill_class(&state, false).contains("--studio-status-error-text"));
+        assert!(fader_fill_class(&state, false, false).contains("--studio-status-error-text"));
     }
 }
