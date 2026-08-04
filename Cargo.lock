@@ -4071,7 +4071,6 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lpvm-native",
- "ser-write-json",
 ]
 
 [[package]]
