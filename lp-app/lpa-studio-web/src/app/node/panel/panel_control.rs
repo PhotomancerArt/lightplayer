@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiPanelControl as UiPanelControlData, UiPanelWidget, UiSlotAffordance,
+    UiAction, UiPanelControl as UiPanelControlData, UiPanelEmit, UiPanelWidget, UiSlotAffordance,
     UiSlotValueKind,
 };
 
@@ -178,11 +178,21 @@ fn PanelControlBody(
     } else {
         "authored value"
     };
+    // A phasor speed knob stores period_seconds but PRESENTS as speed (G2
+    // feedback — "phase period" was expert vocabulary): the readout is the
+    // reciprocal ("1/100 s") and the drag axis inverts so up = faster.
+    // PROVISIONAL display language pending the clock-face UX spike.
+    let phasor = matches!(control.emit, UiPanelEmit::PhasorPeriod { .. });
+    let shown_value = if phasor {
+        phasor_speed_display(control.shown_display())
+    } else {
+        control.shown_display().to_string()
+    };
     let readout = rsx! {
         // `relative` so the engaged clear hangs past the readout without
         // occupying layout — its appearance must not reflow the row (GV2).
         span { class: "tw:relative {READOUT_CLASS} {readout_class}",
-            span { title: readout_title, "{control.shown_display()}" }
+            span { title: readout_title, "{shown_value}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
             {clear}
         }
@@ -202,6 +212,7 @@ fn PanelControlBody(
                     step,
                     state: control.state.clone(),
                     bound,
+                    invert: phasor,
                     address: control.address.clone(),
                     panel_target: control.panel_target.clone(),
                     emit,
@@ -258,6 +269,21 @@ fn PanelControlBody(
             }
         }
     }
+}
+
+/// A period reading presented as speed: `"100"` → `"1/100"` (one cycle per
+/// 100 seconds — the unit suffix supplies the "s"). A frozen phasor
+/// (period 0) never cycles, which is a period of ∞. A reading that does not
+/// parse passes through untouched.
+fn phasor_speed_display(shown: &str) -> String {
+    let Ok(period) = shown.trim().parse::<f32>() else {
+        return shown.to_string();
+    };
+    if period <= 0.0 {
+        return "1/∞".to_string();
+    }
+    let trimmed = shown.trim().trim_end_matches(".0");
+    format!("1/{trimmed}")
 }
 
 /// The label visual shared by the trigger button and its top-layer copy:
@@ -486,6 +512,19 @@ mod tests {
         bound.live_value = None;
         assert_eq!(bound.live_numeric(), None);
         assert_eq!(bound.shown_display(), "1.6");
+    }
+
+    #[test]
+    fn phasor_readouts_present_the_period_as_a_reciprocal() {
+        use super::phasor_speed_display;
+        // "one cycle per N seconds" — the unit suffix supplies the "s".
+        assert_eq!(phasor_speed_display("100"), "1/100");
+        assert_eq!(phasor_speed_display("100.0"), "1/100");
+        assert_eq!(phasor_speed_display("2.5"), "1/2.5");
+        // Period 0 is the frozen sentinel: it never cycles.
+        assert_eq!(phasor_speed_display("0.0"), "1/∞");
+        // A non-numeric reading (product chip label, etc.) passes through.
+        assert_eq!(phasor_speed_display("Time product"), "Time product");
     }
 
     #[test]

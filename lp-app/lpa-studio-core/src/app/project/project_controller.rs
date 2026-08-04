@@ -3632,7 +3632,7 @@ impl ProjectController {
         binding_kind: lpc_model::Kind,
     ) -> Option<String> {
         match self.pending_panel_write(scope, channel) {
-            Some(value) => crate::app::project::format_live_scalar(value),
+            Some(value) => crate::app::project::format_live_panel_value(value),
             None => live_channel_value(graph, scope, channel, binding_kind),
         }
     }
@@ -5746,6 +5746,13 @@ fn live_channel_value(
                 .detail_label()
                 .to_string(),
         );
+    }
+    // A PhasorConfig on a config channel displays as its period: the value
+    // only moves when someone writes it (a knob, an authored writer), so the
+    // churn worry behind the instant exclusion does not apply, and the speed
+    // knob riding the channel needs the reading to track its own writes.
+    if let Some(period) = crate::app::project::phasor_config_period(value) {
+        return crate::app::project::format_live_scalar(&lpc_model::LpValue::F32(period));
     }
     let instant =
         binding_kind == lpc_model::Kind::Instant || channel.kind == Some(lpc_model::Kind::Instant);

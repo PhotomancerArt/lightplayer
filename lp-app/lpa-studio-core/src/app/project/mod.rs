@@ -82,7 +82,10 @@ pub use project_sync::{ProjectSync, UiTimebaseRead};
 pub use project_sync_phase::ProjectSyncPhase;
 pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;
-pub use project_value_format::{format_live_scalar, format_lp_value, format_slot_map_key};
+pub use project_value_format::{
+    format_live_panel_value, format_live_scalar, format_lp_value, format_slot_map_key,
+    phasor_config_period,
+};
 pub use slot::{
     PendingEdit, PendingEditOp, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot,
     SlotBindingFact, SlotBindingFactKind, SlotController, SlotControllerState, SlotEditOp,

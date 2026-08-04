@@ -305,6 +305,20 @@ fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
     else {
         return Vec::new();
     };
+    // One phasor on the def → the knob is just "Speed"; several need the
+    // uniform's name to tell them apart (G2 feedback: "phase period" was
+    // expert vocabulary). A def can also carry a plain VALUE uniform the
+    // author already labeled "Speed" (the pre-migration idiom) — the plain
+    // label yields to it rather than rendering two knobs with one name.
+    let lone_phasor = consumed
+        .fields
+        .iter()
+        .filter(|entry| uniform_kind(entry).as_deref() == Some(PHASOR_SLOT_KIND))
+        .count()
+        == 1
+        && !consumed.fields.iter().any(|entry| {
+            uniform_kind(entry).as_deref() != Some(PHASOR_SLOT_KIND) && uniform_speed_label(entry)
+        });
     consumed
         .fields
         .iter()
@@ -315,13 +329,25 @@ fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
             // it gets (settled D11 v1 — waveform and phase offset stay
             // card-face/def-editable, because a waveform is how ONE reader
             // shapes a possibly-shared phase).
-            Some(PHASOR_SLOT_KIND) => phasor_period_control(entry, &rows),
+            Some(PHASOR_SLOT_KIND) => phasor_period_control(entry, &rows, lone_phasor),
             // `seconds` is unbounded time. There is nothing to set: no
             // period, no range, no default. It gets no knob at all.
             Some(SECONDS_SLOT_KIND) => None,
             _ => shader_uniform_control(entry, &rows),
         })
         .collect()
+}
+
+/// Whether a uniform's display label is "Speed" (the pre-migration idiom a
+/// plain phasor label must not collide with).
+fn uniform_speed_label(entry: &UiConfigSlot) -> bool {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return false;
+    };
+    string_field(&record.fields, "label")
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| entry.label.clone())
+        .eq_ignore_ascii_case("speed")
 }
 
 /// The `kind` discriminant string on a uniform's record row
@@ -366,6 +392,7 @@ const PHASOR_PERIOD_MAX_SECONDS: f32 = 120.0;
 fn phasor_period_control(
     entry: &UiConfigSlot,
     top_rows: &[&UiConfigSlot],
+    lone_phasor: bool,
 ) -> Option<UiPanelControl> {
     let UiConfigSlotBody::Record(record) = &entry.body else {
         return None;
@@ -389,14 +416,22 @@ fn phasor_period_control(
     let min = option_f32_field(fields, "min").unwrap_or(0.0);
     let max = option_f32_field(fields, "max").unwrap_or(PHASOR_PERIOD_MAX_SECONDS);
     let mut control = UiPanelControl {
-        // The knob's LABEL says what it does, not what the uniform is
-        // called: "Phase" is the uniform, seconds-per-cycle is the control.
-        label: format!(
-            "{} period",
-            string_field(fields, "label")
-                .filter(|label| !label.is_empty())
-                .unwrap_or_else(|| entry.label.clone())
-        ),
+        // The knob's LABEL is plain vocabulary (G2 feedback): "Speed" when
+        // the def has one phasor; the uniform's name joins only to
+        // disambiguate several. The web layer renders the value as the
+        // reciprocal ("1/100 s") and flips the drag so up = faster —
+        // PROVISIONAL pending the clock-face UX spike; the slot itself
+        // still stores period_seconds.
+        label: if lone_phasor {
+            "Speed".to_string()
+        } else {
+            format!(
+                "{} speed",
+                string_field(fields, "label")
+                    .filter(|label| !label.is_empty())
+                    .unwrap_or_else(|| entry.label.clone())
+            )
+        },
         address: row_edit_address(config_row),
         widget: UiPanelWidget::Knob {
             min,
@@ -1856,7 +1891,10 @@ mod tests {
 
         assert_eq!(face.controls.len(), 1, "one control per phasor slot");
         let control = &face.controls[0];
-        assert_eq!(control.label, "Phase period");
+        assert_eq!(
+            control.label, "Speed",
+            "a lone phasor knob wears the plain label"
+        );
         assert_eq!(control.value.kind, UiSlotValueKind::F32(20.0));
         assert_eq!(
             control.unit.as_ref().map(|unit| unit.short.as_str()),
