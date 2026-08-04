@@ -61,6 +61,14 @@ pub fn KnobField(
     /// Violet bound treatment on the arc, pointer, and body ring.
     #[props(default = false)]
     bound: bool,
+    /// Inverted axis (phasor speed knobs): up/right DECREASES the stored
+    /// value, and the arc fills toward the left-hand minimum — the stored
+    /// number is a period (seconds) but the felt quantity is speed. The
+    /// value 0 is the frozen sentinel and renders at the far left (no
+    /// speed), not the far right. PROVISIONAL pending the clock-face UX
+    /// spike.
+    #[props(default = false)]
+    invert: bool,
     /// Amber ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Deliberately NOT the
     /// violet bound family — bound means "wired", engaged means "captured"
@@ -91,8 +99,17 @@ pub fn KnobField(
     // between 2 and 3, whichever off-grid value (a stale authored default, a
     // continuous bus reading) is behind it. Gestures still start from the raw
     // `value` so repeated arrow presses never stall on a rounding boundary.
-    let shown = knob_snap(base, min, step);
-    let frac = knob_fraction(shown, min, max);
+    // Drag-local echo: while a drag is live the knob renders the value under
+    // the hand, not the last snapshot — display truth catches up through the
+    // panel-write echo, but the geometry must never wait for it (G2: the
+    // knob read "stuck" while its writes landed).
+    let preview = use_signal(|| None::<f32>);
+    let shown = knob_snap(preview().unwrap_or(base), min, step);
+    let frac = if invert {
+        knob_inverted_fraction(shown, min, max)
+    } else {
+        knob_fraction(shown, min, max)
+    };
     let arc_len = frac * 100.0;
     let pointer_deg = knob_pointer_deg(frac);
     let stroke = knob_value_stroke(&state, bound, engaged, editable);
@@ -107,11 +124,15 @@ pub fn KnobField(
 
     let down_wiring = wired.clone();
     let move_wiring = wired.clone();
+    let up_wiring = wired.clone();
     let key_wiring = wired;
     let move_target = panel_target.clone();
+    let up_target = panel_target.clone();
     let key_target = panel_target;
     // Drag anchor: pointer y and value at pointerdown; None while idle.
     let mut drag = use_signal(|| None::<(f64, f32)>);
+    // Last dispatch timestamp (ms) for the drag throttle.
+    let last_sent = use_signal(|| 0.0_f64);
 
     rsx! {
         span {
@@ -126,8 +147,20 @@ pub fn KnobField(
                 let Some((address, handler)) = key_wiring.clone() else {
                     return;
                 };
-                let multiplier = if event.modifiers().shift() { 10.0 } else { 1.0 };
-                let Some(next) = knob_key_value(base, &event.key(), multiplier, min, max, step)
+                let mut multiplier = if event.modifiers().shift() { 10.0 } else { 1.0 };
+                // Inverted axis: arrows move the FELT quantity (up = faster
+                // = smaller stored value), and Home/End land on the felt
+                // extremes.
+                let mut key = event.key();
+                if invert {
+                    multiplier = -multiplier;
+                    key = match key {
+                        Key::Home => Key::End,
+                        Key::End => Key::Home,
+                        other => other,
+                    };
+                }
+                let Some(next) = knob_key_value(base, &key, multiplier, min, max, step)
                 else {
                     return;
                 };
@@ -142,28 +175,55 @@ pub fn KnobField(
                 drag.set(Some((event.data().client_coordinates().y, base)));
             },
             onpointermove: move |event| {
+                let mut preview = preview;
+                let mut last_sent = last_sent;
                 let Some((anchor_y, anchor_value)) = drag() else {
                     return;
                 };
                 if event.data().held_buttons().is_empty() {
                     // Missed release (no pointer capture): stop the drag.
                     drag.set(None);
+                    preview.set(None);
                     return;
                 }
                 let Some((address, handler)) = move_wiring.clone() else {
                     return;
                 };
+                let rise = anchor_y - event.data().client_coordinates().y;
                 let next = knob_drag_value(
                     anchor_value,
-                    anchor_y - event.data().client_coordinates().y,
+                    if invert { -rise } else { rise },
                     min,
                     max,
                     step,
                 );
+                preview.set(Some(next));
+                // Throttled dispatch (G2: an unthrottled flood kept the app
+                // in a verdict-chase probe loop for the whole drag). The
+                // knob geometry above follows every move; the write stream
+                // is capped, and pointerup flushes the final value.
+                let now = js_sys::Date::now();
+                if now - last_sent() < KNOB_DISPATCH_INTERVAL_MS {
+                    return;
+                }
+                last_sent.set(now);
                 handler.call(panel_or_slot_action(&move_target, address, emit.lp_value(next)));
             },
-            onpointerup: move |_| drag.set(None),
-            onpointercancel: move |_| drag.set(None),
+            onpointerup: move |_| {
+                let mut preview = preview;
+                drag.set(None);
+                // Flush the final position: the throttle may have swallowed
+                // the last few moves, and the release must land exactly.
+                if let (Some(next), Some((address, handler))) = (preview(), up_wiring.clone()) {
+                    handler.call(panel_or_slot_action(&up_target, address, emit.lp_value(next)));
+                }
+                preview.set(None);
+            },
+            onpointercancel: move |_| {
+                let mut preview = preview;
+                drag.set(None);
+                preview.set(None);
+            },
             svg {
                 class: "tw:block",
                 width: "46",
@@ -272,6 +332,21 @@ pub fn KnobField(
 ///-left start to the +135° bottom-right end. Shared by the track and value
 /// arcs; `pathLength=100` makes the dasharray a percentage.
 const KNOB_ARC_PATH: &str = "M10.56 37.44 A19 19 0 1 1 37.44 37.44";
+
+/// Minimum interval between drag dispatches (ms). The geometry previews
+/// every pointer move; only the write stream is throttled.
+const KNOB_DISPATCH_INTERVAL_MS: f64 = 50.0;
+
+/// Sweep fraction for an INVERTED knob: the felt quantity grows to the
+/// right while the stored value shrinks. The stored value 0 is the phasor
+/// frozen sentinel — no speed at all — and pins to the far left rather
+/// than inverting to the far right.
+pub(crate) fn knob_inverted_fraction(value: f32, min: f32, max: f32) -> f32 {
+    if value <= 0.0 {
+        return 0.0;
+    }
+    1.0 - knob_fraction(value, min, max)
+}
 
 /// The value's position in the knob's range, clamped to 0..=1. A degenerate
 /// range (max <= min) pins to 0 so the arc and pointer stay deterministic.
@@ -493,8 +568,8 @@ mod tests {
 
     use super::{
         TICK_INNER_RADIUS, TICK_OUTER_RADIUS, knob_arc_chunks, knob_drag_value, knob_fraction,
-        knob_key_step, knob_key_value, knob_pointer_deg, knob_snap, knob_tick_x, knob_tick_y,
-        knob_value_stroke,
+        knob_inverted_fraction, knob_key_step, knob_key_value, knob_pointer_deg, knob_snap,
+        knob_tick_x, knob_tick_y, knob_value_stroke,
     };
 
     #[test]
@@ -733,5 +808,15 @@ mod tests {
         let stroke = knob_value_stroke(&UiSlotFieldState::editable(), true, true, true);
         assert_eq!(stroke, "var(--studio-status-attention-text)");
         assert!(!stroke.contains("bound"));
+    }
+
+    #[test]
+    fn inverted_fraction_reads_speed_and_pins_frozen_left() {
+        // Stored period shrinks as the felt speed grows to the right.
+        assert_eq!(knob_inverted_fraction(120.0, 0.0, 120.0), 0.0);
+        assert_eq!(knob_inverted_fraction(30.0, 0.0, 120.0), 0.75);
+        // The frozen sentinel (period 0) is NO speed — far left, never the
+        // inverted far right a plain 1-frac would give it.
+        assert_eq!(knob_inverted_fraction(0.0, 0.0, 120.0), 0.0);
     }
 }

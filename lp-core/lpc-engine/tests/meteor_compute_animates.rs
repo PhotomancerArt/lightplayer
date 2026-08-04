@@ -1,6 +1,13 @@
 //! The checked-in meteor example must actually animate on the CPU (lpvm)
-//! tier: the sim compute shader integrates positions from `bus:time` into a
-//! persistent sentinel map, so they have to move across engine ticks.
+//! tier: the sim compute shader integrates positions from the scope's time
+//! product into a persistent sentinel map, so they have to move across
+//! engine ticks.
+//!
+//! Meteor is the sanctioned-integrator case of the TimeProduct migration: it
+//! computes `dt = time - prev_time`, so its `time` uniform stays **unbounded
+//! seconds** where every other animated example moved to a wrapped phasor. A
+//! phasor there would rewind `dt` once per cycle and stall the meteors, so
+//! the slot kind is pinned below alongside the movement assertion.
 //!
 //! Regression pin for the editor-sim "meteor frozen while the clock
 //! advances" defect: every wasm shader instance's vmctx sat at guest address
@@ -73,6 +80,27 @@ fn meteor0_pos_x(rt: &LoadedProjectRuntime) -> Option<f32> {
             _ => panic!("pos should be vec2, got {value:?}"),
         })
     })
+}
+
+/// The def half of the pin: meteor integrates a delta, so its timebase
+/// uniform must stay `seconds`. Reading the authored artifact (rather than
+/// the loaded node) is deliberate — this is a statement about the checked-in
+/// example, which is what a future sweep would be tempted to "finish".
+#[test]
+fn meteor_sim_keeps_an_unbounded_seconds_uniform() {
+    let def = std::fs::read_to_string(workspace_dir().join("examples/meteor/sim.json"))
+        .expect("read examples/meteor/sim.json");
+    let def: serde_json::Value = serde_json::from_str(&def).expect("parse sim.json");
+    let time = &def["consumed"]["time"];
+
+    assert_eq!(
+        time["kind"], "seconds",
+        "meteor/sim integrates dt; a phasor would rewind it every cycle"
+    );
+    assert!(
+        def["bindings"]["time"].is_null(),
+        "a seconds slot reads the scope's time product, it takes no binding"
+    );
 }
 
 #[test]

@@ -150,6 +150,19 @@ pub struct ParamUpsert {
     pub max: Option<f32>,
     pub step: Option<f32>,
     pub unit: Option<String>,
+    /// Slot kind wire tag (`"value"` | `"phasor"` | `"seconds"`); `None`
+    /// leaves the existing kind untouched (a brand-new record already
+    /// defaults to `"value"`).
+    pub kind: Option<String>,
+    /// Phasor shaping, valid only alongside `kind == Some("phasor")`: cycle
+    /// length in seconds (the period IS the speed control).
+    pub period_seconds: Option<f32>,
+    /// Phasor output shaping wire tag (`"ramp"` | `"sine"` | `"triangle"` |
+    /// `"square"`); valid only alongside `kind == Some("phasor")`.
+    pub waveform: Option<String>,
+    /// Added to the phasor's wrapped phase, then re-wrapped; valid only
+    /// alongside `kind == Some("phasor")`.
+    pub phase_offset: Option<f32>,
 }
 
 /// A host-side failure (project unavailable, write refused, ...). These are

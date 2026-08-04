@@ -693,7 +693,7 @@ fn boot_crash_loop_enters_safe_mode_and_recovers() {
 /// exhausts its fuel tank (`lpvm::DEFAULT_INVOCATION_FUEL` back-edges).
 const LOOPING_SHADER_GLSL: &str = "\
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float phase;
 vec4 render(vec2 pos) {
     float x = 0.0;
     while (true) {

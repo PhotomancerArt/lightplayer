@@ -23,7 +23,9 @@ use crate::app::module::{ModuleFace, ModulePanel, PanelGesture, panel_gesture_ac
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
-use super::{FixtureFace, NodeCardDrawers, NodeCardSection, OutputFace, PlaylistFace, ShaderFace};
+use super::{
+    ClockFace, FixtureFace, NodeCardDrawers, NodeCardSection, OutputFace, PlaylistFace, ShaderFace,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -119,6 +121,23 @@ pub fn NodeFaceBody(
                 },
                 UiNodeFace::Output(output) => rsx! {
                     OutputFace { face: output, on_action }
+                },
+                // The clock's phasor listing is a READ-ONLY debug surface
+                // (D10) — it keeps the ordinary drawers under it, since the
+                // clock's own controls (running, rate, scrub) live in the
+                // slot sections exactly as they always have.
+                UiNodeFace::Clock(clock) => rsx! {
+                    ClockFace { face: clock, on_action }
+                    NodeCardDrawers {
+                        node,
+                        sections,
+                        advanced_open: card_ui.advanced_open,
+                        debug_open: card_ui.debug_open,
+                        platform,
+                        pending_edits,
+                        dirty_tint,
+                        on_action,
+                    }
                 },
                 // The module face carries its own drawer
                 // (wiring), so it does NOT compose `NodeCardDrawers` — the

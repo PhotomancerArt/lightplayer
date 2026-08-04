@@ -39,7 +39,9 @@ pub fn compute_desc_from_model_def<'a>(
     for (name, slot) in &def.consumed_slots.entries {
         let ty = lps_type_for_slot_value(slot.value.value(), registry)?;
         match slot.kind.value() {
-            ShaderSlotKind::Value => {
+            // A phasor/seconds uniform IS an f32 uniform to the compiler; the
+            // host fills it from the timebase instead of from slot data.
+            ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
                 desc = desc.with_consumed(name.clone(), ty);
             }
             ShaderSlotKind::Map => {
@@ -67,7 +69,7 @@ pub fn compute_desc_from_model_def<'a>(
     for (name, slot) in &def.produced_slots.entries {
         let ty = lps_type_for_slot_value(slot.value.value(), registry)?;
         match slot.kind.value() {
-            ShaderSlotKind::Value => {
+            ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
                 desc = desc.with_produced(name.clone(), ty);
             }
             ShaderSlotKind::Map => {
@@ -263,6 +265,7 @@ void tick() {{
                 kind: ValueSlot::new(lpc_model::ShaderSlotKind::Value),
                 value: ValueSlot::new(lpc_model::ShaderValueShapeRef::builtin("f32")),
                 key: lpc_model::OptionSlot::none(),
+                phasor: lpc_model::OptionSlot::none(),
                 default: lpc_model::OptionSlot::none(),
                 min: lpc_model::OptionSlot::none(),
                 max: lpc_model::OptionSlot::none(),

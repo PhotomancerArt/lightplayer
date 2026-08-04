@@ -113,7 +113,7 @@ impl ProjectBuilder {
         ShaderBuilder {
             _texture_path: texture_path.clone(),
             glsl_source: String::from(
-                "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }",
+                "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float phase; vec4 render(vec2 pos) { return vec4(phase, 0.0, 0.0, 1.0); }",
             ),
             render_order: 0,
             visual_bus: String::from("visual.out"),
@@ -175,7 +175,7 @@ impl ProjectBuilder {
         self.texture().add(self)
     }
 
-    /// Add a shader node with defaults (time-based sawtooth shader)
+    /// Add a shader node with defaults (phasor-driven sawtooth shader)
     pub fn shader_basic(&mut self, texture_path: &LpPathBuf) -> LpPathBuf {
         self.shader(texture_path).add(self)
     }
@@ -464,14 +464,11 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
     )
 }
 
+/// The same `phase` phasor uniform the per-kind starter declares — kept in
+/// step with [`lpc_model::nodes::starter::starter_phase_consumed_slots`] so
+/// built projects and created projects teach one idiom.
 fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
-    let mut slots = VecMap::new();
-    slots.insert(
-        String::from("time"),
-        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None)
-            .with_default_bind(BindingRef::parse("bus:time").expect("bus:time endpoint")),
-    );
-    MapSlot::new(slots)
+    lpc_model::nodes::starter::starter_phase_consumed_slots()
 }
 
 fn fixture_binding_defs() -> BindingDefs {

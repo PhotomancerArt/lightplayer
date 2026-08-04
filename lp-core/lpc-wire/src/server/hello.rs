@@ -33,6 +33,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 10: the timebase probe — `ProjectProbeRequest::Timebase` /
+///   `ProjectProbeResult::Timebase` (`TimebaseProbeRequest`,
+///   `TimebaseProbeResult`, `WirePhasorRow`, `WirePhasorOrigin`), the
+///   read-only listing of the phasors riding a clock's time product. New
+///   enum variants on both probe enums: an old peer cannot decode a
+///   `timebase` probe frame, and an old server cannot answer one — which is
+///   what earns the bump, additive though the surface reads.
 /// - 9: panel-state auto-save reaches the wire —
 ///   `WireProjectCommand::PanelAutoSave` (the P11 toggle, beside
 ///   `PanelWrite`/`PanelClear`) and `ServerRuntimeStatus.panel_auto_save`,
@@ -79,7 +86,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 9;
+pub const WIRE_PROTO_VERSION: u32 = 10;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -96,6 +96,10 @@ mod tests {
                 0,
                 crate::ControlExtent::new(1, 12),
             ))),
+            LpValue::Product(crate::ProductRef::time(crate::TimeProduct::new(
+                crate::NodeId::new(4),
+                0,
+            ))),
         ] {
             let json = serde_json::to_string(&v).unwrap();
             let back: LpValue = serde_json::from_str(&json).unwrap();

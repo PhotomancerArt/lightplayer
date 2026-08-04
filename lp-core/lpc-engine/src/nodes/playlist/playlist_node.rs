@@ -136,7 +136,12 @@ impl NodeRuntime for PlaylistNode {
         _slot: &SlotPath,
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
-        let time = ctx.resolve_consumed_slot_value::<f32>(&SlotPath::parse("time").unwrap())?;
+        // `bus:time` carries the product handle; the schedule below works in
+        // effective seconds, so query it once per tick.
+        let product = ctx.resolve_consumed_slot_value::<lpc_model::TimeProduct>(
+            &SlotPath::parse("time").unwrap(),
+        )?;
+        let time = ctx.time_product_seconds(product)?;
         // Trigger detection always runs (it also advances the per-message
         // dedup state), but an explicit activate command wins a same-frame
         // race against a trigger message.

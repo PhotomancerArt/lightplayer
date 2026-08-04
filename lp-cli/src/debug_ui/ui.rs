@@ -331,6 +331,9 @@ fn render_product_probe(probe: &ProjectProbeResult) -> Option<&RenderProductProb
         ProjectProbeResult::RenderProduct(probe) => Some(probe),
         ProjectProbeResult::ControlProduct(_) => None,
         ProjectProbeResult::BindingGraph(_) => None,
+        // The timebase listing is the Studio clock face's debug surface; the
+        // CLI debug UI draws render products only.
+        ProjectProbeResult::Timebase(_) => None,
     }
 }
 

@@ -20,7 +20,9 @@ pub fn materialize_produced_slot(
     revision: Revision,
 ) -> Result<SlotData, ComputeMaterializeError> {
     match slot.kind.value() {
-        ShaderSlotKind::Value => {
+        // Timebase kinds declare a plain f32 uniform, so a produced one
+        // (meaningless, but authorable) materializes as one.
+        ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
             let value = lps_value_f32_to_model_value(value).map_err(|e| {
                 ComputeMaterializeError::Unsupported(format!(
                     "produced slot {slot_name:?} cannot convert value: {e}"

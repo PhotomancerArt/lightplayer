@@ -1,6 +1,7 @@
 // 0=heatmap, 1=rainbow, 2=fire, 3=cool, 4=warm (5s per palette, 1s lerp transition)
 
 const bool CYCLE_PALETTE = true;
+const float TAU = 6.28318530718;
 
 // Lygia heatmap: blue -> cyan -> green -> yellow -> red
 vec3 paletteHeatmap(float t) {
@@ -79,7 +80,12 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
 }
 
 layout(binding = 0) uniform vec2 outputSize;
+// Unbounded seconds: the noise field is advanced, not wrapped, so this one
+// term genuinely wants the clock rather than a cycle position.
 layout(binding = 1) uniform float time;
+layout(binding = 2) uniform float palettePhase01;
+layout(binding = 3) uniform float panPhase;
+layout(binding = 4) uniform float scalePhase;
 
 vec4 render(vec2 pos) {
     // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.
@@ -87,9 +93,10 @@ vec4 render(vec2 pos) {
     vec2 virtCoord = pos * REF_SIZE / outputSize;
 
     // Palette cycle: 5s per palette, 1s smooth transition to next.
-    // Keep palette index and blend phase derived from one timer so fixed-point
-    // boundary rounding cannot make them disagree at 25s loop points.
-    float palettePhase = mod(time, 25.0) * 0.2;
+    // Keep palette index and blend phase derived from one 25 s phasor so
+    // fixed-point boundary rounding cannot make them disagree at the loop
+    // point.
+    float palettePhase = palettePhase01 * 5.0;
     float palette = min(floor(palettePhase), 4.0);
     float cyclePhase = palettePhase - palette;
     float nextPalette = palette + 1.0;
@@ -98,11 +105,9 @@ vec4 render(vec2 pos) {
     }
     float blend = smoothstep(0.8, 1.0, cyclePhase);
 
-    float panSpeed = .3;
-    float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));
+    float pan = mix(1.0, 8.0, 0.5 * (sin(TAU * panPhase) + 1.0));
 
-    float scaleSpeed = .7;
-    float scale = mix(.04, .06, 0.5 * (sin(time * scaleSpeed) + 1.0));
+    float scale = mix(.04, .06, 0.5 * (sin(TAU * scalePhase) + 1.0));
 
     vec2 center = REF_SIZE * 0.5;
     vec2 dir = virtCoord - center;

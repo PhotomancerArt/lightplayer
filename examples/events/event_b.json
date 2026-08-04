@@ -4,19 +4,16 @@
   "bindings": {
     "events": {
       "target": "bus:trigger"
-    },
-    "time": {
-      "source": "bus:time"
     }
   },
   "float_mode": "fixed",
   "consumed": {
     "time": {
-      "kind": "value",
+      "kind": "seconds",
       "value": "f32",
       "default": 0,
-      "label": "",
-      "description": ""
+      "label": "Time",
+      "description": "Seconds from the scope's time product"
     }
   },
   "produced": {

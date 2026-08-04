@@ -73,7 +73,7 @@ mod tests {
     use lpfs::LpFsMemory;
 
     const MANIFEST: &[u8] = br#"{
-  "format": 4,
+  "format": 5,
   "name": "demo"
 }
 "#;
@@ -132,7 +132,7 @@ mod tests {
         fs.write_file(
             MANIFEST_PATH.as_path(),
             br#"{
-  "format": 4,
+  "format": 5,
   "uid": "garbage"
 }
 "#,

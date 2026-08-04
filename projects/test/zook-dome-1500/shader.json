@@ -9,13 +9,12 @@
   },
   "float_mode": "fixed",
   "consumed": {
-    "time": {
-      "kind": "value",
+    "phase": {
+      "kind": "phasor",
       "value": "f32",
-      "default": 0,
-      "label": "Time",
-      "description": "Project clock time in seconds",
-      "default_bind": "bus:time"
+      "phasor": { "period_seconds": 20.0, "waveform": "ramp", "phase_offset": 0.0 },
+      "label": "Phase",
+      "description": "Base chase phase; bands ride integer harmonics of it"
     }
   }
 }

@@ -19,7 +19,7 @@
       {
         "name": "node.2.state",
         "shape": 3175756068,
-        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":102,"value":3.333},{"kind":"value","changed_at":102,"value":0.032999992}]}
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":102,"value":{"kind":"time","node":2,"output":0}},{"kind":"value","changed_at":102,"value":3.333},{"kind":"value","changed_at":102,"value":0.032999992}]}
       }
     ]
   }

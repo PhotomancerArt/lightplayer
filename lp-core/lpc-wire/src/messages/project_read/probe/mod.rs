@@ -4,6 +4,7 @@ mod binding_graph_probe;
 mod control_product_probe;
 mod project_probe;
 mod render_product_probe;
+mod timebase_probe;
 
 pub use binding_graph_probe::{
     BindingGraphProbeRequest, BindingGraphProbeResult, WireBindingDirection, WireBindingEndpoint,
@@ -17,4 +18,7 @@ pub use control_product_probe::{
 pub use project_probe::{ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader};
 pub use render_product_probe::{
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
+};
+pub use timebase_probe::{
+    TimebaseProbeRequest, TimebaseProbeResult, WirePhasorOrigin, WirePhasorRow,
 };
