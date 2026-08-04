@@ -210,16 +210,22 @@
   .verdictcard .at { font-size: 12.5px; font-weight: 700; color: var(--strong); }
   .verdictcard .ad { font-size: 11px; color: var(--subtle); }
 
-  .boardrow { display: flex; flex-direction: column; gap: 6px; }
-  .bcard { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
-    padding: 7px 9px; display: flex; flex-direction: row; gap: 9px; align-items: center; text-align: left; width: 100%; }
+  /* board picker — the EXISTING setup-form UX: thumbnail tiles, name below
+     (story: studio__roster__roster-card__setup-board-picker-*) */
+  .pickerlbl { font-size: 12.5px; font-weight: 700; color: var(--strong); margin-bottom: 8px; }
+  .boardrow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bcard { background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+    padding: 9px 5px 7px; display: flex; flex-direction: column; gap: 6px; align-items: center;
+    text-align: center; width: 90px; }
   .bcard:hover { border-color: var(--border-strong); }
   .bcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
-  .bcard svg { flex: none; width: 44px; height: 28px; }
-  .bcard .bmid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .bcard .bn { font-size: 11px; font-weight: 700; color: var(--strong); line-height: 1.25; }
-  .bcard .bio { font: 500 8.5px/1.3 var(--mono); color: var(--dim); }
+  .bcard svg { width: 54px; height: 34px; }
+  .bcard .bn { font-size: 9.5px; font-weight: 600; color: var(--muted); line-height: 1.25; }
+  .bcard[aria-pressed=true] .bn { color: var(--strong); }
   .bcard.generic svg { opacity: .45; }
+  .pickedbio { font: 500 10px/1.4 var(--mono); color: var(--dim); margin-top: 7px; }
+  .pickedbio b { color: var(--subtle); font-family: var(--sans); }
+  .fullbtn { width: 100%; text-align: center; justify-content: center; display: flex; }
   .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 8.5px; font-weight: 800;
     letter-spacing: .08em; text-transform: uppercase; border-radius: 999px; padding: 1.5px 7px; }
   .badge.detected { color: var(--live-text); background: var(--live-bg); border: 1px solid var(--live-border); }
@@ -428,7 +434,6 @@
     <button class="chip warnc" data-inj="alreadylp">runs LightPlayer</button>
     <button class="chip warnc" data-inj="unresponsive">unresponsive</button>
     <button class="chip warnc" data-inj="flashfail">flash fails @42%</button>
-    <button class="chip warnc" data-inj="zeroproj">zero projects</button>
   </span>
 </div>
 
@@ -450,11 +455,11 @@
   <h4>Derivation (flow-spec F3 — proposal to ratify)</h4>
   <table class="ntable">
     <tr><th>Situation</th><th>Default device name</th></tr>
-    <tr><td>Loaded an existing project</td>
-      <td><b>project's human name, titlecased</b> — <span class="mono">porch-sign</span> → <b>Porch sign</b></td></tr>
-    <tr><td>New generated project</td>
+    <tr><td>New generated project (the only provision path for now)</td>
       <td><b>&lt;board short&gt; · &lt;Mon D&gt;</b> — <b>C6 DevKit · Aug 4</b></td></tr>
-    <tr><td>Name collision</td><td>numeric suffix — <b>Porch sign 2</b></td></tr>
+    <tr><td>Name collision</td><td>numeric suffix — <b>C6 DevKit · Aug 4 2</b></td></tr>
+    <tr><td><i>(future, with load-existing)</i></td>
+      <td><i>project's human name, titlecased — <span class="mono">porch-sign</span> → Porch sign</i></td></tr>
   </table>
   <span class="fieldlbl">Device name</span>
   <input type="text" value="Porch sign">
@@ -577,19 +582,14 @@ const BOARDS = [
 ];
 const boardById = id => BOARDS.find(b => b.id === id);
 const DETECTED_CHIP = "ESP32-C6";
-const PROJECTS = [
-  { name: "2026-07-02-0930-porch-sign",   human: "Porch sign",   target: "c6",  grad: "linear-gradient(90deg,#3f2114,#a34b1e,#f0b97a)" },
-  { name: "2026-07-04-1102-evening-glow", human: "Evening glow", target: null,  grad: "linear-gradient(90deg,#14323f,#1d5c50,#7be0b2)" },
-  { name: "dome-mapper-test",             human: "Dome mapper test", target: "s3", grad: "linear-gradient(90deg,#0e2438,#2d5f8a,#9cc8ee)" },
-];
 const state = { path: "hw", inject: "none" };
 
 /* ===================== the state machine (flow-spec F2) ===================== */
 const wiz = {
   open: true, path: "hw",
-  st: "intro",            // intro|picking|driverhelp|probing|probefail|boardpick|wled|alreadylp|
+  st: "intro",            // intro|picking|boardfirst|probing|probefail|boardpick|wled|alreadylp|
                           // flashing|provision|done  ·  sim: simboard|provision|done
-  cancelCount: 0, board: null, content: null, loadPick: null,
+  cancelCount: 0, board: null,
   flashPct: 0, flashFailed: false, failCount: 0, flashTimer: null, probeTimer: null,
   name: "", nameTouched: false, adopted: false, abandoned: false,
 };
@@ -597,14 +597,14 @@ const wiz = {
 function resetWizard() {
   clearInterval(wiz.flashTimer); clearTimeout(wiz.probeTimer);
   Object.assign(wiz, { open: true, path: state.path, st: state.path === "hw" ? "intro" : "simboard",
-    cancelCount: 0, board: null, content: null, loadPick: null,
+    cancelCount: 0, board: null,
     flashPct: 0, flashFailed: false, failCount: 0,
     name: "", nameTouched: false, adopted: false, abandoned: false });
   renderWizard();
 }
 
 /* steps rail: which big step is a state in? */
-const RAIL_HW = [["Connect", ["intro","picking","driverhelp"]],
+const RAIL_HW = [["Connect", ["intro","picking","boardfirst"]],
                  ["Flash", ["probing","probefail","boardpick","wled","alreadylp","flashing"]],
                  ["Project", ["provision"]],
                  ["Done", ["done"]]];
@@ -612,8 +612,6 @@ const RAIL_SIM = [["Board", ["simboard"]], ["Project", ["provision"]], ["Done", 
 
 function derivedName() {
   if (wiz.nameTouched) return wiz.name;
-  if (wiz.content === "load" && wiz.loadPick)
-    return PROJECTS.find(p => p.name === wiz.loadPick).human;
   const b = boardById(wiz.board || "c6");
   return (b.short || b.name) + " · Aug 4";
 }
@@ -656,23 +654,19 @@ function renderWizard() {
     body.innerHTML = `
       <div class="introwrap">
         <span class="big-t">Connect your device now</span>
-        <span class="big-d">Plug the board into this computer over USB. When the light on the
-          board is on, press the button and pick its port.</span>
-        <div class="cablewait"><svg width="22" height="22" viewBox="0 0 24 24"><use href="#i-usb"/></svg>
-          waiting for you — nothing happens until you press the button</div>
+        <span class="big-d">Plug the board into this computer over USB, then pick its port.</span>
         ${wiz.cancelCount === 1 ? `<span class="hintline">Picker closed without a pick — no rush,
           press it again when the board's plugged in.</span>` : ""}
-        ${wiz.cancelCount >= 2 || state.inject === "noport" && wiz.cancelCount >= 1 ? `
+        ${wiz.cancelCount >= 2 || (state.inject === "noport" && wiz.cancelCount >= 1) ? `
           <span class="hintline warned">Don't see your board in the list? Some boards need a
-          driver before the port shows up. <span class="lnk" id="drvlink">Pick your board and
-          we'll help you set it up →</span></span>`
-        : `<span class="hintline">Don't see it? Some boards need drivers —
-          <span class="lnk" id="drvlink">driver help</span>.</span>`}
+          driver before the port shows up — start from the board instead.</span>` : ""}
+        <button class="abtn primary big fullbtn" id="connectbtn">It's connected →</button>
+        <button class="abtn fullbtn" id="boardfirstbtn">Pick my board first</button>
+        <span class="hintline">Know the board already? Start there — drivers, setup help, and
+          (soon) networked boards.</span>
       </div>`;
-    foot.innerHTML = `<span class="spacer"></span>
-      <button class="abtn primary big" id="connectbtn">It's connected →</button>`;
     document.getElementById("connectbtn").onclick = () => { wiz.st = "picking"; renderWizard(); };
-    document.getElementById("drvlink").onclick = () => { wiz.st = "driverhelp"; renderWizard(); };
+    document.getElementById("boardfirstbtn").onclick = () => { wiz.st = "boardfirst"; renderWizard(); };
   }
 
   /* ---------- CONNECT: browser port picker (mock) ---------- */
@@ -708,16 +702,17 @@ function renderWizard() {
     };
   }
 
-  /* ---------- CONNECT: driver help ---------- */
-  if (wiz.st === "driverhelp") {
+  /* ---------- CONNECT: board-first (absorbs driver help; later: networked boards) ---------- */
+  if (wiz.st === "boardfirst") {
     body.innerHTML = `
       <div class="drvgrid">
-        <span style="font-size:12.5px; color:var(--muted)">Which board do you have? We'll get its
-          port showing up.</span>
-        <div class="boardrow">${BOARDS.filter(b => !b.q).map(b => `
-          <button class="bcard" data-drvboard="${b.id}" aria-pressed="${wiz.board === b.id}">
-            <svg viewBox="0 0 64 40"><use href="#b-generic"/></svg>
-            <span class="bmid"><span class="bn">${b.name}</span></span></button>`).join("")}
+        <div>
+          <div class="pickerlbl">Select your board</div>
+          <div class="boardrow">${BOARDS.filter(b => !b.q).map(b => `
+            <button class="bcard" data-drvboard="${b.id}" aria-pressed="${wiz.board === b.id}">
+              <svg viewBox="0 0 64 40"><use href="#b-generic"/></svg>
+              <span class="bn">${b.name}</span></button>`).join("")}
+          </div>
         </div>
         ${wiz.board ? `<div class="drvsteps">
           <b>${boardById(wiz.board).name} on macOS</b>
@@ -726,19 +721,18 @@ function renderWizard() {
               without the WCH driver.</span>
             <span>1 · Download the WCH CH34x driver &nbsp;<span class="mono">wch-ic.com/downloads</span></span>
             <span>2 · Install, then approve it in System Settings › Privacy &amp; Security</span>
-            <span>3 · Replug the board, come back, press retry</span>`
-          : `<span>This board's USB-serial is native — no driver needed on macOS. If it's not
-              showing: try another cable (charge-only cables are silent killers), another port,
-              and make sure the board's power light is on.</span>`}
+            <span>3 · Replug the board, then pick the port below</span>`
+          : `<span>USB-serial is native on this board — no driver needed. Not showing up? Try
+              another cable (charge-only cables are silent killers) or another port.</span>`}
         </div>` : ""}
+        ${wiz.board ? `<button class="abtn primary big fullbtn" id="retryport">It's plugged in — pick the port →</button>` : ""}
       </div>`;
     body.querySelectorAll("[data-drvboard]").forEach(el =>
       el.onclick = () => { wiz.board = el.dataset.drvboard; renderWizard(); });
-    foot.innerHTML = `
-      <button class="abtn ghost" id="wback">← Back</button><span class="spacer"></span>
-      <button class="abtn primary" id="retryport">Driver's in — pick the port →</button>`;
+    foot.innerHTML = `<button class="abtn ghost" id="wback">← Back</button>`;
     document.getElementById("wback").onclick = () => { wiz.st = "intro"; renderWizard(); };
-    document.getElementById("retryport").onclick = () => { wiz.st = "picking"; renderWizard(); };
+    const rp = document.getElementById("retryport");
+    if (rp) rp.onclick = () => { wiz.st = "picking"; renderWizard(); };
   }
 
   /* ---------- FLASH: probing ---------- */
@@ -756,7 +750,7 @@ function renderWizard() {
           <button class="abtn ghost" id="todrv">Driver help</button>
         </div>
         <div class="ehint">Try: hold BOOT while plugging in (puts the chip in download mode) ·
-          another cable · another port. If it keeps happening, the driver-help path knows
+          another cable · another port. If it keeps happening, the board-first path knows
           board-specific tricks.</div></div>`;
     document.getElementById("probeagain").onclick = () => {
       wiz.st = "probing"; renderWizard();
@@ -766,7 +760,7 @@ function renderWizard() {
         renderWizard();
       }, 900);
     };
-    document.getElementById("todrv").onclick = () => { wiz.st = "driverhelp"; renderWizard(); };
+    document.getElementById("todrv").onclick = () => { wiz.st = "boardfirst"; renderWizard(); };
   }
 
   /* ---------- FLASH: WLED found ---------- */
@@ -808,28 +802,28 @@ function renderWizard() {
     document.getElementById("freshsetup").onclick = () => { wiz.st = "boardpick"; wiz.board = "c6"; renderWizard(); };
   }
 
-  /* ---------- FLASH: board pick + flash CTA ---------- */
+  /* ---------- FLASH: board pick (existing setup-form UX) + flash CTA ---------- */
   if (wiz.st === "boardpick") {
-    const noprobe = false;
     const list = BOARDS.filter(b => b.q || b.chip === DETECTED_CHIP);
+    const sel = wiz.board ? boardById(wiz.board) : null;
     body.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:11px">
-        <span style="font-size:12.5px; color:var(--muted)">Blank board, chip
-          <b style="color:var(--strong)">${DETECTED_CHIP}</b> — which board is it?</span>
+      <div style="display:flex; flex-direction:column; gap:4px">
+        <div class="pickerlbl">Select your board</div>
+        <span style="font-size:10.5px; color:var(--dim); margin:-6px 0 8px">blank board · chip
+          <b style="color:var(--subtle)">${DETECTED_CHIP}</b> detected — showing matches</span>
         <div class="boardrow">${list.map(b => `
           <button class="bcard ${b.q ? "generic" : ""}" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
             <svg viewBox="0 0 64 40"><use href="${b.q ? "#b-q" : "#b-generic"}"/></svg>
-            <span class="bmid"><span class="bn">${b.name}</span>
-              ${b.q ? `<span class="bio">any ESP32-family</span>`
-                : `<span class="bio">${b.chip} · ${b.wires} wire${b.wires > 1 ? "s" : ""} · ${b.pin}</span>`}</span>
-            ${!b.q ? `<span class="badge detected">chip ✓</span>` : ""}
+            <span class="bn">${b.name}</span>
           </button>`).join("")}
         </div>
+        ${sel && !sel.q ? `<div class="pickedbio"><b>${sel.name}</b> — ${sel.chip} ·
+          ${sel.wires} LED wire${sel.wires > 1 ? "s" : ""} · default ${sel.pin}</div>` : ""}
       </div>`;
     body.querySelectorAll("[data-board]").forEach(el =>
       el.onclick = () => { wiz.board = el.dataset.board; renderWizard(); });
-    foot.innerHTML = `<span class="spacer"></span>
-      <button class="abtn primary big" id="flashgo" ${wiz.board ? "" : "disabled"}>⚡ Flash LightPlayer →</button>`;
+    foot.innerHTML = `
+      <button class="abtn primary big fullbtn" id="flashgo" ${wiz.board ? "" : "disabled"}>⚡ Flash LightPlayer →</button>`;
     document.getElementById("flashgo").onclick = () => {
       wiz.st = "flashing"; wiz.flashPct = 0; wiz.flashFailed = false; runFlash(); renderWizard(); };
   }
@@ -878,88 +872,55 @@ function renderWizard() {
     fillFlashLog();
   }
 
-  /* ---------- SIM: board pick ---------- */
+  /* ---------- SIM: board pick (existing setup-form UX) ---------- */
   if (wiz.st === "simboard") {
+    const sel = wiz.board ? boardById(wiz.board) : null;
     body.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:11px">
-        <span style="font-size:12.5px; color:var(--muted)">The simulator takes on a board — pins,
-          wires, and limits follow it, so what works here works when you flash the real one.</span>
+      <div style="display:flex; flex-direction:column; gap:4px">
+        <div class="pickerlbl">Select your board</div>
+        <span style="font-size:10.5px; color:var(--dim); margin:-6px 0 8px">the sim takes on the
+          board — pins, wires, and limits follow it</span>
         <div class="boardrow">${BOARDS.filter(b => !b.q).map(b => `
           <button class="bcard" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
             <svg viewBox="0 0 64 40"><use href="#b-generic"/></svg>
-            <span class="bmid"><span class="bn">${b.name}</span>
-              <span class="bio">${b.chip} · ${b.wires} wire${b.wires > 1 ? "s" : ""} · ${b.pin}</span></span>
+            <span class="bn">${b.name}</span>
           </button>`).join("")}
         </div>
+        ${sel ? `<div class="pickedbio"><b>${sel.name}</b> — ${sel.chip} ·
+          ${sel.wires} LED wire${sel.wires > 1 ? "s" : ""} · default ${sel.pin}</div>` : ""}
       </div>`;
     body.querySelectorAll("[data-board]").forEach(el =>
       el.onclick = () => { wiz.board = el.dataset.board; renderWizard(); });
-    foot.innerHTML = `<span class="spacer"></span>
-      <button class="abtn primary" id="wnext" ${wiz.board ? "" : "disabled"}>
-        Continue as ${wiz.board ? boardById(wiz.board).name : "…"} →</button>`;
+    foot.innerHTML = `
+      <button class="abtn primary big fullbtn" id="wnext" ${wiz.board ? "" : "disabled"}>Continue →</button>`;
     document.getElementById("wnext").onclick = () => { wiz.st = "provision"; renderWizard(); };
   }
 
-  /* ---------- PROVISION (shared) ---------- */
+  /* ---------- PROVISION: new project only (load-existing = future work) ---------- */
   if (wiz.st === "provision") {
     const b = boardById(wiz.board || "c6");
-    const zero = state.inject === "zeroproj";
-    if (wiz.content === null) wiz.content = "new";
-    const pick = wiz.loadPick ? PROJECTS.find(p => p.name === wiz.loadPick) : null;
-    const mismatch = pick && pick.target && pick.target !== wiz.board;
     body.innerHTML = `
-      <div class="contentsplit">
-        <div class="choicebox ${wiz.content === "new" ? "picked" : ""}" id="ch-new">
-          <h4>New — made for the ${b.name}<small>recommended</small></h4>
+      <div style="display:flex; flex-direction:column; gap:10px">
+        <div class="choicebox picked">
+          <h4>Your first project<small>made for the ${b.name}</small></h4>
           <div class="compactgen">meteor <span class="arr">→</span> 256-px strip <span class="arr">→</span> ${b.pin}
             <span class="inf" title="Also: a clock, a one-entry playlist, and target: recorded on the project (advisory — the engine never reads it).">ⓘ what's inside</span></div>
+          <span style="font-size:10.5px; color:var(--dim)">Add, swap, and remix effects in the
+            editor — this just gets pixels moving.</span>
         </div>
-        <div class="choicebox ${wiz.content === "load" ? "picked" : ""}" id="ch-load">
-          <h4>Load one of yours</h4>
-          ${zero ? `<div class="emptybox">No projects yet — <b>New</b> is the way in.<br>
-              Everything you make lands in your library for next time.</div>`
-            : `<div class="projlist">${PROJECTS.map(p => `
-              <button class="prow" data-load="${p.name}" aria-pressed="${wiz.loadPick === p.name}">
-                <span class="sw" style="background:${p.grad}"></span><span class="pn">${p.name}</span>
-                ${p.target ? (p.target === wiz.board
-                  ? `<span class="badge forboard">for ${boardById(p.target).chip}</span>`
-                  : `<span class="badge warnb">for ${boardById(p.target).chip}</span>`)
-                  : `<span class="badge forboard">no target</span>`}
-              </button>`).join("")}</div>`}
-          ${mismatch ? `
-            <div class="warnbox"><b>${pick.name}</b> targets the
-              <b>${boardById(pick.target).name}</b> — it may not light up as wired here.
-              <div class="eactions">
-                <button class="abtn warn" id="loadanyway">Load anyway</button>
-                <button class="abtn primary" id="newinstead">New for this board instead</button>
-              </div></div>` : ""}
-        </div>
-      </div>
-      ${wiz.path === "hw" ? `
-        <div class="namefield">
-          <span class="fieldlbl">Device name</span>
-          <input type="text" id="devname" value="${derivedName()}">
-          <span class="der">derived from ${wiz.content === "load" && wiz.loadPick ? "the project you picked" : "board + date"} —
-            <b>edit only if you feel like it</b></span>
-        </div>` : ""}`;
-    document.getElementById("ch-new").onclick = e => {
-      if (e.target.closest(".prow,.abtn")) return;
-      wiz.content = "new"; wiz.loadPick = null; renderWizard();
-    };
-    body.querySelectorAll("[data-load]").forEach(el => el.onclick = () => {
-      wiz.content = "load"; wiz.loadPick = el.dataset.load; renderWizard();
-    });
-    if (mismatch) {
-      document.getElementById("loadanyway").onclick = () => { wiz.st = "done"; renderWizard(); };
-      document.getElementById("newinstead").onclick = () => { wiz.content = "new"; wiz.loadPick = null; renderWizard(); };
-    }
+        ${wiz.path === "hw" ? `
+          <div class="namefield">
+            <span class="fieldlbl">Device name</span>
+            <input type="text" id="devname" value="${derivedName()}">
+            <span class="der">derived from board + date — <b>edit only if you feel like it</b></span>
+          </div>` : ""}
+      </div>`;
     const nameEl = document.getElementById("devname");
     if (nameEl) nameEl.oninput = () => { wiz.name = nameEl.value; wiz.nameTouched = true; };
-    const ready = wiz.content === "new" || (wiz.content === "load" && wiz.loadPick && !mismatch);
     foot.innerHTML = `
       ${wiz.path === "sim" ? `<button class="abtn ghost" id="wback">← Board</button>` : ""}
       <span class="spacer"></span>
-      <button class="abtn primary big" id="wnext" ${ready ? "" : "disabled"}>
+      <button class="abtn primary big" id="wnext">
         ${wiz.path === "hw" ? "Run it →" : "Start the simulator →"}</button>`;
     const back = document.getElementById("wback");
     if (back) back.onclick = () => { wiz.st = "simboard"; renderWizard(); };
@@ -976,7 +937,7 @@ function renderWizard() {
             wiz.path === "hw" ? "It's glowing." : "The simulator is running."}</span>
         <span style="font-size:12px; color:var(--muted)">
           ${wiz.adopted ? "Luna's porch sign · 2026-07-02-0930-porch-sign"
-            : (wiz.content === "load" ? wiz.loadPick : "2026-08-04-1347-esp32-c6") + " · " +
+            : "2026-08-04-1347-esp32-c6 · " +
               (wiz.path === "hw" ? `<b>${derivedName()}</b>` : `Simulator (as ${b.name})`) +
               ` · ws281x local:${b.pin}`}</span>
         <div class="glowstrip"></div>
@@ -1051,7 +1012,7 @@ document.getElementById("wizclose").onclick = () => {
 function finishToHome() {
   const name = wiz.adopted ? "Luna's porch sign" : wiz.path === "hw" ? derivedName() : "Simulator";
   const proj = wiz.adopted ? "2026-07-02-0930-porch-sign"
-    : wiz.content === "load" ? wiz.loadPick : "2026-08-04-1347-esp32-c6";
+    : "2026-08-04-1347-esp32-c6";
   document.getElementById("edpanename").innerHTML =
     `${name}<span class="tp">${wiz.path === "hw" ? "USB" : "SIM"}</span>`;
   document.getElementById("edpane").classList.toggle("simp", wiz.path === "sim");
@@ -1092,7 +1053,6 @@ resetWizard();
       wiz.flashFailed = h.get("inj") === "flashfail";
       if (wiz.flashFailed) wiz.failCount = parseInt(h.get("fails") || "1");
     }
-    if (wiz.st === "provision" && h.get("load")) { wiz.content = "load"; wiz.loadPick = h.get("load"); }
     if (wiz.st === "intro" && h.get("cancels")) wiz.cancelCount = parseInt(h.get("cancels"));
     renderWizard();
   }
