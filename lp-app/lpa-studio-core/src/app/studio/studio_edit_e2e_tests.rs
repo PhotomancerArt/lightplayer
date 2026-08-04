@@ -30,7 +30,8 @@ use lpfs::LpFsMemory;
 use crate::{
     ControllerId, ProjectController, ProjectOp, SlotEditOp, StudioActor, StudioCommand,
     StudioController, StudioServerClient, UiAction, UiConfigSlot, UiConfigSlotBody,
-    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiSlotEditorHint, UiStudioView, UiViewContent,
+    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotEditorHint, UiStudioView,
+    UiViewContent,
 };
 
 #[test]
@@ -55,13 +56,18 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
-    // Flat-root workspace over the real wire: the project root renders no
-    // card (the clock and fixture panes are the top-level entries) and the
+    // Root card restored over the real wire: the project root is the ONE
+    // top-level card and the clock and fixture ride its children.
     // Post-mitosis the root module def carries ONLY `nodes` (role `Fixed`);
     // format/uid/name live in the project.json container manifest, so they
     // must NOT surface as root slots.
     let editor = project_editor(&snapshot);
-    assert_eq!(editor.nodes.len(), 2, "two child panes, no root card");
+    assert_eq!(editor.nodes.len(), 1, "one top card: the root module");
+    assert_eq!(
+        editor.nodes[0].children.len(),
+        2,
+        "clock and fixture ride the root card"
+    );
     let root_slot = |path: &str| {
         editor.root_slots.iter().find(|slot| {
             slot.address
@@ -335,7 +341,11 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     // package's minted uid (the push is hash-verified inside the open)
     assert!(snapshot.home.is_none(), "an open project leaves home");
     let editor = project_editor(&snapshot);
-    assert_eq!(editor.nodes.len(), 2, "clock and fixture panes");
+    assert_eq!(
+        editor.nodes[0].children.len(),
+        2,
+        "clock and fixture panes under the root card"
+    );
     let pushed_manifest = {
         let bytes = server
             .borrow()
@@ -391,11 +401,14 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
     let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
 
     // create-and-open landed in the editor: home is gone and the blank
-    // project renders zero node cards (the add-node picker is the point)
+    // project renders its root card with nothing under it (the add-node
+    // picker is the point)
     assert!(snapshot.home.is_none(), "the created project opened");
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.nodes.len(), 1, "the root module card");
     assert!(
-        project_editor(&snapshot).nodes.is_empty(),
-        "a blank project has no node cards"
+        editor.nodes[0].children.is_empty(),
+        "a blank project has no child cards"
     );
 
     // the library holds the package: Created origin + the initial save
@@ -470,7 +483,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":3,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -511,8 +524,10 @@ fn device_connect_pulls_classifies_and_adopts() {
     controller.attach_library(host.clone());
 
     // 1) unknown uid + stamped identity → adoption
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     assert_eq!(
         sync.identity
             .as_ref()
@@ -537,8 +552,10 @@ fn device_connect_pulls_classifies_and_adopts() {
 
     // 2) reconnect: now the uid is known and the hashes match → AtHead,
     //    no second adoption
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, slug, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -557,8 +574,10 @@ fn device_connect_pulls_classifies_and_adopts() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known {
         relation, observed, ..
     } = &sync.content
@@ -593,7 +612,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":3,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -632,7 +651,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
 
     // connect-as-pull adopts, then the device copy changes behind our
     // back → Diverged (the EditedOnDevice card)
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
     {
         let server = server.borrow();
         server
@@ -643,8 +662,10 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -654,10 +675,14 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
     // project's new head, and the handler's own re-sync lands on AtHead.
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::AdoptDeviceCopy,
+        DeployOp::AdoptDeviceCopy {
+            target: controller.device_target_for_test(),
+        },
     )))
     .expect("adopt works straight from the card sheet");
-    let sync = controller.device_sync().expect("device state cached");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -679,10 +704,12 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::KeepBothFork,
+        DeployOp::KeepBothFork {
+            target: controller.device_target_for_test(),
+        },
     )))
     .expect("keep-both works straight from the card sheet");
     let summaries = store.list().unwrap();
@@ -742,7 +769,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
     controller.attach_library(host.clone());
     drive(controller.settle_library());
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
 
     let deploy_action = |op: DeployOp| UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op);
 
@@ -750,7 +777,9 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     // name sheet is the stamping surface; there is no dialog — this
     // test runs with a project open, so the card mapping itself is
     // pinned by the roster tests and the link e2e)
-    let sync = controller.device_sync().expect("connect-as-pull landed");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     assert_eq!(sync.identity, None, "unstamped");
     assert_eq!(sync.content, DeviceContent::Empty, "empty");
 
@@ -759,6 +788,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(crate::app::home::HOME_NODE_ID),
         crate::HomeOp::NameDevice {
+            target: controller.device_target_for_test(),
             name: "Luna's porch sign".to_string(),
         },
     )))
@@ -786,6 +816,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     // history + association recorded; device now AtHead
     let outcome = drive(controller.dispatch(deploy_action(DeployOp::PushProject {
         key: summary.uid.to_string(),
+        target: controller.device_target_for_test(),
     })))
     .unwrap();
     assert!(
@@ -847,7 +878,9 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
         .expect("association recorded");
     assert_eq!(association.project, summary.uid);
 
-    let sync = controller.device_sync().expect("re-pulled after push");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("re-pulled after push");
     assert!(
         matches!(
             &sync.content,
@@ -1418,7 +1451,7 @@ fn variant_dropdown_switch_away_and_back_ends_clean_from_acks_alone() {
 #[test]
 fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
     // The dead-click repro on the fixture `brightness` option (base-present:
-    // the shape default is Some(64)): toggle OFF (RemoveValue brightness —
+    // the shape default is Some(0.25)): toggle OFF (RemoveValue brightness —
     // stores `Remove` at the option path), refresh, toggle back ON
     // (EnsurePresent brightness.some — normalizes away against base at a
     // DIFFERENT path). The counteracting-entry sweep clears the stored
@@ -1446,8 +1479,8 @@ fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
     assert_eq!(brightness.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(brightness),
-        "64",
-        "base default is Some(64)"
+        "0.25",
+        "base default is Some(0.25)"
     );
     let brightness_address = brightness
         .address
@@ -1491,7 +1524,7 @@ fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
     let brightness = find_slot(&snapshot, "brightness");
     assert_eq!(
         slot_value_display(brightness),
-        "64",
+        "0.25",
         "the effective option is back to the base value"
     );
     assert_eq!(
@@ -2102,7 +2135,7 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
     // P5, over the real wire: `OutputDef.test_pattern` is `SlotRole::Debug`,
     // and NOTHING output-specific exists in the UI layer — the same
     // role-keyed partition that gives the Clock its Debug section (P3) gives
-    // the output card one, with the toggle in it. `endpoint` stays a Setting.
+    // the output card one, with the toggle in it. Channel endpoints stay Settings.
     let server = Rc::new(RefCell::new(asset_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -2146,10 +2179,10 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
         "a Debug slot is writable — that is the whole point of the toggle"
     );
     assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
-    let endpoint = find_slot(&snapshot, "endpoint");
+    let endpoint = find_slot(&snapshot, "channels[0].endpoint");
     assert!(
         !endpoint.state.debug,
-        "the endpoint is authored config, not debug"
+        "a channel endpoint is authored config, not debug"
     );
 }
 
@@ -2314,10 +2347,16 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // The shader publishes to the visual bus and a fixture consumes it —
     // without a consumer the shader never renders, so it would never
     // (re)compile and compile errors would never surface.
+    //
+    // `speed` is wired to a channel with no def record yet: that is the
+    // agent e2e's repair shape (declare the uniform, upsert the record) and,
+    // since Q13, the binding is also what will put the repaired param on the
+    // panel — publicity is the binding, not an authored flag.
     let shader_json = r#"{
   "kind": "Shader",
   "source": "shader.glsl",
   "bindings": {
+    "speed": { "source": "bus:speed" },
     "output": { "target": "bus:visual.out" }
   },
   "consumed": {
@@ -2343,12 +2382,16 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // provider accepts any authored endpoint.
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 3\n}\n";
+    let project_json = "{\n  \"format\": 4\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2427,7 +2470,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 3\n}\n"),
+        ("project.json", "{\n  \"format\": 4\n}\n"),
         (
             "module.json",
             r#"{
@@ -2559,8 +2602,57 @@ fn count_overlay_reads(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
         .count()
 }
 
+/// Every workspace card, root first and then depth-first through the nested
+/// cards, each promoted exactly the way the renderer promotes it
+/// ([`crate::UiNodeChild::into_node_view`]).
+///
+/// Since the flat-root reversal the editor carries ONE top-level card — the
+/// root module — and every other node is a `UiNodeChild` beneath it, so a
+/// scan over `editor.nodes` alone would only ever see the project root.
+pub(crate) fn workspace_cards(view: &UiStudioView) -> Vec<UiNodeView> {
+    fn walk(card: UiNodeView, out: &mut Vec<UiNodeView>) {
+        let children = card.children.clone();
+        out.push(card);
+        for child in children {
+            walk(child.into_node_view(), out);
+        }
+    }
+    let mut cards = Vec::new();
+    for card in project_editor(view).nodes.iter().cloned() {
+        walk(card, &mut cards);
+    }
+    cards
+}
+
+/// The one workspace card matching `pick`, anywhere in the nested card tree.
+pub(crate) fn card_matching(
+    view: &UiStudioView,
+    what: &str,
+    pick: impl Fn(&UiNodeView) -> bool,
+) -> UiNodeView {
+    let cards = workspace_cards(view);
+    cards
+        .iter()
+        .find(|card| pick(card))
+        .unwrap_or_else(|| {
+            panic!(
+                "workspace carries a {what} card; got {:?}",
+                cards
+                    .iter()
+                    .map(|card| (card.header.kind.clone(), card.header.path.clone()))
+                    .collect::<Vec<_>>()
+            )
+        })
+        .clone()
+}
+
+/// The workspace card at `path` (a node address).
+pub(crate) fn card_at(view: &UiStudioView, path: &str) -> UiNodeView {
+    card_matching(view, path, |card| card.header.path == path)
+}
+
 /// The project editor DTO from a studio snapshot.
-fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
+pub(crate) fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
     view.panes
         .iter()
         .find_map(|pane| match &pane.body {
@@ -2579,13 +2671,7 @@ pub(crate) fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
 
 /// The main-tab sections of one workspace card, by node address.
 pub(crate) fn node_sections(view: &UiStudioView, node_id: &str) -> Vec<UiNodeSection> {
-    let editor = project_editor(view);
-    let node = editor
-        .nodes
-        .iter()
-        .find(|node| node.node_id == node_id)
-        .unwrap_or_else(|| panic!("workspace card {node_id} should exist"));
-    match &node.tabs[0].body {
+    match &card_at(view, node_id).tabs[0].body {
         UiNodeTabBody::Sections(sections) => sections.clone(),
         UiNodeTabBody::Text { .. } => panic!("expected node sections"),
     }

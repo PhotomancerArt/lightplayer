@@ -7,7 +7,7 @@ use std::sync::Arc;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
-    DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpsValueF32, LpvmBuffer, LpvmInstance,
+    DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpsValueF32, LpvmBuffer, LpvmInstance, LpvmMemory,
     TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, encode_global_write,
     encode_uniform_write, encode_uniform_write_q32, global_data_span, validate_compute_tick_sig,
     validate_render_samples_sig_ir, validate_render_texture_sig_ir,
@@ -41,6 +41,14 @@ pub struct WasmLpvmInstance {
     signatures: LpsModuleSig,
     shadow_stack_base: Option<i32>,
     float_mode: FloatMode,
+    /// Guest base address of this instance's vmctx block (header + uniforms +
+    /// globals + snapshot). Every instance owns a distinct allocation in the
+    /// shared linear memory; emitted code addresses all of them relative to
+    /// the vmctx pointer passed as WASM param 0. A fixed base (the old `0`)
+    /// makes every instance on the engine share one block, so a second live
+    /// shader silently clobbers the first one's uniforms and persistent
+    /// globals.
+    vmctx_base: usize,
     /// Byte offset from vmctx base to globals region
     globals_offset: usize,
     /// Byte offset from vmctx base to snapshot region
@@ -65,6 +73,25 @@ impl WasmLpvmInstance {
         let snapshot_offset = sigs.snapshot_offset();
         let globals_size = sigs.globals_size();
 
+        // Per-instance vmctx allocation, mirroring `NativeJitModule::instantiate`.
+        // The bump region is pre-grown, zero-filled, and never reused, but zero
+        // explicitly anyway so a future allocator change cannot leak state in.
+        let align = 16usize;
+        let total_size = sigs.vmctx_buffer_size();
+        let vmctx_buf = super::shared_runtime::WasmtimeLpvmMemory::new(Arc::clone(&module.runtime))
+            .alloc(total_size.max(align), align)
+            .map_err(|e| WasmError::runtime(format!("vmctx alloc: {e:?}")))?;
+        let vmctx_base = usize::try_from(vmctx_buf.guest_base())
+            .map_err(|_| WasmError::runtime("vmctx guest base exceeds usize"))?;
+        i32::try_from(vmctx_base)
+            .map_err(|_| WasmError::runtime("vmctx guest base exceeds i32 range"))?;
+        {
+            let mut guard = module.runtime.lock();
+            let mem = guard.memory;
+            let store = &mut guard.store;
+            mem.data_mut(store)[vmctx_base..vmctx_base + total_size].fill(0);
+        }
+
         let mut inst = Self {
             runtime: Arc::clone(&module.runtime),
             instance,
@@ -72,6 +99,7 @@ impl WasmLpvmInstance {
             signatures: module.signatures.clone(),
             shadow_stack_base: module.shadow_stack_base,
             float_mode: module.opts.float_mode,
+            vmctx_base,
             globals_offset,
             snapshot_offset,
             globals_size,
@@ -101,10 +129,11 @@ impl WasmLpvmInstance {
                 .ok_or_else(|| WasmError::runtime("__shader_init export not found"))?;
 
             self.prepare_call(store, mem)?;
-            // Pass vmctx pointer (0) as first argument, same as other shader calls
-            let wasm_args = vec![Val::I32(0)];
+            // Pass this instance's vmctx pointer as first argument, same as
+            // other shader calls
+            let wasm_args = vec![Val::I32(self.vmctx_base as i32)];
             let call_result = func.call(&mut *store, &wasm_args, &mut []);
-            take_trap(store, mem)?;
+            take_trap(store, mem, self.vmctx_base)?;
             call_result
                 .map_err(|e| WasmError::runtime(format!("WASM trap in __shader_init: {e}")))?;
         }
@@ -127,8 +156,8 @@ impl WasmLpvmInstance {
         let mem = guard.memory;
         let store = &mut guard.store;
 
-        let globals_start = self.globals_offset;
-        let snapshot_start = self.snapshot_offset;
+        let globals_start = self.vmctx_base + self.globals_offset;
+        let snapshot_start = self.vmctx_base + self.snapshot_offset;
         let size = self.globals_size;
 
         // Copy snapshot -> globals
@@ -149,8 +178,8 @@ impl WasmLpvmInstance {
         let mem = guard.memory;
         let store = &mut guard.store;
 
-        let globals_start = self.globals_offset;
-        let snapshot_start = self.snapshot_offset;
+        let globals_start = self.vmctx_base + self.globals_offset;
+        let snapshot_start = self.vmctx_base + self.snapshot_offset;
         let size = self.globals_size;
 
         // Copy globals -> snapshot
@@ -163,8 +192,8 @@ impl WasmLpvmInstance {
     /// fuel low u32, host-armed invocation index in the high u32, no trap.
     /// Render wrappers immediately re-arm per pixel/sample with
     /// `DEFAULT_INVOCATION_FUEL`; `metadata` (vmctx+12) is left untouched.
-    /// The vmctx block sits at guest offset 0 (see `marshal` — the vmctx
-    /// pointer passed as WASM param 0 is 0).
+    /// The vmctx block sits at this instance's `vmctx_base` (see `marshal` —
+    /// the vmctx pointer passed as WASM param 0 is that base).
     fn prepare_call(
         &self,
         store: &mut wasmtime::Store<()>,
@@ -177,7 +206,7 @@ impl WasmLpvmInstance {
         debug_assert_eq!(VMCTX_OFFSET_FUEL, 0);
         debug_assert_eq!(VMCTX_OFFSET_TRAP, 8);
         linear_memory
-            .write(&mut *store, VMCTX_OFFSET_FUEL, &header)
+            .write(&mut *store, self.vmctx_base + VMCTX_OFFSET_FUEL, &header)
             .map_err(|e| WasmError::runtime(format!("failed to write vmctx fuel header: {e}")))?;
         if let Some(base) = self.shadow_stack_base {
             let g = self
@@ -204,7 +233,7 @@ impl WasmLpvmInstance {
         let mut guard = self.runtime.lock();
         let mem = guard.memory;
         let store = &mut guard.store;
-        mem.write(store, offset, data)
+        mem.write(store, self.vmctx_base + offset, data)
             .map_err(|e| WasmError::runtime(format!("vmctx write failed: {e}")))?;
         Ok(())
     }
@@ -223,7 +252,7 @@ impl WasmLpvmInstance {
         let mem = guard.memory;
         let store = &mut guard.store;
         let mut bytes = vec![0u8; len];
-        mem.read(store, offset, &mut bytes)
+        mem.read(store, self.vmctx_base + offset, &mut bytes)
             .map_err(|e| WasmError::runtime(format!("vmctx read failed: {e}")))?;
         Ok(bytes)
     }
@@ -303,10 +332,11 @@ fn format_wasm_call_error(context: &str, error: wasmtime::Error) -> WasmError {
 fn take_trap(
     store: &mut wasmtime::Store<()>,
     linear_memory: wasmtime::Memory,
+    vmctx_base: usize,
 ) -> Result<(), WasmError> {
     let mut words = [0u8; 8];
     linear_memory
-        .read(&*store, VMCTX_OFFSET_FUEL + 4, &mut words)
+        .read(&*store, vmctx_base + VMCTX_OFFSET_FUEL + 4, &mut words)
         .map_err(|e| WasmError::runtime(format!("failed to read vmctx trap slot: {e}")))?;
     let invocation = u32::from_le_bytes(words[0..4].try_into().expect("4 bytes"));
     let trap = u32::from_le_bytes(words[4..8].try_into().expect("4 bytes"));
@@ -392,6 +422,7 @@ impl LpvmInstance for WasmLpvmInstance {
                 args,
                 self.float_mode,
                 &return_ty,
+                self.vmctx_base as i32,
             )?
         } else {
             (
@@ -400,6 +431,7 @@ impl LpvmInstance for WasmLpvmInstance {
                     export.params.len(),
                     args,
                     self.float_mode,
+                    self.vmctx_base as i32,
                 )?,
                 None,
             )
@@ -412,7 +444,7 @@ impl LpvmInstance for WasmLpvmInstance {
         };
 
         let call_result = func.call(&mut *store, &wasm_args, &mut results);
-        take_trap(store, mem)?;
+        take_trap(store, mem, self.vmctx_base)?;
         call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
 
         if let Some(frame) = shadow_frame {
@@ -495,10 +527,23 @@ impl LpvmInstance for WasmLpvmInstance {
         };
 
         let (wasm_args, sret_plan) = if needs_shadow {
-            build_wasm_args_q32_for_call(&self.instance, store, &mem, &export, args, &return_ty)?
+            build_wasm_args_q32_for_call(
+                &self.instance,
+                store,
+                &mem,
+                &export,
+                args,
+                &return_ty,
+                self.vmctx_base as i32,
+            )?
         } else {
             (
-                build_wasm_args_q32_scalar_only(&export.param_types, export.params.len(), args)?,
+                build_wasm_args_q32_scalar_only(
+                    &export.param_types,
+                    export.params.len(),
+                    args,
+                    self.vmctx_base as i32,
+                )?,
                 None,
             )
         };
@@ -506,7 +551,7 @@ impl LpvmInstance for WasmLpvmInstance {
         if matches!(return_ty, LpsType::Void) {
             let mut results: Vec<Val> = Vec::new();
             let call_result = func.call(&mut *store, &wasm_args, &mut results);
-            take_trap(store, mem)?;
+            take_trap(store, mem, self.vmctx_base)?;
             call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
             if let Some(frame) = shadow_frame {
                 shadow_stack_frame_close(&self.instance, store, frame)?;
@@ -520,7 +565,7 @@ impl LpvmInstance for WasmLpvmInstance {
             zero_results_for_type(&return_ty, self.float_mode)
         };
         let call_result = func.call(&mut *store, &wasm_args, &mut results);
-        take_trap(store, mem)?;
+        take_trap(store, mem, self.vmctx_base)?;
         call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
 
         if let Some(frame) = shadow_frame {
@@ -579,7 +624,7 @@ impl LpvmInstance for WasmLpvmInstance {
         })?;
 
         let wasm_args = vec![
-            Val::I32(0),
+            Val::I32(self.vmctx_base as i32),
             Val::I32(tex_offset),
             Val::I32(width as i32),
             Val::I32(height as i32),
@@ -592,7 +637,7 @@ impl LpvmInstance for WasmLpvmInstance {
         let store = &mut guard.store;
         self.prepare_call(store, mem)?;
         let call_result = func.call(&mut *store, &wasm_args, &mut []);
-        take_trap(store, mem)?;
+        take_trap(store, mem, self.vmctx_base)?;
         call_result.map_err(|e| {
             format_wasm_call_error(&format!("rendering texture via `{fn_name}`"), e)
         })?;
@@ -631,7 +676,7 @@ impl LpvmInstance for WasmLpvmInstance {
         })?;
 
         let wasm_args = vec![
-            Val::I32(0),
+            Val::I32(self.vmctx_base as i32),
             Val::I32(points_offset),
             Val::I32(out_offset),
             Val::I32(count as i32),
@@ -644,7 +689,7 @@ impl LpvmInstance for WasmLpvmInstance {
         let store = &mut guard.store;
         self.prepare_call(store, mem)?;
         let call_result = func.call(&mut *store, &wasm_args, &mut []);
-        take_trap(store, mem)?;
+        take_trap(store, mem, self.vmctx_base)?;
         call_result.map_err(|e| {
             format_wasm_call_error(&format!("rendering samples via `{fn_name}`"), e)
         })?;
@@ -695,8 +740,8 @@ impl LpvmInstance for WasmLpvmInstance {
             .get_func(&mut *store, name)
             .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
         self.prepare_call(store, mem)?;
-        let call_result = func.call(&mut *store, &[Val::I32(0)], &mut []);
-        take_trap(store, mem)?;
+        let call_result = func.call(&mut *store, &[Val::I32(self.vmctx_base as i32)], &mut []);
+        take_trap(store, mem, self.vmctx_base)?;
         call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
         Ok(())
     }
@@ -839,8 +884,15 @@ mod tests {
         let out_ptr = i32::try_from(out.guest_base()).expect("out ptr fits i32");
 
         // The raw path gets no arming; prove the wrapper works from zero.
-        inst.vmctx_write_bytes(VMCTX_OFFSET_FUEL, &[0u8; 12])
-            .expect("zero vmctx header");
+        // The legacy wrapper's vmctx is absolute guest address 0 (emitted
+        // constant), not the instance's per-instance block.
+        {
+            let mut guard = inst.runtime.lock();
+            let mem = guard.memory;
+            let store = &mut guard.store;
+            mem.write(store, VMCTX_OFFSET_FUEL, &[0u8; 12])
+                .expect("zero raw vmctx header");
+        }
 
         {
             let mut guard = inst.runtime.lock();
@@ -904,9 +956,16 @@ mod tests {
             assert!(result.is_err(), "infinite pixel must trap the raw call");
         }
 
-        let words = inst
-            .vmctx_read_bytes(VMCTX_OFFSET_FUEL + 4, 8)
-            .expect("read invocation + trap slot");
+        // The legacy wrapper arms/traps at absolute guest address 0.
+        let words = {
+            let mut guard = inst.runtime.lock();
+            let mem = guard.memory;
+            let store = &mut guard.store;
+            let mut bytes = [0u8; 8];
+            mem.read(&*store, VMCTX_OFFSET_FUEL + 4, &mut bytes)
+                .expect("read invocation + trap slot");
+            bytes
+        };
         let invocation = u32::from_le_bytes(words[0..4].try_into().expect("4 bytes"));
         let trap = u32::from_le_bytes(words[4..8].try_into().expect("4 bytes"));
         assert_eq!(trap, TRAP_CODE_OUT_OF_FUEL);

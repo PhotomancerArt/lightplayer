@@ -109,9 +109,6 @@ pub(crate) fn param_upsert_edits(upsert: &ParamUpsert) -> Vec<SlotEdit> {
             option(name, LpValue::F32(value));
         }
     }
-    if let Some(panel) = upsert.panel {
-        option("panel", LpValue::Bool(panel));
-    }
     if let Some(unit) = &upsert.unit {
         option("unit", LpValue::String(unit.clone()));
     }
@@ -148,7 +145,6 @@ mod tests {
             max: Some(4.0),
             step: Some(1.0),
             unit: Some("x".into()),
-            panel: Some(true),
         };
         assert_eq!(
             param_upsert_edits(&upsert),
@@ -169,11 +165,6 @@ mod tests {
                 SlotEdit::assign_value(parse(r#"consumed["speed"].max.some"#), LpValue::F32(4.0)),
                 SlotEdit::ensure_present(parse(r#"consumed["speed"].step.some"#)),
                 SlotEdit::assign_value(parse(r#"consumed["speed"].step.some"#), LpValue::F32(1.0)),
-                SlotEdit::ensure_present(parse(r#"consumed["speed"].panel.some"#)),
-                SlotEdit::assign_value(
-                    parse(r#"consumed["speed"].panel.some"#),
-                    LpValue::Bool(true),
-                ),
                 SlotEdit::ensure_present(parse(r#"consumed["speed"].unit.some"#)),
                 SlotEdit::assign_value(
                     parse(r#"consumed["speed"].unit.some"#),

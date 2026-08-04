@@ -2214,3 +2214,54 @@ fn test_default_texture_binding_spec() -> TextureBindingSpec {
         shape_hint: TextureShapeHint::General2D,
     }
 }
+
+/// Two live shader instances on one engine must not share vmctx state:
+/// uniforms and persistent globals are per-instance. Regression pin for the
+/// meteor editor-sim freeze, where every instance's vmctx sat at guest
+/// address 0 of the shared linear memory and a coexisting px shader
+/// clobbered the compute shader's persistent globals each frame.
+#[test]
+fn compute_instances_on_one_engine_keep_isolated_state() {
+    let engine = test_engine();
+    let source = r#"
+layout(binding = 0) uniform float step_size;
+float acc;
+float out_acc;
+void tick() {
+    acc += step_size;
+    out_acc = acc;
+}
+"#;
+    let compile = || {
+        engine
+            .compile_compute_desc(
+                CompileComputeDesc::new(source, lpir::CompilerConfig::default())
+                    .with_consumed("step_size", LpsType::Float)
+                    .with_produced("out_acc", LpsType::Float),
+            )
+            .expect("compile compute")
+    };
+    let a = compile();
+    let b = compile();
+
+    // Interleave ticks with different uniforms; each accumulator must only
+    // ever see its own step size.
+    for _ in 0..3 {
+        a.tick(&[("step_size", LpsValueF32::F32(1.0))])
+            .expect("tick a");
+        b.tick(&[("step_size", LpsValueF32::F32(10.0))])
+            .expect("tick b");
+    }
+    assert!(
+        a.get_output("out_acc")
+            .expect("out a")
+            .approx_eq_default(&LpsValueF32::F32(3.0)),
+        "instance A accumulator polluted by instance B"
+    );
+    assert!(
+        b.get_output("out_acc")
+            .expect("out b")
+            .approx_eq_default(&LpsValueF32::F32(30.0)),
+        "instance B accumulator polluted by instance A"
+    );
+}

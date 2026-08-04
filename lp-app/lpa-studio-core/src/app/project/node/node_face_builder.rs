@@ -6,19 +6,31 @@
 //! (one derivation, two presentations). The builder never re-reads slot
 //! controllers or project state.
 //!
+//! **Q13 — binding is publicity.** "On the panel" means "bound to a bus
+//! channel": there is no authored panel FLAG any more (the legacy
+//! `ShaderSlotDef.panel` / `SlotMeta.panel` pair is deleted). A control
+//! reaches a panel by carrying a `panel_target`, which the project walk
+//! derives from the binding itself.
+//!
+//! Publicity is **authored** wiring — plus one additive override: a slot
+//! whose declaration carries `panel = "show"` beside its `default_bind`
+//! is public through that default wiring too (the fixture's brightness
+//! fader). See [`public_panel_target`].
+//!
 //! - **Shader**: preview = the produced visual product; controls = consumed
-//!   uniform slots whose authored `panel` flag is on (`ShaderSlotDef.panel`),
-//!   as knobs over the authored `min`/`max` editing
-//!   `consumed.<name>.default.some`, snapping to the uniform's step
-//!   ([`lpc_model::shader_panel_step`] — authored, else 1 for an i32/u32
-//!   shape); the code drawer reuses the inline GLSL
-//!   asset editor. The agent handle is decorated later by the studio
-//!   controller (`AgentController::decorate_editor_view`), exactly like the
-//!   sections path.
+//!   uniform slots BOUND to a bus channel, as knobs over the authored
+//!   `min`/`max` editing `consumed.<name>.default.some`, snapping to the
+//!   uniform's step ([`lpc_model::shader_panel_step`] — authored, else 1
+//!   for an i32/u32 shape); a bound uniform with no min/max meta still gets
+//!   the default 0..1 knob. The code drawer reuses the inline GLSL asset
+//!   editor. The agent handle is decorated later by the studio controller
+//!   (`AgentController::decorate_editor_view`), exactly like the sections
+//!   path.
 //! - **Fixture**: preview = the produced control product (lamp map);
-//!   brightness = the first panel-flagged value row (`SlotMeta::panel`,
-//!   seeded by [`lpc_model::Brightness`]) as the dominant fader editing
-//!   `brightness.some`.
+//!   brightness = the `brightness` row as the dominant fader editing
+//!   `brightness.some`. That fader is the fixture FACE's own affordance,
+//!   named outright rather than flagged; it joins the enclosing module's
+//!   panel only when brightness is itself wired to a channel.
 //! - **Playlist**: face = the ENTRIES strip only ({entries, active} — P2c
 //!   item 2); entries from the def's `entries` map rows (authored name,
 //!   `duration` seconds → ms chip, `trigger_ids` non-empty → cue tag),
@@ -27,21 +39,30 @@
 //!   preview snapshot, node-select action). Deriving the face ALSO
 //!   enforces the sibling invariant: the children list keeps ONLY the
 //!   active entry's child (see [`kind_face`]).
+//! - **Output**: face = one row per authored `channels[k]` wire (endpoint,
+//!   pin label parsed out of the endpoint spec, authored count, derived
+//!   slice start) plus the slot addresses the web edits through. Everything
+//!   the builder cannot see from this node's sections — the running device's
+//!   BOARD, and the incoming lamp extent that resolves the remainder
+//!   channel — is filled afterwards by the studio controller's decoration
+//!   pass (`app::studio::output_face_decoration`), the same shape as the
+//!   shader face's agent handle.
 //! - Every other kind returns `None` — the card keeps today's generic
 //!   sections.
 
 use lpc_model::{
-    FixtureDef, LpValue, PlaylistDef, ShaderDef, ShaderValueShapeRef, shader_panel_step,
+    FixtureDef, HwEndpointSpec, LpValue, OutputDef, PlaylistDef, ShaderDef, ShaderValueShapeRef,
+    shader_panel_step,
 };
 
 use crate::app::project::format_lp_value;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
-    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue,
-    UiSlotValueKind,
+    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiOutputChannelRow, UiOutputFace,
+    UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
+    UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect, UiSlotAspectKind,
+    UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -82,6 +103,7 @@ pub(in crate::app::project) fn kind_face(
             // ACTIVE placard is the active-ness presentation.
             Some(UiNodeFace::Playlist(face))
         }
+        OutputDef::KIND => output_face(sections).map(UiNodeFace::Output),
         // Unknown kinds stay on the generic fallback permanently.
         _ => None,
     }
@@ -102,41 +124,40 @@ fn shader_face(sections: &[UiNodeSection]) -> Option<UiShaderFace> {
 }
 
 /// The fixture card's face: lamp preview + dominant brightness fader. Both
-/// pieces are required — a fixture without a panel-flagged fader row keeps
-/// the generic sections.
+/// pieces are required — a fixture whose `brightness` row carries no
+/// mappable editor hint keeps the generic sections.
+///
+/// Q13 (binding-is-publicity) deleted the `panel` flag that used to pick
+/// this row, so the fader is now named outright: **brightness is the
+/// fixture face's own affordance**, not a panel entry. It reaches the
+/// enclosing module's panel only through the usual door — a `panel_target`,
+/// i.e. brightness wired to a bus channel — which the block below resolves.
 fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
     let preview = product_of_kind(sections, UiProductKind::Control)?;
     let rows = config_rows(sections);
     let (key, mut brightness) = rows
         .iter()
+        .filter(|slot| slot_field_name(&slot.key) == "brightness")
         .find_map(|slot| {
             Some((
                 slot.key.clone(),
-                panel_control_from_row(slot, panel_widget(slot)?),
+                panel_control_from_row(slot, panel_widget(slot)?)?,
             ))
-        })
-        .and_then(|(key, control)| control.map(|control| (key, control)))?;
+        })?;
     // Same rule the shader knobs follow: when the fader's slot is wired to
     // a bus channel, the fader drives that channel (a panel write) rather
-    // than an authored default it can no longer affect. The wiring rides a
-    // separate binding-derived row — for a fixture it carries the SAME key
-    // as the authored row it decorates (unlike a shader uniform, whose
-    // entry key is `consumed[name]`), so this scans for whichever row
-    // actually carries the wiring rather than taking the first by key.
-    //
-    // NOTE (2026-08-02): no fixture can reach this yet. The project loader
-    // registers authored `source` bindings only for a fixed set of slot
-    // names per kind — for a fixture that is `input` alone — so
-    // `brightness` cannot currently be bound to a channel at all. This
-    // path exists so the fixture fader behaves like every other panel
-    // control the moment it can be, rather than silently lacking the
-    // feature; brightness is the scarf's own control and the two
-    // derivations must not diverge.
-    let field = key.rsplit('.').next().unwrap_or(&key).to_string();
-    let field = field.split('[').next().unwrap_or(&field).to_string();
+    // than an authored default it can no longer affect. The wiring
+    // decorates the authored `brightness` row itself (the graph overlays —
+    // authored facts, then the default overlay carrying the declared
+    // `panel = "show"` promotion), so the scan below covers whichever row
+    // carries the wiring. The standard shape today: FixtureDef declares
+    // `default_bind = "bus:brightness"` with the hint, so every fixture's
+    // fader is channel-backed with zero authoring — brightness is the
+    // scarf's own control (panel.md P10).
+    let field = slot_field_name(&key).to_string();
     let wired = || rows.iter().filter(|row| row.key == field);
     if brightness.panel_target.is_none() {
-        brightness.panel_target = wired().find_map(|row| bound_panel_target(row));
+        brightness.panel_target = wired().find_map(|row| public_panel_target(row));
     }
     if brightness.live_value.is_none() {
         brightness.live_value = wired().find_map(|row| bound_live_value(row));
@@ -147,6 +168,12 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
         power: fixture_power(sections),
     })
+}
+
+/// The bare field name a config row's key ends in: `a.b[key]` → `b`.
+fn slot_field_name(key: &str) -> &str {
+    let field = key.rsplit('.').next().unwrap_or(key);
+    field.split('[').next().unwrap_or(field)
 }
 
 /// The fixture's power readout, present only when the fixture is limited.
@@ -171,7 +198,15 @@ fn fixture_power(sections: &[UiNodeSection]) -> Option<UiFixturePower> {
 
 /// First produced product row of the wanted kind; an `Empty`-kind row (the
 /// output exists but nothing resolved yet) is the stable-face fallback.
-fn product_of_kind(sections: &[UiNodeSection], kind: UiProductKind) -> Option<UiProducedProduct> {
+///
+/// Shared with the module-face derivation (`ProjectController::apply_module_faces`):
+/// a module's hero is its own `output` mirror, chosen by exactly the rule
+/// the shader hero uses, so the two heroes can never disagree about what
+/// "the visual this card produces" means.
+pub(in crate::app::project) fn product_of_kind(
+    sections: &[UiNodeSection],
+    kind: UiProductKind,
+) -> Option<UiProducedProduct> {
     let products = sections.iter().find_map(|section| match section {
         UiNodeSection::ProducedProducts(products) => Some(products),
         _ => None,
@@ -231,11 +266,12 @@ fn inline_editor_of_kind(
 
 // -- shader panel controls ---------------------------------------------------
 
-/// Knob controls from the shader's `consumed` map: one per uniform whose
-/// authored `panel` flag is on and whose `default` value is present (the
-/// knob edits `consumed.<name>.default.some` through the standard slot
-/// path). A uniform wired by a binding additionally wears that binding's
-/// aspect, so the knob rolls up violet exactly like the binding row.
+/// Knob controls from the shader's `consumed` map: one per uniform that is
+/// BOUND to a bus channel and whose `default` value is present (the knob
+/// edits `consumed.<name>.default.some` through the standard slot path, or
+/// writes the channel when the binding gives it a panel target). The knob
+/// wears the binding's aspect, so it rolls up violet exactly like the
+/// binding row.
 fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
     let rows = config_rows(sections);
     let Some(UiConfigSlotBody::Record(consumed)) = rows
@@ -261,9 +297,25 @@ fn shader_uniform_control(
         return None;
     };
     let fields = &record.fields;
-    if !option_bool_field(fields, "panel") {
-        return None;
-    }
+    let name = map_entry_name(entry);
+    // Q13, binding-is-publicity: "on the panel" IS "bound to a bus
+    // channel". Membership is therefore read off the binding-derived row
+    // the project walk appends for a wired uniform (keyed by the bare
+    // uniform name) — it carries a `panel_target` exactly when the binding
+    // resolves to a `(scope, channel)`. The legacy authored `panel` flag is
+    // gone; an unbound uniform gets no knob anywhere.
+    //
+    // GV fix 1: publicity is AUTHORED wiring only. A uniform reached solely
+    // through its own `default_bind` (the probe marks that binding
+    // `WireBindingOrigin::Default`, and the derived endpoint carries
+    // `default_origin`) is plumbing the author never asked for — fyeah's
+    // `time` is bound to `bus:time` by its shape, and a time knob on the
+    // panel is noise. The channel stays wired and readable; it just is not
+    // a control.
+    let panel_target = top_rows
+        .iter()
+        .find(|row| row.key == name)
+        .and_then(|row| public_panel_target(row))?;
 
     let default_row = uniform_field(fields, "default")?;
     // Whole-number uniforms ("how many meteors") snap: the authored `step`
@@ -282,7 +334,6 @@ fn shader_uniform_control(
         },
     )?;
 
-    let name = map_entry_name(entry);
     let label = string_field(fields, "label")
         .filter(|label| !label.is_empty())
         .unwrap_or_else(|| entry.label.clone());
@@ -309,14 +360,11 @@ fn shader_uniform_control(
             .find(|row| row.key == name)
             .and_then(|row| bound_live_value(row));
     }
-    // The panel-write target rides the same binding-derived row: a wired
-    // uniform's knob writes the consumed (scope, channel) down the command
-    // path; an unwired one keeps editing the authored default.
+    // The panel-write target is the membership fact itself: the knob writes
+    // the consumed (scope, channel) down the command path rather than
+    // editing an authored default it can no longer affect.
     if control.panel_target.is_none() {
-        control.panel_target = top_rows
-            .iter()
-            .find(|row| row.key == name)
-            .and_then(|row| bound_panel_target(row));
+        control.panel_target = Some(panel_target);
     }
     Some(control)
 }
@@ -350,12 +398,18 @@ fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
     }
 }
 
-/// A row's panel-write target: the `(scope, channel)` its bound source
-/// endpoint consumes, so the control dispatches panel commands (panel.md
-/// P8) instead of editing the authored default.
-fn bound_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
+/// A row's panel-write target — the `(scope, channel)` its bound source
+/// endpoint consumes — but only when the wiring is **public**: authored, or a
+/// default-origin endpoint whose slot declares `panel = "show"`. A bare
+/// `default_bind` the loader materialized does not make its slot public
+/// (GV fix 1); the hint is the one additive override on that rule
+/// (ADR 2026-08-03-panel-visibility-is-derived, amended — the fixture's
+/// brightness fader is the motivating case).
+fn public_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
     match &slot.source {
-        UiSlotSourceState::Bound(endpoint) => endpoint.panel_target.clone(),
+        UiSlotSourceState::Bound(endpoint) if !endpoint.default_origin || endpoint.panel_hint => {
+            endpoint.panel_target.clone()
+        }
         _ => None,
     }
 }
@@ -397,20 +451,6 @@ fn replace_binding_aspect(aspects: &mut Vec<UiSlotAspect>, binding: UiSlotAspect
 fn uniform_field<'a>(fields: &'a [UiConfigSlot], name: &str) -> Option<&'a UiConfigSlot> {
     let suffix = format!(".{name}");
     fields.iter().find(|field| field.key.ends_with(&suffix))
-}
-
-/// A present `OptionSlot<ValueSlot<bool>>` field carrying `true`.
-fn option_bool_field(fields: &[UiConfigSlot], name: &str) -> bool {
-    uniform_field(fields, name).is_some_and(|field| {
-        field.optionality.is_some_and(|opt| opt.included)
-            && matches!(
-                &field.body,
-                UiConfigSlotBody::Value(UiSlotValue {
-                    kind: UiSlotValueKind::Bool(true),
-                    ..
-                })
-            )
-    })
 }
 
 /// A present `OptionSlot<ValueSlot<f32>>` field's value.
@@ -622,6 +662,131 @@ fn option_list_field_is_non_empty(fields: &[UiConfigSlot], name: &str) -> bool {
     })
 }
 
+// -- output face ---------------------------------------------------------------
+
+/// The output card's face: one row per authored `channels[k]` wire, plus the
+/// slice arithmetic that can be done from the authored counts alone.
+///
+/// `None` — generic-sections fallback — only when the node carries no
+/// `channels` map row at all. An EMPTY map still derives a face: an output
+/// with no wires is exactly the state whose surface should be "add a wire",
+/// the same reasoning as the playlist's empty strip.
+///
+/// Board identity and the incoming lamp extent are deliberately absent here:
+/// neither is visible from this node's sections, and the builder never reads
+/// controller state. The studio controller's decoration pass fills them.
+fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
+    let rows = config_rows(sections);
+    let channels_row = rows.iter().find(|row| row.key == "channels")?;
+    let UiConfigSlotBody::Record(channels_map) = &channels_row.body else {
+        return None;
+    };
+    let mut channels: Vec<UiOutputChannelRow> = channels_map
+        .fields
+        .iter()
+        .filter_map(output_channel_row)
+        .collect();
+    // The slice order IS the key order (the engine's `planned_wires` walks
+    // the map ascending); the projected map is already sorted, and sorting
+    // here keeps the face's arithmetic true to the engine regardless.
+    channels.sort_by_key(|channel| channel.key);
+    resolve_authored_slices(&mut channels);
+
+    Some(UiOutputFace {
+        channels,
+        channels_address: channels_row.address.clone(),
+        input_binding: bound_endpoint_label(&rows, "input"),
+        // Filled by the decoration pass (board + upstream extent).
+        total_lamps: None,
+        span_boundaries: Vec::new(),
+        board: None,
+    })
+}
+
+/// Walk the channels in key order and hand each its slice start, mirroring
+/// the engine's `planned_wires`: a lamp count advances the cursor, and the
+/// count-less channel takes the remainder — so nothing after it has a
+/// defined start (an authoring mistake the engine refuses outright; the face
+/// leaves those starts `None` rather than inventing one).
+fn resolve_authored_slices(channels: &mut [UiOutputChannelRow]) {
+    let mut start = Some(0u32);
+    for channel in channels {
+        channel.slice_start = start;
+        match channel.count {
+            Some(count) => {
+                channel.resolved_count = Some(count);
+                start = start.map(|start| start.saturating_add(count));
+            }
+            None => start = None,
+        }
+    }
+}
+
+/// One `channels[<key>]` record row → its wire row. Rows whose key does not
+/// parse as a channel index, or which carry no `endpoint` field, are not
+/// wires and are dropped.
+fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputChannelRow> {
+    let UiConfigSlotBody::Record(record) = &row.body else {
+        return None;
+    };
+    let key: u32 = map_entry_name(row).parse().ok()?;
+    let fields = &record.fields;
+    let endpoint_row = uniform_field(fields, "endpoint")?;
+    let endpoint_display = string_field(fields, "endpoint").unwrap_or_default();
+
+    Some(UiOutputChannelRow {
+        key,
+        pin_label: endpoint_pin_label(&endpoint_display),
+        endpoint_display,
+        // Resolved by the decoration pass against the known board.
+        gpio: None,
+        count: option_u32_field(fields, "count"),
+        resolved_count: None,
+        slice_start: None,
+        endpoint_address: row_edit_address(endpoint_row),
+        // The count is an `OptionSlot`, so a PRESENT count edits its
+        // interior `some` and an ABSENT one has no value address (including
+        // it is the option-toggle gesture the generic row already owns) —
+        // exactly the rule `row_edit_address` encodes.
+        count_address: uniform_field(fields, "count").and_then(row_edit_address),
+    })
+}
+
+/// The board's own label for the wire an endpoint spec names — the spec's
+/// config segment (`ws281x:local:IO18` → `IO18`).
+///
+/// Endpoint↔pin translation lives in core, never in the web layer. An
+/// unparseable spec yields an empty label, which reads downstream as
+/// "unresolved": shown, never hidden.
+fn endpoint_pin_label(endpoint: &str) -> String {
+    HwEndpointSpec::parse(endpoint)
+        .map(|spec| spec.config().to_string())
+        .unwrap_or_default()
+}
+
+/// A present `OptionSlot<ValueSlot<u32>>` field's value.
+fn option_u32_field(fields: &[UiConfigSlot], name: &str) -> Option<u32> {
+    let field = uniform_field(fields, name)?;
+    if !field.optionality.is_some_and(|opt| opt.included) {
+        return None;
+    }
+    match &field.body {
+        UiConfigSlotBody::Value(UiSlotValue {
+            kind: UiSlotValueKind::U32(value),
+            ..
+        }) => Some(*value),
+        _ => None,
+    }
+}
+
+/// The endpoint label a top-level row is bound to, when it is bound.
+fn bound_endpoint_label(rows: &[&UiConfigSlot], key: &str) -> Option<String> {
+    match &rows.iter().find(|row| row.key == key)?.source {
+        UiSlotSourceState::Bound(endpoint) => Some(endpoint.label.clone()),
+        _ => None,
+    }
+}
+
 // -- generic panel controls --------------------------------------------------
 
 /// Project one config row into a panel control wearing `widget`: value,
@@ -638,23 +803,28 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         widget,
         value: value.clone(),
         live_value: bound_live_value(slot),
-        panel_target: bound_panel_target(slot),
+        panel_target: public_panel_target(slot),
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),
     })
 }
 
-/// The widget a panel-flagged value row renders as, from its editor hint
-/// (Knob → knob, Slider → fader, bool → toggle). `None` (no mappable
-/// widget) keeps the row off the panel.
+/// The widget a value row renders as, from its editor hint (Knob → knob,
+/// Slider → fader, bool → toggle). `None` = no mappable widget, so the row
+/// has no panel presentation at all.
+///
+/// Q13 (binding-is-publicity): this answers "what would this row look like
+/// as a control", never "does it belong on a panel". Membership is a
+/// binding question now — a generic control reaches a module panel only by
+/// carrying a `panel_target` — and the one caller left is the fixture face,
+/// whose brightness fader is that face's OWN affordance rather than a panel
+/// entry (`docs/design/panel.md` P1: it still shows up on the module panel
+/// when, and only when, brightness is wired to a channel).
 fn panel_widget(slot: &UiConfigSlot) -> Option<UiPanelWidget> {
     let UiConfigSlotBody::Value(value) = &slot.body else {
         return None;
     };
-    if !value.panel {
-        return None;
-    }
     match &value.editor {
         UiSlotEditorHint::Knob { min, max, step } => Some(UiPanelWidget::Knob {
             min: *min,
@@ -699,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn shader_face_builds_knobs_from_panel_flagged_uniforms() {
+    fn shader_face_builds_knobs_from_bound_uniforms() {
         let sections = shader_sections();
 
         let face =
@@ -709,7 +879,7 @@ mod tests {
         };
 
         assert_eq!(face.preview.kind, UiProductKind::Visual);
-        assert_eq!(face.controls.len(), 1, "only the panel-flagged uniform");
+        assert_eq!(face.controls.len(), 1, "only the bound uniform");
         let control = &face.controls[0];
         assert_eq!(control.label, "Speed");
         assert_eq!(
@@ -740,11 +910,14 @@ mod tests {
         // off-grid stored default the panel must not repeat back.
         let sections = vec![
             UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
-            UiNodeSection::ConfigSlots(vec![UiConfigSlot::record(
-                "consumed",
-                "Consumed",
-                vec![panel_uniform("count", "u32", 2.37, 1.0, 4.0, None)],
-            )]),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::record(
+                    "consumed",
+                    "Consumed",
+                    vec![uniform_record("count", "u32", 2.37, 1.0, 4.0, None)],
+                ),
+                bound_row("count", channel_endpoint("bus:count", "count", 1)),
+            ]),
         ];
 
         let Some(UiNodeFace::Shader(face)) =
@@ -771,21 +944,20 @@ mod tests {
 
     #[test]
     fn authored_step_beats_the_shape_and_float_uniforms_stay_continuous() {
-        let sections = |uniform| {
+        let sections = |name: &str, uniform| {
             vec![
                 UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
-                UiNodeSection::ConfigSlots(vec![UiConfigSlot::record(
-                    "consumed",
-                    "Consumed",
-                    vec![uniform],
-                )]),
+                UiNodeSection::ConfigSlots(vec![
+                    UiConfigSlot::record("consumed", "Consumed", vec![uniform]),
+                    bound_row(name, channel_endpoint("bus:x", name, 1)),
+                ]),
             ]
         };
-        let step_of = |uniform| {
+        let step_of = |name: &str, uniform| {
             let Some(UiNodeFace::Shader(face)) = kind_face(
                 "shader",
                 &test_address(),
-                &sections(uniform),
+                &sections(name, uniform),
                 &mut Vec::new(),
             ) else {
                 panic!("expected a shader face");
@@ -797,20 +969,27 @@ mod tests {
         };
 
         assert_eq!(
-            step_of(panel_uniform("count", "u32", 2.0, 1.0, 4.0, Some(2.0))),
+            step_of(
+                "count",
+                uniform_record("count", "u32", 2.0, 1.0, 4.0, Some(2.0))
+            ),
             Some(2.0),
             "an authored step overrides the shape's implied 1"
         );
         assert_eq!(
-            step_of(panel_uniform("speed", "f32", 2.37, 0.0, 4.0, None)),
+            step_of(
+                "speed",
+                uniform_record("speed", "f32", 2.37, 0.0, 4.0, None)
+            ),
             None,
             "a plain f32 uniform keeps sliding continuously"
         );
     }
 
-    /// A panel-flagged uniform record row: value shape, default, range, and
-    /// an optional authored step.
-    fn panel_uniform(
+    /// A uniform record row: value shape, default, range, and an optional
+    /// authored step. Whether it reaches the panel is a BINDING question
+    /// (Q13), answered by the companion [`bound_row`].
+    fn uniform_record(
         name: &str,
         shape: &str,
         default: f32,
@@ -838,8 +1017,6 @@ mod tests {
                 "Label",
                 UiSlotValue::string(name),
             ),
-            UiConfigSlot::value(format!("{prefix}.panel"), "Panel", UiSlotValue::bool(true))
-                .with_optionality(UiSlotOptionality::included(true)),
         ];
         if let Some(step) = step {
             fields.push(option_f32(&format!("{prefix}.step"), "Step", step));
@@ -849,15 +1026,7 @@ mod tests {
 
     #[test]
     fn bound_uniform_wears_the_binding_rows_violet_aspect() {
-        let mut sections = shader_sections();
-        // The binding-derived row the project walk appends for a wired
-        // uniform (key = bare uniform name, source = Bound).
-        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
-            rows.push(
-                UiConfigSlot::empty("speed", "Speed")
-                    .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time"))),
-            );
-        }
+        let sections = shader_sections_with(channel_endpoint("bus:time", "time", 2));
 
         let Some(UiNodeFace::Shader(face)) =
             kind_face("shader", &test_address(), &sections, &mut Vec::new())
@@ -874,23 +1043,8 @@ mod tests {
     fn a_bus_wired_uniform_gets_a_panel_write_target() {
         // panel.md P8: the knob for a uniform that CONSUMES a bus channel
         // writes that (scope, channel) down the command channel instead of
-        // editing the authored default it can no longer affect. A uniform
-        // with nothing behind it keeps the slot-edit path, which is why
-        // the target is optional rather than assumed.
-        let mut sections = shader_sections();
-        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
-            rows.push(
-                UiConfigSlot::empty("speed", "Speed").with_source(UiSlotSourceState::Bound(
-                    UiBindingEndpoint::new("bus:glow").with_panel_target(crate::UiPanelTarget {
-                        scope: lpc_wire::WireScopeRef::Module {
-                            owner: lpc_model::NodeId::new(3),
-                        },
-                        channel: "glow".to_string(),
-                        engaged: false,
-                    }),
-                )),
-            );
-        }
+        // editing the authored default it can no longer affect.
+        let sections = shader_sections_with(channel_endpoint("bus:glow", "glow", 3));
 
         let Some(UiNodeFace::Shader(face)) =
             kind_face("shader", &test_address(), &sections, &mut Vec::new())
@@ -910,10 +1064,12 @@ mod tests {
         );
     }
 
+    /// Q13, binding-is-publicity: an UNBOUND uniform gets no knob anywhere
+    /// (there is no authored flag left to ask), while a bound one keeps its
+    /// slot address so the authored default is still editable behind the
+    /// panel write.
     #[test]
-    fn an_unwired_uniform_keeps_the_slot_edit_path() {
-        // No binding row at all: nothing to write, so the knob still edits
-        // `consumed.speed.default.some` exactly as it did before P9.
+    fn only_bound_uniforms_get_knobs_and_they_keep_their_slot_address() {
         let Some(UiNodeFace::Shader(face)) = kind_face(
             "shader",
             &test_address(),
@@ -922,25 +1078,84 @@ mod tests {
         ) else {
             panic!("expected a shader face");
         };
-        assert!(face.controls[0].panel_target.is_none());
+        // `time` is unbound in the fixture; only `speed` reaches the panel.
+        assert_eq!(face.controls.len(), 1);
+        assert_eq!(face.controls[0].label, "Speed");
+        assert_eq!(
+            face.controls[0]
+                .panel_target
+                .as_ref()
+                .expect("membership IS the target")
+                .channel,
+            "speed"
+        );
         assert!(
             face.controls[0].address.is_some(),
             "and it still has a slot address to edit"
         );
+
+        // Strip the binding row and the knob goes with it.
+        let mut unbound = shader_sections();
+        if let UiNodeSection::ConfigSlots(rows) = &mut unbound[1] {
+            rows.retain(|row| row.key != "speed");
+        }
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &unbound, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert!(
+            face.controls.is_empty(),
+            "an unbound uniform is not on the panel, got {:?}",
+            face.controls
+        );
+    }
+
+    /// GV fix 1: a uniform reached only through its own `default_bind`
+    /// (`WireBindingOrigin::Default`, surfaced as `default_origin` on the
+    /// endpoint) is NOT public. fyeah's `time` is exactly this shape — the
+    /// shader shape binds it to `bus:time`, and a time knob is noise on
+    /// every panel it would reach.
+    #[test]
+    fn a_default_bound_uniform_gets_no_knob() {
+        let sections = shader_sections_with(
+            channel_endpoint("bus:time", "time", 2)
+                .with_default_origin()
+                .with_live_value("12.5"),
+        );
+
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert!(
+            face.controls.is_empty(),
+            "default-origin wiring is not publicity, got {:?}",
+            face.controls
+                .iter()
+                .map(|control| control.label.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        // The same row, AUTHORED, is public — the exclusion turns on the
+        // origin flag alone.
+        let authored = shader_sections_with(channel_endpoint("bus:time", "time", 2));
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &authored, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert_eq!(face.controls.len(), 1);
     }
 
     #[test]
     fn bound_uniform_mirrors_the_wired_rows_live_reading() {
-        let mut sections = shader_sections();
         // The binding-derived row, decorated with the channel's quantized
         // live reading by the project walk (P6 item 1).
-        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
-            rows.push(
-                UiConfigSlot::empty("speed", "Speed").with_source(UiSlotSourceState::Bound(
-                    UiBindingEndpoint::new("bus:master-tempo").with_live_value("2.72"),
-                )),
-            );
-        }
+        let sections = shader_sections_with(
+            channel_endpoint("bus:master-tempo", "master-tempo", 4).with_live_value("2.72"),
+        );
 
         let Some(UiNodeFace::Shader(face)) =
             kind_face("shader", &test_address(), &sections, &mut Vec::new())
@@ -1022,7 +1237,8 @@ mod tests {
             kind_face("shader", &test_address(), &no_products, &mut Vec::new()),
             None
         );
-        // A fixture whose rows carry no panel flag keeps the sections view.
+        // A fixture whose rows carry no mappable editor hint keeps the
+        // sections view.
         let unflagged = vec![
             UiNodeSection::ProducedProducts(vec![UiProducedProduct::control("Output")]),
             UiNodeSection::ConfigSlots(vec![UiConfigSlot::value(
@@ -1167,7 +1383,191 @@ mod tests {
         assert!(entry.action.is_some(), "matched via the entry_<key> rule");
     }
 
+    #[test]
+    fn output_face_projects_every_wire_with_its_slice_and_edit_addresses() {
+        let sections = output_sections(&[
+            (0, "ws281x:local:IO18", Some(100)),
+            (1, "ws281x:local:IO2", None),
+        ]);
+
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+
+        assert_eq!(face.channels.len(), 2);
+        let first = &face.channels[0];
+        assert_eq!((first.key, first.pin_label.as_str()), (0, "IO18"));
+        assert_eq!(first.endpoint_display, "ws281x:local:IO18");
+        assert_eq!((first.count, first.resolved_count), (Some(100), Some(100)));
+        assert_eq!(first.slice_start, Some(0));
+        assert_eq!(
+            slot_path(&first.endpoint_address),
+            "channels[0].endpoint",
+            "the wire is edited through the normal slot write path"
+        );
+        assert_eq!(
+            slot_path(&first.count_address),
+            "channels[0].count.some",
+            "a PRESENT count edits its interior option slot"
+        );
+
+        let second = &face.channels[1];
+        assert_eq!((second.key, second.pin_label.as_str()), (1, "IO2"));
+        assert_eq!(second.count, None, "the highest key may omit its count");
+        assert_eq!(
+            second.resolved_count, None,
+            "the remainder waits for the decoration pass to say how big it is"
+        );
+        assert_eq!(
+            second.slice_start,
+            Some(100),
+            "slices start where the previous one ended"
+        );
+        assert_eq!(
+            second.count_address, None,
+            "an ABSENT option has no value address — including it is the toggle"
+        );
+
+        assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
+        assert_eq!(slot_path(&face.channels_address), "channels");
+        // Hardware and upstream facts are the decoration pass's business.
+        assert_eq!(face.board, None);
+        assert_eq!(face.total_lamps, None);
+        assert!(face.channels.iter().all(|channel| channel.gpio.is_none()));
+        assert_eq!(face.authored_lamps(), None, "the remainder is open-ended");
+    }
+
+    #[test]
+    fn the_single_countless_channel_takes_the_whole_extent() {
+        // The shape every format-2 output migrated into: one wire, no count.
+        let sections = output_sections(&[(0, "ws281x:local:D10", None)]);
+
+        let Some(UiNodeFace::Output(mut face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+        assert_eq!(face.channels[0].slice_start, Some(0));
+        assert_eq!(face.channels[0].resolved_count, None);
+
+        // What the decoration pass then does with a 241-lamp buffer.
+        face.resolve_extent(241);
+        assert_eq!(face.total_lamps, Some(241));
+        assert_eq!(face.channels[0].resolved_count, Some(241));
+    }
+
+    #[test]
+    fn fully_counted_channels_total_without_any_runtime_help() {
+        let sections = output_sections(&[
+            (0, "ws281x:local:IO18", Some(60)),
+            (1, "ws281x:local:IO16", Some(60)),
+            (2, "ws281x:local:IO14", Some(30)),
+        ]);
+
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+        assert_eq!(
+            face.channels
+                .iter()
+                .map(|channel| channel.slice_start)
+                .collect::<Vec<_>>(),
+            [Some(0), Some(60), Some(120)]
+        );
+        assert_eq!(face.authored_lamps(), Some(150));
+    }
+
+    #[test]
+    fn an_empty_channels_map_still_derives_a_face_and_a_missing_one_does_not() {
+        // No wires yet: the face's empty state (with the map's own add
+        // affordance) is the card's surface, exactly like a new playlist.
+        let empty = output_sections(&[]);
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &empty, &mut Vec::new())
+        else {
+            panic!("expected an empty output face");
+        };
+        assert!(face.channels.is_empty());
+        assert_eq!(face.authored_lamps(), Some(0));
+
+        // No `channels` row at all is not an output card we understand.
+        let no_channels = vec![UiNodeSection::ConfigSlots(Vec::new())];
+        assert_eq!(
+            kind_face("output", &test_address(), &no_channels, &mut Vec::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unparseable_endpoint_leaves_the_pin_unresolved_but_shown() {
+        let sections = output_sections(&[(0, "nonsense", Some(4))]);
+
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+        assert_eq!(face.channels[0].endpoint_display, "nonsense");
+        assert_eq!(face.channels[0].pin_label, "");
+    }
+
     // -- fixtures ------------------------------------------------------------
+
+    fn slot_path(address: &Option<ProjectSlotAddress>) -> String {
+        address
+            .as_ref()
+            .expect("the row is addressed")
+            .path
+            .to_string()
+    }
+
+    /// Output sections as the project walk projects them: the bound `input`
+    /// product row plus the `channels` map, one record per authored wire.
+    fn output_sections(wires: &[(u32, &str, Option<u32>)]) -> Vec<UiNodeSection> {
+        let entries = wires
+            .iter()
+            .map(|(key, endpoint, count)| {
+                let prefix = format!("channels[{key}]");
+                let endpoint_key = format!("{prefix}.endpoint");
+                let count_key = format!("{prefix}.count");
+                let count_row = match count {
+                    Some(count) => {
+                        UiConfigSlot::value(&count_key, "Count", UiSlotValue::u32(*count))
+                            .with_address(address(&count_key))
+                            .with_optionality(UiSlotOptionality::included(true))
+                    }
+                    None => UiConfigSlot::empty(&count_key, "Count")
+                        .with_address(address(&count_key))
+                        .with_optionality(UiSlotOptionality::excluded(true)),
+                };
+                UiConfigSlot::record(
+                    prefix.clone(),
+                    key.to_string(),
+                    vec![
+                        UiConfigSlot::value(
+                            &endpoint_key,
+                            "Endpoint",
+                            UiSlotValue::string(*endpoint),
+                        )
+                        .with_address(address(&endpoint_key)),
+                        count_row,
+                    ],
+                )
+                .with_address(address(&prefix))
+            })
+            .collect();
+
+        vec![UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value("input", "Input", UiSlotValue::unset()).with_source(
+                UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:control.out")),
+            ),
+            UiConfigSlot::record("channels", "Channels", entries).with_address(address("channels")),
+        ])]
+    }
 
     fn address(path: &str) -> ProjectSlotAddress {
         ProjectSlotAddress::new(
@@ -1183,10 +1583,19 @@ mod tests {
             .with_optionality(UiSlotOptionality::included(true))
     }
 
+    /// Shader sections with `speed` and `time` uniforms, where `speed` is
+    /// wired to `bus:speed` — which, since Q13, is the ONLY thing that puts
+    /// it on the panel. `time` stays unbound and therefore knob-less.
     fn shader_sections() -> Vec<UiNodeSection> {
-        let uniform = |name: &str, panel: bool| {
+        shader_sections_with(channel_endpoint("bus:speed", "speed", 1))
+    }
+
+    /// The same sections with `speed`'s binding-derived row carrying
+    /// `endpoint` — the seam every Q13 case varies.
+    fn shader_sections_with(endpoint: UiBindingEndpoint) -> Vec<UiNodeSection> {
+        let uniform = |name: &str| {
             let prefix = format!("consumed[{name}]");
-            let mut fields = vec![
+            let fields = vec![
                 UiConfigSlot::value(
                     format!("{prefix}.kind"),
                     "Kind",
@@ -1202,27 +1611,38 @@ mod tests {
                     UiSlotValue::string("Speed"),
                 ),
             ];
-            if panel {
-                fields.push(
-                    UiConfigSlot::value(
-                        format!("{prefix}.panel"),
-                        "Panel",
-                        UiSlotValue::bool(true),
-                    )
-                    .with_optionality(UiSlotOptionality::included(true)),
-                );
-            }
             UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
         };
 
         vec![
             UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
-            UiNodeSection::ConfigSlots(vec![UiConfigSlot::record(
-                "consumed",
-                "Consumed",
-                vec![uniform("speed", true), uniform("time", false)],
-            )]),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::record(
+                    "consumed",
+                    "Consumed",
+                    vec![uniform("speed"), uniform("time")],
+                ),
+                bound_row("speed", endpoint),
+            ]),
         ]
+    }
+
+    /// The binding-derived row the project walk appends for a wired uniform
+    /// (key = the bare uniform name, source = Bound).
+    fn bound_row(name: &str, endpoint: UiBindingEndpoint) -> UiConfigSlot {
+        UiConfigSlot::empty(name, "Speed").with_source(UiSlotSourceState::Bound(endpoint))
+    }
+
+    /// A consumed-bus endpoint carrying the `(scope, channel)` panel target
+    /// the project walk derives — the Q13 membership fact.
+    fn channel_endpoint(display: &str, channel: &str, owner: u32) -> UiBindingEndpoint {
+        UiBindingEndpoint::new(display).with_panel_target(crate::UiPanelTarget {
+            scope: lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(owner),
+            },
+            channel: channel.to_string(),
+            engaged: false,
+        })
     }
 
     /// Playlist sections: produced visual output, the `active_entry` status
@@ -1349,14 +1769,11 @@ mod tests {
     }
 
     fn fixture_sections() -> Vec<UiNodeSection> {
-        let brightness_value =
-            UiSlotValue::u32(64)
-                .with_panel(true)
-                .with_editor(UiSlotEditorHint::Slider {
-                    min: 0.0,
-                    max: 255.0,
-                    step: Some(1.0),
-                });
+        let brightness_value = UiSlotValue::u32(64).with_editor(UiSlotEditorHint::Slider {
+            min: 0.0,
+            max: 255.0,
+            step: Some(1.0),
+        });
         vec![
             UiNodeSection::ProducedProducts(vec![UiProducedProduct::control("Output")]),
             UiNodeSection::ConfigSlots(vec![

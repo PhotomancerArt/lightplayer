@@ -22,6 +22,10 @@ pub struct UiBindingEndpoint {
     /// (panel.md P1), present on Consumes-direction bus endpoints so the
     /// panel control built over this wiring can dispatch panel commands.
     pub panel_target: Option<crate::UiPanelTarget>,
+    /// The consumed slot's declared `panel = "show"` hint: this
+    /// default-origin wiring still presents a panel control (the additive
+    /// override on ADR 2026-08-03-panel-visibility-is-derived).
+    pub panel_hint: bool,
 }
 
 impl UiBindingEndpoint {
@@ -33,6 +37,7 @@ impl UiBindingEndpoint {
             default_origin: false,
             live_value: None,
             panel_target: None,
+            panel_hint: false,
         }
     }
 
@@ -57,6 +62,12 @@ impl UiBindingEndpoint {
     /// Attach the consumed channel's panel-write target.
     pub fn with_panel_target(mut self, panel_target: crate::UiPanelTarget) -> Self {
         self.panel_target = Some(panel_target);
+        self
+    }
+
+    /// Mark this endpoint's slot as declaring `panel = "show"`.
+    pub fn with_panel_hint(mut self) -> Self {
+        self.panel_hint = true;
         self
     }
 }

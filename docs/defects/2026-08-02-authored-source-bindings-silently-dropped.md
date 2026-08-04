@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed          # 2026-08-03 — shape-driven registration (fix direction 2)
 found: 2026-08-02      # how: P10 walk prep — authoring a consuming bus binding that never took effect
 area: lpc-engine/project_loader (authored binding registration)
 class: silent-drop
@@ -59,3 +59,37 @@ what is broken is the feedback when you try.
 
 Either fix makes fixture brightness bindable, which is what lets the
 panel own the control the design keeps using as its example.
+
+**Fixed 2026-08-03** — fix direction 2, in
+`register_node_bindings`/`resolve_declared_binding_path`
+(lp-core/lpc-engine/src/engine/project_loader.rs): every authored
+bindings key resolves against the kind's declared def/state shapes (plus
+shader/compute dynamic slots), with two refinements the fix surfaced:
+
+- **Option-wrapped slots normalize to their `.some` interior** — binding
+  lookup is exact-path and the runtime's accessor reads
+  `brightness.some`, so a target registered at `brightness` would have
+  been a second silent drop one layer deeper.
+- **Unknown keys fail the load loudly** (`InvalidProjectReference`,
+  naming the slot) on every closed-namespace kind. Shader/compute kinds
+  are exempt: their slot namespace is open and a binding may legally
+  arrive before its consumed record — the declared-orphan state the
+  agent's `upsert_param` repair flow depends on (pinned by the agent
+  e2es). The studio's uniform surface owns that feedback.
+
+The fix flushed out dead weight the drop had been hiding: texture nodes
+carried a `bus:visual.out` → `input` binding (test fixtures and the
+shared project builder) for a slot `TextureDef` never declared. Fixture
+brightness is now not merely bindable but default-bound
+(`bus:brightness`, ADR 2026-08-03-panel-visibility-is-derived amendment),
+and clock `controls.rate` — the report's own example — registers, both
+pinned by loader regression tests.
+
+**Met again 2026-08-03** (modules vision push, P5 content). Authoring
+`"brightness": { "source": "bus:brightness" }` on `examples/meteor`'s
+fixture, to give that example a second public control, registered
+nothing: no `brightness` row in the module's wiring drawer, no fader on
+the panel, no diagnostic. The binding was removed and the example ships
+with one control instead of two. This is now the second time the defect
+has been met by someone trying to do exactly what the design documents
+use as their worked example, which is the argument for fix direction 2.

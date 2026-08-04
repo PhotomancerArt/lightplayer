@@ -24,7 +24,7 @@ pub fn run() -> ! {
     let button_endpoint = button_driver
         .endpoints()
         .into_iter()
-        .find(|endpoint| endpoint.spec().as_str() == "button:gpio:D9")
+        .find(|endpoint| endpoint.spec().as_str() == "button:local:D9")
         .expect("D9/GPIO8 button endpoint exists");
     let mut button = button_driver
         .open(button_endpoint.id(), ButtonConfig::default())

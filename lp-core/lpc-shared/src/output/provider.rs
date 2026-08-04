@@ -38,7 +38,7 @@ pub trait OutputProvider {
     /// Open an output channel
     ///
     /// # Arguments
-    /// * `endpoint` - Authored hardware endpoint spec, such as `ws281x:rmt:D10`
+    /// * `endpoint` - Authored hardware endpoint spec, such as `ws281x:local:D10`
     /// * `byte_count` - Total number of bytes to allocate for this channel
     /// * `format` - Output format/protocol
     ///

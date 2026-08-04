@@ -150,7 +150,6 @@ impl SlotValue for FixturePower {
             meta: StaticSlotMeta {
                 label: Some("Power"),
                 description: Some("Lamp type and supply budget used to limit output current."),
-                panel: false,
                 unit: None,
             },
             editor: StaticValueEditorHint::Power,
@@ -177,7 +176,6 @@ impl SlotValue for FixturePower {
                 description: Some(
                     "Lamp type and supply budget used to limit output current.".to_string(),
                 ),
-                panel: false,
                 unit: None,
             },
             editor: ValueEditorHint::Power,

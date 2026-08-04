@@ -437,12 +437,22 @@ impl DemoCapture {
                     }
                 }
             }
-            DeviceEvent::State { state } => {
+            DeviceEvent::State { to: state, .. } => {
                 if let Ok(mut file) = self.trace_file.lock() {
                     writeln!(file, "[session] state: {state:?}").ok();
                 }
             }
             DeviceEvent::Progress { .. } => {}
+            DeviceEvent::ParseAnomaly { detail } => {
+                if let Ok(mut file) = self.trace_file.lock() {
+                    writeln!(file, "[session] parse anomaly: {detail}").ok();
+                }
+            }
+            DeviceEvent::TxFrame { frame } => {
+                if let Ok(mut file) = self.trace_file.lock() {
+                    writeln!(file, "[session] tx: {frame}").ok();
+                }
+            }
         }
     }
 

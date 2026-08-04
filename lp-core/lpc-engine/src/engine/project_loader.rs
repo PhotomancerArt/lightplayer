@@ -12,7 +12,9 @@ use lpc_model::{
     NodeName, ProjectNodeOrigin, ProjectNodePlacement, Revision, SlotPath,
 };
 use lpc_model::{NodeDefLocation, NodeDefState};
-use lpc_model::{SlotDirection, SlotPathSegment, SlotShape, StaticSlotShape, well_known_channel};
+use lpc_model::{
+    SlotDirection, SlotName, SlotPathSegment, SlotShape, StaticSlotShape, well_known_channel,
+};
 // `FixtureDef`/`MappingConfig` back `resolve_fixture_mapping` (node-fixture
 // only); `PlaylistDef` backs `playlist_runtime_entries` (node-playlist only)
 // — both model types, but their sole consumers here are gated, so the
@@ -52,7 +54,6 @@ use crate::nodes::OutputNode;
 use crate::nodes::TextureNode;
 #[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
-use crate::nodes::playlist_output_path;
 #[cfg(feature = "node-shader")]
 use crate::nodes::{ComputeShaderNode, ShaderNode};
 #[cfg(feature = "node-fixture")]
@@ -616,7 +617,7 @@ impl ProjectLoader {
                 })?;
             runtime
                 .services_mut()
-                .register_output_sink(sink_id, &config);
+                .register_output_sink(sink_id, node.id, &config);
             runtime.add_demand_root(node.id);
         }
 
@@ -1415,6 +1416,24 @@ fn register_node_bindings(
     if node.kind == NodeKind::Module {
         if let Ok(NodeDef::Module(config)) = projected_node_config(registry, node) {
             let config = config.clone();
+            for (key, entry) in config.bindings.entries().iter() {
+                let name = key.as_str();
+                entry
+                    .validate()
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("binding `{name}`: {e}"),
+                    })?;
+                if name != "output" || entry.target_ref().is_none() {
+                    return Err(ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!(
+                            "binding `{name}` names no bindable module slot \
+                             (a module takes a `target` binding on `output`)"
+                        ),
+                    });
+                }
+            }
             register_target_binding(
                 runtime,
                 projected_nodes,
@@ -1428,57 +1447,11 @@ fn register_node_bindings(
         }
         return Ok(());
     }
-    match projected_node_config(registry, node)?.clone() {
-        NodeDef::Clock(config) => {
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "seconds",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "delta_seconds",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
-        }
-        NodeDef::Button(config) => {
-            for slot in ["down", "held", "up"] {
-                register_target_binding(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    slot,
-                    &config.bindings,
-                    frame,
-                )?;
-            }
-        }
-        NodeDef::ControlRadio(config) => {
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "input",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
-        }
-        NodeDef::Output(config) => {
+    let config = projected_node_config(registry, node)?.clone();
+    // Kind-owned loader plumbing that no authored bindings entry drives: the
+    // output demand literal, and shader slot-declared default binds.
+    match &config {
+        NodeDef::Output(_) => {
             runtime
                 .add_binding(
                     BindingDraft {
@@ -1497,36 +1470,9 @@ fn register_node_bindings(
                     path: node_label(node),
                     reason: format!("bind output demand slot: {e}"),
                 })?;
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "input",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
-        NodeDef::Shader(config) => {
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
-            for name in config.consumed_slots.entries.keys() {
-                register_optional_source_binding(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    name.as_str(),
-                    &config.bindings,
-                    frame,
-                )?;
-            }
-            for (name, slot) in config.consumed_slots.entries.iter() {
+        NodeDef::Shader(shader) => {
+            for (name, slot) in shader.consumed_slots.entries.iter() {
                 let Some(endpoint) = slot.default_bind.data.as_ref() else {
                     continue;
                 };
@@ -1534,141 +1480,210 @@ fn register_node_bindings(
                     runtime,
                     projected_nodes,
                     node,
-                    &config.bindings,
+                    &shader.bindings,
                     frame,
                     name,
                     SlotDirection::Consumed,
                     &endpoint.value().to_string(),
                 )?;
             }
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
-        NodeDef::ComputeShader(config) => {
-            for name in config.consumed_slots.entries.keys() {
-                register_optional_source_binding(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    name.as_str(),
-                    &config.bindings,
-                    frame,
-                )?;
-            }
-            for name in config.produced_slots.entries.keys() {
-                register_target_binding(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    name.as_str(),
-                    &config.bindings,
-                    frame,
-                )?;
-            }
-        }
-        NodeDef::Fluid(config) => {
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "time",
-                &config.bindings,
-                frame,
-            )?;
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "emitters",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
-        }
-        NodeDef::Playlist(config) => {
-            if let Some(source) = binding_source(&config.bindings, "time")
-                .map(|source| binding_source_endpoint(projected_nodes, node, source))
-                .transpose()?
-            {
-                register_source_binding_at_path(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    "time",
-                    source,
-                    SlotPath::parse("time").expect("playlist time slot"),
-                    frame,
-                )?;
-            }
-            if let Some(source) = binding_source(&config.bindings, "trigger")
-                .map(|source| binding_source_endpoint(projected_nodes, node, source))
-                .transpose()?
-            {
-                register_source_binding_at_path(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    "trigger",
-                    source,
-                    SlotPath::parse("trigger").expect("playlist trigger slot"),
-                    frame,
-                )?;
-            }
-            if let Some(target) = binding_target(&config.bindings, "output")
-                .map(|target| binding_target_endpoint(projected_nodes, node, target))
-                .transpose()?
-            {
-                let source = BindingSource::ProducedSlot {
-                    node: node.id,
-                    slot: playlist_output_path(),
-                };
-                runtime
-                    .add_binding(
-                        BindingDraft {
-                            kind: binding_kind(&source, &target, "output"),
-                            source,
-                            target,
-                            priority: BindingPriority::authored(),
-                            owner: node.id,
-                        },
-                        frame,
-                    )
-                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                        path: node_label(node),
-                        reason: format!("register output target binding: {e}"),
-                    })?;
-            }
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
-        }
-        NodeDef::Fixture(config) => {
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "input",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
-        }
-        NodeDef::Module(_) | NodeDef::Texture(_) => {}
+        _ => {}
     }
+    // Dynamic (artifact-declared) slot names: shader/compute consumed slots
+    // take source bindings, compute produced slots take target bindings.
+    let (dynamic_consumed, dynamic_produced): (Vec<&str>, Vec<&str>) = match &config {
+        NodeDef::Shader(shader) => (
+            shader
+                .consumed_slots
+                .entries
+                .keys()
+                .map(String::as_str)
+                .collect(),
+            Vec::new(),
+        ),
+        NodeDef::ComputeShader(compute) => (
+            compute
+                .consumed_slots
+                .entries
+                .keys()
+                .map(String::as_str)
+                .collect(),
+            compute
+                .produced_slots
+                .entries
+                .keys()
+                .map(String::as_str)
+                .collect(),
+        ),
+        _ => (Vec::new(), Vec::new()),
+    };
+    // Every authored binding entry registers or errs — an entry naming a slot
+    // nobody resolves was the silent-drop defect
+    // (docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md).
+    let bindings = node_def_bindings(&config);
+    for (key, entry) in bindings.entries().iter() {
+        let name = key.as_str();
+        entry
+            .validate()
+            .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                path: node_label(node),
+                reason: format!("binding `{name}`: {e}"),
+            })?;
+        let has_target = entry.target_ref().is_some();
+        if !has_target && dynamic_consumed.contains(&name) {
+            register_source_binding(runtime, projected_nodes, node, name, bindings, frame)?;
+            continue;
+        }
+        if has_target && dynamic_produced.contains(&name) {
+            register_target_binding(runtime, projected_nodes, node, name, bindings, frame)?;
+            continue;
+        }
+        let slot = match resolve_declared_binding_path(node.kind, name) {
+            Ok(slot) => slot,
+            // A shader/compute slot namespace is OPEN — its consumed/produced
+            // records are authored and tooling repairs a binding that arrives
+            // before its record (the agent's declared-orphan → `upsert_param`
+            // flow). An unresolved key there is that legal orphan state, and
+            // the studio's uniform surface owns the feedback; registering
+            // nothing preserves it. Every other kind's slot set is closed, so
+            // an unresolved key can only be a mistake — fail the load with
+            // the slot's name.
+            Err(_) if matches!(node.kind, NodeKind::Shader | NodeKind::ComputeShader) => {
+                continue;
+            }
+            Err(reason) => {
+                return Err(ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason,
+                });
+            }
+        };
+        if has_target {
+            register_target_binding_at_path(
+                runtime,
+                projected_nodes,
+                node,
+                name,
+                bindings,
+                slot,
+                frame,
+            )?;
+        } else {
+            let source = binding_source(bindings, name).expect("validate: source or value present");
+            let source = binding_source_endpoint(projected_nodes, node, source)?;
+            register_source_binding_at_path(
+                runtime,
+                projected_nodes,
+                node,
+                name,
+                source,
+                slot,
+                frame,
+            )?;
+        }
+    }
+    register_declared_defaults(runtime, projected_nodes, node, bindings, frame)?;
     Ok(())
+}
+
+/// The authored bindings map every non-module node kind carries.
+fn node_def_bindings(config: &NodeDef) -> &BindingDefs {
+    match config {
+        NodeDef::Module(config) => &config.bindings,
+        NodeDef::Button(config) => &config.bindings,
+        NodeDef::Clock(config) => &config.bindings,
+        NodeDef::Texture(config) => &config.bindings,
+        NodeDef::Shader(config) => &config.bindings,
+        NodeDef::ComputeShader(config) => &config.bindings,
+        NodeDef::Fluid(config) => &config.bindings,
+        NodeDef::Playlist(config) => &config.bindings,
+        NodeDef::ControlRadio(config) => &config.bindings,
+        NodeDef::Output(config) => &config.bindings,
+        NodeDef::Fixture(config) => &config.bindings,
+    }
+}
+
+/// Resolve one authored binding key against the kind's declared def/state
+/// record shapes, normalizing option wrappers to the interior `some` path
+/// the runtime's accessors actually resolve (`brightness` on a fixture →
+/// `brightness.some`). Nested structure is verified as far as it is
+/// statically declared; segments past an opaque leaf (value, custom codec,
+/// shape ref) pass through unchanged. A key that names no declared slot is
+/// an error — the loud replacement for the silent drop recorded in
+/// `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md`.
+fn resolve_declared_binding_path(kind: NodeKind, name: &str) -> Result<SlotPath, String> {
+    let path =
+        SlotPath::parse(name).map_err(|e| format!("invalid binding slot `{name}`: {e:?}"))?;
+    let mut segments = path.segments().iter();
+    let Some(SlotPathSegment::Field(first)) = segments.next() else {
+        return Err(format!(
+            "binding slot `{name}` must start with a field name"
+        ));
+    };
+    let (def_shape, state_shape) = kind_shapes(kind);
+    let field = [def_shape, state_shape]
+        .into_iter()
+        .flatten()
+        .find_map(|shape| match shape {
+            SlotShape::Record { fields, .. } => fields
+                .into_iter()
+                .find(|field| field.name.as_str() == first.as_str()),
+            _ => None,
+        })
+        .ok_or_else(|| format!("binding `{name}` names no declared slot on {kind:?}"))?;
+    let some_segment = || SlotPathSegment::Field(SlotName::parse("some").expect("valid name"));
+    let mut out = alloc::vec![SlotPathSegment::Field(first.clone())];
+    // `None` = walked past what the shape declares; stop verifying.
+    let mut shape = Some(field.shape);
+    for segment in segments {
+        // Auto-descend option wrappers the author left implicit.
+        let spells_some =
+            matches!(segment, SlotPathSegment::Field(field) if field.as_str() == "some");
+        while !spells_some && matches!(shape, Some(SlotShape::Option { .. })) {
+            let Some(SlotShape::Option { some, .. }) = shape else {
+                unreachable!("matched above");
+            };
+            out.push(some_segment());
+            shape = Some(*some);
+        }
+        let next = match (shape, segment) {
+            (Some(SlotShape::Option { some, .. }), SlotPathSegment::Field(_)) => Some(*some),
+            (Some(SlotShape::Record { fields, .. }), SlotPathSegment::Field(field)) => Some(
+                fields
+                    .into_iter()
+                    .find(|candidate| candidate.name == *field)
+                    .ok_or_else(|| {
+                        format!("binding `{name}`: no declared field `{field}` on {kind:?}")
+                    })?
+                    .shape,
+            ),
+            (Some(SlotShape::Enum { variants, .. }), SlotPathSegment::Field(field)) => Some(
+                variants
+                    .into_iter()
+                    .find(|candidate| candidate.name == *field)
+                    .ok_or_else(|| {
+                        format!("binding `{name}`: no declared variant `{field}` on {kind:?}")
+                    })?
+                    .shape,
+            ),
+            (Some(SlotShape::Map { value, .. }), SlotPathSegment::Key(_)) => Some(*value),
+            (Some(SlotShape::Map { .. }), SlotPathSegment::Field(field)) => {
+                return Err(format!(
+                    "binding `{name}`: map slot takes a bracketed key, not field `{field}`"
+                ));
+            }
+            (_, _) => None,
+        };
+        out.push(segment.clone());
+        shape = next;
+    }
+    // A binding lands on the value-bearing interior of an option wrapper.
+    while let Some(SlotShape::Option { some, .. }) = shape {
+        out.push(some_segment());
+        shape = Some(*some);
+    }
+    Ok(SlotPath::from_segments(out))
 }
 
 /// Slot-declared default bindings for a node kind: (slot name, declared
@@ -1744,10 +1759,16 @@ fn register_default_bind(
             });
         }
     };
-    let slot = SlotPath::parse(name).map_err(|e| ProjectLoadError::InvalidProjectReference {
-        path: node_label(current),
-        reason: format!("invalid default_bind slot `{name}`: {e}"),
-    })?;
+    // Declared slots normalize through the shape walk (an option-wrapped
+    // slot binds its `.some` interior — the accessor path the runtime
+    // resolves); dynamic shader slot names are already accessor paths.
+    let slot = match resolve_declared_binding_path(current.kind, name) {
+        Ok(slot) => slot,
+        Err(_) => SlotPath::parse(name).map_err(|e| ProjectLoadError::InvalidProjectReference {
+            path: node_label(current),
+            reason: format!("invalid default_bind slot `{name}`: {e}"),
+        })?,
+    };
     let draft = if direction == SlotDirection::Produced {
         if binding_target(bindings, name).is_some() {
             return Ok(());
@@ -1896,20 +1917,6 @@ fn register_source_binding_at_path(
     Ok(())
 }
 
-fn register_optional_source_binding(
-    engine: &mut Engine,
-    projected_nodes: &[ProjectedNode],
-    current: &ProjectedNode,
-    slot_name: &str,
-    bindings: &BindingDefs,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
-    if binding_source(bindings, slot_name).is_none() {
-        return Ok(());
-    }
-    register_source_binding(engine, projected_nodes, current, slot_name, bindings, frame)
-}
-
 fn register_target_binding(
     engine: &mut Engine,
     projected_nodes: &[ProjectedNode],
@@ -1918,15 +1925,36 @@ fn register_target_binding(
     bindings: &BindingDefs,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
-    let Some(target) = binding_target(bindings, slot_name) else {
-        return Ok(());
-    };
-    let target = binding_target_endpoint(projected_nodes, current, target)?;
     let source_slot =
         SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("invalid source slot `{slot_name}`: {e}"),
         })?;
+    register_target_binding_at_path(
+        engine,
+        projected_nodes,
+        current,
+        slot_name,
+        bindings,
+        source_slot,
+        frame,
+    )
+}
+
+#[allow(clippy::too_many_arguments, reason = "loader registration plumbing")]
+fn register_target_binding_at_path(
+    engine: &mut Engine,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
+    slot_name: &str,
+    bindings: &BindingDefs,
+    source_slot: SlotPath,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    let Some(target) = binding_target(bindings, slot_name) else {
+        return Ok(());
+    };
+    let target = binding_target_endpoint(projected_nodes, current, target)?;
     let source = BindingSource::ProducedSlot {
         node: current.id,
         slot: source_slot,
@@ -2217,7 +2245,7 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2313,9 +2341,9 @@ mod tests {
     fn a_node_whose_definition_does_not_parse_is_marked_failed() {
         let fs = char_project(&[(
             "output",
-            // Endpoint specs are `capability:driver:config`; the config part
+            // Endpoint specs are `capability:target:config`; the config part
             // is empty here, exactly as a mis-edited `outputN.json` had it.
-            r#"{ "kind": "Output", "endpoint": "ws281x:rmt:",
+            r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:" } },
                  "bindings": { "input": { "source": "bus:control.out" } } }"#,
         )]);
 
@@ -2343,7 +2371,7 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2441,7 +2469,7 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2475,7 +2503,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {
@@ -2640,6 +2668,76 @@ mod tests {
         )
         .expect("attach probe");
         levels
+    }
+
+    /// The compile window is keyed to the ENGINE's frame revision, not the
+    /// ambient [`lpc_model::current_revision`] counter.
+    ///
+    /// `open_compile_window` stamps the tick's revision, and a node only
+    /// compiles when its render context reports that same revision. Reading
+    /// the render revision from the process-global ambient counter instead
+    /// broke the match whenever anything advanced that counter between the
+    /// tick's `advance_revision` and the render — a second engine in the
+    /// process, or parallel tests sharing a binary. The node then deferred
+    /// the compile it had just been granted a window for, and a studio
+    /// apply-then-read-status round trip saw no compile error at all.
+    ///
+    /// The probe stands in for that other advancer: pressure is broadcast at
+    /// the top of the tick, after the frame revision is stamped and before
+    /// any render, so bumping the ambient counter there reproduces the
+    /// desync deterministically. See
+    /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.md`.
+    #[test]
+    fn compile_window_survives_an_ambient_revision_bump_inside_the_tick() {
+        struct RevisionBumper;
+
+        impl crate::node::NodeRuntime for RevisionBumper {
+            fn destroy(
+                &mut self,
+                _ctx: &mut crate::node::DestroyCtx,
+            ) -> Result<(), crate::node::NodeError> {
+                Ok(())
+            }
+
+            fn handle_memory_pressure(
+                &mut self,
+                _level: crate::node::PressureLevel,
+                _ctx: &mut crate::node::MemPressureCtx,
+            ) -> Result<(), crate::node::NodeError> {
+                lpc_model::advance_revision();
+                Ok(())
+            }
+        }
+
+        let mut rt = loaded_basic_runtime();
+        let root = rt.tree().root();
+        let frame = rt.revision();
+        let id = rt
+            .tree_mut()
+            .add_child(
+                root,
+                NodeName::parse("revision_bumper").expect("name"),
+                NodeName::parse("probe").expect("ty"),
+                lpc_wire::WireChildKind::Input {
+                    source: lpc_wire::WireSlotIndex(0),
+                },
+                lpc_model::NodeInvocation::new(lpc_model::ArtifactSpec::path("probe.json")),
+                frame,
+            )
+            .expect("add bumper child");
+        rt.attach_runtime_node(id, alloc::boxed::Box::new(RevisionBumper), frame)
+            .expect("attach bumper");
+
+        rt.tick(40).expect("deferral tick");
+        rt.tick(40).expect("window tick");
+
+        assert!(
+            output_buffer_bytes(&rt, "/output.json")
+                .iter()
+                .any(|byte| *byte != 0),
+            "the compile ran inside the window frame even though the ambient \
+             revision moved after the frame revision was stamped"
+        );
     }
 
     /// M4 differential: after a `High` pressure broadcast at a safe point, the
@@ -2842,7 +2940,7 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2979,7 +3077,7 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3009,7 +3107,7 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3385,7 +3483,7 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3430,7 +3528,7 @@ mod tests {
     #[test]
     fn missing_module_json_returns_io_error() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3450,7 +3548,7 @@ mod tests {
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3621,7 +3719,7 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4193,7 +4291,7 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4214,7 +4312,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1
 }
 "#,
@@ -4264,7 +4362,7 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4288,7 +4386,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {
@@ -4304,7 +4402,7 @@ mod tests {
             br#"
 {
   "kind": "ControlRadio",
-  "endpoint": "radio:virtual:0",
+  "endpoint": "radio:local:0",
   "channel": 1,
   "repeat_count": 2,
   "bindings": {
@@ -4558,7 +4656,7 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4591,11 +4689,6 @@ mod tests {
   "size": {
     "width": 16,
     "height": 16
-  },
-  "bindings": {
-    "input": {
-      "source": "bus:visual.out"
-    }
   }
 }
 "#,
@@ -4629,7 +4722,11 @@ mod tests {
             br#"
 {
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": {
       "source": "bus:control.out"
@@ -4753,7 +4850,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file("/module.json".as_path(), module.as_bytes())
             .expect("module.json");
@@ -4762,6 +4859,115 @@ mod tests {
                 .unwrap_or_else(|_| panic!("{name}.json"));
         }
         fs
+    }
+
+    /// Fix for
+    /// `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md`:
+    /// registration is driven by the declared slot shape, so an authored
+    /// source binding on ANY declared slot registers. Fixture `brightness`
+    /// is the defect's own example — and its target lands on
+    /// `brightness.some`, the option-interior accessor path the runtime
+    /// actually resolves (binding lookup is exact-path).
+    #[test]
+    fn authored_fixture_brightness_binding_registers_on_the_accessor_path() {
+        let fs = char_project(&[(
+            "fixture",
+            r#"{ "kind": "Fixture",
+                 "bindings": { "brightness": { "source": "bus:brightness" } } }"#,
+        )]);
+        let rt = load_project(&fs);
+        let fixture = sibling(&rt, "fixture");
+        assert!(rt.tree().bindings().any(|binding| matches!(
+            (&binding.source, &binding.target),
+            (BindingSource::BusChannel(channel), BindingTarget::ConsumedSlot { node, slot })
+                if channel.0 == "brightness"
+                    && *node == fixture
+                    && slot == &SlotPath::parse("brightness.some").expect("path")
+        )));
+    }
+
+    /// The defect doc's clock example: a nested declared value slot
+    /// (`controls.rate`) takes an authored source binding.
+    #[test]
+    fn authored_clock_rate_binding_registers() {
+        let fs = char_project(&[(
+            "clock",
+            r#"{ "kind": "Clock",
+                 "bindings": { "controls.rate": { "source": "bus:rate" } } }"#,
+        )]);
+        let rt = load_project(&fs);
+        let clock = sibling(&rt, "clock");
+        assert!(rt.tree().bindings().any(|binding| matches!(
+            (&binding.source, &binding.target),
+            (BindingSource::BusChannel(channel), BindingTarget::ConsumedSlot { node, slot })
+                if channel.0 == "rate"
+                    && *node == clock
+                    && slot == &SlotPath::parse("controls.rate").expect("path")
+        )));
+    }
+
+    /// A binding key nobody declares fails the load with a reason naming
+    /// the slot — the loud replacement for the silent drop.
+    #[test]
+    fn a_binding_naming_no_declared_slot_fails_the_load() {
+        let fs = char_project(&[(
+            "fixture",
+            r#"{ "kind": "Fixture",
+                 "bindings": { "brightnes": { "source": "bus:brightness" } } }"#,
+        )]);
+        let services = EngineServices::new(TreePath::parse("/char.show").expect("path"));
+        let Err(err) = ProjectLoader::load_from_root(&fs, services) else {
+            panic!("typo must not vanish");
+        };
+        let reason = format!("{err}");
+        assert!(
+            reason.contains("brightnes") && reason.contains("names no declared slot"),
+            "got: {reason}"
+        );
+    }
+
+    /// The scarf path at the engine (panel.md P10): every fixture's
+    /// brightness is default-bound to `bus:brightness` (with
+    /// `panel = "show"`), so a panel writer on the fixture's scope dims the
+    /// value the render path reads — and with no writer, the authored
+    /// default reads through the binding's writerless dead-end (R6 via the
+    /// resolver's fallback).
+    #[test]
+    fn a_panel_brightness_write_reaches_the_fixture_read() {
+        use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
+
+        let fs = char_project(&[("fixture", r#"{ "kind": "Fixture", "brightness": 0.5 }"#)]);
+        let mut rt = load_project(&fs);
+        let fixture = sibling(&rt, "fixture");
+        let scope = rt.tree().node_scope(fixture).expect("fixture scope");
+        let key = || QueryKey::ConsumedSlot {
+            node: fixture,
+            slot: SlotPath::parse("brightness.some").expect("path"),
+        };
+
+        let (authored, _) = rt
+            .resolve_with_engine_host(key(), ResolveLogLevel::Off)
+            .expect("resolve authored");
+        assert_eq!(
+            authored.value_leaf().map(|leaf| leaf.value().clone()),
+            Some(LpValue::F32(0.5)),
+            "no writer anywhere: the authored default reads through the R6 fallback"
+        );
+
+        rt.engine_mut().panel_write(
+            scope,
+            ChannelName(String::from("brightness")),
+            LpValue::F32(0.1),
+            None,
+        );
+        let (held, _) = rt
+            .resolve_with_engine_host(key(), ResolveLogLevel::Off)
+            .expect("resolve held");
+        assert_eq!(
+            held.value_leaf().map(|leaf| leaf.value().clone()),
+            Some(LpValue::F32(0.1)),
+            "the engaged writer dims what the fixture's render path reads"
+        );
     }
 
     // The time default is declared on the slot-def (ADR 2026-07-09) — the
@@ -5001,7 +5207,7 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5022,7 +5228,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {

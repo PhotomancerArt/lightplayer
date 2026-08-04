@@ -40,6 +40,23 @@ pub struct BrowserLpvmInstance {
     signatures: LpsModuleSig,
     shadow_stack_base: Option<i32>,
     float_mode: FloatMode,
+    /// Backing storage for this instance's vmctx block. Shaders share the
+    /// app's own linear memory, so the block is a plain Rust allocation whose
+    /// address is the guest offset; `Vec<u128>` guarantees the 16-byte
+    /// alignment the vmctx header wants. Owned so it lives exactly as long as
+    /// the instance.
+    vmctx_buf: Vec<u128>,
+    /// Guest base address of `vmctx_buf` (header + uniforms + globals +
+    /// snapshot). Passing a fixed base (the old `0`) made every instance —
+    /// and the app itself — share low memory, so a second live shader
+    /// silently clobbered the first one's uniforms and persistent globals.
+    vmctx_base: usize,
+    /// Byte offset from vmctx base to globals region
+    globals_offset: usize,
+    /// Byte offset from vmctx base to snapshot region
+    snapshot_offset: usize,
+    /// Size of globals region in bytes
+    globals_size: usize,
     lpir: LpirModule,
     render_texture_cache: Option<RenderTextureEntry>,
     render_samples_cache: Option<RenderTextureEntry>,
@@ -52,7 +69,20 @@ impl BrowserLpvmInstance {
         let exports_obj = Reflect::get(&inst_js, &JsValue::from_str("exports"))
             .map_err(|e| WasmError::runtime(format!("instance.exports: {e:?}")))?;
 
-        Ok(Self {
+        // Per-instance vmctx allocation, mirroring `NativeJitModule::instantiate`
+        // and the wasmtime runtime.
+        let total_size = module.signatures.vmctx_buffer_size();
+        let vmctx_buf = vec![0u128; total_size.div_ceil(16).max(1)];
+        let vmctx_base = vmctx_buf.as_ptr() as usize;
+        i32::try_from(vmctx_base)
+            .map_err(|_| WasmError::runtime("vmctx guest base exceeds i32 range"))?;
+
+        let sigs = &module.signatures;
+        let globals_offset = sigs.globals_offset();
+        let snapshot_offset = sigs.snapshot_offset();
+        let globals_size = sigs.globals_size();
+
+        let mut inst = Self {
             instance: linked.instance,
             memory: linked.memory,
             exports_obj,
@@ -60,10 +90,67 @@ impl BrowserLpvmInstance {
             signatures: module.signatures.clone(),
             shadow_stack_base: module.shadow_stack_base,
             float_mode: module.opts.float_mode,
+            vmctx_buf,
+            vmctx_base,
+            globals_offset,
+            snapshot_offset,
+            globals_size,
             lpir: module.lpir.clone(),
             render_texture_cache: None,
             render_samples_cache: None,
-        })
+        };
+
+        // Auto-init globals: call __shader_init if it exists, then snapshot
+        inst.init_globals()?;
+
+        Ok(inst)
+    }
+
+    /// Initialize globals by calling `__shader_init` if it exists,
+    /// then memcpy globals -> snapshot to capture the initialized state
+    /// (mirrors `rt_wasmtime` and lpvm-native's `rt_jit`).
+    pub fn init_globals(&mut self) -> Result<(), WasmError> {
+        // Call __shader_init if it exists (it may not be present if there are no globals with initializers)
+        if self.exports.contains_key("__shader_init") {
+            let func_val = Reflect::get(&self.exports_obj, &JsValue::from_str("__shader_init"))
+                .map_err(|e| WasmError::runtime(format!("get export __shader_init: {e:?}")))?;
+            let func: Function = func_val
+                .dyn_into()
+                .map_err(|_| WasmError::runtime("`__shader_init` is not a function"))?;
+
+            self.prepare_call()?;
+            // Pass this instance's vmctx pointer as first argument, same as
+            // other shader calls
+            let js_args = js_sys::Array::new();
+            js_args.push(&JsValue::from_f64(self.vmctx_base as f64));
+            let call_result = func.apply(&JsValue::NULL, &js_args);
+            self.take_trap()?;
+            call_result
+                .map_err(|e| WasmError::runtime(format!("WASM trap in __shader_init: {e:?}")))?;
+        }
+
+        // Copy globals region to snapshot region
+        self.snapshot_globals()?;
+        Ok(())
+    }
+
+    /// Reset globals by memcpy snapshot -> globals so each shader call sees
+    /// the initialized state (per-pixel isolation). No-op if globals_size == 0.
+    fn reset_globals(&mut self) -> Result<(), WasmError> {
+        if self.globals_size == 0 {
+            return Ok(());
+        }
+        let bytes = self.vmctx_read_bytes(self.snapshot_offset, self.globals_size)?;
+        self.vmctx_write_bytes(self.globals_offset, &bytes)
+    }
+
+    /// Copy globals region to snapshot region (for init).
+    fn snapshot_globals(&mut self) -> Result<(), WasmError> {
+        if self.globals_size == 0 {
+            return Ok(());
+        }
+        let bytes = self.vmctx_read_bytes(self.globals_offset, self.globals_size)?;
+        self.vmctx_write_bytes(self.snapshot_offset, &bytes)
     }
 
     /// Arm the vmctx fuel/trap words and reset the shadow stack before a
@@ -118,14 +205,15 @@ impl BrowserLpvmInstance {
             .dyn_into()
             .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
         let len = ab.byte_length() as usize;
-        if end > len {
+        if self.vmctx_base + end > len {
             return Err(WasmError::runtime(format!(
-                "linear memory too small: need {end} have {len}"
+                "linear memory too small: need {} have {len}",
+                self.vmctx_base + end
             )));
         }
         let view = js_sys::Uint8Array::new_with_byte_offset_and_length(
             &ab,
-            offset as u32,
+            (self.vmctx_base + offset) as u32,
             data.len() as u32,
         );
         view.copy_from(data);
@@ -151,13 +239,17 @@ impl BrowserLpvmInstance {
             .dyn_into()
             .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
         let mem_len = ab.byte_length() as usize;
-        if end > mem_len {
+        if self.vmctx_base + end > mem_len {
             return Err(WasmError::runtime(format!(
-                "linear memory too small: need {end} have {mem_len}"
+                "linear memory too small: need {} have {mem_len}",
+                self.vmctx_base + end
             )));
         }
-        let view =
-            js_sys::Uint8Array::new_with_byte_offset_and_length(&ab, offset as u32, len as u32);
+        let view = js_sys::Uint8Array::new_with_byte_offset_and_length(
+            &ab,
+            (self.vmctx_base + offset) as u32,
+            len as u32,
+        );
         let mut bytes = vec![0u8; len];
         view.copy_to(&mut bytes);
         Ok(bytes)
@@ -302,6 +394,8 @@ impl LpvmInstance for BrowserLpvmInstance {
             .dyn_into()
             .map_err(|_| WasmError::runtime(format!("'{name}' is not a function")))?;
 
+        // Reset globals before each shader call to ensure per-pixel isolation
+        self.reset_globals()?;
         self.prepare_call()?;
 
         let shadow_frame = if needs_shadow {
@@ -322,6 +416,7 @@ impl LpvmInstance for BrowserLpvmInstance {
                 args,
                 self.float_mode,
                 &return_ty,
+                self.vmctx_base as f64,
             )?
         } else {
             (
@@ -330,6 +425,7 @@ impl LpvmInstance for BrowserLpvmInstance {
                     export.params.len(),
                     args,
                     self.float_mode,
+                    self.vmctx_base as f64,
                 )?,
                 None,
             )
@@ -402,6 +498,8 @@ impl LpvmInstance for BrowserLpvmInstance {
             .dyn_into()
             .map_err(|_| WasmError::runtime(format!("'{name}' is not a function")))?;
 
+        // Reset globals before each shader call to ensure per-pixel isolation
+        self.reset_globals()?;
         self.prepare_call()?;
 
         let shadow_frame = if needs_shadow {
@@ -415,10 +513,22 @@ impl LpvmInstance for BrowserLpvmInstance {
                 .memory
                 .as_ref()
                 .ok_or_else(|| WasmError::runtime("no linear memory for aggregate call"))?;
-            build_js_args_q32_for_call(&self.exports_obj, mem, &export, args, &return_ty)?
+            build_js_args_q32_for_call(
+                &self.exports_obj,
+                mem,
+                &export,
+                args,
+                &return_ty,
+                self.vmctx_base as f64,
+            )?
         } else {
             (
-                build_js_args_q32_scalar_only(&export.param_types, export.params.len(), args)?,
+                build_js_args_q32_scalar_only(
+                    &export.param_types,
+                    export.params.len(),
+                    args,
+                    self.vmctx_base as f64,
+                )?,
                 None,
             )
         };
@@ -489,11 +599,12 @@ impl LpvmInstance for BrowserLpvmInstance {
         })?;
 
         let js_args = js_sys::Array::new();
-        js_args.push(&JsValue::from_f64(0.0));
+        js_args.push(&JsValue::from_f64(self.vmctx_base as f64));
         js_args.push(&JsValue::from_f64(f64::from(tex_offset)));
         js_args.push(&JsValue::from_f64(f64::from(width as i32)));
         js_args.push(&JsValue::from_f64(f64::from(height as i32)));
 
+        self.reset_globals()?;
         self.prepare_call()?;
         let call_result = func.apply(&JsValue::NULL, &js_args);
         self.take_trap()?;
@@ -533,11 +644,12 @@ impl LpvmInstance for BrowserLpvmInstance {
         })?;
 
         let js_args = js_sys::Array::new();
-        js_args.push(&JsValue::from_f64(0.0));
+        js_args.push(&JsValue::from_f64(self.vmctx_base as f64));
         js_args.push(&JsValue::from_f64(f64::from(points_offset)));
         js_args.push(&JsValue::from_f64(f64::from(out_offset)));
         js_args.push(&JsValue::from_f64(f64::from(count as i32)));
 
+        self.reset_globals()?;
         self.prepare_call()?;
         let call_result = func.apply(&JsValue::NULL, &js_args);
         self.take_trap()?;
@@ -587,7 +699,7 @@ impl LpvmInstance for BrowserLpvmInstance {
             .map_err(|_| WasmError::runtime(format!("`{name}` is not a function")))?;
         self.prepare_call()?;
         let args = js_sys::Array::new();
-        args.push(&JsValue::from_f64(0.0));
+        args.push(&JsValue::from_f64(self.vmctx_base as f64));
         let call_result = func.apply(&JsValue::NULL, &args);
         self.take_trap()?;
         call_result.map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;

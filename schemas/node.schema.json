@@ -126,6 +126,20 @@
       },
       "type": "object"
     },
+    "lpc_model::nodes::output::output_channel_def::OutputChannelDef": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "endpoint": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -282,9 +296,6 @@
         },
         "min": {
           "type": "number"
-        },
-        "panel": {
-          "type": "boolean"
         },
         "step": {
           "type": "number"
@@ -788,8 +799,14 @@
           },
           "type": "object"
         },
-        "endpoint": {
-          "type": "string"
+        "channels": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::output::output_channel_def::OutputChannelDef"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
         },
         "input": {
           "additionalProperties": false,
@@ -848,11 +865,9 @@
           "type": "object"
         },
         "brightness": {
-          "description": "Fixture output brightness (0-255).",
-          "maximum": 4294967295,
-          "minimum": 0,
+          "description": "Fixture output brightness (0-1).",
           "title": "Brightness",
-          "type": "integer"
+          "type": "number"
         },
         "color_order": {
           "type": "string"

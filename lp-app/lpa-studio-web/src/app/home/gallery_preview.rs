@@ -389,7 +389,14 @@ mod wasm {
                     state.errors = state.errors.saturating_add(1);
                 }
                 if state.errors >= THUMB_ERROR_LIMIT || state.remounts >= THUMB_REMOUNT_LIMIT {
-                    log::warn!("gallery preview #{frame_id} gave up: {reason}");
+                    // Workers killed by an aborted wasm fetch mean the page
+                    // is tearing down (refresh/navigation/HMR): the badge
+                    // still parks, but the console stays quiet.
+                    if lpa_studio_core::is_teardown_abort_reason(&reason) {
+                        log::debug!("gallery preview #{frame_id} gave up: {reason}");
+                    } else {
+                        log::warn!("gallery preview #{frame_id} gave up: {reason}");
+                    }
                     badge.set(Some(ThumbPreviewBadge::Error { reason }));
                 } else {
                     generation += 1; // fresh canvas element; re-lease next tick

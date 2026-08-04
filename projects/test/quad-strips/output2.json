@@ -1,6 +1,10 @@
 {
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D9",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D9"
+    }
+  },
   "bindings": {
     "input": {
       "source": "bus:control.out/ch2"

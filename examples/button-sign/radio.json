@@ -8,7 +8,7 @@
       "target": "bus:trigger"
     }
   },
-  "endpoint": "radio:espnow:0",
+  "endpoint": "radio:local:0",
   "channel": 1,
   "repeat_count": 3,
   "wifi_channel": 0

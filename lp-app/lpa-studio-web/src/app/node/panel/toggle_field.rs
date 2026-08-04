@@ -25,6 +25,10 @@ pub fn ToggleField(
     /// Violet bound treatment on the pill ring.
     #[props(default = false)]
     bound: bool,
+    /// Amber ENGAGED ring (`docs/design/panel.md` P2/P6): a panel writer
+    /// has captured this channel and holds it. Outranks the bound violet.
+    #[props(default = false)]
+    engaged: bool,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
     /// Panel-write target: when present, a click dispatches `PanelWriteOp`
     /// flipping the SHOWN (live) state at this `(scope, channel)` instead
@@ -36,7 +40,7 @@ pub fn ToggleField(
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
     let shown = live_value.unwrap_or(value);
-    let pill_class = toggle_pill_class(shown, bound, disabled);
+    let pill_class = toggle_pill_class(shown, bound, engaged, disabled);
     let thumb_class = toggle_thumb_class(shown);
     let invalid_title = state.invalid.clone().unwrap_or_default();
 
@@ -65,14 +69,17 @@ pub fn ToggleField(
 }
 
 /// Pill chrome: good-green surface strictly for the ON state; bound rings
-/// violet in both states; disabled pills drop the pointer cursor.
-fn toggle_pill_class(on: bool, bound: bool, disabled: bool) -> String {
+/// violet in both states, engaged rings amber over it; disabled pills drop
+/// the pointer cursor.
+fn toggle_pill_class(on: bool, bound: bool, engaged: bool, disabled: bool) -> String {
     let surface = if on {
         "tw:border-status-good-border tw:bg-status-good-bg"
     } else {
         "tw:border-border-strong tw:bg-page"
     };
-    let ring = if bound {
+    let ring = if engaged {
+        " tw:ring-1 tw:ring-status-attention-border"
+    } else if bound {
         " tw:ring-1 tw:ring-status-bound-border"
     } else {
         ""
@@ -99,16 +106,23 @@ mod tests {
 
     #[test]
     fn green_is_reserved_for_the_on_state() {
-        assert!(toggle_pill_class(true, false, false).contains("status-good"));
-        assert!(!toggle_pill_class(false, false, false).contains("status-good"));
+        assert!(toggle_pill_class(true, false, false, false).contains("status-good"));
+        assert!(!toggle_pill_class(false, false, false, false).contains("status-good"));
         assert!(toggle_thumb_class(true).contains("status-good"));
         assert!(!toggle_thumb_class(false).contains("status-good"));
     }
 
     #[test]
     fn bound_ring_is_violet_in_both_states() {
-        assert!(toggle_pill_class(true, true, false).contains("status-bound"));
-        assert!(toggle_pill_class(false, true, false).contains("status-bound"));
-        assert!(!toggle_pill_class(false, false, false).contains("status-bound"));
+        assert!(toggle_pill_class(true, true, false, false).contains("status-bound"));
+        assert!(toggle_pill_class(false, true, false, false).contains("status-bound"));
+        assert!(!toggle_pill_class(false, false, false, false).contains("status-bound"));
+    }
+
+    #[test]
+    fn engaged_ring_replaces_the_bound_ring() {
+        let engaged = toggle_pill_class(false, true, true, false);
+        assert!(engaged.contains("status-attention"));
+        assert!(!engaged.contains("status-bound"));
     }
 }

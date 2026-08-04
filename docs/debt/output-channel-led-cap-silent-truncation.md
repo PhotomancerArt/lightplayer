@@ -7,7 +7,12 @@ area: lp-fw/fw-esp32-common/src/output/provider.rs + lp-fw/fw-esp32c6/src/output
 related:
   - lp-fw/fw-esp32c6/src/output/rmt_ws281x_driver.rs
   - lp-fw/fw-esp32-common/src/output/provider.rs
+  - lp-core/lpc-engine/src/engine/engine_services.rs
+  - lp-core/lpc-shared/src/output/memory.rs
+  - lp-fw/fw-emu/src/output.rs
   - 2026-07-31-0720-s3-led-output-4ch (plan dir, out-of-scope note)
+  - 2026-08-03-0903-multi-endpoint-output-node (plan dir, P3 widened the fix
+    to the engine seam and raised the bound to 1024)
 ---
 # `MAX_LEDS = 256` per-channel output is a silent cap, duplicated in two places
 
@@ -59,7 +64,33 @@ or read `provider.rs` before wiring a long run.
   while sizing the RMT buffer from the capped one; it now stores the capped
   value consistently.
 
+- **2026-08-03 (correction + widening)** — The 2026-07-31 retirement over-
+  claimed: "every cap site" turned out to mean every *device* cap site.
+  `lpc-shared`'s `MemoryOutputProvider` (host/browser) and `fw-emu`'s
+  `SyscallOutputProvider` (emulator) never capped at all — a project authored
+  for, say, 1500 LEDs opened and rendered its full length in the sim while the
+  device silently truncated the same project to 256, which is a second silent
+  divergence the original filing did not catch (found during the
+  multi-endpoint output node plan's P3, `2026-08-03-0903-multi-endpoint-
+  output-node/notes.md` N1). Fixed by moving the source of truth up one layer:
+  `lpc-engine`'s `EngineServices` (`engine/engine_services.rs`, `wire_slice`)
+  now applies `ws281x_capped_byte_count` once, at the seam every
+  `OutputProvider` is flushed through, so host, emulator, and device all grant
+  the same byte count for the same authored channel regardless of what the
+  concrete provider does on its own. `Esp32OutputProvider`'s own check stays
+  as a defense-in-depth backstop, not the enforcement point. The bound itself
+  also moved, 256 → 1024 LEDs, now that a real cause of divergence (not just
+  drift) is closed. A second, config-time warning fires at sink registration
+  (`reconcile_wires`) for an explicitly authored count above the bound, ahead
+  of whatever the first flush would say. Parity is covered by
+  `lpc-engine::engine::engine_services::tests` (memory provider, and a
+  non-capping recording provider standing in for the emulator — see that
+  test's doc comment for why `fw-emu` itself cannot be unit-tested on this
+  host toolchain) and by new `fw-esp32-common::output::provider::tests`
+  covering the device-side backstop at the raised bound.
+
 **Exit criteria** — `capped_byte_count` (or its caller) logs a `warn!` (or
 returns a distinguishable error) the moment truncation actually occurs, and
-`MAX_LEDS` has exactly one definition the two drivers share instead of two
-hand-copied constants.
+`MAX_LEDS` has exactly one definition every provider — host, emulator, and
+device — is bound by identically, applied at one seam rather than trusted to
+each provider individually.

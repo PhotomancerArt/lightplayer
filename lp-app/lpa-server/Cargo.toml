@@ -57,6 +57,26 @@ node-shader = ["lpc-engine/node-shader"]
 # `default-features = false` simply omits it to trade frame time for heap.
 resolver-payload-cache = ["lpc-engine/resolver-payload-cache"]
 
+# --- FIXTURE builds — test scaffolding, never shipped ------------------
+#
+# The device-scenario matrix needs firmware that a CURRENT Studio classifies
+# as Incompatible, and archiving old binaries is not maintainable (they rot
+# against the toolchain and prove nothing about today's classifier). These
+# two features make the CURRENT build misreport its hello instead, so the
+# scenario is reproducible from source at any commit
+# (`scripts/device-scenarios/s4-old-firmware.json`).
+#
+# ⚠️ Neither belongs in a released image. They exist to make a device LIE
+# about its wire protocol.
+#
+# `fixture-old-proto` reports WIRE_PROTO_VERSION - 1 → Incompatible
+# (proto-mismatch). `fixture-no-hello` refuses the hello entirely, which is
+# what pre-hello firmware looks like → Incompatible (no-hello). They are
+# mutually exclusive in effect; no-hello wins, because a server that never
+# answers cannot also report a version.
+fixture-old-proto = []
+fixture-no-hello = []
+
 [dependencies]
 # `default-features = false` here means lpa-server takes none of
 # `lpc-engine`'s defaults automatically — including its node-* gates, all

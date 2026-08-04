@@ -11,7 +11,7 @@ use lpc_model::{
     ChannelName, ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision,
     SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment,
     SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision,
-    advance_revision, current_revision, lookup_slot_data_and_shape,
+    advance_revision, lookup_slot_data_and_shape,
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
@@ -455,7 +455,7 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .map_err(|e| e.to_string())?;
         let module = format!("{{ \"kind\": \"Module\", \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/module.json".as_path(), module.as_bytes())
@@ -549,7 +549,7 @@ impl Engine {
             let Ok(NodeDef::Output(def)) = loaded_registry_def(registry, location) else {
                 continue;
             };
-            services.update_output_sink_config(buffer_id, def);
+            services.update_output_sink_config(buffer_id, entry.id, def);
         }
     }
 
@@ -615,6 +615,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            frame_revision: self.revision,
         };
 
         {
@@ -684,6 +685,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            frame_revision: self.revision,
         };
         host.render_node_texture(product, request)
     }
@@ -734,6 +736,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            frame_revision: self.revision,
         };
         let result = session.resolve(&mut host, &key);
         self.resolver = resolver_tmp;
@@ -788,6 +791,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            frame_revision: self.revision,
         };
         host.render_node_control(product, request, target)
     }
@@ -827,6 +831,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            frame_revision: self.revision,
         };
         let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
         let result = session.resolve(
@@ -866,6 +871,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
+            frame_revision: self.revision,
         };
         host.render_node_control_probe(product, request, target, display_layout)
     }
@@ -913,6 +919,18 @@ struct EngineResolveHost<'a> {
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
     safe_output_clamp_q16: Option<u32>,
+    /// The engine's current frame revision — the same value the tick stamps
+    /// on compile windows ([`NodeRuntime::open_compile_window`]).
+    ///
+    /// Render contexts must carry THIS, not the ambient
+    /// [`lpc_model::current_revision`]: the ambient counter is
+    /// process-global, so anything else advancing it between the tick's
+    /// `advance_revision` and a node's render (a second engine in the
+    /// process, or parallel tests sharing the binary) desyncs the two and
+    /// the node sees a window that never matches its render frame. That is
+    /// exactly how a shader deferred its compile forever — see
+    /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.md`.
+    frame_revision: Revision,
 }
 
 impl EngineResolveHost<'_> {
@@ -1327,7 +1345,7 @@ impl EngineResolveHost<'_> {
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
         let node_id = product.node();
-        let revision = current_revision();
+        let revision = self.frame_revision;
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("render: unknown node {node_id:?}"))
@@ -1418,7 +1436,7 @@ impl EngineResolveHost<'_> {
         target: &mut TextureHandle,
     ) -> Result<(), SessionResolveError> {
         let node_id = product.node();
-        let revision = current_revision();
+        let revision = self.frame_revision;
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("render: unknown node {node_id:?}"))
@@ -1509,7 +1527,7 @@ impl EngineResolveHost<'_> {
         target: VisualSampleTarget<'_>,
     ) -> Result<(), SessionResolveError> {
         let node_id = product.node();
-        let revision = current_revision();
+        let revision = self.frame_revision;
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("sample visual: unknown node {node_id:?}"))
@@ -1602,7 +1620,7 @@ impl EngineResolveHost<'_> {
         target: ControlRenderTarget<'_>,
     ) -> Result<ControlLayout, SessionResolveError> {
         let node_id = product.node();
-        let revision = current_revision();
+        let revision = self.frame_revision;
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("control render: unknown node {node_id:?}"))
@@ -1696,7 +1714,7 @@ impl EngineResolveHost<'_> {
         display_layout: ControlDisplayLayoutRead,
     ) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
         let node_id = product.node();
-        let revision = current_revision();
+        let revision = self.frame_revision;
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!(
@@ -1873,6 +1891,27 @@ fn slot_path_semantics_segments(
             "slot path key {key:?} cannot descend through node def shape for {slot}"
         ))),
     }
+}
+
+/// The declared panel hint of the slot a binding consumes: the hint sits on
+/// the TOP-LEVEL declared field (`brightness.some` reads field
+/// `brightness`) in the node's def shape. `None` for undeclared slots
+/// (shader dynamic slots have no hint spelling yet) and for defs that are
+/// not loaded.
+pub(crate) fn authored_def_slot_panel_hint(
+    registry: &ProjectRegistry,
+    slot_shapes: &SlotShapeRegistry,
+    location: &NodeDefLocation,
+    slot: &SlotPath,
+) -> Option<lpc_model::PanelHint> {
+    let def = loaded_registry_def(registry, location).ok()?;
+    let shape = slot_shapes.get_shape(def.shape_id())?;
+    let shape = resolve_shape_projection(shape, slot_shapes).ok()?;
+    let SlotPathSegment::Field(name) = slot.segments().first()? else {
+        return None;
+    };
+    let (_, field) = shape.record_field_by_name(name)?;
+    field.panel()
 }
 
 fn resolve_shape_projection<'a>(
@@ -2168,6 +2207,7 @@ pub(crate) fn resolve_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
+        frame_revision: eng.revision,
     };
     let result = session
         .resolve(&mut host, &key)
@@ -2208,6 +2248,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
+        frame_revision: eng.revision,
     };
     let result = session.resolve(&mut host, &key).and_then(|first| {
         session

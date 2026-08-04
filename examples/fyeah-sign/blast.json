@@ -19,8 +19,7 @@
       "min": 0,
       "max": 1,
       "label": "Progress",
-      "description": "Blast envelope progress (bound to the playlist entry)",
-      "panel": true
+      "description": "Blast envelope progress (bound to the playlist entry)"
     },
     "time": {
       "kind": "value",

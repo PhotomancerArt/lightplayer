@@ -83,7 +83,7 @@ HwRegistry
 HardwareSystem + registered Ws281xDriver
         |
         v
-endpoint spec: ws281x:rmt:D10
+endpoint spec: ws281x:local:D10
         |
         v
 driver checks endpoint and capabilities
@@ -124,7 +124,7 @@ Dropping or closing an opened device releases the lease.
 `src/endpoint/`
 
 Openable surfaces reported by drivers. Endpoints connect authored specs such as
-`button:gpio:D2` or `ws281x:rmt:D10` to concrete `HwAddress` resources and a
+`button:local:D2` or `ws281x:local:D10` to concrete `HwAddress` resources and a
 current availability status.
 
 `src/drivers/`

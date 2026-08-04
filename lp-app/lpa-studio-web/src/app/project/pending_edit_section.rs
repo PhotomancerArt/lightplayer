@@ -11,7 +11,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};
 
-use crate::base::DetailSectionTint;
+use crate::base::{DetailSectionTint, InlineButton, InlineButtonTone};
 
 /// The save-panel buckets, mirroring `UiPendingEditPhase` for filtering
 /// entries into their popup sections.
@@ -156,15 +156,12 @@ fn PendingEditRow(entry: UiPendingEdit, on_action: EventHandler<UiAction>) -> El
                 }
             }
             if let Some(revert) = revert {
-                button {
-                    class: "tw:flex-none tw:cursor-pointer tw:appearance-none tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-[0.68rem] tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground",
-                    r#type: "button",
-                    title,
-                    onclick: move |event| {
-                        event.stop_propagation();
-                        on_action.call(revert.clone());
-                    },
-                    "{label}"
+                InlineButton {
+                    label: label.to_string(),
+                    title: title.to_string(),
+                    text: label.to_string(),
+                    tone: InlineButtonTone::Warning,
+                    on_press: move |_| on_action.call(revert.clone()),
                 }
             }
         }

@@ -52,6 +52,10 @@ pub(crate) fn derive_record(
             Some(endpoint) => quote! { Some(#endpoint) },
             None => quote! { None },
         };
+        let panel = match field_attr.panel {
+            Some(attr::PanelHintAttr::Show) => quote! { Some(::lpc_model::PanelHint::Show) },
+            None => quote! { None },
+        };
         shape_fields.push(quote! {
             ::lpc_model::slot::shape::field_with_dataflow(
                 #field_name,
@@ -59,6 +63,7 @@ pub(crate) fn derive_record(
                 #semantics,
                 #role,
                 #default_bind,
+                #panel,
             )
         });
         static_shape_options.push(static_shape);
@@ -69,6 +74,7 @@ pub(crate) fn derive_record(
                 semantics: #semantics,
                 role: #static_role,
                 default_bind: #default_bind,
+                panel: #panel,
             }
         });
         static_shape_bindings.push(static_shape_binding);

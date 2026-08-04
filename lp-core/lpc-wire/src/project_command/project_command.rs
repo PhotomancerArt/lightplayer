@@ -48,6 +48,12 @@ pub enum WireProjectCommand {
     PanelClear {
         request: crate::WirePanelClearRequest,
     },
+    /// Turn panel-state auto-save on or off (panel.md P11). Project-level,
+    /// like the `.lp/state.json` file it governs — see
+    /// [`crate::WirePanelAutoSaveRequest`].
+    PanelAutoSave {
+        request: crate::WirePanelAutoSaveRequest,
+    },
 }
 
 /// Project command response.
@@ -79,6 +85,12 @@ pub enum WireProjectCommandResponse {
         response: crate::WirePanelCommandResponse,
     },
     PanelClear {
+        response: crate::WirePanelCommandResponse,
+    },
+    /// Reuses the panel command response: `Accepted { engaged }` carries
+    /// the same engaged-writer count every panel command answers with, so
+    /// the toggle needs no shape of its own.
+    PanelAutoSave {
         response: crate::WirePanelCommandResponse,
     },
 }

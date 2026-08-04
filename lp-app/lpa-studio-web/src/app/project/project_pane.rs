@@ -18,7 +18,7 @@
 //! Body: the node tree (plus any sync issue) — no heading and no pane-level
 //! button strip (P6 sidebar tidy: the tree is self-evident; Refresh and
 //! Disconnect remain ops without buttons). The popup is the save panel
-//! (M3 P5) plus the root's "Project settings" rows (P6 flat root): the
+//! (M3 P5) plus the root's "Project settings" rows: the
 //! per-bucket sections list the labeled pending edits with per-entry revert.
 
 use dioxus::prelude::*;
@@ -171,10 +171,10 @@ fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -> Element {
 
 /// The detail popup on the shared [`DetailPopover`] base — the save panel:
 /// project identity with the status word (its only home — headers no longer
-/// carry a status chip), the root's "Project settings" identity rows (P6
-/// flat root: the workspace renders no root card, so the editable `name` —
-/// and the read-only `format`/`uid`/`nodes` rows — live here, as
-/// purpose-built controls rather than generic slot editors; see
+/// carry a status chip), the root's "Project settings" identity rows (the
+/// editable `name` — and the read-only `format`/`uid`/`nodes` rows — live
+/// here rather than on the restored root card, as purpose-built controls
+/// rather than generic slot editors; see
 /// [`ProjectSettingsSection`]), the pending-edit state,
 /// overlay revision, the per-bucket [`DetailSection`]s (unsaved / failed —
 /// there is no debug bucket, D7) as titled change lists with per-entry revert (a populated bucket

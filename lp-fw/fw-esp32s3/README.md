@@ -214,7 +214,7 @@ outputs possible at all: a 48-word window halves into exactly one LED, the
 tightest refill deadline the hardware can pose.
 
 Pins are bound at `open`, not at boot. An endpoint is a board label
-(`ws281x:rmt:D10`) and which one a project drives is authored data, so the
+(`ws281x:local:D10`) and which one a project drives is authored data, so the
 channel is configured up front and its pad connected when the endpoint opens,
 under the registry lease that grants exclusive use of that GPIO.
 

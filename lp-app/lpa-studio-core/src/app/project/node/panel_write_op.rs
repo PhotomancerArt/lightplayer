@@ -102,9 +102,64 @@ impl ControllerOp for PanelClearOp {
     }
 }
 
+/// Flip panel-state auto-save for the whole project (panel.md P11).
+///
+/// Project-level, not scoped: panel state persists per project folder, so
+/// the switch has no `(scope, channel)` identity — which is also why the
+/// root module is the only face that presents it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PanelAutoSaveOp {
+    /// Whether panel state keeps being written.
+    pub enabled: bool,
+}
+
+impl ControllerOp for PanelAutoSaveOp {
+    fn default_action_meta(&self) -> ActionMeta {
+        ActionMeta::new(
+            "Panel auto-save",
+            "Keep this project's held panel values across restarts.",
+            ActionPriority::Primary,
+        )
+    }
+
+    fn action_class(&self) -> ActionClass {
+        ActionClass::Foreground {
+            deadline: PROJECT_EDITOR_ACTION_DEADLINE,
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn ControllerOp> {
+        Box::new(*self)
+    }
+
+    fn eq_op(&self, other: &dyn ControllerOp) -> bool {
+        other.as_any().downcast_ref::<Self>() == Some(self)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_auto_save_op_is_editor_foreground_class() {
+        let op = PanelAutoSaveOp { enabled: false };
+        assert_eq!(
+            op.action_class(),
+            ActionClass::Foreground {
+                deadline: PROJECT_EDITOR_ACTION_DEADLINE,
+            }
+        );
+        assert_eq!(op.default_action_meta().label, "Panel auto-save");
+    }
 
     #[test]
     fn panel_ops_are_editor_foreground_class() {

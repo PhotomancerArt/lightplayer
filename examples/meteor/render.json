@@ -1,0 +1,42 @@
+{
+  "kind": "Shader",
+  "source": "render.glsl",
+  "render_order": 0,
+  "bindings": {
+    "decay": {
+      "source": "bus:decay"
+    },
+    "meteors": {
+      "source": "node:../sim#meteors"
+    },
+    "output": {
+      "target": "bus:visual.out"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "decay": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3,
+      "min": 0.5,
+      "max": 8,
+      "label": "Decay",
+      "description": "How fast each meteor's tail falls off"
+    },
+    "meteors": {
+      "kind": "map",
+      "value": "lp::fluid::Emitter",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 4,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "",
+      "description": ""
+    }
+  }
+}

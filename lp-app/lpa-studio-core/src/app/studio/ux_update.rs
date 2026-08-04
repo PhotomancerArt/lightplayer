@@ -17,16 +17,17 @@ pub enum UxUpdate {
     /// and its narration — tracks the work instead of freezing at the
     /// dispatch-time label.
     ///
-    /// The controller's own `device_card_op` slot is the authority (it is
+    /// The controller's own `device_card_ops` map is the authority (it is
     /// what a full view build reads); this is the delta that carries the
     /// same value to the live view BETWEEN full snapshots, because a
     /// management op holds `&mut controller` for its whole duration and
     /// cannot rebuild a view mid-flight.
     CardOp {
-        /// The managed device's stamped uid, or `None` for an
-        /// identity-less board — matched by
+        /// The managed SESSION's key (`RuntimeId` rendering) — matched by
         /// [`UiDeviceCard::takes_card_op`](crate::UiDeviceCard::takes_card_op).
-        uid: Option<String>,
+        /// The session rather than the uid, because a first-provision
+        /// flash stamps a uid mid-op and the card's key moves with it.
+        session_key: String,
         op: CardOp,
     },
 }

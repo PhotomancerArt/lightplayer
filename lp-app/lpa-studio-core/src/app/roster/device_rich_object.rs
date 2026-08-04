@@ -50,6 +50,11 @@ pub enum DeviceDetailAffordance {
     EraseDevice,
     /// Danger zone, offline registered device: forget it (D34 hygiene).
     ForgetDevice,
+    /// Danger zone, live device: close this board's session and drop its
+    /// card (multi-device M3 — with several boards attachable there must
+    /// be a way OUT per board; the board keeps running and reconnecting
+    /// adds it back). Wired only when the card carries a session key.
+    DisconnectDevice,
 }
 
 /// Everything the device builder may know, assembled from the card's
@@ -74,6 +79,13 @@ pub struct DeviceRichInput<'a> {
     /// Studio's bundled firmware image, when the packaged manifest is on
     /// hand — the advisory chip comparison's other half.
     pub bundled_fw: Option<&'a BundledFirmware>,
+    /// Chip identity from passive/probe evidence — a Technical line even
+    /// before any firmware hello exists (gate-1 sitting, 2026-08-03: an
+    /// unflashed card's Technical tab identified nothing but "USB").
+    pub detected_chip: Option<&'a str>,
+    /// The port as the app can name it (endpoint label + grant short id).
+    /// Web Serial never exposes the OS path, so this is the whole truth.
+    pub port_label: Option<&'a str>,
     /// f64 epoch seconds for status-line recency copy.
     pub now_secs: f64,
 }
@@ -213,6 +225,28 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
     if let Some(uid) = input.uid {
         lines.push(RichLine::new("uid", uid));
     }
+    // Everything knowable about an unprovisioned board rides here too
+    // (gate-1 sitting, 2026-08-03): before any firmware hello the tab
+    // showed only "transport USB", which identified nothing — with two
+    // boards attached, nothing on screen said which was which beyond the
+    // title. Web Serial never exposes the OS port path or manufacturer
+    // strings, so chip (boot banner / probe) + endpoint label (VID:PID +
+    // grant id) is the complete honest set.
+    if let Some(chip) = input.detected_chip {
+        // The silicon revision comes from the device's own efuse and only
+        // exists after a hello; `detected_chip` is the boot banner, which
+        // is all an unflashed board can offer. Combine them when both are
+        // known rather than spending two lines on one fact.
+        match input.hardware.and_then(|hw| hw.chip_revision.as_deref()) {
+            Some(revision) => {
+                lines.push(RichLine::new("chip", format!("{chip} · rev {revision}")));
+            }
+            None => lines.push(RichLine::new("chip", chip)),
+        }
+    }
+    if let Some(port) = input.port_label {
+        lines.push(RichLine::new("port", port));
+    }
     if !input.transport.is_empty() {
         lines.push(RichLine::new("transport", input.transport));
     }
@@ -222,6 +256,20 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
             "firmware",
             format!("{} @ {}{dirty} · {}", fw.package, fw.commit, fw.profile),
         ));
+    }
+    // The chip's OWN identity, from efuse. Worth its own line above the
+    // capability gaps: unlike everything else here it is permanent — it
+    // survives an erase, which the `dev_…` uid does not, because that one
+    // lives in the device's filesystem.
+    if let Some(hardware) = input.hardware {
+        if let Some(mac) = hardware.base_mac.as_deref() {
+            lines.push(RichLine::new("mac", mac));
+        }
+        // 802.15.4 (Zigbee/Thread) — 64 bits, and only on parts that have
+        // that radio, so its absence is not a gap worth reporting.
+        if let Some(eui64) = hardware.eui64.as_deref() {
+            lines.push(RichLine::new("eui-64", eui64));
+        }
     }
     lines.extend(capability_lines(input.fw, input.hardware));
     if lines.is_empty() {
@@ -346,11 +394,17 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
         | RosterCardState::InUseElsewhere => forget().into_iter().collect(),
         RosterCardState::OperationInFlight { .. } => Vec::new(),
         // The setup form owns the install; erase is the short-circuit.
+        // Disconnect closes the live session (multi-device M3: per-board
+        // way out; the web wires it only when a session key exists).
         RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware => {
-            vec![DeviceDetailAffordance::EraseDevice]
+            vec![
+                DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
+            ]
         }
         RosterCardState::NotResponding => core::iter::once(DeviceDetailAffordance::FlashFirmware)
             .chain(forget())
+            .chain(core::iter::once(DeviceDetailAffordance::DisconnectDevice))
             .collect(),
         _ => {
             let mut rows = Vec::new();
@@ -368,6 +422,7 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
             }
             rows.push(DeviceDetailAffordance::FlashFirmware);
             rows.push(DeviceDetailAffordance::EraseDevice);
+            rows.push(DeviceDetailAffordance::DisconnectDevice);
             rows
         }
     };
@@ -417,6 +472,118 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
 mod tests {
     use super::*;
 
+    /// The chip's own efuse identity reaches the Technical tab (2026-08-03).
+    ///
+    /// The MAC matters beyond display: it is the only identity of a board
+    /// that SURVIVES AN ERASE. The `dev_…` uid lives in the device
+    /// filesystem and dies with it, so before this the card had no
+    /// permanent way to say which physical board it was.
+    #[test]
+    fn the_technical_tab_reports_the_chips_own_identity() {
+        let hardware = HardwareFacts {
+            radio: true,
+            button: true,
+            base_mac: Some("60:55:f9:01:02:03".to_string()),
+            chip_revision: Some("0.2".to_string()),
+            eui64: Some("60:55:f9:ff:fe:01:02:03".to_string()),
+            ..Default::default()
+        };
+        let state = RosterCardState::RunningUpToDate;
+        let mut input = input(&state);
+        input.fw = Some(&DEVICE_FW);
+        input.hardware = Some(&hardware);
+        input.detected_chip = Some("esp32c6");
+
+        let view = device_rich_object(&input);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .expect("a Technical section");
+        let lines: Vec<(&str, &str)> = technical
+            .lines
+            .iter()
+            .map(|line| (line.label.as_str(), line.value.as_str()))
+            .collect();
+
+        assert!(lines.contains(&("mac", "60:55:f9:01:02:03")), "{lines:?}");
+        assert!(
+            lines.contains(&("eui-64", "60:55:f9:ff:fe:01:02:03")),
+            "the 802.15.4 address is 64 bits and gets its own line: {lines:?}"
+        );
+        // The revision JOINS the chip line rather than taking its own —
+        // one fact, one row.
+        assert!(lines.contains(&("chip", "esp32c6 · rev 0.2")), "{lines:?}");
+    }
+
+    /// A board that has said nothing about itself yet (no hello, so no
+    /// efuse read) reports no identity lines rather than empty ones.
+    #[test]
+    fn an_unflashed_board_reports_no_chip_identity_lines() {
+        let state = RosterCardState::ConnectedEmpty;
+        let mut input = input(&state);
+        input.hardware = None;
+        input.detected_chip = Some("esp32c6");
+
+        let view = device_rich_object(&input);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .expect("a Technical section");
+        let labels: Vec<&str> = technical
+            .lines
+            .iter()
+            .map(|line| line.label.as_str())
+            .collect();
+
+        assert!(!labels.contains(&"mac"), "{labels:?}");
+        assert!(!labels.contains(&"eui-64"), "{labels:?}");
+        // …and the chip line stays bare, with no dangling revision.
+        let chip = technical
+            .lines
+            .iter()
+            .find(|line| line.label == "chip")
+            .expect("the boot banner still identifies the chip");
+        assert_eq!(chip.value, "esp32c6");
+    }
+
+    /// An UNFLASHED board's Technical tab identifies the device with
+    /// everything Web Serial can honestly say — chip + port label — not
+    /// just "transport USB" (gate-1 sitting, 2026-08-03: with two boards
+    /// attached, nothing beyond the title said which was which).
+    #[test]
+    fn an_unflashed_board_gets_chip_and_port_technical_lines() {
+        let state = RosterCardState::ReadyToSetUp;
+        let mut fixture = input(&state);
+        fixture.uid = None;
+        fixture.fw = None;
+        fixture.hardware = None;
+        fixture.project_name = None;
+        fixture.detected_chip = Some("esp32c6");
+        fixture.port_label = Some("ESP32 Serial (0x303a:0x1001) · port-2");
+
+        let view = device_rich_object(&fixture);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .expect("technical section exists pre-hello");
+        let lines: Vec<(&str, &str)> = technical
+            .lines
+            .iter()
+            .map(|line| (line.label.as_str(), line.value.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ("chip", "esp32c6"),
+                ("port", "ESP32 Serial (0x303a:0x1001) · port-2"),
+                ("transport", "USB"),
+            ]
+        );
+    }
+
     #[test]
     fn running_behind_live_device_sections_and_rollup() {
         let state = RosterCardState::RunningBehind {
@@ -456,6 +623,7 @@ mod tests {
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
             ]
         );
     }
@@ -528,6 +696,7 @@ mod tests {
                 DeviceDetailAffordance::BackUpFilesystem,
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
             ]
         );
     }
@@ -615,6 +784,7 @@ mod tests {
             radio: false,
             button: true,
             board_id: None,
+            ..Default::default()
         };
         let state = RosterCardState::RunningUpToDate;
         let mut input = input(&state);
@@ -664,6 +834,8 @@ mod tests {
             fw: Some(&DEVICE_FW),
             hardware: Some(&DEVICE_HW),
             bundled_fw: None,
+            detected_chip: None,
+            port_label: None,
             now_secs: NOW,
         }
     }
@@ -695,6 +867,7 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         });
 
     fn titles(view: &RichObjectView<DeviceDetailAffordance>) -> Vec<&str> {
