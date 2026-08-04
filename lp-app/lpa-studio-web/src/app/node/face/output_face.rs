@@ -699,17 +699,32 @@ fn spread_snaps(face: &UiOutputFaceData) -> bool {
 
 fn spread_label(face: &UiOutputFaceData) -> &'static str {
     if spread_snaps(face) {
-        "spread to paths"
+        "fit counts to strips"
     } else {
-        "spread evenly"
+        "divide lamps evenly"
     }
 }
 
+/// Says exactly what clicking will do — the resulting per-wire counts — so
+/// the gesture is judgeable before it is taken (G-A feedback: "spread" alone
+/// did not explain itself).
 fn spread_title(face: &UiOutputFaceData) -> String {
-    if spread_snaps(face) {
-        return "Split the buffer across these wires, cutting on the upstream fixture's path boundaries".to_string();
+    let Some(total) = face.total_lamps else {
+        return String::new();
+    };
+    let counts = spread_counts(total, face.channels.len(), &face.span_boundaries);
+    let mut parts: Vec<String> = counts.iter().map(u32::to_string).collect();
+    if let (Some(last), Some(channel)) = (parts.last_mut(), face.channels.last()) {
+        if channel.count.is_none() {
+            *last = format!("{last} (rest)");
+        }
     }
-    "Split the buffer evenly across these wires; the remainder goes to the last one".to_string()
+    let plan = parts.join(" · ");
+    if spread_snaps(face) {
+        format!("Rewrite the wire counts to {plan} — cut where the mapping's strips end")
+    } else {
+        format!("Rewrite the wire counts to an even {plan}")
+    }
 }
 
 #[cfg(test)]
@@ -842,12 +857,12 @@ mod tests {
     #[test]
     fn the_label_says_which_split_the_gesture_performs() {
         let mut face = face(Some(400), &[(0, "IO18", Some(200)), (1, "IO2", None)]);
-        assert_eq!(spread_label(&face), "spread evenly");
+        assert_eq!(spread_label(&face), "divide lamps evenly");
         face.span_boundaries = vec![0, 90];
-        assert_eq!(spread_label(&face), "spread to paths");
+        assert_eq!(spread_label(&face), "fit counts to strips");
         // A grid that is only the buffer's own start is not a grid.
         face.span_boundaries = vec![0];
-        assert_eq!(spread_label(&face), "spread evenly");
+        assert_eq!(spread_label(&face), "divide lamps evenly");
     }
 
     #[test]
