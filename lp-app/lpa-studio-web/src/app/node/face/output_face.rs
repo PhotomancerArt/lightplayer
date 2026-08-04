@@ -35,10 +35,9 @@ use lpa_studio_core::{
 use crate::app::node::slot_edit_actions::{
     slot_ensure_present_action, slot_remove_value_action, slot_set_value_action,
 };
-use crate::app::node::slot_gesture_fields::{gesture_icon_button_class, gesture_text_button_class};
 use crate::app::node::{MapEntryRemoveButton, NodeCardSection, UIntSlotField};
 use crate::base::{
-    DetailPopover, DetailSection, NodeKindIcon, PopoverCloseHandle, PopoverPlacement, StudioIcon,
+    DetailPopover, DetailSection, InlineButton, NodeKindIcon, PopoverCloseHandle, PopoverPlacement,
     StudioIconName,
 };
 use crate::core::menu_item_action_class;
@@ -125,20 +124,19 @@ fn OutputChannels(
                         "{summary}"
                     }
                     if let Some(handler) = on_action.filter(|_| !spread.is_empty()) {
-                        button {
-                            class: "{gesture_text_button_class()} tw:ml-auto",
-                            r#type: "button",
-                            title: "{spread_title}",
-                            onclick: {
+                        InlineButton {
+                            label: spread_label,
+                            text: spread_label,
+                            title: spread_title.clone(),
+                            class: "tw:ml-auto",
+                            on_press: {
                                 let face = face.clone();
-                                move |event: Event<MouseData>| {
-                                    event.stop_propagation();
+                                move |_| {
                                     for action in spread_actions(&face) {
                                         handler.call(action);
                                     }
                                 }
                             },
-                            "{spread_label}"
                         }
                     }
                 }
@@ -164,18 +162,14 @@ fn OutputChannels(
                 }
                 if let Some((address, handler)) = add_address.zip(on_action) {
                     div { class: "tw:flex tw:min-w-0",
-                        button {
-                            class: gesture_text_button_class(),
-                            r#type: "button",
+                        InlineButton {
+                            label: "Add channel {add_key}",
                             title: "Add channel {add_key} — a new wire at the end of the slice order",
-                            onclick: move |event: Event<MouseData>| {
-                                event.stop_propagation();
+                            icon: StudioIconName::Add,
+                            text: "channel",
+                            on_press: move |_| {
                                 handler.call(slot_ensure_present_action(address.clone()));
                             },
-                            span { class: "tw:mr-1 tw:inline-flex", aria_hidden: "true",
-                                StudioIcon { name: StudioIconName::Add, size: 12 }
-                            }
-                            "channel"
                         }
                     }
                 }
@@ -369,22 +363,19 @@ fn ChannelCountCell(
                 span { {resolved.map_or_else(|| "—".to_string(), |count| count.to_string())} }
             }
             if let Some((count, handler)) = pin_count {
-                button {
-                    class: gesture_icon_button_class(false),
-                    r#type: "button",
+                InlineButton {
+                    label: "Author this wire's count",
                     title: "Author this wire's count as {count} instead of taking the remainder",
-                    aria_label: "Author this wire's count",
-                    onclick: {
+                    icon: StudioIconName::Add,
+                    on_press: {
                         let face = face.clone();
                         let channel = channel.clone();
-                        move |event: Event<MouseData>| {
-                            event.stop_propagation();
+                        move |_| {
                             for action in count_edit_actions(&face, &channel, count) {
                                 handler.call(action);
                             }
                         }
                     },
-                    StudioIcon { name: StudioIconName::Add, size: 12 }
                 }
             }
         };
@@ -411,16 +402,13 @@ fn ChannelCountCell(
             }
         }
         if let Some((address, handler)) = clear {
-            button {
-                class: gesture_icon_button_class(false),
-                r#type: "button",
+            InlineButton {
+                label: "Take the remainder",
                 title: "Drop the count — this wire takes whatever is left of the buffer",
-                aria_label: "Take the remainder",
-                onclick: move |event: Event<MouseData>| {
-                    event.stop_propagation();
+                icon: StudioIconName::Remove,
+                on_press: move |_| {
                     handler.call(slot_remove_value_action(address.clone()));
                 },
-                StudioIcon { name: StudioIconName::Remove, size: 12 }
             }
         }
     }

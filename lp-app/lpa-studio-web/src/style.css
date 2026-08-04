@@ -96,6 +96,9 @@
     --studio-color-accent-border: #65bd96;
     --studio-color-accent-hover: #6fc39f;
     --studio-color-accent-text-on-fill: #08130d;
+    /* Low-alpha accent fill for hover/active washes on accent-bordered
+       controls (inline buttons, agent-chat chips, settings buttons). */
+    --studio-color-accent-wash: rgba(123, 224, 178, 0.08);
 
     /* Selection is its own concept — a neutral white-ish outline, kept
        distinct from the teal brand accent and from semantic status colors so

@@ -49,6 +49,7 @@
     --tw-color-background: var(--studio-color-bg);
     --tw-color-background-wash: var(--studio-color-bg-wash);
     --tw-color-foreground: var(--studio-color-text);
+    --tw-color-page: var(--studio-color-bg);
     --tw-color-card: var(--studio-color-surface);
     --tw-color-card-subtle: var(--studio-color-surface-subtle);
     --tw-color-card-muted: var(--studio-color-surface-muted);
@@ -72,6 +73,7 @@
     --tw-color-accent-border: var(--studio-color-accent-border);
     --tw-color-accent-hover: var(--studio-color-accent-hover);
     --tw-color-accent-foreground: var(--studio-color-accent-text-on-fill);
+    --tw-color-accent-wash: var(--studio-color-accent-wash);
     --tw-color-selection-border: var(--studio-color-selection-border);
     --tw-color-status-neutral-bg: var(--studio-status-neutral-bg);
     --tw-color-status-neutral-border: var(--studio-status-neutral-border);
@@ -540,6 +542,9 @@
   .tw\:w-72 {
     width: calc(var(--tw-spacing) * 72);
   }
+  .tw\:w-80 {
+    width: calc(var(--tw-spacing) * 80);
+  }
   .tw\:w-96 {
     width: calc(var(--tw-spacing) * 96);
   }
@@ -830,6 +835,9 @@
   .tw\:grid-cols-\[260px_minmax\(0\,1fr\)\] {
     grid-template-columns: 260px minmax(0,1fr);
   }
+  .tw\:grid-cols-\[auto_auto_auto_auto_auto\] {
+    grid-template-columns: auto auto auto auto auto;
+  }
   .tw\:grid-cols-\[auto_auto_minmax\(0\,1fr\)\] {
     grid-template-columns: auto auto minmax(0,1fr);
   }
@@ -983,8 +991,14 @@
   .tw\:gap-x-3 {
     column-gap: calc(var(--tw-spacing) * 3);
   }
+  .tw\:gap-x-4 {
+    column-gap: calc(var(--tw-spacing) * 4);
+  }
   .tw\:gap-y-0\.5 {
     row-gap: calc(var(--tw-spacing) * 0.5);
+  }
+  .tw\:gap-y-2 {
+    row-gap: calc(var(--tw-spacing) * 2);
   }
   .tw\:divide-y {
     :where(& > :not(:last-child)) {
@@ -1223,6 +1237,9 @@
   .tw\:bg-accent {
     background-color: var(--tw-color-accent);
   }
+  .tw\:bg-accent-wash {
+    background-color: var(--tw-color-accent-wash);
+  }
   .tw\:bg-background\/70 {
     background-color: var(--tw-color-background);
     @supports (color: color-mix(in lab, red, red)) {
@@ -1255,6 +1272,9 @@
   }
   .tw\:bg-muted-foreground {
     background-color: var(--tw-color-muted-foreground);
+  }
+  .tw\:bg-page {
+    background-color: var(--tw-color-page);
   }
   .tw\:bg-panel-primary {
     background-color: var(--tw-color-panel-primary);
@@ -1480,9 +1500,6 @@
   }
   .tw\:px-\[18px\] {
     padding-inline: 18px;
-  }
-  .tw\:py-0 {
-    padding-block: calc(var(--tw-spacing) * 0);
   }
   .tw\:py-0\.5 {
     padding-block: calc(var(--tw-spacing) * 0.5);
@@ -2202,6 +2219,13 @@
       }
     }
   }
+  .tw\:hover\:border-selection-border {
+    &:hover {
+      @media (hover: hover) {
+        border-color: var(--tw-color-selection-border);
+      }
+    }
+  }
   .tw\:hover\:border-status-attention-foreground {
     &:hover {
       @media (hover: hover) {
@@ -2262,6 +2286,13 @@
     &:hover {
       @media (hover: hover) {
         background-color: var(--tw-color-accent-hover);
+      }
+    }
+  }
+  .tw\:hover\:bg-accent-wash {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-accent-wash);
       }
     }
   }
@@ -2338,6 +2369,34 @@
     &:hover {
       @media (hover: hover) {
         background-color: var(--tw-color-status-error-bg);
+      }
+    }
+  }
+  .tw\:hover\:bg-status-good-bg {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-status-good-bg);
+      }
+    }
+  }
+  .tw\:hover\:bg-status-live-bg {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-status-live-bg);
+      }
+    }
+  }
+  .tw\:hover\:bg-status-warning-bg {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-status-warning-bg);
+      }
+    }
+  }
+  .tw\:hover\:bg-status-working-bg {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-status-working-bg);
       }
     }
   }
@@ -2452,11 +2511,6 @@
   .tw\:disabled\:opacity-40 {
     &:disabled {
       opacity: 40%;
-    }
-  }
-  .tw\:disabled\:opacity-50 {
-    &:disabled {
-      opacity: 50%;
     }
   }
   .tw\:disabled\:opacity-60 {

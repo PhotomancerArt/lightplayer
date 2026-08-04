@@ -18,7 +18,6 @@ use lpc_model::{
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
-use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, TickContext,
@@ -28,10 +27,9 @@ use lp_gfx::LpComputeShader;
 
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
-use super::shader_input_materialize::materialize_shader_input;
 use super::shader_node::{
-    format_compile_stats, read_authored_value, set_slot_if_changed,
-    sync_shader_slot_def_from_authored,
+    format_compile_stats, input_resolve_warning, note_input_resolve_failures, read_authored_value,
+    resolve_or_default_input, set_slot_if_changed, sync_shader_slot_def_from_authored,
 };
 
 /// Runtime node for `kind = "shader/compute"` artifacts.
@@ -49,6 +47,9 @@ pub struct ComputeShaderNode {
     shader: Option<Box<dyn LpComputeShader>>,
     /// The newest compile attempt's failure; may coexist with `shader`.
     compilation_error: Option<String>,
+    /// Consumed inputs whose binding failed to resolve this frame — same
+    /// warn-don't-swallow contract as the `shader_node.rs` field docs.
+    input_resolve_failures: Vec<(String, String)>,
     /// True until the current source/config gets its one compile attempt.
     needs_compile: bool,
     /// Compile-window deferral state — same protocol as `shader_node.rs`.
@@ -73,6 +74,7 @@ impl ComputeShaderNode {
             header_lines: 0,
             shader: None,
             compilation_error: None,
+            input_resolve_failures: Vec::new(),
             needs_compile: true,
             compile_window_requested: false,
             compile_window: None,
@@ -216,14 +218,24 @@ impl ComputeShaderNode {
     }
 
     fn collect_inputs(
-        &self,
+        &mut self,
         ctx: &mut TickContext<'_>,
     ) -> Result<Vec<(String, LpsValueF32)>, NodeError> {
         let mut inputs = Vec::new();
+        let mut failures = Vec::new();
         for (name, slot) in &self.def.consumed_slots.entries {
-            let value = resolve_or_default_input(ctx, name, slot)?;
+            let (value, failure) = resolve_or_default_input(ctx, name, slot, "compute shader")?;
+            if let Some(failure) = failure {
+                failures.push((name.clone(), failure));
+            }
             inputs.push((name.clone(), value));
         }
+        note_input_resolve_failures(
+            &mut self.input_resolve_failures,
+            failures,
+            self.node_id,
+            "compute-shader",
+        );
         Ok(inputs)
     }
 
@@ -359,9 +371,11 @@ impl NodeRuntime for ComputeShaderNode {
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
-        self.compilation_error
-            .as_ref()
-            .map(|error| NodeRuntimeStatus::Error(error.clone()))
+        if let Some(error) = &self.compilation_error {
+            return Some(NodeRuntimeStatus::Error(error.clone()));
+        }
+        // Still ticking on authored defaults, so warn rather than error.
+        input_resolve_warning(&self.input_resolve_failures).map(NodeRuntimeStatus::Warn)
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
@@ -464,29 +478,6 @@ fn split_leading_number(s: &str) -> Option<(usize, &str)> {
     Some((s.get(..end)?.parse().ok()?, s.get(end..)?))
 }
 
-fn resolve_or_default_input(
-    ctx: &mut TickContext<'_>,
-    name: &str,
-    slot: &lpc_model::ShaderSlotDef,
-) -> Result<LpsValueF32, NodeError> {
-    let slot_path = SlotPath::parse(name)
-        .map_err(|e| NodeError::msg(format!("invalid compute consumed slot {name:?}: {e}")))?;
-    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: slot_path,
-    }) {
-        Ok(production) => Some(production),
-        Err(_) => None,
-    };
-    materialize_shader_input(
-        name,
-        slot,
-        production.as_ref().map(|production| production.data()),
-        ctx.slot_shapes(),
-    )
-    .map_err(|e| NodeError::msg(format!("compute input {name:?}: {e}")))
-}
-
 #[cfg(all(test, not(any(target_arch = "riscv32", target_arch = "wasm32"))))]
 mod tests {
     use super::*;
@@ -500,9 +491,11 @@ mod tests {
     use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
+    use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
     use crate::engine::{Engine, resolve_with_engine_host};
     use crate::node::NodeEntryState;
+    use lpc_model::{ChannelName, Kind};
 
     #[test]
     fn diagnostic_lines_shift_back_to_user_source() {
@@ -584,6 +577,141 @@ mod tests {
             LpValue::Struct { fields, .. }
                 if fields.iter().any(|(name, value)| name == "id" && value == &LpValue::U32(7))
         ));
+    }
+
+    /// A bound input whose binding cannot resolve (here: a bus channel with
+    /// no provider) must not degrade silently to the authored default — the
+    /// node keeps producing on the default AND reports a warning status.
+    /// This is the "broken `bus:time` freezes the shader with zero
+    /// diagnostics" family; see
+    /// docs/defects/2026-08-03-wasm-shader-instances-share-vmctx.md.
+    #[test]
+    fn unresolvable_bound_input_reports_warning_status() {
+        let (mut engine, registry, node_id) = build_compute_engine();
+        let frame = lpc_model::Revision::new(1);
+        bind_time_input_to_bus(&mut engine, node_id, frame);
+
+        let phase = resolve_phase_twice(&mut engine, &registry, node_id);
+        // Still producing: the authored default (time = 0.25) feeds the shader.
+        assert_eq!(phase, LpValue::F32(1.25));
+
+        let status = node_runtime_status(&engine, node_id)
+            .expect("broken bound input must surface a runtime status");
+        let NodeRuntimeStatus::Warn(message) = status else {
+            panic!("expected Warn (node still runs on defaults), got {status:?}");
+        };
+        assert!(message.contains("\"time\""), "names the input: {message}");
+        assert!(
+            message.contains("no bus provider"),
+            "carries the resolve error: {message}"
+        );
+
+        // Recovery: once a provider exists the warning clears.
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(2.0)),
+                    target: BindingTarget::BusChannel(ChannelName(String::from("time"))),
+                    priority: BindingPriority::authored(),
+                    kind: Kind::Color,
+                    owner: node_id,
+                },
+                frame,
+            )
+            .expect("provide bus time");
+        let phase = resolve_phase_twice(&mut engine, &registry, node_id);
+        assert_eq!(phase, LpValue::F32(3.0));
+        assert_eq!(node_runtime_status(&engine, node_id), None);
+    }
+
+    /// Two providers at equal top priority are ambiguous
+    /// ([`crate::dataflow::resolver::SessionResolveError::AmbiguousBusBinding`]) —
+    /// that failure lands on the consuming node's status too, instead of
+    /// silently defaulting.
+    #[test]
+    fn ambiguous_bus_providers_report_warning_status() {
+        let (mut engine, registry, node_id) = build_compute_engine();
+        let frame = lpc_model::Revision::new(1);
+        bind_time_input_to_bus(&mut engine, node_id, frame);
+        for value in [1.0, 2.0] {
+            engine
+                .add_binding(
+                    BindingDraft {
+                        source: BindingSource::Literal(LpValue::F32(value)),
+                        target: BindingTarget::BusChannel(ChannelName(String::from("time"))),
+                        priority: BindingPriority::authored(),
+                        kind: Kind::Color,
+                        owner: node_id,
+                    },
+                    frame,
+                )
+                .expect("provide bus time");
+        }
+
+        let phase = resolve_phase_twice(&mut engine, &registry, node_id);
+        assert_eq!(phase, LpValue::F32(1.25), "authored default still feeds");
+
+        let status = node_runtime_status(&engine, node_id).expect("status");
+        let NodeRuntimeStatus::Warn(message) = status else {
+            panic!("expected Warn, got {status:?}");
+        };
+        assert!(message.contains("ambiguous"), "{message}");
+    }
+
+    fn bind_time_input_to_bus(engine: &mut Engine, node_id: NodeId, frame: lpc_model::Revision) {
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::BusChannel(ChannelName(String::from("time"))),
+                    target: BindingTarget::ConsumedSlot {
+                        node: node_id,
+                        slot: SlotPath::parse("time").expect("time path"),
+                    },
+                    priority: BindingPriority::authored(),
+                    kind: Kind::Color,
+                    owner: node_id,
+                },
+                frame,
+            )
+            .expect("bind time input to bus");
+    }
+
+    /// Resolve `phase` twice (compile-window warm-up, then the real frame)
+    /// and return its value.
+    fn resolve_phase_twice(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        node_id: NodeId,
+    ) -> LpValue {
+        let mut last = None;
+        for _ in 0..2 {
+            last = Some(
+                resolve_with_engine_host(
+                    engine,
+                    registry,
+                    QueryKey::ProducedSlot {
+                        node: node_id,
+                        slot: SlotPath::parse("phase").expect("phase path"),
+                    },
+                    ResolveLogLevel::Off,
+                )
+                .expect("resolve phase")
+                .0,
+            );
+        }
+        last.expect("resolved")
+            .value_leaf()
+            .expect("value")
+            .value()
+            .clone()
+    }
+
+    fn node_runtime_status(engine: &Engine, node_id: NodeId) -> Option<NodeRuntimeStatus> {
+        let entry = engine.tree().get(node_id).expect("node");
+        let NodeEntryState::Alive(node) = entry.state.value() else {
+            panic!("node alive");
+        };
+        node.runtime_status()
     }
 
     fn build_compute_engine() -> (Engine, ProjectRegistry, NodeId) {
