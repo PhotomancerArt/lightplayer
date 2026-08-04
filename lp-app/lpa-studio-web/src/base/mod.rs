@@ -15,6 +15,9 @@ pub mod icon;
 pub mod icon_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod icon_menu_stories;
+pub mod inline_button;
+#[cfg(feature = "stories")]
+pub(crate) mod inline_button_stories;
 pub mod keyboard;
 pub mod logo_mark;
 #[cfg(feature = "stories")]
@@ -39,6 +42,10 @@ pub use detail_popover::{
 pub use field_row::FieldRow;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
+pub use inline_button::{
+    INLINE_ICON_SIZE, INLINE_TEXT_ICON_SIZE, InlineButton, InlineButtonTone,
+    inline_icon_button_class, inline_text_button_class,
+};
 pub use keyboard::Platform;
 pub use logo_mark::{LogoLockup, LogoMark, LogoStacked};
 pub use markdown_text::{MarkdownDocs, MarkdownText};

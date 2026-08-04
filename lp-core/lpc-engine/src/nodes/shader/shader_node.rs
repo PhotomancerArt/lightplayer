@@ -73,6 +73,12 @@ pub struct ShaderNode {
     /// running `shader` — the status reports the error while the last good
     /// program keeps rendering.
     compilation_error: Option<String>,
+    /// Consumed inputs whose binding failed to resolve this frame, with the
+    /// resolve error — the shader keeps running on their authored defaults,
+    /// and the status reports a warning instead of silently degrading (a
+    /// broken `bus:time` binding must not look like a frozen shader; see
+    /// docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md).
+    input_resolve_failures: Vec<(String, String)>,
     /// Consecutive frames rendered/sampled as the black fallback, used to
     /// throttle the log below. See [`BLACK_FALLBACK_RESTATE_EVERY`].
     black_fallback_frames: u32,
@@ -106,6 +112,7 @@ impl ShaderNode {
             config_accessors: None,
             shader: None,
             compilation_error: None,
+            input_resolve_failures: Vec::new(),
             black_fallback_frames: 0,
             needs_compile: true,
             compile_window_requested: false,
@@ -342,10 +349,21 @@ impl ShaderNode {
 
     fn update_visual_uniforms(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut uniforms = Vec::new();
+        let mut failures = Vec::new();
         for (name, slot) in &self.consumed_slots.entries {
-            uniforms.push((name.clone(), resolve_or_default_input(ctx, name, slot)?));
+            let (value, failure) = resolve_or_default_input(ctx, name, slot, "visual shader")?;
+            if let Some(failure) = failure {
+                failures.push((name.clone(), failure));
+            }
+            uniforms.push((name.clone(), value));
         }
         self.visual_uniforms = uniforms;
+        note_input_resolve_failures(
+            &mut self.input_resolve_failures,
+            failures,
+            self.node_id,
+            "visual-shader",
+        );
         Ok(())
     }
 }
@@ -419,9 +437,12 @@ impl NodeRuntime for ShaderNode {
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
-        self.compilation_error
-            .as_ref()
-            .map(|error| NodeRuntimeStatus::Error(error.clone()))
+        if let Some(error) = &self.compilation_error {
+            return Some(NodeRuntimeStatus::Error(error.clone()));
+        }
+        // The shader still renders (on authored defaults), so a broken
+        // input binding is a warning, not an error.
+        input_resolve_warning(&self.input_resolve_failures).map(NodeRuntimeStatus::Warn)
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
@@ -873,27 +894,74 @@ fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform
         .collect()
 }
 
-fn resolve_or_default_input(
+/// Resolve one consumed shader input, falling back to its authored default
+/// when the binding fails to resolve — with the failure *reported*, not
+/// swallowed. An unbound slot resolves `Ok` through the authored-default
+/// production, so any `Err` here means a genuinely broken binding (no bus
+/// provider, ambiguous providers, dangling target, cycle); returning the
+/// default silently would freeze e.g. a `bus:time`-driven shader with zero
+/// diagnostics. Shared by the visual and compute shader nodes; `context`
+/// labels error messages ("visual shader" / "compute shader").
+pub(super) fn resolve_or_default_input(
     ctx: &mut TickContext<'_>,
     name: &str,
     slot: &ShaderSlotDef,
-) -> Result<LpsValueF32, NodeError> {
+    context: &str,
+) -> Result<(LpsValueF32, Option<String>), NodeError> {
     let slot_path = SlotPath::parse(name)
-        .map_err(|e| NodeError::msg(format!("invalid visual consumed slot {name:?}: {e}")))?;
-    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
+        .map_err(|e| NodeError::msg(format!("invalid {context} consumed slot {name:?}: {e}")))?;
+    let (production, failure) = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {
-        Ok(production) => Some(production),
-        Err(_) => None,
+        Ok(production) => (Some(production), None),
+        Err(e) => (None, Some(e.message)),
     };
-    materialize_shader_input(
+    let value = materialize_shader_input(
         name,
         slot,
         production.as_ref().map(|production| production.data()),
         ctx.slot_shapes(),
     )
-    .map_err(|e| NodeError::msg(format!("visual shader input {name:?}: {e}")))
+    .map_err(|e| NodeError::msg(format!("{context} input {name:?}: {e}")))?;
+    Ok((value, failure))
+}
+
+/// Fold the per-slot resolve failures into one status message, or `None`
+/// when every input resolved. Deterministic (slot iteration order) so the
+/// engine's status diffing sees a stable value frame over frame.
+pub(super) fn input_resolve_warning(failures: &[(String, String)]) -> Option<String> {
+    if failures.is_empty() {
+        return None;
+    }
+    let joined = failures
+        .iter()
+        .map(|(name, error)| format!("input {name:?} using its default: {error}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some(joined)
+}
+
+/// Store this frame's input resolve failures, logging only on *transition*
+/// (failures appear, change, or clear) — a broken binding reports itself
+/// once on the console and rides the node status thereafter, never
+/// per-frame log spam (see the black-fallback throttle above for why).
+pub(super) fn note_input_resolve_failures(
+    current: &mut Vec<(String, String)>,
+    new: Vec<(String, String)>,
+    node_id: lpc_model::NodeId,
+    context: &str,
+) {
+    if *current == new {
+        return;
+    }
+    match input_resolve_warning(&new) {
+        Some(warning) => log::warn!(
+            "[{context}-node] bound inputs failed to resolve (node={node_id:?}): {warning}"
+        ),
+        None => log::info!("[{context}-node] bound inputs resolve again (node={node_id:?})"),
+    }
+    *current = new;
 }
 
 fn validate_shader_visual_product(
