@@ -216,6 +216,7 @@ mod tests {
                 origin: WireBindingOrigin::Authored,
                 priority: 0,
                 kind: Kind::Instant,
+                panel_show: false,
             }],
             channels: vec![WireBusChannel {
                 scope: Some(WireScopeRef::Module {
