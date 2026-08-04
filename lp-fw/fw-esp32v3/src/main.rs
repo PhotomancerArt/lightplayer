@@ -161,8 +161,20 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// competition with `.stack`; the second region costs `.stack` nothing,
 /// which is exactly why it was worth reclaiming. Total heap is
 /// `HEAP_SIZE + 65,536`.
-#[cfg(feature = "server")]
+#[cfg(all(feature = "server", not(feature = "net-eth")))]
 const HEAP_SIZE: usize = 110 * 1024;
+
+/// `net-eth` builds: the EMAC DMA rings + embassy-net statics cost ~15.9 KiB
+/// of `.bss`, which `.stack` — the zero-sum residue — would otherwise absorb
+/// entirely, leaving 25,488 B. Measured on the bench (2026-08-04): that image
+/// blows the stack guard during project auto-load, inside the recursive GLSL
+/// parse — twice, then safe mode. So the network feature pays for its statics
+/// out of heap instead: 88 KiB puts `.stack` back at ≈48 KiB, the proven
+/// non-net figure. The heap it costs (22 KiB of the arena the shader compiler
+/// fights for) is the trade M2-P5 formally gates; until then this constant is
+/// the measured "boots, loads, compiles" setting, not a tuned optimum.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+const HEAP_SIZE: usize = 88 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
 /// skeleton, kept buildable as the minimal bring-up image.
