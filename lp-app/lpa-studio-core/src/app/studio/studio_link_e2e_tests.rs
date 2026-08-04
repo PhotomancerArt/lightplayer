@@ -2695,8 +2695,8 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
 /// render key and both were "Connected device"; 2026-08-02 walk).
 ///
 /// This helper + test pair is the roadmap's agentic substitute for
-/// physically plugging in two boards; M4/M5 build their op-targeting and
-/// connect-flow regressions on it.
+/// physically plugging in two boards. M4's op-targeting regressions build
+/// on it; M5's connect-flow ones will.
 #[test]
 fn two_fake_boards_render_two_cards_with_distinct_keys() {
     let (_store, host) = library();
@@ -2809,8 +2809,9 @@ fn a_flash_narrates_on_its_own_board_and_leaves_the_other_alone() {
         .collect();
     assert_eq!(keys.len(), 2, "two blank boards to start");
 
-    // ⚠️ Interim: the op still targets the OLDEST board (P3 takes the
-    // target from the clicked card). What P2 fixes is where it NARRATES.
+    // Aimed at the board `device_target_for_test` resolves; what this
+    // test pins is where the op NARRATES, not where it runs (that is
+    // `a_flash_aimed_at_the_second_board_leaves_the_first_untouched`).
     drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
         target: studio.device_target_for_test(),
         setup_name: None,

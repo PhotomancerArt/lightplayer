@@ -980,11 +980,11 @@ impl StudioController {
     /// coexistence) — plus the SIM session's evidence while it lives
     /// (D36: the sim card exists exactly as long as the session does).
     ///
-    /// The connect FLOW and the card-op slot are still app-singular (M4/M5
-    /// make them targeted): their narration rides the OLDEST device entry
-    /// — the same session the id-less op seam resolves — or a session-less
-    /// entry ("evidence of work, not of a session") while nothing is
-    /// attached, exactly as the ≤1 shape carried it. Recorded in the
+    /// The card-owned op flow is per-session (M4) — each entry carries
+    /// its own board's `op_in_flight`. The connect FLOW is still
+    /// app-singular (M5 makes it targeted): its narration rides the
+    /// OLDEST device entry, or a session-less entry ("evidence of work,
+    /// not of a session") while nothing is attached. Recorded in the
     /// multi-device ADR so M5 inherits the attribution decision.
     fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
         let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
@@ -4363,13 +4363,12 @@ impl StudioController {
         }
     }
 
-    /// Disconnect ONE device session (the card's Danger-zone affordance,
-    /// multi-device M3): close its link and remove it from the pool — the
-    /// other sessions (a second board, the sim) stay attached. `None`
-    /// targets the oldest device session, matching the other
-    /// still-untargeted device ops until M4. (The pre-M3 shape took EVERY
-    /// session down, sim included — the ≤1-era "explicit disconnect =
-    /// full teardown" semantics.)
+    /// Disconnect ONE device session (the card's Danger-zone affordance):
+    /// close its link and remove it from the pool — the other sessions (a
+    /// second board, the sim) stay attached. The caller resolved `id`
+    /// from the card's target (M4). (The pre-M3 shape took EVERY session
+    /// down, sim included — the ≤1-era "explicit disconnect = full
+    /// teardown" semantics.)
     async fn disconnect_device(&mut self, id: crate::RuntimeId) -> UiResult {
         // The mirror quiesces only when the editor was a lens on THIS
         // session (a project open on the sim or another board survives).
