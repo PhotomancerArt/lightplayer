@@ -35,6 +35,11 @@ pub fn HFaderField(
     /// Violet bound treatment on the fill, slot border, and grip ring.
     #[props(default = false)]
     bound: bool,
+    /// Amber ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
+    /// writer has captured this channel and holds it. Outranks the violet
+    /// bound family — bound means "wired", engaged means "captured".
+    #[props(default = false)]
+    engaged: bool,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
     /// Panel-write target: when present, gestures dispatch `PanelWriteOp`
     /// at this `(scope, channel)` instead of editing the authored default.
@@ -48,12 +53,16 @@ pub fn HFaderField(
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
+    // The gesture surface tracks the CURRENT reading — grabbing the thumb
+    // of a live control must start from what the fill shows, not snap back
+    // to the authored default underneath (GV2 bug, same as the knob).
+    let base = live_value.unwrap_or(value);
     // The fill rides the step grid the native input's thumb already snaps
     // to, so a stepped fader never shows fill and thumb in different places.
-    let frac = knob_fraction(knob_snap(live_value.unwrap_or(value), min, step), min, max);
-    let input_class = fader_input_class(bound);
-    let fill_style = fader_fill_style(frac, &state, bound);
-    let slot_style = fader_slot_style(&state, bound);
+    let frac = knob_fraction(knob_snap(base, min, step), min, max);
+    let input_class = fader_input_class(bound, engaged);
+    let fill_style = fader_fill_style(frac, &state, bound, engaged);
+    let slot_style = fader_slot_style(&state, bound, engaged);
     let step = step.map_or_else(|| "any".to_string(), |step| step.to_string());
     let invalid_title = state.invalid.clone().unwrap_or_default();
 
@@ -77,7 +86,7 @@ pub fn HFaderField(
                     min: "{min}",
                     max: "{max}",
                     step: "{step}",
-                    value: "{value}",
+                    value: "{base}",
                     disabled,
                     title: "{invalid_title}",
                     oninput: move |event| {
@@ -112,19 +121,30 @@ fn FaderTicks() -> Element {
 }
 
 /// Input classes: the transparent gesture surface (with the styled grip)
-/// plus the bound ring.
-pub(crate) fn fader_input_class(bound: bool) -> &'static str {
-    if bound {
+/// plus the bound / engaged grip ring.
+pub(crate) fn fader_input_class(bound: bool, engaged: bool) -> &'static str {
+    if engaged {
+        "ux-hfader is-engaged"
+    } else if bound {
         "ux-hfader is-bound"
     } else {
         "ux-hfader"
     }
 }
 
-/// Fill and border colors by status family: violet when bound, error when
-/// invalid, accent otherwise (green stays valid-only).
-fn fader_fill_colors(state: &UiSlotFieldState, bound: bool) -> (&'static str, &'static str) {
-    if bound {
+/// Fill and border colors by status family: amber when engaged, violet when
+/// bound, error when invalid, accent otherwise (green stays valid-only).
+fn fader_fill_colors(
+    state: &UiSlotFieldState,
+    bound: bool,
+    engaged: bool,
+) -> (&'static str, &'static str) {
+    if engaged {
+        (
+            "color-mix(in oklab, var(--studio-status-attention-text) 45%, var(--studio-color-surface-muted))",
+            "var(--studio-status-attention-border)",
+        )
+    } else if bound {
         (
             "color-mix(in oklab, var(--studio-status-bound-text) 45%, var(--studio-color-surface-muted))",
             "var(--studio-status-bound-border)",
@@ -144,15 +164,20 @@ fn fader_fill_colors(state: &UiSlotFieldState, bound: bool) -> (&'static str, &'
 
 /// Inline style for the value fill inside the slot: width = the value
 /// fraction, background = the status family's fill mix.
-pub(crate) fn fader_fill_style(frac: f32, state: &UiSlotFieldState, bound: bool) -> String {
-    let (fill, _) = fader_fill_colors(state, bound);
+pub(crate) fn fader_fill_style(
+    frac: f32,
+    state: &UiSlotFieldState,
+    bound: bool,
+    engaged: bool,
+) -> String {
+    let (fill, _) = fader_fill_colors(state, bound, engaged);
     format!("width: {:.1}%; background: {fill};", frac * 100.0)
 }
 
 /// Inline style for the slot border so bound faders read violet at a
 /// glance.
-pub(crate) fn fader_slot_style(state: &UiSlotFieldState, bound: bool) -> String {
-    let (_, border) = fader_fill_colors(state, bound);
+pub(crate) fn fader_slot_style(state: &UiSlotFieldState, bound: bool, engaged: bool) -> String {
+    let (_, border) = fader_fill_colors(state, bound, engaged);
     format!("border-color: {border};")
 }
 
@@ -164,24 +189,34 @@ mod tests {
 
     #[test]
     fn fill_sizes_to_the_value_fraction() {
-        let style = fader_fill_style(0.72, &UiSlotFieldState::editable(), false);
+        let style = fader_fill_style(0.72, &UiSlotFieldState::editable(), false, false);
         assert!(style.contains("width: 72.0%"));
         assert!(style.contains("--studio-color-accent"));
     }
 
     #[test]
     fn bound_fader_wears_the_violet_family() {
-        let fill = fader_fill_style(0.5, &UiSlotFieldState::editable(), true);
+        let fill = fader_fill_style(0.5, &UiSlotFieldState::editable(), true, false);
         assert!(fill.contains("--studio-status-bound-text"));
-        let slot = fader_slot_style(&UiSlotFieldState::editable(), true);
+        let slot = fader_slot_style(&UiSlotFieldState::editable(), true, false);
         assert!(slot.contains("--studio-status-bound-border"));
-        assert!(fader_input_class(true).contains("is-bound"));
-        assert!(!fader_input_class(false).contains("is-bound"));
+        assert!(fader_input_class(true, false).contains("is-bound"));
+        assert!(!fader_input_class(false, false).contains("is-bound"));
+    }
+
+    #[test]
+    fn engaged_fader_wears_amber_over_the_bound_violet() {
+        // Same rule as the knob: a captured fader has stopped following its
+        // binding, so the engaged family wins (panel.md P-Q2).
+        let fill = fader_fill_style(0.5, &UiSlotFieldState::editable(), true, true);
+        assert!(fill.contains("--studio-status-attention-text"));
+        assert!(!fill.contains("bound"));
+        assert!(fader_input_class(true, true).contains("is-engaged"));
     }
 
     #[test]
     fn invalid_fill_wears_the_error_family_when_unbound() {
         let state = UiSlotFieldState::editable().with_invalid("too bright");
-        assert!(fader_fill_style(0.5, &state, false).contains("--studio-status-error-text"));
+        assert!(fader_fill_style(0.5, &state, false, false).contains("--studio-status-error-text"));
     }
 }

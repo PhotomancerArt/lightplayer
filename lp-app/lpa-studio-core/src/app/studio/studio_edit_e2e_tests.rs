@@ -30,7 +30,8 @@ use lpfs::LpFsMemory;
 use crate::{
     ControllerId, ProjectController, ProjectOp, SlotEditOp, StudioActor, StudioCommand,
     StudioController, StudioServerClient, UiAction, UiConfigSlot, UiConfigSlotBody,
-    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiSlotEditorHint, UiStudioView, UiViewContent,
+    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotEditorHint, UiStudioView,
+    UiViewContent,
 };
 
 #[test]
@@ -55,13 +56,18 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
-    // Flat-root workspace over the real wire: the project root renders no
-    // card (the clock and fixture panes are the top-level entries) and the
+    // Root card restored over the real wire: the project root is the ONE
+    // top-level card and the clock and fixture ride its children.
     // Post-mitosis the root module def carries ONLY `nodes` (role `Fixed`);
     // format/uid/name live in the project.json container manifest, so they
     // must NOT surface as root slots.
     let editor = project_editor(&snapshot);
-    assert_eq!(editor.nodes.len(), 2, "two child panes, no root card");
+    assert_eq!(editor.nodes.len(), 1, "one top card: the root module");
+    assert_eq!(
+        editor.nodes[0].children.len(),
+        2,
+        "clock and fixture ride the root card"
+    );
     let root_slot = |path: &str| {
         editor.root_slots.iter().find(|slot| {
             slot.address
@@ -335,7 +341,11 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     // package's minted uid (the push is hash-verified inside the open)
     assert!(snapshot.home.is_none(), "an open project leaves home");
     let editor = project_editor(&snapshot);
-    assert_eq!(editor.nodes.len(), 2, "clock and fixture panes");
+    assert_eq!(
+        editor.nodes[0].children.len(),
+        2,
+        "clock and fixture panes under the root card"
+    );
     let pushed_manifest = {
         let bytes = server
             .borrow()
@@ -391,11 +401,14 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
     let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
 
     // create-and-open landed in the editor: home is gone and the blank
-    // project renders zero node cards (the add-node picker is the point)
+    // project renders its root card with nothing under it (the add-node
+    // picker is the point)
     assert!(snapshot.home.is_none(), "the created project opened");
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.nodes.len(), 1, "the root module card");
     assert!(
-        project_editor(&snapshot).nodes.is_empty(),
-        "a blank project has no node cards"
+        editor.nodes[0].children.is_empty(),
+        "a blank project has no child cards"
     );
 
     // the library holds the package: Created origin + the initial save
@@ -2314,10 +2327,16 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // The shader publishes to the visual bus and a fixture consumes it —
     // without a consumer the shader never renders, so it would never
     // (re)compile and compile errors would never surface.
+    //
+    // `speed` is wired to a channel with no def record yet: that is the
+    // agent e2e's repair shape (declare the uniform, upsert the record) and,
+    // since Q13, the binding is also what will put the repaired param on the
+    // panel — publicity is the binding, not an authored flag.
     let shader_json = r#"{
   "kind": "Shader",
   "source": "shader.glsl",
   "bindings": {
+    "speed": { "source": "bus:speed" },
     "output": { "target": "bus:visual.out" }
   },
   "consumed": {
@@ -2563,8 +2582,57 @@ fn count_overlay_reads(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
         .count()
 }
 
+/// Every workspace card, root first and then depth-first through the nested
+/// cards, each promoted exactly the way the renderer promotes it
+/// ([`crate::UiNodeChild::into_node_view`]).
+///
+/// Since the flat-root reversal the editor carries ONE top-level card — the
+/// root module — and every other node is a `UiNodeChild` beneath it, so a
+/// scan over `editor.nodes` alone would only ever see the project root.
+pub(crate) fn workspace_cards(view: &UiStudioView) -> Vec<UiNodeView> {
+    fn walk(card: UiNodeView, out: &mut Vec<UiNodeView>) {
+        let children = card.children.clone();
+        out.push(card);
+        for child in children {
+            walk(child.into_node_view(), out);
+        }
+    }
+    let mut cards = Vec::new();
+    for card in project_editor(view).nodes.iter().cloned() {
+        walk(card, &mut cards);
+    }
+    cards
+}
+
+/// The one workspace card matching `pick`, anywhere in the nested card tree.
+pub(crate) fn card_matching(
+    view: &UiStudioView,
+    what: &str,
+    pick: impl Fn(&UiNodeView) -> bool,
+) -> UiNodeView {
+    let cards = workspace_cards(view);
+    cards
+        .iter()
+        .find(|card| pick(card))
+        .unwrap_or_else(|| {
+            panic!(
+                "workspace carries a {what} card; got {:?}",
+                cards
+                    .iter()
+                    .map(|card| (card.header.kind.clone(), card.header.path.clone()))
+                    .collect::<Vec<_>>()
+            )
+        })
+        .clone()
+}
+
+/// The workspace card at `path` (a node address).
+pub(crate) fn card_at(view: &UiStudioView, path: &str) -> UiNodeView {
+    card_matching(view, path, |card| card.header.path == path)
+}
+
 /// The project editor DTO from a studio snapshot.
-fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
+pub(crate) fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
     view.panes
         .iter()
         .find_map(|pane| match &pane.body {
@@ -2583,13 +2651,7 @@ pub(crate) fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
 
 /// The main-tab sections of one workspace card, by node address.
 pub(crate) fn node_sections(view: &UiStudioView, node_id: &str) -> Vec<UiNodeSection> {
-    let editor = project_editor(view);
-    let node = editor
-        .nodes
-        .iter()
-        .find(|node| node.node_id == node_id)
-        .unwrap_or_else(|| panic!("workspace card {node_id} should exist"));
-    match &node.tabs[0].body {
+    match &card_at(view, node_id).tabs[0].body {
         UiNodeTabBody::Sections(sections) => sections.clone(),
         UiNodeTabBody::Text { .. } => panic!("expected node sections"),
     }

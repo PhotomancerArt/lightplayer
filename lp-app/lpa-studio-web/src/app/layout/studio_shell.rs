@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiPaneView, UiStudioView, UiViewContent};
+use lpa_studio_core::{UiAction, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
 
+use crate::app::module::{PlayModeSurface, panel_gesture_actions};
 use crate::app::{HomeGallery, ProjectNodeWorkspace, ProjectOpeningFrame};
 use crate::core::PaneView;
 
@@ -17,6 +18,13 @@ pub fn StudioShell(
     /// intent picks the frame — no gallery flash on a project reload).
     #[props(default = false)]
     opening_frame: bool,
+    /// Play mode (`docs/design/panel.md` P12): the root module's panel and
+    /// nothing else — no pane column, no workspace, no device card. Set by
+    /// the `/play` route suffix; a session whose root wears no module face
+    /// falls through to the normal layout rather than showing an empty
+    /// surface.
+    #[props(default = false)]
+    play: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let UiStudioView {
@@ -56,6 +64,26 @@ pub fn StudioShell(
 
     let main = panes;
     let project_editor = project_editor_view(&main);
+
+    // Play mode: the root module's panel, full width, single column (P12).
+    // It renders panels ONLY — no faces, no children, no wiring, no device
+    // card — so it deliberately short-circuits the whole editor layout
+    // below. `PlayModeSurface` wraps its own controls, which is what makes
+    // the same mount usable on a phone.
+    if play && let Some(face) = play_mode_face(project_editor.as_ref()) {
+        return rsx! {
+            div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",
+                PlayModeSurface {
+                    panel: face.panel,
+                    preview: face.preview,
+                    auto_save: face.auto_save,
+                    on_panel: panel_gesture_actions(on_action),
+                    on_action,
+                }
+            }
+        };
+    }
+
     let layout_class = if project_editor.is_some() {
         "tw:grid tw:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(300px,360px)] tw:gap-3.5 tw:max-[960px]:grid-cols-1"
     } else if main.is_empty() {
@@ -122,4 +150,17 @@ fn project_editor_view(panes: &[UiPaneView]) -> Option<lpa_studio_core::ProjectE
         UiViewContent::ProjectEditor(editor) => Some((**editor).clone()),
         _ => None,
     })
+}
+
+/// The module face play mode renders: the workspace ROOT's, since the flat
+/// root is the single top-level card and its scope is the project's own
+/// (R8). Anything else — no editor yet, or a root wearing another kind's
+/// face — has no play surface, and the caller falls back.
+fn play_mode_face(
+    editor: Option<&lpa_studio_core::ProjectEditorView>,
+) -> Option<lpa_studio_core::UiModuleFace> {
+    match editor?.nodes.first()?.face.as_ref()? {
+        UiNodeFace::Module(face) => Some(face.clone()),
+        _ => None,
+    }
 }

@@ -45,6 +45,17 @@ pub struct ServerRuntimeStatus {
     pub last_frame_time_us: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryStats>,
+    /// Whether panel state keeps being written for the project this read
+    /// targets (panel.md P11). Server-owned, like the `.lp/state.json`
+    /// file itself — the engine knows nothing about it, so an engine-only
+    /// caller leaves it `None` and the client renders no toggle.
+    ///
+    /// This is the P11 switch's READ path: rather than a dedicated pull,
+    /// the current value rides the runtime read every project refresh
+    /// already makes, so the module face's toggle converges the same way
+    /// engaged panel writers do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel_auto_save: Option<bool>,
 }
 
 #[cfg(test)]

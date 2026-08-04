@@ -125,27 +125,23 @@ impl ProjectRegistry {
             .unwrap_or_else(|| LpPath::new("/"))
             .to_path_buf();
 
-        // Body parses as a node definition; `Module` cannot be created as a
-        // child node (nested sub-projects are future work).
+        // Body parses as a node definition. `Module` is creatable like any
+        // other kind (D-C): an embedded module is just a child def whose
+        // node introduces a scope — the loader has handled nested modules
+        // since the structural-scope work.
         let text = core::str::from_utf8(body).map_err(|_| {
             reject(
                 MutationRejectionReason::InvalidBody,
                 "node body is not valid UTF-8".into(),
             )
         })?;
-        let def = NodeDef::read_json(ctx.shapes, text).map_err(|err| {
+        // Parse for validation only — any kind that parses is creatable.
+        let _def = NodeDef::read_json(ctx.shapes, text).map_err(|err| {
             reject(
                 MutationRejectionReason::InvalidBody,
                 format!("node body does not parse as a node definition: {err}"),
             )
         })?;
-        if matches!(def, NodeDef::Module(_)) {
-            return Err(reject(
-                MutationRejectionReason::InvalidBody,
-                "kind Module cannot be created as a child node".into(),
-            ));
-        }
-
         // Def and asset paths: project-relative, path-safe, unoccupied on
         // disk and in the effective inventory, and unique within the request.
         let def_path = resolve_created_path(&root_dir, file).ok_or_else(|| invalid_path(file))?;
@@ -1078,7 +1074,7 @@ mod tests {
     }
 
     #[test]
-    fn create_rejects_unparsable_and_project_kind_bodies() {
+    fn create_rejects_unparsable_bodies_and_accepts_module_children() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
 
@@ -1095,19 +1091,27 @@ mod tests {
         assert_eq!(rejection.reason, MutationRejectionReason::InvalidBody);
         assert_nothing_written(&fs, "/new.json");
 
-        let project_body = br#"{ "kind": "Module", "nodes": {} }"#;
-        let rejection = create(
+        // An embedded module is creatable like any other kind (settled
+        // D-C): the def lands, and the root module gains the use.
+        let module_body = br#"{ "kind": "Module", "nodes": {} }"#;
+        let outcome = create(
             &fs,
             &mut registry,
             &shapes,
             "./new.json",
-            project_body,
+            module_body,
             &[],
             &project_nodes("new"),
         )
-        .expect_err("Project kind body rejects");
-        assert_eq!(rejection.reason, MutationRejectionReason::InvalidBody);
-        assert_nothing_written(&fs, "/new.json");
+        .expect("an empty module child creates");
+        assert!(
+            outcome
+                .artifact_changes
+                .added
+                .iter()
+                .any(|artifact| *artifact == ArtifactLocation::file("/new.json")),
+            "the module def is written: {outcome:?}"
+        );
     }
 
     #[test]

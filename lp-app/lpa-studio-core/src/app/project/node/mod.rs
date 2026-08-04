@@ -28,7 +28,7 @@ pub use node_remove_op::NodeRemoveOp;
 pub use node_remove_preflight::UiNodeRemovePreflight;
 pub use node_revert_op::NodeRevertOp;
 pub use node_share_op::{NodeCopyOp, NodePasteOp};
-pub use panel_write_op::{PanelClearOp, PanelWriteOp};
+pub use panel_write_op::{PanelAutoSaveOp, PanelClearOp, PanelWriteOp};
 pub use playlist_activate_op::PlaylistActivateOp;
 pub use project_node_address::ProjectNodeAddress;
 pub use project_node_target::ProjectNodeTarget;

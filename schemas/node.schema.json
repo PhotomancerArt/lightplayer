@@ -297,9 +297,6 @@
         "min": {
           "type": "number"
         },
-        "panel": {
-          "type": "boolean"
-        },
         "step": {
           "type": "number"
         },

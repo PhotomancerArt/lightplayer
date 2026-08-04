@@ -59,3 +59,12 @@ what is broken is the feedback when you try.
 
 Either fix makes fixture brightness bindable, which is what lets the
 panel own the control the design keeps using as its example.
+
+**Met again 2026-08-03** (modules vision push, P5 content). Authoring
+`"brightness": { "source": "bus:brightness" }` on `examples/meteor`'s
+fixture, to give that example a second public control, registered
+nothing: no `brightness` row in the module's wiring drawer, no fader on
+the panel, no diagnostic. The binding was removed and the example ships
+with one control instead of two. This is now the second time the defect
+has been met by someone trying to do exactly what the design documents
+use as their worked example, which is the argument for fix direction 2.

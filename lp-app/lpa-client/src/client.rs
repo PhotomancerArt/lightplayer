@@ -498,6 +498,28 @@ where
         }
     }
 
+    /// Turn panel-state auto-save on or off (panel.md P11). The current
+    /// value comes back on every project read as
+    /// `ServerRuntimeStatus::panel_auto_save`, not from this response.
+    pub async fn project_panel_auto_save(
+        &mut self,
+        handle: WireProjectHandle,
+        request: lpc_wire::WirePanelAutoSaveRequest,
+    ) -> ClientResult<ClientOutcome<lpc_wire::WirePanelCommandResponse>> {
+        let response = self
+            .project_command(handle, WireProjectCommand::PanelAutoSave { request })
+            .await?;
+        match response.value {
+            WireProjectCommandResponse::PanelAutoSave { response: value } => {
+                Ok(ClientOutcome::new(value, response.events))
+            }
+            other => Err(ClientError::unexpected_response(
+                "project.panel_auto_save",
+                other,
+            )),
+        }
+    }
+
     /// Dispatch a runtime node command (playlist activate-entry, future sim
     /// pokes) and return the server's accepted/rejected outcome.
     pub async fn project_node_command(
