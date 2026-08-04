@@ -37,7 +37,11 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 # (tcp, dns) are named by the bin crates that use them and arrive via feature
 # unification. Version matches the bench spike (`spikes/net-bringup-classic`)
 # and the fw-esp32v3 image.
-embassy-net = { version = "0.9", default-features = false, features = ["dhcpv4", "medium-ethernet"], optional = true }
+embassy-net = { version = "0.9", default-features = false, features = ["dhcpv4", "dhcpv4-hostname", "medium-ethernet"], optional = true }
+# Only for the announced-hostname string: `DhcpConfig.hostname` is concretely
+# `heapless::String<32>`, so the version here must stay in lockstep with
+# embassy-net's own heapless line or the types stop unifying.
+heapless = { version = "0.9", default-features = false, optional = true }
 
 # Server stack (heavy) — only with the `server` feature, mirroring the bin crates.
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, optional = true }
@@ -68,4 +72,4 @@ server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-mod
 # shared NetStatus, and the DHCP wait/status loop. Orthogonal to `server` —
 # a bin crate turns it on alongside its own driver feature (fw-esp32v3's
 # `net-eth` is the first consumer).
-net = ["dep:embassy-net"]
+net = ["dep:embassy-net", "dep:heapless"]

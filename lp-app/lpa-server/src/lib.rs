@@ -14,6 +14,7 @@ pub mod device_identity;
 pub mod error;
 pub mod file_sync;
 pub mod handlers;
+pub mod net_settings;
 pub mod panel_state;
 pub mod project;
 pub mod project_manager;

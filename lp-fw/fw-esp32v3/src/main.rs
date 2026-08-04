@@ -394,12 +394,14 @@ async fn net_runner_task(mut runner: embassy_net::Runner<'static, board::esp32v3
 #[cfg(all(feature = "server", feature = "net-eth"))]
 #[embassy_executor::task]
 async fn net_status_task(stack: embassy_net::Stack<'static>) {
-    log::info!("net: link assumed up (fixed-link), waiting DHCP");
+    log::info!("net: link assumed up (fixed-link), waiting for IPv4 config");
     fw_esp32_common::net::dhcp_status_loop(stack).await;
 }
 
-/// Ethernet bring-up (net-eth builds): EMAC driver → embassy-net stack →
-/// runner + status tasks. Called from [`boot_firmware`] once the logger is up.
+/// Ethernet bring-up (net-eth builds): settings gate → EMAC driver →
+/// embassy-net stack → runner + status tasks. Called from [`boot_firmware`]
+/// once the logger AND the filesystem are up — `/.lp/net.json` (M2-P3) shapes
+/// the stack, so the mount order is load-bearing.
 ///
 /// Failure costs the board its network, never its boot — same posture as the
 /// RMT init below: a board that renders without an IP is strictly more
@@ -408,7 +410,27 @@ async fn net_status_task(stack: embassy_net::Stack<'static>) {
 fn start_network(
     spawner: embassy_executor::Spawner,
     eth_peripherals: board::esp32v3::init::EthPeripherals,
+    fs: &dyn lpfs::LpFs,
 ) {
+    use lpa_server::net_settings::NetMode;
+
+    let settings = lpa_server::net_settings::read(fs);
+    // The medium gate is a board fact: this carrier's one network is the
+    // wired one, and its APLL clock-out excludes the radio besides.
+    match settings.as_ref().and_then(|settings| settings.mode) {
+        None | Some(NetMode::Ethernet) => {}
+        Some(NetMode::Off) => {
+            log::info!("net: disabled by /.lp/net.json (mode=off)");
+            return;
+        }
+        Some(NetMode::Wifi) => {
+            log::warn!(
+                "net: /.lp/net.json asks for wifi, but this board's APLL ethernet \
+clock excludes the radio; network stays off (set mode=ethernet or remove the file)"
+            );
+            return;
+        }
+    }
     let driver = match board::esp32v3::eth::create_driver(eth_peripherals) {
         Ok(driver) => driver,
         Err(error) => {
@@ -424,6 +446,7 @@ fn start_network(
         driver,
         NET_STACK_RESOURCES.init(embassy_net::StackResources::new()),
         seed,
+        fw_esp32_common::net::NetOptions::from_settings(settings.as_ref()),
     );
     spawner.spawn(net_runner_task(runner).unwrap());
     spawner.spawn(net_status_task(stack).unwrap());
@@ -485,21 +508,24 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // `esp_println!` lines above are the pre-transport ones.
     logger::init(serial::io_task::log_write_to_outgoing);
 
-    // Ethernet control plane (net-eth builds): construct the EMAC driver and
-    // spawn the embassy-net runner + DHCP status tasks NOW, so the lease is
-    // being negotiated concurrently with the rest of boot rather than after
-    // it. Placed after `logger::init` on purpose — every `net:` line,
-    // including the fixed-link note printed from inside `Ethernet::new`, goes
-    // through the normal logger onto the serial wire.
+    // Filesystem before network: `/.lp/net.json` (M2-P3) shapes the stack
+    // config, so the mount has to come first. The network still starts ahead
+    // of the (expensive) server build below, so the lease is negotiated
+    // concurrently with the rest of boot.
+    let base_fs = mount_filesystem(flash);
+
+    // Ethernet control plane (net-eth builds): read settings, construct the
+    // EMAC driver and spawn the embassy-net runner + status tasks NOW. Placed
+    // after `logger::init` on purpose — every `net:` line, including the
+    // fixed-link note printed from inside `Ethernet::new`, goes through the
+    // normal logger onto the serial wire.
     #[cfg(feature = "net-eth")]
-    start_network(spawner, eth_peripherals);
+    start_network(spawner, eth_peripherals, base_fs.as_ref());
 
     let (incoming, _) = serial::io_task::get_message_channels();
     let (write_request, write_result) = serial::io_task::get_server_write_channels();
     let transport =
         transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
-
-    let base_fs = mount_filesystem(flash);
 
     // The compiled-in fallback is the DOM-Z-102 profile — the desk board and
     // the roadmap's WLED-class exemplar. An `/hardware.json` on the device

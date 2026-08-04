@@ -23,8 +23,10 @@
 //! deliberately not generic in embassy-net 0.9.
 
 use core::cell::Cell;
+use core::fmt::Write as _;
 
-use embassy_net::{Config, Ipv4Cidr, Runner, Stack, StackResources, driver::Driver};
+use embassy_net::driver::{Driver, HardwareAddress};
+use embassy_net::{Config, DhcpConfig, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 
 /// Socket slots in the [`StackResources`] the host firmware allocates.
@@ -70,22 +72,129 @@ fn publish(status: NetStatus) {
     NET_STATUS.lock(|cell| cell.set(status));
 }
 
-/// Builds the embassy-net stack over any driver, configured for DHCPv4.
+/// The longest hostname the stack announces — embassy-net's DHCP option 12
+/// cap (its `MAX_HOSTNAME_LEN` is private, so this mirrors it; the
+/// `hostname` field's concrete type keeps the two honest at compile time).
+pub const MAX_HOSTNAME_LEN: usize = 32;
+
+/// Caller choices for [`init_stack`], resolved from `/.lp/net.json` by the
+/// chip crate (which owns the filesystem and the medium decision). Both
+/// `None`s mean the stock experience: DHCP, hostname derived from the
+/// interface MAC.
+#[derive(Default)]
+pub struct NetOptions<'a> {
+    /// Hostname to announce (DHCP option 12 today, mDNS later).
+    /// `None` → `lp-<mac6>` derived from the driver's hardware address.
+    pub hostname: Option<&'a str>,
+    /// Static IPv4 configuration. `None` → DHCPv4.
+    pub static_v4: Option<StaticConfigV4>,
+}
+
+#[cfg(feature = "server")]
+impl<'a> NetOptions<'a> {
+    /// Resolve `/.lp/net.json` settings into stack options: validated
+    /// hostname override, static-IPv4 block if one parsed. The MEDIUM
+    /// decision (`mode`) is deliberately not consumed here — which media an
+    /// image has is a chip/board fact, so the chip crate gates on `mode`
+    /// before it ever builds a driver.
+    pub fn from_settings(settings: Option<&'a lpa_server::net_settings::NetSettingsFile>) -> Self {
+        let Some(settings) = settings else {
+            return Self::default();
+        };
+        NetOptions {
+            hostname: settings.valid_hostname(),
+            static_v4: settings.resolved_static_ipv4().map(|static_v4| {
+                StaticConfigV4 {
+                    address: Ipv4Cidr::new(static_v4.address, static_v4.prefix),
+                    gateway: static_v4.gateway,
+                    // `take(3)`: heapless `FromIterator` panics past capacity,
+                    // and the settings reader does not cap the list.
+                    dns_servers: static_v4.dns.iter().copied().take(3).collect(),
+                }
+            }),
+        }
+    }
+}
+
+/// The default hostname: `lp-` + the low three MAC bytes in hex — stable per
+/// device, short enough for any label rule, and matching the discovery
+/// milestone's `lp-<mac6>.local` convention.
+pub fn default_hostname(mac: &[u8; 6]) -> heapless::String<MAX_HOSTNAME_LEN> {
+    let mut name = heapless::String::new();
+    // Infallible: "lp-" + 6 hex digits is 9 bytes into a 32-byte string.
+    let _ = write!(name, "lp-{:02x}{:02x}{:02x}", mac[3], mac[4], mac[5]);
+    name
+}
+
+/// Builds the embassy-net stack over any driver.
 ///
-/// Thin by design — it pins down the three decisions every LightPlayer image
-/// should share (DHCP config, socket count, caller-supplied RNG seed) and
-/// nothing else. The seed comes in as a plain `u64` because the RNG is a chip
-/// peripheral this crate must not name.
+/// Thin by design — it pins down the decisions every LightPlayer image
+/// should share (IPv4 config shape, announced hostname, socket count,
+/// caller-supplied RNG seed) and nothing else. The seed comes in as a plain
+/// `u64` because the RNG is a chip peripheral this crate must not name.
 pub fn init_stack<D: Driver>(
     driver: D,
     resources: &'static mut StackResources<SOCKET_COUNT>,
     seed: u64,
+    options: NetOptions<'_>,
 ) -> (Stack<'static>, Runner<'static, D>) {
-    embassy_net::new(driver, Config::dhcpv4(Default::default()), resources, seed)
+    let hostname: heapless::String<MAX_HOSTNAME_LEN> = match options.hostname {
+        // Length is pre-validated by the settings reader; a caller handing us
+        // an oversized name anyway gets the derived default, not a panic.
+        Some(name) => {
+            heapless::String::try_from(name).unwrap_or_else(|_| derived_hostname(&driver))
+        }
+        None => derived_hostname(&driver),
+    };
+    let config = match options.static_v4 {
+        Some(static_v4) => {
+            log::info!(
+                "net: hostname={hostname} ipv4=static {} gw={:?}",
+                static_v4.address,
+                static_v4.gateway
+            );
+            Config::ipv4_static(static_v4)
+        }
+        None => {
+            log::info!("net: hostname={hostname} ipv4=dhcp");
+            let mut dhcp = DhcpConfig::default();
+            dhcp.hostname = Some(hostname);
+            Config::dhcpv4(dhcp)
+        }
+    };
+    embassy_net::new(driver, config, resources, seed)
 }
 
-/// DHCP wait + status-update loop: publishes [`NetStatus`] transitions and
-/// logs them through the normal firmware logger (i.e. onto the serial wire).
+fn derived_hostname<D: Driver>(driver: &D) -> heapless::String<MAX_HOSTNAME_LEN> {
+    match driver.hardware_address() {
+        HardwareAddress::Ethernet(mac) => default_hostname(&mac),
+        // No MAC to derive from (unreachable for the media we ship today);
+        // a fixed name beats none.
+        _ => {
+            let mut name = heapless::String::new();
+            let _ = write!(name, "lp-device");
+            name
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_hostname_is_lp_plus_low_mac_bytes() {
+        assert_eq!(
+            default_hostname(&[0x32, 0x76, 0xf5, 0xec, 0xf6, 0x34]).as_str(),
+            "lp-ecf634"
+        );
+    }
+}
+
+/// IPv4-config wait + status-update loop: publishes [`NetStatus`] transitions
+/// and logs them through the normal firmware logger (i.e. onto the serial
+/// wire). Works for DHCP and static configs alike — under a static config
+/// `wait_config_up` resolves immediately and the loop simply reports it.
 ///
 /// Runs forever; the chip crate wraps it in an `#[embassy_executor::task]`.
 /// Losing the config (lease expiry with no renewal, cable pulled mid-lease)
@@ -114,6 +223,6 @@ pub async fn dhcp_status_loop(stack: Stack<'static>) {
             up: false,
             ip: None,
         });
-        log::info!("net: IPv4 config lost, waiting for DHCP");
+        log::info!("net: IPv4 config lost, waiting for a new one");
     }
 }
