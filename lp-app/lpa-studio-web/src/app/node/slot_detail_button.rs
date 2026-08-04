@@ -10,8 +10,8 @@ use crate::app::node::{
     legacy_shape_from_parts,
 };
 use crate::base::{
-    DetailPopover, DetailSectionTint, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName,
-    detail_popover_section_class,
+    DetailPopover, DetailSectionTint, IconMenuTone, InlineButton, InlineButtonTone,
+    PopoverPlacement, StudioIcon, StudioIconName, detail_popover_section_class,
 };
 
 /// Revert/clear affordance rendered INSIDE the slot detail popup's edited
@@ -166,19 +166,13 @@ fn SlotDetailRevertButton(revert: SlotDetailRevert) -> Element {
 
     rsx! {
         div { class: "tw:flex tw:justify-end tw:pt-1",
-            button {
-                class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-[0.68rem] tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground",
-                r#type: "button",
-                title,
-                onclick: move |event| {
-                    event.stop_propagation();
-                    on_action.call(action.clone());
-                },
-                StudioIcon {
-                    name: StudioIconName::Revert,
-                    size: 12,
-                }
-                span { "{label}" }
+            InlineButton {
+                label: label.to_string(),
+                title: title.to_string(),
+                text: label.to_string(),
+                icon: StudioIconName::Revert,
+                tone: InlineButtonTone::Warning,
+                on_press: move |_| on_action.call(action.clone()),
             }
         }
     }
