@@ -5,12 +5,13 @@ use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::{ResolveError, SessionResolveError};
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_session::ResolveSession;
+use crate::dataflow::timebase::PhasorKey;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
-use lpc_model::{NodeId, Revision, SlotPath};
+use lpc_model::{NodeId, PhasorConfig, Revision, SlotPath, TimeProduct};
 
 /// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`Production`]).
 pub trait TickResolver {
@@ -51,6 +52,47 @@ pub trait TickResolver {
         id: RuntimeBufferId,
         frame: Revision,
     ) -> Result<&mut RuntimeBuffer, ResolveError>;
+
+    /// Publish this node's timebase for the current tick.
+    ///
+    /// Defaulted (with the three reads below) so a node-level test fake does
+    /// not have to model the timebase store to tick a node that publishes
+    /// one; the engine's own resolver always forwards to the store.
+    fn publish_timebase(
+        &mut self,
+        clock: NodeId,
+        effective_seconds: f32,
+        delta_seconds: f32,
+        at: Revision,
+    ) {
+        let _ = (clock, effective_seconds, delta_seconds, at);
+    }
+
+    fn time_product_seconds(&self, product: TimeProduct) -> Result<f32, ResolveError> {
+        let _ = product;
+        Err(ResolveError::new(alloc::format!(
+            "resolver has no timebase access"
+        )))
+    }
+
+    fn time_product_delta(&self, product: TimeProduct) -> Result<f32, ResolveError> {
+        let _ = product;
+        Err(ResolveError::new(alloc::format!(
+            "resolver has no timebase access"
+        )))
+    }
+
+    fn time_product_phasor(
+        &mut self,
+        product: TimeProduct,
+        key: &PhasorKey,
+        config: &PhasorConfig,
+    ) -> Result<(f32, u32), ResolveError> {
+        let _ = (product, key, config);
+        Err(ResolveError::new(alloc::format!(
+            "resolver has no timebase access"
+        )))
+    }
 }
 
 /// Bridges [`ResolveSession`] + [`ResolveHost`] into a [`TickResolver`].
@@ -118,6 +160,40 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<&mut RuntimeBuffer, ResolveError> {
         self.host
             .runtime_buffer_mut(id, frame)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn publish_timebase(
+        &mut self,
+        clock: NodeId,
+        effective_seconds: f32,
+        delta_seconds: f32,
+        at: Revision,
+    ) {
+        self.host
+            .publish_timebase(clock, effective_seconds, delta_seconds, at);
+    }
+
+    fn time_product_seconds(&self, product: TimeProduct) -> Result<f32, ResolveError> {
+        self.host
+            .time_product_seconds(product)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn time_product_delta(&self, product: TimeProduct) -> Result<f32, ResolveError> {
+        self.host
+            .time_product_delta(product)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn time_product_phasor(
+        &mut self,
+        product: TimeProduct,
+        key: &PhasorKey,
+        config: &PhasorConfig,
+    ) -> Result<(f32, u32), ResolveError> {
+        self.host
+            .time_product_phasor(product, key, config)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 }
