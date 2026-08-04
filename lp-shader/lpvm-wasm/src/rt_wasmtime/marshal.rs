@@ -166,9 +166,10 @@ pub(crate) fn build_wasm_args_q32_scalar_only(
     param_types: &[LpsType],
     export_param_slots: usize,
     words: &[i32],
+    vmctx_base: i32,
 ) -> Result<Vec<Val>, WasmError> {
     let mut wasm_args = Vec::new();
-    wasm_args.push(Val::I32(0));
+    wasm_args.push(Val::I32(vmctx_base));
     let mut woff = 0;
     for ty in param_types {
         let n = glsl_component_count(ty);
@@ -326,6 +327,7 @@ pub(crate) fn build_wasm_args_scalar_only(
     export_param_slots: usize,
     args: &[LpsValueF32],
     fm: FloatMode,
+    vmctx_base: i32,
 ) -> Result<Vec<Val>, WasmError> {
     if args.len() != param_types.len() {
         return Err(WasmError::runtime(format!(
@@ -335,7 +337,7 @@ pub(crate) fn build_wasm_args_scalar_only(
         )));
     }
     let mut wasm_args = Vec::new();
-    wasm_args.push(Val::I32(0));
+    wasm_args.push(Val::I32(vmctx_base));
     for (v, ty) in args.iter().zip(param_types.iter()) {
         wasm_args.extend(glsl_value_to_wasm_flat(ty, v, fm)?);
     }
@@ -630,6 +632,7 @@ pub(crate) fn build_wasm_args_for_call(
     args: &[LpsValueF32],
     fm: FloatMode,
     return_ty: &LpsType,
+    vmctx_base: i32,
 ) -> Result<(Vec<Val>, Option<SretPlan>), WasmError> {
     if args.len() != export.param_types.len() {
         return Err(WasmError::runtime(format!(
@@ -638,7 +641,7 @@ pub(crate) fn build_wasm_args_for_call(
             args.len()
         )));
     }
-    let mut wasm_args = vec![Val::I32(0)];
+    let mut wasm_args = vec![Val::I32(vmctx_base)];
     let mut sret = None;
     if export.uses_sret {
         let size_u = type_size(return_ty, LayoutRules::Std430);
@@ -681,8 +684,9 @@ pub(crate) fn build_wasm_args_q32_for_call(
     export: &WasmExport,
     words: &[i32],
     return_ty: &LpsType,
+    vmctx_base: i32,
 ) -> Result<(Vec<Val>, Option<SretPlan>), WasmError> {
-    let mut wasm_args = vec![Val::I32(0)];
+    let mut wasm_args = vec![Val::I32(vmctx_base)];
     let mut sret = None;
     if export.uses_sret {
         let size_u = type_size(return_ty, LayoutRules::Std430);

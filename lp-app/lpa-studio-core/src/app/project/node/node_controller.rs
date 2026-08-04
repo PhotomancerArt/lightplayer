@@ -594,18 +594,19 @@ impl NodeController {
 
     /// Config and asset rows for this node's **own** slots (children
     /// excluded), in section order (config, then assets). Feeds the project
-    /// popup's settings section for the workspace root, whose card the
-    /// flat-root workspace no longer renders.
+    /// popup's settings section for the workspace root — which since the
+    /// flat-root reversal ALSO renders a card, though its own rows still
+    /// live in the popup rather than on it.
     pub(in crate::app::project) fn ui_config_slots(
         &self,
         edits: &SlotEditJoin<'_>,
     ) -> Vec<UiConfigSlot> {
         let mut config_slots = Vec::new();
         let mut asset_slots = Vec::new();
-        // The flat root renders no node card, so it has no Debug section to
-        // route Debug rows into; they stay in the one flat list rather than
-        // vanishing. `ProjectDef` declares no Debug field today, so this is
-        // empty in practice.
+        // These rows land in the project popup, which has no Debug
+        // section to route Debug rows into; they stay in the one flat list
+        // rather than vanishing. `ProjectDef` declares no Debug field
+        // today, so this is empty in practice.
         let mut debug_slots = Vec::new();
         for slot in &self.slots {
             match slot.address().root {
@@ -684,6 +685,10 @@ impl NodeController {
                 view.face = child.kind_face(&view.sections, &mut view.children);
                 view.header_actions =
                     node_header_actions(&child.address, &view.dirty, remove_action(&child.address));
+                // A container child keeps its picker: since the flat-root
+                // reversal a playlist card is always nested, so its "+
+                // entry" chip only exists if it rides the child DTO.
+                view.add_node_menu = child.add_node_menu();
                 view
             })
             .collect()

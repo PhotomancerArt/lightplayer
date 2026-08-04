@@ -1,0 +1,33 @@
+{
+  "id": "s2-fresh-fw-no-lpfs",
+  "title": "Current firmware, no lpfs (no project data)",
+  "board": "C6",
+  "needs": [],
+  "expect": [
+    "state:ready"
+  ],
+  "setup": [
+    {
+      "describe": "Build the current C6 firmware",
+      "run": "just build-fw-esp32c6",
+      "verified": true
+    },
+    {
+      "describe": "Flash it (NO --monitor: the port must be free for the browser afterwards)",
+      "run": "espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size 4mb --after hard-reset --port {port} target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6",
+      "verified": false
+    },
+    {
+      "describe": "Erase the lpfs data partition (offset from lp-fw/fw-esp32c6/partitions.csv)",
+      "run": "espflash erase-region --port {port} 0x310000 0xF0000",
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Connect to this board.",
+    "The card should reach Ready and ask for a name (unstamped, empty)."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
+}

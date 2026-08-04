@@ -123,7 +123,7 @@ pub fn stderr_device_events(verbose: bool) -> impl Fn(DeviceEvent) + 'static {
                 eprintln!("[device] {line}");
             }
         }
-        DeviceEvent::State { state } => {
+        DeviceEvent::State { to: state, .. } => {
             if verbose || !matches!(state, DeviceState::Booting | DeviceState::Ready { .. }) {
                 eprintln!("[device] state: {state:?}");
             }
@@ -132,5 +132,13 @@ pub fn stderr_device_events(verbose: bool) -> impl Fn(DeviceEvent) + 'static {
             Some(percent) => eprintln!("[device] {label}: {percent}%"),
             None => eprintln!("[device] {label}"),
         },
+        DeviceEvent::ParseAnomaly { detail } => {
+            eprintln!("[device] parse anomaly: {detail}");
+        }
+        DeviceEvent::TxFrame { frame } => {
+            if verbose {
+                eprintln!("[device] tx: {frame}");
+            }
+        }
     }
 }

@@ -27,6 +27,11 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// artifacts (alpha posture: bump and refuse, never migrate).
 ///
 /// History:
+/// - `4` — multi-endpoint output nodes: `OutputDef.endpoint` (one string)
+///   became `channels` (a map of `{endpoint, count}` records), and endpoint
+///   specs name the target device instead of a driver mechanism
+///   (`ws281x:local:IO18`, likewise `button:local:*` / `radio:local:*`).
+///   Version-3 outputs carry a top-level `endpoint` key and are refused.
 /// - `3` — project/module mitosis: `project.json` became the non-node
 ///   container manifest (`format`/`uid`/`name`), and the root module node
 ///   moved to `module.json` (kind `Module`, renamed from `project` in the
@@ -35,7 +40,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
-pub const PROJECT_FORMAT_VERSION: u32 = 3;
+pub const PROJECT_FORMAT_VERSION: u32 = 4;
 
 /// Parsed `project.json` container manifest.
 ///
@@ -274,7 +279,7 @@ mod tests {
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 3,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\"\n}\n"
+            "{\n  \"format\": 4,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -284,16 +289,16 @@ mod tests {
     #[test]
     fn manifest_absent_fields_serialize_to_nothing() {
         let manifest = ProjectManifest {
-            format: Some(3),
+            format: Some(4),
             ..ProjectManifest::default()
         };
-        assert_eq!(manifest.write_json(), "{\n  \"format\": 3\n}\n");
+        assert_eq!(manifest.write_json(), "{\n  \"format\": 4\n}\n");
         assert_eq!(ProjectManifest::default().write_json(), "{}\n");
     }
 
     #[test]
     fn manifest_rejects_unknown_fields() {
-        let err = ProjectManifest::read_json(r#"{ "format": 3, "nodes": {} }"#)
+        let err = ProjectManifest::read_json(r#"{ "format": 4, "nodes": {} }"#)
             .expect_err("nodes is not a container field");
         assert_eq!(
             err,

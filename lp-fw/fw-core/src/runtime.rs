@@ -47,6 +47,14 @@ pub async fn send_unsolicited_hello<T: ServerTransport>(
     server: &LpServer,
     transport: &mut T,
 ) -> Result<(), TransportError> {
+    // A FIXTURE build stays silent, which is exactly what pre-hello
+    // firmware looks like — absence of a hello IS the mismatch signal.
+    // `lpa-server/fixture-no-hello` refuses the client's Hello REQUEST for
+    // the same reason; both halves are needed, because Studio's client
+    // asks as well as listening. Never in a released image.
+    if cfg!(feature = "fixture-no-hello") {
+        return Ok(());
+    }
     transport
         .send(WireServerMessage::new(
             0,

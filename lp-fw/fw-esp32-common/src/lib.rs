@@ -23,6 +23,8 @@ pub mod net;
 #[cfg(feature = "server")]
 pub mod boot;
 #[cfg(feature = "server")]
+pub mod chip_identity;
+#[cfg(feature = "server")]
 pub mod hardware;
 #[cfg(feature = "server")]
 pub mod lp_fs;

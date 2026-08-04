@@ -1,12 +1,29 @@
 # ADR: Artifact Format Version and Generated Schema Snapshots
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-08-03 — see the format-4 note below)
 - **Date:** 2026-07-05
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
 - **Relates to:** `2026-07-04-json-only-artifacts.md` (JSON-only, one node
-  per file — the artifact form these schemas describe)
+  per file — the artifact form these schemas describe),
+  `2026-08-03-multi-endpoint-output-node.md` (format 4, the third bump)
+
+> **Format-4 amendment (2026-08-03).** The bump ritual has now run three
+> times: `2` (shader `float_mode`), `3` (project/module mitosis —
+> `project.json` became the non-node container, the root module moved to
+> `module.json`), `4` (`OutputDef.endpoint` → `channels`, this plan). Every
+> bump followed §6 unchanged: `just format-bump` snapshotted the outgoing
+> schemas/shape-dumps/fixtures into `schemas/history/v<N>/` before the
+> constant moved, so `schemas/history/` now holds `v1/`, `v2/`, and `v3/`.
+> `PROJECT_FORMAT_VERSION` and its history log live in
+> `lp-core/lpc-model/src/project/manifest.rs` (moved there by the v3
+> mitosis; it was originally on the `module_def.rs` root node). Decision 4
+> below ("currently 1") and the CI-check follow-up ("deferred until the
+> first bump") are the only stale claims from the original text — the
+> ritual itself needed no rework across three real bumps, which is the
+> amendment's finding: name the constant's current home rather than repeat
+> its value or bump count here, since both keep moving.
 
 ## Context
 
@@ -58,7 +75,8 @@ hygiene is now. Constraints:
    `lp-cli/tests/schema_conformance.rs`, which runs in normal CI. The
    schemas are load-bearing, not decorative.
 4. **`"format": N` contract on the project root.** A single monotonic `u32`
-   (`PROJECT_FORMAT_VERSION` in `lpc-model`, currently 1) is required on
+   (`PROJECT_FORMAT_VERSION` in `lpc-model`, 1 at the time of this decision,
+   see the format-4 amendment above for where it lives now) is required on
    `project.json`; child node files are versioned transitively through
    their root. `ProjectRegistry::load_root` probes the raw root bytes
    (streaming, before any full parse) and rejects missing/mismatched
@@ -128,5 +146,7 @@ would be dead bytes on device-shipped files).
 - The offline upgrader (Studio/desktop) consuming `schemas/history/`
   shape dumps + fixtures — future work, not scheduled.
 - CI check that a `PROJECT_FORMAT_VERSION` bump lands together with a
-  `schemas/history/v<N-1>/` snapshot — deferred until the first bump.
+  `schemas/history/v<N-1>/` snapshot — still not automated after three
+  bumps (2, 3, 4); each relied on the author following §6 by hand. Worth
+  revisiting if a fourth bump ever skips the snapshot.
 - Wire-protocol (`lpc-wire`) schema generation — out of scope here.

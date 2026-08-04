@@ -40,8 +40,6 @@ pub struct UpsertParamInput {
     pub step: Option<f32>,
     #[serde(default)]
     pub unit: Option<String>,
-    #[serde(default)]
-    pub panel: Option<bool>,
 }
 
 impl UpsertParamInput {
@@ -54,7 +52,6 @@ impl UpsertParamInput {
             max: self.max,
             step: self.step,
             unit: self.unit,
-            panel: self.panel,
         }
     }
 }
@@ -245,9 +242,6 @@ fn upsert_echo(upsert: &ParamUpsert) -> Value {
     if let Some(unit) = &upsert.unit {
         obj.insert("unit".into(), json!(unit));
     }
-    if let Some(panel) = upsert.panel {
-        obj.insert("panel".into(), json!(panel));
-    }
     Value::Object(obj)
 }
 
@@ -262,8 +256,9 @@ pub fn upsert_param_tool_def() -> ToolDef {
 
 const DESCRIPTION: &str = "\
 Create or update the def-side param record for one float uniform: label, \
-default value, min/max range, an optional `step` the knob snaps to, display \
-unit, and the `panel` flag that puts a knob on the node card. Use it to \
+default value, min/max range, an optional `step` the knob snaps to, and \
+display unit. (Whether the param appears as a knob is not set here: a param \
+is on the panel exactly when it is BOUND to a bus channel.) Use it to \
 repair a `declared_only` orphan from \
 `iterate`'s params section (the engine cannot render a declared uniform \
 without a record) or to polish an existing record. Only the fields you pass \
@@ -289,9 +284,7 @@ fn input_schema() -> Value {
             "step": { "type": "number",
                 "description": "Knob quantization: values snap to whole multiples of this. Pass 1 for a whole-number param (\"how many\"); omit for a continuous one." },
             "unit": { "type": "string",
-                "description": "Display unit suffix (e.g. \"Hz\", \"%\")." },
-            "panel": { "type": "boolean",
-                "description": "Show this param as a knob on the node card's front panel." }
+                "description": "Display unit suffix (e.g. \"Hz\", \"%\")." }
         }
     })
 }
@@ -339,11 +332,16 @@ mod tests {
 
         let input: UpsertParamInput = serde_json::from_value(json!({
             "name": "speed", "label": "Speed", "default": 1.0,
-            "min": 0.0, "max": 4.0, "unit": "x", "panel": true,
+            "min": 0.0, "max": 4.0, "unit": "x", "step": 0.25,
         }))
         .expect("full input parses");
         assert_eq!(input.name, "speed");
-        assert_eq!(input.panel, Some(true));
+        assert_eq!(input.step, Some(0.25));
+
+        // Q13: publicity is a BINDING, never an argument here — `panel` is
+        // no longer part of the surface and reads as any other typo.
+        serde_json::from_value::<UpsertParamInput>(json!({ "name": "s", "panel": true }))
+            .expect_err("the retired panel flag is rejected");
 
         let sparse: UpsertParamInput =
             serde_json::from_value(json!({ "name": "speed" })).expect("name-only input parses");
@@ -365,7 +363,7 @@ mod tests {
         });
         let mut phases = Vec::new();
         let outcome = futures_executor::block_on(run_upsert_param(
-            &json!({ "name": "speed", "label": "Speed", "default": 1.0, "panel": true }),
+            &json!({ "name": "speed", "label": "Speed", "default": 1.0 }),
             &mut host,
             &mut |phase| phases.push(phase),
         ));

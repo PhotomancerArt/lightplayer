@@ -82,6 +82,21 @@ pub struct LpServer {
 /// still happening without drowning the console.
 const TICK_ERROR_RESTATE_EVERY: u32 = 512;
 
+/// The wire proto this build REPORTS.
+///
+/// Normally [`lpc_wire::WIRE_PROTO_VERSION`]. A `fixture-old-proto` build
+/// reports one LESS, so a current Studio classifies it Incompatible
+/// (proto-mismatch) — the s4 device scenario, reproducible from source
+/// instead of from an archived binary. Never enable this in a released
+/// image.
+const fn fixture_proto() -> u32 {
+    if cfg!(feature = "fixture-old-proto") {
+        lpc_wire::WIRE_PROTO_VERSION - 1
+    } else {
+        lpc_wire::WIRE_PROTO_VERSION
+    }
+}
+
 impl LpServer {
     /// Create a new LpServer instance
     ///
@@ -174,6 +189,11 @@ impl LpServer {
             // becomes populatable when provisioning writes `/hardware.json`
             // (board-selection roadmap M5).
             board_id: None,
+            // Efuse facts: only the embedder can read them, so they land
+            // through `set_hardware_identity` (like build provenance).
+            base_mac: None,
+            chip_revision: None,
+            eui64: None,
         };
         let features = server_features(&hardware, graphics.backend_name());
         Self {
@@ -188,7 +208,7 @@ impl LpServer {
             radio_service,
             graphics,
             hello: lpc_wire::ServerHello {
-                proto: lpc_wire::WIRE_PROTO_VERSION,
+                proto: fixture_proto(),
                 build: lpc_wire::BuildFacts {
                     features,
                     package: "unknown".to_string(),
@@ -220,12 +240,41 @@ impl LpServer {
             profile,
             device_uid,
         } = identity;
-        self.hello.proto = proto;
+        // A fixture build keeps LYING even when the embedder states the
+        // truth — the whole point is that the wire reports the wrong
+        // version (see the `fixture-old-proto` feature).
+        self.hello.proto = if cfg!(feature = "fixture-old-proto") {
+            fixture_proto()
+        } else {
+            proto
+        };
         self.hello.build.package = package;
         self.hello.build.commit = commit;
         self.hello.build.dirty = dirty;
         self.hello.build.profile = profile;
         self.hello.device_uid = device_uid;
+    }
+
+    /// Inject the chip-level identity the server cannot derive: the
+    /// factory MAC, the silicon revision, and the 802.15.4 EUI-64 where
+    /// the chip has one.
+    ///
+    /// These live in efuse, so only the embedder can read them — the same
+    /// reason build provenance arrives through
+    /// [`Self::set_hello_identity`] rather than being derived. Embedders
+    /// with no efuse (the host server, the browser worker, `lp-cli`)
+    /// never call this and honestly report `None`.
+    ///
+    /// Call at construction, beside [`Self::set_hello_identity`].
+    pub fn set_hardware_identity(&mut self, identity: lpc_wire::HardwareIdentity) {
+        let lpc_wire::HardwareIdentity {
+            base_mac,
+            chip_revision,
+            eui64,
+        } = identity;
+        self.hello.hardware.base_mac = base_mac;
+        self.hello.hardware.chip_revision = chip_revision;
+        self.hello.hardware.eui64 = eui64;
     }
 
     /// Declare embedder-owned features the server cannot derive from
@@ -440,7 +489,7 @@ impl LpServer {
                     let msg_id = client_msg.id;
                     match client_msg.msg {
                         ClientRequest::ProjectRead { handle, request } => {
-                            let server_status = self.runtime_status();
+                            let mut server_status = self.runtime_status();
                             let Some(project) = self.project_manager.get_project_mut(handle) else {
                                 transport
                                     .send(WireServerMessage::new(
@@ -460,6 +509,12 @@ impl LpServer {
                                 response_count += 1;
                                 continue;
                             };
+                            // The P11 toggle's read path: panel auto-save
+                            // is per-project (`.lp/state.json`) and lives
+                            // on the wrapper, not the engine, so it is
+                            // stamped here — once the read's project is
+                            // known — rather than in `runtime_status`.
+                            server_status.panel_auto_save = Some(project.panel_auto_save());
                             let mut source =
                                 ServerProjectReadSource::new(project, Some(server_status));
                             let mut sink = ProjectReadStreamSink::new(transport, msg_id);
@@ -668,6 +723,9 @@ impl LpServer {
             theoretical_fps: self.theoretical_fps(),
             last_frame_time_us: self.last_frame_time_us(),
             memory,
+            // Per-project, so it is stamped by the read dispatch once the
+            // handle resolves — the server loop has no one project.
+            panel_auto_save: None,
         }
     }
 }
@@ -807,6 +865,7 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         };
         let features = server_features(&both, "lpvm-native::rt_jit");
         assert!(features.contains(&LpFeature::SvcButton));
@@ -817,6 +876,7 @@ mod tests {
             radio: false,
             button: false,
             board_id: None,
+            ..Default::default()
         };
         let features = server_features(&neither, "lpvm-native::rt_jit");
         assert!(!features.contains(&LpFeature::SvcButton));
@@ -831,6 +891,7 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         };
         let features = server_features(&hardware, "lpvm-native::rt_jit");
         let mut ordered = features.clone();

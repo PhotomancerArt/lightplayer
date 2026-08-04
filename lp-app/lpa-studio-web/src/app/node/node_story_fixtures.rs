@@ -258,14 +258,14 @@ pub(crate) fn output_node_view(active: bool, debug_open: bool) -> UiNodeView {
         UiNodeHeader::new("output", "Output", OUTPUT_NODE)
             .with_source("output.json")
             .with_status(UiStatus::good("Running"))
-            .with_summary("ws281x:rmt:D10")
+            .with_summary("ws281x:local:D10")
             .with_debug_overrides(usize::from(active)),
         vec![UiNodeTab::main(vec![
             UiNodeSection::ConfigSlots(vec![
                 UiConfigSlot::value(
                     "endpoint",
                     "Endpoint",
-                    UiSlotValue::string("ws281x:rmt:D10"),
+                    UiSlotValue::string("ws281x:local:D10"),
                 )
                 .with_address(output_slot_address("endpoint")),
                 UiConfigSlot::value("input", "Input", UiSlotValue::unset()).with_source(
@@ -633,7 +633,7 @@ pub(crate) fn control_unsupported_product(name: &str) -> UiProducedProduct {
         })
 }
 
-fn visual_preview_bytes(width: u32, height: u32) -> Vec<u8> {
+pub(crate) fn visual_preview_bytes(width: u32, height: u32) -> Vec<u8> {
     let mut bytes = Vec::with_capacity((width * height * 3) as usize);
     for y in 0..height {
         for x in 0..width {

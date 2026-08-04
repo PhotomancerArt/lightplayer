@@ -5,7 +5,7 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
-use crate::dataflow::binding::{BindingEntry, BindingRef, BindingSource};
+use crate::dataflow::binding::{BindingEntry, BindingPriority, BindingRef, BindingSource};
 use crate::dataflow::resolver::production::{Production, ProductionSource};
 use crate::dataflow::resolver::query_intern::QueryId;
 use crate::dataflow::resolver::query_key::QueryKey;
@@ -334,7 +334,40 @@ impl<'a> EngineSession<'a> {
                 target,
             } => {
                 self.trace.record_select_binding(query, *binding_ref);
-                self.resolve_route_target(host, *binding_ref, target)
+                match self.resolve_route_target(host, *binding_ref, target) {
+                    // R6 (modules.md): a DEFAULT-bound consumed slot whose
+                    // channel no enclosing scope writes falls back to its own
+                    // authored default — an unfilled public input is an
+                    // invitation, not an error (the fixture's brightness with
+                    // no writer). Deliberately narrow: only consumed queries
+                    // (a bare bus read keeps the hard error — the module
+                    // mirror and probes want it), and only wiring the loader
+                    // materialized from the slot's own `default_bind`. An
+                    // AUTHORED binding with no provider stays an error so the
+                    // consuming node can surface it as a warning while
+                    // running on defaults ("surface shader input resolve
+                    // failures", 2026-08-03) — bound-but-broken is
+                    // diagnosable, defaulted-and-unfilled is normal.
+                    Err(err @ SessionResolveError::NoBusProvider { .. }) => {
+                        let default_bound_consumed = match query {
+                            QueryKey::ConsumedSlot { node, slot } => Some((*node, slot)),
+                            QueryKey::ConsumedSlotAccessor { node, accessor } => {
+                                Some((*node, accessor.path()))
+                            }
+                            _ => None,
+                        }
+                        .and_then(|(node, slot)| host.binding_for_consumed_slot(node, slot))
+                        .is_some_and(|(_, entry)| {
+                            entry.priority == BindingPriority::default_fallback()
+                        });
+                        if default_bound_consumed {
+                            self.produce_through_host(host, query)
+                        } else {
+                            Err(err)
+                        }
+                    }
+                    result => result,
+                }
             }
             ResolvedRoute::Produce => self.produce_through_host(host, query),
             ResolvedRoute::MergeByKey { inputs } => {

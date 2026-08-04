@@ -21,14 +21,15 @@
         }
       },
       {
-        "name": "endpoint",
+        "name": "channels",
         "shape": {
-          "value": {
-            "shape": {
-              "editor": "plain",
-              "id": 397552907,
-              "meta": {},
-              "ty": "string"
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 3125801182
+              }
             }
           }
         }

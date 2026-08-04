@@ -33,8 +33,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_remove_value_action};
-use crate::app::node::slot_gesture_fields::{GESTURE_ICON_SIZE, gesture_icon_button_class};
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{InlineButton, StudioIcon, StudioIconName};
 
 /// How an option row renders its option-ness. [`Self::PresenceInRow`] is the
 /// live default (P5); the other variants stay story-selectable so the user
@@ -192,14 +191,11 @@ pub fn OptionPresenceActionButton(
     };
 
     rsx! {
-        button {
-            class: gesture_icon_button_class(disabled),
-            r#type: "button",
+        InlineButton {
+            label: label.to_string(),
+            icon,
             disabled,
-            aria_label: label,
-            title: label,
-            onclick: move |event| {
-                event.stop_propagation();
+            on_press: move |_| {
                 let Some((address, handler)) = wired.clone() else {
                     return;
                 };
@@ -209,7 +205,6 @@ pub fn OptionPresenceActionButton(
                     handler.call(slot_ensure_present_action(some));
                 }
             },
-            StudioIcon { name: icon, size: GESTURE_ICON_SIZE }
         }
     }
 }
@@ -352,7 +347,7 @@ fn presence_checkbox_button_class(disabled: bool) -> &'static str {
 /// check glyph.
 fn presence_checkbox_square_class(included: bool) -> &'static str {
     if included {
-        "tw:inline-flex tw:h-4 tw:w-4 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-accent-bg tw:text-accent"
+        "tw:inline-flex tw:h-4 tw:w-4 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-accent-wash tw:text-accent"
     } else {
         "tw:inline-flex tw:h-4 tw:w-4 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-page"
     }
@@ -363,6 +358,7 @@ mod tests {
     use lpa_studio_core::{UiSlotEditorHint, UiSlotValue};
 
     use super::*;
+    use crate::base::{InlineButtonTone, inline_icon_button_class};
 
     #[test]
     fn presence_in_row_is_the_live_default() {
@@ -396,8 +392,9 @@ mod tests {
         }
         // And the gesture slot: set (trash) and unset (plus) render the same
         // fixed-square button class, so the trailing anchor never moves.
-        assert!(gesture_icon_button_class(false).contains("tw:h-6"));
-        assert!(gesture_icon_button_class(false).contains("tw:w-6"));
+        let action = inline_icon_button_class(InlineButtonTone::default(), false);
+        assert!(action.contains("tw:h-6"));
+        assert!(action.contains("tw:w-6"));
     }
 
     #[test]
@@ -477,7 +474,7 @@ mod tests {
         // The trailing gesture slot stays anchored because the button is
         // the same fixed square whether wired or inert, set or unset.
         for disabled in [false, true] {
-            let action = gesture_icon_button_class(disabled);
+            let action = inline_icon_button_class(InlineButtonTone::default(), disabled);
             assert!(action.contains("tw:h-6"), "{action}");
             assert!(action.contains("tw:w-6"), "{action}");
             assert!(action.contains("tw:flex-none"), "{action}");

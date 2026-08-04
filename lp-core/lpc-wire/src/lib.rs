@@ -47,8 +47,9 @@ pub use project::{
 };
 pub use project_command::{
     WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
-    WirePanelClearRequest, WirePanelCommandResponse, WirePanelWriteRequest, WireProjectCommand,
-    WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WirePanelAutoSaveRequest, WirePanelClearRequest, WirePanelCommandResponse,
+    WirePanelWriteRequest, WireProjectCommand, WireProjectCommandResponse, WireRemoveNodeRequest,
+    WireRemoveNodeResponse,
 };
 pub use project_inventory::{
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,
@@ -62,8 +63,8 @@ pub use project_overlay::{
 pub use ser_write::{CountingSerWrite, ErasedWriteError, ser_write_json_len, ser_write_json_to};
 pub use server::{
     AvailableProject, BuildFacts, ClientMsgBody, FsRequest, FsResponse, HardwareFacts,
-    HelloIdentity, LoadedProject, MemoryStats, SampleStats, ServerConfig, ServerHello,
-    ServerMsgBody, WIRE_PROTO_VERSION,
+    HardwareIdentity, HelloIdentity, LoadedProject, MemoryStats, SampleStats, ServerConfig,
+    ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

@@ -608,6 +608,9 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         )
         .with_device_uid(device_uid),
     );
+    // The chip's own permanent identity (efuse): the factory MAC and the
+    // silicon revision. The server cannot derive either.
+    server.set_hardware_identity(chip_identity());
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing
@@ -742,5 +745,31 @@ fn main() -> ! {
             "[HEARTBEAT] uptime_s={uptime_s} heap_free={}",
             esp_alloc::HEAP.free()
         );
+    }
+}
+
+// Gated on `server` unlike the c6/s3 twins' `not(fw_harness)`: this
+// crate has no harness cfg (build.rs deliberately emits none), and its
+// wire deps (`lpc_wire`, the common chip_identity module) are optional
+// behind `server` — the no-server build must not touch them.
+#[cfg(feature = "server")]
+/// This chip's permanent identity, read from efuse.
+///
+/// Injected rather than derived: the server cannot read silicon, and the
+/// chip-generic firmware layer deliberately has no `esp_hal`
+/// (ADR 2026-07-29-per-chip-fw-toolchains). See
+/// `fw_esp32_common::chip_identity` for why this reports the BASE MAC
+/// rather than a per-interface list.
+fn chip_identity() -> lpc_wire::HardwareIdentity {
+    use esp_hal::efuse;
+    let revision = efuse::chip_revision();
+    lpc_wire::HardwareIdentity {
+        base_mac: Some(fw_esp32_common::chip_identity::hex_bytes(
+            efuse::base_mac_address().as_bytes(),
+        )),
+        chip_revision: Some(alloc::format!("{}.{}", revision.major, revision.minor)),
+        // No 802.15.4 radio on this part, so no EUI-64 (and no
+        // `MAC_EXT` efuse field to build one from).
+        eui64: None,
     }
 }

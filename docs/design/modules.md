@@ -24,7 +24,11 @@ composite-effects spike, is recorded in
 > `docs/glossary.md` (terms),
 > `docs/adr/2026-07-26-node-card-faces.md` (face grammar),
 > `docs/adr/2026-07-09-declarative-default-bindings.md` (default binds),
-> `docs/adr/2026-07-27-node-authoring-operations.md` (create/vendor seam).
+> `docs/adr/2026-07-27-node-authoring-operations.md` (create/vendor seam),
+> `docs/adr/2026-08-01-scoped-bus-engine-architecture.md` (R1–R7 as
+> built),
+> `docs/adr/2026-08-03-panel-visibility-is-derived.md` (R3/R8/Q13 as
+> built).
 
 ## 1. Concepts
 
@@ -192,10 +196,22 @@ particular faces: every node has a panel, and it presents the node's
 *public surface*. No dataflow construct exists behind a panel; nothing is
 promoted between levels.
 
+> **Naming (2026-08-04, wiring spike G2).** In Studio the section
+> *labeled* `panel` appears on **module** cards only, wearing the
+> panel-primary tint and a ▶ rail mark — the panel is the thing play
+> mode renders. A **leaf** card's own bound-slot strip is labeled
+> `settings`: its knobs configure that one node, and the same publicity
+> simultaneously surfaces as controls on the enclosing module's panel.
+> The derivation below is unchanged — every node *has* a panel in the
+> model; the label is reserved for the module/product surface so the two
+> readings stop colliding. See
+> `docs/adr/2026-08-04-wiring-flow-and-panel-settings.md`.
+
 - A **leaf node's** panel presents its public (bound) slots. Publicity
   (R3) is the one gesture that puts a control on a panel — this
-  **subsumes the legacy `panel: bool` slot flag**: "add to panel" *means*
-  "bind to a channel". (Widget choice, step, unit remain slot meta.)
+  **subsumes the legacy `panel: bool` slot flag** — deleted outright in
+  P2: "add to panel" *means* "bind to a channel". (Widget choice, step,
+  unit remain slot meta.)
 - A **module's** panel presents its scope's channel list — which is the
   aggregate of its children's publicity — plus each child module's panel
   as a **nested group** (presentation recursion). Two embedded instances
@@ -430,17 +446,27 @@ F (module, "fluid-draw"):
   friend-count, and the sim's public params — *is* the installation
   controller.
 
-## 5. UI corollaries (the UX spike owns the shape)
+## 5. UI corollaries
 
 One face, three zoom levels: the **effect author** works inside the module
 (children expanded); the **artist** sees the module face as a card
 (preview + panel group); the **end user** sees the root module's face
-alone (play mode). Consequences the UX spike must exercise: the root
-module returns to the node area as the single top-level card (flat-root
-reversal — the root now *does* something); the sidebar bus pane dissolves
-into the module face (bus-as-controls) plus a wiring drawer
-(bus-as-writers/readers, today's pane content); engaged-vs-inheriting
-state and the reset gesture (R11/R12); the drop-time contention pick (E3).
+alone (play mode). The consequences: the root module returns to the node
+area as the single top-level card (flat-root reversal — the root now
+*does* something); the sidebar bus pane dissolves into the module face
+(bus-as-controls) plus a wiring drawer (bus-as-writers/readers, the
+pane's own rows); engaged-vs-inheriting state and the reset gesture
+(R11/R12); the drop-time contention pick (E3).
+
+> Status: landed 2026-08-03 (`planning/2026-08-03-1021-modules-vision-push`
+> P2–P3, gate GV). The flat-root reversal, the module face at every depth
+> (children below as sibling cards), the per-scope wiring drawer, and play
+> mode (`#/sim|device/<key>/play`) are all real; the sidebar bus pane is
+> deleted. 2026-08-04: the drawer's rows became the **flow view**
+> (writers → value box → readers, from the wiring-UI spike;
+> `docs/adr/2026-08-04-wiring-flow-and-panel-settings.md`). The
+> contention pick (E3) is authorable on `ModuleDef.bindings` but has no
+> gesture yet — the drawer shows the ambiguity as display only.
 
 ## 6. File layout
 
@@ -534,10 +560,92 @@ Copy-on-extract per R14.
 - **Q11:** → moved to `panel.md` P6 (merge/tiebreak rules); ratify there.
 - **Q12:** → resolved by the latch model: grabbing authored-driven
   channels is core behavior (`panel.md` P2/P5), not an increment.
-- **Q13:** R8 subsumes the `panel: bool` slot flag under publicity — a
-  leaf node's knobs are exactly its bound slots, and "add to panel" is
-  the binding gesture. Confirm the flag (and `ShaderSlotDef.panel`) is
-  deleted rather than kept as a parallel card-local mechanism.
-- `panel.md` carries its own register (P-Q1–P-Q4: slew defaults,
+- **Q13:** SETTLED — IMPLEMENTED (2026-08-03, P2; refined P6). The flag
+  is deleted, not kept in parallel. `ShaderSlotDef.panel`,
+  `SlotMeta.panel` and their DTO/agent surfaces are gone; a shader
+  uniform reaches a panel exactly when its binding derives a
+  `(scope, channel)` panel target, and the fixture face's brightness
+  fader is that face's own named affordance. **Refinement (2026-08-03,
+  P6): publicity is AUTHORED wiring only** — a binding the loader
+  materialized from a slot's own `default_bind` is not publicity, so
+  `bus:time` no longer materializes a time knob on every panel. Recorded
+  as `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+  **Second refinement (2026-08-03, amendment in the same ADR): one
+  additive override** — a slot declaration may carry `panel = "show"`
+  beside its `default_bind`, promoting that default wiring to publicity
+  (fixture `brightness` → `bus:brightness`, the master fader). Absent
+  hint = the refined rule unchanged; there is no `hide`.
+- `panel.md` carries its own register (P-Q1–P-Q5: slew defaults,
   three-state affordance requirement, state-file versioning/flush,
-  clear-all vs sink scopes).
+  clear-all vs sink scopes, touch-set value shape).
+
+## 10. Future work register
+
+Not open *questions* — settled directions with no home yet. Each is
+either a named spike, a registered defect/debt entry, or a design pass
+somebody owes. Recorded 2026-08-03 at the close of
+`planning/2026-08-03-1021-modules-vision-push` unless noted.
+
+**Design passes owed**
+
+- **Wiring-drawer redesign.** DONE 2026-08-04 — the flow view
+  (writers → value box → readers, arrowed wires, tone-matched colors,
+  child-scope readers listed, stacked tree layout in narrow containers)
+  shipped from the wiring-UI spike (`spikes/wiring-ui/`,
+  `docs/adr/2026-08-04-wiring-flow-and-panel-settings.md`). Still open
+  from that pass: the E3 pick gesture (§5) and the `control.out`
+  channel rename (§7 vocabulary).
+- **CONTROLS-vs-PANEL nomenclature.** DONE 2026-08-04 — `panel` is the
+  module card's tinted ▶ section (what play mode renders); leaf cards
+  say `settings` (R8 naming note, same ADR). The `control.out` product
+  channel keeps its name until §7 vocabulary lock-down.
+- **Auto-naming.** Manually naming nodes is a tax the node type usually
+  pays for you. A node/module should present a good name with nothing
+  authored — derived from kind, role, or position, with an authored
+  label overriding. The root card shipped only the minimal fix (it
+  wears the project's manifest display name).
+- **What a module's canonical self-portrait is.** The hero draws the
+  scope's resolved `visual.out` (live beats black). Yona leans
+  `control.out` — the fixture view — with 3D mapping renders later.
+- **Driving time from a panel.** With `default_bind` wiring no longer
+  publicity (Q13 refinement), `bus:time` has no panel presence at all.
+  The sanctioned answer should be the CLOCK's own transport/scrub
+  controls published to the panel, not a knob materialized from a
+  default binding. See `docs/debt/clock-transport-has-no-transport-ui.md`.
+- **Playlist edit-vs-play, and entry progress.** A playlist card is both
+  an authoring surface and a live transport; the two readings collide,
+  and an entry's progress has no presentation. Spun off at GV2.
+- **Parenthood rules.** Add-node should only offer kinds that make sense
+  at the site — one `can_attach(parent_kind, child_kind)` legality
+  function shared by the picker, drag-reparent, and wrap. Belongs with
+  `planning/2026-08-03-1515-module-authoring-ops`.
+- **Authored panel layouts.** A curated promoted-control list per module
+  (the closed #218 spike's `controls{}`), as an additive override on the
+  derived default. See the rejected-alternatives section of
+  `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+- **Data-driven playlist activation** (R2.2 carve-out), an **input
+  design doc** (R13's external sources), **vocabulary lock-down** (§7),
+  and a **module registry** (§6 import/vendor flows) — carried from the
+  predecessor plan's register, unchanged.
+
+**Known gaps in what shipped**
+
+- **A kind with no face publishes no controls.** Module panels are
+  assembled from face controls, so a `ComputeShader`'s bound uniforms
+  reach the wiring drawer but never a knob — `examples/meteor` publishes
+  `speed` and `count` as channels with no control above them. Either
+  compute shaders grow a face, or panel assembly stops depending on one.
+- ~~**Authored source bindings on non-hand-listed slots are dropped
+  silently**~~ — FIXED 2026-08-03 (shape-driven registration, loud
+  unknown-key errors on closed-namespace kinds; see the defect doc's
+  resolution note). The fixture fader is now not merely publishable but
+  default-bound to `bus:brightness` with `panel = "show"` (Q13's second
+  refinement).
+- **Sims do not restore panel state** (settled D-B: device-first,
+  deliberately). Persistent sims are the follow-up, not a bug — do not
+  "fix" a sim that fails to restore.
+- **Panel-state serde flash cost** — parked by decision (Q3 of the
+  vision push); `docs/debt/panel-state-serde-flash-cost.md`.
+- **G4 hardware walk is still owed.** Decoupled from merging (DY2,
+  opportunistic); materials at
+  `planning/2026-08-01-1003-modules-impl-roadmap/g4-hardware-walk.md`.

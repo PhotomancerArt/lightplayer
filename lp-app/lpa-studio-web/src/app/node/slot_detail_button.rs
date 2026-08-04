@@ -10,8 +10,8 @@ use crate::app::node::{
     legacy_shape_from_parts,
 };
 use crate::base::{
-    DetailPopover, DetailSectionTint, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName,
-    detail_popover_section_class,
+    DetailPopover, DetailSectionTint, IconMenuTone, InlineButton, InlineButtonTone,
+    PopoverPlacement, StudioIcon, StudioIconName, detail_popover_section_class,
 };
 
 /// Revert/clear affordance rendered INSIDE the slot detail popup's edited
@@ -166,19 +166,13 @@ fn SlotDetailRevertButton(revert: SlotDetailRevert) -> Element {
 
     rsx! {
         div { class: "tw:flex tw:justify-end tw:pt-1",
-            button {
-                class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-[0.68rem] tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground",
-                r#type: "button",
-                title,
-                onclick: move |event| {
-                    event.stop_propagation();
-                    on_action.call(action.clone());
-                },
-                StudioIcon {
-                    name: StudioIconName::Revert,
-                    size: 12,
-                }
-                span { "{label}" }
+            InlineButton {
+                label: label.to_string(),
+                title: title.to_string(),
+                text: label.to_string(),
+                icon: StudioIconName::Revert,
+                tone: InlineButtonTone::Warning,
+                on_press: move |_| on_action.call(action.clone()),
             }
         }
     }
@@ -361,6 +355,24 @@ fn aspect_summary(aspect: &UiSlotAspect) -> AspectSummary {
         UiSlotAspectKind::Validation => validation_summary(aspect),
         UiSlotAspectKind::EditState => edit_state_summary(aspect),
         UiSlotAspectKind::Binding => binding_summary(aspect),
+        // Panel state titles itself: "Held" / "Following" / "At default"
+        // are the section's whole content, so there is nothing to derive.
+        UiSlotAspectKind::PanelState => AspectSummary {
+            title: aspect.title.clone(),
+            code: None,
+            title_is_code: false,
+            icon: match aspect.affordance {
+                Some(UiSlotAffordance::Edited) => StudioIconName::Edited,
+                Some(UiSlotAffordance::Bound) => StudioIconName::BoundValue,
+                _ => StudioIconName::UnboundValue,
+            },
+            tone: match aspect.affordance {
+                Some(UiSlotAffordance::Edited) => AspectTone::Warning,
+                Some(UiSlotAffordance::Bound) => AspectTone::Bound,
+                _ => AspectTone::Quiet,
+            },
+            highlight: aspect.affordance,
+        },
         UiSlotAspectKind::TypeInfo => AspectSummary {
             title: type_info_title(aspect),
             code: None,
