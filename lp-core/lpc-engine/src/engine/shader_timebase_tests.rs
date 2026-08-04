@@ -167,6 +167,43 @@ impl Project {
             .set_timebase(timebase, seconds, delta, revision);
     }
 
+    /// Write one of the clock's transient controls the way the studio's
+    /// Debug slider does: a slot edit staged in the registry overlay, then
+    /// applied to the engine.
+    ///
+    /// This is the only way to drive `running` / `scrub_offset_seconds` —
+    /// they are `Debug`-role slot data, which the project codec deliberately
+    /// round-trips to defaults, so authoring them into the fixture's
+    /// `clock.json` would be silently discarded (P2/P3 both hit this).
+    ///
+    /// Only the scrub walkthrough drives this, and that test is host-tier.
+    #[cfg(feature = "scrub-log")]
+    fn write_clock_control(&mut self, path: &str, value: LpValue) {
+        let shapes = self.engine.slot_shapes().clone();
+        self.revision += 1;
+        let result = self
+            .registry
+            .mutate(
+                &self.fs,
+                lpc_model::MutationOp::PutSlotEdit {
+                    artifact: lpc_model::ArtifactLocation::file("/clock.json"),
+                    edit: lpc_model::SlotEdit::assign_value(
+                        SlotPath::parse(path).expect("slot path"),
+                        value,
+                    ),
+                },
+                Revision::new(self.revision),
+                &ParseCtx { shapes: &shapes },
+            )
+            .expect("write clock control");
+        self.engine
+            .apply_project_changes(&self.fs, &mut self.registry, &result.changes)
+            .expect("apply project changes");
+        for (value, channel, kind) in core::mem::take(&mut self.literals) {
+            self.add_literal(value, &channel, kind);
+        }
+    }
+
     /// Re-read one artifact and apply it, the way an authoring edit does.
     fn apply_edit(&mut self, path: &str) {
         let shapes = self.engine.slot_shapes().clone();
@@ -484,6 +521,21 @@ fn a_live_period_edit_changes_the_rate_without_disturbing_the_phase() {
     project.frame(&[compute]);
     let at_edit = project.read(compute, "out_wave");
 
+    // The phase itself never moves — that is the whole subject. Where the
+    // frame carrying the edit spends its delta differs by tier: with the
+    // breakpoint log the edit lands at the effective time it arrived, so
+    // that frame finishes at the OLD rate; the forward-only integrator
+    // spends the whole frame at the new one.
+    assert!(
+        at_edit > before && at_edit - before <= TICK_SECONDS + 1e-4,
+        "the edit must not displace the phase: {before} -> {at_edit}"
+    );
+    #[cfg(feature = "scrub-log")]
+    assert!(
+        (at_edit - before - TICK_SECONDS).abs() < 1e-4,
+        "the frame across the edit finishes at the OLD rate: {before} -> {at_edit}"
+    );
+    #[cfg(not(feature = "scrub-log"))]
     assert!(
         (at_edit - before - 0.5 * TICK_SECONDS).abs() < 1e-4,
         "the frame across the edit advances at the NEW rate from the OLD \
@@ -516,13 +568,27 @@ fn a_zero_period_freezes_the_uniform_where_it_stands() {
         &clocked_compute_json(&ramp(0.0)),
     );
     project.apply_edit("/compute.json");
+    // The freeze takes hold at the effective time it arrived — with the
+    // breakpoint log that is *now*, so the frame carrying the edit finishes
+    // at the old rate; the forward-only integrator stops it a frame earlier.
+    // Either way the phase is held, never reset.
+    project.frame(&[compute]);
+    let held = project.read(compute, "out_wave");
+    assert!(
+        held >= before && held - before <= TICK_SECONDS + 1e-4,
+        "the freeze must hold the phase, not move it: {before} -> {held}"
+    );
+
+    // …and from there nothing moves it. Frozen, not reset: a phasor that
+    // snapped back to zero here would flash every LED in the room.
     for _ in 0..3 {
         project.frame(&[compute]);
         assert!(
-            (project.read(compute, "out_wave") - before).abs() < 1e-6,
+            (project.read(compute, "out_wave") - held).abs() < 1e-6,
             "a frozen phasor holds its phase rather than resetting it"
         );
     }
+    assert!(held > 0.0, "…and what it holds is where it had got to");
 }
 
 /// D3, the shared half: a config channel with a writer means ONE integrator
@@ -877,5 +943,103 @@ fn an_unbound_uniform_warns_today_even_though_it_runs_on_its_authored_default() 
         message.contains("unresolved consumed slot"),
         "the warning is the authored-def lookup failing, not a real binding \
          fault: {message}"
+    );
+}
+
+// --- P8: scrubbing the Debug slider ----------------------------------------
+
+/// The sim walkthrough: drive `scrub_offset_seconds` exactly as the studio's
+/// Debug slider does and watch a phasor uniform come back **bit for bit**.
+///
+/// The clock is paused first, so wall time is not moving underneath the
+/// slider and the offset alone says where the clock is — which is what a
+/// transport scrub means. Every step here is the real path: an overlay slot
+/// edit, `apply_project_changes`, the clock node re-resolving its controls,
+/// the timebase it publishes, the store's breakpoint log, and the uniform
+/// fill that shapes the ramp.
+///
+/// Host-tier only: a firmware build has no breakpoint log to reconstruct
+/// from, and no transport UI to ask it to. What a device does with a
+/// backward scrub is pinned at the clock instead
+/// (`a_backward_scrub_publishes_a_negative_delta`).
+#[cfg(feature = "scrub-log")]
+#[test]
+fn scrubbing_the_debug_slider_reproduces_a_phasor_uniform_exactly() {
+    let mut project = load(clocked_fs(&ramp(1.0)));
+    let clock = project.node("clock.clock");
+    let compute = project.node("compute.compute_shader");
+    project.publish_time_product(clock);
+    project.warm_up(&[compute]);
+    for _ in 0..6 {
+        project.frame(&[compute]);
+    }
+    let live_edge = project
+        .engine
+        .timebases()
+        .seconds(clock)
+        .expect("published");
+    assert!(live_edge > 0.0, "the clock has to have run: {live_edge}");
+
+    project.write_clock_control("controls.running", LpValue::Bool(false));
+    project.frame(&[compute]);
+    let paused_at = project
+        .engine
+        .timebases()
+        .seconds(clock)
+        .expect("published");
+
+    // Three slider positions behind the live edge, remembered.
+    let offsets = [-0.45, -0.25, -0.1];
+    let mut seen = Vec::new();
+    for offset in offsets {
+        project.write_clock_control("controls.scrub_offset_seconds", LpValue::F32(offset));
+        project.frame(&[compute]);
+        let entry = project.engine.timebases().entry(clock).expect("timebase");
+        assert!(
+            entry
+                .live_edge()
+                .is_some_and(|edge| entry.effective_seconds < edge),
+            "the slider must put the clock BEHIND the live edge — otherwise \
+             this reads the forward path and proves nothing: {} vs {:?}",
+            entry.effective_seconds,
+            entry.live_edge()
+        );
+        seen.push(project.read(compute, "out_wave"));
+    }
+    assert!(
+        seen.windows(2).all(|pair| pair[0] != pair[1]),
+        "three slider positions must show three different frames: {seen:?}"
+    );
+
+    // Revisited in the other order, they read the same frames.
+    for (offset, expected) in offsets.iter().zip(seen).rev() {
+        project.write_clock_control("controls.scrub_offset_seconds", LpValue::F32(*offset));
+        project.frame(&[compute]);
+        assert_eq!(
+            project.read(compute, "out_wave"),
+            expected,
+            "the uniform at slider position {offset} did not reproduce"
+        );
+    }
+
+    // Releasing the slider puts the clock back at the live edge, and the
+    // phasor picks up from what it was showing there.
+    project.write_clock_control("controls.scrub_offset_seconds", LpValue::F32(0.0));
+    project.frame(&[compute]);
+    assert!(
+        (project
+            .engine
+            .timebases()
+            .seconds(clock)
+            .expect("published")
+            - paused_at)
+            .abs()
+            < 1e-6,
+        "back to the live edge"
+    );
+    assert_eq!(
+        project.status(compute),
+        NodeRuntimeStatus::Ok,
+        "scrubbing is not an error condition"
     );
 }

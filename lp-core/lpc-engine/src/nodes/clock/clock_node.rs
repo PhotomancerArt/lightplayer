@@ -17,6 +17,7 @@ pub struct ClockNode {
     accessors: Option<ClockAccessors>,
     accumulated_seconds: f32,
     last_engine_seconds: Option<f32>,
+    last_effective_seconds: Option<f32>,
 }
 
 impl ClockNode {
@@ -27,6 +28,7 @@ impl ClockNode {
             accessors: None,
             accumulated_seconds: 0.0,
             last_engine_seconds: None,
+            last_effective_seconds: None,
         }
     }
 
@@ -50,6 +52,17 @@ impl ClockNode {
         }
 
         let effective_seconds = self.accumulated_seconds + scrub_offset_seconds;
+        // What the timebase advanced by, which is not the same thing as what
+        // the clock ran by: dragging `scrub_offset` moves effective time
+        // without any wall time passing, and a drag *backwards* has to arrive
+        // as a negative delta or a device (which keeps no breakpoint log)
+        // would sit still while its clock reads earlier and earlier. With the
+        // offset held constant the two are identical, which is why an
+        // ordinary running clock is unaffected by this.
+        let effective_delta = self
+            .last_effective_seconds
+            .map_or(0.0, |previous| effective_seconds - previous);
+        self.last_effective_seconds = Some(effective_seconds);
         // The published handle is constant for the life of the node; only its
         // revision moves, so readers of `bus:time` see a stable value while
         // the timebase behind it advances every tick.
@@ -61,13 +74,13 @@ impl ClockNode {
             .set_with_version(ctx.revision(), effective_seconds);
         self.state
             .delta_seconds
-            .set_with_version(ctx.revision(), clock_delta);
+            .set_with_version(ctx.revision(), effective_delta);
 
         // The same two numbers, published where TimeProduct queries can
         // reach them without dispatching back into this node. The clock
         // stays the transformer on engine wall time (`ctx.time_seconds()`
         // is raw, and stays raw); this is only where its output lands.
-        ctx.publish_timebase(effective_seconds, clock_delta);
+        ctx.publish_timebase(effective_seconds, effective_delta);
         Ok(())
     }
 }
@@ -341,6 +354,50 @@ mod tests {
 
         assert_eq!(published[0], (10.0, 0.0));
         assert_eq!(published[2], (11.0, 0.5));
+    }
+
+    /// Dragging the scrub offset backwards publishes a NEGATIVE delta.
+    ///
+    /// This is the device half of parent D6: firmware keeps no breakpoint log
+    /// (`scrub-log` is off there), so the only way a backward scrub can reach
+    /// a phasor at all is as a negative advance it integrates through. A
+    /// clock that published only forward wall time would leave a scrubbed
+    /// device showing an earlier clock and an unchanged animation.
+    #[test]
+    fn a_backward_scrub_publishes_a_negative_delta() {
+        let shapes = SlotShapeRegistry::default();
+        let mut resolver = ControlsResolver::new(true, 1.0);
+        let mut node = ClockNode::new(NodeId::new(1));
+        let run_frame = |node: &mut ClockNode, resolver: &mut ControlsResolver, frame: i64| {
+            let mut ctx = TickContext::with_render_services(
+                NodeId::new(1),
+                Revision::new(frame),
+                resolver,
+                &shapes,
+                None,
+                None,
+                0.5 * frame as f32,
+            );
+            node.produce(&SlotPath::root(), &mut ctx).expect("produce");
+        };
+
+        for frame in 1..=3 {
+            run_frame(&mut node, &mut resolver, frame);
+        }
+        let (before, _) = *resolver.published.last().expect("published");
+
+        resolver.scrub_offset_seconds = -0.75;
+        run_frame(&mut node, &mut resolver, 4);
+
+        let (seconds, delta) = *resolver.published.last().expect("published");
+        assert!(
+            seconds < before,
+            "the clock reads earlier: {before} -> {seconds}"
+        );
+        assert!(
+            (delta - (seconds - before)).abs() < 1e-6 && delta < 0.0,
+            "the published delta is the change in effective time: {delta}"
+        );
     }
 
     #[test]

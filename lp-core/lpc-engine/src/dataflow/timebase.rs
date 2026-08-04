@@ -29,6 +29,28 @@
 //!
 //! Firmware-safe by construction: `VecMap`, `no_std` + alloc, and wrapping
 //! done with plain arithmetic (no `std::f32`, no `libm`).
+//!
+//! # Two ways to answer "what phase is it?"
+//!
+//! With `feature = "scrub-log"` on (every host and sim tier), each phasor
+//! also keeps a **breakpoint log**: one [`Breakpoint`] per moment its
+//! effective rate changed, and nothing in between. Phase is then evaluated in
+//! closed form from the segment covering the clock's effective time —
+//! `fract(phase + rate·(t − t_eff))` — which is what makes scrubbing exact.
+//! Dragging a clock back to a time already seen re-runs the *same*
+//! expression from the *same* breakpoint and lands on the same bits, where
+//! re-integrating a different sequence of deltas would not.
+//!
+//! With the feature off (firmware), the store keeps only the forward
+//! integrator P2 shipped — `phase += rate · delta`, no allocation at all —
+//! and a backward `scrub_offset` write arrives as a negative delta that
+//! wraps the phase downward (parent D6's monotone-consistent device
+//! behavior).
+
+#[cfg(feature = "scrub-log")]
+use alloc::vec;
+#[cfg(feature = "scrub-log")]
+use alloc::vec::Vec;
 
 use lp_collection::VecMap;
 use lpc_model::{ChannelName, NodeId, PhasorConfig, Revision, SlotPath};
@@ -41,6 +63,49 @@ use crate::node::ScopeRef;
 /// (a playlist entry off-screen, a paused preview) keeps its phase; short
 /// enough that a deleted shader's phasors do not accumulate on a device.
 pub const PHASOR_IDLE_TICKS: u32 = 120;
+
+/// How far behind the live edge a phasor stays reconstructable, in seconds of
+/// effective clock time.
+///
+/// Breakpoints older than this are dropped on the next append. 30 s is a
+/// working window, not a history: it is long enough to cover the scrub a
+/// studio user actually performs (drag back a few seconds, watch, come
+/// forward) and short enough that a session left running for an hour with a
+/// busy config does not accumulate. The oldest breakpoint at or before the
+/// cutoff is always kept — it is what anchors the segment covering the
+/// window's own start.
+#[cfg(feature = "scrub-log")]
+pub const SCRUB_WINDOW_SECONDS: f32 = 30.0;
+
+/// Hard cap on breakpoints kept per phasor.
+///
+/// A safety, not a working limit: breakpoints are event-sparse by
+/// construction (one per *rate change*, never per frame), so a phasor that
+/// reaches 256 inside one 30 s window is being re-authored ~9×/s — a dragged
+/// period knob, or a defect. Either way the oldest entries go and a debug
+/// line says so.
+#[cfg(feature = "scrub-log")]
+pub const SCRUB_LOG_CAP: usize = 256;
+
+/// One point where a phasor's rate changed, and the ramp position it changed
+/// at.
+///
+/// The log is a list of these; the segment between two of them is a straight
+/// line in phase, so any time inside it is answerable in closed form. Copy +
+/// 16 bytes: the whole point is that this is cheap enough to keep a few
+/// dozen of per phasor on a host.
+#[cfg(feature = "scrub-log")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Breakpoint {
+    /// Effective clock time this segment starts at.
+    pub t_eff: f32,
+    /// Wrapped `[0,1)` ramp position at `t_eff`.
+    pub phase: f32,
+    /// Completed cycles at `t_eff`.
+    pub cycle: u32,
+    /// Cycles per second from `t_eff` until the next breakpoint.
+    pub rate: f32,
+}
 
 /// Provenance identity of one phasor integrator.
 ///
@@ -112,6 +177,17 @@ pub struct TimebaseEntry {
     /// Engine revision of the most recent clock update.
     pub updated_at: Revision,
     phasors: VecMap<PhasorKey, PhasorState>,
+    /// Per-phasor breakpoint log, in ascending `t_eff` order and never empty
+    /// once its phasor has materialized.
+    #[cfg(feature = "scrub-log")]
+    logs: VecMap<PhasorKey, Vec<Breakpoint>>,
+    /// The furthest effective time this timebase has ever run to.
+    ///
+    /// `None` until the first phasor query. Everything at or past it is live
+    /// (integrate, log, advance the edge); anything behind it is a scrub, and
+    /// answers out of the log without disturbing a thing.
+    #[cfg(feature = "scrub-log")]
+    live_edge: Option<f32>,
 }
 
 impl TimebaseEntry {
@@ -121,6 +197,22 @@ impl TimebaseEntry {
         self.phasors.len()
     }
 
+    /// The furthest effective time this timebase has run to, or `None` before
+    /// its first phasor query. A query behind this is a scrub.
+    #[cfg(feature = "scrub-log")]
+    #[must_use]
+    pub fn live_edge(&self) -> Option<f32> {
+        self.live_edge
+    }
+
+    /// One phasor's breakpoint log, oldest first. Empty for a phasor that has
+    /// never materialized.
+    #[cfg(feature = "scrub-log")]
+    #[must_use]
+    pub fn breakpoints(&self, key: &PhasorKey) -> &[Breakpoint] {
+        self.logs.get(key).map_or(&[], |log| log.as_slice())
+    }
+
     /// Every live phasor on this timebase, in store order.
     ///
     /// Read-only debug surface (the studio's clock-face phasor listing —
@@ -128,6 +220,187 @@ impl TimebaseEntry {
     /// despawn clock, so watching the rows cannot keep a dead phasor alive.
     pub fn phasors(&self) -> impl Iterator<Item = (&PhasorKey, &PhasorState)> {
         self.phasors.iter()
+    }
+
+    /// Materialize `key` if this is its first query, and hand back a mutable
+    /// integrator. Shared by both tick paths.
+    fn state_mut(&mut self, key: &PhasorKey, tick: u32) -> &mut PhasorState {
+        if self.phasors.get(key).is_none() {
+            self.phasors
+                .insert(key.clone(), PhasorState::materialized(tick));
+        }
+        self.phasors
+            .get_mut(key)
+            .expect("phasor was just materialized")
+    }
+
+    /// Forward-only tick (firmware): advance once per store tick by
+    /// `rate · delta`, wrapping in either direction.
+    #[cfg(not(feature = "scrub-log"))]
+    fn phasor_tick(&mut self, key: &PhasorKey, config: &PhasorConfig, tick: u32) -> (f32, u32) {
+        let delta_seconds = self.delta_seconds;
+        let state = self.state_mut(key, tick);
+        state.last_queried_at = tick;
+        if state.advanced_at != tick {
+            state.advanced_at = tick;
+            state.period_seconds = config.period_seconds;
+            advance(state, config.rate_hz() * delta_seconds);
+        }
+        (state.phase, state.cycle)
+    }
+
+    /// Logged tick (hosts): answer from the segment covering the clock's
+    /// effective time, and record a breakpoint when the rate changes.
+    ///
+    /// Three cases, and the difference between them is the whole feature:
+    ///
+    /// - **Live, same rate** — evaluate the last segment at `t` and carry the
+    ///   live edge forward. This is the ordinary frame, and it costs one
+    ///   multiply-add; no allocation, no append.
+    /// - **Rate changed** — evaluate the *old* segment at `t` (that is the
+    ///   position the change happens at, so phase is continuous across it),
+    ///   append a breakpoint there, and run on the new rate from `t`. If the
+    ///   clock was scrubbed back when this happened it is a **punch-in**
+    ///   (parent D6): the future being overwritten was provisional, so every
+    ///   phasor on this timebase drops its breakpoints past `t` and the live
+    ///   edge resets to here.
+    /// - **Scrubbed, same rate** — a pure read. Nothing is appended, the live
+    ///   edge does not move, and the integrator is not disturbed, which is
+    ///   exactly why coming back to the live edge continues from the
+    ///   pre-scrub state.
+    #[cfg(feature = "scrub-log")]
+    fn phasor_tick(&mut self, key: &PhasorKey, config: &PhasorConfig, tick: u32) -> (f32, u32) {
+        let t = self.effective_seconds;
+        let rate = config.rate_hz();
+
+        if self.phasors.get(key).is_none() {
+            // The materializing query still owes this tick's delta (P2's
+            // contract), so the first segment starts where the tick started —
+            // not at `t`, which would answer 0 for a frame.
+            let opening = Breakpoint {
+                t_eff: t - self.delta_seconds,
+                phase: 0.0,
+                cycle: 0,
+                rate,
+            };
+            self.logs.insert(key.clone(), vec![opening]);
+        }
+        {
+            let state = self.state_mut(key, tick);
+            state.last_queried_at = tick;
+            if state.advanced_at == tick {
+                // Advance-once-per-tick: later consumers in the same tick see
+                // what the first one saw.
+                return (state.phase, state.cycle);
+            }
+            state.advanced_at = tick;
+            state.period_seconds = config.period_seconds;
+        }
+
+        let scrubbed = self.live_edge.is_some_and(|edge| t < edge);
+        let (active, latest) = {
+            let log = self.logs.get(key).expect("log materialized with phasor");
+            (
+                log[active_segment(log, t)],
+                *log.last().expect("a log is never empty"),
+            )
+        };
+        // Evaluate on the segment covering `t`, but decide whether the *config*
+        // changed against the newest breakpoint — the rate this phasor is
+        // currently authored at. Comparing against the covering segment
+        // instead would read every scrub into history as a config write:
+        // scrub back past an old period edit and the query, still carrying
+        // today's period, would punch in and delete the very history it was
+        // asking for.
+        let value = eval_segment(&active, t);
+
+        if rate == latest.rate {
+            if !scrubbed {
+                self.live_edge = Some(t);
+            }
+        } else {
+            if scrubbed {
+                punch_in(&mut self.logs, t);
+            }
+            let log = self
+                .logs
+                .get_mut(key)
+                .expect("log materialized with phasor");
+            log.push(Breakpoint {
+                t_eff: t,
+                phase: value.0,
+                cycle: value.1,
+                rate,
+            });
+            trim(log, t);
+            self.live_edge = Some(t);
+        }
+
+        let state = self.state_mut(key, tick);
+        state.phase = value.0;
+        state.cycle = value.1;
+        value
+    }
+}
+
+/// The segment covering `t`: the last breakpoint at or before it.
+///
+/// Falls back to the oldest breakpoint when `t` is older than the whole log
+/// (trimmed away, or a phasor that materialized after `t`). Evaluating that
+/// segment backwards is an extrapolation, not history — but it is continuous
+/// with the window's edge and keeps a scrub past the window from reading as a
+/// frozen phasor.
+#[cfg(feature = "scrub-log")]
+fn active_segment(log: &[Breakpoint], t: f32) -> usize {
+    log.iter().rposition(|bp| bp.t_eff <= t).unwrap_or(0)
+}
+
+/// Where `segment` has got to at effective time `t`.
+///
+/// The one expression the whole feature rests on: the live path and a
+/// scrubbed reconstruction both come through here with the same breakpoint
+/// and the same `t`, so they cannot disagree in the last bit.
+#[cfg(feature = "scrub-log")]
+fn eval_segment(segment: &Breakpoint, t: f32) -> (f32, u32) {
+    let (phase, whole) = wrap_unit(segment.phase + segment.rate * (t - segment.t_eff));
+    (phase, saturating_offset(segment.cycle, whole))
+}
+
+/// Drop the overwritten future: every breakpoint past `t`, on every phasor of
+/// one timebase.
+///
+/// Timebase-wide rather than per-phasor because the live edge is a property
+/// of the clock. Once a config write lands at `t`, no phasor's recorded
+/// history past `t` is what will be played again — and a stale breakpoint out
+/// there would be picked up by a later scrub as if it had been.
+///
+/// A log never goes empty: a phasor that materialized inside the discarded
+/// stretch keeps its opening breakpoint, and [`active_segment`] extrapolates
+/// from it.
+#[cfg(feature = "scrub-log")]
+fn punch_in(logs: &mut VecMap<PhasorKey, Vec<Breakpoint>>, t: f32) {
+    for (_, log) in logs.iter_mut() {
+        let keep = log.iter().take_while(|bp| bp.t_eff <= t).count().max(1);
+        log.truncate(keep);
+    }
+}
+
+/// Drop breakpoints that have fallen out of the scrub window, keeping the one
+/// that anchors its start, then enforce [`SCRUB_LOG_CAP`].
+#[cfg(feature = "scrub-log")]
+fn trim(log: &mut Vec<Breakpoint>, t: f32) {
+    let cutoff = t - SCRUB_WINDOW_SECONDS;
+    let anchor = log.iter().rposition(|bp| bp.t_eff <= cutoff).unwrap_or(0);
+    if anchor > 0 {
+        log.drain(..anchor);
+    }
+    if log.len() > SCRUB_LOG_CAP {
+        let excess = log.len() - SCRUB_LOG_CAP;
+        log.drain(..excess);
+        log::debug!(
+            "phasor breakpoint log hit its {SCRUB_LOG_CAP} cap at t={t}; dropped {excess} \
+             oldest entries (a rate changing this often is a dragged knob or a defect)"
+        );
     }
 }
 
@@ -175,7 +448,7 @@ impl TimebaseStore {
                         effective_seconds,
                         delta_seconds,
                         updated_at: at,
-                        phasors: VecMap::new(),
+                        ..TimebaseEntry::default()
                     },
                 );
             }
@@ -209,26 +482,7 @@ impl TimebaseStore {
     ) -> Option<(f32, u32)> {
         let tick = self.tick;
         let entry = self.entries.get_mut(&clock)?;
-        let delta_seconds = entry.delta_seconds;
-        let state = match entry.phasors.get_mut(key) {
-            Some(state) => state,
-            None => {
-                entry
-                    .phasors
-                    .insert(key.clone(), PhasorState::materialized(tick));
-                entry
-                    .phasors
-                    .get_mut(key)
-                    .expect("phasor was just materialized")
-            }
-        };
-        state.last_queried_at = tick;
-        if state.advanced_at != tick {
-            state.advanced_at = tick;
-            state.period_seconds = config.period_seconds;
-            advance(state, config.rate_hz() * delta_seconds);
-        }
-        Some((state.phase, state.cycle))
+        Some(entry.phasor_tick(key, config, tick))
     }
 
     /// Render-side phasor query: read whatever the tick left behind.
@@ -266,6 +520,14 @@ impl TimebaseStore {
                 .phasors
                 .retain(|_, state| tick.wrapping_sub(state.last_queried_at) < PHASOR_IDLE_TICKS);
             dropped += before - entry.phasors.len();
+            // A despawned phasor's history goes with it: re-materializing
+            // starts a fresh cycle at zero, so the old segments describe a
+            // ramp nothing will ever replay.
+            #[cfg(feature = "scrub-log")]
+            {
+                let phasors = &entry.phasors;
+                entry.logs.retain(|key, _| phasors.get(key).is_some());
+            }
             true
         });
         self.tick = self.tick.wrapping_add(1);
@@ -298,10 +560,15 @@ impl TimebaseStore {
 
 /// Advance a phasor by `advance` cycles and re-wrap into `[0,1)`.
 ///
+/// The forward-only (firmware) integrator. With `scrub-log` on, phase comes
+/// from [`eval_segment`] instead — the log's closed form is what a scrubbed
+/// read has to agree with, bit for bit.
+///
 /// Handles a negative advance (a device scrubbing backwards) by wrapping
 /// downward and stepping the cycle counter back, and refuses to act on a
 /// non-finite advance rather than poisoning the integrator with a NaN it can
 /// never recover from.
+#[cfg(not(feature = "scrub-log"))]
 fn advance(state: &mut PhasorState, advance: f32) {
     if !advance.is_finite() || advance == 0.0 {
         return;
@@ -360,6 +627,29 @@ mod tests {
         store
     }
 
+    /// End the tick and publish the next one, moving effective time by
+    /// exactly the delta it reports.
+    ///
+    /// A real clock always publishes those two numbers in agreement (`P8`
+    /// made the second one the difference of the first), and the breakpoint
+    /// log keys on effective time — so a fixture that advanced the delta
+    /// while holding the clock still would be describing a timebase nothing
+    /// can produce.
+    fn tick(store: &mut TimebaseStore, delta: f32) {
+        store.sweep(|_| true);
+        let now = store.seconds(CLOCK).unwrap_or(0.0);
+        store.set_timebase(CLOCK, now + delta, delta, Revision::new(1));
+    }
+
+    /// Publish a scrub: effective time jumps to `to`, and the delta reports
+    /// the jump — which is what the studio's `scrub_offset_seconds` slider
+    /// produces through the clock.
+    fn scrub_to(store: &mut TimebaseStore, to: f32) {
+        store.sweep(|_| true);
+        let now = store.seconds(CLOCK).unwrap_or(0.0);
+        store.set_timebase(CLOCK, to, to - now, Revision::new(1));
+    }
+
     /// 20 bytes = four `u32`-sized fields plus the period witness. The cap
     /// is deliberately tight: a device may carry one of these per phasor per
     /// consumer, so anything that grows it should have to argue for itself.
@@ -384,7 +674,7 @@ mod tests {
         let (_, state) = entry.phasors().next().expect("one phasor");
         assert_eq!(state.period_seconds, 4.0);
 
-        store.sweep(|_| true);
+        tick(&mut store, 0.1);
         store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(0.5));
         let rows: alloc::vec::Vec<_> = store
             .entry(CLOCK)
@@ -406,7 +696,7 @@ mod tests {
 
         store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(1.0));
         for _ in 0..=PHASOR_IDLE_TICKS {
-            store.sweep(|_| true);
+            tick(&mut store, 0.25);
             let _ = store.entry(CLOCK).expect("timebase").phasors().count();
         }
 
@@ -423,7 +713,7 @@ mod tests {
             store.phasor_tick(CLOCK, &key("a"), &config),
             Some((0.25, 0))
         );
-        store.sweep(|_| true);
+        tick(&mut store, 0.5);
         assert_eq!(store.phasor_tick(CLOCK, &key("a"), &config), Some((0.5, 0)));
     }
 
@@ -461,7 +751,7 @@ mod tests {
         for _ in 0..40 {
             let (phase, _) = store.phasor_tick(CLOCK, &key("a"), &config).unwrap();
             assert!((0.0..1.0).contains(&phase), "phase escaped [0,1): {phase}");
-            store.sweep(|_| true);
+            tick(&mut store, 0.25);
         }
         let (phase, cycle) = store.phasor_read(CLOCK, &key("a")).unwrap();
         assert_eq!(cycle, 10);
@@ -476,18 +766,17 @@ mod tests {
 
         for _ in 0..7 {
             store.phasor_tick(CLOCK, &key("a"), &slow);
-            store.sweep(|_| true);
+            tick(&mut store, 0.1);
         }
-        let before = store.phasor_read(CLOCK, &key("a")).unwrap();
+        let before = store.phasor_tick(CLOCK, &key("a"), &slow).unwrap();
 
         // Swapping config with no time elapsed must move nothing at all.
-        store.set_timebase(CLOCK, 0.0, 0.0, Revision::new(2));
+        tick(&mut store, 0.0);
         let at_event = store.phasor_tick(CLOCK, &key("a"), &fast).unwrap();
         assert_eq!(at_event, before);
 
         // …and the next advance simply uses the new rate from there.
-        store.sweep(|_| true);
-        store.set_timebase(CLOCK, 0.0, 0.1, Revision::new(3));
+        tick(&mut store, 0.1);
         let after = store.phasor_tick(CLOCK, &key("a"), &fast).unwrap();
         assert!(
             (after.0 - (before.0 + 0.1)).abs() <= f32::EPSILON,
@@ -495,6 +784,13 @@ mod tests {
         );
     }
 
+    /// A period of 0 freezes the phase where it stood, and restoring the
+    /// period resumes from there.
+    ///
+    /// Both edits land *at* the moment they arrive: the phase at the freeze
+    /// is whatever the old rate had reached by then, and the resume returns
+    /// that same value before the new rate starts moving it. A config change
+    /// changes the slope from here; it never displaces the phase.
     #[test]
     fn a_zero_period_freezes_the_phase_and_resumes_continuously() {
         let mut store = store_with_delta(0.1);
@@ -502,16 +798,34 @@ mod tests {
         let frozen = PhasorConfig::with_period(0.0);
 
         store.phasor_tick(CLOCK, &key("a"), &running);
-        store.sweep(|_| true);
-        let held = store.phasor_read(CLOCK, &key("a")).unwrap();
+        tick(&mut store, 0.1);
+        let held = store.phasor_tick(CLOCK, &key("a"), &frozen).unwrap();
 
         for _ in 0..5 {
+            tick(&mut store, 0.1);
             assert_eq!(store.phasor_tick(CLOCK, &key("a"), &frozen), Some(held));
-            store.sweep(|_| true);
         }
 
+        tick(&mut store, 0.1);
         let resumed = store.phasor_tick(CLOCK, &key("a"), &running).unwrap();
-        assert!((resumed.0 - (held.0 + 0.1)).abs() <= f32::EPSILON);
+        assert!(
+            resumed.0 >= held.0 && resumed.0 - held.0 <= 0.1 + f32::EPSILON,
+            "restoring the period must not displace the phase: {held:?} -> {resumed:?}"
+        );
+        // With the log on, the edit lands at exactly the effective time it
+        // arrived, so the restored rate has not moved anything yet. The
+        // forward-only integrator instead spends this tick's delta at the new
+        // rate — a one-frame difference in where a config change sits, and
+        // the reason a scrubbed reconstruction has to come from the log.
+        #[cfg(feature = "scrub-log")]
+        assert_eq!(resumed, held);
+
+        tick(&mut store, 0.1);
+        let moving = store.phasor_tick(CLOCK, &key("a"), &running).unwrap();
+        assert!(
+            (moving.0 - resumed.0 - 0.1).abs() <= f32::EPSILON,
+            "…and from there it advances at the restored rate: {resumed:?} -> {moving:?}"
+        );
     }
 
     #[test]
@@ -520,28 +834,35 @@ mod tests {
         let config = PhasorConfig::with_period(1.0);
         store.phasor_tick(CLOCK, &key("a"), &config);
         store.phasor_tick(CLOCK, &key("b"), &config);
-        store.sweep(|_| true);
 
-        store.set_timebase(CLOCK, 0.0, 0.0, Revision::new(2));
         for _ in 0..4 {
+            tick(&mut store, 0.0);
             assert_eq!(store.phasor_tick(CLOCK, &key("a"), &config), Some((0.1, 0)));
             assert_eq!(store.phasor_tick(CLOCK, &key("b"), &config), Some((0.1, 0)));
-            store.sweep(|_| true);
         }
     }
 
+    /// A backward scrub reaches a phasor as a negative delta, and it wraps
+    /// downward through the cycle counter.
+    ///
+    /// This is the device contract (parent D6): firmware keeps no breakpoint
+    /// log, so integrating the negative delta is *all* it can do. Both builds
+    /// land on the same numbers here, which is what makes the logged path a
+    /// refinement of this one rather than a different animal.
     #[test]
     fn a_negative_delta_wraps_downward() {
         let mut store = store_with_delta(0.25);
         let config = PhasorConfig::with_period(1.0);
 
-        for _ in 0..5 {
+        store.phasor_tick(CLOCK, &key("a"), &config);
+        for _ in 0..4 {
+            tick(&mut store, 0.25);
             store.phasor_tick(CLOCK, &key("a"), &config);
-            store.sweep(|_| true);
         }
         assert_eq!(store.phasor_read(CLOCK, &key("a")), Some((0.25, 1)));
 
-        store.set_timebase(CLOCK, 0.0, -0.5, Revision::new(2));
+        // Back half a cycle, from effective 1.0 to 0.5.
+        scrub_to(&mut store, 0.5);
         let (phase, cycle) = store.phasor_tick(CLOCK, &key("a"), &config).unwrap();
 
         assert!((phase - 0.75).abs() < 1e-6, "phase: {phase}");
@@ -596,7 +917,7 @@ mod tests {
         assert_eq!(store.entry(CLOCK).unwrap().phasor_count(), 1);
 
         for _ in 0..PHASOR_IDLE_TICKS {
-            store.sweep(|_| true);
+            tick(&mut store, 0.25);
             assert_eq!(
                 store.entry(CLOCK).unwrap().phasor_count(),
                 1,
@@ -604,8 +925,17 @@ mod tests {
                 store.tick()
             );
         }
-        store.sweep(|_| true);
+        tick(&mut store, 0.25);
         assert_eq!(store.entry(CLOCK).unwrap().phasor_count(), 0);
+        #[cfg(feature = "scrub-log")]
+        assert!(
+            store
+                .entry(CLOCK)
+                .unwrap()
+                .breakpoints(&key("a"))
+                .is_empty(),
+            "a despawned phasor's history goes with it"
+        );
 
         // The timebase itself survives; only the phasor went.
         assert_eq!(store.delta(CLOCK), Some(0.25));
@@ -622,7 +952,7 @@ mod tests {
 
         for _ in 0..(PHASOR_IDLE_TICKS * 3) {
             store.phasor_tick(CLOCK, &key("a"), &config);
-            store.sweep(|_| true);
+            tick(&mut store, 0.0);
         }
 
         assert_eq!(store.entry(CLOCK).unwrap().phasor_count(), 1);
@@ -655,8 +985,15 @@ mod tests {
 
         assert_eq!(store.seconds(outer), Some(10.0));
         assert_eq!(store.seconds(inner), Some(3.0));
-        assert_eq!(outer_phase, (0.5, 0));
-        assert_eq!(inner_phase, (0.1, 0));
+        // Tolerances, not equality: a materializing query opens its segment
+        // one delta behind the clock's *absolute* effective time, and
+        // `3.0 - 0.1` is not exactly 2.9 in f32. Scrub-exactness is about a
+        // reconstruction matching what was shown (same expression, same
+        // inputs, same bits) — never about a phase matching decimal
+        // arithmetic.
+        assert!((outer_phase.0 - 0.5).abs() < 1e-6, "outer: {outer_phase:?}");
+        assert!((inner_phase.0 - 0.1).abs() < 1e-6, "inner: {inner_phase:?}");
+        assert_eq!((outer_phase.1, inner_phase.1), (0, 0));
     }
 
     #[test]
@@ -670,7 +1007,7 @@ mod tests {
         };
 
         store.phasor_tick(CLOCK, &private, &config);
-        store.sweep(|_| true);
+        tick(&mut store, 0.25);
         store.phasor_tick(CLOCK, &private, &config);
         store.phasor_tick(CLOCK, &shared, &config);
 
@@ -693,7 +1030,7 @@ mod tests {
         };
 
         store.phasor_tick(CLOCK, &outer, &config);
-        store.sweep(|_| true);
+        tick(&mut store, 0.25);
         store.phasor_tick(CLOCK, &outer, &config);
         store.phasor_tick(CLOCK, &inner, &config);
 
@@ -719,6 +1056,338 @@ mod tests {
         let b = store.phasor_tick(CLOCK, &key("b"), &shaped).unwrap();
 
         assert_eq!(a, b, "the store's contract is the raw ramp");
+    }
+
+    // --- P8: scrub-exact reconstruction from the breakpoint log ------------
+
+    /// Run `frames` frames at `dt`, applying `edits` (frame → new period) on
+    /// the way, and record what the phasor read at each effective time.
+    ///
+    /// The recorded pairs are the ground truth every scrub test compares
+    /// against: they are literally what a shader uniform was filled with.
+    #[cfg(feature = "scrub-log")]
+    fn run_forward(
+        store: &mut TimebaseStore,
+        frames: usize,
+        dt: f32,
+        edits: &[(usize, f32)],
+    ) -> (alloc::vec::Vec<(f32, (f32, u32))>, f32) {
+        let mut period = 1.0_f32;
+        let mut samples = alloc::vec::Vec::new();
+        for frame in 0..frames {
+            if let Some((_, next)) = edits.iter().find(|(at, _)| *at == frame) {
+                period = *next;
+            }
+            if frame > 0 {
+                tick(store, dt);
+            }
+            let t = store.seconds(CLOCK).expect("timebase");
+            let value = store
+                .phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(period))
+                .expect("phasor");
+            samples.push((t, value));
+        }
+        (samples, period)
+    }
+
+    /// The headline obligation: every instant the phasor was ever shown at
+    /// comes back **bit for bit** when the clock is scrubbed to it.
+    ///
+    /// Exact `f32` equality, not a tolerance — the closed form is evaluated
+    /// from the same breakpoint with the same `t`, so anything less than
+    /// equality would mean the reconstruction is a different computation
+    /// wearing the same numbers.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn every_sample_of_a_scattered_run_reconstructs_bit_exactly() {
+        let mut store = store_with_delta(0.1);
+        let edits = [(4, 2.0), (9, 0.75), (13, 5.0), (20, 1.25), (26, 0.5)];
+        let (samples, period) = run_forward(&mut store, 32, 0.1, &edits);
+        let live = PhasorConfig::with_period(period);
+
+        // Scrub back through history in the order a dragged slider would.
+        for (t, recorded) in samples.iter().rev() {
+            scrub_to(&mut store, *t);
+            let replayed = store.phasor_tick(CLOCK, &key("a"), &live).expect("phasor");
+            assert_eq!(
+                replayed, *recorded,
+                "reconstruction at t={t} drifted from what was shown"
+            );
+        }
+    }
+
+    /// Scrubbing is a read. The integrator is untouched by it, so releasing
+    /// the slider picks up exactly where the pre-scrub frame left off.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn returning_to_the_live_edge_continues_from_the_pre_scrub_state() {
+        let mut store = store_with_delta(0.1);
+        let (samples, period) = run_forward(&mut store, 20, 0.1, &[(6, 2.0), (12, 0.5)]);
+        let live = PhasorConfig::with_period(period);
+        let (edge, at_edge) = *samples.last().expect("samples");
+
+        for back in [edge - 0.4, edge - 1.1, edge - 0.2] {
+            scrub_to(&mut store, back);
+            store.phasor_tick(CLOCK, &key("a"), &live);
+        }
+
+        // Back to the live edge: the same effective time reads the same value
+        // it did before the scrub…
+        scrub_to(&mut store, edge);
+        assert_eq!(
+            store.phasor_tick(CLOCK, &key("a"), &live),
+            Some(at_edge),
+            "the live edge itself must be reproduced"
+        );
+        // …and the next frame carries on from there.
+        tick(&mut store, 0.1);
+        let next = store.phasor_tick(CLOCK, &key("a"), &live).expect("phasor");
+        assert_eq!(
+            next,
+            eval_segment(
+                &Breakpoint {
+                    t_eff: edge,
+                    phase: at_edge.0,
+                    cycle: at_edge.1,
+                    rate: live.rate_hz(),
+                },
+                edge + 0.1
+            )
+        );
+    }
+
+    /// The log is event-sparse *by construction*: a frame is not an event.
+    ///
+    /// This is the pin that keeps the feature honest — a per-frame append
+    /// would make the log a recording, with a recording's memory profile,
+    /// and would be a design violation rather than a slow implementation.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn the_log_grows_only_where_the_rate_changed() {
+        let mut store = store_with_delta(0.1);
+        let edits = [(5, 2.0), (11, 0.25), (19, 4.0)];
+        run_forward(&mut store, 40, 0.1, &edits);
+
+        let log = store.entry(CLOCK).expect("timebase").breakpoints(&key("a"));
+        assert_eq!(
+            log.len(),
+            1 + edits.len(),
+            "40 frames, 3 edits: the opening segment plus one breakpoint per \
+             edit — nothing per frame ({log:?})"
+        );
+        assert!(
+            log.windows(2).all(|pair| pair[0].t_eff <= pair[1].t_eff),
+            "breakpoints must stay ordered in effective time: {log:?}"
+        );
+    }
+
+    /// Punch-in (parent D6): editing the period while scrubbed back rewrites
+    /// the timeline from there. The overwritten future was provisional.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn a_config_write_while_scrubbed_truncates_the_provisional_future() {
+        let mut store = store_with_delta(0.1);
+        let (samples, _) = run_forward(&mut store, 24, 0.1, &[(8, 2.0), (16, 0.5)]);
+        let (punch_t, at_punch) = samples[10];
+        let edge = samples.last().expect("samples").0;
+
+        scrub_to(&mut store, punch_t);
+        let punched = store
+            .phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(3.0))
+            .expect("phasor");
+
+        // The write lands *at* the scrub position: it changes the slope from
+        // here, it does not displace the phase.
+        assert_eq!(punched, at_punch);
+        let log = store.entry(CLOCK).expect("timebase").breakpoints(&key("a"));
+        assert!(
+            log.iter().all(|bp| bp.t_eff <= punch_t),
+            "breakpoints past the punch-in survived: {log:?}"
+        );
+        assert_eq!(log.last().expect("log").rate, 1.0 / 3.0);
+        assert_eq!(
+            store.entry(CLOCK).expect("timebase").live_edge(),
+            Some(punch_t),
+            "the live edge resets to the punch-in position"
+        );
+        assert!(
+            punch_t < edge,
+            "the test only means something scrubbed back"
+        );
+    }
+
+    /// And the rewritten timeline is itself scrub-exact: the history the
+    /// punch-in created replays like any other.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn the_punched_in_history_reproduces_exactly_on_a_second_scrub() {
+        let mut store = store_with_delta(0.1);
+        let (samples, _) = run_forward(&mut store, 20, 0.1, &[(7, 2.0)]);
+        let punch_t = samples[9].0;
+        let punched_config = PhasorConfig::with_period(3.0);
+
+        scrub_to(&mut store, punch_t);
+        store.phasor_tick(CLOCK, &key("a"), &punched_config);
+
+        // Run the new future forward, recording it.
+        let mut replayed_samples = alloc::vec::Vec::new();
+        for _ in 0..12 {
+            tick(&mut store, 0.1);
+            let t = store.seconds(CLOCK).expect("timebase");
+            let value = store
+                .phasor_tick(CLOCK, &key("a"), &punched_config)
+                .expect("phasor");
+            replayed_samples.push((t, value));
+        }
+
+        for (t, recorded) in replayed_samples.iter().rev() {
+            scrub_to(&mut store, *t);
+            assert_eq!(
+                store.phasor_tick(CLOCK, &key("a"), &punched_config),
+                Some(*recorded),
+                "the punched-in timeline drifted at t={t}"
+            );
+        }
+    }
+
+    /// The window is a working set, not a history: breakpoints more than
+    /// [`SCRUB_WINDOW_SECONDS`] behind get dropped on the next append, and
+    /// everything inside it still reconstructs.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn breakpoints_older_than_the_window_are_dropped() {
+        let mut store = store_with_delta(1.0);
+        // One edit per second for 70 s — the first half falls out of a 30 s
+        // window by the end.
+        let edits: alloc::vec::Vec<(usize, f32)> = (1..70)
+            .map(|frame| (frame, 1.0 + (frame % 5) as f32))
+            .collect();
+        let (samples, period) = run_forward(&mut store, 70, 1.0, &edits);
+        let live = PhasorConfig::with_period(period);
+        let edge = samples.last().expect("samples").0;
+
+        let log = store.entry(CLOCK).expect("timebase").breakpoints(&key("a"));
+        assert!(
+            log.len() < 40,
+            "a 30 s window over a 70 s run should have dropped most of it: {}",
+            log.len()
+        );
+        assert!(
+            log[0].t_eff <= edge - SCRUB_WINDOW_SECONDS,
+            "the segment anchoring the window's own start must be kept: {:?}",
+            log[0]
+        );
+
+        // Inside the window, reconstruction is untouched by the trimming.
+        for (t, recorded) in samples.iter().rev() {
+            if *t < edge - SCRUB_WINDOW_SECONDS {
+                break;
+            }
+            scrub_to(&mut store, *t);
+            assert_eq!(
+                store.phasor_tick(CLOCK, &key("a"), &live),
+                Some(*recorded),
+                "in-window reconstruction at t={t}"
+            );
+        }
+    }
+
+    /// The cap is a safety net under a pathological rate: never more than
+    /// [`SCRUB_LOG_CAP`] entries, however hard the period is dragged.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn the_cap_bounds_a_pathological_log() {
+        let mut store = store_with_delta(0.001);
+        // 400 edits inside a hundredth of the window: nothing trims by time.
+        let edits: alloc::vec::Vec<(usize, f32)> =
+            (0..400).map(|frame| (frame, 1.0 + frame as f32)).collect();
+        run_forward(&mut store, 400, 0.001, &edits);
+
+        let log = store.entry(CLOCK).expect("timebase").breakpoints(&key("a"));
+        assert!(log.len() <= SCRUB_LOG_CAP, "log grew to {}", log.len());
+        assert!(
+            log.len() >= SCRUB_LOG_CAP - 1,
+            "…and the cap is what bounded it, not the window: {}",
+            log.len()
+        );
+    }
+
+    /// One integrator, one log: two consumers of a `Shared` key read the same
+    /// reconstruction, because there is only one thing to reconstruct.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn one_shared_key_is_one_log_for_every_consumer() {
+        let mut store = store_with_delta(0.1);
+        let shared = PhasorKey::Shared {
+            scope: ScopeRef::Module { owner: NodeId(1) },
+            channel: ChannelName("phase".into()),
+        };
+        let slow = PhasorConfig::with_period(2.0);
+        let fast = PhasorConfig::with_period(0.5);
+
+        let mut samples = alloc::vec::Vec::new();
+        for frame in 0..16 {
+            if frame > 0 {
+                tick(&mut store, 0.1);
+            }
+            let config = if frame < 8 { &slow } else { &fast };
+            // Two consumers, same key, same tick: the second sees the first's
+            // advance, not one of its own.
+            let first = store.phasor_tick(CLOCK, &shared, config).expect("phasor");
+            let second = store.phasor_tick(CLOCK, &shared, config).expect("phasor");
+            assert_eq!(first, second);
+            samples.push((store.seconds(CLOCK).expect("timebase"), first));
+        }
+
+        assert_eq!(
+            store.entry(CLOCK).expect("timebase").phasor_count(),
+            1,
+            "one integrator for the channel"
+        );
+        for (t, recorded) in samples.iter().rev() {
+            scrub_to(&mut store, *t);
+            let a = store.phasor_tick(CLOCK, &shared, &fast).expect("phasor");
+            let b = store.phasor_tick(CLOCK, &shared, &fast).expect("phasor");
+            assert_eq!((a, b), (*recorded, *recorded), "shared scrub at t={t}");
+        }
+    }
+
+    /// Scrubbing past the oldest breakpoint is out of history, not out of
+    /// bounds: the phasor keeps answering inside `[0,1)` instead of freezing
+    /// or panicking on an empty log.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn a_scrub_older_than_the_whole_log_still_answers_in_range() {
+        let mut store = store_with_delta(0.1);
+        let (_, period) = run_forward(&mut store, 10, 0.1, &[(5, 2.0)]);
+        let live = PhasorConfig::with_period(period);
+
+        scrub_to(&mut store, -500.0);
+        let (phase, cycle) = store.phasor_tick(CLOCK, &key("a"), &live).expect("phasor");
+
+        assert!((0.0..1.0).contains(&phase), "phase: {phase}");
+        assert_eq!(cycle, 0, "the cycle counter saturates at the start");
+    }
+
+    /// A phasor that materializes while the clock is scrubbed back does not
+    /// corrupt the live edge — it opens its own segment and reads from it.
+    #[cfg(feature = "scrub-log")]
+    #[test]
+    fn a_phasor_born_while_scrubbed_does_not_move_the_live_edge() {
+        let mut store = store_with_delta(0.1);
+        let (samples, period) = run_forward(&mut store, 12, 0.1, &[(6, 2.0)]);
+        let live = PhasorConfig::with_period(period);
+        let edge = samples.last().expect("samples").0;
+
+        scrub_to(&mut store, edge - 0.5);
+        let born = store.phasor_tick(CLOCK, &key("b"), &live).expect("phasor");
+
+        assert!((0.0..1.0).contains(&born.0), "phase: {born:?}");
+        assert_eq!(
+            store.entry(CLOCK).expect("timebase").live_edge(),
+            Some(edge),
+            "a birth behind the edge must not drag the edge back"
+        );
     }
 
     #[test]
