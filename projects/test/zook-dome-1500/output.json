@@ -1,0 +1,35 @@
+{
+ "kind": "Output",
+ "channels": {
+  "0": {
+   "endpoint": "ws281x:local:IO18",
+   "count": 375
+  },
+  "1": {
+   "endpoint": "ws281x:local:IO16",
+   "count": 375
+  },
+  "2": {
+   "endpoint": "ws281x:local:IO14",
+   "count": 375
+  },
+  "3": {
+   "endpoint": "ws281x:local:IO2"
+  }
+ },
+ "bindings": {
+  "input": {
+   "source": "bus:control.out"
+  }
+ },
+ "options": {
+  "white_point": [
+   1,
+   1,
+   1
+  ],
+  "interpolation_enabled": false,
+  "dithering_enabled": false,
+  "lut_enabled": false
+ }
+}
