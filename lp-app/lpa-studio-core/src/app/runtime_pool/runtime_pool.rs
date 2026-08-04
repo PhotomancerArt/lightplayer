@@ -175,10 +175,12 @@ impl RuntimePool {
 
     /// Remove the OLDEST session of `kind` (a failed/cancelled connect of
     /// that kind clears the slot it was aimed at; the other kind stays).
-    /// The lens clears if it was on the removed session. ⚠️ Interim (M3):
+    /// The lens clears if it was on the removed session. ⚠️ Interim:
     /// with several device sessions this removes the oldest, preserving
     /// the ≤1-era "failed connect clears the slot" semantics — M5 decides
-    /// what a failed ADDITIONAL connect should tear down.
+    /// what a failed ADDITIONAL connect should tear down. (A CONNECT
+    /// concern, not an op one: M4's targeting does not reach here,
+    /// because a failed connect has no session to name.)
     pub fn remove_kind(&mut self, kind: RuntimeKind) -> Option<RuntimeSession> {
         let id = self
             .sessions
