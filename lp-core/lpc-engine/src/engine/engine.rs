@@ -352,8 +352,10 @@ impl Engine {
     /// Mutable timebase access, so a test can stand in for the consumer that
     /// P3 will add. Not public: outside the engine, a timebase is read-only
     /// — only a producing node may publish one, and only a tick may advance
-    /// a phasor.
-    #[cfg(test)]
+    /// a phasor. Gated to the clock+shader feature set its only callers
+    /// (`timebase_tests`, `shader_timebase_tests`) compile under, so the
+    /// gate-off builds of `check-lpc-engine-gates` stay warning-free.
+    #[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
     pub(crate) fn timebases_mut(&mut self) -> &mut crate::dataflow::timebase::TimebaseStore {
         &mut self.timebases
     }
