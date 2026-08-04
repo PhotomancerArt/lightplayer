@@ -156,6 +156,13 @@ Shipped with the amendment:
   accessor path and unknown keys failing the load loudly (except on
   shader/compute kinds, whose open slot namespace makes an unresolved
   key the legal declared-orphan state the agent repairs).
-- R6's no-writer fallback moved into the resolver: a consumed slot whose
-  route dead-ends in a writerless channel falls back to its authored
-  default generically, instead of per-node catch code.
+- R6's no-writer fallback moved into the resolver — for DEFAULT-origin
+  wiring only: a consumed slot whose materialized `default_bind`
+  dead-ends in a writerless channel falls back to its authored default
+  silently (defaulted-and-unfilled is normal; brightness with no writer
+  must not warn on every fresh project). An AUTHORED binding with no
+  provider keeps its resolve error, so the consuming node surfaces it as
+  a warning while running on defaults (the same day's "surface shader
+  input resolve failures as node warning status") — bound-but-broken is
+  diagnosable. The two rules meet at the binding's priority
+  (`default_fallback` vs authored), the same fact origin derives from.
