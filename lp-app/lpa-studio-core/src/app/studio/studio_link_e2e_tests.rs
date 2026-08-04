@@ -2624,7 +2624,7 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
                 // (D-A), which would leave the device unidentified here.
                 (
                     "project.json".to_string(),
-                    br#"{"format":4,"name":"sign"}"#.to_vec(),
+                    br#"{"format":5,"name":"sign"}"#.to_vec(),
                 ),
                 (
                     "module.json".to_string(),
@@ -3062,7 +3062,7 @@ fn project_files(marker: &str) -> Vec<(String, Vec<u8>)> {
     vec![
         (
             "project.json".to_string(),
-            format!(r#"{{"format":4,"name":"Porch {marker}"}}"#).into_bytes(),
+            format!(r#"{{"format":5,"name":"Porch {marker}"}}"#).into_bytes(),
         ),
         (
             "module.json".to_string(),

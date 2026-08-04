@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lp_gfx::TextureHandle;
 use lpc_model::{
     Dim2u, FluidDefView, FluidEmitter, FluidState, FromLpValue, NodeId, SlotAccess, SlotData,
-    SlotMapKey, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, VisualProduct,
+    SlotMapKey, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, TimeProduct, VisualProduct,
 };
 use lps_q32::Q32;
 use lps_shared::TextureStorageFormat;
@@ -97,7 +97,12 @@ impl NodeRuntime for FluidNode {
         };
 
         let emitters = resolve_emitters(ctx)?;
-        let now = def.time().get::<_, f32>(ctx)?;
+        // `bus:time` carries a queryable product, not a number: resolve the
+        // handle, then read effective seconds off the timebase. The step gate
+        // and rewind guard below are unchanged — they need Seconds semantics,
+        // not a per-tick delta.
+        let product: TimeProduct = def.time().get(ctx)?;
+        let now = ctx.time_product_seconds(product)?;
         let should_step = match self.last_step_time_seconds {
             None => true,
             Some(last) if now < last => {
@@ -342,7 +347,7 @@ mod tests {
     #[test]
     fn fluid_node_loaded_from_project_produces_sampleable_visual_product() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -450,7 +455,7 @@ mod tests {
     #[test]
     fn fluid_node_consumes_compute_emitter_map_through_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),

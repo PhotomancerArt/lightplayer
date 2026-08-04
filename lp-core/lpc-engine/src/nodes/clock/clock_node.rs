@@ -2,7 +2,7 @@ use alloc::format;
 
 use lpc_model::{
     ClockDef, ClockState, NodeId, SlotAccess, SlotAccessor, SlotPath, SlotShapeRegistry,
-    SlotShapeRegistryError, StaticSlotShape,
+    SlotShapeRegistryError, StaticSlotShape, TimeProduct,
 };
 
 use crate::node::{
@@ -23,7 +23,7 @@ impl ClockNode {
     pub fn new(node_id: NodeId) -> Self {
         Self {
             node_id,
-            state: ClockState::default(),
+            state: ClockState::for_node(node_id),
             accessors: None,
             accumulated_seconds: 0.0,
             last_engine_seconds: None,
@@ -50,6 +50,12 @@ impl ClockNode {
         }
 
         let effective_seconds = self.accumulated_seconds + scrub_offset_seconds;
+        // The published handle is constant for the life of the node; only its
+        // revision moves, so readers of `bus:time` see a stable value while
+        // the timebase behind it advances every tick.
+        self.state
+            .product
+            .set_with_version(ctx.revision(), TimeProduct::new(self.node_id, 0));
         self.state
             .seconds
             .set_with_version(ctx.revision(), effective_seconds);
@@ -72,7 +78,6 @@ impl NodeRuntime for ClockNode {
         _slot: &SlotPath,
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
-        let _ = self.node_id;
         self.update_from_controls(ctx)?;
         Ok(ProduceResult::Produced)
     }
@@ -148,6 +153,11 @@ fn compile_clock_accessor(
 
 pub fn clock_seconds_path() -> SlotPath {
     SlotPath::parse("seconds").expect("clock seconds path")
+}
+
+/// The clock's time-product output — the slot `bus:time` is fed from.
+pub fn clock_product_path() -> SlotPath {
+    SlotPath::parse("product").expect("clock product path")
 }
 
 #[cfg(test)]
