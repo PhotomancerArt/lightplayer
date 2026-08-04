@@ -297,6 +297,26 @@
         "min": {
           "type": "number"
         },
+        "phasor": {
+          "additionalProperties": false,
+          "properties": {
+            "period_seconds": {
+              "type": "number"
+            },
+            "phase_offset": {
+              "type": "number"
+            },
+            "waveform": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "period_seconds",
+            "waveform",
+            "phase_offset"
+          ],
+          "type": "object"
+        },
         "step": {
           "type": "number"
         },

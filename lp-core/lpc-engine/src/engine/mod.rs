@@ -23,8 +23,11 @@ mod project_read_stream;
 mod project_runtime_index;
 #[cfg(test)]
 mod resolution_persistence_tests;
+// Compute-shader nodes reading a clock's timebase through `bus:time`.
 #[cfg(test)]
 mod scoped_resolution_tests;
+#[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
+mod shader_timebase_tests;
 mod srgb8_lut;
 #[cfg(test)]
 pub(crate) mod test_support;

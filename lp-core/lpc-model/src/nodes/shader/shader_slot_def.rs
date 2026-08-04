@@ -6,9 +6,9 @@
 //! structure into every shader artifact.
 
 use crate::{
-    BindingRef, FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotShapeId, SlotValue,
-    SlotValueShape, Slotted, StaticLpType, StaticSlotValueShape, ToLpValue, ValueEditorHint,
-    ValueRootError, ValueSlot,
+    BindingRef, FromLpValue, LpType, LpValue, OptionSlot, PhasorConfig, SlotMeta, SlotShapeId,
+    SlotValue, SlotValueShape, Slotted, StaticLpType, StaticSlotValueShape, ToLpValue,
+    ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,11 @@ pub struct ShaderSlotDef {
     pub kind: ValueSlot<ShaderSlotKind>,
     pub value: ValueSlot<ShaderValueShapeRef>,
     pub key: OptionSlot<ValueSlot<ShaderMapKeyDef>>,
+    /// Timebase shaping for a [`ShaderSlotKind::Phasor`] slot: present iff
+    /// the kind is `phasor`, absent for every other kind. The waveform is
+    /// always slot-local; the period may instead be driven by a bound
+    /// config channel, in which case this is the R6 fallback.
+    pub phasor: OptionSlot<ValueSlot<PhasorConfig>>,
     /// Declarative default binding endpoint (`bus:<channel>`), materialized
     /// at load when no authored binding names this slot (ADR 2026-07-09).
     /// Consumed slots source from the channel; produced slots publish to it.
@@ -52,6 +57,7 @@ impl ShaderSlotDef {
             kind: ValueSlot::new(ShaderSlotKind::Value),
             value: ValueSlot::new(ShaderValueShapeRef::builtin("f32")),
             key: OptionSlot::none(),
+            phasor: OptionSlot::none(),
             default_bind: OptionSlot::none(),
             default: OptionSlot::some(ValueSlot::new(default)),
             min: min
@@ -64,6 +70,34 @@ impl ShaderSlotDef {
             description: ValueSlot::new(String::from(description)),
             unit: OptionSlot::none(),
         }
+    }
+
+    /// A `phasor` slot: a `float` uniform fed by the scope's timebase as a
+    /// wrapped `[0,1)` cycle position, shaped by `config`.
+    pub fn phasor(label: &str, description: &str, config: PhasorConfig) -> Self {
+        Self {
+            kind: ValueSlot::new(ShaderSlotKind::Phasor),
+            phasor: OptionSlot::some(ValueSlot::new(config)),
+            ..Self::value_f32(label, description, 0.0, None)
+        }
+    }
+
+    /// A `seconds` slot: a `float` uniform fed by the scope's timebase as
+    /// unbounded effective seconds.
+    pub fn seconds(label: &str, description: &str) -> Self {
+        Self {
+            kind: ValueSlot::new(ShaderSlotKind::Seconds),
+            ..Self::value_f32(label, description, 0.0, None)
+        }
+    }
+
+    /// The phasor config this slot evaluates against when nothing drives it
+    /// from a channel — the authored one, or the default shaping.
+    pub fn phasor_config(&self) -> PhasorConfig {
+        self.phasor
+            .data
+            .as_ref()
+            .map_or_else(PhasorConfig::default, |config| config.value().clone())
     }
 
     /// Quantize this slot's panel control to whole multiples of `step`.
@@ -85,6 +119,7 @@ impl ShaderSlotDef {
             kind: ValueSlot::new(ShaderSlotKind::Map),
             value: ValueSlot::new(ShaderValueShapeRef::native(value)),
             key: OptionSlot::some(ValueSlot::new(ShaderMapKeyDef::U32)),
+            phasor: OptionSlot::none(),
             default_bind: OptionSlot::none(),
             default: OptionSlot::none(),
             min: OptionSlot::none(),
@@ -116,11 +151,20 @@ impl Default for ShaderSlotDef {
 }
 
 /// Top-level shader slot shape kind.
+///
+/// `Phasor` and `Seconds` are the two **timebase** kinds: both declare a
+/// plain `float` uniform in GLSL (`value` stays `"f32"`), but their value is
+/// evaluated by the host against the scope's time product rather than
+/// materialized from the slot's resolved data. A `Phasor` reads the timebase
+/// as a wrapped `[0,1)` cycle position shaped by [`ShaderSlotDef::phasor`];
+/// a `Seconds` reads it as unbounded effective seconds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ShaderSlotKind {
     #[default]
     Value,
     Map,
+    Phasor,
+    Seconds,
 }
 
 impl ShaderSlotKind {
@@ -128,6 +172,8 @@ impl ShaderSlotKind {
         match self {
             Self::Value => "value",
             Self::Map => "map",
+            Self::Phasor => "phasor",
+            Self::Seconds => "seconds",
         }
     }
 
@@ -135,8 +181,17 @@ impl ShaderSlotKind {
         match value {
             "value" => Some(Self::Value),
             "map" => Some(Self::Map),
+            "phasor" => Some(Self::Phasor),
+            "seconds" => Some(Self::Seconds),
             _ => None,
         }
+    }
+
+    /// Whether this kind's uniform is evaluated against the scope's time
+    /// product instead of the slot's resolved value.
+    #[must_use]
+    pub fn is_timebase(self) -> bool {
+        matches!(self, Self::Phasor | Self::Seconds)
     }
 }
 
@@ -404,6 +459,75 @@ mod tests {
         assert_eq!(slot.value.value().as_str(), "lp::fluid::Emitter");
         assert!(slot.value.value().is_native());
         assert!(slot.mapping.data.is_some());
+    }
+
+    #[test]
+    fn phasor_shader_slot_parses_its_config_and_stays_an_f32_uniform() {
+        let slot = read_slot_def(
+            r#"{
+  "kind": "phasor",
+  "value": "f32",
+  "phasor": { "period_seconds": 2.5, "waveform": "sine", "phase_offset": 0.25 },
+  "default_bind": "bus:beat",
+  "label": "Wave",
+  "description": "Cycle position"
+}"#,
+        );
+
+        assert_eq!(*slot.kind.value(), ShaderSlotKind::Phasor);
+        assert!(slot.kind.value().is_timebase());
+        // The GLSL side sees a plain float; the config is def metadata.
+        assert_eq!(slot.value_lp_type(), Some(LpType::F32));
+        assert_eq!(
+            slot.phasor_config(),
+            crate::PhasorConfig {
+                period_seconds: 2.5,
+                waveform: crate::Waveform::Sine,
+                phase_offset: 0.25,
+            }
+        );
+    }
+
+    #[test]
+    fn seconds_shader_slot_parses_without_a_phasor_config() {
+        let slot = read_slot_def(
+            r#"{
+  "kind": "seconds",
+  "value": "f32",
+  "label": "Elapsed",
+  "description": "Unbounded project seconds"
+}"#,
+        );
+
+        assert_eq!(*slot.kind.value(), ShaderSlotKind::Seconds);
+        assert!(slot.kind.value().is_timebase());
+        assert_eq!(slot.value_lp_type(), Some(LpType::F32));
+        assert!(slot.phasor.data.is_none());
+        // A slot with no authored config still has one to evaluate against.
+        assert_eq!(slot.phasor_config(), crate::PhasorConfig::default());
+    }
+
+    #[test]
+    fn every_kind_tag_round_trips_and_only_timebase_kinds_say_so() {
+        for kind in [
+            ShaderSlotKind::Value,
+            ShaderSlotKind::Map,
+            ShaderSlotKind::Phasor,
+            ShaderSlotKind::Seconds,
+        ] {
+            assert_eq!(ShaderSlotKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(
+            ShaderSlotKind::parse("phasor"),
+            Some(ShaderSlotKind::Phasor)
+        );
+        assert_eq!(
+            ShaderSlotKind::parse("seconds"),
+            Some(ShaderSlotKind::Seconds)
+        );
+        assert_eq!(ShaderSlotKind::parse("lfo"), None);
+        assert!(!ShaderSlotKind::Value.is_timebase());
+        assert!(!ShaderSlotKind::Map.is_timebase());
     }
 
     #[test]
