@@ -249,6 +249,19 @@
   .cmp .ch { font: 700 10px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; text-align: center; }
   .cmp .cell { height: 20px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); background:#000; }
 
+  /* ---- section 6: discrete set blocks (stepped-control language: squared) ---- */
+  .setblocks { display: flex; gap: 4px; }
+  .setblocks .blk { width: 34px; height: 16px; border-radius: 3px; overflow: hidden;
+                    border: 1px solid var(--border-strong); cursor: pointer; position: relative; background:#000; }
+  .setblocks .blk:hover { border-color: var(--dim); }
+  .setblocks .blk.on { border-color: var(--held); box-shadow: 0 0 0 1px var(--held); }
+  .cycsetblk { width: 30px; height: 13px; border-radius: 3px; overflow: hidden;
+               border: 1px solid var(--border-strong); position: relative; background:#000; }
+  .cycsetblk.on { border-color: var(--bound); box-shadow: 0 0 0 1px var(--bound); }
+  .slewtgt { width: 56px; height: 20px; border-radius: 4px; overflow: hidden;
+             border: 1px solid var(--border-strong); cursor: pointer; position: relative; background:#000; }
+  .slewtgt:hover { border-color: var(--dim); }
+
   /* ---- section 4: module panel inheritance ---- */
   .modpanel { width: 380px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .modpanel > header { padding: 8px 12px; background: var(--terminal); border-bottom: 1px solid var(--border);
@@ -274,10 +287,12 @@
   <span style="font-family:var(--mono)">2026-08-03-1803-palette-exploration-spike</span>).
   Thesis: a palette is a <em>value on a bus channel</em> — the panel control is a latch-mode writer like
   any knob (panel.md P2), sharing is scope inheritance (modules.md R5/E4), and anything that animates a
-  palette is a node. This playground explores the three surfaces that need visual judgment: the panel
-  swatch control (§1), the picker (§2), the gradient editor + interpolation space (§3), and the
-  drop-in inheritance story WLED can't do (§4). Engaged/captured treatment is candidate <b>gold</b> —
-  deliberately not the bound-violet family (P6, P-Q2).
+  palette is a node. Round 1: the panel swatch control (§1), the picker (§2), the gradient editor +
+  interpolation space (§3), and the drop-in inheritance story WLED can't do (§4). Round 2, from the
+  G1 gate's follow-up questions: where palettes live (§5 · D11), switching with the live cycler and
+  crossfade-as-slew (§6 · D12), and dynamic palettes as plain compute generators (§7 · D14).
+  Engaged/captured treatment is candidate <b>gold</b> — deliberately not the bound-violet family
+  (P6, P-Q2).
 </p>
 
 <div class="controls">
@@ -510,6 +525,155 @@
         </div>
       </div>
       <div class="flow"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 5 ================= -->
+<h2>5 · Where palettes live (D11)</h2>
+<p class="sub">
+  Both concepts agree on the top and bottom tiers: <b>built-ins are copy-on-use</b> (picking "Party"
+  embeds its stops + provenance into the slot — no catalog ids to drift, share envelopes stay
+  self-contained) and <b>the palette in use is just the slot's value / panel state</b>. They differ on
+  user-saved palettes. In A, <b>click a built-in</b> — watch it appear under "This project" with its
+  usage row: saving IS using.
+  <span class="lean">Lean: <b>A</b> for v1 — zero new storage, the project's palettes are the
+  palettes in its slots; B's <span style="font-family:var(--mono)">palettes/</span> dir waits for
+  save-without-using demand (it needs a blessed-folder enumeration exception the registry
+  deliberately avoids).</span>
+</p>
+<div class="gallery">
+  <div class="concept" id="c5a">
+    <header><span class="tag">A</span><span class="title">Derived project library</span>
+      <span class="note">no new files — "This project"<br>= values authored in slots</span></header>
+    <div class="picker">
+      <div class="plist" style="max-height:340px" id="plist5A"></div>
+    </div>
+  </div>
+  <div class="concept" id="c5b">
+    <header><span class="tag">B</span><span class="title">Explicit palettes/ dir</span>
+      <span class="note">saved files, copy-to-own,<br>vendorable — can sit unused</span></header>
+    <div class="picker">
+      <div class="plist" style="max-height:280px" id="plist5B"></div>
+    </div>
+    <div class="bodyp" style="border-top:1px solid var(--border)">
+      <div class="editrow" style="margin-top:0">
+        <button>💾 save to project as…</button>
+        <span style="font:10.5px var(--mono);color:var(--dim)">→ palettes/dusk-ember.palette.json</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 6 ================= -->
+<h2>6 · Palette switching (D12)</h2>
+<p class="sub">
+  WLED's "switching" is three different things, each with a home in the ratified model:
+  <b>selection</b> = a panel write (the held value is the control's state — no P3 amendment);
+  <b>crossfade</b> = the P-Q1 slew seam applied to palettes (LUT-lerp at the bake, writer-side
+  shaping); <b>auto-cycle</b> = a node, because it integrates — same shape as the unbuilt phasors
+  (panel controls the <i>rate</i>, the node owns the clock). B is live: the cycler advances on its
+  own — <b>grab its swatch</b> to capture the channel (P5 jump-takeover), <b>↺</b> to fall back into
+  the cycle. In C, pick a target palette and compare slew times.
+  <span class="lean">Lean: ship selection in v1, crossfade-as-slew in v1.5, the cycler as gallery
+  content later (see §7 — it's just a generator).</span>
+</p>
+<div class="gallery">
+  <div class="concept" id="c6a">
+    <header><span class="tag">A</span><span class="title">Selector over a set</span>
+      <span class="note">discrete control language:<br>squared blocks, held value</span></header>
+    <div class="bodyp">
+      <div class="panelrow pal">
+        <span class="lbl bound">palette</span>
+        <div>
+          <div class="swatchwrap" style="margin-bottom:6px"><canvas class="strip" id="selstrip"></canvas>
+            <span class="pname" id="selname"></span></div>
+          <div class="setblocks" id="setblocks"></div>
+        </div>
+        <span class="readout"><span class="statechip held">held</span><button class="clearbtn">↺</button></span>
+      </div>
+      <p class="sub" style="margin:8px 0 0">the set is authored (a <span style="font-family:var(--mono)">List&lt;Gradient&gt;</span> slot);
+        the control's state is just which member it holds — latch semantics, nothing new.</p>
+    </div>
+  </div>
+
+  <div class="concept" id="c6b">
+    <header><span class="tag">B</span><span class="title">Cycler node (live)</span>
+      <span class="note">integration = a node (P3);<br>output is grabbable (P5)</span></header>
+    <div class="bodyp">
+      <div style="border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;background:var(--terminal);margin-bottom:10px">
+        <div style="display:flex;gap:8px;align-items:baseline;margin-bottom:6px">
+          <span style="font-weight:700;color:var(--name);font-size:12.5px">palette-cycler</span>
+          <span style="font:600 9px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em">node · produces bus:palette</span>
+        </div>
+        <div class="panelrow" style="grid-template-columns:70px 1fr auto"><span class="lbl bound">rate</span>
+          <div class="fader"><i style="left:30%"></i></div><span class="readout">every 4 s</span></div>
+        <div class="panelrow" style="grid-template-columns:70px 1fr auto"><span class="lbl bound">fade</span>
+          <div class="fader"><i style="left:22%"></i></div><span class="readout">0.9 s</span></div>
+        <div style="display:flex;gap:4px;margin-top:6px" id="cycset"></div>
+      </div>
+      <div class="panelrow pal" id="cycrow">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip" id="cycstrip"></canvas><span class="pname" id="cycname"></span></div>
+        <span class="readout state-slot" id="cycstate"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="concept" id="c6c">
+    <header><span class="tag">C</span><span class="title">Crossfade = slew (P-Q1)</span>
+      <span class="note">LUT-lerp at the bake;<br>writer-side shaping</span></header>
+    <div class="bodyp">
+      <div class="swatchwrap" style="height:26px;margin-bottom:8px"><canvas class="strip" id="slewstrip"></canvas>
+        <span class="pname" id="slewname"></span></div>
+      <div class="editrow" style="margin-top:0;margin-bottom:8px">
+        <span style="font-size:11px;color:var(--muted)">slew</span>
+        <span class="seg" id="segslew">
+          <button data-v="0">0 ms</button><button data-v="300" class="on">300 ms</button><button data-v="1200">1200 ms</button>
+        </span>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap" id="slewtargets"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 7 ================= -->
+<h2>7 · Dynamic palettes (D14) — generators are content</h2>
+<p class="sub">
+  A dynamic palette is a <b>normal compute shader producing a Gradient value</b> — the same
+  produced-slot contract FluidEmitter sets use today; no special engine feature. Below, a mock
+  "aurora-breather" mutates its stops every tick; the panel control follows in Read (◈), the stops
+  inspector shows it's just a value changing, and <b>grabbing the swatch</b> freezes the moment you
+  captured (P5) — the generator keeps running underneath, shadowed in this scope (P4).
+  <span class="lean">WLED's <i>* Random Cycle</i>, <i>* Color 1</i>, audio-morph — all this one
+  pattern. The only later nicety: a blessed gallery module so it's discoverable without GLSL.</span>
+</p>
+<div class="gallery">
+  <div class="concept wide" id="c7">
+    <header><span class="tag">D14</span><span class="title">Compute generator → bus:palette (live)</span>
+      <span class="note">produced: { palette: Gradient } · control-rate · bake re-keys on value hash</span></header>
+    <div class="bodyp" style="display:grid;grid-template-columns:1fr 190px;gap:14px">
+      <div>
+        <div style="border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;background:var(--terminal);margin-bottom:10px">
+          <div style="display:flex;gap:8px;align-items:baseline">
+            <span style="font-weight:700;color:var(--name);font-size:12.5px">aurora-breather</span>
+            <span style="font:600 9px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em">shader/compute · f32</span>
+          </div>
+          <div style="font:10.5px var(--mono);color:var(--dim);margin-top:4px">
+            produced: <span style="color:var(--muted)">palette</span> → <span style="color:var(--bound)">bus:palette</span>
+            &nbsp;·&nbsp; consumed: <span style="color:var(--muted)">time, energy</span>
+          </div>
+        </div>
+        <div class="panelrow pal" id="dynrow" style="grid-template-columns:64px 1fr auto">
+          <span class="lbl bound">palette</span>
+          <div class="swatchwrap"><canvas class="strip" id="dynstrip"></canvas><span class="pname" id="dynname"></span></div>
+          <span class="readout state-slot" id="dynstate"></span>
+        </div>
+      </div>
+      <div>
+        <div style="font:700 9.5px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">live Gradient value</div>
+        <div id="dyninspect" style="font:10px var(--mono);color:var(--muted);display:grid;gap:3px"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -862,12 +1026,229 @@ function renderInherit() {
   };
 }
 
+/* ============ section 5: storage concepts ============ */
+const byName = n => CATALOG.find(p => p.name === n);
+const s5 = { adopted: [] }; /* built-ins copied into "This project" by clicking (concept A) */
+const S5_USAGE = { 'fyeah warm': 'idle.palette', 'fyeah cool': 'idle.palette (entry b)', 'gala teal→rose': 'blast.tint' };
+function rowFor(p, extraHtml, onclick) {
+  const row = document.createElement('div');
+  row.className = 'prow';
+  row.innerHTML = `<span class="pn">${p.name}${extraHtml ?? ''}</span>
+                   <span class="mini"><canvas class="strip"></canvas></span>`;
+  renderStrip(row.querySelector('canvas'), p);
+  if (onclick) row.onclick = onclick;
+  return row;
+}
+const DUSK_EMBER = P('dusk ember','project',[[0,0x1a0505],[.5,0xb0342a],[1,0xf0a35e]]);
+function renderS5() {
+  const A = document.getElementById('plist5A');
+  A.innerHTML = '';
+  let h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'This project · derived from slots in use'; A.appendChild(h);
+  for (const p of CATALOG.filter(p => p.cat === 'project'))
+    A.appendChild(rowFor(p, `<small>${S5_USAGE[p.name] ?? ''}</small>`));
+  for (const name of s5.adopted)
+    A.appendChild(rowFor(byName(name), `<small>just embedded → idle.palette · provenance: built-in</small>`));
+  h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'Built-in · copy-on-use (click one)'; A.appendChild(h);
+  for (const p of CATALOG.filter(p => p.cat === 'stock').slice(0, 6))
+    A.appendChild(rowFor(p, null, () => {
+      if (!s5.adopted.includes(p.name)) s5.adopted.push(p.name);
+      renderS5();
+    }));
+
+  const B = document.getElementById('plist5B');
+  B.innerHTML = '';
+  h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'Saved · palettes/ (committed files)'; B.appendChild(h);
+  const saved = [[byName('fyeah warm'),'fyeah-warm.palette.json · in use'],
+                 [DUSK_EMBER,'dusk-ember.palette.json · unused'],
+                 [byName('gala teal→rose'),'gala-teal-rose.palette.json · in use']];
+  for (const [p, meta] of saved) B.appendChild(rowFor(p, `<small>${meta}</small>`));
+}
+
+/* blended strip render (crossfade/slew demos) */
+function renderStripBlend(canvas, palA, palB, mix) {
+  const W = 256; canvas.width = W; canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, 1);
+  for (let x = 0; x < W; x++) {
+    const t = x/(W-1);
+    const a = samplePal(palA, t, palA.space, palA.method);
+    const b = samplePal(palB, t, palB.space, palB.method);
+    for (let k = 0; k < 3; k++) img.data[x*4+k] = Math.round(clamp01(a[k]+(b[k]-a[k])*mix)*255);
+    img.data[x*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/* ============ section 6 ============ */
+/* A: selector over a set */
+const SET6 = ['Aurora','Lava','Icefire','Party'];
+let sel6 = 0;
+function renderSel6() {
+  renderStrip(document.getElementById('selstrip'), byName(SET6[sel6]));
+  document.getElementById('selname').textContent = SET6[sel6];
+  const root = document.getElementById('setblocks');
+  root.innerHTML = '';
+  SET6.forEach((n, i) => {
+    const b = document.createElement('div');
+    b.className = 'blk' + (i === sel6 ? ' on' : '');
+    b.title = n;
+    const cv = document.createElement('canvas'); cv.className = 'strip'; b.appendChild(cv);
+    b.onclick = () => { sel6 = i; renderSel6(); };
+    root.appendChild(b);
+    renderStrip(cv, byName(n));
+  });
+}
+
+/* B: live cycler */
+const cyc = { set: SET6, idx: 0, next: 1, fadeT: 1, lastAdvance: 0, period: 4000, fadeMs: 900, grabbed: false, grabbedMix: null };
+function renderCycSet() {
+  const root = document.getElementById('cycset');
+  root.innerHTML = '';
+  cyc.set.forEach((n, i) => {
+    const b = document.createElement('div');
+    b.className = 'cycsetblk' + (i === (cyc.fadeT < 1 ? cyc.next : cyc.idx) ? ' on' : '');
+    const cv = document.createElement('canvas'); cv.className = 'strip'; b.appendChild(cv);
+    root.appendChild(b);
+    renderStrip(cv, byName(n));
+  });
+}
+function cycState() {
+  document.getElementById('cycstate').innerHTML = cyc.grabbed
+    ? '<span class="statechip held">held</span><button class="clearbtn" id="cycclear" title="release into the cycle">↺</button>'
+    : '<span class="statechip auto">◈ palette-cycler</span>';
+  document.getElementById('cycrow').classList.toggle('pal-state-engaged', cyc.grabbed);
+  const clr = document.getElementById('cycclear');
+  if (clr) clr.onclick = e => { e.stopPropagation(); cyc.grabbed = false; cycState(); };
+}
+document.getElementById('cycrow').querySelector('.swatchwrap').onclick = () => {
+  if (!cyc.grabbed) {
+    /* P5 jump-takeover: capture the channel AT the gesture's value (freeze current blend) */
+    cyc.grabbed = true;
+    cyc.grabbedMix = { a: byName(cyc.set[cyc.idx]), b: byName(cyc.set[cyc.next]), m: cyc.fadeT < 1 ? cyc.fadeT : 1 };
+    cycState();
+  }
+};
+
+/* C: slew targets */
+const slew = { cur: byName('Sunset'), from: byName('Sunset'), t: 1, ms: 300 };
+function renderSlewTargets() {
+  const root = document.getElementById('slewtargets');
+  root.innerHTML = '';
+  ['Aurora','Lava','Ocean','Party','Icefire','Candy'].forEach(n => {
+    const b = document.createElement('div'); b.className = 'slewtgt'; b.title = n;
+    const cv = document.createElement('canvas'); cv.className = 'strip'; b.appendChild(cv);
+    b.onclick = () => {
+      slew.from = currentSlewPal();
+      slew.cur = byName(n);
+      slew.t = slew.ms === 0 ? 1 : 0;
+      document.getElementById('slewname').textContent = n + (slew.ms ? ' (slewing)' : '');
+    };
+    root.appendChild(b);
+    renderStrip(cv, byName(n));
+  });
+}
+function currentSlewPal() { /* snapshot for chained fades: sample the blend into literal stops */
+  if (slew.t >= 1) return slew.cur;
+  const stops = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i/8;
+    const a = samplePal(slew.from, t, slew.from.space, slew.from.method);
+    const b = samplePal(slew.cur, t, slew.cur.space, slew.cur.method);
+    stops.push({ at: t, c: a.map((v,k) => v + (b[k]-v)*slew.t) });
+  }
+  return { stops, space: 'srgb', method: 'linear' };
+}
+document.getElementById('segslew').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('segslew').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+  slew.ms = +b.dataset.v;
+});
+
+/* ============ section 7: live compute generator ============ */
+const dyn = { grabbed: false, frozen: null, t: 0 };
+function breatherStops(t) {
+  /* the "compute shader": stops as a function of time — it's just a value */
+  const wob = (ph, amp) => amp * Math.sin(t*0.9 + ph);
+  return [
+    { at: 0,                        c: [0.00+0.02*Math.sin(t*.7), 0.10, 0.18+0.06*Math.sin(t*.5)] },
+    { at: clamp01(0.30 + wob(0, 0.08)), c: [0.00, 0.65+0.20*Math.sin(t*1.1), 0.55] },
+    { at: clamp01(0.62 + wob(2, 0.10)), c: [0.16+0.1*Math.sin(t*.8+1), 0.85, 0.66] },
+    { at: clamp01(0.85 + wob(4, 0.05)), c: [0.45+0.15*Math.sin(t*.6+2), 0.24, 0.85] },
+    { at: 1,                        c: [0.17, 0.04, 0.33] },
+  ];
+}
+function dynState() {
+  document.getElementById('dynstate').innerHTML = dyn.grabbed
+    ? '<span class="statechip held">held</span><button class="clearbtn" id="dynclear" title="release back to the generator">↺</button>'
+    : '<span class="statechip auto">◈ breather</span>';
+  document.getElementById('dynrow').classList.toggle('pal-state-engaged', dyn.grabbed);
+  document.getElementById('dynname').textContent = dyn.grabbed ? 'held (captured)' : 'live';
+  const clr = document.getElementById('dynclear');
+  if (clr) clr.onclick = e => { e.stopPropagation(); dyn.grabbed = false; dynState(); };
+}
+document.getElementById('dynrow').querySelector('.swatchwrap').onclick = () => {
+  if (!dyn.grabbed) { dyn.grabbed = true; dyn.frozen = breatherStops(dyn.t); dynState(); }
+};
+
+/* ============ master animation tick for §6/§7 ============ */
+let lastTs = null;
+function masterTick(ts) {
+  if (lastTs === null) lastTs = ts;
+  const dt = ts - lastTs; lastTs = ts;
+
+  /* cycler */
+  if (!document.hidden) {
+    cyc.lastAdvance += dt;
+    if (cyc.fadeT < 1) {
+      cyc.fadeT = Math.min(1, cyc.fadeT + dt / cyc.fadeMs);
+      if (cyc.fadeT >= 1) { cyc.idx = cyc.next; renderCycSet(); }
+    } else if (cyc.lastAdvance >= cyc.period) {
+      cyc.lastAdvance = 0; cyc.next = (cyc.idx + 1) % cyc.set.length; cyc.fadeT = 0; renderCycSet();
+    }
+    const cv = document.getElementById('cycstrip');
+    if (cyc.grabbed && cyc.grabbedMix) {
+      renderStripBlend(cv, cyc.grabbedMix.a, cyc.grabbedMix.b, cyc.grabbedMix.m);
+      document.getElementById('cycname').textContent = 'held (captured mid-fade)';
+    } else {
+      renderStripBlend(cv, byName(cyc.set[cyc.idx]), byName(cyc.set[cyc.next]), cyc.fadeT < 1 ? cyc.fadeT : 0);
+      document.getElementById('cycname').textContent =
+        cyc.fadeT < 1 ? `${cyc.set[cyc.idx]} → ${cyc.set[cyc.next]}` : cyc.set[cyc.idx];
+    }
+
+    /* slew strip */
+    if (slew.t < 1) slew.t = Math.min(1, slew.t + dt / Math.max(1, slew.ms));
+    const scv = document.getElementById('slewstrip');
+    renderStripBlend(scv, slew.from, slew.cur, slew.t);
+    if (slew.t >= 1) document.getElementById('slewname').textContent = slew.cur.name ?? document.getElementById('slewname').textContent.replace(' (slewing)','');
+
+    /* breather (throttle inspector to ~10fps for readability) */
+    dyn.t += dt / 1000;
+    const pal = dyn.grabbed ? { stops: dyn.frozen } : { stops: breatherStops(dyn.t) };
+    renderStrip(document.getElementById('dynstrip'), { ...pal, space: 'oklab', method: 'smooth' });
+    if (!dyn.grabbed && (masterTick.acc = (masterTick.acc ?? 0) + dt) > 100) {
+      masterTick.acc = 0;
+      const insp = document.getElementById('dyninspect');
+      insp.innerHTML = pal.stops.map(s =>
+        `<div>at <span style="color:var(--text)">${s.at.toFixed(2)}</span> · rgb(${s.c.map(v=>clamp01(v).toFixed(2)).join(', ')})</div>`
+      ).join('') + `<div style="color:var(--dim);margin-top:4px">space: oklab · method: smooth · count: 5</div>`;
+    }
+  }
+  requestAnimationFrame(masterTick);
+}
+
 /* ============ boot ============ */
 function renderAll() { renderS1(); renderPickers(); renderInherit(); heroPreview(state.current); }
 renderAll();
 renderEditor();
 renderCmp();
+renderS5();
+renderSel6();
+renderCycSet();
+cycState();
+renderSlewTargets();
+document.getElementById('slewname').textContent = 'Sunset';
+dynState();
 heroTick();
+requestAnimationFrame(masterTick);
 </script>
 </body>
 </html>
