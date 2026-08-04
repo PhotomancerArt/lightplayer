@@ -67,7 +67,12 @@ construction.
   globals snapshot/reset lifecycle that wasmtime and native have; a global
   with an initializer starts zeroed in the editor sim, and px globals are
   not reset per call there.
-- `resolve_or_default_input` (`compute_shader_node.rs`) still swallows
+- ~~`resolve_or_default_input` (`compute_shader_node.rs`) still swallows
   resolve errors into authored defaults with no node status — a failed
   `bus:time` resolve would freeze this same example again, silently, from
-  a different cause.
+  a different cause.~~ **Fixed 2026-08-03**: both shader nodes now record
+  per-slot resolve failures (including ambiguous-bus) and report them as
+  `NodeRuntimeStatus::Warn` on the card, with a transition-only log line;
+  see `resolve_or_default_input` in `shader_node.rs` and
+  `unresolvable_bound_input_reports_warning_status` in
+  `compute_shader_node.rs`.
