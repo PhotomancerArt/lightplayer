@@ -717,9 +717,11 @@ fn main() -> ! {
     }
 }
 
-// Same gate as its only caller, `boot_firmware`: the hardware harnesses
-// replace `main` with their own entrypoint and never send a hello.
-#[cfg(not(fw_harness))]
+// Gated on `server` unlike the c6/s3 twins' `not(fw_harness)`: this
+// crate has no harness cfg (build.rs deliberately emits none), and its
+// wire deps (`lpc_wire`, the common chip_identity module) are optional
+// behind `server` — the no-server build must not touch them.
+#[cfg(feature = "server")]
 /// This chip's permanent identity, read from efuse.
 ///
 /// Injected rather than derived: the server cannot read silicon, and the
