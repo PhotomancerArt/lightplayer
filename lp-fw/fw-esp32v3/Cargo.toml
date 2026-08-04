@@ -124,6 +124,32 @@ ws281x_telemetry = []
 #   cargo build --profile release-esp32v3 --features frame-dump
 frame-dump = []
 
+# Ethernet control plane for the DOM-WLE-LAN carrier (networking M2-P2, first
+# increment): EMAC + embassy-net + DHCP running alongside the app, IP logged
+# through the normal logger. No HTTP/websocket/settings yet — later phases.
+# The configuration is the bench-proven one (`spikes/net-bringup-classic`,
+# G1): APLL clock out on GPIO17, fixed-link PHY (no SMI on this board),
+# MDC/MDIO parked on inert pins. See `src/board/esp32v3/eth.rs`.
+#
+# OFF by default, additive to `server`, for two reasons:
+#  * The measured flash/RAM cost is P5's gate — until it is paid down and
+#    recorded, the shipping image must be byte-identical without it.
+#  * On the DOM-WLE-LAN the EMAC's APLL clock excludes the radio; that costs
+#    nothing on THIS image (radio retired), but the default staying off keeps
+#    the exclusion an explicit choice per build rather than an ambient fact.
+#
+# `tcp`/`dns` are enabled now, ahead of use: later phases (HTTP control
+# plane, discovery) need them, and pre-declaring keeps the P5 size
+# measurement honest about where the feature is headed.
+#
+# Build:
+#   cargo build --profile release-esp32v3 --features net-eth
+net-eth = [
+    "dep:embassy-net",
+    "dep:static_cell",
+    "fw-esp32-common/net",
+]
+
 # The M2-P3 radio RAM probe (`radio_ram_probe`) was retired by the
 # standalone-workspace split: crates.io esp-radio and the git-pinned esp-hal
 # cohort both claim the `xtensa-lx-rt` links slot, and the DOM-WLE-LAN's
@@ -208,6 +234,16 @@ embassy-sync = { version = "0.8.0", optional = true }
 embassy-futures = { version = "0.1", optional = true }
 embedded-io-async = { version = "0.6", optional = true }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"], optional = true }
+
+# `net-eth` only: the TCP/IP stack over esp-hal's EMAC driver. Same version
+# and feature set the bench spike proved (`spikes/net-bringup-classic`), plus
+# tcp/dns for the later phases (see the feature's comment). esp-hal's `Driver`
+# impl for `Ethernet` arrives via its own `esp32`+`unstable` features, already
+# on above. `static_cell` holds the DMA rings and StackResources — statics,
+# not heap: the heap is the shader compiler's battleground (see HEAP_SIZE in
+# main.rs) and the network must not be a new claimant on it.
+embassy-net = { version = "0.9", default-features = false, features = ["dhcpv4", "medium-ethernet", "tcp", "dns"], optional = true }
+static_cell = { version = "2.1", optional = true }
 
 # Flash-backed filesystem. The lpfs partition is located by label at runtime
 # (see src/flash_storage.rs), not transcribed from partitions.csv.

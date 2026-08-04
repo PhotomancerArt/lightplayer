@@ -24,7 +24,55 @@ use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 use esp_hal::uart::{Config as UartConfig, Uart};
 use esp_hal::{Blocking, uart::ConfigError};
 
-/// Initialize classic-ESP32 hardware.
+/// The DOM-WLE-LAN's Ethernet peripheral set, extracted here because the
+/// peripheral singleton is only taken once (see the module doc) and consumed
+/// by `super::eth::create_driver` on `net-eth` builds.
+///
+/// The *pin selection* is this struct's construction site in
+/// [`init_board_impl`]; the *drive configuration* (APLL, fixed-link PHY, DMA
+/// sizing) is `super::eth`'s. Defined unconditionally — it holds only
+/// peripheral singletons, and the non-net `init_board` drops it, which
+/// compiles to nothing — so the shared, heavily-commented init body does not
+/// have to exist twice under `cfg`.
+// `expect`, not `allow`: if the non-net build ever starts reading these
+// fields the expectation fails loudly and this attribute gets deleted.
+#[cfg_attr(
+    not(feature = "net-eth"),
+    expect(
+        dead_code,
+        reason = "constructed and dropped whole by the non-net init_board; the alternative is duplicating the entire documented init body under cfg"
+    )
+)]
+pub struct EthPeripherals {
+    /// The EMAC itself.
+    pub eth: esp_hal::peripherals::ETH<'static>,
+    /// APLL 50 MHz reference clock **output** to the PHY (`EMAC_CLK_OUT_180`).
+    ///
+    /// GPIO17 is the only working clock topology on this board: no external
+    /// oscillator feeds GPIO0, and the GPIO16 output phase fails (bench spike
+    /// `spikes/net-bringup-classic`, G1). APLL mode excludes wifi/ESP-NOW —
+    /// moot on this image (radio retired), load-bearing for any future one.
+    pub clk_out: esp_hal::peripherals::GPIO17<'static>,
+    /// RMII RXD0 — fixed by silicon, as are the five below.
+    pub rxd0: esp_hal::peripherals::GPIO25<'static>,
+    /// RMII RXD1.
+    pub rxd1: esp_hal::peripherals::GPIO26<'static>,
+    /// RMII CRS_DV.
+    pub rx_dv: esp_hal::peripherals::GPIO27<'static>,
+    /// RMII TXD0.
+    pub txd0: esp_hal::peripherals::GPIO19<'static>,
+    /// RMII TXD1.
+    pub txd1: esp_hal::peripherals::GPIO22<'static>,
+    /// RMII TX_EN.
+    pub tx_en: esp_hal::peripherals::GPIO21<'static>,
+    /// MDC, parked: no SMI exists on this board (the spike's sweeps proved
+    /// GPIO33/GPIO32 inert), but the EMAC driver requires the pins.
+    pub mdc: esp_hal::peripherals::GPIO33<'static>,
+    /// MDIO, parked — see `mdc`.
+    pub mdio: esp_hal::peripherals::GPIO32<'static>,
+}
+
+/// Initialize classic-ESP32 hardware (non-net build).
 ///
 /// Sets up the CPU clock and returns the runtime components the app layer
 /// needs: the software-interrupt control and timer group for the executor,
@@ -37,12 +85,47 @@ use esp_hal::{Blocking, uart::ConfigError};
 /// `esp_println!`.
 ///
 /// Unlike the C6, the heap is **not** allocated here — `main.rs` owns it.
+#[cfg(not(feature = "net-eth"))]
 pub fn init_board() -> (
     SoftwareInterruptControl<'static>,
     TimerGroup<'static, impl TimerGroupInstance>,
     Result<Uart<'static, Blocking>, ConfigError>,
     esp_hal::peripherals::FLASH<'static>,
     esp_hal::peripherals::RMT<'static>,
+) {
+    // Dropping the Ethernet pins/peripheral is free: singletons carry no
+    // state, and nothing configures the pads until `Ethernet::new` runs — so
+    // the non-net image's behavior is untouched by their extraction.
+    let (sw_int, timg0, uart0, flash, rmt, _eth) = init_board_impl();
+    (sw_int, timg0, uart0, flash, rmt)
+}
+
+/// Initialize classic-ESP32 hardware (`net-eth` build): everything the
+/// non-net variant returns, plus the [`EthPeripherals`] that
+/// `super::eth::create_driver` consumes. See the non-net variant's doc for
+/// the shared facts.
+#[cfg(feature = "net-eth")]
+pub fn init_board() -> (
+    SoftwareInterruptControl<'static>,
+    TimerGroup<'static, impl TimerGroupInstance>,
+    Result<Uart<'static, Blocking>, ConfigError>,
+    esp_hal::peripherals::FLASH<'static>,
+    esp_hal::peripherals::RMT<'static>,
+    EthPeripherals,
+) {
+    init_board_impl()
+}
+
+/// The one shared init body behind both `init_board` variants — a tuple
+/// cannot carry a `cfg`'d element, and duplicating this function's comments
+/// under `cfg` is how they would rot.
+fn init_board_impl() -> (
+    SoftwareInterruptControl<'static>,
+    TimerGroup<'static, esp_hal::peripherals::TIMG0<'static>>,
+    Result<Uart<'static, Blocking>, ConfigError>,
+    esp_hal::peripherals::FLASH<'static>,
+    esp_hal::peripherals::RMT<'static>,
+    EthPeripherals,
 ) {
     // `esp_hal::init` disables the RTC watchdog (RWDT) and both TIMG
     // watchdogs unconditionally (esp-hal 1.1.1 `lib.rs::init`). `CpuClock::max()`
@@ -102,7 +185,23 @@ pub fn init_board() -> (
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    (sw_int, timg0, uart0, flash, rmt)
+    // Ethernet peripherals, handed out whole; the WHY of each pin is on the
+    // struct's field docs. Nothing here touches the pads — that happens (or
+    // does not) in `super::eth::create_driver`.
+    let eth = EthPeripherals {
+        eth: peripherals.ETH,
+        clk_out: peripherals.GPIO17,
+        rxd0: peripherals.GPIO25,
+        rxd1: peripherals.GPIO26,
+        rx_dv: peripherals.GPIO27,
+        txd0: peripherals.GPIO19,
+        txd1: peripherals.GPIO22,
+        tx_en: peripherals.GPIO21,
+        mdc: peripherals.GPIO33,
+        mdio: peripherals.GPIO32,
+    };
+
+    (sw_int, timg0, uart0, flash, rmt, eth)
 }
 
 /// Start the Embassy runtime with the given timer and software interrupt.
