@@ -33,6 +33,11 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 9: panel-state auto-save reaches the wire —
+///   `WireProjectCommand::PanelAutoSave` (the P11 toggle, beside
+///   `PanelWrite`/`PanelClear`) and `ServerRuntimeStatus.panel_auto_save`,
+///   which carries the CURRENT value back on every project read so the
+///   module face can render the switch without a dedicated pull.
 /// - 8: sink scopes list on the probe surface — `WireBusChannel` rows now
 ///   include playlist-entry sink scopes (same shape; new content
 ///   contract), which is what carries a bound panel control's live value
@@ -65,7 +70,7 @@ use serde::{Deserialize, Serialize};
 ///   runtime command channel (playlist activate-entry;
 ///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
 /// - 1: hello handshake introduced.
-pub const WIRE_PROTO_VERSION: u32 = 8;
+pub const WIRE_PROTO_VERSION: u32 = 9;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

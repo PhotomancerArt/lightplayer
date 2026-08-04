@@ -24,9 +24,10 @@ pub struct ProjectEditorView {
     pub sync: ProjectSyncSummary,
     pub stats: Vec<UiMetric>,
     pub tree: ProjectNodeTreeView,
-    /// Workspace node cards. Flat-root model (P6): the tree root itself is
-    /// never a card — its child panes are the top-level entries, and the
-    /// root's own slots live in [`Self::root_slots`].
+    /// Workspace node cards. Since the flat-root reversal the tree ROOT is
+    /// the single top-level entry (it wears the module face) and every
+    /// other node rides its [`UiNodeView::children`]; the root's own config
+    /// slot rows still live in [`Self::root_slots`].
     pub nodes: Vec<UiNodeView>,
     /// Channels the binding picker offers (observed ∪ well-known), shared by
     /// every bindable row in the workspace (M4).

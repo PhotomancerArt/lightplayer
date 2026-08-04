@@ -156,6 +156,11 @@ fn handle_project_command(
         WireProjectCommand::PanelClear { request } => Ok(WireProjectCommandResponse::PanelClear {
             response: project.panel_clear(&request),
         }),
+        WireProjectCommand::PanelAutoSave { request } => {
+            Ok(WireProjectCommandResponse::PanelAutoSave {
+                response: project.panel_auto_save_command(&request),
+            })
+        }
     }
 }
 

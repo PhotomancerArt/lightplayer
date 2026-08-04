@@ -13,8 +13,8 @@ pub use lpa_link::{
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
-    ControlSampleSpan, LampType, LpFeature, LpValue, NodeKind, Revision, SlotMapKey, SlotPath,
-    SlotPathSegment,
+    ControlSampleSpan, LampType, LpFeature, LpValue, NodeId, NodeKind, Revision, SlotMapKey,
+    SlotPath, SlotPathSegment,
 };
 
 pub mod app;
@@ -47,16 +47,17 @@ pub use app::home::{
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiNodeChild, UiNodeDirtyState,
-    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
-    UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
-    UiPanelTarget, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding,
-    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview,
-    UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform,
-    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
-    UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite,
-    UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
-    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiModuleFace, UiNodeChild,
+    UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
+    UiPanelControlState, UiPanelControlView, UiPanelGroup, UiPanelTarget, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
+    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
+    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
+    UiSlotValue, UiSlotValueKind,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -68,11 +69,11 @@ pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
     MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp, NodeController,
     NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
-    NodeUiOp, PanelClearOp, PanelWriteOp, PendingAssetEdit, PendingEdit, PendingEditOp,
-    PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun, ProjectConnectResult,
-    ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PendingAssetEdit, PendingEdit,
+    PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
     ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,

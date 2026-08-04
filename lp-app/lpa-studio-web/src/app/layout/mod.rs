@@ -20,7 +20,7 @@ pub(crate) mod version_badge_stories;
 pub use local_store_banner::LocalStoreBanner;
 pub use pane_frame::PaneFrame;
 pub use rich_object_pane::RichObjectPane;
-pub use site_chrome::{SiteChrome, SiteSection};
+pub use site_chrome::{PlayToggle, SiteChrome, SiteSection};
 pub use studio_pane::{PaneChip, PaneChrome, PaneCollapse, PaneTone, StudioPane};
 pub use studio_settings_popover::StudioSettingsPopover;
 pub use studio_shell::StudioShell;

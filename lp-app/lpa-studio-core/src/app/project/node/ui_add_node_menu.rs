@@ -8,12 +8,14 @@ use super::node_create_op::{NodeCreateOp, UiAttachTarget};
 use super::node_naming::{node_kind_label, node_kind_slug};
 
 /// Picker order: the common authoring targets first, hardware-/niche kinds
-/// last. Stable — the picker never reorders. `Module` is excluded (it is
-/// the artifact root; nested sub-projects are future work).
+/// last. Stable — the picker never reorders. `Module` sits with the other
+/// container (settled D-C: an empty module is creatable, and everything
+/// composable should be authorable).
 const PICKER_KINDS: &[NodeKind] = &[
     NodeKind::Shader,
     NodeKind::Texture,
     NodeKind::Playlist,
+    NodeKind::Module,
     NodeKind::Clock,
     NodeKind::Fixture,
     NodeKind::Output,
@@ -57,7 +59,7 @@ pub struct UiAddNodeMenuEntry {
     pub unavailable: Option<String>,
 }
 
-/// Build the picker for one attach site: every kind except `Module`, in
+/// Build the picker for one attach site: every instantiable kind, in
 /// [`PICKER_KINDS`] order, with every entry enabled.
 ///
 /// The device gate is applied afterwards by [`gate_add_node_menu`], once,
@@ -123,11 +125,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn menu_offers_every_kind_except_module_in_stable_order() {
+    fn menu_offers_every_kind_in_stable_order() {
         let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
 
-        assert_eq!(menu.entries.len(), 10, "all kinds except Module");
-        assert!(menu.entries.iter().all(|e| e.kind != NodeKind::Module));
+        assert_eq!(menu.entries.len(), 11, "every instantiable kind");
+        assert!(menu.entries.iter().any(|e| e.kind == NodeKind::Module));
         assert_eq!(menu.entries[0].kind, NodeKind::Shader);
         assert_eq!(menu.entries[0].label, "Shader");
         assert_eq!(menu.entries[0].icon, "shader");
