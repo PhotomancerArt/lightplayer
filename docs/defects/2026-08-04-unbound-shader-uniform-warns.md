@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-08-04      # how: live-debugging (TimeProduct M2 P3, pinned not fixed)
-fixed: this change
+fixed: 283eef04d
 area: lpc-engine engine host (EngineResolveHost) + shader/compute shader nodes
 class: state-conflation
 related:
