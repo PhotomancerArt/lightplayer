@@ -8,6 +8,7 @@ pub mod mapping;
 pub mod mapping_points;
 pub mod power;
 pub mod power_model;
+pub mod resolved_mapping;
 pub mod sampling;
 
 pub use crate::slot_views::{FixtureDefView, FixtureStateView};
@@ -23,4 +24,5 @@ pub use mapping_points::{
 };
 pub use power::FixturePower;
 pub use power_model::PowerModel;
+pub use resolved_mapping::{MappingRef, ResolvedMappingCompact, ResolvedSpan};
 pub use sampling::FixtureSamplingConfig;

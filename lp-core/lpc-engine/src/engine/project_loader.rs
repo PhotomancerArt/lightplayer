@@ -57,7 +57,7 @@ use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 #[cfg(feature = "node-shader")]
 use crate::nodes::{ComputeShaderNode, ShaderNode};
 #[cfg(feature = "node-fixture")]
-use crate::nodes::{FixtureMap2dSource, FixtureNode};
+use crate::nodes::{FixtureMap2dSource, FixtureMapping, FixtureNode};
 #[cfg(feature = "node-playlist")]
 use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
 
@@ -1133,7 +1133,7 @@ fn resolve_fixture_mapping(
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<(MappingConfig, Option<FixtureMap2dSource>), ProjectLoadError> {
+) -> Result<(FixtureMapping, Option<FixtureMap2dSource>), ProjectLoadError> {
     match config.mapping.value() {
         MappingConfig::Map2d { .. } => {
             let text = materialize_node_text_asset(
@@ -1163,9 +1163,13 @@ fn resolve_fixture_mapping(
                 render_width: config.render_width(),
                 render_height: config.render_height(),
             };
-            Ok((mapping, Some(source)))
+            // Document geometry stays compact: never expanded into slots,
+            // never serialized, never slot-addressed.
+            Ok((FixtureMapping::Compact(mapping), Some(source)))
         }
-        other => Ok((other.clone(), None)),
+        // Hand-authored `PathPoints` (and an unset mapping) keep the slot
+        // form — Studio edits individual lamps there.
+        other => Ok((FixtureMapping::Slots(other.clone()), None)),
     }
 }
 
