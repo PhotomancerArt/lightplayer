@@ -21,7 +21,6 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 use esp_bootloader_esp_idf::partitions;
 use littlefs_rust::{Config, Error as LfsError, Storage};
 
@@ -53,7 +52,10 @@ impl LpfsPartition {
     /// and espflash substituted its default table. That is a flashing mistake,
     /// not a runtime condition, so the caller should say so loudly rather than
     /// fall back to a guessed offset.
-    pub fn locate(flash: &mut impl embedded_storage::Storage) -> Option<Self> {
+    // Concrete `FlashStorage`, not `impl embedded_storage::Storage`: the
+    // git-cohort `read_partition_table` takes its own concrete type (the
+    // signature changed after crates.io 0.5.0).
+    pub fn locate(flash: &mut esp_storage::FlashStorage<'_>) -> Option<Self> {
         let mut buf = [0u8; partitions::PARTITION_TABLE_MAX_LEN];
         let table = partitions::read_partition_table(flash, &mut buf).ok()?;
         let entry = table.iter().find(|e| e.label_as_str() == LPFS_LABEL)?;
