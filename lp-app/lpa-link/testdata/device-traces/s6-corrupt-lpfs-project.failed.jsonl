@@ -1,0 +1,109 @@
+{"t":1785796834.065,"kind":"sweep","disposition":"ran"}
+{"t":1785796834.065,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
+{"t":1785796834.074,"kind":"flow","from":"discovering-endpoints","to":"selecting-endpoint"}
+{"t":1785796834.074,"kind":"flow","from":"selecting-endpoint","to":"connecting"}
+{"t":1785796834.284,"endpoint":"browser-serial-esp32-port-1","kind":"state","to":"booting"}
+{"t":1785796834.285,"kind":"flow","from":"connecting","to":"connected"}
+{"t":1785796834.286,"session":"runtime-1","endpoint":"browser-serial-esp32-port-1","kind":"pool","action":"install","detail":"Device"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (109) esp_image: segment 1: paddr=00010040 vaddr=420000ESP-ROM:esp32c6-20220919"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x42099796"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:2"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086c410,len:0xd48"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x4086e610,len:0x2d68"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x40875720,len:0x1800"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"entry 0x4086c410"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (23) boot: compile time Jun  7 2023 08:02:08\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (24) boot: chip revision: v0.2\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (28) boot.esp32c6: SPI Speed      : 40MHz\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (33) boot.esp32c6: SPI Mode       : DIO\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (42) boot: Enabling RNG early entropy source...\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (48) boot: Partition Table:\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (66) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (81) boot:  3 factory          factory app      00 00 00010000 00300000\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00310000 000f0000\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (96) boot: End of partition table\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (109) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=3fb84h (260996) map\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (169) esp_image: segment 2: paddr=0004fbcc vaddr=40800018 size=0044ch (  1100) load\u001b[0m"}
+{"t":1785796834.289,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (171) esp_image: segment 3: paddr=00050020 vaddr=42040020 size=1abccch (1752268) map\u001b[0m"}
+{"t":1785796834.621,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (531) esp_image: segment 4: paddr=001fbcf4 vaddr=40800464 size=12ac8h ( 76488) load\u001b[0m"}
+{"t":1785796834.631,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (549) esp_image: segment 5: paddr=0020e7c4 vaddr=40812f30 size=001e0h (   480) load\u001b[0m"}
+{"t":1785796834.642,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (554) boot: Loaded app from partition at offset 0x10000\u001b[0m"}
+{"t":1785796834.642,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"\u001b[0;32mI (555) boot: Disabling RNG early entropy source...\u001b[0m"}
+{"t":1785796834.664,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Initializing board..."}
+{"t":1785796834.664,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Board initialized, starting runtime..."}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[RECOVERY] boot: cause=user-reset level=green safe_mode=false prior_boot_complete=true"}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms"}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Runtime started"}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] fw-esp32 starting..."}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Spawning I/O task..."}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] I/O task spawned"}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating StreamingMessageRouterTransport..."}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] StreamingMessageRouterTransport created"}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Initializing RMT peripheral at 80MHz..."}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] RMT peripheral initialized"}
+{"t":1785796834.674,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Flash filesystem mounted"}
+{"t":1785796834.759,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating output provider..."}
+{"t":1785796834.759,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Output provider created"}
+{"t":1785796834.759,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating LpServer instance..."}
+{"t":1785796834.759,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] LpServer created"}
+{"t":1785796834.77,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Creating time provider..."}
+{"t":1785796834.77,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] Time provider created"}
+{"t":1785796834.77,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INIT] fw-esp32 initialized, starting server loop... proto=5 commit=1ce45a201a29 dirty=false"}
+{"t":1785796834.866,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.866,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.866,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)"}
+{"t":1785796834.866,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)"}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)"}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11"}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects"}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory"}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)"}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"state","from":"booting","to":"ready"}
+{"t":1785796834.867,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":1,\"msg\":\"listLoadedProjects\"}"}
+{"t":1785796834.872,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.873,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":2,\"msg\":\"listLoadedProjects\"}"}
+{"t":1785796834.878,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.878,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":3,\"msg\":{\"filesystem\":{\"read\":{\"path\":\"/.lp/device.json\"}}}}"}
+{"t":1785796834.883,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.884,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":4,\"msg\":{\"filesystem\":{\"changesSince\":{\"prefix\":\"/projects/studio\",\"since\":0,\"cursor\":null}}}}"}
+{"t":1785796834.888,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796834.895,"session":"runtime-1","kind":"sync","content":"empty"}
+{"t":1785796864.191,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":5,\"msg\":{\"filesystem\":{\"write\":{\"path\":\"/.lp/device.json\",\"data\":\"{\\n  \\\"uid\\\": \\\"dev_GEWw6xW9O1EFIwrh\\\",\\n  \\\"name\\\": \\\"2026-08-03 - esp32c6\\\"\\n}\"}}}}"}
+{"t":1785796864.194,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.194,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [perf] frame=4640 fps=928 elapsed=5000ms recv=0ms tick=0ms send=0ms total=0ms responses=0"}
+{"t":1785796864.194,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [perf] frame=9281 fps=928 elapsed=5000ms recv=0ms tick=0ms send=0ms total=0ms responses=0"}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [perf] frame=13938 fps=931 elapsed=5000ms recv=0ms tick=0ms send=0ms total=0ms responses=0"}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [perf] frame=18592 fps=930 elapsed=5001ms recv=0ms tick=0ms send=0ms total=0ms responses=0"}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [perf] frame=23239 fps=929 elapsed=5000ms recv=0ms tick=0ms send=0ms total=0ms responses=0"}
+{"t":1785796864.196,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.243,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.277,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":6,\"msg\":\"listLoadedProjects\"}"}
+{"t":1785796864.279,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.279,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":7,\"msg\":{\"filesystem\":{\"read\":{\"path\":\"/.lp/device.json\"}}}}"}
+{"t":1785796864.287,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.288,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":8,\"msg\":{\"filesystem\":{\"changesSince\":{\"prefix\":\"/projects/studio\",\"since\":0,\"cursor\":null}}}}"}
+{"t":1785796864.297,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796864.332,"session":"runtime-1","kind":"sync","content":"empty"}

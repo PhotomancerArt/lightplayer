@@ -1,0 +1,84 @@
+{"t":1785796790.504,"kind":"sweep","disposition":"ran"}
+{"t":1785796790.505,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
+{"t":1785796790.516,"kind":"flow","from":"discovering-endpoints","to":"selecting-endpoint"}
+{"t":1785796790.517,"kind":"flow","from":"selecting-endpoint","to":"connecting"}
+{"t":1785796790.735,"endpoint":"browser-serial-esp32-port-1","kind":"state","to":"booting"}
+{"t":1785796790.736,"kind":"flow","from":"connecting","to":"connected"}
+{"t":1785796790.737,"session":"runtime-1","endpoint":"browser-serial-esp32-port-1","kind":"pool","action":"install","detail":"Device"}
+{"t":1785796790.739,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ets Jul 29 2019 12:21:46"}
+{"t":1785796790.739,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.74,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:"}
+{"t":1785796790.741,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.741,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32v3: [fw-esp32v3] hardware manifest: domraem/dom-z-102 (DOM-Z-102)"}
+{"t":1785796790.741,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.741,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver: 4 WS281x channels for 4 declared (plan=Some([2, 0, 2, 0, 2, 0, 2, 0]) ch0_window_words=128 ch0_half_words=64)"}
+{"t":1785796790.741,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.741,"endpoint":"browser-serial-esp32-port-1","kind":"state","from":"booting","to":"ready"}
+{"t":1785796790.742,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":1,\"msg\":\"listLoadedProjects\"}"}
+{"t":1785796790.753,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects"}
+{"t":1785796790.753,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.753,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: found configured startup project: Shader oracle"}
+{"t":1785796790.753,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.758,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: auto-loading /projects/Shader oracle"}
+{"t":1785796790.761,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.761,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: [mem] boot auto_load before: 166800 B free / 11376 B used (162k / 11k)"}
+{"t":1785796790.761,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new start: 162k free / 11k used"}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after root path: 162k free / 11k used"}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after services: 162k free / 11k used"}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after core project: 145k free / 28k used"}
+{"t":1785796790.784,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after graphics: 145k free / 28k used"}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project: [mem] project new after wrapper: 145k free / 28k used"}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpa_server::project_manager: Project loaded: Shader oracle"}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: [mem] boot auto_load after: 145720 B free / 32456 B used (142k / 31k)"}
+{"t":1785796790.788,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/Shader oracle"}
+{"t":1785796790.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=NodeId(3), 1628 bytes)"}
+{"t":1785796790.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=NodeId(3), elapsed=83ms, lpir_inst_count=191, lpir_func_count=5, lpir_import_count=2, final_inst_count=611, final_code_size=2444 bytes, float=fixed)"}
+{"t":1785796790.793,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.797,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32v3::output::rmt::esp32v3_rmt_ws281x_driver: Esp32V3RmtWs281xDriver::open: endpoint=esp32v3-rmt-ws281x:ws281x:rmt:IO13 gpio=/gpio/13 ws281x_ch=0 rmt_slot=0 bytes=192"}
+{"t":1785796790.797,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.797,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened channel handle=1, endpoint=ws281x:rmt:IO13, byte_count=192"}
+{"t":1785796790.797,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.797,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)"}
+{"t":1785796790.797,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.804,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":2,\"msg\":\"listLoadedProjects\"}"}
+{"t":1785796790.842,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.848,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":3,\"msg\":{\"filesystem\":{\"read\":{\"path\":\"/.lp/device.json\"}}}}"}
+{"t":1785796790.89,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796790.891,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":4,\"msg\":{\"filesystem\":{\"changesSince\":{\"prefix\":\"/projects/Shader oracle\",\"since\":0,\"cursor\":null}}}}"}
+{"t":1785796790.973,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796791.056,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":5,\"msg\":{\"filesystem\":{\"hashPackage\":{\"prefix\":\"/projects/Shader oracle\"}}}}"}
+{"t":1785796791.141,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796791.143,"session":"runtime-1","kind":"sync","content":"pending-identity"}
+{"t":1785796793.046,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":6,\"msg\":{\"filesystem\":{\"write\":{\"path\":\"/.lp/device.json\",\"data\":\"{\\n  \\\"uid\\\": \\\"dev_H5Wqj7OBwS17o90R\\\",\\n  \\\"name\\\": \\\"2026-08-03 - lightplayer\\\"\\n}\"}}}}"}
+{"t":1785796793.117,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796793.144,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":7,\"msg\":\"listLoadedProjects\"}"}
+{"t":1785796793.185,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796793.186,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":8,\"msg\":{\"filesystem\":{\"read\":{\"path\":\"/.lp/device.json\"}}}}"}
+{"t":1785796793.231,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796793.236,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":9,\"msg\":{\"filesystem\":{\"changesSince\":{\"prefix\":\"/projects/Shader oracle\",\"since\":0,\"cursor\":null}}}}"}
+{"t":1785796793.316,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796793.395,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":10,\"msg\":{\"filesystem\":{\"hashPackage\":{\"prefix\":\"/projects/Shader oracle\"}}}}"}
+{"t":1785796793.488,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796793.666,"session":"runtime-1","kind":"sync","content":"adopted"}
+{"t":1785796796.598,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":11,\"msg\":\"listLoadedProjects\"}"}
+{"t":1785796796.6,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796796.6,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [perf] frame=213 fps=42 elapsed=5003ms recv=0ms tick=20ms send=0ms total=20ms responses=0"}
+{"t":1785796796.635,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796796.636,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":12,\"msg\":{\"projectCommand\":{\"handle\":1,\"command\":{\"read_inventory\":{\"request\":null}}}}}"}
+{"t":1785796796.684,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796796.71,"endpoint":"browser-serial-esp32-port-1","kind":"tx","frame":"{\"id\":13,\"msg\":{\"projectRead\":{\"handle\":1,\"request\":{\"since\":null,\"queries\":[{\"shapes\":{\"level\":\"detail\"}},{\"nodes\":{\"level\":\"detail\",\"nodes\":\"all\",\"include_slots\":true}},{\"resources\":{\"level\":\"summary\",\"payloads\":\"none\"}},{\"runtime\":null}],\"probes\":[{\"binding_graph\":{\"include_values\":true}}]}}}}"}
+{"t":1785796796.744,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796796.746,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[WARN] fw_esp32v3::serial::io_task: [io_task] UART RX error: FifoOverflowed; dropping partial line"}
+{"t":1785796800.598,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":""}
+{"t":1785796800.598,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"[INFO] fw_esp32_common::server_loop: [perf] frame=446 fps=46 elapsed=5013ms recv=0ms tick=20ms send=0ms total=20ms responses=0"}

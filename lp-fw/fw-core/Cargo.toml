@@ -11,6 +11,13 @@ default = []
 std = ["log/std"]
 emu = ["ser-write-json", "lpc-wire/ser-write-json"]
 
+# FIXTURE build — test scaffolding, never shipped. Suppresses the
+# unsolicited hello so the board reads as pre-hello firmware (the s4
+# device scenario). Pair with `lpa-server/fixture-no-hello`, which refuses
+# the client's Hello REQUEST; suppressing only one half leaves the board
+# compatible.
+fixture-no-hello = []
+
 [dependencies]
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }

@@ -309,7 +309,11 @@ fn same_kind_body_value_edit_does_not_report_node_use_change() {
         br#"
 {
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": {
       "source": "bus:control.out"

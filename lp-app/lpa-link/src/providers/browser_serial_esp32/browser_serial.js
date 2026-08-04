@@ -42,25 +42,30 @@ export async function getGrantedPorts() {
     return [];
   }
   const { BrowserEsp32DeviceController } = await loadControllerModule();
-  return ports.map((port) => {
-    for (const [id, session] of sessions) {
-      if (session.port === port) {
-        return { id, label: session.label };
-      }
+  return ports.map((port) => sessionForPort(BrowserEsp32DeviceController, port, undefined));
+}
+
+// The ONE session-per-SerialPort rule, shared by the chooser and the
+// granted-ports paths so they cannot drift (they did: requestPort used to
+// mint a second controller over an already-registered port, and two
+// controllers contending for one port's reader/writer is a concrete
+// disconnect mechanism — the multi-board L1 defect).
+function sessionForPort(BrowserEsp32DeviceController, port, label) {
+  for (const [id, session] of sessions) {
+    if (session.port === port) {
+      return { id, label: session.label };
     }
-    const id = nextSessionId++;
-    const session = new BrowserEsp32DeviceController({ port });
-    sessions.set(id, session);
-    return { id, label: session.label };
-  });
+  }
+  const id = nextSessionId++;
+  const session = new BrowserEsp32DeviceController({ port, label });
+  sessions.set(id, session);
+  return { id, label: session.label };
 }
 
 export async function requestPort() {
   const { BrowserEsp32DeviceController } = await loadControllerModule();
   const { port, label } = await BrowserEsp32DeviceController.requestPort();
-  const id = nextSessionId++;
-  sessions.set(id, new BrowserEsp32DeviceController({ port, label }));
-  return { id, label };
+  return sessionForPort(BrowserEsp32DeviceController, port, label);
 }
 
 export async function openPort(id, baudRate) {

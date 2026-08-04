@@ -38,7 +38,7 @@
 //!
 //! # Why the pin is bound at `open`, not at construction
 //!
-//! An endpoint is a board label (`ws281x:rmt:IO18`), and which label a project
+//! An endpoint is a board label (`ws281x:local:IO18`), and which label a project
 //! drives is authored data that arrives long after boot. So the RMT channel is
 //! configured up front (its memory blocks and interrupt are chip resources,
 //! not project ones) and its **pin** is connected when a project opens the
@@ -331,7 +331,7 @@ impl Ws281xDriver for Esp32V3RmtWs281xDriver {
                 continue;
             }
             let address = resource.address().clone();
-            let spec = ws281x_rmt_spec(resource.display_label());
+            let spec = ws281x_local_spec(resource.display_label());
             endpoints.push(HwEndpoint::new(
                 self.endpoint_id(&spec),
                 spec,
@@ -681,7 +681,7 @@ fn has_board_assigned_label(address: &HwAddress, display_label: &str) -> bool {
     !display_label.eq_ignore_ascii_case(&format!("GPIO{raw}"))
 }
 
-fn ws281x_rmt_spec(config: &str) -> HwEndpointSpec {
-    HwEndpointSpec::parse(format!("ws281x:rmt:{config}"))
+fn ws281x_local_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(format!("ws281x:local:{config}"))
         .expect("manifest display label should form a valid endpoint spec")
 }

@@ -580,7 +580,7 @@ mod tests {
         vec![
             (
                 "project.json".to_string(),
-                format!(r#"{{"format":3,"name":"Demo {marker}"}}"#).into_bytes(),
+                format!(r#"{{"format":4,"name":"Demo {marker}"}}"#).into_bytes(),
             ),
             ("shader.glsl".to_string(), marker.as_bytes().to_vec()),
         ]
@@ -691,7 +691,7 @@ mod tests {
         let mut files = vec![
             (
                 "project.json".to_string(),
-                br#"{"format":3,"uid":"prj_zzzzzzzzzzzzzzzz","name":"Wild One"}"#.to_vec(),
+                br#"{"format":4,"uid":"prj_zzzzzzzzzzzzzzzz","name":"Wild One"}"#.to_vec(),
             ),
             ("shader.glsl".to_string(), b"wild".to_vec()),
             (".lp/device.json".to_string(), b"{}".to_vec()),

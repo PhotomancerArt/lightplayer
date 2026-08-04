@@ -1824,6 +1824,22 @@ label:has(> input:not(:disabled)) {
     min-height: 0;
 }
 
+/* The output face's board diagram (P5). The renderer sizes its SVG from the
+   pin pitch, which is a DRAWING decision, not a layout one — a card is
+   whatever width the workspace gives it. Letting the diagram scale down to
+   the column (aspect preserved via its own viewBox) is what keeps the whole
+   board legible at sm without a second, hand-tuned pitch. */
+.ux-output-board {
+    display: flex;
+    justify-content: center;
+    padding: 12px 16px;
+}
+
+.ux-output-board .lpb-diagram {
+    max-width: 100%;
+    height: auto;
+}
+
 /* The face-embedded mapping editor (one-home edit mode). */
 .lpme-face-editor {
     display: flex;

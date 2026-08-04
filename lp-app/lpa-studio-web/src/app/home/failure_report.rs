@@ -145,6 +145,8 @@ mod tests {
 
     fn failed_card() -> (UiDeviceCard, CardOp) {
         let card = UiDeviceCard {
+            port_label: None,
+            session_key: None,
             uid: None,
             name: "Luna's porch sign".to_string(),
             transport: "USB".to_string(),

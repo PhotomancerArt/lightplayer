@@ -1,6 +1,8 @@
 //! The kind-specific face variants a node card can render.
 
-use crate::{UiFixtureFace, UiModuleFace, UiPanelGroup, UiPlaylistFace, UiShaderFace};
+use crate::{
+    UiFixtureFace, UiModuleFace, UiOutputFace, UiPanelGroup, UiPlaylistFace, UiShaderFace,
+};
 
 /// Kind-specific permanent face for a node card.
 ///
@@ -16,6 +18,9 @@ pub enum UiNodeFace {
     /// Playlist card: entry strip; the active child's real card renders
     /// below via the existing [`crate::UiNodeChild`].
     Playlist(UiPlaylistFace),
+    /// Output card: one row per physical wire, over the running device's
+    /// board diagram when its board is known.
+    Output(UiOutputFace),
     /// Module card (`docs/design/modules.md` §5): output-mirror hero, the
     /// scope's panel, and the bus-wiring drawer. Worn at every depth — root
     /// workspace card and embedded child card alike. Its children render

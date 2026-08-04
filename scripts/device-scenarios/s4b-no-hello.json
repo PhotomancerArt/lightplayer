@@ -1,0 +1,24 @@
+{
+  "id": "s4b-no-hello",
+  "title": "Pre-hello firmware (no hello at all)",
+  "board": "C6",
+  "needs": [],
+  "expect": [
+    "state:incompatible(no-hello)"
+  ],
+  "setup": [
+    {
+      "describe": "Flash a FIXTURE build with `fixture-no-hello`: the board neither sends the unsolicited hello nor answers the client's Hello request, which is exactly what pre-hello firmware looks like. Both halves are suppressed on purpose \u2014 Studio's client ASKS as well as listening, so answering would make the board compatible again.",
+      "run": "just fixture-fw no-hello {port}",
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Connect to this board.",
+    "The card should land Incompatible (no-hello) \u2014 absence of a hello IS the mismatch signal (docs/adr/2026-07-14-wire-hello-versioning.md).",
+    "AFTER capturing: put the board back with the card's Update/Flash, or `just build-fw-esp32c6` + espflash."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
+}

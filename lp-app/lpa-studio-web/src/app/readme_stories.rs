@@ -198,6 +198,8 @@ fn readme_lens_card() -> UiDeviceCard {
         )
     };
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         uid: None,
         name: "Simulator".to_string(),
         transport: String::new(),
@@ -234,6 +236,7 @@ fn readme_home_view() -> UiHomeView {
             on_device: None,
             open_elsewhere: false,
             connected_device: Some(lpa_studio_core::UiCardConnection {
+                device_key: "runtime-1".to_string(),
                 device_name: "Workbench ESP32".to_string(),
                 relation: lpa_studio_core::SyncRelation::AtHead,
             }),
@@ -264,6 +267,8 @@ fn readme_home_view() -> UiHomeView {
     ];
     let devices = vec![
         UiDeviceCard {
+            port_label: None,
+            session_key: None,
             uid: None,
             name: "Simulator".to_string(),
             transport: String::new(),
@@ -281,6 +286,8 @@ fn readme_home_view() -> UiHomeView {
             detected_chip: None,
         },
         UiDeviceCard {
+            port_label: None,
+            session_key: None,
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
             name: "Workbench ESP32".to_string(),
             transport: "USB".to_string(),
