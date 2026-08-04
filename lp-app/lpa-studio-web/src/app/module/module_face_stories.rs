@@ -15,8 +15,8 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::NodePane;
 
 use super::module_fixtures::{
-    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, held_root_view, module_node_view,
-    plasma_children, plasma_face, plasma_one_panel, root_module_node_view,
+    HELD, PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, control_root_face, held_root_face, held_root_view,
+    module_node_view, plasma_children, plasma_face, plasma_one_panel, root_module_node_view,
 };
 use super::{ModuleFace, PanelGesture};
 
@@ -114,6 +114,23 @@ fn nested_groups() -> Element {
         WorkspaceCanvas {
             div { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 ModuleFace { face, on_action: move |_| {} }
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Control Output",
+    description = "A control-first module: no channel in the scope carries a visual, so the mirror would render cleared — the hero is the scope's `control.out` product instead, the fixture's lamp layout drawn by the same preview component the fixture card uses. The wiring drawer below shows where it comes from: the fixture writes it, the hardware output reads it."
+)]
+fn control_output() -> Element {
+    let mut face = control_root_face();
+    face.wiring_open = true;
+    rsx! {
+        WorkspaceCanvas {
+            NodePane {
+                view: module_node_view("Scanner Rig", ROOT_SCOPE, "3 nodes · 1 fixture", face),
+                on_action: move |_| {},
             }
         }
     }
