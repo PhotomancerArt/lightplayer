@@ -42,6 +42,9 @@
     --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
     --good-text: #7be0b2;
 
+    --panel-primary: #18201d;
+    --panel-primary-border: #34463e;
+
     --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
     --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
 
@@ -63,6 +66,11 @@
   p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 12px; max-width: 780px; }
   code { font-family: var(--mono); font-size: .92em; color: var(--muted); }
 
+  details.archive { margin-top: 40px; border-top: 1px solid var(--border-muted); padding-top: 10px; }
+  details.archive > summary { cursor: pointer; font-size: 12px; letter-spacing: .1em;
+    color: var(--subtle); text-transform: uppercase; user-select: none; }
+  details.archive .aside-reason { color: var(--dim); font-size: 11.5px; font-style: italic; }
+
   /* ---- exploration controls ---- */
   .xcontrols {
     display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
@@ -77,10 +85,6 @@
                         text-transform: uppercase; letter-spacing: .07em; }
   .xcontrols label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
   .xcontrols input { accent-color: var(--accent); }
-  #selReadout { margin-left: auto; font-family: var(--mono); font-size: 11px;
-                color: var(--subtle); border: 1px solid var(--border-strong);
-                border-radius: var(--r-xs); padding: 2px 8px; background: var(--surface-subtle); }
-  #selReadout b { color: var(--sel-border); font-weight: 600; }
 
   /* ---- module card frame ---- */
   .mcard {
@@ -110,7 +114,6 @@
     padding: 10px 0; user-select: none;
   }
   .sect > .sbody { min-width: 0; padding: 10px 14px 12px 2px; }
-  .drawer-note { margin: 0 0 10px; font-size: 11.5px; line-height: 1.4; color: var(--dim); }
 
   .empty-scope { font-size: 12.5px; color: var(--subtle); }
   .empty-scope p { margin: 0 0 4px; }
@@ -139,7 +142,7 @@
   .site.picked { border-color: var(--good-text); }
 
   .chan {
-    display: inline-flex; align-items: baseline; gap: 6px; cursor: pointer;
+    display: inline-flex; align-items: baseline; gap: 6px;
     border: 1px solid var(--bound-border); border-radius: var(--r-xs);
     background: var(--bound-bg); color: var(--bound-text);
     padding: 2px 8px; font-family: var(--mono); font-size: 12px; font-weight: 600;
@@ -147,7 +150,6 @@
   }
   .chan .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .chan.contended { border-color: var(--attn-border); box-shadow: 0 0 0 1px var(--attn-border) inset; }
-  .selected, .site.selected, .chan.selected { outline: 1.5px solid var(--sel-border); outline-offset: 1px; }
   .kindb { font-size: 8.5px; font-weight: 700; letter-spacing: .07em; color: var(--subtle);
            text-transform: uppercase; font-family: var(--sans); flex: none; }
   .primaryb {
@@ -165,7 +167,6 @@
   .vval.err { color: var(--err-text); font-weight: 400; font-size: 11.5px; }
   .vval.none { color: var(--dim); font-weight: 400; }
   .vval.invite { color: var(--dim); font-weight: 400; font-size: 11px; font-style: italic; }
-  .arrow { color: var(--dim); font-size: 11px; }
 
   /* rich values: product thumb + float bar */
   .vthumb { display: inline-block; border-radius: 3px; border: 1px solid var(--border-strong);
@@ -178,6 +179,7 @@
           background: var(--track); vertical-align: 2px; margin-left: 6px;
           border: 1px solid var(--border-muted); position: relative; overflow: hidden; }
   .vbar i { position: absolute; inset: 0; right: auto; background: var(--live-text); opacity: .75; }
+  .vbar.wide { width: 84px; height: 4px; }
 
   .scope-head {
     display: flex; align-items: center; gap: 8px; margin: 12px 0 6px;
@@ -189,33 +191,36 @@
   .scope-head .tag { color: var(--dim); font-weight: 600; letter-spacing: .05em; }
   .scope-indent { border-left: 2px solid var(--bound-bg); padding-left: 10px; margin-left: 2px; }
 
-  /* =============== 1. current production =============== */
-  .w0-pane { border: 1px solid var(--bound-border); border-radius: var(--r-sm);
-             overflow: hidden; margin-bottom: 8px; background: var(--terminal); }
-  .w0-title { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
-              background: var(--bound-bg); border-bottom: 1px solid var(--bound-border); }
-  .w0-title .busic { color: var(--bound-text); font-size: 11px; }
-  .w0-title .nm { font-weight: 700; font-size: 12.5px; color: var(--text); }
-  .w0-link { margin-left: auto; width: 30px; height: 22px; border: 1px solid var(--bound-border);
-             border-radius: var(--r-xs); background: var(--bound-bg); color: var(--bound-text);
-             display: inline-flex; align-items: center; justify-content: center; font-size: 11px;
-             cursor: pointer; }
-  .w0-body { padding: 12px 10px; text-align: center; }
-
-  /* =============== 2. horizontal flow =============== */
+  /* =============== horizontal flow (THE direction) =============== */
   .w2-row { position: relative; display: grid;
-            grid-template-columns: minmax(0,1fr) 44px auto 44px minmax(0,1fr);
-            align-items: center; padding: 9px 2px; border-top: 1px solid var(--border-muted); }
+            grid-template-columns: minmax(0,1fr) 40px minmax(176px,220px) 40px minmax(0,1fr);
+            align-items: center; padding: 10px 2px; border-top: 1px solid var(--border-muted); }
   .w2-row:first-child, .scope-indent .w2-row:first-of-type { border-top: 0; }
   .w2-writers { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; min-width: 0; }
   .w2-readers { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; min-width: 0; }
-  .w2-hub { display: grid; justify-items: center; gap: 3px; z-index: 1; max-width: 240px; }
-  .w2-hub .under { font-size: 10px; color: var(--dim); display: flex; gap: 6px; align-items: baseline; }
   .w2-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
   .w2-none { font-size: 10.5px; color: var(--dim); font-style: italic; padding: 2px 0;
              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .w2-hidden { font-size: 10px; color: var(--dim); font-style: italic; padding: 1px 0 2px;
+               border-top: 1px dotted var(--border-strong); margin-top: 2px; }
 
-  /* =============== 3. vertical flow =============== */
+  /* the value box: channel header + live value body */
+  .hubcard { z-index: 1; width: 100%; border: 1px solid var(--bound-border);
+             border-radius: var(--r-sm); background: var(--terminal); overflow: hidden; }
+  .hubcard.contended { border-color: var(--attn-border); }
+  .hub-h { display: flex; align-items: baseline; gap: 6px; padding: 3px 8px 4px;
+           background: var(--bound-bg); border-bottom: 1px solid var(--bound-border); min-width: 0; }
+  .hubcard.contended .hub-h { border-bottom-color: var(--attn-border); }
+  .hub-h .nm { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--bound-text);
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .hub-h .kindb { margin-left: auto; }
+  .hub-v { padding: 7px 9px 8px; text-align: center; }
+  .hub-v .vval { font-size: 14px; }
+  .hub-v .cap { display: block; margin-top: 4px; font-family: var(--mono); font-size: 10px;
+                color: var(--subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hub-v .contendrow { margin-top: 5px; }
+
+  /* =============== vertical flow (archived) =============== */
   .w3-wrap { overflow-x: auto; padding: 4px 2px 8px; }
   .w3-strips { display: inline-flex; gap: 12px; min-width: 100%; align-items: flex-start; }
   .w3-strip { width: 148px; flex: none; display: grid; justify-items: center; }
@@ -227,7 +232,7 @@
   .w3-capbox { height: 84px; display: flex; align-items: center; width: 100%; justify-content: center; }
   .w3-cap { display: grid; justify-items: center; gap: 3px; padding: 6px 9px; width: 100%;
             border: 1px solid var(--bound-border); border-radius: var(--r-sm);
-            background: var(--bound-bg); cursor: pointer; }
+            background: var(--bound-bg); }
   .w3-cap.contended { border-color: var(--attn-border); }
   .w3-cap .nm { font-family: var(--mono); font-size: 11.5px; font-weight: 700;
                 color: var(--bound-text); max-width: 126px; overflow: hidden;
@@ -237,7 +242,7 @@
   .w3-cap .vthumb.md { width: 116px; height: 26px; }
   .w3-strip .site { max-width: 144px; }
 
-  /* =============== 4. value cards =============== */
+  /* =============== value cards (archived) =============== */
   .wc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
   .wc-card { border: 1px solid var(--bound-border); border-radius: var(--r-sm);
              background: var(--terminal); overflow: hidden; display: flex; flex-direction: column; }
@@ -246,7 +251,7 @@
              background: var(--bound-bg); border-bottom: 1px solid var(--bound-border); min-width: 0; }
   .wc-card.contended .wc-head { border-bottom-color: var(--attn-border); }
   .wc-head .nm { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--bound-text);
-                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wc-hero { padding: 10px 10px 8px; text-align: center; }
   .wc-hero .vval { font-size: 14px; }
   .wc-io { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--border-muted);
@@ -258,7 +263,7 @@
   .wc-io .list { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
   .wc-io .site { max-width: 100%; }
 
-  /* =============== 5. matrix =============== */
+  /* =============== matrix (archived) =============== */
   .w4-scroll { overflow-x: auto; }
   table.w4 { border-collapse: collapse; font-size: 11.5px; min-width: 100%; }
   table.w4 th, table.w4 td { padding: 4px 8px; border: 1px solid var(--border-muted); }
@@ -282,9 +287,9 @@
     font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
     color: var(--bound-text); text-align: left; padding-top: 10px; }
 
-  /* =============== 6. nomenclature =============== */
+  /* =============== nomenclature =============== */
   .nom-grid { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
-  .nom-col { width: 300px; }
+  .nom-col { width: 302px; }
   .nom-col h3 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
                 color: var(--muted); margin: 0 0 8px; }
   .nom-col h3 .lean { color: var(--good-text); font-size: 9.5px; margin-left: 6px; }
@@ -296,8 +301,15 @@
   .nom-card .mhead .kind { font-size: 10.5px; }
   .nom-card .sect > .srail { font-size: 8px; padding: 6px 0; }
   .nom-card .sect > .sbody { padding: 7px 10px 8px 2px; }
-  .nom-card .sect.panelish > .srail { color: var(--heading); }
-  .nom-card .sect.paneltint { background: linear-gradient(90deg, rgba(52,70,62,.18), transparent 60%); }
+  /* the module-panel "teach it" treatment: panel-primary tint + framed edge + play chip */
+  .nom-card .sect.paneltint { background: linear-gradient(90deg, rgba(52,70,62,.28), rgba(52,70,62,.06)); }
+  .nom-card .sect.paneltint > .srail { color: var(--heading); }
+  .nom-card .sect.paneltint > .sbody { position: relative; }
+  .playchip { position: absolute; top: 4px; right: 8px; display: inline-flex; gap: 4px;
+              align-items: center; font-size: 8.5px; font-weight: 800; letter-spacing: .09em;
+              text-transform: uppercase; color: var(--heading);
+              border: 1px solid var(--panel-primary-border); border-radius: 3px;
+              background: var(--panel-primary); padding: 1px 5px; }
   .nom-thumb { height: 34px; border-radius: 4px;
                background: linear-gradient(115deg, #16324a, #1f6f65 45%, #79d6a3); opacity: .85; }
   .nom-knobs { display: flex; gap: 14px; }
@@ -323,16 +335,14 @@
 
 <h1>Wiring UI — visualizing the bus</h1>
 <p class="hint">
-  The question: <b>how do we show the bus to users?</b> Three things must surface —
-  the <b>channels</b>, the <b>bindings</b> on them (writers and readers, with their flavors:
-  default-origin, inherited, engaged panel writers, module publishes, E3 contention), and
-  <b>what's on the channel</b> (the live value or product — a <code>visual.out</code> should show
-  its picture, not a debug string). It should be one hop from wiring to value. This spike also
-  trials <b>selection</b> as a new UI concept: click any channel or binding site — the readout in
-  the strip below tracks it, and the target flashes everywhere it appears (stand-in for
-  "selection jumps to the actual thing"). Hovering a node chip highlights that node everywhere.
-  A proper node-graph view is real but later; these are the drawer-scale answers.
-  Section 6 carries the CONTROLS-vs-PANEL nomenclature question.
+  <b>Converged at gate 1 (2026-08-03): the horizontal flow is the direction</b> —
+  writers enter left, the channel's <b>value box</b> is the junction, readers exit right.
+  This round makes the box <i>show</i> the value (the gate-1 gap): products render as pictures,
+  floats as big numbers with bars. Wire weight carries resolution — winning writer solid violet,
+  shadowed dashed, E3 contention orange with the <b>pick</b> affordance. Selection-as-a-concept
+  is parked (gate 1); clicking a site still flashes that node everywhere as a stand-in for
+  focus-jump, and hover highlights a node across the view. Node-graph view is later.
+  Set-aside concepts are archived at the bottom for contrast.
 </p>
 
 <div class="xcontrols">
@@ -347,34 +357,21 @@
   </span>
   <span class="grp">
     <label><input type="checkbox" id="engageHue" checked> engage <code>hue</code></label>
+    <label><input type="checkbox" id="showInh" checked> show inherited readers</label>
     <label><input type="checkbox" id="live" checked> live values</label>
   </span>
-  <span id="selReadout">selection: <b>none</b></span>
 </div>
 
-<section class="concept" id="w0">
-  <h2>1. Current production — for contrast</h2>
-  <p class="thesis">
-    What shipped in the relocation (the retired bus pane's rows, unchanged): a violet value-hero
-    pane per channel; bindings only in the link-button popup; embedded scopes flattened into a
-    name prefix. None of the directions below look like this — it's here as the baseline to beat.
-  </p>
-  <div class="mcard">
-    <div class="mhead"><span class="chev">⌄</span><span class="name" id="w0name">Aurora Sign</span>
-      <span class="kind">module</span><span class="info">i</span></div>
-    <div class="sect"><div class="srail">wiring</div>
-      <div class="sbody"><div id="w0body"></div></div></div>
-  </div>
-</section>
-
 <section class="concept" id="w2">
-  <h2>2. Horizontal flow — [writers] → [value] → [readers]</h2>
+  <h2>1. The direction — [writers] → [value box] → [readers]</h2>
   <p class="thesis">
-    The sketch, literally: writers enter left, the channel box holds the name <i>and what's on
-    the channel</i>, readers exit right. Wire weight carries resolution — the winning writer's
-    wire is solid violet, shadowed writers dim to dashed, E3 contention turns both wires orange
-    with the <b>pick</b> affordance on the box. Reads as dataflow without being a free-form graph:
-    still a per-scope list, one channel per row.
+    The channel box is now a real value box: name in the violet header, <i>what's on the channel</i>
+    as the body — a picture for visuals, a big number + bar for floats, the authored default
+    (italic) for R6 invitations, red for unresolved. The <b>show inherited readers</b> toggle above
+    is gate question 2 made concrete: with it ON, root's <code>time</code> row lists
+    <code>plasma_1 · sim</code> — a reader that lives <i>inside</i> the plasma scope and reaches
+    root time through R5 inheritance (dotted chips). With it OFF, those rows say
+    "2 inherited readers in child scopes" instead of listing them.
   </p>
   <div class="mcard">
     <div class="mhead"><span class="chev">⌄</span><span class="name" id="w2name">Aurora Sign</span>
@@ -384,123 +381,119 @@
   </div>
 </section>
 
-<section class="concept" id="w3">
-  <h2>3. Vertical flow — the same diagram, rotated</h2>
-  <p class="thesis">
-    Writers drop in from above, the value box sits mid-lane, readers tap off below; channels
-    stand side by side like console strips and the strip scrolls sideways as a scope grows.
-    Products get room to be pictures. Strongest at "what does this scope carry"; tightest on
-    horizontal space for long site lists.
-  </p>
-  <div class="mcard">
-    <div class="mhead"><span class="chev">⌄</span><span class="name" id="w3name">Aurora Sign</span>
-      <span class="kind">module</span><span class="info">i</span></div>
-    <div class="sect"><div class="srail">wiring</div>
-      <div class="sbody"><div id="w3body"></div></div></div>
-  </div>
-</section>
-
-<section class="concept" id="wc">
-  <h2>4. Value cards — the value is the hero, the wiring is the caption</h2>
-  <p class="thesis">
-    One card per channel: the live value/product as the hero, writers and readers as two visible
-    lists underneath — the current design's monitoring strength, but with the popup's contents
-    promoted onto the card. Cards pack into a grid, so a big scope stays shallow instead of tall.
-    The least diagrammatic option: no drawn flow, just legible lists.
-  </p>
-  <div class="mcard">
-    <div class="mhead"><span class="chev">⌄</span><span class="name" id="wcname">Aurora Sign</span>
-      <span class="kind">module</span><span class="info">i</span></div>
-    <div class="sect"><div class="srail">wiring</div>
-      <div class="sbody"><div id="wcbody"></div></div></div>
-  </div>
-</section>
-
-<section class="concept" id="w4">
-  <h2>5. Matrix — nodes × channels (wildcard)</h2>
-  <p class="thesis">
-    The inverse pivot: rows are nodes, columns are channels, cells say
-    <b style="color:var(--bound-text)">W</b>rites / <span style="color:var(--subtle)">R</span>eads;
-    values live in the column headers. Answers "what is this node's bus footprint?" — the question
-    every flow view makes you hunt for. Scales best, reads coldest; if it earns a place it's as a
-    second view behind a toggle, not the default.
-  </p>
-  <div class="mcard">
-    <div class="mhead"><span class="chev">⌄</span><span class="name" id="w4name">Aurora Sign</span>
-      <span class="kind">module</span><span class="info">i</span></div>
-    <div class="sect"><div class="srail">wiring</div>
-      <div class="sbody"><div class="w4-scroll" id="w4body"></div></div></div>
-  </div>
-</section>
-
 <section class="concept" id="nom">
-  <h2>6. Nomenclature — CONTROLS vs PANEL</h2>
+  <h2>2. Nomenclature — what do the rails say, and how do we teach it?</h2>
   <p class="thesis">
-    Today a leaf card labels its knob strip <code>CONTROLS</code> and a module card labels the
-    identical-looking strip <code>PANEL</code>. The ratified docs already resolve the concepts:
-    <b>every node has a panel</b> (R8), and a <b>control</b> is one channel's presentation
-    <i>on</i> a panel (panel.md P1). The question is only what the section rail says. Three schemes,
-    each shown on a module card and a leaf card:
+    Gate-1 steer: "panel everywhere" appeals but blurs two readings; "panel + settings" floated;
+    and if only modules have panels, the leaf/module strips <i>look identical</i> — the teaching
+    problem. The differentiated schemes below apply a "teach it" treatment to the module panel:
+    the existing <code>panel-primary</code> green tint plus a <b>▶ play surface</b> chip — the
+    claim being that the panel is <i>the thing play mode renders</i>, and that visual link is what
+    teaches the difference, whatever the words say.
   </p>
   <div class="nom-grid">
     <div class="nom-col">
-      <h3>A — “panel” everywhere <span class="lean">◈ lean</span></h3>
+      <h3>A — “panel” everywhere</h3>
       <div class="nom-card">
         <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
         <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
-        <div class="sect panelish"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
         <div class="sect"><div class="srail">wiring</div><div class="sbody"><span class="nom-wiring">6 channels · writers → readers</span></div></div>
       </div>
       <div class="nom-card">
         <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
-        <div class="sect panelish"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
+        <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
       </div>
-      <p class="why">One word, one concept, every depth — matches R8 literally (“every node has a
-        panel”), play mode (“renders panels”), and panel.md (“controls” = the things <i>on</i> a
-        panel, never a place). Cheapest to say out loud: “put it on the panel.”</p>
+      <p class="why">One word matching R8 (“every node has a panel”). Honest to the model — but
+        the two rails read as the same surface when one is a node's own knobs and the other is a
+        whole scope's aggregate. This blur is exactly what gate 1 flagged.</p>
     </div>
     <div class="nom-col">
-      <h3>B — “controls” everywhere</h3>
+      <h3>D — “panel” (module) + “settings” (leaf) <span class="lean">◈ lean</span></h3>
       <div class="nom-card">
         <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
         <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
-        <div class="sect"><div class="srail">controls</div><div class="sbody"><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        <div class="sect paneltint"><div class="srail">panel</div><div class="sbody"><span class="playchip">▶ play surface</span><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        <div class="sect"><div class="srail">wiring</div><div class="sbody"><span class="nom-wiring">6 channels · writers → readers</span></div></div>
+      </div>
+      <div class="nom-card">
+        <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
+        <div class="sect"><div class="srail">settings</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
+      </div>
+      <p class="why">Two words for two concepts: the module's <b>panel</b> is the performable
+        product surface (tinted + ▶ = what play mode renders); a leaf's knobs are its
+        <b>settings</b> — you're configuring <i>that node</i>. Caveat to weigh: a bound shader
+        speed knob is also a live performance control, and “settings” can read static/config-ish.</p>
+    </div>
+    <div class="nom-col">
+      <h3>E — “panel” (module) + “controls” (leaf), taught visually</h3>
+      <div class="nom-card">
+        <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
+        <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
+        <div class="sect paneltint"><div class="srail">panel</div><div class="sbody"><span class="playchip">▶ play surface</span><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
         <div class="sect"><div class="srail">wiring</div><div class="sbody"><span class="nom-wiring">6 channels · writers → readers</span></div></div>
       </div>
       <div class="nom-card">
         <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
         <div class="sect"><div class="srail">controls</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
       </div>
-      <p class="why">Keeps the everyday word; reserves “panel” for the shipped end-user surface
-        (play mode). But it contradicts the ratified docs’ vocabulary, and “controls”
-        collides hardest with the <code>control.out</code> product channel.</p>
-    </div>
-    <div class="nom-col">
-      <h3>C — status quo, differentiated</h3>
-      <div class="nom-card">
-        <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
-        <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
-        <div class="sect panelish paneltint"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
-        <div class="sect"><div class="srail">wiring</div><div class="sbody"><span class="nom-wiring">6 channels · writers → readers</span></div></div>
-      </div>
-      <div class="nom-card">
-        <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
-        <div class="sect"><div class="srail">controls</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
-      </div>
-      <p class="why">Keep both words but make PANEL <i>look</i> different (the
-        <code>panel-primary</code> green tint token already exists). Preserves a leaf/module
-        distinction the model itself says doesn’t exist — two words for one concept is the
-        confusion being reported, styled harder.</p>
+      <p class="why">Today's words, kept — the differentiation does all the work: PANEL is tinted
+        and carries ▶; CONTROLS stays plain. Zero rename cost and “controls” stays honest about
+        liveness — but “controls” keeps its collision with the <code>control.out</code> channel,
+        and docs say every node <i>has</i> a panel (leaf panels would simply never be labeled).</p>
     </div>
   </div>
   <div class="nom-note">
-    Adjacent collision, either way: <code>control.out</code> is a <i>bus channel</i> naming the
-    fixture's rendered LED product — a third meaning of "control". Bus vocabulary is still
-    under discovery (§7), so the cheap fix is renaming the channel
-    (<code>fixture.out</code> / <code>led.out</code>) when vocabulary locks down, not renaming
-    the UI around it.
+    Either way: <code>control.out</code> is a <i>bus channel</i> naming the fixture's rendered LED
+    product — an unrelated third meaning of "control". Bus vocabulary is under discovery (§7);
+    rename the channel (<code>fixture.out</code> / <code>led.out</code>) when vocabulary locks
+    down rather than bending the UI words around it.
   </div>
 </section>
+
+<details class="archive" id="archive">
+  <summary>Explored and set aside at gate 1 (kept for contrast — open to compare)</summary>
+
+  <section class="concept" id="w0">
+    <h2>A1. Current production <span class="aside-reason">— the baseline the direction replaces: wiring invisible until a popup</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="w0name">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div id="w0body"></div></div></div>
+    </div>
+  </section>
+
+  <section class="concept" id="w3">
+    <h2>A2. Vertical flow <span class="aside-reason">— set aside: fights the card's width; sideways scroll hides the contended strip</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="w3name">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div id="w3body"></div></div></div>
+    </div>
+  </section>
+
+  <section class="concept" id="wc">
+    <h2>A3. Value cards <span class="aside-reason">— set aside as the default; strong monitor, but resolution isn't drawn. Its value treatment moved into the flow's box</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="wcname">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div id="wcbody"></div></div></div>
+    </div>
+  </section>
+
+  <section class="concept" id="w4">
+    <h2>A4. Matrix <span class="aside-reason">— set aside: possible later second view ("node's bus footprint"), never the default</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="w4name">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div class="w4-scroll" id="w4body"></div></div></div>
+    </div>
+  </section>
+</details>
 
 <script>
 /* ------------------------------------------------------------------ data */
@@ -596,8 +589,7 @@ const DATASETS = {
 };
 
 const state = {
-  ds: "aurora", cont: "ambiguous", engageHue: true, live: true,
-  t: 0, sel: null, // {kind:'chan'|'node', key, label}
+  ds: "aurora", cont: "ambiguous", engageHue: true, showInh: true, live: true, t: 0,
 };
 
 /* Copy of the active dataset with exploration state applied. */
@@ -612,6 +604,10 @@ function activeData() {
         c.value = "0.735"; c.frac = 0.735; c.invite = false;
       } else if (c.hueChan) {
         c.invite = true; c.value = "0.410"; c.frac = 0.41;
+      }
+      if (!state.showInh) {
+        c.hiddenInh = c.readers.filter(r => r.inh).length;
+        c.readers = c.readers.filter(r => !r.inh);
       }
       if (c.contendable) {
         c.contended = state.cont === "ambiguous";
@@ -647,8 +643,6 @@ function siteChip(site, role) {
   if (site.pub) cls.push("pub");
   if (site.shadowed) cls.push("shadowed");
   if (site.picked) cls.push("picked");
-  const key = nodeKey(site);
-  if (state.sel?.kind === "node" && state.sel.key === key) cls.push("selected");
   const label = site.panel ? "panel · engaged"
     : (site.sc ? `<span class="sc">${esc(site.sc)} ·</span> ${esc(site.n)}` : esc(site.n));
   const slot = site.s && !site.panel ? ` <span class="slot">.${esc(site.s)}</span>` : "";
@@ -664,7 +658,7 @@ function siteChip(site, role) {
     : site.inh ? "Inner-scope consumer inheriting this channel (R5)"
     : site.def ? "Default binding"
     : site.pub ? "Module publish (R7)" : "";
-  return `<span class="${cls.join(" ")}" data-node="${esc(key)}" title="${esc(title)}"><span class="lab">${label}${slot}</span>${mark}</span>`;
+  return `<span class="${cls.join(" ")}" data-node="${esc(nodeKey(site))}" title="${esc(title)}"><span class="lab">${label}${slot}</span>${mark}</span>`;
 }
 
 function thumbStyle() {
@@ -672,29 +666,23 @@ function thumbStyle() {
   return `filter:hue-rotate(${shift}deg)`;
 }
 
-/* what's ON the channel — text sizes: sm (inline), md (boxes), lg (card hero) */
+/* what's ON the channel — sm (inline), md (strips), lg (card hero), hub (value box) */
 function valueRich(ch, size) {
   const v = valueOf(ch);
   if (ch.visual && v.kind === "val") {
-    if (size === "lg") return `<span class="vthumb lg" style="${thumbStyle()}"></span>
-      <div style="margin-top:5px"><span class="vval" style="font-size:11px">${esc(v.text)}</span></div>`;
+    if (size === "lg" || size === "hub") {
+      const h = size === "hub" ? "" : "";
+      return `<span class="vthumb lg" style="${thumbStyle()}"></span>
+        <span class="cap">${esc(v.text)}</span>`;
+    }
     if (size === "md") return `<span class="vthumb md" style="${thumbStyle()}" title="${esc(v.text)}"></span>`;
     return `<span class="vthumb sm" style="${thumbStyle()}"></span> <span class="vval">${esc(v.text)}</span>`;
   }
+  const barCls = size === "hub" ? "vbar wide" : "vbar";
   const bar = ch.frac != null && v.kind === "val" && size !== "sm"
-    ? `<span class="vbar"><i style="width:${Math.round(ch.frac * 100)}%"></i></span>` : "";
-  const big = size === "lg" ? ' style="font-size:15px"' : "";
+    ? `<span class="${barCls}"><i style="width:${Math.round(ch.frac * 100)}%"></i></span>` : "";
+  const big = (size === "lg" || size === "hub") ? ' style="font-size:15px"' : "";
   return `<span class="vval ${v.kind === "val" ? "" : v.kind}"${big} ${v.title ? `title="${esc(v.title)}"` : ""}>${esc(v.text)}</span>${bar}`;
-}
-
-function chanCapsule(sc, ch) {
-  const key = `${sc.id}:${ch.name}`;
-  const sel = state.sel?.kind === "chan" && state.sel.key === key ? " selected" : "";
-  return `<span class="chan ${ch.contended ? "contended" : ""}${sel}" data-chan="${esc(key)}"
-      title="bus:${esc(ch.name)}${sc.label ? " in scope " + esc(sc.label) : ""}">
-    <span class="nm">${esc(ch.name)}</span>
-    ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
-    <span class="kindb">${esc(ch.kind ?? "")}</span></span>`;
 }
 
 function contendBadge(ch) {
@@ -720,27 +708,7 @@ function scopeGroups(data, renderScope) {
   }).join("");
 }
 
-/* ------------------------------------------------- 1. current production */
-function renderW0() {
-  const data = activeData();
-  document.getElementById("w0name").textContent = data.title;
-  const rows = [];
-  for (const sc of data.scopes)
-    for (const ch of sc.channels)
-      rows.push({ ...ch, title: sc.label ? `${sc.label} · ${ch.name}` : ch.name });
-  document.getElementById("w0body").innerHTML = rows.length ? rows.map(ch => {
-    const v = valueOf(ch);
-    return `<div class="w0-pane">
-      <div class="w0-title"><span class="busic">⚡︎</span><span class="nm">${esc(ch.title)}</span>
-        ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
-        <span class="kindb">${esc(ch.kind ?? "")}</span>
-        <button class="w0-link" title="Writers → readers live in this popup">⛓</button></div>
-      <div class="w0-body"><span class="vval ${v.kind === "val" ? "" : v.kind}">${esc(v.text)}</span></div>
-    </div>`;
-  }).join("") : emptyScope();
-}
-
-/* ---------------------------------------------------- 2. horizontal flow */
+/* --------------------------------------------- THE DIRECTION: flow rows */
 function renderW2() {
   const data = activeData();
   document.getElementById("w2name").textContent = data.title;
@@ -748,14 +716,21 @@ function renderW2() {
     const writers = ch.writers.length
       ? ch.writers.map(w => siteChip(w, "w")).join("")
       : `<span class="w2-none">no writer — authored default (R6)</span>`;
-    const readers = ch.readers.length
+    let readers = ch.readers.length
       ? ch.readers.map(r => siteChip(r, "r")).join("")
-      : `<span class="w2-none">no readers</span>`;
+      : (ch.hiddenInh ? "" : `<span class="w2-none">no readers</span>`);
+    if (ch.hiddenInh)
+      readers += `<span class="w2-hidden">${ch.hiddenInh} inherited reader${ch.hiddenInh > 1 ? "s" : ""} in child scopes</span>`;
     return `<div class="w2-row">
       <svg class="w2-svg"></svg>
       <div class="w2-writers">${writers}</div><div></div>
-      <div class="w2-hub">${chanCapsule(sc, ch)}
-        <span class="under">${valueRich(ch, "sm")} ${contendBadge(ch)}</span></div>
+      <div class="hubcard ${ch.contended ? "contended" : ""}">
+        <div class="hub-h"><span class="nm">${esc(ch.name)}</span>
+          ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
+          <span class="kindb">${esc(ch.kind ?? "")}</span></div>
+        <div class="hub-v">${valueRich(ch, "hub")}
+          ${ch.contended ? `<div class="contendrow">${contendBadge(ch)}</div>` : ""}</div>
+      </div>
       <div></div>
       <div class="w2-readers">${readers}</div>
     </div>`;
@@ -769,7 +744,7 @@ function drawW2Wires() {
     const rr = row.getBoundingClientRect();
     svg.setAttribute("viewBox", `0 0 ${rr.width} ${rr.height}`);
     svg.setAttribute("width", rr.width); svg.setAttribute("height", rr.height);
-    const hub = row.querySelector(".chan");
+    const hub = row.querySelector(".hubcard");
     if (!hub) { svg.innerHTML = ""; return; }
     const hb = hub.getBoundingClientRect();
     const hubL = { x: hb.left - rr.left, y: hb.top - rr.top + hb.height / 2 };
@@ -800,7 +775,29 @@ function drawW2Wires() {
   });
 }
 
-/* ------------------------------------------------------ 3. vertical flow */
+/* -------------------------------------------------- archived: baseline */
+function renderW0() {
+  const data = activeData();
+  document.getElementById("w0name").textContent = data.title;
+  const rows = [];
+  for (const sc of data.scopes)
+    for (const ch of sc.channels)
+      rows.push({ ...ch, title: sc.label ? `${sc.label} · ${ch.name}` : ch.name });
+  document.getElementById("w0body").innerHTML = rows.length ? rows.map(ch => {
+    const v = valueOf(ch);
+    return `<div style="border:1px solid var(--bound-border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:8px;background:var(--terminal)">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bound-bg);border-bottom:1px solid var(--bound-border)">
+        <span style="color:var(--bound-text);font-size:11px">⚡︎</span>
+        <span style="font-weight:700;font-size:12.5px">${esc(ch.title)}</span>
+        ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
+        <span class="kindb">${esc(ch.kind ?? "")}</span>
+        <button style="margin-left:auto;width:30px;height:22px;border:1px solid var(--bound-border);border-radius:var(--r-xs);background:var(--bound-bg);color:var(--bound-text);font-size:11px;cursor:pointer" title="Writers → readers live in this popup">⛓</button></div>
+      <div style="padding:12px 10px;text-align:center"><span class="vval ${v.kind === "val" ? "" : v.kind}">${esc(v.text)}</span></div>
+    </div>`;
+  }).join("") : emptyScope();
+}
+
+/* --------------------------------------------- archived: vertical flow */
 function renderW3() {
   const data = activeData();
   document.getElementById("w3name").textContent = data.title;
@@ -809,14 +806,13 @@ function renderW3() {
       const writers = ch.writers.length
         ? ch.writers.map(w => siteChip(w, "w") + '<div class="vline w"></div>').join("")
         : `<span class="w2-none">R6 default</span><div class="vline"></div>`;
-      const readers = ch.readers.length
+      let readers = ch.readers.length
         ? ch.readers.map(r => '<div class="vline"></div>' + siteChip(r, "r")).join("")
-        : `<div class="vline"></div><span class="w2-none">no readers</span>`;
-      const key = `${sc.id}:${ch.name}`;
-      const sel = state.sel?.kind === "chan" && state.sel.key === key ? " selected" : "";
+        : (ch.hiddenInh ? "" : `<div class="vline"></div><span class="w2-none">no readers</span>`);
+      if (ch.hiddenInh) readers += `<span class="w2-hidden">${ch.hiddenInh} inherited</span>`;
       return `<div class="w3-strip">
         <div class="w3-writers">${writers}</div>
-        <div class="w3-capbox"><div class="w3-cap ${ch.contended ? "contended" : ""}${sel}" data-chan="${esc(key)}">
+        <div class="w3-capbox"><div class="w3-cap ${ch.contended ? "contended" : ""}">
           <span class="nm">${esc(ch.name)}</span>
           ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
           <span class="vv">${valueRich(ch, "md")}</span>
@@ -828,23 +824,22 @@ function renderW3() {
   });
 }
 
-/* -------------------------------------------------------- 4. value cards */
+/* ----------------------------------------------- archived: value cards */
 function renderWC() {
   const data = activeData();
   document.getElementById("wcname").textContent = data.title;
   document.getElementById("wcbody").innerHTML = scopeGroups(data, sc => {
     const cards = sc.channels.map(ch => {
-      const key = `${sc.id}:${ch.name}`;
-      const sel = state.sel?.kind === "chan" && state.sel.key === key ? " selected" : "";
       const writers = ch.writers.length
         ? ch.writers.map(w => siteChip(w, "w")).join("")
         : `<span class="w2-none">none — invitation (R6)</span>`;
-      const readers = ch.readers.length
+      let readers = ch.readers.length
         ? ch.readers.map(r => siteChip(r, "r")).join("")
-        : `<span class="w2-none">none</span>`;
+        : (ch.hiddenInh ? "" : `<span class="w2-none">none</span>`);
+      if (ch.hiddenInh) readers += `<span class="w2-hidden">${ch.hiddenInh} inherited hidden</span>`;
       return `<div class="wc-card ${ch.contended ? "contended" : ""}">
         <div class="wc-head">
-          <span class="nm${sel}" data-chan="${esc(key)}">${esc(ch.name)}</span>
+          <span class="nm">${esc(ch.name)}</span>
           ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
           <span class="kindb" style="margin-left:auto">${esc(ch.kind ?? "")}</span></div>
         <div class="wc-hero">${valueRich(ch, "lg")} ${contendBadge(ch)}</div>
@@ -858,7 +853,7 @@ function renderWC() {
   });
 }
 
-/* ------------------------------------------------------------- 5. matrix */
+/* ---------------------------------------------------- archived: matrix */
 function renderW4() {
   const data = activeData();
   document.getElementById("w4name").textContent = data.title;
@@ -887,7 +882,7 @@ function renderW4() {
         const s = node.site;
         const label = s.panel ? `<span style="color:var(--attn-text)">panel (engaged)</span>`
           : `${s.sc ? `<span class="sc">${esc(s.sc)} · </span>` : ""}${esc(s.n)}`;
-        return `<tr data-noderow="${esc(node.key)}"><th data-node="${esc(node.key)}">${label}</th>${chans.map(ch => {
+        return `<tr><th data-node="${esc(node.key)}">${label}</th>${chans.map(ch => {
           const v = node.cells[ch.name] ?? "";
           const glyph = v.includes("W") && v.includes("R") ? '<span class="W">W</span><span class="R">R</span>'
             : v === "W" ? '<span class="W">W</span>' : v === "R" ? '<span class="R">R</span>' : '<span class="d">·</span>';
@@ -936,35 +931,31 @@ document.querySelectorAll(".nom-knobs").forEach(el => {
 
 /* ------------------------------------------------------- orchestration */
 function renderAll() {
-  renderW0(); renderW2(); renderW3(); renderWC(); renderW4();
+  renderW2(); renderW0(); renderW3(); renderWC(); renderW4();
 }
 document.querySelectorAll('input[name=ds]').forEach(r =>
-  r.addEventListener("change", () => { state.ds = r.value; state.sel = null; updateSel(); renderAll(); }));
+  r.addEventListener("change", () => { state.ds = r.value; renderAll(); }));
 document.querySelectorAll('input[name=cont]').forEach(r =>
   r.addEventListener("change", () => { state.cont = r.value; renderAll(); }));
 document.getElementById("engageHue").addEventListener("change", e => {
   state.engageHue = e.target.checked; renderAll();
 });
+document.getElementById("showInh").addEventListener("change", e => {
+  state.showInh = e.target.checked; renderAll();
+});
 document.getElementById("live").addEventListener("change", e => {
   state.live = e.target.checked; renderAll();
 });
 
-function updateSel() {
-  document.getElementById("selReadout").innerHTML =
-    state.sel ? `selection: <b>${esc(state.sel.label)}</b> — jump would scroll the workspace there`
-              : `selection: <b>none</b> — click a channel or a site`;
-}
-updateSel();
-
-/* hover-linking + selection (event delegation) */
+/* hover-linking + click = focus-jump preview (selection itself is parked) */
 document.body.addEventListener("mouseover", e => {
-  const chip = e.target.closest(".site[data-node],th[data-node]");
+  const chip = e.target.closest("[data-node]");
   if (!chip) return;
   document.querySelectorAll(`[data-node="${CSS.escape(chip.dataset.node)}"]`)
     .forEach(c => c.classList.add("hl"));
 });
 document.body.addEventListener("mouseout", e => {
-  const chip = e.target.closest(".site[data-node],th[data-node]");
+  const chip = e.target.closest("[data-node]");
   if (!chip) return;
   document.querySelectorAll(".hl").forEach(c => c.classList.remove("hl"));
 });
@@ -976,26 +967,14 @@ document.body.addEventListener("click", e => {
     renderAll();
     return;
   }
-  const chanEl = e.target.closest("[data-chan]");
-  if (chanEl) {
-    state.sel = { kind: "chan", key: chanEl.dataset.chan,
-                  label: "bus:" + chanEl.dataset.chan.split(":")[1] +
-                         (chanEl.dataset.chan.startsWith("root") ? "" : " @ " + chanEl.dataset.chan.split(":")[0]) };
-    updateSel(); renderAll();
-    document.querySelectorAll(`[data-chan="${CSS.escape(chanEl.dataset.chan)}"]`)
-      .forEach(c => { c.classList.remove("flash"); void c.offsetWidth; c.classList.add("flash"); });
-    return;
-  }
-  const chip = e.target.closest(".site[data-node],th[data-node]");
+  const chip = e.target.closest("[data-node]");
   if (chip) {
-    state.sel = { kind: "node", key: chip.dataset.node, label: "node " + chip.dataset.node };
-    updateSel(); renderAll();
     document.querySelectorAll(`[data-node="${CSS.escape(chip.dataset.node)}"]`)
       .forEach(c => { c.classList.remove("flash"); void c.offsetWidth; c.classList.add("flash"); });
   }
 });
 
-/* live ticking — values + thumbs only; wires redrawn after W2 re-render */
+/* live ticking */
 setInterval(() => {
   if (!state.live) return;
   state.t += 0.25;
@@ -1005,7 +984,7 @@ setInterval(() => {
 window.addEventListener("resize", drawW2Wires);
 
 /* URL params (screenshot harness / linkable states):
-   ?only=<section-id> — show a single section; ?ds=, ?cont= — preset state */
+   ?only=<section-id> — show a single section; ?ds=, ?cont=, ?inh=0 — preset state */
 const params = new URLSearchParams(location.search);
 for (const [key, name] of [["ds", "ds"], ["cont", "cont"]]) {
   const v = params.get(key);
@@ -1015,11 +994,17 @@ for (const [key, name] of [["ds", "ds"], ["cont", "cont"]]) {
     if (input) input.checked = true;
   }
 }
+if (params.get("inh") === "0") {
+  state.showInh = false;
+  document.getElementById("showInh").checked = false;
+}
 const only = params.get("only");
 if (only) {
   document.querySelectorAll(".concept").forEach(s => {
     if (s.id !== only) s.style.display = "none";
   });
+  const archived = document.querySelector(`#archive #${CSS.escape(only)}`);
+  if (archived) document.getElementById("archive").open = true;
   document.querySelector(".xcontrols").style.position = "static";
 }
 
