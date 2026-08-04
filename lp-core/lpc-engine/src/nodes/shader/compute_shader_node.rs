@@ -582,6 +582,50 @@ mod tests {
         ));
     }
 
+    /// An UNBOUND uniform is not a failure: nothing names it, so it runs on
+    /// its authored default exactly as authored, and the node stays clean.
+    ///
+    /// This is the counterpart the warning tests below need to mean
+    /// anything. It did not hold until the engine host learned to project a
+    /// uniform name onto `consumed[<name>]`: every unbound uniform came back
+    /// `UnresolvedConsumedSlot`, so a normal node wore a permanent `Warn`
+    /// indistinguishable from a genuinely broken binding —
+    /// docs/defects/2026-08-04-unbound-shader-uniform-warns.md.
+    #[test]
+    fn unbound_uniform_runs_on_its_authored_default_without_warning() {
+        let (mut engine, registry, node_id) = build_compute_engine();
+
+        // The consumed-slot query itself resolves — through the authored
+        // default, not an error the caller has to absorb.
+        let time = resolve_with_engine_host(
+            &mut engine,
+            &registry,
+            QueryKey::ConsumedSlot {
+                node: node_id,
+                slot: SlotPath::parse("time").expect("time path"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("an unbound uniform resolves through its authored default")
+        .0;
+        assert_eq!(
+            *time.value_leaf().expect("value").value(),
+            LpValue::F32(0.25)
+        );
+
+        let phase = resolve_phase_twice(&mut engine, &registry, node_id);
+        assert_eq!(
+            phase,
+            LpValue::F32(1.25),
+            "authored default feeds the shader"
+        );
+        assert_eq!(
+            node_runtime_status(&engine, node_id),
+            None,
+            "a node behaving exactly as authored reports nothing"
+        );
+    }
+
     /// A bound input whose binding cannot resolve (here: a bus channel with
     /// no provider) must not degrade silently to the authored default — the
     /// node keeps producing on the default AND reports a warning status.

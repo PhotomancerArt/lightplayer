@@ -515,6 +515,29 @@ pub(super) fn format_compile_stats(
     )
 }
 
+/// Hot-apply a uniform's authored record onto the running node's copy.
+///
+/// Only the fields the ENGINE itself reads are synced. This copy feeds
+/// header generation, the compute ABI descriptor, and
+/// `materialize_shader_input`; it is never published to a client, because
+/// `snapshot_node_slots` sends the registry's authored def as the node's
+/// `.def` root and a shader's `.state` root is just its output product.
+///
+/// Three fields of `ShaderSlotDef` are therefore left out on purpose —
+/// each verified inert, not overlooked:
+///
+/// - `step` and `unit` are panel presentation. The studio derives its face
+///   from that authored `.def` root, so an edit to either already reaches
+///   the panel live; no engine path consults them. Copying them would buy
+///   nothing and, through this function's return value, force a full GLSL
+///   recompile on a presentation-only edit.
+/// - `default_bind` is a binding, and bindings are load-time
+///   materializations rather than resolver-read values. An edit to one
+///   already takes effect: every project apply clears and re-registers the
+///   whole binding table from current defs, precisely so that a changed
+///   `default_bind` lands (`Engine::apply_project_changes`). Copying the
+///   endpoint here would register nothing and leave the runtime record
+///   claiming a wire the binding table does not have.
 pub(super) fn sync_shader_slot_def_from_authored(
     ctx: &mut TickContext<'_>,
     base_path: &str,
@@ -1095,6 +1118,13 @@ fn resolve_phasor_config(
 /// diagnostics. Shared by the visual and compute shader nodes; `context`
 /// labels error messages ("visual shader" / "compute shader").
 ///
+/// That "an unbound slot resolves `Ok`" is a claim about the *host*, not
+/// this function: it holds only because
+/// `EngineResolveHost::read_shader_consumed_slot_default` projects the
+/// uniform name onto `consumed[<name>]`. Without that projection every
+/// unbound uniform reported here, and the warning meant nothing —
+/// `docs/defects/2026-08-04-unbound-shader-uniform-warns.md`.
+///
 /// The timebase kinds (`phasor`, `seconds`) never reach the materialize
 /// helper: their value comes from the scope's time product, not from the
 /// slot's resolved data, and `timebase` memoizes that product across every
@@ -1515,6 +1545,83 @@ mod tests {
             other => panic!("expected visual product, got {other:?}"),
         };
         assert_eq!(got_id, rid);
+    }
+
+    /// The visual half of the compute node's
+    /// `unbound_uniform_runs_on_its_authored_default_without_warning`: an
+    /// unbound uniform resolves through its authored default and leaves the
+    /// node status clean. Both node kinds go through the same engine-host
+    /// projection, and it keys off the `NodeDef` variant, so both variants
+    /// stay pinned — docs/defects/2026-08-04-unbound-shader-uniform-warns.md.
+    #[test]
+    fn unbound_uniform_runs_on_its_authored_default_without_warning() {
+        let source = "layout(binding = 0) uniform float time;\nvec4 render(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").expect("name"),
+                lpc_model::NodeName::parse("shader").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                NodeInvocation::new(ArtifactSpec::path("shader.toml")),
+                frame,
+            )
+            .expect("shader");
+        engine
+            .load_test_node_defs(
+                &mut registry,
+                &[(sh_id, NodeDef::Shader(shader_def_with_time()))],
+                frame,
+            )
+            .expect("load test defs");
+        engine
+            .attach_runtime_node(
+                sh_id,
+                Box::new(ShaderNode::new(
+                    sh_id,
+                    shader_def_with_time(),
+                    shader_asset_text(source, frame),
+                )),
+                frame,
+            )
+            .expect("attach shader");
+
+        // Nothing binds `time`; the authored default (0.5) is the answer.
+        let time = resolve_with_engine_host(
+            &mut engine,
+            &registry,
+            QueryKey::ConsumedSlot {
+                node: sh_id,
+                slot: SlotPath::parse("time").expect("time path"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("an unbound uniform resolves through its authored default")
+        .0;
+        assert_eq!(
+            *time.value_leaf().expect("value").value(),
+            lpc_model::LpValue::F32(0.5)
+        );
+
+        engine.tick(&registry, 500).expect("tick");
+        let entry = engine.tree().get(sh_id).expect("node");
+        let crate::node::NodeEntryState::Alive(node) = entry.state.value() else {
+            panic!("node alive");
+        };
+        assert_eq!(
+            node.runtime_status(),
+            None,
+            "a node behaving exactly as authored reports nothing"
+        );
     }
 
     #[test]

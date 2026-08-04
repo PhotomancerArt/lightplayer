@@ -1449,7 +1449,7 @@ fn register_node_bindings(
     }
     let config = projected_node_config(registry, node)?.clone();
     // Kind-owned loader plumbing that no authored bindings entry drives: the
-    // output demand literal, and shader slot-declared default binds.
+    // output demand literal.
     match &config {
         NodeDef::Output(_) => {
             runtime
@@ -1471,24 +1471,37 @@ fn register_node_bindings(
                     reason: format!("bind output demand slot: {e}"),
                 })?;
         }
-        NodeDef::Shader(shader) => {
-            for (name, slot) in shader.consumed_slots.entries.iter() {
-                let Some(endpoint) = slot.default_bind.data.as_ref() else {
-                    continue;
-                };
-                register_default_bind(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    &shader.bindings,
-                    frame,
-                    name,
-                    SlotDirection::Consumed,
-                    &endpoint.value().to_string(),
-                )?;
-            }
-        }
         _ => {}
+    }
+    // Slot-declared `default_bind` on the artifact-declared consumed slots of
+    // BOTH shader kinds — a compute shader's `time` slot is default-bound by
+    // the starter itself, and registering only the render-shader arm made
+    // that silently unwired
+    // (docs/defects/2026-08-04-compute-shader-default-bind-ignored.md).
+    // Produced slots are deliberately excluded: publishing a produced slot
+    // still takes an authored `target` entry, so a `default_bind` there is
+    // inert.
+    let default_bind_slots = match &config {
+        NodeDef::Shader(shader) => Some((&shader.consumed_slots, &shader.bindings)),
+        NodeDef::ComputeShader(compute) => Some((&compute.consumed_slots, &compute.bindings)),
+        _ => None,
+    };
+    if let Some((consumed_slots, bindings)) = default_bind_slots {
+        for (name, slot) in consumed_slots.entries.iter() {
+            let Some(endpoint) = slot.default_bind.data.as_ref() else {
+                continue;
+            };
+            register_default_bind(
+                runtime,
+                projected_nodes,
+                node,
+                bindings,
+                frame,
+                name,
+                SlotDirection::Consumed,
+                &endpoint.value().to_string(),
+            )?;
+        }
     }
     // Dynamic (artifact-declared) slot names: shader/compute consumed slots
     // take source bindings, compute produced slots take target bindings.
@@ -5097,6 +5110,25 @@ mod tests {
 
     const CHAR_SHADER_GLSL: &[u8] = b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }";
 
+    // A compute shader declares the same default-bound `time` slot the
+    // starter does (`starter_time_consumed_slots`), plus one produced slot
+    // so the def is representative of an authored compute node.
+    const CHAR_COMPUTE_WITH_TIME: &str = r#"
+{
+  "kind": "ComputeShader",
+  "source": { "path": "compute.glsl" },
+  "consumed": {
+    "time": { "kind": "value", "value": "f32", "default": 0.0,
+              "default_bind": "bus:time" }
+  },
+  "produced": {
+    "phase": { "kind": "value", "value": "f32", "default": 0.0 }
+  }
+}
+"#;
+
+    const CHAR_COMPUTE_GLSL: &[u8] = b"void compute() { phase = fract(time); }";
+
     #[test]
     fn char_minimal_clock_publishes_time_default_only_for_the_product() {
         // `bus:time` carries the clock's TIME PRODUCT, never raw seconds:
@@ -5217,6 +5249,70 @@ mod tests {
                     && *node == playlist
                     && slot == &SlotPath::parse("time").expect("path")
         )));
+    }
+
+    /// Fix for
+    /// `docs/defects/2026-08-04-compute-shader-default-bind-ignored.md`: the
+    /// loader registered slot-declared `default_bind` for render shaders
+    /// only, so `starter_compute_shader_def`'s own default-bound `time` slot
+    /// came up unwired and every compute author had to restate it under
+    /// `bindings`.
+    #[test]
+    fn char_compute_shader_slot_default_bind_registers() {
+        let fs = char_project(&[
+            ("clock", "{ \"kind\": \"Clock\" }"),
+            ("compute", CHAR_COMPUTE_WITH_TIME),
+        ]);
+        fs.write_file("/compute.glsl".as_path(), CHAR_COMPUTE_GLSL)
+            .expect("compute.glsl");
+        let rt = load_project(&fs);
+        let compute = sibling(&rt, "compute");
+        assert!(default_sources(&rt, compute, "time", "time"));
+    }
+
+    /// The suppression rule is the shader arm's: an authored source on the
+    /// same slot outranks the slot-declared default rather than doubling it.
+    #[test]
+    fn char_authored_compute_time_suppresses_the_default() {
+        let fs = char_project(&[
+            ("clock", "{ \"kind\": \"Clock\" }"),
+            (
+                "compute",
+                r#"
+{
+  "kind": "ComputeShader",
+  "source": { "path": "compute.glsl" },
+  "consumed": {
+    "time": { "kind": "value", "value": "f32", "default": 0.0,
+              "default_bind": "bus:time" }
+  },
+  "bindings": {
+    "time": { "source": "bus:custom" }
+  }
+}
+"#,
+            ),
+        ]);
+        fs.write_file("/compute.glsl".as_path(), CHAR_COMPUTE_GLSL)
+            .expect("compute.glsl");
+        let rt = load_project(&fs);
+        let compute = sibling(&rt, "compute");
+        assert!(!default_sources(&rt, compute, "time", "time"));
+        assert!(
+            rt.tree().bindings().any(|binding| {
+                binding.priority != BindingPriority::default_fallback()
+                    && matches!(
+                        (&binding.source, &binding.target),
+                        (
+                            BindingSource::BusChannel(channel),
+                            BindingTarget::ConsumedSlot { node, slot },
+                        ) if channel.0 == "custom"
+                            && *node == compute
+                            && slot == &SlotPath::parse("time").expect("slot")
+                    )
+            }),
+            "the authored source binding is what wires the slot instead"
+        );
     }
 
     #[test]
