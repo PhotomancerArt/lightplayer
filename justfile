@@ -1367,6 +1367,11 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
 # missing-node contract, `docs/debt/firmware-capability-reporting.md`) only
 # exists in a gate-off build and is only run here.
 #
+# Wired into `check-lint` (and so CI's Lint job): the recipe sat unwired for
+# a while and the gate-off tier rotted exactly as predicted — a `#[cfg(test)]`
+# helper whose only callers were feature-gated tests went dead-code under
+# `-D warnings` and nothing noticed until a manual run.
+#
 # `--all-targets` matters: without it the gate-off tests are never built.
 check-lpc-engine-gates:
     #!/usr/bin/env bash
@@ -1569,7 +1574,7 @@ test-glsl-filetests:
 # was measured at ~18 min for the pair on a 4-core runner). Local `check`
 # keeps the full meaning.
 [parallel]
-check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
+check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
 check: check-lint schema-check
