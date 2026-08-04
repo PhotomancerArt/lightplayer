@@ -155,7 +155,13 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core?/fixture-no-hello"]
 # locally, so pin the version that is known to work with the `esp32` feature.
 esp-hal = { version = "1.1.1", features = ["esp32", "log-04", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
-esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+# `default-features = false` drops `global-allocator`: this crate installs its
+# own `#[global_allocator]` — `esp_alloc::HEAP` behind a bounded retry (see
+# `RetryingHeap` in main.rs). `compat` (the C malloc shims) is kept from the
+# defaults. esp-rtos's own esp-alloc edge is also `default-features = false`,
+# so no build re-enables `global-allocator` and `RetryingHeap` is the one
+# allocator in every feature combination, `radio_ram_probe` included.
+esp-alloc = { version = "0.10.0", default-features = false, features = ["compat", "internal-heap-stats"] }
 
 # UART variant, not `jtag-serial`: classic ESP32 has no USB-Serial-JTAG
 # peripheral. `esp-println`'s `uart` feature only writes UART0's FIFO — it
