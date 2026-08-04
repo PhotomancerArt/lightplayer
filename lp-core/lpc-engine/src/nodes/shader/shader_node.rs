@@ -507,6 +507,29 @@ pub(super) fn format_compile_stats(
     )
 }
 
+/// Hot-apply a uniform's authored record onto the running node's copy.
+///
+/// Only the fields the ENGINE itself reads are synced. This copy feeds
+/// header generation, the compute ABI descriptor, and
+/// `materialize_shader_input`; it is never published to a client, because
+/// `snapshot_node_slots` sends the registry's authored def as the node's
+/// `.def` root and a shader's `.state` root is just its output product.
+///
+/// Three fields of `ShaderSlotDef` are therefore left out on purpose —
+/// each verified inert, not overlooked:
+///
+/// - `step` and `unit` are panel presentation. The studio derives its face
+///   from that authored `.def` root, so an edit to either already reaches
+///   the panel live; no engine path consults them. Copying them would buy
+///   nothing and, through this function's return value, force a full GLSL
+///   recompile on a presentation-only edit.
+/// - `default_bind` is a binding, and bindings are load-time
+///   materializations rather than resolver-read values. An edit to one
+///   already takes effect: every project apply clears and re-registers the
+///   whole binding table from current defs, precisely so that a changed
+///   `default_bind` lands (`Engine::apply_project_changes`). Copying the
+///   endpoint here would register nothing and leave the runtime record
+///   claiming a wire the binding table does not have.
 pub(super) fn sync_shader_slot_def_from_authored(
     ctx: &mut TickContext<'_>,
     base_path: &str,
