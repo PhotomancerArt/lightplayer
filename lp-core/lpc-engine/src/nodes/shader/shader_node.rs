@@ -17,9 +17,10 @@ use alloc::vec::Vec;
 
 use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
-    AssetLocation, FloatMode, MapSlot, NodeId, NodeRuntimeStatus, Revision, ShaderMapKeyDef,
-    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
-    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
+    AssetLocation, FloatMode, MapSlot, NodeId, NodeRuntimeStatus, OptionSlot, Revision,
+    ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,
+    ShaderState, ShaderValueShapeRef, SlotAccess, SlotPath, SlotShapeRegistry,
+    SlotShapeRegistryError, StaticSlotShape, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
@@ -546,21 +547,33 @@ pub(super) fn sync_shader_slot_def_from_authored(
         return Ok(changed);
     };
     changed |= set_slot_if_changed(&mut slot.value, value);
-    if let Some(key) = slot.key.data.as_mut() {
-        if let Some(value) = try_read_authored_value::<ShaderMapKeyDef>(
+    // `key` and `mapping` describe map STORAGE — `materialize_map_input`
+    // is the only reader, and a value slot never reaches it. Probing them
+    // on a value slot would ask the resolver for two paths that cannot
+    // exist, and every distinct query key it is handed persists a route
+    // entry across frames (ADR 2026-07-31), so the dead probes would cost
+    // resident bytes on every project forever.
+    let is_map = matches!(slot.kind.value(), ShaderSlotKind::Map);
+    if is_map {
+        changed |= sync_optional_value_from_authored::<ShaderMapKeyDef>(
             ctx,
             &alloc::format!("{base_path}.key.some"),
-        )? {
-            changed |= set_slot_if_changed(key, value);
-        }
+            &mut slot.key,
+        )?;
     }
-    if let Some(default) = slot.default.data.as_mut() {
-        if let Some(value) =
-            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.default.some"))?
-        {
-            changed |= set_slot_if_changed(default, value);
-        }
-    }
+    changed |= sync_optional_value_from_authored::<f32>(
+        ctx,
+        &alloc::format!("{base_path}.default.some"),
+        &mut slot.default,
+    )?;
+    // `min` and `max` deliberately keep the update-only shape: they belong
+    // with `step` and `unit` above. The only reader of either
+    // (`compute_shader_state::value_shape_for_slot`, for the Slider-vs-Number
+    // editor hint) shapes a compute node's PRODUCED slots, and this function
+    // only ever walks CONSUMED ones — so a created option here would have no
+    // reader, while the probe that creates it would persist a resolver route
+    // entry on every value slot forever (measured: ~223 B each). The panel
+    // gets a newly authored range from the authored `.def` root regardless.
     if let Some(min) = slot.min.data.as_mut() {
         if let Some(value) =
             try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.min.some"))?
@@ -573,6 +586,23 @@ pub(super) fn sync_shader_slot_def_from_authored(
             try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.max.some"))?
         {
             changed |= set_slot_if_changed(max, value);
+        }
+    }
+    // `mapping` is an OptionSlot of a RECORD, not of a value slot, so it
+    // cannot go through the helper: creation needs a whole struct before
+    // the per-field reads below have anywhere to land. `kind` stands in
+    // for "the authored side has a mapping at all" — the remaining fields
+    // then sync onto the placeholder exactly as they would onto a loaded
+    // record.
+    if is_map && slot.mapping.data.is_none() {
+        if let Some(kind) = try_read_authored_value::<ShaderSlotMappingKind>(
+            ctx,
+            &alloc::format!("{base_path}.mapping.some.kind"),
+        )? {
+            let mut mapping = ShaderSlotMappingDef::default();
+            mapping.kind.set(kind);
+            slot.mapping = OptionSlot::some(mapping);
+            changed = true;
         }
     }
     if let Some(mapping) = slot.mapping.data.as_mut() {
@@ -666,6 +696,39 @@ fn try_read_authored_value<T: lpc_model::FromLpValue>(
     T::from_lp_value(value.value())
         .map(Some)
         .map_err(|e| NodeError::msg(alloc::format!("shader path {path:?}: {e}")))
+}
+
+/// Sync one optional authored field onto the runtime slot def, CREATING
+/// the option when the runtime copy does not have one yet.
+///
+/// Creation is the point. An `if let Some(existing) = slot.data.as_mut()`
+/// guard can only UPDATE an option that already exists, so a uniform
+/// authored without a `default` (or `min`/`max`/`key`) and later given one
+/// in a live authoring edit kept its `none` until the project reloaded —
+/// and `default` is engine-read: `materialize_value_input` falls back to
+/// `slot.default_value()` whenever the binding does not resolve, so the
+/// new default silently did not take effect on the running node.
+///
+/// Absence on the authored side stays "leave as loaded": a host with no
+/// authored def (a unit fake) must not have its fields wiped.
+fn sync_optional_value_from_authored<T>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+    slot: &mut OptionSlot<ValueSlot<T>>,
+) -> Result<bool, NodeError>
+where
+    T: lpc_model::FromLpValue + PartialEq,
+{
+    let Some(value) = try_read_authored_value::<T>(ctx, path)? else {
+        return Ok(false);
+    };
+    Ok(match slot.data.as_mut() {
+        Some(existing) => set_slot_if_changed(existing, value),
+        None => {
+            *slot = OptionSlot::some(ValueSlot::new(value));
+            true
+        }
+    })
 }
 
 pub(super) fn set_slot_if_changed<T>(slot: &mut ValueSlot<T>, value: T) -> bool
@@ -1390,6 +1453,100 @@ mod tests {
                 },
             )
             .expect("render succeeds once the reconciled record supplies `speed`");
+    }
+
+    #[test]
+    fn authored_default_added_after_load_reaches_the_uniform() {
+        // The runtime node's `speed` record carries `default: none` while
+        // the registry's effective def gives it 0.75 — the state a live
+        // authoring edit (adding a default to a uniform that never had
+        // one) produces. The per-field sync must CREATE the option, not
+        // only update an existing one: `default` is engine-read, so
+        // `materialize_value_input` otherwise keeps falling back to the
+        // stale `none`'s 0.0 until the project reloads.
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(speed, 0.0, 0.0, 1.0); }";
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").expect("name"),
+                lpc_model::NodeName::parse("shader").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                NodeInvocation::new(ArtifactSpec::path("shader.toml")),
+                frame,
+            )
+            .expect("shader");
+
+        let mut authored = shader_def_with_time();
+        authored.consumed_slots.entries.insert(
+            String::from("speed"),
+            ShaderSlotDef::value_f32("Speed", "", 0.75, None),
+        );
+        engine
+            .load_test_node_defs(&mut registry, &[(sh_id, NodeDef::Shader(authored))], frame)
+            .expect("load test defs");
+        // The runtime node's copy predates the authored default.
+        let mut stale = shader_def_with_time();
+        let mut speed = ShaderSlotDef::value_f32("Speed", "", 0.75, None);
+        speed.default = OptionSlot::none();
+        stale
+            .consumed_slots
+            .entries
+            .insert(String::from("speed"), speed);
+        let sh = ShaderNode::new(sh_id, stale, shader_asset_text(source, frame));
+        engine
+            .attach_runtime_node(sh_id, Box::new(sh), frame)
+            .expect("attach shader");
+
+        engine.tick(&registry, 500).expect("tick");
+        let q = QueryKey::ProducedSlot {
+            node: sh_id,
+            slot: shader_output_path(),
+        };
+        resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off).expect("resolve");
+
+        let request = crate::products::visual::RenderTextureRequest {
+            width: 4,
+            height: 4,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.5,
+        };
+        // First render requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        engine
+            .render_texture_for_test(&registry, VisualProduct::new(sh_id, 0), &request)
+            .expect("warm-up render");
+        let texture = engine
+            .render_texture_for_test(&registry, VisualProduct::new(sh_id, 0), &request)
+            .expect("render texture");
+        let sample = texture
+            .sample_batch(&TextureSampleBatch {
+                points: vec![TextureUvSamplePoint {
+                    u_q16: 32768,
+                    v_q16: 32768,
+                }],
+                time_seconds: 0.5,
+            })
+            .expect("host product samples");
+        // 0.75 in unorm16 is ~49151; the stale `none` would render 0.
+        let red = sample.samples[0].rgba_unorm16[0];
+        assert!(
+            red > 45_000,
+            "expected the authored default 0.75, got {red}"
+        );
+        assert!(
+            red < 53_000,
+            "expected the authored default 0.75, got {red}"
+        );
     }
 
     #[test]
