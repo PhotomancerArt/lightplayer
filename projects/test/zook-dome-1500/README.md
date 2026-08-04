@@ -27,14 +27,22 @@ same files, smaller grids/wires):
 | 1500 | ❌ first tick | — | — | — | `alloc 38400` fails, `free=42548 largest_free=12160 retry_ok=true` |
 | 900 (heavy shader) | ❌ compile | — | — | — | `alloc 768` fails at `used=177072` — genuine exhaustion |
 
-The 1200/1500 failures are the `retry_ok=true` allocator edge
-(`docs/debt/2026-08-02-classic-oom-retry-succeeds.md`) hitting the
-~25.6 B/LED contiguous mapping-slot expansion
-(`generate_mapping_points` ← `ensure_direct_channels`): the block fits on
-retry, but the failed alloc is treated as a crash and two boots quarantine
-the project. Marginal steady cost measured 600→900 is ~100 B/LED all-in,
-so 1500 extrapolates to ~186 KB against the 178,176 B arena — the parked
-M6 "compact resolved carrier" (−24 B/LED) is what makes 1500 fit outright.
+The 1200/1500 failures are the ~25.6 B/LED contiguous mapping-slot
+expansion (`generate_mapping_points` ← `ensure_direct_channels`) meeting a
+load-churned heap. Marginal steady cost measured 600→900 is ~100 B/LED
+all-in — the parked M6 "compact resolved carrier" (−24 B/LED) is what
+makes 1500 fit outright.
+
+## Same-day follow-up: retrying allocator + 24 KiB JIT region
+
+Two levers landed on this branch and were re-probed (total heap
+178,176 → 186,368 B; `[MEM]` now carries `retry_saves=`):
+
+| LEDs | result | notes |
+|---|---|---|
+| 900 | ✅ 17 fps unchanged | steady free 60,416 B (+7.9 KB from the region shrink) |
+| 1200 | ❌ first tick | now **genuine fragmentation**: 25 holes, largest 24,888 < 30,720 ask, `retry_ok=false` — the earlier `retry_ok=true` window-free anomaly did not recur; the contiguous mapping vec is the confirmed wall and M6 its fix |
+| 900 (heavy shader) | ❌ compile | exhausts even the enlarged heap: used=183,024, 3.3 KB free in crumbs, `retry_ok=false` — "LED count × shader size" stands |
 
 ## Uploading
 
