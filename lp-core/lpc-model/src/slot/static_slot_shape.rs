@@ -437,6 +437,10 @@ pub struct StaticSlotFieldShape {
     /// [`crate::SlotFieldShape::default_bind`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_bind: Option<&'static str>,
+    /// Panel-visibility hint for the default binding; see
+    /// [`crate::SlotFieldShape::panel`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<crate::PanelHint>,
 }
 
 impl StaticSlotFieldShape {
@@ -449,6 +453,7 @@ impl StaticSlotFieldShape {
         )
         .expect("valid static slot field name");
         field.default_bind = self.default_bind.map(ToString::to_string);
+        field.panel = self.panel;
         field
     }
 }
@@ -481,6 +486,7 @@ mod tests {
         semantics: SlotSemantics::new(SlotDirection::Local, SlotMerge::Latest),
         role: SlotRole::Setting,
         default_bind: None,
+        panel: None,
     }];
     static RECORD_SHAPE: StaticSlotShapeDescriptor = StaticSlotShapeDescriptor::Record {
         meta: StaticSlotMeta::EMPTY,

@@ -885,11 +885,9 @@
           "type": "object"
         },
         "brightness": {
-          "description": "Fixture output brightness (0-255).",
-          "maximum": 4294967295,
-          "minimum": 0,
+          "description": "Fixture output brightness (0-1).",
           "title": "Brightness",
-          "type": "integer"
+          "type": "number"
         },
         "color_order": {
           "type": "string"

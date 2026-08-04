@@ -159,7 +159,7 @@ pub fn FixtureFace(
                 }
             }
         }
-        NodeCardSection { label: "controls",
+        NodeCardSection { label: "settings",
             div { class: "tw:px-4 tw:py-3",
                 PanelControl {
                     control: face.brightness.clone(),
