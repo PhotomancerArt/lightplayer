@@ -40,6 +40,17 @@ pub struct BrowserLpvmInstance {
     signatures: LpsModuleSig,
     shadow_stack_base: Option<i32>,
     float_mode: FloatMode,
+    /// Backing storage for this instance's vmctx block. Shaders share the
+    /// app's own linear memory, so the block is a plain Rust allocation whose
+    /// address is the guest offset; `Vec<u128>` guarantees the 16-byte
+    /// alignment the vmctx header wants. Owned so it lives exactly as long as
+    /// the instance.
+    vmctx_buf: Vec<u128>,
+    /// Guest base address of `vmctx_buf` (header + uniforms + globals +
+    /// snapshot). Passing a fixed base (the old `0`) made every instance —
+    /// and the app itself — share low memory, so a second live shader
+    /// silently clobbered the first one's uniforms and persistent globals.
+    vmctx_base: usize,
     lpir: LpirModule,
     render_texture_cache: Option<RenderTextureEntry>,
     render_samples_cache: Option<RenderTextureEntry>,
@@ -52,6 +63,14 @@ impl BrowserLpvmInstance {
         let exports_obj = Reflect::get(&inst_js, &JsValue::from_str("exports"))
             .map_err(|e| WasmError::runtime(format!("instance.exports: {e:?}")))?;
 
+        // Per-instance vmctx allocation, mirroring `NativeJitModule::instantiate`
+        // and the wasmtime runtime.
+        let total_size = module.signatures.vmctx_buffer_size();
+        let vmctx_buf = vec![0u128; total_size.div_ceil(16).max(1)];
+        let vmctx_base = vmctx_buf.as_ptr() as usize;
+        i32::try_from(vmctx_base)
+            .map_err(|_| WasmError::runtime("vmctx guest base exceeds i32 range"))?;
+
         Ok(Self {
             instance: linked.instance,
             memory: linked.memory,
@@ -60,6 +79,8 @@ impl BrowserLpvmInstance {
             signatures: module.signatures.clone(),
             shadow_stack_base: module.shadow_stack_base,
             float_mode: module.opts.float_mode,
+            vmctx_buf,
+            vmctx_base,
             lpir: module.lpir.clone(),
             render_texture_cache: None,
             render_samples_cache: None,
@@ -118,14 +139,15 @@ impl BrowserLpvmInstance {
             .dyn_into()
             .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
         let len = ab.byte_length() as usize;
-        if end > len {
+        if self.vmctx_base + end > len {
             return Err(WasmError::runtime(format!(
-                "linear memory too small: need {end} have {len}"
+                "linear memory too small: need {} have {len}",
+                self.vmctx_base + end
             )));
         }
         let view = js_sys::Uint8Array::new_with_byte_offset_and_length(
             &ab,
-            offset as u32,
+            (self.vmctx_base + offset) as u32,
             data.len() as u32,
         );
         view.copy_from(data);
@@ -151,13 +173,17 @@ impl BrowserLpvmInstance {
             .dyn_into()
             .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
         let mem_len = ab.byte_length() as usize;
-        if end > mem_len {
+        if self.vmctx_base + end > mem_len {
             return Err(WasmError::runtime(format!(
-                "linear memory too small: need {end} have {mem_len}"
+                "linear memory too small: need {} have {mem_len}",
+                self.vmctx_base + end
             )));
         }
-        let view =
-            js_sys::Uint8Array::new_with_byte_offset_and_length(&ab, offset as u32, len as u32);
+        let view = js_sys::Uint8Array::new_with_byte_offset_and_length(
+            &ab,
+            (self.vmctx_base + offset) as u32,
+            len as u32,
+        );
         let mut bytes = vec![0u8; len];
         view.copy_to(&mut bytes);
         Ok(bytes)
@@ -322,6 +348,7 @@ impl LpvmInstance for BrowserLpvmInstance {
                 args,
                 self.float_mode,
                 &return_ty,
+                self.vmctx_base as f64,
             )?
         } else {
             (
@@ -330,6 +357,7 @@ impl LpvmInstance for BrowserLpvmInstance {
                     export.params.len(),
                     args,
                     self.float_mode,
+                    self.vmctx_base as f64,
                 )?,
                 None,
             )
@@ -415,10 +443,22 @@ impl LpvmInstance for BrowserLpvmInstance {
                 .memory
                 .as_ref()
                 .ok_or_else(|| WasmError::runtime("no linear memory for aggregate call"))?;
-            build_js_args_q32_for_call(&self.exports_obj, mem, &export, args, &return_ty)?
+            build_js_args_q32_for_call(
+                &self.exports_obj,
+                mem,
+                &export,
+                args,
+                &return_ty,
+                self.vmctx_base as f64,
+            )?
         } else {
             (
-                build_js_args_q32_scalar_only(&export.param_types, export.params.len(), args)?,
+                build_js_args_q32_scalar_only(
+                    &export.param_types,
+                    export.params.len(),
+                    args,
+                    self.vmctx_base as f64,
+                )?,
                 None,
             )
         };
@@ -489,7 +529,7 @@ impl LpvmInstance for BrowserLpvmInstance {
         })?;
 
         let js_args = js_sys::Array::new();
-        js_args.push(&JsValue::from_f64(0.0));
+        js_args.push(&JsValue::from_f64(self.vmctx_base as f64));
         js_args.push(&JsValue::from_f64(f64::from(tex_offset)));
         js_args.push(&JsValue::from_f64(f64::from(width as i32)));
         js_args.push(&JsValue::from_f64(f64::from(height as i32)));
@@ -533,7 +573,7 @@ impl LpvmInstance for BrowserLpvmInstance {
         })?;
 
         let js_args = js_sys::Array::new();
-        js_args.push(&JsValue::from_f64(0.0));
+        js_args.push(&JsValue::from_f64(self.vmctx_base as f64));
         js_args.push(&JsValue::from_f64(f64::from(points_offset)));
         js_args.push(&JsValue::from_f64(f64::from(out_offset)));
         js_args.push(&JsValue::from_f64(f64::from(count as i32)));
@@ -587,7 +627,7 @@ impl LpvmInstance for BrowserLpvmInstance {
             .map_err(|_| WasmError::runtime(format!("`{name}` is not a function")))?;
         self.prepare_call()?;
         let args = js_sys::Array::new();
-        args.push(&JsValue::from_f64(0.0));
+        args.push(&JsValue::from_f64(self.vmctx_base as f64));
         let call_result = func.apply(&JsValue::NULL, &args);
         self.take_trap()?;
         call_result.map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
