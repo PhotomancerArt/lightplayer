@@ -7234,6 +7234,7 @@ mod tests {
                 origin,
                 priority,
                 kind: lpc_model::Kind::Ratio,
+                panel_show: false,
             }
         };
         use lpc_wire::{WireBindingDirection::*, WireBindingOrigin::*};
