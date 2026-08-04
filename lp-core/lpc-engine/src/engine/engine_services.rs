@@ -140,6 +140,11 @@ pub enum OutputFlushError {
         endpoint: HwEndpointSpec,
         error: OutputError,
     },
+    /// The end-of-frame [`OutputProvider::flush`] barrier failed — a
+    /// transmission begun by a `write` this frame did not complete. Carries no
+    /// node: the barrier is frame-wide, and the provider's own log names the
+    /// channel.
+    Flush { error: OutputError },
 }
 
 impl fmt::Display for OutputFlushError {
@@ -158,6 +163,7 @@ impl fmt::Display for OutputFlushError {
                 f,
                 "output node {node} channel {channel} {endpoint}: {error}"
             ),
+            Self::Flush { error } => write!(f, "output flush barrier: {error}"),
         }
     }
 }
@@ -690,6 +696,17 @@ fn flush_registered_sinks(
                 first_error.get_or_insert(error);
             }
         }
+    }
+
+    // The frame-wide barrier: a provider whose `write` starts transmissions
+    // without waiting (so wires transmit concurrently) completes them all
+    // here, before the engine goes back to rendering. Synchronous providers
+    // default this to a no-op.
+    if let Err(error) = provider.flush() {
+        failed += 1;
+        let error = OutputFlushError::Flush { error };
+        log::warn!("EngineServices: {error}");
+        first_error.get_or_insert(error);
     }
 
     match first_error {
