@@ -137,6 +137,11 @@ holds the full context.
 | `Debug` naming re-check (ratified as provisional — the corpus is all diagnostics, but the clock's `rate`/`scrub_offset_seconds` read as transport) | `2026-08-01-debug-slots-taxonomy` (a) | The clock's transport controls move to a transport surface |
 | Debug indication on preview/play surfaces (D8 covered the workspace only; a running installation in test-pattern mode shows nothing outside the editor) | `2026-08-01-debug-slots-taxonomy` (b) | The panels/play-mode work defines its own chrome |
 | `TEST_PATTERN_RGB` is full white — the max-current case on long strips, deliberate for pin discovery | `2026-08-01-debug-slots-taxonomy` (c) | Someone runs it on a long strip and wants it dimmer |
+| Slew shaping on panel writers (emission is immediate; the seam is writer-side shaping) | `2026-08-02-panel-writers-and-state-persistence` | `panel.md` P-Q1 gets an answer, or a control visibly zippers |
+| Panel state encoded through `slot_codec` instead of a second serde codec (24,912 B of duplicate C6 flash) | `2026-08-02-panel-writers-and-state-persistence` | Flash headroom tightens again — `docs/debt/panel-state-serde-flash-cost.md` |
+| A kind with no face publishes no panel controls (`ComputeShader`'s bound uniforms reach the wiring drawer, never a knob) | `2026-08-03-panel-visibility-is-derived` | A compute-driven module needs its knobs — `examples/meteor` already does |
+| Authored panel layouts: a curated promoted-control list per module, as an additive override on the derived default | `2026-08-03-panel-visibility-is-derived` | A published/vendored module needs a curated public API |
+| A minted `status-engaged` token family (engaged currently borrows `status-attention` amber; Yona leans maybe-blue) | `2026-08-03-panel-visibility-is-derived` | Yona settles the engaged treatment — do not change it before then |
 
 ## Relationship To Shared Planning
 

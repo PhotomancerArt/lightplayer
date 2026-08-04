@@ -19,10 +19,11 @@ use lpa_studio_core::{
     NodeCardUiState, UiAction, UiAddNodeMenu, UiNodeFace, UiNodeSection, UiPendingEdit,
 };
 
+use crate::app::module::{ModuleFace, ModulePanel, PanelGesture, panel_gesture_actions};
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
-use super::{FixtureFace, NodeCardDrawers, PlaylistFace, ShaderFace};
+use super::{FixtureFace, NodeCardDrawers, NodeCardSection, PlaylistFace, ShaderFace};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -49,8 +50,15 @@ pub fn NodeFaceBody(
     add_node_menu: Option<UiAddNodeMenu>,
     #[props(default)] pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
+    /// Panel-gesture override — stories fake state through this. In the
+    /// live app leave it `None`: gestures translate to the real panel ops
+    /// through the shared [`panel_gesture_actions`] seam, riding
+    /// `on_action`.
+    #[props(default = None)]
+    module_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let module_panel = module_panel.or_else(|| Some(panel_gesture_actions(on_action?)));
     rsx! {
         // Full-bleed: sections reclaim the pane's padding and sit flush
         // under the header's bottom border.
@@ -98,6 +106,38 @@ pub fn NodeFaceBody(
                 },
                 UiNodeFace::Playlist(playlist) => rsx! {
                     PlaylistFace { face: playlist, add_node_menu, on_action }
+                    NodeCardDrawers {
+                        node,
+                        sections,
+                        advanced_open: card_ui.advanced_open,
+                        debug_open: card_ui.debug_open,
+                        platform,
+                        pending_edits,
+                        dirty_tint,
+                        on_action,
+                    }
+                },
+                // The module face carries its own drawer
+                // (wiring), so it does NOT compose `NodeCardDrawers` — the
+                // advanced slot view lives on the individual child nodes,
+                // which are sibling cards below this one.
+                UiNodeFace::Module(module) => rsx! {
+                    ModuleFace {
+                        face: module,
+                        // The wiring drawer's disclosure is core-owned like
+                        // every other drawer, keyed by this address.
+                        node: Some(node),
+                        on_panel: module_panel,
+                        on_action,
+                    }
+                },
+                // A leaf under a module: its bound slots ARE its face (R3).
+                // Same widgets and same panel state as the module panel
+                // above, because it is literally the same control (P1).
+                UiNodeFace::Controls(panel) => rsx! {
+                    NodeCardSection { label: "controls", first: true,
+                        ModulePanel { panel, on_panel: module_panel, on_action }
+                    }
                     NodeCardDrawers {
                         node,
                         sections,

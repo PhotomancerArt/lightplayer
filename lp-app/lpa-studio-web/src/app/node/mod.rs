@@ -50,7 +50,7 @@ pub(crate) mod shader_face_stories;
 mod slot_affine2d_field;
 mod slot_detail_button;
 mod slot_dimensions_field;
-mod slot_edit_actions;
+pub(crate) mod slot_edit_actions;
 mod slot_fields;
 mod slot_gesture_fields;
 mod slot_issue_list;
@@ -84,15 +84,16 @@ pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;
 pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
+pub(crate) use face::node_ui_action;
 pub use face::{
     FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, PlaylistFace, ShaderFace,
 };
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
-pub use panel::{HFaderField, KnobField, PanelControl, ToggleField};
+pub use panel::{HFaderField, KnobField, PanelControl, PanelEmit, ToggleField};
 pub use produced_product_view::ProducedProductView;
-pub(crate) use produced_product_view::ProductPreviewCanvas;
+pub(crate) use produced_product_view::{ProductPreview, ProductPreviewCanvas};
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;

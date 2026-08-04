@@ -18,7 +18,7 @@ use serde_json::json;
 
 use crate::app::studio::studio_edit_e2e_tests::{
     ASSET_SHADER_V1, InProcessServerIo, asset_e2e_server, drive, editor_dirty, find_asset_editor,
-    project_action,
+    project_action, workspace_cards,
 };
 use crate::{
     AgentTaskFuture, ProjectOp, SettingsCommand, StudioActor, StudioCommand, StudioController,
@@ -436,7 +436,7 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
         json!({ "source": SPEED_SHADER, "note": "add a speed control" }).to_string();
     let upsert_input = json!({
         "name": "speed", "label": "Speed", "default": 1.0,
-        "min": 0.0, "max": 4.0, "panel": true,
+        "min": 0.0, "max": 4.0,
     })
     .to_string();
     let verify_input = json!({ "note": "verify params" }).to_string();
@@ -582,7 +582,7 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
         .find(|record| record["name"] == "speed")
         .expect("speed record");
     assert_eq!(speed["label"], "Speed");
-    assert_eq!(speed["panel"], true);
+    assert_eq!(speed["bound"], true, "publicity is the binding (Q13)");
     assert_eq!(speed["min"], 0.0);
     assert_eq!(speed["max"], 4.0);
     assert_eq!(content["engine"]["status"], "ok", "{content}");
@@ -592,7 +592,8 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
     assert!(persisted > 0, "the upsert rides the Save-gated overlay");
 
     // The knob appears on the shader face via the EXISTING panel
-    // derivation — the def record alone makes it so.
+    // derivation: the uniform is wired to `bus:speed` (Q13 publicity) and
+    // the new def record supplies its range.
     let face = shader_face(&snapshot);
     let knob = face
         .controls
@@ -775,19 +776,13 @@ fn tool_result_json(request: &TurnRequest) -> serde_json::Value {
     serde_json::from_str(&content).expect("tool result is json")
 }
 
-/// The shader node's face DTO.
+/// The shader node's face DTO. The shader is a NESTED card since the
+/// flat-root reversal, so the scan walks the promoted card tree.
 fn shader_face(view: &UiStudioView) -> crate::UiShaderFace {
-    view.panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            crate::UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane")
-        .nodes
-        .iter()
-        .find_map(|node| match &node.face {
-            Some(crate::UiNodeFace::Shader(face)) => Some(face.clone()),
+    workspace_cards(view)
+        .into_iter()
+        .find_map(|card| match card.face {
+            Some(crate::UiNodeFace::Shader(face)) => Some(face),
             _ => None,
         })
         .expect("shader node carries a face")
@@ -803,20 +798,7 @@ fn agent_view(view: &UiStudioView) -> UiAgentView {
 /// The decorated agent chat DTO on the shader node's card face (node-card
 /// P3: the face's agent section).
 fn face_agent_view(view: &UiStudioView) -> UiAgentView {
-    let editor = view
-        .panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            crate::UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane");
-    editor
-        .nodes
-        .iter()
-        .find_map(|node| match &node.face {
-            Some(crate::UiNodeFace::Shader(face)) => face.agent.clone(),
-            _ => None,
-        })
+    shader_face(view)
+        .agent
         .expect("shader face carries the agent chat DTO")
 }

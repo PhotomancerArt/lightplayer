@@ -14,8 +14,11 @@
 
 mod ui_fixture_face;
 mod ui_fixture_power;
+mod ui_module_face;
 mod ui_node_face;
 mod ui_panel_control;
+mod ui_panel_control_view;
+mod ui_panel_group;
 mod ui_panel_widget;
 mod ui_playlist_entry;
 mod ui_playlist_face;
@@ -23,8 +26,11 @@ mod ui_shader_face;
 
 pub use ui_fixture_face::UiFixtureFace;
 pub use ui_fixture_power::UiFixturePower;
+pub use ui_module_face::UiModuleFace;
 pub use ui_node_face::UiNodeFace;
 pub use ui_panel_control::{UiPanelControl, UiPanelTarget};
+pub use ui_panel_control_view::{UiPanelControlState, UiPanelControlView};
+pub use ui_panel_group::UiPanelGroup;
 pub use ui_panel_widget::UiPanelWidget;
 pub use ui_playlist_entry::UiPlaylistEntry;
 pub use ui_playlist_face::UiPlaylistFace;

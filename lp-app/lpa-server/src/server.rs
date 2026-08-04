@@ -440,7 +440,7 @@ impl LpServer {
                     let msg_id = client_msg.id;
                     match client_msg.msg {
                         ClientRequest::ProjectRead { handle, request } => {
-                            let server_status = self.runtime_status();
+                            let mut server_status = self.runtime_status();
                             let Some(project) = self.project_manager.get_project_mut(handle) else {
                                 transport
                                     .send(WireServerMessage::new(
@@ -460,6 +460,12 @@ impl LpServer {
                                 response_count += 1;
                                 continue;
                             };
+                            // The P11 toggle's read path: panel auto-save
+                            // is per-project (`.lp/state.json`) and lives
+                            // on the wrapper, not the engine, so it is
+                            // stamped here — once the read's project is
+                            // known — rather than in `runtime_status`.
+                            server_status.panel_auto_save = Some(project.panel_auto_save());
                             let mut source =
                                 ServerProjectReadSource::new(project, Some(server_status));
                             let mut sink = ProjectReadStreamSink::new(transport, msg_id);
@@ -668,6 +674,9 @@ impl LpServer {
             theoretical_fps: self.theoretical_fps(),
             last_frame_time_us: self.last_frame_time_us(),
             memory,
+            // Per-project, so it is stamped by the read dispatch once the
+            // handle resolves — the server loop has no one project.
+            panel_auto_save: None,
         }
     }
 }

@@ -57,7 +57,6 @@ impl SlotValue for Brightness {
             meta: StaticSlotMeta {
                 label: Some("Brightness"),
                 description: Some("Fixture output brightness (0-255)."),
-                panel: true,
                 unit: None,
             },
             editor: StaticValueEditorHint::Slider {
@@ -74,7 +73,6 @@ impl SlotValue for Brightness {
             meta: SlotMeta {
                 label: Some("Brightness".into()),
                 description: Some("Fixture output brightness (0-255).".into()),
-                panel: true,
                 unit: None,
             },
             editor: ValueEditorHint::Slider {
@@ -106,10 +104,12 @@ mod tests {
         );
     }
 
+    /// Q13 (binding-is-publicity): brightness carries no panel FLAG — the
+    /// fixture face's fader is that face's own affordance, derived from
+    /// this slider editor hint. The hint is therefore load-bearing.
     #[test]
-    fn brightness_shape_carries_the_panel_fader_bucket() {
+    fn brightness_shape_carries_the_slider_editor_hint() {
         let shape = Brightness::value_shape();
-        assert!(shape.meta.panel, "brightness is a front-panel control");
         assert!(matches!(
             shape.editor,
             ValueEditorHint::Slider { min, max, .. }

@@ -3,7 +3,7 @@
 //!
 //! Reuses the edit-e2e harness (`InProcessServerIo`, `drive`,
 //! `project_action`): a real `LpServer` loads a clock + shader + fixture +
-//! output project whose shader carries a panel-flagged `speed` uniform.
+//! output project whose shader carries a bus-bound `speed` uniform.
 //! Asserts the controller-side face derivation end-to-end — shader knob and
 //! fixture fader present with real addresses — and that knob/fader
 //! `SetValue` dispatches ride the SAME overlay path the slot editors use
@@ -22,14 +22,14 @@ use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
 use crate::app::studio::studio_edit_e2e_tests::{
-    InProcessServerIo, drive, editor_dirty, project_action,
+    InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
 use crate::{
     ControllerId, NodeCardUiState, NodeUiOp, PlaylistActivateOp, ProjectController,
     ProjectEditorOp, ProjectEditorTarget, ProjectOp, ProjectSlotAddress, SlotEditOp, StudioActor,
     StudioCommand, StudioController, StudioServerClient, UiAction, UiLogLevel, UiNodeDirtyState,
     UiNodeFace, UiNodeView, UiPanelControl, UiPanelWidget, UiPlaylistFace, UiSlotValueKind,
-    UiStudioView, UiViewContent,
+    UiStudioView,
 };
 
 #[test]
@@ -51,12 +51,12 @@ fn node_faces_derive_and_edit_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
-    // -- shader face: knob from the panel-flagged uniform ------------------
+    // -- shader face: knobs from the bound uniforms ------------------------
     let shader = node_by_kind(&snapshot, "Shader");
     let Some(UiNodeFace::Shader(face)) = &shader.face else {
         panic!("shader node derives a shader face, got {:?}", shader.face);
     };
-    assert_eq!(face.controls.len(), 2, "both panel-flagged uniforms");
+    assert_eq!(face.controls.len(), 2, "both bound uniforms");
     let knob = control_labeled(face, "Speed");
     assert_eq!(knob.label, "Speed");
     assert_eq!(
@@ -491,14 +491,18 @@ fn playlist_with_unresolvable_active_entry_keeps_all_children() {
 
 #[test]
 fn a_bound_panel_uniform_keeps_an_interactive_control() {
-    // The §4.1 regression shape (fyeah-sign): `glow` is panel-flagged AND
-    // bound to `bus:glow`, `speed` is panel-flagged and unbound. The bound
-    // knob must stay a working control — it derives a panel target (the
-    // command-channel write path) AND keeps the editable, addressed authored
-    // default underneath (modules.md R6: the authored default is what an
-    // unwritten channel resolves to, so it stays reachable). Nothing pinned
-    // interactivity before: the knob rendered correctly bound and dispatched
-    // nothing when turned.
+    // The §4.1 regression shape (fyeah-sign): `glow` is bound to
+    // `bus:glow`, `speed` is bound to nothing. The bound knob must stay a
+    // working control — it derives a panel target (the command-channel write
+    // path) AND keeps the editable, addressed authored default underneath
+    // (modules.md R6: the authored default is what an unwritten channel
+    // resolves to, so it stays reachable). Nothing pinned interactivity
+    // before: the knob rendered correctly bound and dispatched nothing when
+    // turned.
+    //
+    // Q13 (binding is publicity) also makes `speed` the negative case: with
+    // the authored `panel` flag deleted, an unbound uniform has no control
+    // at all.
     let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -521,11 +525,15 @@ fn a_bound_panel_uniform_keeps_an_interactive_control() {
         panic!("shader node derives a shader face, got {:?}", shader.face);
     };
 
-    // The unbound control: the ordinary slot-edit path, as a baseline.
-    let speed = control_labeled(face, "Speed");
-    assert!(speed.panel_target.is_none(), "unbound ⇒ no panel target");
-    assert!(speed.state.editable, "unbound control is editable");
-    assert!(speed.address.is_some(), "unbound control is addressed");
+    // The unbound uniform: not on the panel at all (Q13).
+    assert!(
+        face.controls.iter().all(|control| control.label != "Speed"),
+        "an unbound uniform gets no knob, got {:?}",
+        face.controls
+            .iter()
+            .map(|control| control.label.as_str())
+            .collect::<Vec<_>>()
+    );
 
     // The bound control derives its (scope, channel) write target…
     let glow = control_labeled(face, "Glow");
@@ -628,6 +636,37 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
         },
     )));
     drive(actor.run_one_batch_for_test());
+
+    // GV fix 5, the jerky-drag fix: the very first snapshot after the
+    // dispatch — no RefreshProject, no probe — already shows the written
+    // value and reads engaged. Before the local echo the knob sat at its
+    // authored default until the round trip landed, which is what made a
+    // drag move at probe cadence.
+    let echo = view.try_recv().expect("the write itself emits a snapshot");
+    let playlist = node_by_kind(&echo, "Playlist");
+    let Some(UiNodeFace::Shader(face)) = &playlist.children[0].face else {
+        panic!("idle child keeps its face");
+    };
+    let echoed = control_labeled(face, "Glow");
+    assert_eq!(
+        echoed.live_value.as_deref(),
+        Some("0.9"),
+        "the panel's own write reads back before any probe"
+    );
+    assert!(
+        echoed
+            .panel_target
+            .as_ref()
+            .expect("target survives")
+            .engaged,
+        "and the control reads engaged at once"
+    );
+    assert_eq!(
+        editor_dirty(&echo),
+        (0, 0),
+        "the echo is display state — it stages nothing"
+    );
+
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("panel write emits a snapshot");
@@ -678,7 +717,407 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
     );
 }
 
+#[test]
+fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
+    // R9 / GV fix 2. A playlist entry's bindings resolve in the entry's
+    // SINK scope, which matches no module panel by scope — so fyeah's root
+    // panel rendered EMPTY while the idle shader card below it carried a
+    // live Glow knob. The active entry's controls now ride the root panel
+    // as their own group, labeled by the entry.
+    let server = Rc::new(RefCell::new(playlist_bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let face = module_face(&snapshot);
+    assert!(
+        face.panel.controls.is_empty(),
+        "nothing binds in the root scope itself: {:?}",
+        face.panel
+            .controls
+            .iter()
+            .map(|control| control.channel.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(face.panel.groups.len(), 1, "one group: the active entry");
+    let entry_group = &face.panel.groups[0];
+    assert_eq!(
+        entry_group.label, "idle",
+        "the group wears the ACTIVE entry's name"
+    );
+    let entry_scope = entry_group
+        .target
+        .expect("the entry group resets its own scope");
+    assert!(
+        entry_scope.is_sink(),
+        "the group targets the entry's SINK scope, got {entry_scope:?}"
+    );
+    assert_eq!(
+        entry_group
+            .controls
+            .iter()
+            .map(|control| control.channel.as_str())
+            .collect::<Vec<_>>(),
+        vec!["glow"],
+        "only the entry's authored-bound uniform is public"
+    );
+    let glow = &entry_group.controls[0];
+    assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);
+    let target = glow
+        .control
+        .panel_target
+        .clone()
+        .expect("the bubbled control keeps its own write target");
+    assert_eq!(target.scope, entry_scope);
+
+    // One control, two cards (P1): the entry card below carries the SAME one.
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    let Some(UiNodeFace::Shader(entry_face)) = &playlist.children[0].face else {
+        panic!("the entry card keeps its shader face");
+    };
+    assert_eq!(
+        control_labeled(entry_face, "Glow").panel_target,
+        Some(target.clone()),
+        "the group control and the entry card's knob share one identity"
+    );
+
+    // Engaging through the bubbled control flows back to BOTH views.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelWriteOp {
+            scope: target.scope,
+            channel: target.channel.clone(),
+            value: LpValue::F32(0.9),
+            ttl_ms: None,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel write emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let glow = &face.panel.groups[0].controls[0];
+    assert_eq!(
+        glow.state,
+        crate::UiPanelControlState::Engaged,
+        "the module panel's copy reads Held"
+    );
+    assert_eq!(glow.control.live_value.as_deref(), Some("0.9"));
+    let playlist = node_by_kind(&snapshot, "Playlist");
+    let Some(UiNodeFace::Shader(entry_face)) = &playlist.children[0].face else {
+        panic!("the entry card keeps its shader face");
+    };
+    assert_eq!(
+        control_labeled(entry_face, "Glow").live_value.as_deref(),
+        Some("0.9"),
+        "and so does the entry card's knob"
+    );
+}
+
+#[test]
+fn the_root_module_card_derives_its_panel_from_scoped_channels() {
+    // The flat-root reversal made the root module a real card, and this is
+    // what it is FOR: its face carries the root scope's panel, derived from
+    // the binding graph and the panel targets its subtree already produced
+    // (`docs/design/modules.md` R8, `panel.md` P1). Nothing is mock-fed.
+    let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    // -- one top-level card: the root module, wearing the module face -------
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.nodes.len(), 1, "one top-level workspace card");
+    let root_card = &editor.nodes[0];
+    assert_eq!(root_card.header.kind, "Module");
+    assert_eq!(root_card.header.title, editor.project_name);
+    let face = module_face(&snapshot);
+
+    // -- the panel: the root scope's channels, and only those ---------------
+    let scope = face.panel.target.expect("the root panel targets its scope");
+    assert!(
+        matches!(scope, lpc_wire::WireScopeRef::Module { .. }),
+        "the root scope is a module scope, got {scope:?}"
+    );
+    assert_eq!(
+        face.panel
+            .controls
+            .iter()
+            .map(|control| control.channel.as_str())
+            .collect::<Vec<_>>(),
+        vec!["glow"],
+        "only the BOUND uniform lists — `speed` is wired to nothing, and \
+         panel membership is scope publicity (Q13), never an authored flag"
+    );
+    let glow = &face.panel.controls[0];
+    assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);
+    assert_eq!(
+        glow.source.as_deref(),
+        Some("authored default"),
+        "nothing writes the channel, so the consuming slot's own default is \
+         what the control displays (R6)"
+    );
+    assert_eq!(glow.control.value.kind, UiSlotValueKind::F32(0.5));
+    let target = glow
+        .control
+        .panel_target
+        .clone()
+        .expect("a module-panel control dispatches panel writes");
+    assert_eq!(target.scope, scope);
+    assert_eq!(target.channel, "glow");
+
+    // -- the wiring drawer: the sidebar bus pane's content, relocated -------
+    // Same rows the pane listed (writers → readers, focus affordances),
+    // scoped to the module that owns them, and closed by default because
+    // wiring is the authoring diagnostic and the panel is the product.
+    let wiring = face.wiring.clone().expect("the root face carries wiring");
+    assert!(
+        !face.wiring_open,
+        "the drawer starts closed (NodeCardUiState default)"
+    );
+    let glow_row = wiring
+        .channels
+        .iter()
+        .find(|channel| channel.name == "glow")
+        .expect("the glow channel is wiring on the root scope");
+    assert_eq!(
+        glow_row.scope,
+        Some(scope),
+        "the drawer lists this scope's channels only"
+    );
+    assert_eq!(
+        glow_row.readers.len(),
+        1,
+        "the shader reads it: {:?}",
+        glow_row.readers
+    );
+    assert!(
+        glow_row.readers[0].focus.is_some(),
+        "site rows keep their focus affordance (D7 linked navigation)"
+    );
+
+    // -- provenance: the authored §8 fields, present ones only -------------
+    assert_eq!(
+        face.provenance.as_deref(),
+        Some("Yona \u{b7} v0.4 \u{b7} CC0-1.0"),
+        "the footer joins the authored provenance fields and skips the \
+         unauthored `created`"
+    );
+
+    // -- the P11 auto-save switch: present, and only on the ROOT -----------
+    assert_eq!(
+        face.auto_save,
+        Some(true),
+        "the root module presents panel auto-save, on by default, carried \
+         back on the read's ServerRuntimeStatus"
+    );
+
+    // Opening the drawer is a core-owned card-UI op, exactly like the
+    // other drawers — disclosure survives the next snapshot.
+    handle.tx.send(node_ui_command(NodeUiOp::SetDrawer {
+        node: root_card.header.path.clone(),
+        drawer: crate::NodeCardDrawer::Wiring,
+        open: true,
+    }));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the drawer toggle emits a snapshot");
+    assert!(
+        module_face(&snapshot).wiring_open,
+        "the wiring drawer's open state rides the face DTO"
+    );
+
+    // -- one control, two cards (P1): the shader card carries the SAME one --
+    let shader = node_by_kind(&snapshot, "Shader");
+    assert!(
+        root_card
+            .children
+            .iter()
+            .any(|child| child.kind == "Shader"),
+        "the shader card renders below the root card"
+    );
+    let Some(UiNodeFace::Shader(shader_face)) = &shader.face else {
+        panic!("shader card keeps its own face");
+    };
+    assert_eq!(
+        control_labeled(shader_face, "Glow").panel_target,
+        Some(target.clone()),
+        "the knob on the shader card and the control on the module panel \
+         share one (scope, channel) identity"
+    );
+
+    // -- engaging a writer: the module panel reads Held ----------------------
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelWriteOp {
+            scope: target.scope,
+            channel: target.channel.clone(),
+            value: LpValue::F32(0.9),
+            ttl_ms: None,
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel write emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let glow = &face.panel.controls[0];
+    assert_eq!(
+        glow.state,
+        crate::UiPanelControlState::Engaged,
+        "the engaged writer reads Held on the module panel"
+    );
+    assert_eq!(
+        glow.control.live_value.as_deref(),
+        Some("0.9"),
+        "and the held value flows back as the live reading"
+    );
+
+    // -- the module's own reset: clear at scope granularity (P2) ------------
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelClearOp {
+            request: lpc_wire::WirePanelClearRequest::Scope { scope },
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("panel clear emits a snapshot");
+
+    let face = module_face(&snapshot);
+    let glow = &face.panel.controls[0];
+    assert_eq!(
+        glow.state,
+        crate::UiPanelControlState::ReadDefault,
+        "resetting the module releases its writer"
+    );
+    assert_eq!(glow.source.as_deref(), Some("authored default"));
+
+    // -- the P11 auto-save switch flips through the wire (no local echo) ----
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelAutoSaveOp { enabled: false },
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the toggle emits a snapshot");
+    assert_eq!(
+        module_face(&snapshot).auto_save,
+        Some(false),
+        "the new value arrives on the next read's ServerRuntimeStatus — \
+         nothing is applied optimistically, so a refusal can't leave the \
+         switch lying"
+    );
+}
+
+#[test]
+fn every_gallery_example_opens_onto_a_populated_root_panel() {
+    // A gallery example that opens onto an EMPTY panel teaches the wrong
+    // thing about modules: the panel is the product, so each embedded
+    // package must publish at least one root-scope control (whether
+    // directly, or bubbled up from a playlist's active entry per R9).
+    //
+    // Booting each example through a real `LpServer` also compiles its
+    // shaders on the device frontend, which is coverage the checked-in
+    // examples otherwise lack (`docs/debt/example-shaders-not-compile-gated.md`).
+    for example in crate::app::home::embedded_examples() {
+        let server = Rc::new(RefCell::new(example_e2e_server(example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+        let editor = project_editor(&snapshot);
+        assert_eq!(
+            editor.nodes.len(),
+            1,
+            "{}: one top-level workspace card",
+            example.id
+        );
+        let face = module_face(&snapshot);
+        let published = face.panel.controls.len()
+            + face
+                .panel
+                .groups
+                .iter()
+                .map(|group| group.controls.len())
+                .sum::<usize>();
+        assert!(
+            published > 0,
+            "{}: the root panel publishes nothing — a gallery example must \
+             open onto live controls, not an empty panel",
+            example.id
+        );
+    }
+}
+
 // -- harness -----------------------------------------------------------------
+
+/// A server holding one embedded gallery example, loaded from the very
+/// bytes the wasm bundle ships (`include_bytes!` of `examples/<name>/`).
+fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+    let dir = format!("/projects/{}", example.id.replace('/', "-"));
+    for (name, bytes) in example.files {
+        server
+            .base_fs_mut()
+            .write_file(format!("{dir}/{name}").as_path(), bytes)
+            .expect("write example file");
+    }
+    server
+        .load_project(dir.as_path())
+        .unwrap_or_else(|err| panic!("{} loads: {err}", example.id));
+    server.advance_frame(16).expect("tick");
+    server
+}
 
 const PROJECT_DIR: &str = "/projects/face-e2e";
 
@@ -716,6 +1155,8 @@ fn face_e2e_server() -> LpServer {
   "kind": "Shader",
   "source": "shader.glsl",
   "bindings": {
+    "speed": { "source": "bus:speed" },
+    "count": { "source": "bus:count" },
     "output": { "target": "bus:visual.out" }
   },
   "consumed": {
@@ -726,8 +1167,7 @@ fn face_e2e_server() -> LpServer {
       "min": 0,
       "max": 3,
       "label": "Speed",
-      "description": "Gradient speed multiplier",
-      "panel": true
+      "description": "Gradient speed multiplier"
     },
     "count": {
       "kind": "value",
@@ -736,8 +1176,7 @@ fn face_e2e_server() -> LpServer {
       "min": 1,
       "max": 4,
       "label": "Count",
-      "description": "How many bands",
-      "panel": true
+      "description": "How many bands"
     }
   }
 }"#;
@@ -789,8 +1228,8 @@ fn face_e2e_server() -> LpServer {
 
 const BOUND_GLOW_PROJECT_DIR: &str = "/projects/bound-glow-e2e";
 
-/// The fyeah-sign shape: `glow` panel-flagged AND bound to `bus:glow`,
-/// `speed` panel-flagged and unbound. Both uniforms feed the shader so the
+/// The fyeah-sign shape: `glow` bound to `bus:glow`, `speed` unbound (and
+/// therefore, since Q13, not on any panel). Both uniforms feed the shader so the
 /// compile stays honest.
 const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform float glow;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, glow, 0.5, 1.0);\n}\n";
 
@@ -808,6 +1247,9 @@ fn bound_glow_e2e_server() -> LpServer {
     );
 
     let project_json = "{\n  \"format\": 3\n}\n";
+    // Authored provenance (R14/§8): the root face's footer line is derived
+    // from these, and the omitted `created` proves the join skips absent
+    // fields rather than leaving a dangling separator.
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -815,6 +1257,11 @@ fn bound_glow_e2e_server() -> LpServer {
     "shader": { "ref": "./shader.json" },
     "pixels": { "ref": "./fixture.json" },
     "output": { "ref": "./output.json" }
+  },
+  "provenance": {
+    "author": "Yona",
+    "version": "v0.4",
+    "license": "CC0-1.0"
   }
 }"#;
     let clock_json = r#"{
@@ -836,8 +1283,7 @@ fn bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 3,
       "label": "Speed",
-      "description": "Animation speed multiplier",
-      "panel": true
+      "description": "Animation speed multiplier"
     },
     "glow": {
       "kind": "value",
@@ -846,8 +1292,7 @@ fn bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 1,
       "label": "Glow",
-      "description": "Rainbow highlight intensity",
-      "panel": true
+      "description": "Rainbow highlight intensity"
     }
   }
 }"#;
@@ -945,8 +1390,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 3,
       "label": "Speed",
-      "description": "Animation speed multiplier",
-      "panel": true
+      "description": "Animation speed multiplier"
     },
     "glow": {
       "kind": "value",
@@ -955,8 +1399,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
       "min": 0,
       "max": 1,
       "label": "Glow",
-      "description": "Rainbow highlight intensity",
-      "panel": true
+      "description": "Rainbow highlight intensity"
     }
   }
 }"#;
@@ -1128,24 +1571,29 @@ fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
         .collect()
 }
 
-fn node_by_kind<'a>(view: &'a UiStudioView, kind: &str) -> &'a UiNodeView {
-    let editor = view
-        .panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane");
-    editor
-        .nodes
-        .iter()
-        .find(|node| node.header.kind == kind)
-        .unwrap_or_else(|| panic!("project carries a {kind} node"))
+/// The one card of `kind`, anywhere in the nested card tree. Since the
+/// flat-root reversal every non-root card is a `UiNodeChild` under the root
+/// module's card, so this promotes as it descends.
+fn node_by_kind(view: &UiStudioView, kind: &str) -> UiNodeView {
+    card_matching(view, kind, |card| card.header.kind == kind)
 }
 
-fn playlist_face(view: &UiStudioView) -> &UiPlaylistFace {
-    let Some(UiNodeFace::Playlist(face)) = &node_by_kind(view, "Playlist").face else {
+/// The root module card's face.
+fn module_face(view: &UiStudioView) -> crate::UiModuleFace {
+    let Some(UiNodeFace::Module(face)) = project_editor(view)
+        .nodes
+        .first()
+        .expect("the root module card")
+        .face
+        .clone()
+    else {
+        panic!("the root card wears a module face");
+    };
+    face
+}
+
+fn playlist_face(view: &UiStudioView) -> UiPlaylistFace {
+    let Some(UiNodeFace::Playlist(face)) = node_by_kind(view, "Playlist").face else {
         panic!("playlist face present");
     };
     face
@@ -1160,16 +1608,16 @@ fn control_labeled<'a>(face: &'a crate::UiShaderFace, label: &str) -> &'a UiPane
         .unwrap_or_else(|| panic!("shader face carries a {label} control"))
 }
 
-fn shader_knob(view: &UiStudioView) -> &UiPanelControl {
-    let Some(UiNodeFace::Shader(face)) = &node_by_kind(view, "Shader").face else {
+fn shader_knob(view: &UiStudioView) -> UiPanelControl {
+    let Some(UiNodeFace::Shader(face)) = node_by_kind(view, "Shader").face else {
         panic!("shader face present");
     };
-    control_labeled(face, "Speed")
+    control_labeled(&face, "Speed").clone()
 }
 
-fn fixture_fader(view: &UiStudioView) -> &UiPanelControl {
-    let Some(UiNodeFace::Fixture(face)) = &node_by_kind(view, "Fixture").face else {
+fn fixture_fader(view: &UiStudioView) -> UiPanelControl {
+    let Some(UiNodeFace::Fixture(face)) = node_by_kind(view, "Fixture").face else {
         panic!("fixture face present");
     };
-    &face.brightness
+    face.brightness
 }

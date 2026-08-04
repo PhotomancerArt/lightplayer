@@ -7,7 +7,13 @@
   `2026-07-28-scoped-buses.md` and `2026-07-28-effects-are-projects.md`
   (branch `claude/composite-effects-planning-f4f51b`, kept as a harvest
   source). The spike's *model* survived review; this records how the
-  restructured implementation differs.
+  restructured implementation differs — the harvest ledger itself is
+  `2026-07-31-module-model-supersedes-composite-effects-spike.md`, and
+  neither superseded file was brought onto main.
+- Built on by: `2026-08-02-panel-writers-and-state-persistence.md` (the
+  unauthored writer tier keyed on the `(scope, channel)` identity below)
+  and `2026-08-03-panel-visibility-is-derived.md` (what a scope's
+  channels put on a panel).
 - Plan: `planning/2026-08-01-1003-modules-impl-roadmap` P4–P6.
 
 ## Decision
@@ -80,4 +86,9 @@ the panel phases; it was chosen before any device persists one.
 - Feedback via one channel in one scope reports as a cycle; chains that
   need explicit topology use `node:` refs (E5 note).
 - The wire still lists channels flat; the structured `WireScopeRef`
-  surface and per-scope listings land in the next phase (P7).
+  surface and per-scope listings land in the next phase (P7). Landed at
+  proto 7–8, with sink scopes joining the probe surface at 8 for the
+  reason `2026-08-03-panel-visibility-is-derived.md` records.
+- Studio consumes these scopes as the module card's **wiring drawer**
+  (one drawer per scope, hung off the module that owns it); the sidebar
+  bus pane it replaced is gone.

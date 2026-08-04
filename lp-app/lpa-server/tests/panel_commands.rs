@@ -11,16 +11,25 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::cell::RefCell;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{LpGraphics, LpServer, Project};
 use lpc_model::{AsLpPath, LpPathBuf, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
+use lpc_shared::transport::ServerTransport;
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, WireBindingGraph, WireBindingOrigin,
-    WirePanelClearRequest, WirePanelCommandResponse, WirePanelWriteRequest, WireProjectHandle,
-    WireScopeRef,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ClientMessage, ClientRequest,
+    ProjectReadEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,
+    RuntimeReadQuery, TransportError, WireBindingGraph, WireBindingOrigin, WireMessage,
+    WirePanelAutoSaveRequest, WirePanelClearRequest, WirePanelCommandResponse,
+    WirePanelWriteRequest, WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
+    WireScopeRef, WireServerMessage, WireServerMsgBody,
 };
 use lpfs::LpFsMemory;
 
@@ -321,7 +330,169 @@ fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
     );
 }
 
-/// One shader whose panel-flagged `glow` uniform consumes `bus:glow` —
+#[test]
+fn the_auto_save_toggle_round_trips_over_the_wire() {
+    // The P11 switch has two halves and they travel on DIFFERENT messages:
+    // the WRITE is `WireProjectCommand::PanelAutoSave`, and the READ rides
+    // `ServerRuntimeStatus::panel_auto_save` on the ordinary project read
+    // Studio already makes every refresh. This drives both through the
+    // real transport, because a toggle whose new value never comes back
+    // is a switch that lies.
+    let (mut server, project_path) = server_with_clock_project("panel-auto-save-wire");
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.advance_frame(16).expect("tick");
+
+    assert_eq!(
+        read_panel_auto_save(&mut server, handle),
+        Some(true),
+        "auto-save is on by default (panel.md P11) and the read says so"
+    );
+
+    let response = command(
+        &mut server,
+        handle,
+        WireProjectCommand::PanelAutoSave {
+            request: WirePanelAutoSaveRequest { enabled: false },
+        },
+    );
+    assert!(
+        matches!(
+            response,
+            WireProjectCommandResponse::PanelAutoSave {
+                response: WirePanelCommandResponse::Accepted { .. }
+            }
+        ),
+        "the toggle answers in the shared panel-command shape, got {response:?}"
+    );
+
+    assert_eq!(
+        read_panel_auto_save(&mut server, handle),
+        Some(false),
+        "and the next read carries the new value"
+    );
+    assert!(
+        !server
+            .project_manager()
+            .get_project(handle)
+            .expect("loaded")
+            .panel_auto_save(),
+        "the wire arm moved the server-side flag, not just the report"
+    );
+
+    // Back on again: the arm is not one-way.
+    command(
+        &mut server,
+        handle,
+        WireProjectCommand::PanelAutoSave {
+            request: WirePanelAutoSaveRequest { enabled: true },
+        },
+    );
+    assert_eq!(read_panel_auto_save(&mut server, handle), Some(true));
+}
+
+/// Dispatch one project command through the real transport and return its
+/// response body.
+fn command(
+    server: &mut LpServer,
+    handle: WireProjectHandle,
+    command: WireProjectCommand,
+) -> WireProjectCommandResponse {
+    let messages = vec![WireMessage::Client(ClientMessage {
+        id: 11,
+        msg: ClientRequest::ProjectCommand { handle, command },
+    })];
+    let mut transport = VecTransport::default();
+    block_on(server.tick_and_send(16, messages, &mut transport)).expect("tick");
+    match transport.sent.into_iter().next().expect("one response").msg {
+        WireServerMsgBody::ProjectCommand { response } => response,
+        other => panic!("expected a project command response, got {other:?}"),
+    }
+}
+
+/// The auto-save flag as reported by a runtime project read — the carrier
+/// Studio actually reads it from.
+fn read_panel_auto_save(server: &mut LpServer, handle: WireProjectHandle) -> Option<bool> {
+    let messages = vec![WireMessage::Client(ClientMessage {
+        id: 12,
+        msg: ClientRequest::ProjectRead {
+            handle,
+            request: ProjectReadRequest {
+                since: None,
+                queries: vec![ProjectReadQuery::Runtime(RuntimeReadQuery)],
+                probes: Vec::new(),
+            },
+        },
+    })];
+    let mut transport = VecTransport::default();
+    block_on(server.tick_and_send(16, messages, &mut transport)).expect("tick");
+    transport
+        .sent
+        .into_iter()
+        .filter_map(|message| match message.msg {
+            WireServerMsgBody::ProjectRead { events } => Some(events),
+            _ => None,
+        })
+        .flatten()
+        .find_map(|event| match event {
+            ProjectReadEvent::Query {
+                event: ProjectReadQueryEvent::Runtime(runtime),
+                ..
+            } => Some(runtime.server?.panel_auto_save),
+            _ => None,
+        })
+        .flatten()
+}
+
+/// In-memory transport that records every sent server message.
+#[derive(Default)]
+struct VecTransport {
+    sent: Vec<WireServerMessage>,
+}
+
+impl ServerTransport for VecTransport {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+        self.sent.push(msg);
+        Ok(())
+    }
+
+    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+        Ok(None)
+    }
+
+    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+        Ok(Vec::new())
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
+        Ok(())
+    }
+}
+
+fn block_on<F: Future>(future: F) -> F::Output {
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let mut future = Box::pin(future);
+    loop {
+        match Future::poll(Pin::as_mut(&mut future), &mut cx) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => {}
+        }
+    }
+}
+
+fn noop_waker() -> Waker {
+    unsafe fn clone(_: *const ()) -> RawWaker {
+        RawWaker::new(core::ptr::null(), &VTABLE)
+    }
+    unsafe fn wake(_: *const ()) {}
+    unsafe fn wake_by_ref(_: *const ()) {}
+    unsafe fn drop(_: *const ()) {}
+    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+
+    unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) }
+}
+
+/// One shader whose `glow` uniform consumes `bus:glow` —
 /// the shape the G4 walk project uses.
 fn server_with_glow_shader_project(name: &str) -> (LpServer, LpPathBuf) {
     let (mut server, project_path) = server_with_clock_project(name);
@@ -353,7 +524,7 @@ fn server_with_glow_shader_project(name: &str) -> (LpServer, LpPathBuf) {
   "consumed": {
     "glow": {
       "kind": "value", "value": "f32", "default": 0.5,
-      "min": 0, "max": 1, "label": "Glow", "panel": true
+      "min": 0, "max": 1, "label": "Glow"
     }
   }
 }

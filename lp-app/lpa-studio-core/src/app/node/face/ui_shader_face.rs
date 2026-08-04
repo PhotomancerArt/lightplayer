@@ -11,7 +11,8 @@ use crate::{UiAgentView, UiAssetEditor, UiPanelControl, UiProducedProduct};
 pub struct UiShaderFace {
     /// The shader's produced visual output, rendered as the face hero.
     pub preview: UiProducedProduct,
-    /// Panel controls projected from panel-flagged uniform slots.
+    /// Panel controls projected from uniform slots bound to a bus channel
+    /// (Q13: binding is publicity).
     pub controls: Vec<UiPanelControl>,
     /// The shader's agent chat handle, as the shader editor decoration
     /// carries today ([`UiAssetEditor::agent`]). `None` when no provider is

@@ -1,8 +1,8 @@
 //! One control on a node face's front panel.
 
 use crate::{
-    ProjectSlotAddress, UiPanelWidget, UiSlotAffordance, UiSlotAspect, UiSlotFieldState,
-    UiSlotUnit, UiSlotValue,
+    ProjectSlotAddress, UiPanelWidget, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
+    UiSlotAspectRow, UiSlotFieldState, UiSlotUnit, UiSlotValue,
 };
 
 /// The `(scope, channel)` a panel gesture writes (panel.md P1 identity),
@@ -22,7 +22,8 @@ pub struct UiPanelTarget {
     pub engaged: bool,
 }
 
-/// A front-panel control projected from a panel-flagged slot.
+/// A front-panel control projected from a slot that is on a panel —
+/// since Q13 that means a slot bound to a bus channel.
 ///
 /// Panel controls sit directly on the card (no box-in-box) and open the SAME
 /// detail popover as their slot row (hover-revealed corner ⓘ). A control
@@ -75,6 +76,52 @@ impl UiPanelControl {
             .filter_map(|aspect| aspect.affordance)
             .max()
             .unwrap_or(UiSlotAffordance::Info)
+    }
+
+    /// The value the control's FACE shows: the live reading when one is
+    /// present, else the authored value (GV fix 3).
+    ///
+    /// One number, never "0.82 (0.5)" — the parenthetical authored default
+    /// read as a second value and reflowed the control's width mid-drag.
+    /// The authored value keeps a home in the detail popup
+    /// ([`Self::detail_aspects`]), which is where the control's provenance
+    /// already lives.
+    pub fn shown_display(&self) -> &str {
+        self.live_value
+            .as_deref()
+            .unwrap_or(self.value.display.as_str())
+    }
+
+    /// The live reading the widget's geometry follows — the arc, fill, or
+    /// pill sits at what the channel actually reads, whatever put it there
+    /// (an automation writer, or this panel holding it).
+    pub fn live_numeric(&self) -> Option<f32> {
+        self.live_value.as_deref()?.parse().ok()
+    }
+
+    /// The live reading as a toggle state.
+    pub fn live_bool(&self) -> Option<bool> {
+        self.live_value.as_deref()?.parse().ok()
+    }
+
+    /// The control's popover sections: the backing slot row's aspects plus
+    /// the AUTHORED value, which the face no longer shows whenever a live
+    /// reading displaces it (GV fix 3). Without this row the authored
+    /// default — still what an unwritten channel falls back to (R6), and
+    /// still the edit target behind a panel write — would be nowhere.
+    pub fn detail_aspects(&self) -> Vec<UiSlotAspect> {
+        let mut aspects = self.aspects.clone();
+        let row = UiSlotAspectRow::new("Authored value", self.value.display.clone());
+        match aspects
+            .iter_mut()
+            .find(|aspect| aspect.kind == UiSlotAspectKind::TypeInfo)
+        {
+            Some(info) => info.rows.push(row),
+            None => {
+                aspects.push(UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info").with_row(row))
+            }
+        }
+        aspects
     }
 
     /// Whether the backing slot is bound (bus/producer wiring) — the violet
@@ -134,5 +181,49 @@ mod tests {
 
         assert_eq!(control.primary_affordance(), UiSlotAffordance::Info);
         assert!(!control.bound());
+    }
+
+    /// GV fix 3: the face shows ONE number, and the authored value it can
+    /// displace keeps a home in the popup.
+    #[test]
+    fn the_face_shows_one_value_and_the_popup_keeps_the_authored_one() {
+        let mut control = control(vec![UiSlotAspect::new(
+            crate::UiSlotAspectKind::TypeInfo,
+            "Info",
+        )]);
+        assert_eq!(control.shown_display(), "1.6");
+        assert_eq!(control.live_numeric(), None);
+
+        control.live_value = Some("0.82".to_string());
+        assert_eq!(
+            control.shown_display(),
+            "0.82",
+            "the live reading leads, with no parenthetical beside it"
+        );
+        assert_eq!(control.live_numeric(), Some(0.82));
+
+        let aspects = control.detail_aspects();
+        assert!(
+            aspects.iter().any(|aspect| aspect
+                .rows
+                .iter()
+                .any(|row| row.label == "Authored value" && row.value == "1.6")),
+            "the displaced authored value is in the popup: {aspects:?}"
+        );
+        assert_eq!(
+            control.aspects.len(),
+            1,
+            "and the control's own aspect list is untouched"
+        );
+    }
+
+    /// A control with no aspects at all (story fixtures) still surfaces the
+    /// authored value rather than dropping it on the floor.
+    #[test]
+    fn the_authored_value_row_lands_even_without_a_type_info_aspect() {
+        let control = control(Vec::new());
+        let aspects = control.detail_aspects();
+        assert_eq!(aspects.len(), 1);
+        assert_eq!(aspects[0].rows[0].label, "Authored value");
     }
 }

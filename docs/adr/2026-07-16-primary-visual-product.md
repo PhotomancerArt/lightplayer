@@ -5,7 +5,10 @@
 - **Deciders:** Photomancer
 - **Supersedes:** the informal `channel.name == "visual.out"` check in
   `ProjectController::ui_bus_view` (the bus pane's PRIMARY badge)
-- **Superseded by:** None
+- **Superseded by:** None. *Amended 2026-08-03:* the sidebar bus pane is
+  gone — its rows are the module card's wiring drawer
+  (`2026-08-03-panel-visibility-is-derived.md`). Read every "bus pane"
+  below as "wiring drawer"; the constant and its meaning are unchanged.
 
 ## Context
 
