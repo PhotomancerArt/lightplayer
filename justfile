@@ -688,6 +688,10 @@ clippy-fw-esp32v3:
     # `cd` for the same reason the build recipe does it: .cargo/config.toml
     # here selects the Xtensa target, and cargo reads it from the CWD upward.
     cd {{ fw_esp32v3_dir }}
+    # Formatting first: as a standalone workspace (networking M2-P2), this
+    # crate is no longer covered by the root `fmt-check` — without this line,
+    # formatting drift here would go completely ungated.
+    cargo fmt --check
     # `--profile release-esp32v3`, NOT fw-esp32s3's `--release`: esp-storage's
     # build script hard-errors on this chip at the workspace release profile's
     # `opt-level = "z"` ("Building esp-storage for ESP32 needs optimization

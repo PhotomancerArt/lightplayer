@@ -56,7 +56,10 @@ pub struct NetStatus {
 /// that must not await, and the payload is a couple of words — the critical
 /// section is a handful of cycles.
 static NET_STATUS: Mutex<CriticalSectionRawMutex, Cell<NetStatus>> =
-    Mutex::new(Cell::new(NetStatus { up: false, ip: None }));
+    Mutex::new(Cell::new(NetStatus {
+        up: false,
+        ip: None,
+    }));
 
 /// Snapshot of the current network status.
 pub fn net_status() -> NetStatus {
@@ -107,7 +110,10 @@ pub async fn dhcp_status_loop(stack: Stack<'static>) {
             }
         }
         stack.wait_config_down().await;
-        publish(NetStatus { up: false, ip: None });
+        publish(NetStatus {
+            up: false,
+            ip: None,
+        });
         log::info!("net: IPv4 config lost, waiting for DHCP");
     }
 }
