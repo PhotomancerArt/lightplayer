@@ -30,8 +30,8 @@ const SECTION_LABEL_TEXT_CLASS: &str = "tw:select-none tw:text-[0.6rem] tw:font-
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn NodeCardSection(
-    /// Lowercase section label ("output", "controls", "agent", "entries",
-    /// "code", "advanced").
+    /// Lowercase section label ("output", "settings", "panel", "agent",
+    /// "entries", "code", "advanced").
     label: &'static str,
     /// Optional role icon beside the label (the agent section's sparkles).
     #[props(default = None)]
@@ -53,10 +53,16 @@ pub fn NodeCardSection(
     /// pane header's own border).
     #[props(default = false)]
     first: bool,
+    /// The module PANEL's teaching treatment: a `panel-primary` wash over
+    /// the section and a heading-toned rail, marking the one section that
+    /// is the performable product surface — the thing play mode renders
+    /// (spike gate 2; ADR 2026-08-04-wiring-flow-and-panel-settings).
+    #[props(default = false)]
+    panel_tint: bool,
     /// Full-bleed section content — padding is the content's own business.
     children: Element,
 ) -> Element {
-    let container = section_container_class(first);
+    let container = section_container_class(first, panel_tint);
     let toggleable = open.is_some() && on_toggle.is_some();
     let expanded = open.unwrap_or(true);
 
@@ -88,12 +94,18 @@ pub fn NodeCardSection(
 /// Divider logic: every section but the first carries the 1px top hairline
 /// (`border-strong` — `border-muted` was invisible against the card in the
 /// wired app).
-fn section_container_class(first: bool) -> &'static str {
-    if first {
+fn section_container_class(first: bool, panel_tint: bool) -> String {
+    let mut class = String::from(if first {
         "tw:grid tw:min-w-0"
     } else {
         "tw:grid tw:min-w-0 tw:border-t tw:border-border-strong"
+    });
+    if panel_tint {
+        class.push_str(
+            " tw:bg-[linear-gradient(90deg,rgba(24,32,29,0.85),rgba(24,32,29,0.25)_60%,transparent)]",
+        );
     }
+    class
 }
 
 /// The vertical label rail on the expanded section's LEFT edge. A
