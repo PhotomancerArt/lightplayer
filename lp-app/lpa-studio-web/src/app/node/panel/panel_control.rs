@@ -275,7 +275,7 @@ fn PanelControlBody(
 /// 100 seconds — the unit suffix supplies the "s"). A frozen phasor
 /// (period 0) never cycles, which is a period of ∞. A reading that does not
 /// parse passes through untouched.
-fn phasor_speed_display(shown: &str) -> String {
+pub(crate) fn phasor_speed_display(shown: &str) -> String {
     let Ok(period) = shown.trim().parse::<f32>() else {
         return shown.to_string();
     };

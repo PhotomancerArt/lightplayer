@@ -96,6 +96,7 @@ pub use face::{
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
+pub(crate) use panel::phasor_speed_display;
 pub use panel::{HFaderField, KnobField, PanelControl, PanelEmit, ToggleField};
 pub use produced_product_view::ProducedProductView;
 pub(crate) use produced_product_view::{ProductPreview, ProductPreviewCanvas};

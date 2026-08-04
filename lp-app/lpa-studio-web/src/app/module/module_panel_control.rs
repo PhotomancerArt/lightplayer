@@ -216,9 +216,21 @@ fn ModulePanelControlBody(
     let engaged = state.engaged();
     let following = matches!(state, UiPanelControlState::ReadFollowing);
 
+    // A phasor speed knob presents its stored period as a reciprocal and
+    // drags on an inverted axis (up = faster) — same treatment as the
+    // node-face control (G2 feedback; provisional pending the UX spike).
+    let phasor = matches!(
+        control.emit,
+        lpa_studio_core::UiPanelEmit::PhasorPeriod { .. }
+    );
+    let shown_value = if phasor {
+        crate::app::node::phasor_speed_display(control.shown_display())
+    } else {
+        control.shown_display().to_string()
+    };
     let readout = rsx! {
         span { class: "{READOUT_CLASS} {readout_class}",
-            span { "{control.shown_display()}" }
+            span { "{shown_value}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
         }
     };
@@ -238,6 +250,7 @@ fn ModulePanelControlBody(
                     state: control.state.clone(),
                     bound: following,
                     engaged,
+                    invert: phasor,
                     address: control.address.clone(),
                     panel_target: control.panel_target.clone(),
                     emit,
