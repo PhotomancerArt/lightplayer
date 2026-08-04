@@ -1549,12 +1549,7 @@ fn register_node_bindings(
             // nothing preserves it. Every other kind's slot set is closed, so
             // an unresolved key can only be a mistake — fail the load with
             // the slot's name.
-            Err(_)
-                if matches!(
-                    node.kind,
-                    NodeKind::Shader | NodeKind::ComputeShader
-                ) =>
-            {
+            Err(_) if matches!(node.kind, NodeKind::Shader | NodeKind::ComputeShader) => {
                 continue;
             }
             Err(reason) => {
@@ -1769,12 +1764,10 @@ fn register_default_bind(
     // resolves); dynamic shader slot names are already accessor paths.
     let slot = match resolve_declared_binding_path(current.kind, name) {
         Ok(slot) => slot,
-        Err(_) => {
-            SlotPath::parse(name).map_err(|e| ProjectLoadError::InvalidProjectReference {
-                path: node_label(current),
-                reason: format!("invalid default_bind slot `{name}`: {e}"),
-            })?
-        }
+        Err(_) => SlotPath::parse(name).map_err(|e| ProjectLoadError::InvalidProjectReference {
+            path: node_label(current),
+            reason: format!("invalid default_bind slot `{name}`: {e}"),
+        })?,
     };
     let draft = if direction == SlotDirection::Produced {
         if binding_target(bindings, name).is_some() {

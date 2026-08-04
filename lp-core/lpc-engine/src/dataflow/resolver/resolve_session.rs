@@ -344,8 +344,7 @@ impl<'a> EngineSession<'a> {
                     Err(SessionResolveError::NoBusProvider { .. })
                         if matches!(
                             query,
-                            QueryKey::ConsumedSlot { .. }
-                                | QueryKey::ConsumedSlotAccessor { .. }
+                            QueryKey::ConsumedSlot { .. } | QueryKey::ConsumedSlotAccessor { .. }
                         ) =>
                     {
                         self.produce_through_host(host, query)
