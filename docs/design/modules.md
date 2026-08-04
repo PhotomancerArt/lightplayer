@@ -196,6 +196,17 @@ particular faces: every node has a panel, and it presents the node's
 *public surface*. No dataflow construct exists behind a panel; nothing is
 promoted between levels.
 
+> **Naming (2026-08-04, wiring spike G2).** In Studio the section
+> *labeled* `panel` appears on **module** cards only, wearing the
+> panel-primary tint and a ▶ rail mark — the panel is the thing play
+> mode renders. A **leaf** card's own bound-slot strip is labeled
+> `settings`: its knobs configure that one node, and the same publicity
+> simultaneously surfaces as controls on the enclosing module's panel.
+> The derivation below is unchanged — every node *has* a panel in the
+> model; the label is reserved for the module/product surface so the two
+> readings stop colliding. See
+> `docs/adr/2026-08-04-wiring-flow-and-panel-settings.md`.
+
 - A **leaf node's** panel presents its public (bound) slots. Publicity
   (R3) is the one gesture that puts a control on a panel — this
   **subsumes the legacy `panel: bool` slot flag** — deleted outright in
@@ -451,9 +462,11 @@ pane's own rows); engaged-vs-inheriting state and the reset gesture
 > P2–P3, gate GV). The flat-root reversal, the module face at every depth
 > (children below as sibling cards), the per-scope wiring drawer, and play
 > mode (`#/sim|device/<key>/play`) are all real; the sidebar bus pane is
-> deleted. What the drawer's rows LOOK like is unchanged from the pane —
-> that redesign is §10 future work, not this slice. The contention pick
-> (E3) is authorable on `ModuleDef.bindings` but has no gesture yet.
+> deleted. 2026-08-04: the drawer's rows became the **flow view**
+> (writers → value box → readers, from the wiring-UI spike;
+> `docs/adr/2026-08-04-wiring-flow-and-panel-settings.md`). The
+> contention pick (E3) is authorable on `ModuleDef.bindings` but has no
+> gesture yet — the drawer shows the ambiguity as display only.
 
 ## 6. File layout
 
@@ -570,14 +583,17 @@ somebody owes. Recorded 2026-08-03 at the close of
 
 **Design passes owed**
 
-- **Wiring-drawer redesign.** The drawer reuses the retired bus pane's
-  channel rows verbatim (relocate, don't redesign — settled DY4). A
-  proper look for bus-as-writers/readers needs its own UX spike, and
-  that spike owns the vocabulary below.
-- **CONTROLS-vs-PANEL nomenclature.** "Controls" (the `control.out`
-  product; a card's control affordances) and "panel" (a scope's public
-  channel surface) name different things and read as the same thing.
-  Likely the wiring spike's to settle, since it surrounds both.
+- **Wiring-drawer redesign.** DONE 2026-08-04 — the flow view
+  (writers → value box → readers, arrowed wires, tone-matched colors,
+  child-scope readers listed, stacked tree layout in narrow containers)
+  shipped from the wiring-UI spike (`spikes/wiring-ui/`,
+  `docs/adr/2026-08-04-wiring-flow-and-panel-settings.md`). Still open
+  from that pass: the E3 pick gesture (§5) and the `control.out`
+  channel rename (§7 vocabulary).
+- **CONTROLS-vs-PANEL nomenclature.** DONE 2026-08-04 — `panel` is the
+  module card's tinted ▶ section (what play mode renders); leaf cards
+  say `settings` (R8 naming note, same ADR). The `control.out` product
+  channel keeps its name until §7 vocabulary lock-down.
 - **Auto-naming.** Manually naming nodes is a tax the node type usually
   pays for you. A node/module should present a good name with nothing
   authored — derived from kind, role, or position, with an authored
