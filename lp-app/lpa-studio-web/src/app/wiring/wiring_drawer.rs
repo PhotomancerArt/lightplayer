@@ -28,7 +28,6 @@ use lpa_studio_core::{UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView
 
 use crate::app::node::value_display::fixed_decimal_display;
 use crate::app::node::{ProductPreview, SlotPane, SlotPaneTreatment};
-use crate::base::StudioIconName;
 
 /// Chip box height — shared by the chip class and the wire geometry.
 const CHIP_H: f64 = 22.0;
@@ -102,7 +101,7 @@ pub(crate) fn FlowChannelRow(
 
     rsx! {
         div {
-            class: "tw:grid tw:min-w-0 tw:items-start tw:gap-y-1 tw:py-2.5{divider} tw:grid-cols-[minmax(0,1fr)_36px_minmax(150px,200px)_36px_minmax(0,1fr)]",
+            class: "tw:grid tw:min-w-0 tw:items-start tw:gap-y-1 tw:py-2.5{divider} tw:grid-cols-[minmax(0,1fr)_36px_minmax(150px,224px)_36px_minmax(0,1fr)]",
             div { class: "tw:flex tw:min-w-0 tw:flex-col tw:items-end tw:gap-1.5 tw:pt-px",
                 if channel.writers.is_empty() {
                     span { class: "tw:pt-1 tw:text-right tw:text-[10.5px] tw:italic tw:leading-snug tw:text-dim-foreground",
@@ -124,7 +123,6 @@ pub(crate) fn FlowChannelRow(
                 aspects,
                 initially_open,
                 treatment,
-                title_icon: StudioIconName::Bus,
                 on_action,
                 badges: rsx! {
                     if channel.primary_visual {
