@@ -1094,6 +1094,13 @@ fw-manifest-check-esp32s3:
 fw-manifest-check-esp32v3:
     node scripts/extract-fw-manifest.mjs {{ fw_esp32v3_elf }} --stable | diff -u lp-fw/fw-esp32v3/manifest-core.expected.json -
 
+# Wired into `check` (local full gate): the four expected fixtures move
+# together on any wire-proto change, and without a local manifest check a
+# WIRE_PROTO_VERSION bump passes `just check test` clean and only fails in
+# CI's per-chip firmware jobs (the TimeProduct 9→10 bump did exactly that).
+# This is the one manifest check that needs no chip toolchain — just the
+# rv32 target the gate already installs — so it is the local proxy for all
+# four; the esp32 variants stay CI-only with their chip builds.
 fw-manifest-check-emu: build-fw-emu
     node scripts/extract-fw-manifest.mjs target/{{ rv32_target }}/release/fw-emu --stable | diff -u lp-fw/fw-emu/manifest-core.expected.json -
 
@@ -1573,11 +1580,16 @@ test-glsl-filetests:
 # but shares nothing with clippy's check-mode output (racing clippy for cores
 # was measured at ~18 min for the pair on a 4-core runner). Local `check`
 # keeps the full meaning.
+#
+# `fw-manifest-check-emu` is likewise local-full-gate only: in CI the same
+# drift class is caught by the per-chip firmware jobs' manifest checks
+# (which need chip builds this gate deliberately avoids). Note the narrow
+# residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
 check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
-check: check-lint schema-check
+check: check-lint schema-check fw-manifest-check-emu
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
