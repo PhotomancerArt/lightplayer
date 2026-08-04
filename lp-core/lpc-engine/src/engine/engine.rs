@@ -978,6 +978,13 @@ impl EngineResolveHost<'_> {
                     node,
                     slot: slot.clone(),
                 })?;
+        // A shader uniform is not a field of `ShaderDef` — it lives under
+        // `consumed[<name>]` — so the plain def lookup below can never see
+        // it. Project it first, the way the merge-policy read does.
+        if let Ok(Some(product)) = self.read_shader_consumed_slot_default(node, slot) {
+            return Ok(Production::new(product, ProductionSource::Default));
+        }
+
         let product = self.read_authored_def_product(node, slot).map_err(|_| {
             SessionResolveError::UnresolvedConsumedSlot {
                 node,
@@ -1298,6 +1305,63 @@ impl EngineResolveHost<'_> {
         node: NodeId,
         slot: &SlotPath,
     ) -> Result<Option<SlotMerge>, SessionResolveError> {
+        Ok(self
+            .shader_consumed_slot_def(node, slot)?
+            .map(|slot| match slot.kind.value() {
+                lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
+                lpc_model::ShaderSlotKind::Value => SlotMerge::Latest,
+            }))
+    }
+
+    /// The authored default an *unbound* shader uniform runs on, as slot
+    /// data — `None` when `slot` does not name a shader consumed slot.
+    ///
+    /// Shader uniforms are not fields of `ShaderDef`/`ComputeShaderDef`;
+    /// they live in the `consumed` map, keyed by uniform name. So a
+    /// `read_authored_def_product` lookup of the *name* has nothing to hit
+    /// and every unbound uniform came back `UnresolvedConsumedSlot` — a
+    /// node behaving exactly as authored reported a permanent `Warn`,
+    /// indistinguishable from a genuinely broken binding
+    /// (`docs/defects/2026-08-04-unbound-shader-uniform-warns.md`).
+    ///
+    /// The data produced is what [`materialize_shader_input`] already
+    /// builds for absent data, so the *value* an unbound uniform runs on is
+    /// unchanged: a value slot's authored `default` (0.0 when unauthored),
+    /// and an empty map for a map slot — which fills every element with the
+    /// mapping's sentinel key.
+    ///
+    /// Only the plain [`QueryKey::ConsumedSlot`] path needs this. An
+    /// accessor is compiled against the def's own shape, so a uniform name
+    /// can never become one in the first place.
+    ///
+    /// [`materialize_shader_input`]: crate::nodes::shader::shader_input_materialize::materialize_shader_input
+    fn read_shader_consumed_slot_default(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Result<Option<SlotData>, SessionResolveError> {
+        Ok(self
+            .shader_consumed_slot_def(node, slot)?
+            .map(|slot| match slot.kind.value() {
+                lpc_model::ShaderSlotKind::Value => {
+                    SlotData::Value(WithRevision::new(self.frame_revision, slot.default_value()))
+                }
+                lpc_model::ShaderSlotKind::Map => {
+                    SlotData::Map(lpc_model::SlotMapDyn::with_revision(
+                        self.frame_revision,
+                        lp_collection::VecMap::new(),
+                    ))
+                }
+            }))
+    }
+
+    /// The authored `consumed[<name>]` def `slot` names, when `node` is a
+    /// shader or compute shader and `slot` is a bare uniform name.
+    fn shader_consumed_slot_def(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Result<Option<&lpc_model::ShaderSlotDef>, SessionResolveError> {
         let Some(SlotPathSegment::Field(name)) = slot.segments().first() else {
             return Ok(None);
         };
@@ -1305,15 +1369,11 @@ impl EngineResolveHost<'_> {
             return Ok(None);
         }
         let def = self.loaded_node_def(node)?;
-        let shader_slot = match def {
+        Ok(match def {
             NodeDef::Shader(config) => config.consumed_slots.entries.get(name.as_str()),
             NodeDef::ComputeShader(config) => config.consumed_slots.entries.get(name.as_str()),
             _ => None,
-        };
-        Ok(shader_slot.map(|slot| match slot.kind.value() {
-            lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
-            lpc_model::ShaderSlotKind::Value => SlotMerge::Latest,
-        }))
+        })
     }
 
     fn read_authored_def_slot_semantics(

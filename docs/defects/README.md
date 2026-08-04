@@ -237,6 +237,7 @@ the combination first being registered as a target.
 | ungated-variant | 2026-07-30 | [stacked-prs-get-no-ci](2026-07-30-stacked-prs-get-no-ci.md) | fixed | .github/workflows/pre-merge.yml (trigger) |
 | lifecycle-ownership | 2026-07-16 | [browser-serial-endpoint-lost](2026-07-16-browser-serial-endpoint-lost.md) | fixed | lpa-link/registry |
 | lifecycle-ownership | 2026-07-22 | [flash-session-map-deleted](2026-07-22-flash-session-map-deleted.md) | fixed | lpa-link/browser-serial |
+| state-conflation | 2026-08-04 | [unbound-shader-uniform-warns](2026-08-04-unbound-shader-uniform-warns.md) | fixed | lpc-engine engine host + shader nodes |
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
 | state-conflation | 2026-07-26 | [worker-poisoned-instance-reuse](2026-07-26-worker-poisoned-instance-reuse.md) | fixed | fw-browser + lpa-link/browser-worker |
