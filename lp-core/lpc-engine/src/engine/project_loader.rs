@@ -4852,6 +4852,50 @@ mod tests {
         );
     }
 
+    /// The scarf path at the engine (panel.md P10): every fixture's
+    /// brightness is default-bound to `bus:brightness` (with
+    /// `panel = "show"`), so a panel writer on the fixture's scope dims the
+    /// value the render path reads — and with no writer, the authored
+    /// default reads through the binding's writerless dead-end (R6 via the
+    /// resolver's fallback).
+    #[test]
+    fn a_panel_brightness_write_reaches_the_fixture_read() {
+        use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
+
+        let fs = char_project(&[("fixture", r#"{ "kind": "Fixture", "brightness": 0.5 }"#)]);
+        let mut rt = load_project(&fs);
+        let fixture = sibling(&rt, "fixture");
+        let scope = rt.tree().node_scope(fixture).expect("fixture scope");
+        let key = || QueryKey::ConsumedSlot {
+            node: fixture,
+            slot: SlotPath::parse("brightness.some").expect("path"),
+        };
+
+        let (authored, _) = rt
+            .resolve_with_engine_host(key(), ResolveLogLevel::Off)
+            .expect("resolve authored");
+        assert_eq!(
+            authored.value_leaf().map(|leaf| leaf.value().clone()),
+            Some(LpValue::F32(0.5)),
+            "no writer anywhere: the authored default reads through the R6 fallback"
+        );
+
+        rt.engine_mut().panel_write(
+            scope,
+            ChannelName(String::from("brightness")),
+            LpValue::F32(0.1),
+            None,
+        );
+        let (held, _) = rt
+            .resolve_with_engine_host(key(), ResolveLogLevel::Off)
+            .expect("resolve held");
+        assert_eq!(
+            held.value_leaf().map(|leaf| leaf.value().clone()),
+            Some(LpValue::F32(0.1)),
+            "the engaged writer dims what the fixture's render path reads"
+        );
+    }
+
     // The time default is declared on the slot-def (ADR 2026-07-09) — the
     // old "any unbound f32 time input" global convention is retired.
     const CHAR_SHADER_WITH_TIME: &str = r#"
