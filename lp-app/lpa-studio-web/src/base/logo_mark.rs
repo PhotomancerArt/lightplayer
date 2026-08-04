@@ -6,14 +6,14 @@
 //! takes `currentColor`, so containers theme the whole mark (in-app chrome
 //! sets it strong white; mono/print contexts set ink).
 //!
-//! Motion rules (spike gates 1–3, 2026-08-03):
-//! - **In-app lockup**: the mark is static all-white; ONLY the word "Light"
-//!   sweeps the LED rainbow ("D3" — the chip is hardware, the light is in
-//!   the name). Always on; `prefers-reduced-motion` freezes it.
-//! - **Icon-only forms** (favicon, avatar, app icon): no word to carry the
-//!   light, so the play triangle cycles instead (`LogoMark { animated }`).
-//! - **Marketing surfaces**: the loud full-rainbow wordmark
-//!   (`marketing: true`).
+//! Motion rules (spike gates 1–3 2026-08-03; gate-4 post-merge collapsed
+//! the in-app/marketing split — the full-rainbow brand runs everywhere):
+//! - **Lockup**: the whole wordmark sweeps the LED rainbow; the mark —
+//!   triangle included — stays quiet white (the word carries the light).
+//!   Always on; `prefers-reduced-motion` freezes everything.
+//! - **Icon-only forms** (favicon, avatar, app icon): the play triangle
+//!   cycles (`LogoMark { animated }`).
+//! - **Mono** (`mono: true`): everything `currentColor`, no motion.
 //!
 //! Derived assets update with this file: brand PNGs come from
 //! `logo_mark_stories.rs` captures, and `public/favicon.svg` is generated
@@ -71,59 +71,34 @@ pub fn LogoMark(size: u32, #[props(default = false)] animated: bool) -> Element 
     }
 }
 
-/// The wordmark text, shared by the lockup forms. `mono` renders everything
-/// `currentColor` (print/one-color contexts); `marketing` runs the full
-/// rainbow sweep; otherwise "Light" alone carries the rainbow (D3).
+/// The wordmark text, shared by the lockup forms. `mono` renders it
+/// `currentColor` (print/one-color contexts); otherwise the whole word
+/// sweeps the LED rainbow.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BrandWord(
-    word_px: u32,
-    #[props(default = false)] mono: bool,
-    #[props(default = false)] marketing: bool,
-) -> Element {
+fn BrandWord(word_px: u32, #[props(default = false)] mono: bool) -> Element {
     let style = format!("font-size:{word_px}px");
-    if mono {
-        return rsx! {
-            span {
-                class: "tw:font-extrabold tw:leading-none tw:tracking-[-0.015em]",
-                style: "{style}",
-                "LightPlayer"
-            }
-        };
-    }
-    let light_class = if marketing {
-        "lp-brand-word-full"
-    } else {
-        "lp-brand-light"
-    };
-    let player_class = if marketing {
-        "lp-brand-word-full"
-    } else {
-        "tw:text-strong"
-    };
+    let word_class = if mono { "" } else { "lp-brand-word" };
     rsx! {
         span {
-            class: "tw:font-extrabold tw:leading-none tw:tracking-[-0.015em]",
+            class: "tw:font-extrabold tw:leading-none tw:tracking-[-0.015em] {word_class}",
             style: "{style}",
-            span { class: "{light_class}", "Light" }
-            span { class: "{player_class}", "Player" }
+            "LightPlayer"
         }
     }
 }
 
-/// The wide brand lockup: mark + wordmark, one unit. Defaults to the in-app
-/// D3 treatment (white mark, "Light" animates). `compact` drops the wordmark
-/// and switches to the icon-only rule (animated triangle). `marketing` runs
-/// the loud form: full-rainbow word AND the triangle cycles with it (accent
-/// when frozen). `mono` is the one-color form for print/light contexts —
-/// set `color` on a parent.
+/// The wide brand lockup: mark + wordmark, one unit. The rainbow lives in
+/// the wordmark; the mark — triangle included — stays quiet `currentColor`.
+/// `compact` drops the wordmark and switches to the icon-only rule (the
+/// triangle cycles instead). `mono` is the one-color form for print/light
+/// contexts — set `color` on a parent.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn LogoLockup(
     #[props(default = 22)] size: u32,
     #[props(default = false)] compact: bool,
     #[props(default = false)] mono: bool,
-    #[props(default = false)] marketing: bool,
 ) -> Element {
     // Optical norm: mark→word gap ≈ 0.5× wordmark cap height measured from
     // the mark's visual edge; the viewBox carries ~9% right-side air (pad
@@ -136,10 +111,10 @@ pub fn LogoLockup(
             class: "tw:flex tw:flex-none tw:cursor-default tw:items-center {tone}",
             style: "gap:{gap}px",
             title: "LightPlayer",
-            LogoMark { size, animated: (compact || marketing) && !mono }
+            LogoMark { size, animated: compact && !mono }
             if !compact {
                 span { class: "tw:max-[560px]:hidden tw:flex",
-                    BrandWord { word_px, mono, marketing }
+                    BrandWord { word_px, mono }
                 }
             }
         }
@@ -153,7 +128,6 @@ pub fn LogoLockup(
 pub fn LogoStacked(
     #[props(default = 64)] size: u32,
     #[props(default = false)] mono: bool,
-    #[props(default = false)] marketing: bool,
 ) -> Element {
     let gap = ((size as f32) * 0.14).round() as u32;
     let word_px = ((size as f32) * 0.28).round() as u32;
@@ -164,7 +138,7 @@ pub fn LogoStacked(
             style: "gap:{gap}px",
             title: "LightPlayer",
             LogoMark { size }
-            BrandWord { word_px, mono, marketing }
+            BrandWord { word_px, mono }
         }
     }
 }

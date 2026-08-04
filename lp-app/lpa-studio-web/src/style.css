@@ -2069,6 +2069,49 @@ label:has(> input:not(:disabled)) {
         rgba(8, 12, 14, 0.46);
 }
 
+/* Composite (struct) produced values: type tag + per-field rows. */
+.ux-produced-struct {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.ux-produced-struct-type {
+    color: var(--studio-color-text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.ux-produced-struct-field {
+    display: flex;
+    gap: 0.6rem;
+    align-items: baseline;
+    justify-content: space-between;
+    min-width: 0;
+}
+
+.ux-produced-struct-field-name {
+    flex: none;
+    color: var(--studio-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ux-produced-struct-field-value {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--studio-color-text-strong);
+    font-family: var(--studio-font-mono);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .ux-produced-value-reading {
     display: inline-grid;
     position: relative;
@@ -4854,8 +4897,13 @@ label:has(> input:not(:disabled)) {
     to { background-position: -300% 0; }
 }
 
-.lp-brand-light,
-.lp-brand-word-full {
+.lp-brand-word {
+    /* background-clip:text only paints inside the box; at leading-none the
+       'g'/'y' descenders fall outside it and render transparent. Pad the box
+       past the descender (negative margin keeps layout metrics unchanged). */
+    display: inline-block;
+    padding-bottom: 0.22em;
+    margin-bottom: -0.22em;
     background-image: linear-gradient(90deg, #5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e, #5fe08b);
     background-size: 300% 100%;
     -webkit-background-clip: text;
@@ -4866,8 +4914,7 @@ label:has(> input:not(:disabled)) {
 
 @media (prefers-reduced-motion: reduce) {
     .lp-brand-play-anim,
-    .lp-brand-light,
-    .lp-brand-word-full {
+    .lp-brand-word {
         animation: none;
     }
 }
