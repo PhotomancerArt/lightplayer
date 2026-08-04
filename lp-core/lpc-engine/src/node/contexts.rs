@@ -28,6 +28,7 @@ use lpc_registry::{AssetBytes, AssetReadError, AssetText, ProjectRegistry};
 use lpc_shared::time::TimeProvider;
 use lpfs::LpFs;
 
+use super::ScopeRef;
 use super::node_error::NodeError;
 
 /// Narrow store access for allocating node-owned visual products and runtime buffers at attach time.
@@ -353,6 +354,24 @@ impl<'r> TickContext<'r> {
         let revision = self.revision;
         self.resolver
             .publish_timebase(node, effective_seconds, delta_seconds, revision);
+    }
+
+    /// The bus scope this node reads from — the scope half of a scoped
+    /// [`QueryKey::Bus`](crate::dataflow::resolver::QueryKey) key. `None` on
+    /// hosts with no scope model.
+    pub fn bus_read_scope(&self) -> Option<ScopeRef> {
+        self.resolver.node_scope(self.node_id)
+    }
+
+    /// The channel + writer scope supplying one of this node's consumed
+    /// slots, when a bus channel with a live writer is what supplies it —
+    /// the provenance a phasor identity is derived from (parent D3).
+    pub fn consumed_slot_bus_provenance(
+        &self,
+        slot: &SlotPath,
+    ) -> Option<(ScopeRef, lpc_model::ChannelName)> {
+        self.resolver
+            .consumed_slot_bus_provenance(self.node_id, slot)
     }
 
     /// The effective seconds behind a time product.

@@ -28,8 +28,9 @@ use lp_gfx::LpComputeShader;
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
 use super::shader_node::{
-    format_compile_stats, input_resolve_warning, note_input_resolve_failures, read_authored_value,
-    resolve_or_default_input, set_slot_if_changed, sync_shader_slot_def_from_authored,
+    TimeProductCache, format_compile_stats, input_resolve_warning, note_input_resolve_failures,
+    read_authored_value, resolve_or_default_input, set_slot_if_changed,
+    sync_shader_slot_def_from_authored,
 };
 
 /// Runtime node for `kind = "shader/compute"` artifacts.
@@ -223,8 +224,10 @@ impl ComputeShaderNode {
     ) -> Result<Vec<(String, LpsValueF32)>, NodeError> {
         let mut inputs = Vec::new();
         let mut failures = Vec::new();
+        let mut timebase = TimeProductCache::new();
         for (name, slot) in &self.def.consumed_slots.entries {
-            let (value, failure) = resolve_or_default_input(ctx, name, slot, "compute shader")?;
+            let (value, failure) =
+                resolve_or_default_input(ctx, name, slot, "compute shader", &mut timebase)?;
             if let Some(failure) = failure {
                 failures.push((name.clone(), failure));
             }
@@ -786,6 +789,7 @@ void tick() {{
                 kind: ValueSlot::new(lpc_model::ShaderSlotKind::Value),
                 value: ValueSlot::new(lpc_model::ShaderValueShapeRef::builtin("f32")),
                 key: lpc_model::OptionSlot::none(),
+                phasor: lpc_model::OptionSlot::none(),
                 default: lpc_model::OptionSlot::none(),
                 min: lpc_model::OptionSlot::none(),
                 max: lpc_model::OptionSlot::none(),

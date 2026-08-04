@@ -47,6 +47,23 @@ pub trait ResolveHost {
         SlotMerge::Latest
     }
 
+    /// Where a consumed slot's value comes from, when it comes from a bus
+    /// channel with a live writer: the channel plus the scope that writer
+    /// lives in, after the R5 shadowing walk outward from the reader.
+    ///
+    /// This is the *provenance* a phasor identity is derived from (parent
+    /// D3), which is why it answers `None` in the two cases that mean
+    /// "slot-local": the slot is not bus-bound at all, and the channel it
+    /// binds has no writer anywhere (an R6 fallback reads the authored
+    /// default, so it is exactly as private as an unbound slot).
+    fn consumed_slot_bus_provenance(
+        &self,
+        _node: NodeId,
+        _slot: &SlotPath,
+    ) -> Option<(ScopeRef, ChannelName)> {
+        None
+    }
+
     /// The bus scope `node` writes into and reads from (its inhabited
     /// scope; the root module reads its own introduced scope). `None`
     /// means the host has no scope model — test fakes — and every read

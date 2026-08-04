@@ -46,6 +46,42 @@
         }
       },
       {
+        "name": "phasor",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 4055979827,
+                  "meta": {},
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "period_seconds",
+                          "ty": "f32"
+                        },
+                        {
+                          "name": "waveform",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "phase_offset",
+                          "ty": "f32"
+                        }
+                      ],
+                      "name": "PhasorConfig"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "default_bind",
         "shape": {
           "option": {

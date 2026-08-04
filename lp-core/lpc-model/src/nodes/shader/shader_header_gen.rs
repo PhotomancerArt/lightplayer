@@ -32,7 +32,10 @@ pub fn generate_compute_shader_header(
     for (binding, (name, slot)) in def.consumed_slots.entries.iter().enumerate() {
         let ty = glsl_type_for_ref(slot.value.value(), registry)?;
         match slot.kind.value() {
-            ShaderSlotKind::Value => {
+            // Timebase kinds declare exactly what a plain f32 value slot
+            // declares: the config that makes them a phasor lives on the def,
+            // never in GLSL (`uniform float phase;` is the whole contract).
+            ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
                 writeln!(&mut out, "// consumed: {name}").expect("write string");
                 writeln!(&mut out, "layout(binding = {binding}) uniform {ty} {name};")
                     .expect("write string");
@@ -62,7 +65,10 @@ pub fn generate_compute_shader_header(
     for (name, slot) in &def.produced_slots.entries {
         let ty = glsl_type_for_ref(slot.value.value(), registry)?;
         match slot.kind.value() {
-            ShaderSlotKind::Value => {
+            // A produced timebase slot is meaningless, but its declaration is
+            // still just `float name;` — refusing it here would only move the
+            // diagnostic somewhere less useful.
+            ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
                 writeln!(&mut out, "// produced: {name}").expect("write string");
                 writeln!(&mut out, "{ty} {name};").expect("write string");
             }
@@ -239,6 +245,7 @@ mod tests {
                 kind: crate::ValueSlot::new(ShaderSlotKind::Value),
                 value: crate::ValueSlot::new(ShaderValueShapeRef::builtin("f32")),
                 key: crate::OptionSlot::none(),
+                phasor: crate::OptionSlot::none(),
                 default: crate::OptionSlot::none(),
                 min: crate::OptionSlot::none(),
                 max: crate::OptionSlot::none(),
@@ -275,6 +282,42 @@ mod tests {
         assert!(header.contains("// produced: emitters"));
         assert!(header.contains("FluidEmitter emitters[4];"));
         assert!(!header.contains("out FluidEmitter"));
+    }
+
+    /// The timebase kinds are invisible to GLSL: the header declares the same
+    /// `float` uniform a value slot would, which is exactly why the shader
+    /// compiler, the ABI and the filetests need no changes for them.
+    #[test]
+    fn timebase_kinds_declare_plain_float_uniforms() {
+        let mut consumed = VecMap::new();
+        consumed.insert(
+            String::from("elapsed"),
+            ShaderSlotDef::seconds("Elapsed", ""),
+        );
+        consumed.insert(
+            String::from("wave"),
+            ShaderSlotDef::phasor("Wave", "", crate::PhasorConfig::with_period(2.0)),
+        );
+        let def = ComputeShaderDef {
+            source: AssetSlot::path("wave.glsl"),
+            bindings: crate::BindingDefs::default(),
+            float_mode: crate::ValueSlot::default(),
+            consumed_slots: MapSlot::new(consumed),
+            produced_slots: MapSlot::default(),
+        };
+
+        let header =
+            generate_compute_shader_header(&def, &SlotShapeRegistry::default()).expect("header");
+
+        assert!(
+            header.contains("layout(binding = 0) uniform float elapsed;"),
+            "{header}"
+        );
+        assert!(
+            header.contains("layout(binding = 1) uniform float wave;"),
+            "{header}"
+        );
+        assert!(!header.contains("PhasorConfig"), "{header}");
     }
 
     #[test]

@@ -17,15 +17,17 @@ use alloc::vec::Vec;
 
 use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
-    AssetLocation, FloatMode, MapSlot, NodeId, NodeRuntimeStatus, Revision, ShaderMapKeyDef,
-    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
-    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
+    AssetLocation, FloatMode, FromLpValue, MapSlot, NodeId, NodeRuntimeStatus, PhasorConfig,
+    Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState,
+    ShaderValueShapeRef, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    StaticSlotShape, TimeProduct, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
+use crate::dataflow::timebase::PhasorKey;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
@@ -35,7 +37,11 @@ use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, Visual
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
+use super::phasor_eval::{phasor_frame_zero, shape_phasor};
 use super::shader_input_materialize::materialize_shader_input;
+
+/// The well-known channel a scope's timebase lives on.
+const TIME_CHANNEL: &str = "time";
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -350,8 +356,10 @@ impl ShaderNode {
     fn update_visual_uniforms(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut uniforms = Vec::new();
         let mut failures = Vec::new();
+        let mut timebase = TimeProductCache::new();
         for (name, slot) in &self.consumed_slots.entries {
-            let (value, failure) = resolve_or_default_input(ctx, name, slot, "visual shader")?;
+            let (value, failure) =
+                resolve_or_default_input(ctx, name, slot, "visual shader", &mut timebase)?;
             if let Some(failure) = failure {
                 failures.push((name.clone(), failure));
             }
@@ -530,6 +538,26 @@ pub(super) fn sync_shader_slot_def_from_authored(
         )? {
             changed |= set_slot_if_changed(key, value);
         }
+    }
+    // The phasor config is a value LEAF (a `PhasorConfig` struct), not a
+    // record of sub-slots, so the whole config syncs in one read — which is
+    // what makes a live period drag hot-apply without a reload.
+    //
+    // Unlike the fields around it, this one may also have to CREATE its
+    // option: a slot re-authored from `value` to `phasor` arrives here with
+    // `phasor: none` on the runtime side and a config on the authored side.
+    // Absence stays "leave as loaded" (a host with no authored def, e.g. a
+    // unit fake, must not have its config wiped).
+    if let Some(config) =
+        try_read_authored_value::<PhasorConfig>(ctx, &alloc::format!("{base_path}.phasor.some"))?
+    {
+        changed |= match slot.phasor.data.as_mut() {
+            Some(existing) => set_slot_if_changed(existing, config),
+            None => {
+                slot.phasor = lpc_model::OptionSlot::some(ValueSlot::new(config));
+                true
+            }
+        };
     }
     if let Some(default) = slot.default.data.as_mut() {
         if let Some(value) =
@@ -878,20 +906,184 @@ fn fuel_exhausted_failure(trap: &lp_gfx::ShaderFuelTrap) -> Result<(), NodeError
     Err(NodeError::msg(format!("{trap}")))
 }
 
+/// The uniform set a shader renders with before its first tick.
+///
+/// A uniform the backend's generated header declares but the frame-0 set
+/// omits is a hard backend error, so every kind that declares a `float`
+/// uniform must answer here — including the timebase kinds, whose store has
+/// not been queried yet and whose honest frame-0 answer is the start of the
+/// first cycle.
 fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform> {
     slots
         .entries
         .iter()
-        .filter_map(|(name, slot)| {
-            if *slot.kind.value() == ShaderSlotKind::Value {
-                model_value_to_lps_value_f32(&slot.default_value())
-                    .ok()
-                    .map(|value| (name.clone(), value))
-            } else {
-                None
-            }
+        .filter_map(|(name, slot)| match *slot.kind.value() {
+            ShaderSlotKind::Value => model_value_to_lps_value_f32(&slot.default_value())
+                .ok()
+                .map(|value| (name.clone(), value)),
+            ShaderSlotKind::Phasor => Some((
+                name.clone(),
+                LpsValueF32::F32(phasor_frame_zero(&slot.phasor_config())),
+            )),
+            ShaderSlotKind::Seconds => Some((name.clone(), LpsValueF32::F32(0.0))),
+            ShaderSlotKind::Map => None,
         })
         .collect()
+}
+
+/// Per-node-tick memo of the scope's time product.
+///
+/// Resolved at most once per `produce` and shared by every timebase uniform
+/// on the node: `fw-esp32v3` runs the resolver payload cache OFF, so a
+/// per-uniform `bus:time` resolve would be a real per-uniform bus walk on the
+/// tier that can least afford one.
+pub(super) struct TimeProductCache {
+    resolved: Option<Result<TimeProduct, String>>,
+}
+
+impl TimeProductCache {
+    pub(super) fn new() -> Self {
+        Self { resolved: None }
+    }
+
+    fn get(&mut self, ctx: &mut TickContext<'_>) -> Result<TimeProduct, String> {
+        if self.resolved.is_none() {
+            self.resolved = Some(resolve_time_product(ctx));
+        }
+        self.resolved
+            .clone()
+            .expect("time product was just resolved")
+    }
+}
+
+/// Resolve the reader's scope's `bus:time` down to a [`TimeProduct`] handle.
+///
+/// Scoped deliberately: a module that shadows `time` with its own clock must
+/// drive the phasors inside it, and an unscoped read would silently pick some
+/// other scope's writer (or refuse as ambiguous).
+fn resolve_time_product(ctx: &mut TickContext<'_>) -> Result<TimeProduct, String> {
+    let query = QueryKey::Bus {
+        scope: ctx.bus_read_scope(),
+        channel: lpc_model::ChannelName(String::from(TIME_CHANNEL)),
+    };
+    let production = ctx.resolve(&query).map_err(|e| e.message)?;
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| String::from("bus:time is not a value"))?;
+    match value.value() {
+        lpc_model::LpValue::Product(lpc_model::ProductRef::Time(product)) => Ok(*product),
+        other => Err(format!(
+            "bus:time does not carry a time product (got {other:?})"
+        )),
+    }
+}
+
+/// Evaluate a `seconds` uniform: the scope timebase's effective seconds.
+fn resolve_seconds_input(
+    ctx: &mut TickContext<'_>,
+    timebase: &mut TimeProductCache,
+) -> (LpsValueF32, Option<String>) {
+    match timebase
+        .get(ctx)
+        .and_then(|product| ctx.time_product_seconds(product).map_err(|e| e.to_string()))
+    {
+        Ok(seconds) => (LpsValueF32::F32(seconds), None),
+        // No timebase reachable: run at the start of the timeline and warn,
+        // exactly as a broken `bus:` binding on a value slot does. Silently
+        // freezing at zero is the failure mode this whole path exists to
+        // prevent.
+        Err(message) => (LpsValueF32::F32(0.0), Some(message)),
+    }
+}
+
+/// Evaluate a `phasor` uniform: resolve the config (and with it the
+/// integrator's identity), query the store, shape the ramp.
+fn resolve_phasor_input(
+    ctx: &mut TickContext<'_>,
+    name: &str,
+    slot: &ShaderSlotDef,
+    timebase: &mut TimeProductCache,
+) -> Result<(LpsValueF32, Option<String>), NodeError> {
+    let slot_path = SlotPath::parse(name)
+        .map_err(|e| NodeError::msg(format!("invalid phasor slot {name:?}: {e}")))?;
+    let (config, key, mut failure) = resolve_phasor_config(ctx, &slot_path, slot);
+    let shaped_default = LpsValueF32::F32(phasor_frame_zero(&config));
+
+    let product = match timebase.get(ctx) {
+        Ok(product) => product,
+        Err(message) => {
+            failure.get_or_insert(message);
+            return Ok((shaped_default, failure));
+        }
+    };
+    match ctx.time_product_phasor(product, &key, &config) {
+        Ok((phase, _cycle)) => Ok((LpsValueF32::F32(shape_phasor(&config, phase)), failure)),
+        Err(error) => {
+            failure.get_or_insert_with(|| error.to_string());
+            Ok((shaped_default, failure))
+        }
+    }
+}
+
+/// The config a phasor slot evaluates against this tick, and the integrator
+/// identity that follows from where the config came from (parent D3).
+///
+/// A channel-driven config is `Shared`, so every reader of that channel rides
+/// one integrator; anything slot-local — an authored config, a `default`
+/// fallback, or a bound channel nobody writes (R6) — is `Private` to this
+/// node's slot. The key changing across that boundary is what resets the
+/// phase when a channel "grabs the reins".
+///
+/// A channel drives the **period only**. `waveform` and `phase_offset` are
+/// output shaping — how one consumer wants to read a cycle — and stay
+/// slot-local by construction (settled: "waveform is ALWAYS slot-local"),
+/// which is also what lets two readers share one integrator and still look
+/// different. The period is the one field the store integrates, so it is the
+/// one field sharing has to be about.
+fn resolve_phasor_config(
+    ctx: &mut TickContext<'_>,
+    slot_path: &SlotPath,
+    slot: &ShaderSlotDef,
+) -> (PhasorConfig, PhasorKey, Option<String>) {
+    let private = PhasorKey::Private {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let Some((scope, channel)) = ctx.consumed_slot_bus_provenance(slot_path) else {
+        return (slot.phasor_config(), private, None);
+    };
+    let query = QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let driven = ctx
+        .resolve(&query)
+        .map_err(|e| e.message)
+        .and_then(|production| {
+            production
+                .value_leaf()
+                .ok_or_else(|| String::from("phasor config channel is not a value"))
+                .and_then(|value| {
+                    PhasorConfig::from_lp_value(value.value())
+                        .map_err(|e| format!("phasor config channel: {e}"))
+                })
+        });
+    let local = slot.phasor_config();
+    match driven {
+        Ok(config) => (
+            PhasorConfig {
+                period_seconds: config.period_seconds,
+                ..local
+            },
+            PhasorKey::Shared { scope, channel },
+            None,
+        ),
+        // The channel has a writer but its value is not a config: report it
+        // and keep running on the slot-local shaping. Falling back to the
+        // shared key would attach this node to an integrator whose rate it
+        // cannot see.
+        Err(message) => (slot.phasor_config(), private, Some(message)),
+    }
 }
 
 /// Resolve one consumed shader input, falling back to its authored default
@@ -902,28 +1094,54 @@ fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform
 /// default silently would freeze e.g. a `bus:time`-driven shader with zero
 /// diagnostics. Shared by the visual and compute shader nodes; `context`
 /// labels error messages ("visual shader" / "compute shader").
+///
+/// The timebase kinds (`phasor`, `seconds`) never reach the materialize
+/// helper: their value comes from the scope's time product, not from the
+/// slot's resolved data, and `timebase` memoizes that product across every
+/// timebase uniform on the node.
 pub(super) fn resolve_or_default_input(
     ctx: &mut TickContext<'_>,
     name: &str,
     slot: &ShaderSlotDef,
     context: &str,
+    timebase: &mut TimeProductCache,
 ) -> Result<(LpsValueF32, Option<String>), NodeError> {
+    match *slot.kind.value() {
+        ShaderSlotKind::Seconds => return Ok(resolve_seconds_input(ctx, timebase)),
+        ShaderSlotKind::Phasor => return resolve_phasor_input(ctx, name, slot, timebase),
+        ShaderSlotKind::Value | ShaderSlotKind::Map => {}
+    }
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid {context} consumed slot {name:?}: {e}")))?;
-    let (production, failure) = match ctx.resolve(&QueryKey::ConsumedSlot {
+    let (production, mut failure) = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {
         Ok(production) => (Some(production), None),
         Err(e) => (None, Some(e.message)),
     };
-    let value = materialize_shader_input(
+    let materialized = materialize_shader_input(
         name,
         slot,
         production.as_ref().map(|production| production.data()),
         ctx.slot_shapes(),
-    )
-    .map_err(|e| NodeError::msg(format!("{context} input {name:?}: {e}")))?;
+    );
+    let value = match materialized {
+        Ok(value) => value,
+        // The binding resolved, but to a value this uniform's declared shape
+        // cannot hold — the kind mismatch D12 is about, and the shape the
+        // `bus:time` swap gives every un-migrated `float time` uniform. It is
+        // a *diagnosable* wiring fault, not a broken shader, so it lands in
+        // the same warn-and-run-on-the-default path a failed resolve does
+        // rather than failing the whole node (which would take the shader's
+        // output down and leave the fixture black).
+        Err(mismatch) if production.is_some() => {
+            failure.get_or_insert_with(|| mismatch.to_string());
+            materialize_shader_input(name, slot, None, ctx.slot_shapes())
+                .map_err(|e| NodeError::msg(format!("{context} input {name:?}: {e}")))?
+        }
+        Err(e) => return Err(NodeError::msg(format!("{context} input {name:?}: {e}"))),
+    };
     Ok((value, failure))
 }
 
@@ -981,6 +1199,88 @@ fn validate_shader_visual_product(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod frame_zero_uniform_tests {
+    use super::*;
+    use lp_collection::VecMap;
+    use lpc_model::{PhasorConfig, ShaderSlotMappingDef, Waveform};
+
+    /// The backend fails hard on a uniform its generated header declares but
+    /// the uniform set omits, so every kind that declares a `float` must
+    /// answer at frame 0 — before any tick, with no timebase queried yet.
+    #[test]
+    fn every_scalar_kind_answers_before_the_first_tick() {
+        let uniforms = default_uniforms(&slots());
+
+        let names: Vec<&str> = uniforms.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["elapsed", "level", "wave"],
+            "map slots declare an array the header sizes itself; the three \
+             scalar kinds must all be present"
+        );
+    }
+
+    /// Frame 0 is the start of the first cycle, shaped: a sine phasor holds
+    /// its midpoint, not zero, and a phase offset rotates that start.
+    #[test]
+    fn a_phasor_starts_at_its_own_shaped_zero() {
+        let uniforms = default_uniforms(&slots());
+
+        assert_eq!(uniform(&uniforms, "level"), 0.5, "the authored default");
+        assert_eq!(uniform(&uniforms, "elapsed"), 0.0, "seconds start at zero");
+        // Sine with a 0.25 offset: 0.5 + 0.5·sin(2π·0.25) = 1.0.
+        assert!(
+            (uniform(&uniforms, "wave") - 1.0).abs() < 1e-6,
+            "wave: {}",
+            uniform(&uniforms, "wave")
+        );
+    }
+
+    fn slots() -> MapSlot<String, ShaderSlotDef> {
+        let mut entries = VecMap::new();
+        entries.insert(
+            String::from("level"),
+            ShaderSlotDef::value_f32("Level", "", 0.5, None),
+        );
+        entries.insert(
+            String::from("wave"),
+            ShaderSlotDef::phasor(
+                "Wave",
+                "",
+                PhasorConfig {
+                    period_seconds: 4.0,
+                    waveform: Waveform::Sine,
+                    phase_offset: 0.25,
+                },
+            ),
+        );
+        entries.insert(
+            String::from("elapsed"),
+            ShaderSlotDef::seconds("Elapsed", ""),
+        );
+        entries.insert(
+            String::from("events"),
+            ShaderSlotDef::map_u32_native(
+                lpc_model::CONTROL_MESSAGE_SHAPE_NAME,
+                ShaderSlotMappingDef::sentinel(2, "id", 0),
+            ),
+        );
+        MapSlot::new(entries)
+    }
+
+    fn uniform(uniforms: &[VisualUniform], name: &str) -> f32 {
+        match uniforms
+            .iter()
+            .find(|(uniform, _)| uniform == name)
+            .map(|(_, value)| value)
+        {
+            Some(LpsValueF32::F32(value)) => *value,
+            other => panic!("uniform {name:?}: {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]

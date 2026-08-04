@@ -1211,6 +1211,39 @@ impl ResolveHost for EngineResolveHost<'_> {
             .collect()
     }
 
+    /// The R5 shadowing walk again, but reporting WHERE it stopped rather
+    /// than what it found there: a phasor's shared identity is the scope the
+    /// winning writer lives in, so two readers in different scopes that both
+    /// resolve outward to the same writer ride the same integrator.
+    ///
+    /// Deliberately not "the winning provider's `node_scope`" — a panel
+    /// writer's synthetic provider is owned by the scope's module node, which
+    /// *inhabits its parent scope*, and that owner-based answer would name
+    /// the wrong scope for exactly the case a shared knob is for.
+    fn consumed_slot_bus_provenance(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Option<(crate::node::ScopeRef, lpc_model::ChannelName)> {
+        let (_, entry) = self.tree.binding_for_consumed_slot(node, slot)?;
+        let crate::dataflow::binding::BindingSource::BusChannel(channel) = &entry.source else {
+            return None;
+        };
+        let channel = channel.clone();
+        let mut scope = self.node_scope(node)?;
+        loop {
+            if self.panel_writers.get(scope, &channel).is_some()
+                || !self
+                    .tree
+                    .providers_for_bus_in_scope(scope, &channel)
+                    .is_empty()
+            {
+                return Some((scope, channel));
+            }
+            scope = self.tree.parent_scope(scope)?;
+        }
+    }
+
     fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
         // Reading scope (R7 export semantics): introducers read inward,
         // everyone else reads the scope they inhabit. Write-side provider
@@ -1431,7 +1464,11 @@ impl EngineResolveHost<'_> {
         };
         Ok(shader_slot.map(|slot| match slot.kind.value() {
             lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
-            lpc_model::ShaderSlotKind::Value => SlotMerge::Latest,
+            // A timebase uniform's binding, when it has one, names a
+            // single config channel — never an aggregate.
+            lpc_model::ShaderSlotKind::Value
+            | lpc_model::ShaderSlotKind::Phasor
+            | lpc_model::ShaderSlotKind::Seconds => SlotMerge::Latest,
         }))
     }
 

@@ -21,7 +21,12 @@ pub fn materialize_shader_input(
     registry: &SlotShapeRegistry,
 ) -> Result<LpsValueF32, ShaderInputMaterializeError> {
     match slot.kind.value() {
-        ShaderSlotKind::Value => materialize_value_input(slot_name, slot, data),
+        // Timebase kinds never arrive here from the shader nodes (their
+        // evaluator answers first); the f32 path is the honest fallback for
+        // any other caller.
+        ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
+            materialize_value_input(slot_name, slot, data)
+        }
         ShaderSlotKind::Map => materialize_map_input(slot_name, slot, data, registry),
     }
 }

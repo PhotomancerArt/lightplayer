@@ -6,12 +6,13 @@ use crate::dataflow::resolver::resolve_error::{ResolveError, SessionResolveError
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_session::ResolveSession;
 use crate::dataflow::timebase::PhasorKey;
+use crate::node::ScopeRef;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
-use lpc_model::{NodeId, PhasorConfig, Revision, SlotPath, TimeProduct};
+use lpc_model::{ChannelName, NodeId, PhasorConfig, Revision, SlotPath, TimeProduct};
 
 /// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`Production`]).
 pub trait TickResolver {
@@ -33,6 +34,25 @@ pub trait TickResolver {
         slot: SlotPath,
         production: Production,
     ) -> Result<(), ResolveError>;
+
+    /// The bus scope `node` reads from. `None` on hosts with no scope model
+    /// (test fakes), where every read shares the unscoped key.
+    fn node_scope(&self, node: NodeId) -> Option<ScopeRef> {
+        let _ = node;
+        None
+    }
+
+    /// The channel + writer scope behind a consumed slot's value, when a bus
+    /// channel with a live writer is what supplies it. See
+    /// [`crate::dataflow::resolver::ResolveHost::consumed_slot_bus_provenance`].
+    fn consumed_slot_bus_provenance(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Option<(ScopeRef, ChannelName)> {
+        let _ = (node, slot);
+        None
+    }
 
     fn render_texture(
         &mut self,
@@ -130,6 +150,18 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<(), ResolveError> {
         self.session.publish_produced_slot(node, slot, production);
         Ok(())
+    }
+
+    fn node_scope(&self, node: NodeId) -> Option<ScopeRef> {
+        self.host.node_scope(node)
+    }
+
+    fn consumed_slot_bus_provenance(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Option<(ScopeRef, ChannelName)> {
+        self.host.consumed_slot_bus_provenance(node, slot)
     }
 
     fn render_control(
