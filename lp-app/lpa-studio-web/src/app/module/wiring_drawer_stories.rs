@@ -15,7 +15,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, ProjectEditorOp, UiAction, UiBusChannelView, UiBusSiteView, UiBusView,
+    ControllerId, ProjectEditorOp, UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView,
+    UiBusView,
     UiModuleFace, UiPanelGroup,
 };
 use lpa_studio_web_story_macros::story;
@@ -29,7 +30,14 @@ fn site(label: &str, slot: Option<&str>, default_origin: bool) -> UiBusSiteView 
     UiBusSiteView {
         node_label: label.to_string(),
         slot: slot.map(str::to_string),
-        default_origin,
+        origin: if default_origin {
+            UiBusSiteOrigin::Default
+        } else {
+            UiBusSiteOrigin::Authored
+        },
+        publish: false,
+        shadowed: false,
+        child_scope: None,
         focus: Some(UiAction::from_op(
             ControllerId::new("story.module"),
             ProjectEditorOp::Focus,
@@ -51,6 +59,8 @@ fn fyeah_bus_view() -> UiBusView {
                 value: Some("3.333".to_string()),
                 value_error: None,
                 primary_visual: false,
+                contended: false,
+                preview: None,
                 writers: vec![site("Clock", Some("seconds"), true)],
                 readers: vec![site("Playlist", Some("time"), false)],
             },
@@ -62,6 +72,8 @@ fn fyeah_bus_view() -> UiBusView {
                 value: None,
                 value_error: None,
                 primary_visual: false,
+                contended: false,
+                preview: None,
                 writers: vec![
                     site("Button", Some("down"), false),
                     site("Radio", Some("output"), false),
@@ -79,6 +91,8 @@ fn fyeah_bus_view() -> UiBusView {
                 value: Some("visual product #5:0".to_string()),
                 value_error: None,
                 primary_visual: true,
+                contended: false,
+                preview: None,
                 writers: vec![site("Playlist", Some("output"), true)],
                 readers: vec![site("Fixture", Some("input"), false)],
             },
@@ -90,6 +104,8 @@ fn fyeah_bus_view() -> UiBusView {
                 value: None,
                 value_error: Some("no provider produced a value".to_string()),
                 primary_visual: false,
+                contended: false,
+                preview: None,
                 writers: vec![site("Fixture", Some("output"), false)],
                 readers: vec![site("Output", Some("input"), false)],
             },

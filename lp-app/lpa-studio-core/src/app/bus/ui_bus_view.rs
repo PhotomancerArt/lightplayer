@@ -1,8 +1,17 @@
 //! Bus **wiring** view DTOs: channels, values, and linked writer/reader
-//! sites. Rendered by the module card's wiring drawer, one view per scope
-//! (P3 — the sidebar bus pane these were built for is gone).
+//! sites. Rendered by the module card's wiring drawer as the flow view
+//! (`[writers] → [value box] → [readers]`, one view per scope — the
+//! 2026-08-03 wiring-UI spike, `spikes/wiring-ui/index.html`).
+//!
+//! Site *flavor* is first-class here because the flow view draws it:
+//! default-origin bindings, engaged panel writers (R10), module publishes
+//! (R7), writers shadowed by priority (R5/R11), and readers that live in a
+//! child scope but resolve to this channel (R5 inheritance, spike gate 3).
 
-use crate::{UiAction, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
+use crate::{
+    UiAction, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductTrackingState,
+    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+};
 
 /// One scope's wiring: every channel of that scope referenced by at least
 /// one binding.
@@ -42,10 +51,37 @@ pub struct UiBusChannelView {
     /// The primary-visual channel (`visual.out`) — the product's main
     /// output; previews hang off it (roadmap M6).
     pub primary_visual: bool,
+    /// Two or more writers tie at top priority (E3): resolution is
+    /// ambiguous until the author picks. Display-only — the pick gesture
+    /// is future work (modules.md §5).
+    pub contended: bool,
+    /// Live preview payload when the resolved value is a visual product —
+    /// exactly the fields the shared `ProductPreview` component consumes,
+    /// so the value box shows the picture, not a debug string. `None`
+    /// when the value is not a product or its preview is not in the
+    /// tracked preview stream.
+    pub preview: Option<UiBusChannelPreview>,
     /// Sites publishing to this channel, highest priority first.
     pub writers: Vec<UiBusSiteView>,
     /// Sites consuming from this channel.
     pub readers: Vec<UiBusSiteView>,
+}
+
+/// A channel value's product preview, lean enough for one wiring row.
+///
+/// Deliberately NOT [`crate::UiProducedProduct`]: that carries binding,
+/// authoring, and dirty state that belong to a produced slot row, none of
+/// which a bus channel's value box has.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiBusChannelPreview {
+    /// Product family (drives the preview frame treatment).
+    pub kind: UiProductKind,
+    /// Current preview bytes/state.
+    pub preview: UiProductPreview,
+    /// Whether Studio is watching this product now.
+    pub tracking: UiProductTrackingState,
+    /// Stable frame used before bytes arrive.
+    pub frame: UiProductPreviewFrame,
 }
 
 impl UiBusChannelView {
@@ -81,6 +117,14 @@ impl UiBusChannelView {
     fn wiring_aspect(&self) -> UiSlotAspect {
         let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Binding, "Wiring")
             .with_affordance(UiSlotAffordance::Bound);
+        if self.contended {
+            aspect = aspect.with_row(
+                UiSlotAspectRow::new("Contention", "ambiguous").with_detail(
+                    "Multiple writers tie at top priority (E3); the author's pick \
+                     resolves it. Until then resolution is ambiguous.",
+                ),
+            );
+        }
         if self.writers.len() > 1 {
             aspect = aspect.with_row(
                 UiSlotAspectRow::new("Writers", format!("{} writers", self.writers.len()))
@@ -106,13 +150,31 @@ impl UiBusChannelView {
 }
 
 fn site_row(label: &str, site: &UiBusSiteView) -> UiSlotAspectRow {
-    let value = match &site.slot {
+    let mut value = match &site.slot {
         Some(slot) => format!("{} .{slot}", site.node_label),
         None => site.node_label.clone(),
     };
+    if let Some(scope) = &site.child_scope {
+        value = format!("{scope} · {value}");
+    }
     let mut row = UiSlotAspectRow::new(label, value);
-    if site.default_origin {
-        row = row.with_detail("default binding");
+    let mut details: Vec<&str> = Vec::new();
+    match site.origin {
+        UiBusSiteOrigin::Authored => {}
+        UiBusSiteOrigin::Panel => details.push("panel writer (engaged)"),
+        UiBusSiteOrigin::Default => details.push("default binding"),
+    }
+    if site.publish {
+        details.push("module publish");
+    }
+    if site.shadowed {
+        details.push("shadowed by a higher-priority writer");
+    }
+    if site.child_scope.is_some() {
+        details.push("resolves here from a child scope (R5)");
+    }
+    if !details.is_empty() {
+        row = row.with_detail(details.join(" · "));
     }
     if let Some(focus) = &site.focus {
         row = row.with_action(focus.clone());
@@ -129,21 +191,56 @@ pub struct UiBusSiteView {
     pub node_label: String,
     /// Anchor slot on the node, when the binding has one.
     pub slot: Option<String>,
-    /// True when the binding came from default policy rather than authoring.
-    pub default_origin: bool,
+    /// Where the binding came from — authored, an engaged panel writer
+    /// (R10), or default policy. The flow view styles each differently.
+    pub origin: UiBusSiteOrigin,
+    /// Publishing site owned by a module node: an R7 publish/export
+    /// (styled bus-violet — the module contributes, a leaf writes).
+    pub publish: bool,
+    /// Writer only: outranked by a higher-priority writer for this
+    /// channel (R5/R11) — drawn dim and dashed, still listed.
+    pub shadowed: bool,
+    /// Reader only: lives in a descendant module scope and resolves to
+    /// this channel by walking outward (R5). The label is the display
+    /// path from this scope down to the site's scope (usually one module
+    /// label, "plasma_1"; "/"-joined at depth ≥ 2). Presentation only.
+    pub child_scope: Option<String>,
     /// Focus/reveal action for the owning node, when it is in the tree.
     pub focus: Option<UiAction>,
+}
+
+impl UiBusSiteView {
+    /// True when the binding came from default policy rather than
+    /// authoring — kept as a reading aid where only that bit matters.
+    pub fn default_origin(&self) -> bool {
+        self.origin == UiBusSiteOrigin::Default
+    }
+}
+
+/// Where a site's binding came from (mirrors `WireBindingOrigin`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiBusSiteOrigin {
+    /// Authored in project data.
+    Authored,
+    /// An engaged panel writer — lazy runtime state, never authored
+    /// (panel.md P1/P2; styled attention-orange like the engaged knob).
+    Panel,
+    /// Materialized from default binding policy.
+    Default,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn site(label: &str, slot: Option<&str>, default_origin: bool) -> UiBusSiteView {
+    fn site(label: &str, slot: Option<&str>, origin: UiBusSiteOrigin) -> UiBusSiteView {
         UiBusSiteView {
             node_label: label.to_string(),
             slot: slot.map(str::to_string),
-            default_origin,
+            origin,
+            publish: false,
+            shadowed: false,
+            child_scope: None,
             focus: None,
         }
     }
@@ -157,11 +254,13 @@ mod tests {
             value: Some("msg 3".to_string()),
             value_error: None,
             primary_visual: false,
+            contended: false,
+            preview: None,
             writers: vec![
-                site("Button", Some("down"), false),
-                site("Radio", Some("output"), false),
+                site("Button", Some("down"), UiBusSiteOrigin::Authored),
+                site("Radio", Some("output"), UiBusSiteOrigin::Authored),
             ],
-            readers: vec![site("Playlist", Some("trigger"), true)],
+            readers: vec![site("Playlist", Some("trigger"), UiBusSiteOrigin::Default)],
         }
     }
 
@@ -216,6 +315,37 @@ mod tests {
             .find(|row| row.value.starts_with("Radio"))
             .unwrap();
         assert!(unfocused.action.is_none());
+    }
+
+    #[test]
+    fn site_flavors_and_child_scope_read_in_the_popup() {
+        let mut ch = channel();
+        ch.contended = true;
+        ch.writers[0].origin = UiBusSiteOrigin::Panel;
+        ch.writers[1].shadowed = true;
+        ch.readers[0].child_scope = Some("plasma_1".to_string());
+        let aspects = ch.visible_aspects();
+        let wiring = &aspects[1];
+        assert_eq!(wiring.rows[0].label, "Contention");
+        let panel = wiring
+            .rows
+            .iter()
+            .find(|row| row.value.starts_with("Button"))
+            .unwrap();
+        assert!(panel.detail.as_deref().unwrap().contains("panel writer"));
+        let shadowed = wiring
+            .rows
+            .iter()
+            .find(|row| row.value.starts_with("Radio"))
+            .unwrap();
+        assert!(shadowed.detail.as_deref().unwrap().contains("shadowed"));
+        let inherited = wiring
+            .rows
+            .iter()
+            .find(|row| row.label == "Reader")
+            .unwrap();
+        assert!(inherited.value.starts_with("plasma_1 · Playlist"));
+        assert!(inherited.detail.as_deref().unwrap().contains("child scope"));
     }
 
     #[test]

@@ -33,7 +33,9 @@ pub use app::agent::{
     UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
     UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
 };
-pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
+pub use app::bus::{
+    UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
+};
 pub use app::device::{
     BootloaderEntryFlow, ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp,
     DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
