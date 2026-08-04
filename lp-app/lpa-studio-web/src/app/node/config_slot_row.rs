@@ -16,7 +16,7 @@ use crate::app::node::{
     OptionPresenceCheckbox, OptionPresenceStyle, ShaderEditorTabs, SlotDetailButton,
     SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
 };
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{InlineButton, InlineButtonTone, StudioIcon, StudioIconName};
 
 /// Edit chrome for a touched slot row: persisted edits wear the warning
 /// (amber) tint and count toward Save; **Debug** overrides wear the hazard
@@ -306,19 +306,6 @@ fn chrome_revert_action(chrome: SlotEditChrome, address: ProjectSlotAddress) -> 
     }
 }
 
-/// Tone for the inline verb button, from the same family as the row tint and
-/// the edited affordance icon: warning (amber) for unsaved persisted edits,
-/// the debug hazard family for Debug overrides — so the button reads as part
-/// of the row's chrome rather than a neutral control.
-fn chrome_revert_button_class(chrome: SlotEditChrome) -> &'static str {
-    match chrome {
-        SlotEditChrome::Unsaved => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground tw:transition-colors tw:hover:border-status-warning-foreground"
-        }
-        SlotEditChrome::Debug => "lp-debug-row-button",
-    }
-}
-
 /// Inline revert affordance data for a touched row with an own edit entry.
 #[derive(Clone, PartialEq)]
 struct RowRevert {
@@ -329,10 +316,13 @@ struct RowRevert {
 
 /// Compact revert icon button on a touched slot row: the same revert icon
 /// token as the node/project headers, dispatching `SlotEditOp::Revert` at the
-/// row's own edit entry. Tooltip verb per [`chrome_revert_labels`], tone per
-/// [`chrome_revert_button_class`]. It renders at the LEADING edge of the
-/// end-aligned value area: the value controls stay right-anchored, so the
-/// button appearing/disappearing on the first edit never shifts the input.
+/// row's own edit entry. Tooltip verb per [`chrome_revert_labels`]; the tone
+/// comes from the row's own chrome family — the shared inline button in
+/// warning (amber) for unsaved persisted edits, the debug hazard chrome for
+/// Debug overrides — so the button reads as part of the row's chrome rather
+/// than a neutral control. It renders at the LEADING edge of the end-aligned
+/// value area: the value controls stay right-anchored, so the button
+/// appearing/disappearing on the first edit never shifts the input.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SlotRowRevertButton(revert: RowRevert) -> Element {
@@ -343,20 +333,33 @@ fn SlotRowRevertButton(revert: RowRevert) -> Element {
     } = revert;
     let (label, title) = chrome_revert_labels(chrome);
 
-    rsx! {
-        button {
-            class: chrome_revert_button_class(chrome),
-            r#type: "button",
-            aria_label: label,
-            title: "{label}: {title}",
-            onclick: move |event| {
-                event.stop_propagation();
-                on_action.call(chrome_revert_action(chrome, address.clone()));
-            },
-            StudioIcon {
-                name: StudioIconName::Revert,
-                size: 13,
+    if chrome == SlotEditChrome::Debug {
+        return rsx! {
+            button {
+                class: "lp-debug-row-button",
+                r#type: "button",
+                aria_label: label,
+                title: "{label}: {title}",
+                onclick: move |event| {
+                    event.stop_propagation();
+                    on_action.call(chrome_revert_action(chrome, address.clone()));
+                },
+                StudioIcon {
+                    name: StudioIconName::Revert,
+                    size: 13,
+                }
             }
+        };
+    }
+
+    rsx! {
+        InlineButton {
+            label: label.to_string(),
+            title: format!("{label}: {title}"),
+            icon: StudioIconName::Revert,
+            icon_size: 13,
+            tone: InlineButtonTone::Warning,
+            on_press: move |_| on_action.call(chrome_revert_action(chrome, address.clone())),
         }
     }
 }
@@ -529,19 +532,15 @@ mod tests {
 
     #[test]
     fn revert_button_wears_the_row_chrome_status_tokens() {
-        // Unsaved: the warning (amber) family shared with the row tint and
-        // the edited affordance icon.
-        let unsaved = chrome_revert_button_class(SlotEditChrome::Unsaved);
+        // Unsaved: the shared inline button in the warning (amber) family
+        // — the same family as the row tint and the edited affordance icon.
+        // (The Debug chrome keeps the hazard family via the CSS
+        // `lp-debug-row-button` class — D9, one place to change the look.)
+        let unsaved =
+            crate::base::inline_icon_button_class(crate::base::InlineButtonTone::Warning, false);
         assert!(unsaved.contains("tw:border-status-warning-border"));
-        assert!(unsaved.contains("tw:bg-status-warning-bg"));
         assert!(unsaved.contains("tw:text-status-warning-foreground"));
-
-        // Debug: the hazard family, defined in one CSS block rather than
-        // spelled out in utilities (D9 — one place to change the look).
-        assert_eq!(
-            chrome_revert_button_class(SlotEditChrome::Debug),
-            "lp-debug-row-button"
-        );
+        assert!(unsaved.contains("tw:hover:bg-status-warning-bg"));
     }
 
     #[test]
