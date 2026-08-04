@@ -557,6 +557,11 @@ Copy-on-extract per R14.
   materialized from a slot's own `default_bind` is not publicity, so
   `bus:time` no longer materializes a time knob on every panel. Recorded
   as `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+  **Second refinement (2026-08-03, amendment in the same ADR): one
+  additive override** — a slot declaration may carry `panel = "show"`
+  beside its `default_bind`, promoting that default wiring to publicity
+  (fixture `brightness` → `bus:brightness`, the master fader). Absent
+  hint = the refined rule unchanged; there is no `hide`.
 - `panel.md` carries its own register (P-Q1–P-Q5: slew defaults,
   three-state affordance requirement, state-file versioning/flush,
   clear-all vs sink scopes, touch-set value shape).
@@ -614,10 +619,12 @@ somebody owes. Recorded 2026-08-03 at the close of
   reach the wiring drawer but never a knob — `examples/meteor` publishes
   `speed` and `count` as channels with no control above them. Either
   compute shaders grow a face, or panel assembly stops depending on one.
-- **Authored source bindings on non-hand-listed slots are dropped
-  silently** — `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md`.
-  Met again 2026-08-03: binding a fixture's `brightness` to a bus channel
-  registers nothing, so a fixture fader cannot currently be published.
+- ~~**Authored source bindings on non-hand-listed slots are dropped
+  silently**~~ — FIXED 2026-08-03 (shape-driven registration, loud
+  unknown-key errors on closed-namespace kinds; see the defect doc's
+  resolution note). The fixture fader is now not merely publishable but
+  default-bound to `bus:brightness` with `panel = "show"` (Q13's second
+  refinement).
 - **Sims do not restore panel state** (settled D-B: device-first,
   deliberately). Persistent sims are the follow-up, not a bug — do not
   "fix" a sim that fails to restore.

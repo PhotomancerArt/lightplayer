@@ -1,6 +1,7 @@
 # Panel visibility is derived from authored bindings, never declared
 
-- Status: accepted
+- Status: accepted, amended 2026-08-03 (the `panel = "show"` hint — see
+  the Amendment section)
 - Date: 2026-08-03
 - Context: implements docs/design/modules.md R3/R8/Q13 and panel.md P1
   (ratified 2026-07-31). Completes the pair started by
@@ -103,3 +104,58 @@ two fixes:
 - Because membership is derived, the panel changes when the wiring
   changes — including live, when a playlist switches entry and the active
   entry's group is replaced.
+
+## Amendment (2026-08-03): the `panel = "show"` hint
+
+The derived rule was right about `bus:time` and wrong about
+`bus:brightness`. Some default-bound channels are exactly what a panel is
+FOR — a fixture's brightness fader must exist with zero authoring (it is
+the scarf scenario's own control, panel.md P10) — and the strict
+authored-only rule left every fresh project's panel without it.
+
+**One additive override:** a slot declaration may carry `panel = "show"`
+beside its `default_bind` (`#[slot(consumed, default_bind =
+"bus:brightness", panel = "show")]`; the same field is reserved for
+`ShaderSlotDef` when a shader case wants it). The hint promotes the
+binding the loader materialized from that `default_bind` to publicity —
+the control appears although the wiring is Default-origin. That is the
+whole semantics:
+
+- **Absent = derived default, unchanged.** Authored wiring is public;
+  bare default wiring is not. `bus:time` still materializes no knob.
+- **`show` promotes only the slot's own default binding.** An authored
+  binding is public already, so the hint never changes an authored
+  answer.
+- **There is no `hide`.** Suppressing AUTHORED wiring is module-level
+  curation — the still-deferred authored panel layouts — and a kind-level
+  veto over an author's own binding is the deleted `panel: bool` growing
+  back.
+
+This is not a second source of truth: visibility remains ONE derivation
+(`public = authored ∨ (default ∧ hinted)`, `public_panel_target` in the
+face builder), the hint is an input to it, and it lives where the
+default binding it promotes is declared. The wire carries it as
+`WireEffectiveBinding.panel_show`, stamped by the probe from the declared
+shape — an additive field, so a server that predates it simply never
+promotes.
+
+Shipped with the amendment:
+
+- Fixture `brightness` declares the default bind + hint; `brightness`
+  joins the well-known channel registry as `Kind::Amplitude`, and the
+  slot moves to the channel's f32 0–1 amplitude convention (legacy 0–255
+  authored values normalize by 1/255 on read; the LED scale is a
+  render-path conversion). Every fixture in a scope reads the SAME
+  channel, so the module panel presents one master fader however many
+  fixtures consume it.
+- The loader defect that made any of this unreachable — authored source
+  bindings silently dropped for slots outside a hand-list — is fixed by
+  shape-driven registration
+  (`docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md`,
+  fix direction 2), with option-wrapped slots normalized to their `.some`
+  accessor path and unknown keys failing the load loudly (except on
+  shader/compute kinds, whose open slot namespace makes an unresolved
+  key the legal declared-orphan state the agent repairs).
+- R6's no-writer fallback moved into the resolver: a consumed slot whose
+  route dead-ends in a writerless channel falls back to its authored
+  default generically, instead of per-node catch code.
