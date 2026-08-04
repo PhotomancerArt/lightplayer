@@ -2642,6 +2642,76 @@ mod tests {
         levels
     }
 
+    /// The compile window is keyed to the ENGINE's frame revision, not the
+    /// ambient [`lpc_model::current_revision`] counter.
+    ///
+    /// `open_compile_window` stamps the tick's revision, and a node only
+    /// compiles when its render context reports that same revision. Reading
+    /// the render revision from the process-global ambient counter instead
+    /// broke the match whenever anything advanced that counter between the
+    /// tick's `advance_revision` and the render — a second engine in the
+    /// process, or parallel tests sharing a binary. The node then deferred
+    /// the compile it had just been granted a window for, and a studio
+    /// apply-then-read-status round trip saw no compile error at all.
+    ///
+    /// The probe stands in for that other advancer: pressure is broadcast at
+    /// the top of the tick, after the frame revision is stamped and before
+    /// any render, so bumping the ambient counter there reproduces the
+    /// desync deterministically. See
+    /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.md`.
+    #[test]
+    fn compile_window_survives_an_ambient_revision_bump_inside_the_tick() {
+        struct RevisionBumper;
+
+        impl crate::node::NodeRuntime for RevisionBumper {
+            fn destroy(
+                &mut self,
+                _ctx: &mut crate::node::DestroyCtx,
+            ) -> Result<(), crate::node::NodeError> {
+                Ok(())
+            }
+
+            fn handle_memory_pressure(
+                &mut self,
+                _level: crate::node::PressureLevel,
+                _ctx: &mut crate::node::MemPressureCtx,
+            ) -> Result<(), crate::node::NodeError> {
+                lpc_model::advance_revision();
+                Ok(())
+            }
+        }
+
+        let mut rt = loaded_basic_runtime();
+        let root = rt.tree().root();
+        let frame = rt.revision();
+        let id = rt
+            .tree_mut()
+            .add_child(
+                root,
+                NodeName::parse("revision_bumper").expect("name"),
+                NodeName::parse("probe").expect("ty"),
+                lpc_wire::WireChildKind::Input {
+                    source: lpc_wire::WireSlotIndex(0),
+                },
+                lpc_model::NodeInvocation::new(lpc_model::ArtifactSpec::path("probe.json")),
+                frame,
+            )
+            .expect("add bumper child");
+        rt.attach_runtime_node(id, alloc::boxed::Box::new(RevisionBumper), frame)
+            .expect("attach bumper");
+
+        rt.tick(40).expect("deferral tick");
+        rt.tick(40).expect("window tick");
+
+        assert!(
+            output_buffer_bytes(&rt, "/output.json")
+                .iter()
+                .any(|byte| *byte != 0),
+            "the compile ran inside the window frame even though the ambient \
+             revision moved after the frame revision was stamped"
+        );
+    }
+
     /// M4 differential: after a `High` pressure broadcast at a safe point, the
     /// next frame's published output bytes are bit-identical to an engine that
     /// never dropped anything. Core path only — display-pipeline temporal
