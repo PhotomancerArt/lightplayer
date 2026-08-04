@@ -83,6 +83,33 @@ use crate::output::rmt::v3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 const DRIVER_ID: &str = "esp32v3-rmt-ws281x";
 const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 
+/// How many RMT channels this driver lets transmit **at the same time**.
+///
+/// The bound is the chip's interrupt budget, not the RMT's. With the
+/// four-channel block plan every transmitter wants a refill each 80 µs
+/// (12.5 k/s per channel), against a measured per-core ISR delivery ceiling
+/// of ~46–55 k/s ([`super::v3_rmt::plan_for_declared`]'s table). Four
+/// concurrent transmitters demand 50 k/s — arithmetically marginal, and the
+/// 2026-08-04 G2 measurement on the DOM-Z-102 app path showed what marginal
+/// means in practice: the two last-started channels starved (guard trips on
+/// ~99 % of frames — strands visibly truncated). Two concurrent transmitters
+/// demand 25 k/s, comfortably inside the ceiling.
+///
+/// Starts past the cap wait in [`Ws281xOutput::start`] for a slot to free.
+/// With deferred completion (the output provider waits for a frame at the
+/// *next* write of the same channel), a four-wire flush becomes two waves:
+/// the first pair costs nothing, the second pair blocks roughly one wave's
+/// wire time — and the second wave's transmission still overlaps the next
+/// frame's render.
+const MAX_CONCURRENT_TX: usize = 1;
+
+/// Channels currently transmitting a frame, across the whole driver.
+fn transmitting_channels() -> usize {
+    (0..TX_CHANNELS as u8)
+        .filter(|&ch| DRIVER.channel(ch).is_some_and(|state| state.is_busy()))
+        .count()
+}
+
 /// One RMT TX channel this driver can hand out.
 struct ChannelSlot {
     /// The manifest resource backing this channel (`/rmt/ws281xK`), claimed
@@ -419,6 +446,7 @@ impl Ws281xDriver for Esp32V3RmtWs281xDriver {
             index,
             channel: ch,
             byte_count: config.byte_count(),
+            in_flight: None,
             #[cfg(feature = "frame-dump")]
             dump: FrameDump::new(),
         }))
@@ -438,6 +466,9 @@ struct Esp32V3RmtWs281xOutput {
     /// RMT slot — what `lp_ws281x` and the register backend address.
     channel: u8,
     byte_count: u32,
+    /// The frame begun by [`Ws281xOutput::start`] and not yet waited out by
+    /// [`Ws281xOutput::wait_complete`]. `None` while the channel is idle.
+    in_flight: Option<InFlightFrame>,
     /// Serial transcript of the frames this channel transmitted. Present only
     /// in a `frame-dump` build — see [`super::frame_dump`] for why the gate is
     /// compile-time rather than a runtime flag.
@@ -445,8 +476,29 @@ struct Esp32V3RmtWs281xOutput {
     dump: FrameDump,
 }
 
+/// Bookkeeping for one started frame: when it began (the hang deadline is
+/// measured from here) and, in a `frame-dump` build, where its bytes live.
+struct InFlightFrame {
+    started: Instant,
+    /// The frame bytes, for the post-completion transcript. Dereferenceable
+    /// for exactly as long as the [`Ws281xOutput::start`] contract holds the
+    /// caller to — until `wait_complete` returns.
+    #[cfg(feature = "frame-dump")]
+    ptr: *const u8,
+    #[cfg(feature = "frame-dump")]
+    len: usize,
+}
+
 impl Ws281xOutput for Esp32V3RmtWs281xOutput {
     fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
+        // The borrow of `data` provably outlives the transmission: `start`'s
+        // contract holds until `wait_complete` returns, and both happen inside
+        // this call.
+        unsafe { self.start(data) }?;
+        self.wait_complete()
+    }
+
+    unsafe fn start(&mut self, data: &[u8]) -> Result<(), OutputError> {
         let expected_len = byte_len_for_byte_count(self.byte_count);
         if data.len() != expected_len {
             return Err(OutputError::DataLengthMismatch {
@@ -455,28 +507,58 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
             });
         }
 
-        // Blocking send: the borrow of `data` provably outlives the
-        // transmission because `send_blocking` does not return until the
-        // channel reports complete, and it aborts the channel on every other
-        // exit path. The spin callback is the hang detector — a frame that
-        // outlives its deadline is aborted and reported rather than wedging
-        // the render loop forever.
-        let started = Instant::now();
+        // Admission control: hold the start until fewer than
+        // [`MAX_CONCURRENT_TX`] other channels are transmitting. The bound is
+        // this chip's ISR budget, not a driver limitation — see the constant.
+        // The in-flight channels complete by interrupt with no help from this
+        // thread, so the spin always ends; the deadline is pure paranoia
+        // against a wedged sibling, and on expiry the start proceeds (worst
+        // case is the over-subscription the cap exists to avoid, for one
+        // frame, on a board that already has a hung channel to report).
+        let admission_wait = Instant::now();
+        while transmitting_channels() >= MAX_CONCURRENT_TX
+            && admission_wait.elapsed() <= FRAME_TIMEOUT
+        {}
+
+        // SAFETY: forwarding this method's own contract — the caller keeps
+        // `data` alive, in place, and unmodified until `wait_complete` returns
+        // (or drops this output, whose `Drop` aborts the channel first).
+        unsafe { DRIVER.start_frame(self.channel, data) }
+            .map_err(|error| start_error_to_output_error(self.channel, error))?;
+
+        self.in_flight = Some(InFlightFrame {
+            started: Instant::now(),
+            #[cfg(feature = "frame-dump")]
+            ptr: data.as_ptr(),
+            #[cfg(feature = "frame-dump")]
+            len: data.len(),
+        });
+        Ok(())
+    }
+
+    fn wait_complete(&mut self) -> Result<(), OutputError> {
+        let Some(in_flight) = self.in_flight.take() else {
+            return Ok(());
+        };
+
+        // The hang detector: a frame that outlives its deadline is aborted and
+        // reported rather than wedging the render loop forever. The deadline
+        // is measured from `start`, so in the deferred pattern — start all
+        // wires, render the next frame, wait here — a healthy frame has long
+        // finished and this loop never spins at all.
         let mut timed_out = false;
-        let result = DRIVER.send_blocking(self.channel, data, || {
-            if !timed_out && started.elapsed() > FRAME_TIMEOUT {
+        while !DRIVER.is_complete(self.channel) {
+            if in_flight.started.elapsed() > FRAME_TIMEOUT {
                 timed_out = true;
                 DRIVER.abort(self.channel);
+                break;
             }
-        });
+        }
 
         // After the frame, never during it, and a no-op unless the
         // `ws281x_telemetry` feature is on.
         report_telemetry_if_due();
 
-        if let Err(error) = result {
-            return Err(start_error_to_output_error(self.channel, error));
-        }
         if timed_out {
             return Err(OutputError::Other {
                 message: format!(
@@ -491,7 +573,12 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
         // about bytes that reached the wire, and a frame that timed out or was
         // refused is not one of them.
         #[cfg(feature = "frame-dump")]
-        self.dump.on_write(data);
+        {
+            // SAFETY: `start`'s contract — the bytes stay alive, in place, and
+            // unmodified until this very call returns.
+            let data = unsafe { core::slice::from_raw_parts(in_flight.ptr, in_flight.len) };
+            self.dump.on_write(data);
+        }
         Ok(())
     }
 
