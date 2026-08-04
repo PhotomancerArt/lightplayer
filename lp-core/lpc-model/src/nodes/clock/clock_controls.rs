@@ -45,6 +45,7 @@ impl FieldSlot for ClockControls {
                         semantics: crate::SlotSemantics::local(),
                         role: SlotRole::Debug,
                         default_bind: None,
+                        panel: None,
                     },
                     StaticSlotFieldShape {
                         name: "rate",
@@ -54,6 +55,7 @@ impl FieldSlot for ClockControls {
                         semantics: crate::SlotSemantics::local(),
                         role: SlotRole::Debug,
                         default_bind: None,
+                        panel: None,
                     },
                     StaticSlotFieldShape {
                         name: "scrub_offset_seconds",
@@ -63,6 +65,7 @@ impl FieldSlot for ClockControls {
                         semantics: crate::SlotSemantics::local(),
                         role: SlotRole::Debug,
                         default_bind: None,
+                        panel: None,
                     },
                 ],
             }),

@@ -124,17 +124,20 @@ pub fn field_with_semantics_and_role(
 }
 
 /// Build one record field carrying full dataflow metadata, including an
-/// optional declarative default binding (derive-macro codegen entry point).
+/// optional declarative default binding and its panel hint (derive-macro
+/// codegen entry point).
 pub fn field_with_dataflow(
     name: &str,
     shape: SlotShape,
     semantics: SlotSemantics,
     role: SlotRole,
     default_bind: Option<&str>,
+    panel: Option<crate::PanelHint>,
 ) -> SlotFieldShape {
     let mut field = SlotFieldShape::with_semantics_and_role(name, shape, semantics, role)
         .expect("valid static slot field name");
     field.default_bind = default_bind.map(ToString::to_string);
+    field.panel = panel;
     field
 }
 

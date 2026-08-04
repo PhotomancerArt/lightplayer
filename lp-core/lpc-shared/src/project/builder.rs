@@ -260,7 +260,9 @@ impl TextureBuilder {
                 width: self.width,
                 height: self.height,
             }),
-            bindings: bus_input_binding_defs("visual.out"),
+            // TextureDef declares no `input` slot — a bus binding here would
+            // be the dead entry the loader now refuses (the silent-drop fix).
+            bindings: BindingDefs::default(),
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Texture(config));
@@ -423,7 +425,9 @@ impl FixtureBuilder {
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
             brightness: self.brightness.map_or_else(OptionSlot::none, |brightness| {
-                OptionSlot::some(ValueSlot::new(lpc_model::Brightness(u32::from(brightness))))
+                OptionSlot::some(ValueSlot::new(lpc_model::Brightness::from_f32(f32::from(
+                    brightness,
+                ))))
             }),
             gamma_correction: self
                 .gamma_correction

@@ -1431,7 +1431,7 @@ fn variant_dropdown_switch_away_and_back_ends_clean_from_acks_alone() {
 #[test]
 fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
     // The dead-click repro on the fixture `brightness` option (base-present:
-    // the shape default is Some(64)): toggle OFF (RemoveValue brightness —
+    // the shape default is Some(0.25)): toggle OFF (RemoveValue brightness —
     // stores `Remove` at the option path), refresh, toggle back ON
     // (EnsurePresent brightness.some — normalizes away against base at a
     // DIFFERENT path). The counteracting-entry sweep clears the stored
@@ -1459,8 +1459,8 @@ fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
     assert_eq!(brightness.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(brightness),
-        "64",
-        "base default is Some(64)"
+        "0.25",
+        "base default is Some(0.25)"
     );
     let brightness_address = brightness
         .address
@@ -1504,7 +1504,7 @@ fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
     let brightness = find_slot(&snapshot, "brightness");
     assert_eq!(
         slot_value_display(brightness),
-        "64",
+        "0.25",
         "the effective option is back to the base value"
     );
     assert_eq!(

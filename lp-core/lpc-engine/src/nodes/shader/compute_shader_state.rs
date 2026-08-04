@@ -80,6 +80,7 @@ impl ComputeShaderState {
                 // does, at `replace_shape_named` below.
                 role: lpc_model::SlotRole::State,
                 default_bind: None,
+                panel: None,
             });
         }
         registry.replace_shape_named(

@@ -334,7 +334,24 @@ impl<'a> EngineSession<'a> {
                 target,
             } => {
                 self.trace.record_select_binding(query, *binding_ref);
-                self.resolve_route_target(host, *binding_ref, target)
+                match self.resolve_route_target(host, *binding_ref, target) {
+                    // R6 (modules.md): a consumed slot whose winning route
+                    // reaches a channel no enclosing scope writes falls back
+                    // to its own authored default — an unfilled public input
+                    // is an invitation, not an error. Only consumed queries
+                    // fall back; a bare bus read keeps the hard error (the
+                    // module mirror and probes want it).
+                    Err(SessionResolveError::NoBusProvider { .. })
+                        if matches!(
+                            query,
+                            QueryKey::ConsumedSlot { .. }
+                                | QueryKey::ConsumedSlotAccessor { .. }
+                        ) =>
+                    {
+                        self.produce_through_host(host, query)
+                    }
+                    result => result,
+                }
             }
             ResolvedRoute::Produce => self.produce_through_host(host, query),
             ResolvedRoute::MergeByKey { inputs } => {

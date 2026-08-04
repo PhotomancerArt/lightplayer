@@ -52,6 +52,6 @@
       1
     ]
   ],
-  "brightness": 255,
+  "brightness": 1.0,
   "gamma_correction": false
 }
