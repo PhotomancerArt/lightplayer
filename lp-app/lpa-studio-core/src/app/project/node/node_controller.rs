@@ -179,7 +179,7 @@ impl NodeController {
             &|_| Vec::new(),
             &|_, _| None,
             &|_| None,
-            None,
+            &[],
             // No project context: focus is the whole Default-intent policy.
             &|node| node.state().focused,
         )
@@ -209,7 +209,7 @@ impl NodeController {
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
-        always_live: Option<&UiProductRef>,
+        always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> UiNodeView {
         let mut children = self.ui_children_with_product_previews(
@@ -518,7 +518,7 @@ impl NodeController {
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
-        always_live: Option<&UiProductRef>,
+        always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
@@ -557,11 +557,13 @@ impl NodeController {
                     product.preview = preview;
                     has_cached_preview = true;
                 }
-                // The primary visual is always presented live: it is
-                // subscribed project-wide regardless of node focus (ADR
+                // The primary visual and primary control are always
+                // presented live: both are subscribed project-wide
+                // regardless of node focus (ADR
                 // 2026-07-16-primary-visual-product, M6 P3).
-                let is_always_live =
-                    product.product.is_some() && product.product.as_ref() == always_live;
+                let is_always_live = product
+                    .product
+                    .is_some_and(|product| always_live.contains(&product));
                 product.tracking = if is_always_live {
                     UiProductTrackingState::Tracking
                 } else if base_tracking == UiProductTrackingState::Untracked && has_cached_preview {
@@ -633,7 +635,7 @@ impl NodeController {
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
-        always_live: Option<&UiProductRef>,
+        always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> Vec<UiNodeChild> {
         self.children

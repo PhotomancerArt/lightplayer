@@ -880,22 +880,19 @@ fn an_f32_uniform_on_a_product_channel_warns_instead_of_freezing_silently() {
     );
 }
 
-/// The caveat PR #316's doc comment leaves open, settled by measurement:
-/// an UNBOUND shader uniform does **not** resolve `Ok` through an
-/// authored-default production. `produce_consumed_slot` asks
-/// `read_authored_def_product` for the uniform name as a FIELD of
-/// `ShaderDef`/`ComputeShaderDef`, which have no field per uniform (the
-/// uniforms live under `consumed[<name>]`), so the resolve fails and the
-/// node carries a standing `Warn` for a slot that is behaving exactly as
-/// authored.
+/// The caveat PR #316's doc comment left open, now settled the right way
+/// round: an UNBOUND shader uniform resolves `Ok` through the
+/// authored-default projection
+/// (`EngineResolveHost::read_shader_consumed_slot_default`, the
+/// 2026-08-04-unbound-shader-uniform-warns fix) and the node reports `Ok`.
+/// This test pinned the *defective* Warn until that fix merged; it is now
+/// the positive pin the old assertion message promised.
 ///
-/// Pinned rather than fixed here: it is a pre-existing defect in the status
-/// surface, not in the timebase path. It also means the kind-mismatch test
-/// above is deliberately built on an *authored binding* — that warning is
-/// earned, and would be indistinguishable from this one if the slot were
-/// unbound.
+/// The kind-mismatch test above stays built on an *authored binding* — that
+/// warning is earned, and must remain distinguishable from a slot that is
+/// simply unbound.
 #[test]
-fn an_unbound_uniform_warns_today_even_though_it_runs_on_its_authored_default() {
+fn an_unbound_uniform_runs_quietly_on_its_authored_default() {
     let fs = LpFsMemory::new();
     write(&fs, "/project.json", "{ \"format\": 5 }\n");
     write(&fs, "/plain.glsl", "void tick() { out_t = t; }");
@@ -931,18 +928,10 @@ fn an_unbound_uniform_warns_today_even_though_it_runs_on_its_authored_default() 
         (project.read(compute, "out_t") - 3.25).abs() < 1e-6,
         "the authored default is what the uniform runs on"
     );
-    let NodeRuntimeStatus::Warn(message) = project.status(compute) else {
-        panic!(
-            "an unbound uniform warns today; if this now reports Ok the \
-             underlying defect was fixed and this test should become the \
-             positive pin: {:?}",
-            project.status(compute)
-        );
-    };
     assert!(
-        message.contains("unresolved consumed slot"),
-        "the warning is the authored-def lookup failing, not a real binding \
-         fault: {message}"
+        matches!(project.status(compute), NodeRuntimeStatus::Ok),
+        "an unbound uniform behaving exactly as authored must not warn: {:?}",
+        project.status(compute)
     );
 }
 
