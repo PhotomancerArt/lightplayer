@@ -120,7 +120,12 @@ function versionInfo(app) {
     schemaVersion: 1,
     app,
     channel,
-    version: commandOrUnknown("scripts/print-app-version.sh"),
+    // Prefer a version resolved BEFORE the build. `print-app-version.sh`
+    // falls back to `<sha>-dirty-<time>` when `git status` is not clean, and
+    // by the time this script runs, dx has rewritten `assets/tailwind.css` in
+    // the checkout — so reading it here reports every CI build as dirty. The
+    // deploy workflows export APP_VERSION straight after checkout instead.
+    version: process.env.APP_VERSION?.trim() || commandOrUnknown("scripts/print-app-version.sh"),
     source: {
       repository: process.env.GITHUB_REPOSITORY ?? "light-player/lightplayer",
       ref: process.env.GITHUB_REF_NAME ?? commandOrUnknown("git", ["branch", "--show-current"]),
