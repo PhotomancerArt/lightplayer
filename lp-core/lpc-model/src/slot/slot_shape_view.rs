@@ -237,6 +237,15 @@ impl<'a> SlotFieldShapeView<'a> {
         }
     }
 
+    /// The field's panel-visibility hint for its `default_bind` wiring
+    /// ([`crate::PanelHint`]).
+    pub fn panel(self) -> Option<crate::PanelHint> {
+        match self {
+            Self::Static(field) => field.panel,
+            Self::Dynamic(field) => field.panel,
+        }
+    }
+
     /// Whether a client may request mutation of this field: the role allows
     /// it and the field's own declared direction is not produced (D1 —
     /// direction implies read-only regardless of role).
@@ -285,6 +294,7 @@ mod tests {
         semantics: SlotSemantics::new(SlotDirection::Local, SlotMerge::Latest),
         role: SlotRole::Setting,
         default_bind: None,
+        panel: None,
     }];
     static RECORD: StaticSlotShapeDescriptor = StaticSlotShapeDescriptor::Record {
         meta: StaticSlotMeta::EMPTY,

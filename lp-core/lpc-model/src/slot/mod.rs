@@ -4,6 +4,7 @@
 //! inside the value exposed at that slot; it is not part of the slot identity.
 
 mod enum_slot;
+mod panel_hint;
 mod slot_access;
 mod slot_accessor;
 mod slot_data;
@@ -37,6 +38,7 @@ mod value_ref;
 mod value_slot;
 
 pub use enum_slot::{EnumSlot, SlottedEnum, SlottedEnumMut};
+pub use panel_hint::PanelHint;
 pub use slot_access::{
     FieldSlot, MapSlotAccess, SlotAccess, SlotCustomAccess, SlotDataAccess, SlotEnumAccess,
     SlotOptionAccess, SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,
