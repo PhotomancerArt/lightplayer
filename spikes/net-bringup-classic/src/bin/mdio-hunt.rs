@@ -147,7 +147,12 @@ fn main() -> ! {
 
     println!("=== mdio-hunt: bit-banged SMI pin sweep (DOM-WLE-LAN) ===");
 
-    let mut pins: [(u8, Flex<'static>); 13] = [
+    let mut pins: [(u8, Flex<'static>); 14] = [
+        // GPIO0 was excluded as "the clock input", but link LEDs blink with
+        // no clock on GPIO0 — so the PHY self-clocks and GPIO0 is free to be
+        // an SMI pin (static census is exactly an idle MDC/MDIO). Post-boot
+        // driving is strap-safe.
+        (0, Flex::new(peripherals.GPIO0)),
         (2, Flex::new(peripherals.GPIO2)),
         (4, Flex::new(peripherals.GPIO4)),
         (5, Flex::new(peripherals.GPIO5)),
@@ -174,8 +179,6 @@ fn main() -> ! {
     // GPIO0 means the PHY is unclocked and the board expects APLL-out.
     println!("--- stage 0: transition census (10k samples/pin) ---");
     {
-        let mut clk0 = Flex::new(peripherals.GPIO0);
-        clk0.set_input_enable(true);
         let probe = |name: u8, p: &Flex<'_>| {
             let mut transitions = 0u32;
             let mut last = p.is_high();
@@ -190,7 +193,6 @@ fn main() -> ! {
                 println!("  GPIO{}: {} transitions", name, transitions);
             }
         };
-        probe(0, &clk0);
         for (n, p) in pins.iter() {
             probe(*n, p);
         }

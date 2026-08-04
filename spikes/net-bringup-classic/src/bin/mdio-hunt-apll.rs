@@ -116,7 +116,10 @@ fn main() -> ! {
 
     // Bit-bang the pins the EMAC didn't claim. GPIO0 stays untouched (it may
     // be fed by the CH340 auto-boot circuit); the clock pin is consumed.
-    let mut pins: [(u8, Flex<'static>); 10] = [
+    let mut pins: [(u8, Flex<'static>); 11] = [
+        // GPIO0 is free in APLL-out topologies — and link LEDs came alive
+        // under APLL-16, so SMI-on-GPIO0 is the live hypothesis.
+        (0, Flex::new(peripherals.GPIO0)),
         (2, Flex::new(peripherals.GPIO2)),
         (4, Flex::new(peripherals.GPIO4)),
         (5, Flex::new(peripherals.GPIO5)),

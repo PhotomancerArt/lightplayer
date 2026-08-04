@@ -55,7 +55,12 @@ static STORAGE: ConstStaticCell<EthernetDmaStorage<10, 10>> =
     ConstStaticCell::new(EthernetDmaStorage::new());
 static STACK_RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
 
-type EthDriver = Ethernet<'static, esp_hal::Async, ScanPhy>;
+#[cfg(feature = "fixed-link")]
+type SpikePhy = FixedLinkPhy;
+#[cfg(not(feature = "fixed-link"))]
+type SpikePhy = ScanPhy;
+
+type EthDriver = Ethernet<'static, esp_hal::Async, SpikePhy>;
 
 /// Wraps [`GenericPhy`]: on `init`, first scans every MDIO address and prints
 /// ID1/ID2 so the G1 report can name the part, then defers to the generic
@@ -90,6 +95,31 @@ fn identify(id1: u16, id2: u16) -> &'static str {
         (0x0243, 0x0C50) => "IP101 (IC Plus)",
         (0x0022, 0x1560) => "KSZ8081 (Micrel/Microchip)",
         _ => "unknown — record raw IDs in the G1 report",
+    }
+}
+
+/// No-SMI operation: the DOM-WLE-LAN wires no management bus (every pin pair
+/// was swept, twice, clocked and unclocked — nothing answers), and the
+/// LAN8720A negotiates link on its own (jack LEDs). Assume strap defaults:
+/// 100M full duplex after autoneg.
+#[cfg(feature = "fixed-link")]
+struct FixedLinkPhy;
+
+#[cfg(feature = "fixed-link")]
+impl Phy for FixedLinkPhy {
+    fn address(&self) -> u8 {
+        0
+    }
+    fn init<M: MdioBus>(&mut self, _mdio: &mut M) -> Result<(), PhyError> {
+        println!("[phy] fixed-link mode: skipping SMI entirely, assuming 100M/full");
+        Ok(())
+    }
+    fn poll_link<M: MdioBus>(&mut self, _mdio: &mut M, _cx: Option<&mut Context<'_>>) -> LinkState {
+        LinkState {
+            up: true,
+            speed: Speed::_100M,
+            duplex: Duplex::Full,
+        }
     }
 }
 
@@ -194,11 +224,16 @@ async fn main(spawner: Spawner) {
     #[cfg(not(any(feature = "apll-out-16", feature = "apll-out-17")))]
     let clock = esp_hal::ethernet::clock::ExternalRefClock::new(peripherals.GPIO0);
 
+    #[cfg(feature = "fixed-link")]
+    let phy = FixedLinkPhy;
+    #[cfg(not(feature = "fixed-link"))]
+    let phy = ScanPhy::new_auto();
+
     let eth: EthDriver = Ethernet::new(
         peripherals.ETH,
         STORAGE.take(),
         MAC_ADDR,
-        ScanPhy::new_auto(),
+        phy,
         RmiiPinBundle {
             clock,
             rxd0: peripherals.GPIO25,
@@ -207,8 +242,10 @@ async fn main(spawner: Spawner) {
             txd0: peripherals.GPIO19,
             txd1: peripherals.GPIO22,
             tx_en: peripherals.GPIO21,
-            mdc: peripherals.GPIO23,
-            mdio: peripherals.GPIO18,
+            // No SMI exists on this board; park the EMAC's MDC/MDIO on pins
+            // the sweeps proved inert.
+            mdc: peripherals.GPIO33,
+            mdio: peripherals.GPIO32,
         },
     )
     .expect("Ethernet init failed")
