@@ -45,8 +45,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{NodeCardDrawer, NodeUiOp, UiAction, UiModuleFace as UiModuleFaceData};
 
 use crate::app::WiringDrawerBody;
-use crate::base::StudioIconName;
 use crate::app::node::{NodeCardSection, ProductPreview, node_ui_action};
+use crate::base::StudioIconName;
 
 use super::{ModulePanel, PanelGesture};
 

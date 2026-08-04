@@ -118,12 +118,10 @@ impl UiBusChannelView {
         let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Binding, "Wiring")
             .with_affordance(UiSlotAffordance::Bound);
         if self.contended {
-            aspect = aspect.with_row(
-                UiSlotAspectRow::new("Contention", "ambiguous").with_detail(
-                    "Multiple writers tie at top priority (E3); the author's pick \
+            aspect = aspect.with_row(UiSlotAspectRow::new("Contention", "ambiguous").with_detail(
+                "Multiple writers tie at top priority (E3); the author's pick \
                      resolves it. Until then resolution is ambiguous.",
-                ),
-            );
+            ));
         }
         if self.writers.len() > 1 {
             aspect = aspect.with_row(
