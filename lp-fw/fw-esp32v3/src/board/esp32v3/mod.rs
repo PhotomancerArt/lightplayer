@@ -11,3 +11,7 @@
 // The app entrypoint's sole source of the peripheral singleton. See the module
 // doc for the hazard that makes it the *only* one.
 pub mod init;
+
+// DOM-WLE-LAN Ethernet (EMAC + RMII + fixed-link PHY), `net-eth` builds only.
+#[cfg(feature = "net-eth")]
+pub mod eth;

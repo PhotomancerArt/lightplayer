@@ -39,6 +39,11 @@
 //!   APLL clock excludes the radio anyway. The M2-P3 RAM probe's numbers
 //!   live in `docs/adr/2026-08-01-esp32v3-flash-budget.md`; its code is in
 //!   git history if a wifi-capable classic board ever needs it back.
+//! - **Ethernet — unless built with `--features net-eth`** (networking
+//!   M2-P2). With the feature, the DOM-WLE-LAN's EMAC comes up alongside the
+//!   app — embassy-net + DHCP, IP logged over the serial wire — with no HTTP
+//!   or websocket yet. See the feature's comment in `Cargo.toml` and
+//!   `board::esp32v3::eth`. Off (the default), the image is unchanged.
 //!
 //! ## Panic posture
 //!
@@ -350,6 +355,73 @@ fn add_sram1_heap_region() -> usize {
     len as usize
 }
 
+/// embassy-net socket + iface storage for the Ethernet control plane. A
+/// static via `StaticCell`, not heap — the network must not be a claimant on
+/// the 110 KB arena the shader compiler fights for (see [`HEAP_SIZE`]). Sized
+/// by `fw_esp32_common::net::SOCKET_COUNT` so the count and the stack-init
+/// signature cannot drift.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+static NET_STACK_RESOURCES: static_cell::StaticCell<
+    embassy_net::StackResources<{ fw_esp32_common::net::SOCKET_COUNT }>,
+> = static_cell::StaticCell::new();
+
+/// The embassy-net runner: owns the EMAC driver and pumps frames forever.
+///
+/// Declared here, not in `fw-esp32-common`: embassy tasks cannot be generic,
+/// and `Runner` carries the concrete driver type (`board::esp32v3::eth`'s
+/// alias). Spawned on the SAME esp-rtos embassy executor as `io_task` — one
+/// executor for the whole image, no second runtime.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+#[embassy_executor::task]
+async fn net_runner_task(
+    mut runner: embassy_net::Runner<'static, board::esp32v3::eth::EthDriver>,
+) {
+    runner.run().await
+}
+
+/// Logs the network's lifecycle over the serial wire and keeps
+/// `fw_esp32_common::net::net_status()` truthful. The chip-agnostic loop does
+/// the work; the board-specific preamble is here because "fixed-link" is a
+/// DOM-WLE-LAN fact (no SMI — see `board::esp32v3::eth::FixedLinkPhy`) that
+/// the common crate is forbidden from knowing.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+#[embassy_executor::task]
+async fn net_status_task(stack: embassy_net::Stack<'static>) {
+    log::info!("net: link assumed up (fixed-link), waiting DHCP");
+    fw_esp32_common::net::dhcp_status_loop(stack).await;
+}
+
+/// Ethernet bring-up (net-eth builds): EMAC driver → embassy-net stack →
+/// runner + status tasks. Called from [`boot_firmware`] once the logger is up.
+///
+/// Failure costs the board its network, never its boot — same posture as the
+/// RMT init below: a board that renders without an IP is strictly more
+/// diagnosable than one that reset-loops.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+fn start_network(
+    spawner: embassy_executor::Spawner,
+    eth_peripherals: board::esp32v3::init::EthPeripherals,
+) {
+    let driver = match board::esp32v3::eth::create_driver(eth_peripherals) {
+        Ok(driver) => driver,
+        Err(error) => {
+            log::error!("net: EMAC init failed ({error:?}); no network this boot");
+            return;
+        }
+    };
+    // smoltcp wants a real random seed (TCP sequence numbers, DHCP XIDs);
+    // the hardware RNG is free to read and this is its one call site.
+    let rng = esp_hal::rng::Rng::new();
+    let seed = ((rng.random() as u64) << 32) | rng.random() as u64;
+    let (stack, runner) = fw_esp32_common::net::init_stack(
+        driver,
+        NET_STACK_RESOURCES.init(embassy_net::StackResources::new()),
+        seed,
+    );
+    spawner.spawn(net_runner_task(runner).unwrap());
+    spawner.spawn(net_status_task(stack).unwrap());
+}
+
 #[cfg(feature = "server")]
 struct FirmwareApp {
     server: LpServer,
@@ -362,7 +434,10 @@ struct FirmwareApp {
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
+    #[cfg(not(feature = "net-eth"))]
     let (sw_int, timg0, uart0, flash, rmt_peripheral) = init_board();
+    #[cfg(feature = "net-eth")]
+    let (sw_int, timg0, uart0, flash, rmt_peripheral, eth_peripherals) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     let sram1_heap = add_sram1_heap_region();
@@ -402,6 +477,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // From here on `log::*` reaches the host over the same serial link; the
     // `esp_println!` lines above are the pre-transport ones.
     logger::init(serial::io_task::log_write_to_outgoing);
+
+    // Ethernet control plane (net-eth builds): construct the EMAC driver and
+    // spawn the embassy-net runner + DHCP status tasks NOW, so the lease is
+    // being negotiated concurrently with the rest of boot rather than after
+    // it. Placed after `logger::init` on purpose — every `net:` line,
+    // including the fixed-link note printed from inside `Ethernet::new`, goes
+    // through the normal logger onto the serial wire.
+    #[cfg(feature = "net-eth")]
+    start_network(spawner, eth_peripherals);
 
     let (incoming, _) = serial::io_task::get_message_channels();
     let (write_request, write_result) = serial::io_task::get_server_write_channels();

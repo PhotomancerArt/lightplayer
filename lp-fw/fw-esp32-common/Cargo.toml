@@ -30,6 +30,15 @@ log = { workspace = true, default-features = false }
 hashbrown = { workspace = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
+# `net` feature: chip-agnostic embassy-net glue (`src/net.rs`). The driver seam
+# is `embassy_net::driver::Driver` itself — chip crates own the driver (EMAC,
+# wifi, whatever) and this crate never learns which. `dhcpv4` and
+# `medium-ethernet` are what the glue itself needs; heavier protocol features
+# (tcp, dns) are named by the bin crates that use them and arrive via feature
+# unification. Version matches the bench spike (`spikes/net-bringup-classic`)
+# and the fw-esp32v3 image.
+embassy-net = { version = "0.9", default-features = false, features = ["dhcpv4", "medium-ethernet"], optional = true }
+
 # Server stack (heavy) — only with the `server` feature, mirroring the bin crates.
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, optional = true }
 # ⚠️ The `panic-recovery` feature this note used to warn about no longer exists
@@ -55,3 +64,8 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 [features]
 default = []
 server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
+# Chip-agnostic networking glue (`src/net.rs`): embassy-net stack init, the
+# shared NetStatus, and the DHCP wait/status loop. Orthogonal to `server` —
+# a bin crate turns it on alongside its own driver feature (fw-esp32v3's
+# `net-eth` is the first consumer).
+net = ["dep:embassy-net"]
