@@ -11,8 +11,8 @@ use lpc_wire::{
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery,
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
     ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, WireBindingGraph,
-    WireChannelSampleFormat, WireTextureFormat,
+    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
+    TimebaseProbeResult, WireBindingGraph, WireChannelSampleFormat, WireTextureFormat,
 };
 
 use crate::{
@@ -29,6 +29,11 @@ pub struct ProjectSync {
     /// renders natively at whatever is asked.
     visual_preview_frame: UiProductPreviewFrame,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
+    /// Latest timebase listing per subscribed time product (D10). Keyed like
+    /// `product_previews` and filled by the same probe cycle: a clock's card
+    /// asks for its listing exactly while it is subscribed for products, so
+    /// the debug surface costs nothing on an unfocused clock.
+    timebases: BTreeMap<UiProductRef, UiTimebaseRead>,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
     /// Whether reads should carry the binding-graph probe. Armed for every
@@ -56,6 +61,7 @@ impl ProjectSync {
             phase: ProjectSyncPhase::Empty,
             visual_preview_frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             product_previews: BTreeMap::new(),
+            timebases: BTreeMap::new(),
             binding_graph: None,
             binding_graph_subscribed: false,
             issue: None,
@@ -273,6 +279,13 @@ impl ProjectSync {
         self.product_previews.get(product)
     }
 
+    /// Latest cached timebase listing for a time product (D10). `None` means
+    /// no read has landed yet — distinct from a read that came back
+    /// [`UiTimebaseRead::Unknown`].
+    pub fn timebase(&self, product: &UiProductRef) -> Option<&UiTimebaseRead> {
+        self.timebases.get(product)
+    }
+
     pub fn is_ready(&self) -> bool {
         self.phase == ProjectSyncPhase::Ready
     }
@@ -359,6 +372,7 @@ impl ProjectSync {
     pub fn reset_view(&mut self) {
         self.view = ProjectView::new();
         self.product_previews.clear();
+        self.timebases.clear();
         self.binding_graph = None;
     }
 
@@ -371,6 +385,13 @@ impl ProjectSync {
     #[cfg(test)]
     pub(crate) fn set_binding_graph_for_test(&mut self, graph: WireBindingGraph) {
         self.binding_graph = Some(graph);
+    }
+
+    /// Inject a timebase read directly (test fixture path), standing in for
+    /// the probe cycle the same way `set_binding_graph_for_test` does.
+    #[cfg(test)]
+    pub(crate) fn set_timebase_for_test(&mut self, product: UiProductRef, read: UiTimebaseRead) {
+        self.timebases.insert(product, read);
     }
 
     /// Set the resolution visual-product probes request (runtime-tiered:
@@ -435,9 +456,17 @@ impl ProjectSync {
                         ));
                     }
                 }
-                // Time products have no Studio preview surface yet: nothing to
-                // probe or watch.
-                UiProductRef::Time { .. } => {}
+                // A time product has no preview frame — there is no picture
+                // behind the handle. What it has is the timebase listing, so
+                // the same subscription that would fetch a preview fetches
+                // the phasor rows instead (D10).
+                UiProductRef::Time { .. } => {
+                    if let Some(time) = product.time_product() {
+                        probes.push(ProjectProbeRequest::Timebase(TimebaseProbeRequest {
+                            product: time,
+                        }));
+                    }
+                }
             }
         }
         probes
@@ -447,6 +476,9 @@ impl ProjectSync {
         for probe in probes {
             if let Some((product, preview)) = self.product_preview_from_probe(probe) {
                 self.product_previews.insert(product, preview);
+            }
+            if let Some((product, read)) = timebase_from_probe(probe) {
+                self.timebases.insert(product, read);
             }
         }
     }
@@ -707,7 +739,54 @@ fn product_preview_from_probe(
             ))
         }
         ProjectProbeResult::ControlProduct(_) => None,
-        ProjectProbeResult::BindingGraph(_) => None,
+        ProjectProbeResult::BindingGraph(_) | ProjectProbeResult::Timebase(_) => None,
+    }
+}
+
+/// One clock's timebase, as the Studio caches it between reads (D10).
+///
+/// `Unknown` is a real answer, not a missing one: the product names a clock
+/// the runtime resolves no timebase for (the node just left the tree, or has
+/// never produced). "No read has landed yet" is the *absence* of a
+/// [`UiTimebaseRead`], which the clock face renders differently.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UiTimebaseRead {
+    /// The clock published a timebase; `phasors` is what rides it (empty is
+    /// a normal state — nothing declared a phasor, or they all went idle).
+    Live {
+        /// Effective project seconds (rate and scrub applied).
+        seconds: f32,
+        /// Seconds the timebase advanced on the most recent tick. Negative
+        /// while a device scrubs backwards.
+        delta_seconds: f32,
+        /// Live integrators, in store order.
+        phasors: Vec<lpc_wire::WirePhasorRow>,
+    },
+    /// The named product resolves to no clock in this runtime.
+    Unknown,
+}
+
+fn timebase_from_probe(probe: &ProjectProbeResult) -> Option<(UiProductRef, UiTimebaseRead)> {
+    match probe {
+        ProjectProbeResult::Timebase(TimebaseProbeResult::Timebase {
+            product,
+            seconds,
+            delta_seconds,
+            phasors,
+            ..
+        }) => Some((
+            UiProductRef::from_time_product(*product),
+            UiTimebaseRead::Live {
+                seconds: *seconds,
+                delta_seconds: *delta_seconds,
+                phasors: phasors.clone(),
+            },
+        )),
+        ProjectProbeResult::Timebase(TimebaseProbeResult::Unknown { product }) => Some((
+            UiProductRef::from_time_product(*product),
+            UiTimebaseRead::Unknown,
+        )),
+        _ => None,
     }
 }
 
@@ -992,6 +1071,82 @@ mod tests {
                 format: WireTextureFormat::Srgb8,
             })
         );
+    }
+
+    /// P7 item 4: a subscribed TIME product asks for its timebase listing
+    /// instead of a preview frame — there is no picture behind the handle,
+    /// so the probe that would fetch one fetches the phasor rows.
+    #[test]
+    fn refresh_request_asks_a_time_product_for_its_timebase() {
+        let mut sync = ProjectSync::new();
+        let product = lpc_model::TimeProduct::new(NodeId::new(2), 0);
+
+        let request =
+            sync.refresh_project_read_request(vec![UiProductRef::from_time_product(product)]);
+
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::Timebase(TimebaseProbeRequest {
+                product
+            })]
+        );
+        assert_eq!(
+            sync.product_preview(&UiProductRef::from_time_product(product)),
+            None,
+            "and no Pending preview is parked for a frame that can never arrive"
+        );
+    }
+
+    /// Both probe answers cache, and they are DIFFERENT answers: `Unknown`
+    /// is a real verdict, while "no read yet" is the absence of an entry.
+    #[test]
+    fn a_timebase_probe_result_caches_live_rows_and_unknown_alike() {
+        let mut sync = ProjectSync::new();
+        let product = lpc_model::TimeProduct::new(NodeId::new(2), 0);
+        let key = UiProductRef::from_time_product(product);
+        assert_eq!(sync.timebase(&key), None, "nothing read yet");
+
+        let row = lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Node {
+                node: 8,
+                slot: "phase".to_string(),
+            },
+            phase: 0.25,
+            cycle: 3,
+            period_seconds: 4.0,
+        };
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::Timebase(
+                TimebaseProbeResult::Timebase {
+                    product,
+                    revision: Revision::new(8),
+                    seconds: 3.5,
+                    delta_seconds: 0.033,
+                    phasors: vec![row.clone()],
+                },
+            )],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            sync.timebase(&key),
+            Some(&UiTimebaseRead::Live {
+                seconds: 3.5,
+                delta_seconds: 0.033,
+                phasors: vec![row],
+            })
+        );
+
+        sync.apply_project_read_events(probe_events(
+            10,
+            vec![ProjectProbeResult::Timebase(TimebaseProbeResult::Unknown {
+                product,
+            })],
+        ))
+        .unwrap();
+
+        assert_eq!(sync.timebase(&key), Some(&UiTimebaseRead::Unknown));
     }
 
     #[test]

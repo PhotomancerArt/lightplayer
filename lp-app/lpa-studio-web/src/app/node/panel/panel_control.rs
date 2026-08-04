@@ -314,7 +314,7 @@ fn value_matches_widget(control: &UiPanelControlData) -> bool {
 /// non-numeric slot behind a numeric widget) falls back to the read-only
 /// display.
 fn numeric_value(control: &UiPanelControlData) -> Option<(f32, PanelEmit)> {
-    PanelEmit::for_value(&control.value.kind)
+    PanelEmit::for_control(control)
 }
 
 /// Boolean payload for toggle widgets.
@@ -341,8 +341,8 @@ fn mismatch_fallback(control: &UiPanelControlData) -> Element {
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{
-        UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiPanelControl, UiPanelWidget,
-        UiSlotFieldState, UiSlotSourceState, UiSlotValue,
+        UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiPanelControl, UiPanelEmit,
+        UiPanelWidget, UiSlotFieldState, UiSlotSourceState, UiSlotValue,
     };
 
     use super::{PanelEmit, bool_value, numeric_value, panel_label_class, value_matches_widget};
@@ -359,6 +359,7 @@ mod tests {
             .with_state(state.clone())
             .with_source(source);
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: "speed".to_string(),
             address: None,
             widget: UiPanelWidget::Knob {

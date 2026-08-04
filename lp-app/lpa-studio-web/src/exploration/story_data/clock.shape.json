@@ -61,9 +61,7 @@
                             }
                           }
                         },
-                        "policy": {
-                          "persistence": "transient"
-                        }
+                        "role": "debug"
                       },
                       {
                         "name": "rate",
@@ -83,9 +81,7 @@
                             }
                           }
                         },
-                        "policy": {
-                          "persistence": "transient"
-                        }
+                        "role": "debug"
                       },
                       {
                         "name": "scrub_offset_seconds",
@@ -105,9 +101,7 @@
                             }
                           }
                         },
-                        "policy": {
-                          "persistence": "transient"
-                        }
+                        "role": "debug"
                       }
                     ]
                   }
@@ -190,6 +184,26 @@
             "meta": {},
             "fields": [
               {
+                "name": "product",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2685686043,
+                      "ty": {
+                        "product": "time"
+                      },
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "produced"
+                },
+                "role": "state",
+                "default_bind": "bus:time"
+              },
+              {
                 "name": "seconds",
                 "shape": {
                   "value": {
@@ -204,10 +218,7 @@
                 "semantics": {
                   "direction": "produced"
                 },
-                "policy": {
-                  "writable": false,
-                  "persistence": "transient"
-                }
+                "role": "state"
               },
               {
                 "name": "delta_seconds",
@@ -224,10 +235,7 @@
                 "semantics": {
                   "direction": "produced"
                 },
-                "policy": {
-                  "writable": false,
-                  "persistence": "transient"
-                }
+                "role": "state"
               }
             ]
           }

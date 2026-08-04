@@ -22,7 +22,10 @@
 //!   see the same underlying cycle.
 //! - **State carries no config.** Period arrives with every query, so
 //!   re-authoring it changes the rate from that instant forward without
-//!   resetting the phase.
+//!   resetting the phase. The one exception is a *witness*:
+//!   [`PhasorState::period_seconds`] records the period the integrator last
+//!   ran at, purely so the studio's probe rows can name it. Nothing reads it
+//!   back into the integration, so the contract above is intact.
 //!
 //! Firmware-safe by construction: `VecMap`, `no_std` + alloc, and wrapping
 //! done with plain arithmetic (no `std::f32`, no `libm`).
@@ -58,11 +61,21 @@ pub enum PhasorKey {
     },
 }
 
-/// One phasor's integrator. Config-free by design; ~16 bytes.
+/// One phasor's integrator. Config-free by design; ~20 bytes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhasorState {
     /// Wrapped cycle position, always in `[0,1)`.
     pub phase: f32,
+    /// The period the most recent query integrated at, in seconds.
+    ///
+    /// A **witness**, not config: the store never reads it back (every
+    /// advance takes the period from the query's own `PhasorConfig`). It
+    /// exists so the studio's read-only phasor rows can say what rate a
+    /// live integrator is running at — the studio cannot re-derive it for a
+    /// `Shared` key without redoing the resolver's work, and for a shared
+    /// integrator the winning period is precisely what a reader wants to
+    /// see. `0.0` on a phasor materialized but never advanced.
+    pub period_seconds: f32,
     /// Completed cycles since materialization (saturating both ways).
     pub cycle: u32,
     /// Store tick this phasor last advanced in — the advance-once-per-tick
@@ -76,6 +89,7 @@ impl PhasorState {
     fn materialized(tick: u32) -> Self {
         Self {
             phase: 0.0,
+            period_seconds: 0.0,
             cycle: 0,
             // Deliberately not `tick`: a phasor that materializes mid-tick
             // still owes this tick's advance to the query that created it.
@@ -105,6 +119,15 @@ impl TimebaseEntry {
     #[must_use]
     pub fn phasor_count(&self) -> usize {
         self.phasors.len()
+    }
+
+    /// Every live phasor on this timebase, in store order.
+    ///
+    /// Read-only debug surface (the studio's clock-face phasor listing —
+    /// parent D10). Iterating never materializes, advances, or refreshes the
+    /// despawn clock, so watching the rows cannot keep a dead phasor alive.
+    pub fn phasors(&self) -> impl Iterator<Item = (&PhasorKey, &PhasorState)> {
+        self.phasors.iter()
     }
 }
 
@@ -202,6 +225,7 @@ impl TimebaseStore {
         state.last_queried_at = tick;
         if state.advanced_at != tick {
             state.advanced_at = tick;
+            state.period_seconds = config.period_seconds;
             advance(state, config.rate_hz() * delta_seconds);
         }
         Some((state.phase, state.cycle))
@@ -336,13 +360,57 @@ mod tests {
         store
     }
 
+    /// 20 bytes = four `u32`-sized fields plus the period witness. The cap
+    /// is deliberately tight: a device may carry one of these per phasor per
+    /// consumer, so anything that grows it should have to argue for itself.
     #[test]
     fn phasor_state_stays_small() {
         assert!(
-            core::mem::size_of::<PhasorState>() <= 16,
+            core::mem::size_of::<PhasorState>() <= 20,
             "PhasorState grew to {} bytes",
             core::mem::size_of::<PhasorState>()
         );
+    }
+
+    /// The period witness records what the integrator last RAN at — it
+    /// follows a config change, and it never feeds back into integration
+    /// (the continuity test above already pins that).
+    #[test]
+    fn the_period_witness_follows_the_config_the_query_supplied() {
+        let mut store = store_with_delta(0.1);
+
+        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(4.0));
+        let entry = store.entry(CLOCK).expect("timebase");
+        let (_, state) = entry.phasors().next().expect("one phasor");
+        assert_eq!(state.period_seconds, 4.0);
+
+        store.sweep(|_| true);
+        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(0.5));
+        let rows: alloc::vec::Vec<_> = store
+            .entry(CLOCK)
+            .expect("timebase")
+            .phasors()
+            .map(|(key, state)| (key.clone(), state.period_seconds))
+            .collect();
+        assert_eq!(rows.len(), 1, "listing does not duplicate the integrator");
+        assert_eq!(rows[0].0, key("a"));
+        assert_eq!(rows[0].1, 0.5);
+    }
+
+    /// The listing is a pure read: walking it must not materialize a phasor
+    /// nor hold a stale one past its despawn horizon.
+    #[test]
+    fn listing_phasors_neither_materializes_nor_keeps_alive() {
+        let mut store = store_with_delta(0.25);
+        assert_eq!(store.entry(CLOCK).expect("timebase").phasors().count(), 0);
+
+        store.phasor_tick(CLOCK, &key("a"), &PhasorConfig::with_period(1.0));
+        for _ in 0..=PHASOR_IDLE_TICKS {
+            store.sweep(|_| true);
+            let _ = store.entry(CLOCK).expect("timebase").phasors().count();
+        }
+
+        assert_eq!(store.entry(CLOCK).expect("timebase").phasors().count(), 0);
     }
 
     #[test]

@@ -681,6 +681,58 @@ fn a_shared_config_still_leaves_the_waveform_slot_local() {
     );
 }
 
+/// P7 item 4: the timebase probe is the ONLY way a client can see what is
+/// riding a clock, and it reports the store as it stands — a private
+/// integrator named by node+slot, a shared one named by its channel, each
+/// with the period it last ran at.
+#[test]
+fn the_timebase_probe_lists_what_rides_the_clock() {
+    let mut project = load(paired_fs(&ramp(1.0), &ramp(8.0), false));
+    let a = project.node("a.compute_shader");
+    let b = project.node("b.compute_shader");
+    let root = project.engine.tree().root();
+    project.publish_time_product(root);
+    project.publish_timebase(root, 0.0, 0.0);
+    project.warm_up(&[a, b]);
+    project.publish_timebase(root, TICK_SECONDS, TICK_SECONDS);
+    project.frame(&[a, b]);
+
+    let result = project
+        .engine
+        .read_project_timebase_probe(lpc_wire::TimebaseProbeRequest {
+            product: TimeProduct::new(root, 0),
+        });
+    let lpc_wire::TimebaseProbeResult::Timebase {
+        seconds, phasors, ..
+    } = result
+    else {
+        panic!("a producing clock resolves a timebase, got {result:?}");
+    };
+    assert!((seconds - TICK_SECONDS).abs() < 1e-6);
+    assert_eq!(phasors.len(), 2, "two private integrators: {phasors:?}");
+    let periods: Vec<f32> = phasors.iter().map(|row| row.period_seconds).collect();
+    assert!(periods.contains(&1.0) && periods.contains(&8.0));
+    for row in &phasors {
+        let lpc_wire::WirePhasorOrigin::Node { slot, .. } = &row.origin else {
+            panic!("an unwired config is private to its slot, got {row:?}");
+        };
+        assert_eq!(slot, "wave", "the CONSUMED slot, not the config field");
+        assert!((0.0..1.0).contains(&row.phase), "raw ramp: {row:?}");
+    }
+
+    // A product naming a node that publishes no timebase is a structured
+    // answer, not an error: a card asking about a node that just left the
+    // tree is not a fault.
+    assert!(matches!(
+        project
+            .engine
+            .read_project_timebase_probe(lpc_wire::TimebaseProbeRequest {
+                product: TimeProduct::new(a, 0),
+            }),
+        lpc_wire::TimebaseProbeResult::Unknown { .. }
+    ));
+}
+
 /// No writer for `bus:time` anywhere is the normal state of the world until
 /// P4: the timebase kinds must fall back to their shaped defaults and warn,
 /// never leave the backend a uniform short.

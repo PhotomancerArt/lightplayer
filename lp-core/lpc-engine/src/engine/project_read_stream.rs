@@ -247,6 +247,11 @@ impl<'a> EngineProjectReadSource<'a> {
                 self.engine
                     .read_project_binding_graph_probe(self.registry, request),
             ),
+            // No registry: the timebase store is pure engine state, so the
+            // listing needs nothing from the project's artifacts.
+            ProjectProbeRequest::Timebase(request) => {
+                ProjectProbeResult::Timebase(self.engine.read_project_timebase_probe(request))
+            }
         };
         stream_probe_result(index, result, sink).await
     }

@@ -151,6 +151,7 @@ mod tests {
                     step: None,
                 },
                 value: UiSlotValue::f32(0.5),
+                emit: crate::UiPanelEmit::Value,
                 live_value: None,
                 panel_target: None,
                 unit: None,

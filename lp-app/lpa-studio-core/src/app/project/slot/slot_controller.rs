@@ -209,7 +209,21 @@ impl SlotController {
                 SlotPath::root().child(SlotName::parse("bindings").expect("valid slot name")),
             ),
             authored,
+            scalar_slot: self.value_shape_is_scalar_number(),
         })
+    }
+
+    /// Whether this slot's declared value shape is a plain number — the
+    /// shapes a product handle cannot convert into (P7 item 3).
+    ///
+    /// An UNKNOWN shape reads as "not scalar" deliberately: the picker's
+    /// guard is an annotation, and annotating on a guess would cry wolf on
+    /// rows whose shape simply has not arrived.
+    fn value_shape_is_scalar_number(&self) -> bool {
+        matches!(
+            self.value_shape.as_ref().map(|shape| &shape.ty),
+            Some(LpType::F32 | LpType::I32 | LpType::U32)
+        )
     }
 
     /// Extract authored binding facts from this root's `bindings` child.
@@ -510,6 +524,22 @@ impl SlotController {
                             product.output(),
                             extent.rows,
                             extent.samples_per_row
+                        )),
+                )
+            }
+            // A clock's published handle. It gets the same product row the
+            // other two families get — identity, detail, binding — and no
+            // preview: `UiProductKind::Time` defaults to `MetadataOnly`, so
+            // nothing here requests a probe frame that could never arrive.
+            Some(LpValue::Product(ProductRef::Time(product))) => {
+                let product_ref = UiProductRef::from_time_product(*product);
+                Some(
+                    UiProducedProduct::time(self.label.clone())
+                        .with_product(product_ref)
+                        .with_detail(format!(
+                            "node {} output {}",
+                            product.node(),
+                            product.output()
                         )),
                 )
             }

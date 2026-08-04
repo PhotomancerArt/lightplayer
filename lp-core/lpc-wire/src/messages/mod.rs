@@ -15,7 +15,8 @@ pub use project_read::{
     ProjectReadResourceEvent, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
     ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
-    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, WireBindingDirection,
-    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireEffectiveBinding, WireScopeRef,
+    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, TimebaseProbeRequest,
+    TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
+    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding, WirePhasorOrigin,
+    WirePhasorRow, WireScopeRef,
 };
