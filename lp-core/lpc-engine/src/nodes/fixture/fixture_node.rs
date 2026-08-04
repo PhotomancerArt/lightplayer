@@ -2,7 +2,6 @@
 //! samples into output-owned targets on demand.
 
 use alloc::format;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{
@@ -196,13 +195,17 @@ impl FixtureNode {
             .as_ref()
             .is_none_or(|(ver, _)| *ver != mapping_ver);
         if stale {
-            let generated = lpc_model::nodes::fixture::generate_mapping_points(&self.mapping, 1, 1);
-            // Build into an exactly-sized Vec: only `point.channel` is read
-            // per frame, so 4 B/lamp is the whole resident cost. The
-            // coordinates the sampler needs are regenerated transiently in
-            // `ensure_fixture_sample_points` when its buffer key changes.
-            let mut channels = alloc::vec::Vec::with_capacity(generated.len());
-            channels.extend(generated.iter().map(|point| point.channel));
+            // Stream the points: only `point.channel` is read per frame, so
+            // 4 B/lamp is the whole resident cost and no intermediate
+            // `Vec<MappingPoint>` (16 B/lamp, plus its doubling peak) needs
+            // to exist at all. The coordinates the sampler needs are
+            // regenerated transiently in `ensure_fixture_sample_points` when
+            // its buffer key changes.
+            let mut channels =
+                Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(&self.mapping));
+            lpc_model::nodes::fixture::for_each_mapping_point(&self.mapping, 1, 1, |_, point| {
+                channels.push(point.channel)
+            });
             self.direct_channels = Some((mapping_ver, channels));
         }
     }
@@ -913,20 +916,25 @@ fn ensure_fixture_sample_points<'a>(
     // Regenerate coordinates transiently from the mapping — this is the one
     // place they exist; the resident per-lamp state is the channel list
     // alone. Runs only when the (mapping, size, count) key changes, never
-    // per frame.
-    let generated = lpc_model::nodes::fixture::generate_mapping_points(mapping, 1, 1);
-    if generated.len() as u32 != count {
+    // per frame. Streamed straight into the exactly-sized coords buffer: the
+    // point list is never materialized.
+    let generated_count = lpc_model::nodes::fixture::mapping_point_count(mapping);
+    if generated_count as u32 != count {
         return Err(NodeError::msg(format!(
-            "fixture sample points out of sync with channels: mapping generated {} points for {} channels",
-            generated.len(),
-            count
+            "fixture sample points out of sync with channels: mapping generated {generated_count} points for {count} channels"
         )));
     }
-    let mut coords = vec![0i32; generated.len() * 2];
-    for (dst, point) in coords.chunks_exact_mut(2).zip(&generated) {
-        dst[0] = normalized_q16_to_pixel_q16(normalized_f32_to_q16(point.center[0]), output_width);
-        dst[1] = normalized_q16_to_pixel_q16(normalized_f32_to_q16(point.center[1]), output_height);
-    }
+    let mut coords = Vec::with_capacity(generated_count * 2);
+    lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
+        coords.push(normalized_q16_to_pixel_q16(
+            normalized_f32_to_q16(point.center[0]),
+            output_width,
+        ));
+        coords.push(normalized_q16_to_pixel_q16(
+            normalized_f32_to_q16(point.center[1]),
+            output_height,
+        ));
+    });
     graphics
         .write_sample_points(&mut handle, &coords)
         .map_err(err_ctx("fixture sample point write"))?;

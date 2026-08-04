@@ -18,7 +18,9 @@ pub use fixture_state::FixtureState;
 pub use lamp_presets::{LampPreset, PowerProvenance, preset_for};
 pub use lamp_type::LampType;
 pub use mapping::{MappingConfig, PathSpec};
-pub use mapping_points::{MappingPoint, generate_mapping_points};
+pub use mapping_points::{
+    MappingPoint, for_each_mapping_point, generate_mapping_points, mapping_point_count,
+};
 pub use power::FixturePower;
 pub use power_model::PowerModel;
 pub use sampling::FixtureSamplingConfig;
