@@ -62,6 +62,9 @@ apll-out-17 = []
 # PHY hardware reset on GPIO5 (ESP32-Ethernet-Kit convention). Off by
 # default: GPIO5 is a strapping pin and its wiring on this board is unknown.
 phy-reset-5 = []
+# No-SMI operation: assume the PHY is strap-configured and autonomous
+# (100M/full), park MDC/MDIO on inert pins. Combine with apll-out-16.
+fixed-link = []
 
 [profile.release]
 codegen-units = 1
