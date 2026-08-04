@@ -623,6 +623,9 @@ impl ProjectController {
             if binding.origin == lpc_wire::WireBindingOrigin::Default {
                 endpoint = endpoint.with_default_origin();
             }
+            if binding.panel_show {
+                endpoint = endpoint.with_panel_hint();
+            }
             let authoring = crate::UiBindingAuthoring {
                 key: name.to_string(),
                 direction: match binding.direction {
@@ -1549,9 +1552,31 @@ impl ProjectController {
             let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
                 continue;
             };
-            let endpoint = self
+            let mut endpoint = self
                 .ui_binding_endpoint(&binding.endpoint)
                 .with_default_origin();
+            // A consumed bus channel is a panel-write target here exactly as
+            // on the synthesized rows (panel.md P1); the declared
+            // `panel = "show"` hint rides along so the face gate can promote
+            // this default wiring to a control (fixture brightness).
+            if binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
+                && let Some(scope) = scope
+            {
+                endpoint = endpoint.with_panel_target(crate::UiPanelTarget {
+                    scope: *scope,
+                    channel: channel.clone(),
+                    engaged: self.panel_engaged(graph, scope, channel),
+                });
+                if let Some(live) =
+                    self.live_channel_display(graph, Some(scope), channel, binding.kind)
+                {
+                    endpoint = endpoint.with_live_value(live);
+                }
+            }
+            if binding.panel_show {
+                endpoint = endpoint.with_panel_hint();
+            }
             let kind = match binding.direction {
                 lpc_wire::WireBindingDirection::Consumes => SlotBindingFactKind::Source(endpoint),
                 lpc_wire::WireBindingDirection::Publishes => SlotBindingFactKind::Target(endpoint),
@@ -6855,6 +6880,7 @@ mod tests {
                     origin: lpc_wire::WireBindingOrigin::Authored,
                     priority: 0,
                     kind: lpc_model::Kind::Color,
+                    panel_show: false,
                 },
                 lpc_wire::WireEffectiveBinding {
                     owner: node,
@@ -6868,6 +6894,7 @@ mod tests {
                     origin: lpc_wire::WireBindingOrigin::Default,
                     priority: -1000,
                     kind: lpc_model::Kind::Color,
+                    panel_show: false,
                 },
             ],
             channels: vec![
@@ -6977,6 +7004,7 @@ mod tests {
                     origin: lpc_wire::WireBindingOrigin::Default,
                     priority: -1000,
                     kind: lpc_model::Kind::Instant,
+                    panel_show: false,
                 },
                 lpc_wire::WireEffectiveBinding {
                     owner: node,
@@ -6990,6 +7018,7 @@ mod tests {
                     origin: lpc_wire::WireBindingOrigin::Default,
                     priority: -1000,
                     kind: lpc_model::Kind::Instant,
+                    panel_show: false,
                 },
             ],
             channels: Vec::new(),
@@ -7059,6 +7088,7 @@ mod tests {
                 origin: lpc_wire::WireBindingOrigin::Default,
                 priority: -1000,
                 kind: lpc_model::Kind::Instant,
+                panel_show: false,
             }],
             channels: Vec::new(),
         };
@@ -7330,6 +7360,7 @@ mod tests {
                 origin: lpc_wire::WireBindingOrigin::Default,
                 priority: -1000,
                 kind: lpc_model::Kind::Instant,
+                panel_show: false,
             }],
             channels: Vec::new(),
         };
@@ -7366,6 +7397,7 @@ mod tests {
                 origin: lpc_wire::WireBindingOrigin::Default,
                 priority: -1000,
                 kind: lpc_model::Kind::Instant,
+                panel_show: false,
             }],
             channels: Vec::new(),
         }
@@ -7571,6 +7603,7 @@ mod tests {
                 origin: lpc_wire::WireBindingOrigin::Authored,
                 priority: 0,
                 kind: lpc_model::Kind::Color,
+                panel_show: false,
             }
         };
         project
@@ -7626,6 +7659,7 @@ mod tests {
                 origin,
                 priority: 0,
                 kind,
+                panel_show: false,
             }
         };
         let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
@@ -7734,6 +7768,7 @@ mod tests {
                     origin: lpc_wire::WireBindingOrigin::Authored,
                     priority: 0,
                     kind: lpc_model::Kind::Amplitude,
+                    panel_show: false,
                 },
                 lpc_wire::WireEffectiveBinding {
                     owner,
@@ -7747,6 +7782,7 @@ mod tests {
                     origin: lpc_wire::WireBindingOrigin::Panel,
                     priority: 100,
                     kind: lpc_model::Kind::Amplitude,
+                    panel_show: false,
                 },
             ],
             channels: vec![lpc_wire::WireBusChannel {

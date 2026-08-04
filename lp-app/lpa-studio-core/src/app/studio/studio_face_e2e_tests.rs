@@ -103,11 +103,11 @@ fn node_faces_derive_and_edit_end_to_end() {
         face.brightness.widget,
         UiPanelWidget::Fader {
             min: 0.0,
-            max: 255.0,
-            step: Some(1.0)
+            max: 1.0,
+            step: None
         }
     );
-    assert_eq!(face.brightness.value.kind, UiSlotValueKind::U32(200));
+    assert_eq!(face.brightness.value.kind, UiSlotValueKind::F32(0.8));
     let fader_address = face
         .brightness
         .address
@@ -131,7 +131,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     }
     handle
         .tx
-        .send(set_value_action(fader_address.clone(), LpValue::U32(31)));
+        .send(set_value_action(fader_address.clone(), LpValue::F32(0.12)));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("edits emit a snapshot");
 
@@ -139,7 +139,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     assert_eq!(knob.value.kind, UiSlotValueKind::F32(2.5));
     assert_eq!(knob.state.dirty, UiNodeDirtyState::Dirty);
     let fader = fixture_fader(&snapshot);
-    assert_eq!(fader.value.kind, UiSlotValueKind::U32(31));
+    assert_eq!(fader.value.kind, UiSlotValueKind::F32(0.12));
     assert_eq!(fader.state.dirty, UiNodeDirtyState::Dirty);
 
     // -- save: both edits commit through the ONE overlay write path ---------
@@ -156,7 +156,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     );
     let fixture_json = read_project_file(&server, "fixture.json");
     assert!(
-        fixture_json.contains("\"brightness\":31"),
+        fixture_json.contains("\"brightness\":0.12"),
         "fixture.json gained the fader's persisted brightness edit: {fixture_json}"
     );
     assert_eq!(shader_knob(&snapshot).state.dirty, UiNodeDirtyState::Clean);
@@ -742,14 +742,16 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
     let face = module_face(&snapshot);
-    assert!(
-        face.panel.controls.is_empty(),
-        "nothing binds in the root scope itself: {:?}",
+    assert_eq!(
         face.panel
             .controls
             .iter()
             .map(|control| control.channel.as_str())
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>(),
+        vec!["brightness"],
+        "nothing is AUTHORED in the root scope itself — the one control is \
+         the fixture's default-bound brightness, promoted by its declared \
+         `panel = \"show\"` hint"
     );
     assert_eq!(face.panel.groups.len(), 1, "one group: the active entry");
     let entry_group = &face.panel.groups[0];
@@ -870,11 +872,28 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
             .iter()
             .map(|control| control.channel.as_str())
             .collect::<Vec<_>>(),
-        vec!["glow"],
-        "only the BOUND uniform lists — `speed` is wired to nothing, and \
-         panel membership is scope publicity (Q13), never an authored flag"
+        vec!["brightness", "glow"],
+        "the BOUND uniform lists, plus the fixture's default-bound \
+         brightness promoted by its declared `panel = \"show\"` hint — \
+         `speed` is wired to nothing and stays off (Q13 + the hint \
+         amendment)"
     );
-    let glow = &face.panel.controls[0];
+    let brightness = control_for_channel(&face, "brightness");
+    assert!(
+        matches!(
+            brightness.control.widget,
+            crate::UiPanelWidget::Fader { .. }
+        ),
+        "the promoted brightness control is the fixture's fader, got {:?}",
+        brightness.control.widget
+    );
+    assert_eq!(
+        brightness.state,
+        crate::UiPanelControlState::ReadDefault,
+        "nothing writes bus:brightness, so the fader reads the fixture's \
+         authored default (R6)"
+    );
+    let glow = control_for_channel(&face, "glow");
     assert_eq!(glow.state, crate::UiPanelControlState::ReadDefault);
     assert_eq!(
         glow.source.as_deref(),
@@ -986,7 +1005,7 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     let snapshot = view.try_recv().expect("panel write emits a snapshot");
 
     let face = module_face(&snapshot);
-    let glow = &face.panel.controls[0];
+    let glow = control_for_channel(&face, "glow");
     assert_eq!(
         glow.state,
         crate::UiPanelControlState::Engaged,
@@ -1011,7 +1030,7 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     let snapshot = view.try_recv().expect("panel clear emits a snapshot");
 
     let face = module_face(&snapshot);
-    let glow = &face.panel.controls[0];
+    let glow = control_for_channel(&face, "glow");
     assert_eq!(
         glow.state,
         crate::UiPanelControlState::ReadDefault,
@@ -1183,7 +1202,7 @@ fn face_e2e_server() -> LpServer {
     let fixture_json = r#"{
   "kind": "Fixture",
   "render_size": { "width": 4, "height": 4 },
-  "brightness": 200,
+  "brightness": 0.8,
   "mapping": { "kind": "Map2d", "source": "sign.map2d.json" },
   "bindings": {
     "input": { "source": "bus:visual.out" },
@@ -1590,6 +1609,19 @@ fn module_face(view: &UiStudioView) -> crate::UiModuleFace {
         panic!("the root card wears a module face");
     };
     face
+}
+
+/// The module panel's control for `channel` (channel-keyed — the control
+/// list is dedupe-ordered, so index-addressing is brittle).
+fn control_for_channel<'a>(
+    face: &'a crate::UiModuleFace,
+    channel: &str,
+) -> &'a crate::UiPanelControlView {
+    face.panel
+        .controls
+        .iter()
+        .find(|control| control.channel == channel)
+        .unwrap_or_else(|| panic!("module panel carries a {channel} control"))
 }
 
 fn playlist_face(view: &UiStudioView) -> UiPlaylistFace {

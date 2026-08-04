@@ -1764,10 +1764,18 @@ fn register_default_bind(
             });
         }
     };
-    let slot = SlotPath::parse(name).map_err(|e| ProjectLoadError::InvalidProjectReference {
-        path: node_label(current),
-        reason: format!("invalid default_bind slot `{name}`: {e}"),
-    })?;
+    // Declared slots normalize through the shape walk (an option-wrapped
+    // slot binds its `.some` interior — the accessor path the runtime
+    // resolves); dynamic shader slot names are already accessor paths.
+    let slot = match resolve_declared_binding_path(current.kind, name) {
+        Ok(slot) => slot,
+        Err(_) => {
+            SlotPath::parse(name).map_err(|e| ProjectLoadError::InvalidProjectReference {
+                path: node_label(current),
+                reason: format!("invalid default_bind slot `{name}`: {e}"),
+            })?
+        }
+    };
     let draft = if direction == SlotDirection::Produced {
         if binding_target(bindings, name).is_some() {
             return Ok(());

@@ -320,6 +320,11 @@ pub struct SlotFieldShape {
     /// 2026-07-09-declarative-default-bindings).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_bind: Option<String>,
+    /// Panel-visibility hint for this slot's `default_bind` wiring
+    /// ([`crate::PanelHint`]): `Show` promotes the materialized default
+    /// binding to publicity; absent leaves the derived rule alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<crate::PanelHint>,
 }
 
 impl SlotFieldShape {
@@ -351,6 +356,7 @@ impl SlotFieldShape {
             semantics,
             role,
             default_bind: None,
+            panel: None,
         })
     }
 

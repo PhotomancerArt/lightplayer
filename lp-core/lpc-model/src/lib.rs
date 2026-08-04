@@ -158,7 +158,8 @@ pub use slot::{
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,
-    MapSlotKeyLike, MapSlotMutAccess, OptionSlot, SlotAccess, SlotAccessMut, SlotAccessor,
+    MapSlotKeyLike, MapSlotMutAccess, OptionSlot, PanelHint, SlotAccess, SlotAccessMut,
+    SlotAccessor,
     SlotAccessorError, SlotAccessorStep, SlotCustomAccess, SlotCustomMutAccess, SlotData,
     SlotDataAccess, SlotDataAccessMut, SlotDataMutAccess, SlotDirection, SlotEnum, SlotEnumAccess,
     SlotEnumAccessMut, SlotEnumDefaultVariant, SlotEnumEncoding, SlotEnumMutAccess, SlotEnumShape,

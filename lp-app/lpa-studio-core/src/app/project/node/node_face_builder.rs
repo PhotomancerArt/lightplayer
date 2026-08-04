@@ -12,9 +12,10 @@
 //! reaches a panel by carrying a `panel_target`, which the project walk
 //! derives from the binding itself.
 //!
-//! Publicity is **authored** wiring: a uniform whose only binding is the
-//! one its own `default_bind` materialized (origin `Default`) is not on
-//! anyone's panel — see [`authored_panel_target`].
+//! Publicity is **authored** wiring — plus one additive override: a slot
+//! whose declaration carries `panel = "show"` beside its `default_bind`
+//! is public through that default wiring too (the fixture's brightness
+//! fader). See [`public_panel_target`].
 //!
 //! - **Shader**: preview = the produced visual product; controls = consumed
 //!   uniform slots BOUND to a bus channel, as knobs over the authored
@@ -135,24 +136,18 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         })?;
     // Same rule the shader knobs follow: when the fader's slot is wired to
     // a bus channel, the fader drives that channel (a panel write) rather
-    // than an authored default it can no longer affect. The wiring rides a
-    // separate binding-derived row — for a fixture it carries the SAME key
-    // as the authored row it decorates (unlike a shader uniform, whose
-    // entry key is `consumed[name]`), so this scans for whichever row
-    // actually carries the wiring rather than taking the first by key.
-    //
-    // NOTE (2026-08-02): no fixture can reach this yet. The project loader
-    // registers authored `source` bindings only for a fixed set of slot
-    // names per kind — for a fixture that is `input` alone — so
-    // `brightness` cannot currently be bound to a channel at all. This
-    // path exists so the fixture fader behaves like every other panel
-    // control the moment it can be, rather than silently lacking the
-    // feature; brightness is the scarf's own control and the two
-    // derivations must not diverge.
+    // than an authored default it can no longer affect. The wiring
+    // decorates the authored `brightness` row itself (the graph overlays —
+    // authored facts, then the default overlay carrying the declared
+    // `panel = "show"` promotion), so the scan below covers whichever row
+    // carries the wiring. The standard shape today: FixtureDef declares
+    // `default_bind = "bus:brightness"` with the hint, so every fixture's
+    // fader is channel-backed with zero authoring — brightness is the
+    // scarf's own control (panel.md P10).
     let field = slot_field_name(&key).to_string();
     let wired = || rows.iter().filter(|row| row.key == field);
     if brightness.panel_target.is_none() {
-        brightness.panel_target = wired().find_map(|row| bound_panel_target(row));
+        brightness.panel_target = wired().find_map(|row| public_panel_target(row));
     }
     if brightness.live_value.is_none() {
         brightness.live_value = wired().find_map(|row| bound_live_value(row));
@@ -310,7 +305,7 @@ fn shader_uniform_control(
     let panel_target = top_rows
         .iter()
         .find(|row| row.key == name)
-        .and_then(|row| authored_panel_target(row))?;
+        .and_then(|row| public_panel_target(row))?;
 
     let default_row = uniform_field(fields, "default")?;
     // Whole-number uniforms ("how many meteors") snap: the authored `step`
@@ -393,22 +388,16 @@ fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
     }
 }
 
-/// A row's panel-write target: the `(scope, channel)` its bound source
-/// endpoint consumes, so the control dispatches panel commands (panel.md
-/// P8) instead of editing the authored default.
-fn bound_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
+/// A row's panel-write target — the `(scope, channel)` its bound source
+/// endpoint consumes — but only when the wiring is **public**: authored, or a
+/// default-origin endpoint whose slot declares `panel = "show"`. A bare
+/// `default_bind` the loader materialized does not make its slot public
+/// (GV fix 1); the hint is the one additive override on that rule
+/// (ADR 2026-08-03-panel-visibility-is-derived, amended — the fixture's
+/// brightness fader is the motivating case).
+fn public_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
     match &slot.source {
-        UiSlotSourceState::Bound(endpoint) => endpoint.panel_target.clone(),
-        _ => None,
-    }
-}
-
-/// The same target, but only when the wiring was **authored** — a
-/// default-origin endpoint (a `default_bind` the loader materialized) does
-/// not make its uniform public (GV fix 1).
-fn authored_panel_target(slot: &UiConfigSlot) -> Option<crate::UiPanelTarget> {
-    match &slot.source {
-        UiSlotSourceState::Bound(endpoint) if !endpoint.default_origin => {
+        UiSlotSourceState::Bound(endpoint) if !endpoint.default_origin || endpoint.panel_hint => {
             endpoint.panel_target.clone()
         }
         _ => None,
@@ -679,7 +668,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         widget,
         value: value.clone(),
         live_value: bound_live_value(slot),
-        panel_target: bound_panel_target(slot),
+        panel_target: public_panel_target(slot),
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),
