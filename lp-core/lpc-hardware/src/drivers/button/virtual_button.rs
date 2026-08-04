@@ -65,7 +65,7 @@ mod tests {
         let registry = Rc::new(HwRegistry::new(test_manifest()));
         let _button = VirtualButton::open_gpio(Rc::clone(&registry), 4, 30).unwrap();
         let system = HardwareSystem::with_virtual_drivers(registry);
-        let endpoint = endpoint("ws281x:rmt:GPIO4");
+        let endpoint = endpoint("ws281x:local:GPIO4");
 
         let result = system.open_ws281x_by_spec(&endpoint, Ws281xConfig::new(3));
 
@@ -82,7 +82,7 @@ mod tests {
         let registry = Rc::new(HwRegistry::new(test_manifest()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
         let _output = system
-            .open_ws281x_by_spec(&endpoint("ws281x:rmt:GPIO4"), Ws281xConfig::new(3))
+            .open_ws281x_by_spec(&endpoint("ws281x:local:GPIO4"), Ws281xConfig::new(3))
             .unwrap();
 
         let result = VirtualButton::open_gpio(registry, 4, 30);
@@ -98,7 +98,7 @@ mod tests {
         let registry = Rc::new(HwRegistry::new(test_manifest()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
         let _output = system
-            .open_ws281x_by_spec(&endpoint("ws281x:rmt:GPIO18"), Ws281xConfig::new(3))
+            .open_ws281x_by_spec(&endpoint("ws281x:local:GPIO18"), Ws281xConfig::new(3))
             .unwrap();
 
         let button = VirtualButton::open_gpio(Rc::clone(&registry), 4, 30).unwrap();

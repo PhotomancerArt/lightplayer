@@ -141,7 +141,7 @@ two-block configuration never ran.
 
 Channel **count** comes from the board manifest and nowhere else: the
 DOM-Z-102 declares four `/rmt/ws281xK` resources, and the endpoints offered
-are its board-labelled GPIOs (IO18/IO16/IO14/IO2 → `ws281x:rmt:IO18` and so
+are its board-labelled GPIOs (IO18/IO16/IO14/IO2 → `ws281x:local:IO18` and so
 on). No GPIO number appears in driver logic; the pin arrives with the
 endpoint and is bound at `open` under a registry lease.
 

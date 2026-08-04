@@ -1,13 +1,16 @@
 ---
 status: fixed      # CLI-side fix (P5, 2026-07-31); the observation-lag
-                    # hypothesis itself is still unconfirmed on hardware —
-                    # that walk is P7. See "Fix" and "Ruled out".
+                    # hypothesis itself is still formally unconfirmed on
+                    # hardware — see the 2026-08-03 note below. See "Fix"
+                    # and "Ruled out".
 found: 2026-07-30      # how: hardware-walk
 fixed: 2026-07-31 (PR #234, upload wait)
 area: lp-cli (upload observability) — observed on fw-esp32s3
 class: stale-measurement
 related:
   - 2026-07-30-q32-native-vs-wasmtime-last-bit.md
+  - 2026-08-02-serial-line-interleaving.md
+  - 2026-08-03-dev-file-sync-drops-on-uart-rx-overflow.md
 ---
 # A pushed project compiles the *previous* upload's shader source
 
@@ -93,7 +96,26 @@ This closes the *CLI-side* half of the defect (what `upload` makes
 observable). It does not, by itself, confirm the reset/reload explanation in
 "Root cause" — that needs a hardware walk that reads the compile line from a
 monitor attached strictly after `upload` returns and compares it against the
-same walk's boot line, which lands at the P7 gate.
+same walk's boot line. (The "P7" that originally named as the confirming
+walk belonged to a different, now-closed plan; it did not happen there.)
+
+**2026-08-03 note** — the multi-endpoint-output-node plan's P6 hardware walk
+drove `lp-cli upload` repeatedly against the desk classic (a different chip
+family than the S3 this defect was found on) without it blocking the walk,
+so no regression in the CLI-side fix was observed. That walk did **not**
+perform the dedicated monitor-after-return confirmation this entry still
+wants — the reset/reload hypothesis in "Root cause" remains formally
+unconfirmed. It did surface two related, more specific findings on the same
+shared-UART theme, now filed separately:
+`docs/defects/2026-08-02-serial-line-interleaving.md` (outbound telemetry
+lines corrupted by concurrent writers — the more likely explanation for an
+"acked, but no evidence" false negative than the original observation-lag
+hypothesis) and
+`docs/defects/2026-08-03-dev-file-sync-drops-on-uart-rx-overflow.md`
+(inbound `lp-cli dev` writes apparently dropped under the same kind of UART
+contention). A future confirming walk should check the interleaving
+hypothesis first — it is the same "no evidence" symptom and needs no new
+instrumentation to test, only a walk built to isolate it.
 
 **Ruled out** (2026-07-31, all on host)
 

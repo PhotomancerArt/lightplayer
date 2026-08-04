@@ -73,13 +73,34 @@ pub struct FrameDump {
     /// Set whenever the next frame should be dumped in full: at open, and again
     /// after any resize.
     dump_next: bool,
+    /// Armed alongside `dump_next`, and kept armed across all-black frames:
+    /// the first frame after a project load is the compile-window black
+    /// fallback (ADR 2026-08-03-memory-pressure-at-compile-safe-points), so
+    /// the one-shot dump alone describes exactly the frame a hardware walk
+    /// cannot use as evidence. When the first *lit* frame arrives this arms
+    /// [`Self::lit_dump_countdown`] instead of dumping immediately — the
+    /// instant the shader finishes compiling is also the moment the UART
+    /// writer queue is flooded (the `compilation succeeded` burst, the
+    /// PR #300 interleaving defect), and a dump printed into that flood is
+    /// dropped end to end. A project that never lights dumps only once, at
+    /// open — this never floods.
+    dump_next_lit: bool,
+    /// Frames remaining until the deferred lit dump fires; 0 = none pending.
+    lit_dump_countdown: u32,
 }
+
+/// How long after the first lit frame the deferred full dump fires. ~0.6 s at
+/// 50 fps: comfortably past the post-compile log burst, comfortably before
+/// the first [`REPORT_EVERY_FRAMES`] summary.
+const LIT_DUMP_DELAY_FRAMES: u32 = 30;
 
 impl FrameDump {
     pub fn new() -> Self {
         Self {
             frame: 0,
             dump_next: true,
+            dump_next_lit: true,
+            lit_dump_countdown: 0,
         }
     }
 
@@ -88,7 +109,15 @@ impl FrameDump {
     /// wire rather than bytes that were merely queued.
     pub fn on_write(&mut self, data: &[u8]) {
         self.frame = self.frame.wrapping_add(1);
-        if core::mem::take(&mut self.dump_next) {
+        if self.dump_next_lit && lit_led_count(data) > 0 {
+            self.dump_next_lit = false;
+            self.lit_dump_countdown = LIT_DUMP_DELAY_FRAMES;
+        }
+        let lit_dump_due = self.lit_dump_countdown > 0 && {
+            self.lit_dump_countdown -= 1;
+            self.lit_dump_countdown == 0
+        };
+        if core::mem::take(&mut self.dump_next) || lit_dump_due {
             self.dump(data);
         } else if self.frame.is_multiple_of(REPORT_EVERY_FRAMES) {
             self.report(data);
@@ -99,6 +128,8 @@ impl FrameDump {
     pub fn on_resize(&mut self, byte_count: u32) {
         log::info!("[OUT] resize bytes={byte_count} leds={}", byte_count / 3);
         self.dump_next = true;
+        self.dump_next_lit = true;
+        self.lit_dump_countdown = 0;
     }
 
     fn report(&self, data: &[u8]) {

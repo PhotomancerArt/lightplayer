@@ -57,6 +57,8 @@ web-sys = { version = "0.3", optional = true, features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+# golden-trace replay (tests/trace_replay.rs) parses the device-event JSONL
+serde_json = { workspace = true }
 
 [features]
 default = []

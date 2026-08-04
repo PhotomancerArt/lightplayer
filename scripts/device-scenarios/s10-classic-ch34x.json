@@ -1,0 +1,23 @@
+{
+  "id": "s10-classic-ch34x",
+  "title": "Classic ESP32 over the CH34x bridge (needs M2; serial-interleaving evidence)",
+  "board": "classic DOM-Z-102 (CH34x)",
+  "needs": [],
+  "expect": [
+    "state:ready"
+  ],
+  "setup": [
+    {
+      "describe": "Flash the classic firmware (uses the flash-fw-esp32v3 toolchain args but WITHOUT --monitor \u2014 the monitor would hold the port the browser needs)",
+      "run": "just build-fw-esp32v3 && espflash flash --chip esp32 --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb --after hard-reset --port {port} target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3",
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Click Connect \u2014 the CH34x port should now APPEAR in the chooser (M2).",
+    "Let the card settle; parse-anomaly events here are evidence for the serial-interleaving defect."
+  ],
+  "port_filter": {
+    "kind_contains": "CH34x"
+  }
+}

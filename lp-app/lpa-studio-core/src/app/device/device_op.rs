@@ -1,4 +1,5 @@
 use super::bootloader_entry_flow::BootloaderEntryFlow;
+use super::device_target::DeviceTarget;
 use core::any::Any;
 use core::time::Duration;
 
@@ -35,9 +36,17 @@ pub enum DeviceOp {
     /// evidence (the ladder / In-use-elsewhere). Idempotent: a live
     /// device session or a busy connect flow makes it a no-op.
     AutoConnect,
-    ConnectLightPlayer,
-    DisconnectLightPlayer,
-    ResetDevice,
+    /// Attach Studio's protocol to the runtime behind `target`.
+    ConnectLightPlayer {
+        target: DeviceTarget,
+    },
+    /// Detach Studio's protocol from `target`, keeping the runtime.
+    DisconnectLightPlayer {
+        target: DeviceTarget,
+    },
+    ResetDevice {
+        target: DeviceTarget,
+    },
     /// Flash the packaged firmware. `setup_name` rides along from the
     /// blank board's SETUP FORM (state-flow model §1-A): after the flash
     /// lands and the wire is up, the controller stamps this name so the
@@ -51,6 +60,7 @@ pub enum DeviceOp {
     /// generic board — nothing written, the compiled-in default stands.
     /// Recovery flashes always pass `None` for both fields.
     ProvisionFirmware {
+        target: DeviceTarget,
         setup_name: Option<String>,
         board_id: Option<String>,
     },
@@ -58,8 +68,12 @@ pub enum DeviceOp {
     /// Holds-unreadable-data card's way out — state-flow model rev
     /// 2026-07-26: the way out is BLANK, never push-over). Firmware
     /// stays; the board lands on Connected-empty.
-    WipeProject,
-    ResetToBlank,
+    WipeProject {
+        target: DeviceTarget,
+    },
+    ResetToBlank {
+        target: DeviceTarget,
+    },
     /// Write the boot-control record so the device's NEXT restart comes up
     /// without loading a project (`lp-bootctl`).
     ///
@@ -68,7 +82,9 @@ pub enum DeviceOp {
     /// erased and the instruction is one-shot: the device consumes it as it
     /// boots, so the restart after that is normal again. That is why this is
     /// NOT destructive and does not sever a lens, unlike `ResetToBlank`.
-    BootSafeOnce,
+    BootSafeOnce {
+        target: DeviceTarget,
+    },
     /// Read the device's filesystem partition over the bootloader and hand
     /// the user a ZIP of it.
     ///
@@ -77,7 +93,9 @@ pub enum DeviceOp {
     /// ROM/stub bootloader rather than through the running server. Nothing
     /// is written, so this is not destructive — but it does own the wire and
     /// reboot the device, like every other management operation.
-    BackUpFilesystem,
+    BackUpFilesystem {
+        target: DeviceTarget,
+    },
     /// Ask the device whether a bootloader is listening, and fold the answer
     /// into the card's open bootloader-entry sheet.
     ///
@@ -90,10 +108,17 @@ pub enum DeviceOp {
     /// The user pressing "I've done that" IS the edge signal that a replug
     /// happened, which is exactly when probing is worth its cost.
     ProbeBootloaderMode {
+        /// The card whose bootloader-entry sheet this answers — both the
+        /// device to probe AND the sheet to fold the answer into, which
+        /// is why it stays a card key rather than becoming a bare target.
         card_key: String,
         flow: BootloaderEntryFlow,
     },
-    DisconnectDevice,
+    /// Disconnect ONE device session: close its link (the board keeps
+    /// running; reconnecting adds it back) and remove it from the pool.
+    DisconnectDevice {
+        target: DeviceTarget,
+    },
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
     /// editor when the lens is on the sim, close the provider session
     /// (`worker.terminate()` on the web), remove it from the pool. The
@@ -137,17 +162,17 @@ impl ControllerOp for DeviceOp {
                 "Connect a granted device automatically (attach only).",
                 ActionPriority::Secondary,
             ),
-            Self::ConnectLightPlayer => ActionMeta::new(
+            Self::ConnectLightPlayer { .. } => ActionMeta::new(
                 "Connect LightPlayer",
                 "Attach Studio to LightPlayer on the connected device.",
                 ActionPriority::Primary,
             ),
-            Self::DisconnectLightPlayer => ActionMeta::new(
+            Self::DisconnectLightPlayer { .. } => ActionMeta::new(
                 "Disconnect",
                 "Detach Studio from LightPlayer while keeping the device connected.",
                 ActionPriority::Tertiary,
             ),
-            Self::ResetDevice => ActionMeta::new(
+            Self::ResetDevice { .. } => ActionMeta::new(
                 "Reset device",
                 "Reboot the connected device without erasing firmware or data.",
                 ActionPriority::Tertiary,
@@ -162,14 +187,14 @@ impl ControllerOp for DeviceOp {
                 "This will write LightPlayer firmware to the selected ESP32. Continue?",
                 "Flash firmware",
             )),
-            Self::BootSafeOnce => ActionMeta::new(
+            Self::BootSafeOnce { .. } => ActionMeta::new(
                 "Start in safe mode",
                 "Have this device start once in safe mode — dim, or with \
                  nothing loaded on older firmware — so a project that stops \
                  it from running can be fixed.",
                 ActionPriority::Secondary,
             ),
-            Self::BackUpFilesystem => ActionMeta::new(
+            Self::BackUpFilesystem { .. } => ActionMeta::new(
                 "Download a backup",
                 "Copy everything on this device to a ZIP on your computer — \
                  works even if the board will not start.",
@@ -180,7 +205,7 @@ impl ControllerOp for DeviceOp {
                 "Ask the device whether it is listening in recovery mode.",
                 ActionPriority::Primary,
             ),
-            Self::WipeProject => ActionMeta::new(
+            Self::WipeProject { .. } => ActionMeta::new(
                 "Wipe project",
                 "Delete the device's project storage; firmware stays.",
                 ActionPriority::Tertiary,
@@ -197,7 +222,7 @@ impl ControllerOp for DeviceOp {
                  works even on content Studio can't open.",
                 "Wipe",
             )),
-            Self::ResetToBlank => ActionMeta::new(
+            Self::ResetToBlank { .. } => ActionMeta::new(
                 "Wipe device",
                 "Erase firmware and device data from this ESP32.",
                 ActionPriority::Tertiary,
@@ -208,9 +233,9 @@ impl ControllerOp for DeviceOp {
                 "This erases firmware and device data from the selected ESP32.",
                 "Wipe device",
             )),
-            Self::DisconnectDevice => ActionMeta::new(
+            Self::DisconnectDevice { .. } => ActionMeta::new(
                 "Disconnect",
-                "Close the current device session and return to connection choices.",
+                "Close this board's session. The board keeps running; connecting it again adds it back.",
                 ActionPriority::Tertiary,
             ),
             Self::StopSimulator => ActionMeta::new(
@@ -245,16 +270,16 @@ impl ControllerOp for DeviceOp {
             | Self::ConnectEndpoint { .. }
             | Self::ReconnectDevice { .. }
             | Self::AutoConnect
-            | Self::ConnectLightPlayer
-            | Self::DisconnectLightPlayer
-            | Self::ResetDevice
+            | Self::ConnectLightPlayer { .. }
+            | Self::DisconnectLightPlayer { .. }
+            | Self::ResetDevice { .. }
             | Self::ProvisionFirmware { .. }
-            | Self::WipeProject
-            | Self::ResetToBlank
-            | Self::BootSafeOnce
-            | Self::BackUpFilesystem
+            | Self::WipeProject { .. }
+            | Self::ResetToBlank { .. }
+            | Self::BootSafeOnce { .. }
+            | Self::BackUpFilesystem { .. }
             | Self::ProbeBootloaderMode { .. }
-            | Self::DisconnectDevice
+            | Self::DisconnectDevice { .. }
             | Self::StopSimulator
             | Self::RefreshConnections => ActionClass::Recovery,
             // A quick request/ack on the existing connection — no reason to
@@ -286,7 +311,7 @@ impl ControllerOp for DeviceOp {
 mod tests {
     use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-    use crate::{ActionClass, ControllerOp, DeviceOp, UiLogLevel};
+    use crate::{ActionClass, ControllerOp, DeviceOp, DeviceTarget, UiLogLevel};
 
     #[test]
     fn every_device_flow_op_is_recovery_class() {
@@ -302,16 +327,29 @@ mod tests {
                 endpoint_id: LinkEndpointId::new("endpoint"),
             },
             DeviceOp::ReconnectDevice { uid: None },
-            DeviceOp::ConnectLightPlayer,
-            DeviceOp::DisconnectLightPlayer,
-            DeviceOp::ResetDevice,
+            DeviceOp::ConnectLightPlayer {
+                target: DeviceTarget::Ambient,
+            },
+            DeviceOp::DisconnectLightPlayer {
+                target: DeviceTarget::card("runtime-1"),
+            },
+            DeviceOp::ResetDevice {
+                target: DeviceTarget::card("runtime-1"),
+            },
             DeviceOp::ProvisionFirmware {
+                target: DeviceTarget::card("runtime-1"),
                 setup_name: None,
                 board_id: None,
             },
-            DeviceOp::ResetToBlank,
-            DeviceOp::BackUpFilesystem,
-            DeviceOp::DisconnectDevice,
+            DeviceOp::ResetToBlank {
+                target: DeviceTarget::card("runtime-1"),
+            },
+            DeviceOp::BackUpFilesystem {
+                target: DeviceTarget::card("runtime-1"),
+            },
+            DeviceOp::DisconnectDevice {
+                target: DeviceTarget::card("runtime-1"),
+            },
             DeviceOp::StopSimulator,
             DeviceOp::RefreshConnections,
         ];

@@ -5286,8 +5286,13 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             }
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
-            // not controls.
-            Some(crate::UiNodeFace::Module(_) | crate::UiNodeFace::Playlist(_)) | None => {}
+            // not controls; an output face carries wires, not panel widgets.
+            Some(
+                crate::UiNodeFace::Module(_)
+                | crate::UiNodeFace::Playlist(_)
+                | crate::UiNodeFace::Output(_),
+            )
+            | None => {}
         }
     }
     fn walk<'a>(children: &'a [crate::UiNodeChild], out: &mut Vec<&'a crate::UiPanelControl>) {

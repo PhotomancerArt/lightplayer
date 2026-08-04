@@ -1,0 +1,99 @@
+{"t":1785789064.05,"kind":"sweep","disposition":"ran"}
+{"t":1785789064.052,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
+{"t":1785789064.057,"kind":"flow","from":"discovering-endpoints","to":"selecting-provider"}
+{"t":1785789073.474,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
+{"t":1785789076.324,"kind":"flow","from":"discovering-endpoints","to":"selecting-endpoint"}
+{"t":1785789076.325,"kind":"flow","from":"selecting-endpoint","to":"connecting"}
+{"t":1785789076.536,"endpoint":"browser-serial-esp32-port-1","kind":"state","to":"booting"}
+{"t":1785789076.537,"kind":"flow","from":"connecting","to":"connected"}
+{"t":1785789076.539,"session":"runtime-1","endpoint":"browser-serial-esp32-port-1","kind":"pool","action":"install","detail":"Device"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalESP-ROM:esp32c6-20220919"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Sep 19 2022"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x400294a6"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.543,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"invalid header: 0xffffffff"}
+{"t":1785789076.544,"endpoint":"browser-serial-esp32-port-1","kind":"state","from":"booting","to":"blank-flash"}

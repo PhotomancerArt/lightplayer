@@ -2,7 +2,7 @@
 //! plus the drawers under it.
 //!
 //! [`super::super::NodePane`] renders this when `UiNodeView.face` is `Some`
-//! (shader/fixture/playlist today); nodes without a face keep the generic
+//! (shader/fixture/playlist/output today); nodes without a face keep the generic
 //! tab/section body. The body owns the full-bleed container: faces and
 //! drawers emit flat
 //! [`super::NodeCardSection`]s that span the card edge-to-edge, divided by
@@ -23,7 +23,7 @@ use crate::app::module::{ModuleFace, ModulePanel, PanelGesture, panel_gesture_ac
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
-use super::{FixtureFace, NodeCardDrawers, NodeCardSection, PlaylistFace, ShaderFace};
+use super::{FixtureFace, NodeCardDrawers, NodeCardSection, OutputFace, PlaylistFace, ShaderFace};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -116,6 +116,9 @@ pub fn NodeFaceBody(
                         dirty_tint,
                         on_action,
                     }
+                },
+                UiNodeFace::Output(output) => rsx! {
+                    OutputFace { face: output, on_action }
                 },
                 // The module face carries its own drawer
                 // (wiring), so it does NOT compose `NodeCardDrawers` — the

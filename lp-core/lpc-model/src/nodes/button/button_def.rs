@@ -1,6 +1,6 @@
 use crate::{BindingDefs, ControlMessage, HwEndpointSpec, MapSlot, Slotted, ValueSlot};
 
-pub const DEFAULT_BUTTON_ENDPOINT_SPEC: &str = "button:gpio:D9";
+pub const DEFAULT_BUTTON_ENDPOINT_SPEC: &str = "button:local:D9";
 
 /// Authored hardware button input node definition.
 ///
@@ -12,7 +12,7 @@ pub struct ButtonDef {
     /// Authored slot bindings for button outputs.
     pub bindings: BindingDefs,
 
-    /// Hardware endpoint spec, for example `button:gpio:D9`.
+    /// Hardware endpoint spec, for example `button:local:D9`.
     pub endpoint: ValueSlot<HwEndpointSpec>,
 
     /// Stable message id used as the key and payload id for this button.
@@ -81,13 +81,13 @@ mod tests {
 
     #[test]
     fn button_def_parses_defaults() {
-        let def = NodeDef::from_json_str(r#"{ "kind": "Button", "endpoint": "button:gpio:D9" }"#)
+        let def = NodeDef::from_json_str(r#"{ "kind": "Button", "endpoint": "button:local:D9" }"#)
             .expect("button");
 
         let NodeDef::Button(def) = def else {
             panic!("button def");
         };
-        assert_eq!(def.endpoint().as_str(), "button:gpio:D9");
+        assert_eq!(def.endpoint().as_str(), "button:local:D9");
         assert_eq!(*def.id.value(), 1);
         assert_eq!(*def.stable_ms.value(), 30);
     }

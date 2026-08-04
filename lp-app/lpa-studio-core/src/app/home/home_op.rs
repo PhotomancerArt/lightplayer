@@ -78,8 +78,10 @@ pub enum HomeOp {
     },
     /// Name an anonymous connected device (the Needs-a-name card's inline
     /// form): mints a `dev_` uid and stamps the identity over the wire —
-    /// card-anchored, never a dialog.
+    /// card-anchored, never a dialog. `target` is that card (M4): with
+    /// two blank boards attached, naming one must not stamp the other.
     NameDevice {
+        target: crate::DeviceTarget,
         name: String,
     },
     /// Mutate a card's UI VIEW-STATE (select tab / open or close a sheet).
