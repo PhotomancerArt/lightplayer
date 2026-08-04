@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Palettes — picker, panel control, editor — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio-ish palette (borrowed from spikes/device-card-panel) ---- */
+  :root {
+    --bg: #0b0c0e;
+    --card: #14161a;
+    --terminal: #0e1013;
+    --border: #262a31;
+    --border-strong: #3a3f48;
+    --text: #e8e6e1;
+    --strong: #f4f2ec;
+    --muted: #9a978f;
+    --dim: #6f6d66;
+    --name: #e4c065;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+    --good: #3fd68e;       --good-bg: rgba(63,214,142,.08);
+    --attn: #f0913b;       --attn-bg: rgba(240,145,59,.09);
+    --error: #ef5350;      --error-bg: rgba(239,83,80,.09);
+    --neutral: #8a8f98;    --neutral-bg: rgba(138,143,152,.06);
+
+    /* studio convention: bound/bus = violet, never green */
+    --bound: #a78bfa;      --bound-bg: rgba(167,139,250,.10);
+    /* candidate ENGAGED (captured) family — deliberately NOT violet (P6/P-Q2).
+       gold = "held in hand"; the spike explores this treatment */
+    --held: #e4c065;       --held-bg: rgba(228,192,101,.10);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 32px 140px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 720px; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 34px 0 4px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 720px; }
+  .lean { color: var(--muted); }
+  .lean b { color: var(--text); }
+
+  /* ---- exploration controls ---- */
+  .controls {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px;
+    position: sticky; top: 0; background: var(--bg); z-index: 40;
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .controls button, .seg button {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--card);
+    color: var(--muted); font: 600 11px/1 -apple-system, sans-serif;
+    padding: 5px 9px; border-radius: 6px; cursor: pointer;
+  }
+  .controls button:hover { color: var(--text); }
+  .controls button.on { color: var(--strong); border-color: var(--dim); background: #1b1e24; }
+  .controls label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+
+  /* ---- concept gallery ---- */
+  .gallery { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .concept {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0; overflow: hidden; width: 320px;
+  }
+  .concept.wide { width: 480px; }
+  .concept > header {
+    padding: 8px 12px; background: var(--terminal); border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .concept > header .tag {
+    font: 700 10px/1 var(--mono); color: var(--bg); background: var(--muted);
+    padding: 3px 6px; border-radius: 4px; letter-spacing: .06em;
+  }
+  .concept > header .title { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .concept > header .note { font-size: 11px; color: var(--dim); margin-left: auto; text-align: right; }
+  .concept .bodyp { padding: 12px; }
+
+  /* ---- shared panel-row chrome (echoes studio panel controls) ---- */
+  .panelrow {
+    display: grid; grid-template-columns: 92px 1fr auto; gap: 10px; align-items: center;
+    padding: 7px 4px; border-radius: 6px;
+  }
+  .panelrow + .panelrow { border-top: 1px solid rgba(255,255,255,.03); }
+  .panelrow .lbl {
+    font-size: 12px; color: var(--muted); font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .panelrow .lbl.bound { color: var(--bound); }
+  .panelrow .readout { font: 11px var(--mono); color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .panelrow .readout .live { color: var(--bound); }
+  .panelrow .readout .authored { color: var(--dim); }
+  .clearbtn {
+    appearance: none; border: 0; background: transparent; color: var(--held);
+    cursor: pointer; font-size: 12px; line-height: 1; padding: 2px; opacity: .8;
+  }
+  .clearbtn:hover { opacity: 1; }
+
+  /* fake knob + fader neighbors, to seat the palette control in real context */
+  .knob { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--border-strong);
+          position: relative; background: var(--terminal); justify-self: start; }
+  .knob i { position: absolute; left: 50%; top: 50%; width: 2px; height: 11px;
+            background: var(--text); transform-origin: 50% 0;
+            transform: translate(-50%,0) rotate(150deg); border-radius: 2px; }
+  .fader { height: 6px; border-radius: 3px; background: var(--terminal);
+           border: 1px solid var(--border); position: relative; align-self: center; }
+  .fader i { position: absolute; top: 50%; left: 62%; width: 12px; height: 16px;
+             transform: translate(-50%,-50%); background: #2a2e36;
+             border: 1px solid var(--border-strong); border-radius: 3px; }
+
+  /* ---- swatch strips ---- */
+  canvas.strip { display: block; width: 100%; height: 100%; border-radius: 4px; }
+  .swatchwrap { position: relative; height: 22px; border-radius: 5px; overflow: hidden;
+                border: 1px solid var(--border-strong); cursor: pointer; background: #000; }
+  .swatchwrap:hover { border-color: var(--dim); }
+  .swatchwrap .pname {
+    position: absolute; left: 7px; top: 50%; transform: translateY(-50%);
+    font: 700 10.5px var(--mono); color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 8px rgba(0,0,0,.6);
+    letter-spacing: .03em; max-width: 85%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .swatchwrap .chev { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+                      color: rgba(255,255,255,.85); font-size: 10px; text-shadow: 0 1px 2px #000; }
+
+  /* state treatments on the swatch control */
+  .pal-state-engaged .swatchwrap { border-color: var(--held); box-shadow: 0 0 0 1px var(--held-bg), 0 0 10px rgba(228,192,101,.15); }
+  .pal-state-automated canvas.strip { animation: palcycle 6s linear infinite; }
+  @keyframes palcycle { 0% { filter: hue-rotate(0deg); } 100% { filter: hue-rotate(360deg); } }
+  .statechip {
+    font: 600 9.5px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase;
+    padding: 3px 6px; border-radius: 4px; white-space: nowrap;
+  }
+  .statechip.inherit { color: var(--muted); background: var(--neutral-bg); }
+  .statechip.default { color: var(--dim); background: rgba(255,255,255,.03); }
+  .statechip.auto { color: var(--bound); background: var(--bound-bg); }
+  .statechip.held { color: var(--held); background: var(--held-bg); }
+
+  /* B: compact chip variant */
+  .chiprow { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .chiprow .chipname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panelrow > * { min-width: 0; }
+  .palchip { width: 64px; height: 18px; border-radius: 4px; overflow: hidden;
+             border: 1px solid var(--border-strong); cursor: pointer; position: relative; background:#000; }
+  .palchip:hover { border-color: var(--dim); }
+  .pal-state-engaged .palchip { border-color: var(--held); box-shadow: 0 0 8px rgba(228,192,101,.18); }
+  .chipname { font: 600 11px var(--mono); color: var(--text); }
+
+  /* C: stepper variant */
+  .stepper { display: grid; grid-template-columns: 22px 1fr 22px; gap: 6px; align-items: stretch; }
+  .stepper .arrow {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--terminal);
+    color: var(--muted); border-radius: 5px; cursor: pointer; font-size: 11px; line-height: 1;
+  }
+  .stepper .arrow:hover { color: var(--strong); border-color: var(--dim); }
+
+  /* ---- picker ---- */
+  .picker {
+    background: var(--terminal); border: 1px solid var(--border-strong); border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+  }
+  .picker .searchbar { display: flex; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--border); align-items:center; }
+  .picker input[type=search] {
+    flex: 1; background: var(--card); border: 1px solid var(--border-strong); border-radius: 6px;
+    color: var(--text); font: 12px var(--mono); padding: 6px 9px; outline: none;
+  }
+  .picker input[type=search]:focus { border-color: var(--dim); }
+  .picker .imp { font: 600 10px/1 -apple-system,sans-serif; color: var(--muted); border:1px solid var(--border-strong);
+                 background: var(--card); border-radius: 6px; padding: 6px 8px; cursor: pointer; white-space: nowrap; }
+  .picker .imp:hover { color: var(--text); }
+  .plist { max-height: 320px; overflow: auto; }
+  .pcat { position: sticky; top: 0; background: var(--terminal); padding: 6px 12px 4px;
+          font: 700 9.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+          border-bottom: 1px solid rgba(255,255,255,.04); z-index: 2; }
+  .prow { display: grid; grid-template-columns: 1fr 108px; gap: 10px; align-items: center;
+          padding: 5px 12px; cursor: pointer; }
+  .prow:hover { background: rgba(255,255,255,.04); }
+  .prow.sel { background: var(--bound-bg); }
+  .prow.sel .pn { color: var(--bound); }
+  .prow .pn { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prow .pn small { color: var(--dim); font-size: 10.5px; margin-left: 6px; }
+  .prow .mini { height: 14px; border-radius: 3px; overflow: hidden; border: 1px solid rgba(255,255,255,.12); background:#000; }
+
+  /* B: grid picker */
+  .pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; max-height: 320px; overflow: auto; }
+  .ptile { cursor: pointer; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-strong); background:#000; position: relative; }
+  .ptile:hover { border-color: var(--dim); }
+  .ptile.sel { border-color: var(--bound); box-shadow: 0 0 0 1px var(--bound); }
+  .ptile .tstrip { height: 26px; }
+  .ptile .tname { font: 600 9.5px var(--mono); color: var(--muted); padding: 3px 6px 4px;
+                  background: var(--terminal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ptile.sel .tname { color: var(--bound); }
+
+  /* C: hero preview picker */
+  .hero { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card); }
+  .hero .ledstrip { display: flex; gap: 3px; margin-top: 8px; }
+  .hero .led { width: 11px; height: 11px; border-radius: 50%; background: #111; }
+  .hero .heroname { font: 700 12px var(--mono); color: var(--strong); }
+  .hero .herometa { font: 10.5px var(--mono); color: var(--dim); margin-top: 2px; }
+
+  /* ---- editor ---- */
+  .editor { padding: 12px; }
+  .gradbar { position: relative; height: 44px; border-radius: 6px; overflow: visible;
+             border: 1px solid var(--border-strong); background: #000; }
+  .gradbar canvas { border-radius: 5px; }
+  .stop {
+    position: absolute; top: 100%; transform: translate(-50%, 2px); cursor: grab;
+    width: 16px; height: 20px; z-index: 3; touch-action: none;
+  }
+  .stop::before { content: ""; position: absolute; left: 50%; top: -46px; width: 1px; height: 44px;
+                  background: rgba(255,255,255,.35); }
+  .stop .dot { position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+               width: 14px; height: 14px; border-radius: 4px; border: 2px solid #fff;
+               box-shadow: 0 1px 4px rgba(0,0,0,.7); }
+  .stop.sel .dot { border-color: var(--bound); box-shadow: 0 0 0 2px var(--bound-bg), 0 1px 4px rgba(0,0,0,.7); }
+  .editrow { display: flex; gap: 10px; margin-top: 34px; align-items: center; flex-wrap: wrap; }
+  .editrow label { font-size: 11px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .editrow input[type=color] { width: 34px; height: 24px; border: 1px solid var(--border-strong);
+                               border-radius: 5px; background: var(--terminal); padding: 1px; cursor: pointer; }
+  .editrow input[type=number] { width: 58px; background: var(--terminal); color: var(--text);
+                                border: 1px solid var(--border-strong); border-radius: 5px;
+                                font: 11px var(--mono); padding: 4px 6px; }
+  .editrow button { appearance: none; border: 1px solid var(--border-strong); background: var(--card);
+                    color: var(--muted); font: 600 11px/1 -apple-system,sans-serif; padding: 5px 8px;
+                    border-radius: 6px; cursor: pointer; }
+  .editrow button:hover { color: var(--text); }
+  .seg { display: inline-flex; gap: 0; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--terminal); }
+  .seg button + button { border-left: 1px solid var(--border-strong); }
+  .seg button.on { color: var(--strong); background: #23272f; }
+
+  /* stop list (concept B) */
+  .stoplist { display: grid; gap: 4px; }
+  .stoplist .srow { display: grid; grid-template-columns: 40px 58px 1fr 22px; gap: 8px; align-items: center;
+                    padding: 4px 6px; border-radius: 5px; background: var(--terminal);
+                    border: 1px solid var(--border); font: 11px var(--mono); color: var(--muted); }
+  .stoplist .srow .pos { color: var(--text); }
+  .stoplist .del { appearance:none; border:0; background:transparent; color: var(--dim); cursor:pointer; }
+  .stoplist .del:hover { color: var(--error); }
+  .srow .chip { height: 16px; border-radius: 3px; border: 1px solid rgba(255,255,255,.15); }
+
+  /* interp comparison grid */
+  .cmp { display: grid; grid-template-columns: 74px 1fr 1fr 1fr; gap: 6px 8px; align-items: center; }
+  .cmp .cl { font: 600 10px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  .cmp .ch { font: 700 10px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; text-align: center; }
+  .cmp .cell { height: 20px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); background:#000; }
+
+  /* ---- section 4: module panel inheritance ---- */
+  .modpanel { width: 380px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .modpanel > header { padding: 8px 12px; background: var(--terminal); border-bottom: 1px solid var(--border);
+                       display: flex; align-items: center; gap: 8px; }
+  .modpanel > header .nm { font-weight: 700; color: var(--name); font-size: 13.5px; }
+  .modpanel > header .k { font: 600 9.5px var(--mono); color: var(--dim); text-transform: uppercase;
+                          letter-spacing: .08em; margin-left: auto; }
+  .modgroup { border-top: 1px solid var(--border); }
+  .modgroup > .gh { display: flex; align-items: center; gap: 8px; padding: 7px 12px 2px; }
+  .modgroup > .gh .gn { font: 700 11px var(--mono); color: var(--muted); }
+  .modgroup > .gh .reset { margin-left: auto; }
+  .modgroup .bodyp { padding: 4px 12px 10px; }
+  .flow { font: 10.5px var(--mono); color: var(--dim); padding: 2px 12px 10px; }
+  .flow .via { color: var(--muted); }
+  .flow .heldtxt { color: var(--held); }
+</style>
+</head>
+<body>
+
+<h1>Palettes — panel control · picker · editor · inheritance</h1>
+<p class="hint">
+  Companion to the palette exploration spike (planning:
+  <span style="font-family:var(--mono)">2026-08-03-1803-palette-exploration-spike</span>).
+  Thesis: a palette is a <em>value on a bus channel</em> — the panel control is a latch-mode writer like
+  any knob (panel.md P2), sharing is scope inheritance (modules.md R5/E4), and anything that animates a
+  palette is a node. This playground explores the three surfaces that need visual judgment: the panel
+  swatch control (§1), the picker (§2), the gradient editor + interpolation space (§3), and the
+  drop-in inheritance story WLED can't do (§4). Engaged/captured treatment is candidate <b>gold</b> —
+  deliberately not the bound-violet family (P6, P-Q2).
+</p>
+
+<div class="controls">
+  <span class="group"><b>§1 control state</b>
+    <button data-st="default">Read · default</button>
+    <button data-st="inherit" class="on">Read · inherited</button>
+    <button data-st="automated">Read · automated</button>
+    <button data-st="engaged">Engaged</button>
+  </span>
+  <span class="group"><b>names</b>
+    <label><input type="checkbox" id="longnames"> awkward-long</label>
+  </span>
+  <span class="group"><b>§2 picker sets</b>
+    <label><input type="checkbox" id="emptyproj" checked> project has customs</label>
+  </span>
+</div>
+
+<!-- ================= SECTION 1 ================= -->
+<h2>1 · The panel swatch control</h2>
+<p class="sub">
+  Where the current palette lives on a panel, seated between a real knob and fader for scale.
+  Cycle the state strip above: <b>Read·default</b> (no writer anywhere, authored default),
+  <b>Read·inherited</b> (host scope writes it — violet live readout), <b>Read·automated</b> (a
+  future generator node animates it — grabbable, P5), <b>Engaged</b> (panel writer holds it — gold + ↺).
+  <span class="lean">Lean: <b>A</b> — the strip is the value; a palette control that doesn't show the
+  gradient at readable width isn't a palette control. C's stepper is a play-mode overlay on A, not a rival.</span>
+</p>
+<div class="gallery">
+
+  <div class="concept" id="c1a">
+    <header><span class="tag">A</span><span class="title">Full-width strip row</span>
+      <span class="note">fader-grade footprint<br>name on the strip</span></header>
+    <div class="bodyp">
+      <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+        <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+      <div class="panelrow pal" data-c="a">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip" data-pal="cur"></canvas>
+          <span class="pname"></span><span class="chev">▾</span></div>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+        <span class="readout">0.62</span></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c1b">
+    <header><span class="tag">B</span><span class="title">Compact chip + name</span>
+      <span class="note">knob-grade footprint<br>name beside chip</span></header>
+    <div class="bodyp">
+      <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+        <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+      <div class="panelrow pal" data-c="b">
+        <span class="lbl bound">palette</span>
+        <span class="chiprow"><span class="palchip"><canvas class="strip" data-pal="cur"></canvas></span>
+          <span class="chipname"></span></span>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+        <span class="readout">0.62</span></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c1c">
+    <header><span class="tag">C</span><span class="title">Stepper strip (play mode)</span>
+      <span class="note">WLED muscle memory:<br>next/prev cycles catalog</span></header>
+    <div class="bodyp">
+      <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+        <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+      <div class="panelrow pal" data-c="c">
+        <span class="lbl bound">palette</span>
+        <div class="stepper">
+          <button class="arrow" id="palprev">‹</button>
+          <div class="swatchwrap"><canvas class="strip" data-pal="cur"></canvas>
+            <span class="pname"></span></div>
+          <button class="arrow" id="palnext">›</button>
+        </div>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+        <span class="readout">0.62</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 2 ================= -->
+<h2>2 · The picker</h2>
+<p class="sub">
+  Opens from the §1 control. All three share the same catalog model: <b>Project</b> (customs, saved
+  in the project), <b>Stock</b> (FastLED-lineage), <b>Classic</b> (cpt-city-lineage), plus a WLED-JSON
+  import affordance. Search filters live in A and C. Click any row/tile — the §1 control follows
+  (that's a real PanelWrite in production).
+  <span class="lean">Lean: <b>A</b> — WLED users know exactly what this is; strips at list width stay
+  legible at 60+ entries. C's live LED preview is the demo-magic add-on if the budget allows; B's grid
+  goes illegible with subtle palettes.</span>
+</p>
+<div class="gallery">
+
+  <div class="concept" id="c2a">
+    <header><span class="tag">A</span><span class="title">Searchable list, preview strips</span>
+      <span class="note">WLED-parity, restyled</span></header>
+    <div class="picker">
+      <div class="searchbar"><input type="search" placeholder="search palettes…" id="searchA">
+        <button class="imp" title="Paste WLED palette JSON">⇪ import</button></div>
+      <div class="plist" id="plistA"></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c2b">
+    <header><span class="tag">B</span><span class="title">Swatch grid</span>
+      <span class="note">denser, more visual</span></header>
+    <div class="picker">
+      <div class="searchbar"><input type="search" placeholder="search palettes…" id="searchB">
+        <button class="imp">⇪ import</button></div>
+      <div class="pgrid" id="pgridB"></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c2c">
+    <header><span class="tag">C</span><span class="title">List + live output preview</span>
+      <span class="note">hover = try it on the strip</span></header>
+    <div class="picker">
+      <div class="hero">
+        <div class="heroname" id="heroname">Aurora</div>
+        <div class="herometa" id="herometa">classic · 5 stops · srgb / linear</div>
+        <div class="ledstrip" id="ledstrip"></div>
+      </div>
+      <div class="searchbar"><input type="search" placeholder="search palettes…" id="searchC">
+        <button class="imp">⇪ import</button></div>
+      <div class="plist" id="plistC"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 3 ================= -->
+<h2>3 · The gradient editor + interpolation space</h2>
+<p class="sub">
+  Authoring-grade (face/drawer), not panel-grade. A: direct manipulation — drag stops, double-click the
+  bar to add, color-well edits the selected stop. B: stop list — precise, boring, phone-friendly.
+  The comparison grid renders the SAME stops through every space × method pair (real Oklab math,
+  live): this is decision D8 made visible.
+  <span class="lean">Lean: <b>A over B as the primary</b>, with B's rows available as a disclosure
+  ("exact values"). D8 leans: imports = srgb/linear for WLED fidelity; new palettes = oklab/smooth.</span>
+</p>
+<div class="gallery">
+
+  <div class="concept wide" id="c3a">
+    <header><span class="tag">A</span><span class="title">Direct-manipulation bar</span>
+      <span class="note">drag stops · dbl-click adds · del removes</span></header>
+    <div class="editor">
+      <div class="gradbar" id="gradbar"><canvas class="strip" id="editcanvas"></canvas></div>
+      <div class="editrow">
+        <label>stop <input type="color" id="stopcolor"></label>
+        <label>at <input type="number" id="stoppos" min="0" max="1" step="0.01"></label>
+        <button id="delstop">delete stop</button>
+        <span style="flex:1"></span>
+        <span class="seg" id="segspace">
+          <button data-v="srgb" class="on">sRGB</button><button data-v="oklab">Oklab</button>
+        </span>
+        <span class="seg" id="segmethod">
+          <button data-v="step">Step</button><button data-v="linear" class="on">Linear</button><button data-v="smooth">Smooth</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="concept" id="c3b">
+    <header><span class="tag">B</span><span class="title">Stop list</span>
+      <span class="note">precise · same value, same edits</span></header>
+    <div class="editor">
+      <div class="stoplist" id="stoplist"></div>
+      <div class="editrow"><button id="addstop">+ add stop</button></div>
+    </div>
+  </div>
+
+  <div class="concept wide" id="c3cmp">
+    <header><span class="tag">D8</span><span class="title">Space × method, live</span>
+      <span class="note">same stops, six bakes</span></header>
+    <div class="editor">
+      <div class="cmp" id="cmpgrid">
+        <span></span><span class="ch">Step</span><span class="ch">Linear</span><span class="ch">Smooth</span>
+      </div>
+      <p class="sub" style="margin-top:10px">sRGB rides through gray dead zones (watch blue→gold);
+        Oklab holds chroma through the middle. Step is the C9/christmas-lights mode.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 4 ================= -->
+<h2>4 · Drop-in inheritance — the thing WLED can't do</h2>
+<p class="sub">
+  A host module and two embedded plasma effects, all consuming <span style="font-family:var(--mono)">bus:palette</span>.
+  Untouched children inherit the host palette (R5). <b>Click a child's swatch</b> to engage its own
+  panel writer — gold ring, that subtree detaches (R11), the sibling still follows the host.
+  <b>↺</b> clears back to inheritance. Change the host palette (click its strip) and watch who follows.
+  <span class="lean">This interaction demo is one concept, not a matrix — it's the acceptance
+  scenario for M4, and the flow lines under each group are the candidate "whose value is this"
+  affordance.</span>
+</p>
+<div class="gallery">
+  <div class="modpanel" id="modpanel">
+    <header><span class="nm">aurora-dome</span><span class="k">root module · panel</span></header>
+    <div class="bodyp" style="padding: 4px 12px 8px;">
+      <div class="panelrow pal" id="hostpal">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip"></canvas><span class="pname"></span><span class="chev">▾</span></div>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl bound">energy</span><div class="fader"><i></i></div>
+        <span class="readout"><span class="live">0.71</span></span></div>
+    </div>
+    <div class="modgroup" id="grp1">
+      <div class="gh"><span class="gn">plasma₁</span><button class="clearbtn reset" title="clear group">↺</button></div>
+      <div class="bodyp">
+        <div class="panelrow pal">
+          <span class="lbl bound">palette</span>
+          <div class="swatchwrap"><canvas class="strip"></canvas><span class="pname"></span><span class="chev">▾</span></div>
+          <span class="readout state-slot"></span>
+        </div>
+      </div>
+      <div class="flow"></div>
+    </div>
+    <div class="modgroup" id="grp2">
+      <div class="gh"><span class="gn">plasma₂</span><button class="clearbtn reset" title="clear group">↺</button></div>
+      <div class="bodyp">
+        <div class="panelrow pal">
+          <span class="lbl bound">palette</span>
+          <div class="swatchwrap"><canvas class="strip"></canvas><span class="pname"></span><span class="chev">▾</span></div>
+          <span class="readout state-slot"></span>
+        </div>
+      </div>
+      <div class="flow"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============ color math (real: sRGB <-> linear <-> Oklab) ============ */
+const s2l = c => c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+const l2s = c => c <= 0.0031308 ? 12.92*c : 1.055*Math.pow(c, 1/2.4) - 0.055;
+function linToOklab([r,g,b]) {
+  const l = 0.4122214708*r + 0.5363325363*g + 0.0514459929*b;
+  const m = 0.2119034982*r + 0.6806995451*g + 0.1073969566*b;
+  const s = 0.0883024619*r + 0.2817188376*g + 0.6299787005*b;
+  const l_=Math.cbrt(l), m_=Math.cbrt(m), s_=Math.cbrt(s);
+  return [0.2104542553*l_+0.7936177850*m_-0.0040720468*s_,
+          1.9779984951*l_-2.4285922050*m_+0.4505937099*s_,
+          0.0259040371*l_+0.7827717662*m_-0.8086757660*s_];
+}
+function oklabToLin([L,a,b]) {
+  const l_=L+0.3963377774*a+0.2158037573*b;
+  const m_=L-0.1055613458*a-0.0638541728*b;
+  const s_=L-0.0894841775*a-1.2914855480*b;
+  const l=l_**3, m=m_**3, s=s_**3;
+  return [ 4.0767416621*l-3.3077115913*m+0.2309699292*s,
+          -1.2684380046*l+2.6097574011*m-0.3413193965*s,
+          -0.0041960863*l-0.7034186147*m+1.7076147010*s];
+}
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const smoothstep = t => t*t*(3-2*t);
+
+/* sample palette at t in [0,1); stops = [{at, c:[srgb 0-1 ×3]}] sorted */
+function samplePal(pal, t, space, method) {
+  const st = pal.stops;
+  t = clamp01(t);
+  let i = 0;
+  while (i < st.length-1 && st[i+1].at <= t) i++;
+  if (method === 'step' || i === st.length-1) return st[i].c;
+  const a = st[i], b = st[i+1];
+  let f = (t - a.at) / Math.max(1e-6, b.at - a.at);
+  if (method === 'smooth') f = smoothstep(f);
+  if (space === 'srgb') return a.c.map((v,k) => v + (b.c[k]-v)*f);
+  const la = linToOklab(a.c.map(s2l)), lb = linToOklab(b.c.map(s2l));
+  const lm = la.map((v,k) => v + (lb[k]-v)*f);
+  return oklabToLin(lm).map(v => clamp01(l2s(clamp01(v))));
+}
+function renderStrip(canvas, pal, space, method) {
+  const W = 256, H = 1;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  for (let x = 0; x < W; x++) {
+    const c = samplePal(pal, x/(W-1), space ?? pal.space, method ?? pal.method);
+    img.data[x*4]   = Math.round(clamp01(c[0])*255);
+    img.data[x*4+1] = Math.round(clamp01(c[1])*255);
+    img.data[x*4+2] = Math.round(clamp01(c[2])*255);
+    img.data[x*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  canvas.style.imageRendering = (method ?? pal.method) === 'step' ? 'pixelated' : 'auto';
+}
+
+/* ============ catalog (hand-authored approximations of the classics) ============ */
+const P = (name, cat, stops, space='srgb', method='linear', meta) =>
+  ({ name, cat, space, method, meta,
+     stops: stops.map(([at, hex]) => ({ at, c: [(hex>>16&255)/255,(hex>>8&255)/255,(hex&255)/255] })) });
+
+const CATALOG = [
+  /* Stock (FastLED-lineage) */
+  P('Rainbow','stock',[[0,0xff0000],[.17,0xffa500],[.33,0xffff00],[.5,0x00ff00],[.67,0x0000ff],[.83,0x4b0082],[1,0xff00ee]]),
+  P('Party','stock',[[0,0x5500ab],[.16,0x84007c],[.33,0xb5004b],[.5,0xe5001b],[.66,0xe81700],[.83,0xb84700],[1,0xab7700]]),
+  P('Lava','stock',[[0,0x000000],[.4,0x8b0000],[.75,0xff4500],[.92,0xffa500],[1,0xffffff]]),
+  P('Ocean','stock',[[0,0x191970],[.35,0x0000cd],[.65,0x00bfff],[.85,0x7fffd4],[1,0xf0ffff]]),
+  P('Forest','stock',[[0,0x013220],[.4,0x228b22],[.75,0x32cd32],[1,0xbfff9f]]),
+  P('Cloud','stock',[[0,0x4682b4],[.4,0x87ceeb],[.75,0xf8f8ff],[1,0xb0c4de]]),
+  P('Heat','stock',[[0,0x000000],[.33,0xcc0000],[.66,0xffff00],[1,0xffffcc]]),
+  /* Classic (cpt-city-lineage) */
+  P('Sunset','classic',[[0,0x120d5e],[.25,0x8b1e6b],[.55,0xe3342f],[.8,0xff8c2f],[1,0xffd166]],'srgb','linear','es/atmospheric/es_sunset_02'),
+  P('Aurora','classic',[[0,0x011a2e],[.3,0x00c48f],[.55,0x27e0b0],[.78,0x7a3ff2],[1,0x2d0a54]],'srgb','linear','es/aurora/es_aurora_04'),
+  P('Fire','classic',[[0,0x000000],[.45,0xb00000],[.8,0xffc02f],[1,0xfff4c9]]),
+  P('Icefire','classic',[[0,0x000000],[.35,0x001f9e],[.7,0x00c8e0],[1,0xeaffff]]),
+  P('Sakura','classic',[[0,0xc4245c],[.4,0xff77a8],[.75,0xffc2d1],[1,0xfff0f3]],'srgb','linear','rc/sakura/sakura_01'),
+  P('Tiamat','classic',[[0,0x02163a],[.3,0x0aa4b8],[.55,0xe23bd9],[.8,0xff9c68],[1,0xfff0b0]]),
+  P('April Night','classic',[[0,0x011963],[.25,0x059926],[.5,0x011963],[.75,0xe60611],[1,0x011963]]),
+  P('Departure','classic',[[0,0x2a1400],[.35,0xb87333],[.55,0xffffff],[.75,0x2eb82e],[1,0x0a3d0a]],'srgb','linear','mjf/departure'),
+  P('Landscape','classic',[[0,0x073b00],[.42,0x8ecf3c],[.52,0xf7f7c8],[.62,0x4ba7d6],[1,0x02264c]]),
+  P('Beach','classic',[[0,0xffe9b8],[.4,0x66d1c1],[.75,0x1a8fb0],[1,0x0a3d62]],'srgb','linear','rc/beach/holiday_05'),
+  P('Vintage','classic',[[0,0x4a1e10],[.35,0xb0603a],[.7,0xe8c07a],[1,0xf4ead0]],'srgb','linear','es/vintage/es_vintage_57'),
+  P('Candy','classic',[[0,0xff2e7e],[.35,0xfff4f8],[.65,0x35c4f0],[1,0x7a2ef0]]),
+  P('Pastel','classic',[[0,0xa8e6cf],[.33,0xdcedc1],[.66,0xffd3b6],[1,0xffaaa5]]),
+  P('C9','classic',[[0,0xb80000],[.25,0xb80000],[.2501,0x006b1f],[.5,0x006b1f],[.5001,0x0033a8],[.75,0x0033a8],[.7501,0xd94f00],[1,0xd94f00]],'srgb','step','christmas lights'),
+  P('Analogous','classic',[[0,0x0f52ba],[.5,0x7a2ef0],[1,0xff2e5b]]),
+  P('Breeze','classic',[[0,0x0e3d4d],[.5,0x2ba2a8],[1,0xbfeff2]]),
+  /* Project customs */
+  P('fyeah warm','project',[[0,0x241102],[.4,0xd96b0c],[.8,0xffd28a],[1,0xfff7e0]],'oklab','smooth','ported from idle.glsl'),
+  P('fyeah cool','project',[[0,0x02102e],[.5,0x1e78c8],[1,0xb8f0ff]],'oklab','smooth','ported from idle.glsl'),
+  P('gala teal→rose','project',[[0,0x0b4f5c],[.55,0x4fb8a8],[1,0xe86a8a]],'oklab','smooth'),
+];
+const LONGNAME = {
+  'Sunset':'Sunset 2 — es_atmospheric es_sunset_02 (cpt-city, J. Cook CC-BY-SA)',
+  'Aurora':'Aurora Borealis Green/Violet — es_aurora_04_gp (cpt-city import)',
+  'fyeah warm':'fyeah-sign idle · warm cosine port (was applyPalette p=2)',
+};
+const CATLABEL = { project: 'Project', stock: 'Stock', classic: 'Classic (cpt-city)' };
+
+/* ============ shared state ============ */
+const state = {
+  current: CATALOG.findIndex(p => p.name === 'Aurora'),
+  s1state: 'inherit',
+  long: false,
+};
+const cur = () => CATALOG[state.current];
+const dispName = p => (state.long && LONGNAME[p.name]) ? LONGNAME[p.name] : p.name;
+
+/* ============ section 1 ============ */
+function renderS1() {
+  document.querySelectorAll('#c1a .pal, #c1b .pal, #c1c .pal').forEach(row => {
+    row.classList.remove('pal-state-engaged','pal-state-automated');
+    if (state.s1state === 'engaged') row.classList.add('pal-state-engaged');
+    if (state.s1state === 'automated') row.classList.add('pal-state-automated');
+    row.querySelectorAll('canvas.strip').forEach(cv => renderStrip(cv, cur()));
+    const nm = row.querySelector('.pname'); if (nm) nm.textContent = dispName(cur());
+    const chip = row.querySelector('.chipname'); if (chip) chip.textContent = dispName(cur());
+    const slot = row.querySelector('.state-slot');
+    slot.innerHTML = {
+      default:   '<span class="statechip default">default</span>',
+      inherit:   '<span class="statechip inherit">↑ aurora-dome</span>',
+      automated: '<span class="statechip auto">◈ cycler</span>',
+      engaged:   '<span class="statechip held">held</span><button class="clearbtn" title="release">↺</button>',
+    }[state.s1state];
+  });
+}
+document.querySelectorAll('.controls [data-st]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.controls [data-st]').forEach(x => x.classList.toggle('on', x === b));
+  state.s1state = b.dataset.st; renderS1();
+});
+document.getElementById('longnames').onchange = e => { state.long = e.target.checked; renderAll(); };
+document.getElementById('palprev').onclick = () => { state.current = (state.current+CATALOG.length-1)%CATALOG.length; renderAll(); };
+document.getElementById('palnext').onclick = () => { state.current = (state.current+1)%CATALOG.length; renderAll(); };
+
+/* ============ section 2 ============ */
+const CATORDER = { project: 0, stock: 1, classic: 2 };
+function catalogFiltered(q, includeProject) {
+  return CATALOG.map((p,i)=>({p,i}))
+    .filter(({p}) => includeProject || p.cat !== 'project')
+    .filter(({p}) => !q || dispName(p).toLowerCase().includes(q) || p.cat.includes(q))
+    .sort((a,b) => CATORDER[a.p.cat] - CATORDER[b.p.cat]);
+}
+function pickPalette(i) { state.current = i; renderAll(); }
+
+function renderListPicker(rootId, q) {
+  const root = document.getElementById(rootId);
+  const inc = document.getElementById('emptyproj').checked;
+  root.innerHTML = '';
+  let lastCat = null;
+  for (const {p,i} of catalogFiltered(q, inc)) {
+    if (p.cat !== lastCat) {
+      lastCat = p.cat;
+      const h = document.createElement('div'); h.className = 'pcat'; h.textContent = CATLABEL[p.cat];
+      root.appendChild(h);
+    }
+    const row = document.createElement('div');
+    row.className = 'prow' + (i === state.current ? ' sel' : '');
+    row.innerHTML = `<span class="pn">${dispName(p)}${p.meta ? `<small>${p.meta}</small>` : ''}</span>
+                     <span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => pickPalette(i);
+    if (rootId === 'plistC') {
+      row.onmouseenter = () => heroPreview(i);
+      row.onmouseleave = () => heroPreview(state.current);
+    }
+    root.appendChild(row);
+    renderStrip(row.querySelector('canvas'), p);
+  }
+  if (!root.children.length) {
+    const e = document.createElement('div'); e.className='pcat'; e.textContent = 'no palettes match'; root.appendChild(e);
+  }
+}
+function renderGridPicker(q) {
+  const root = document.getElementById('pgridB');
+  const inc = document.getElementById('emptyproj').checked;
+  root.innerHTML = '';
+  for (const {p,i} of catalogFiltered(q, inc)) {
+    const t = document.createElement('div');
+    t.className = 'ptile' + (i === state.current ? ' sel' : '');
+    t.innerHTML = `<div class="tstrip"><canvas class="strip"></canvas></div><div class="tname">${dispName(p)}</div>`;
+    t.onclick = () => pickPalette(i);
+    root.appendChild(t);
+    renderStrip(t.querySelector('canvas'), p);
+  }
+}
+['searchA','searchB','searchC'].forEach(id =>
+  document.getElementById(id).addEventListener('input', renderPickers));
+document.getElementById('emptyproj').onchange = renderPickers;
+function renderPickers() {
+  renderListPicker('plistA', document.getElementById('searchA').value.trim().toLowerCase());
+  renderGridPicker(document.getElementById('searchB').value.trim().toLowerCase());
+  renderListPicker('plistC', document.getElementById('searchC').value.trim().toLowerCase());
+}
+
+/* hero LED preview (concept C) */
+const LEDN = 26;
+const ledstrip = document.getElementById('ledstrip');
+for (let i = 0; i < LEDN; i++) { const d = document.createElement('div'); d.className='led'; ledstrip.appendChild(d); }
+let heroIdx = null, heroT = 0;
+function heroPreview(i) {
+  heroIdx = i;
+  const p = CATALOG[i];
+  document.getElementById('heroname').textContent = dispName(p);
+  document.getElementById('herometa').textContent =
+    `${p.cat} · ${p.stops.length} stops · ${p.space} / ${p.method}${p.meta ? ' · ' + p.meta : ''}`;
+}
+function heroTick() {
+  heroT += 0.004;
+  if (heroIdx !== null) {
+    const p = CATALOG[heroIdx];
+    [...ledstrip.children].forEach((led, i) => {
+      const c = samplePal(p, (i/LEDN + heroT) % 1, p.space, p.method);
+      led.style.background = `rgb(${c.map(v=>Math.round(clamp01(v)*255)).join(',')})`;
+      led.style.boxShadow = `0 0 6px rgba(${c.map(v=>Math.round(clamp01(v)*255)).join(',')},.55)`;
+    });
+  }
+  requestAnimationFrame(heroTick);
+}
+
+/* ============ section 3 ============ */
+const edit = {
+  stops: [ {at:0, c:[0.05,0.02,0.30]}, {at:0.45, c:[0.02,0.65,0.55]}, {at:1, c:[1.0,0.82,0.25]} ],
+  space: 'srgb', method: 'linear', sel: 1,
+};
+const editPal = () => ({ stops: edit.stops, space: edit.space, method: edit.method });
+const hex = c => '#' + c.map(v => Math.round(clamp01(v)*255).toString(16).padStart(2,'0')).join('');
+const unhex = h => [1,3,5].map(i => parseInt(h.slice(i,i+2),16)/255);
+
+const gradbar = document.getElementById('gradbar');
+function renderEditor() {
+  edit.stops.sort((a,b) => a.at - b.at);
+  renderStrip(document.getElementById('editcanvas'), editPal());
+  gradbar.querySelectorAll('.stop').forEach(n => n.remove());
+  edit.stops.forEach((s, i) => {
+    const h = document.createElement('div');
+    h.className = 'stop' + (i === edit.sel ? ' sel' : '');
+    h.style.left = (s.at*100) + '%';
+    h.innerHTML = `<span class="dot" style="background:${hex(s.c)}"></span>`;
+    h.onpointerdown = ev => {
+      edit.sel = i; renderEditor();
+      const rect = gradbar.getBoundingClientRect();
+      const move = e => {
+        s.at = clamp01((e.clientX - rect.left) / rect.width);
+        renderEditor(); renderCmp();
+      };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+      ev.preventDefault();
+    };
+    gradbar.appendChild(h);
+  });
+  const s = edit.stops[edit.sel] ?? edit.stops[0];
+  document.getElementById('stopcolor').value = hex(s.c);
+  document.getElementById('stoppos').value = s.at.toFixed(2);
+  /* stop list (B) mirrors the same value */
+  const sl = document.getElementById('stoplist');
+  sl.innerHTML = '';
+  edit.stops.forEach((st, i) => {
+    const r = document.createElement('div'); r.className = 'srow';
+    r.innerHTML = `<span class="pos">${st.at.toFixed(2)}</span>
+      <input type="color" value="${hex(st.c)}" style="width:100%;height:20px;border:1px solid var(--border-strong);border-radius:4px;background:var(--terminal);padding:1px">
+      <span class="chip" style="background:${hex(st.c)}"></span>
+      <button class="del" title="remove">✕</button>`;
+    r.querySelector('input').oninput = e => { st.c = unhex(e.target.value); renderEditor(); renderCmp(); };
+    r.querySelector('.del').onclick = () => {
+      if (edit.stops.length > 2) { edit.stops.splice(i,1); edit.sel = 0; renderEditor(); renderCmp(); }
+    };
+    sl.appendChild(r);
+  });
+}
+gradbar.ondblclick = e => {
+  const rect = gradbar.getBoundingClientRect();
+  const at = clamp01((e.clientX - rect.left) / rect.width);
+  const c = samplePal(editPal(), at, edit.space, edit.method);
+  edit.stops.push({at, c: c.slice()});
+  edit.sel = edit.stops.length - 1;
+  renderEditor(); renderCmp();
+};
+document.getElementById('stopcolor').oninput = e => { edit.stops[edit.sel].c = unhex(e.target.value); renderEditor(); renderCmp(); };
+document.getElementById('stoppos').oninput = e => { edit.stops[edit.sel].at = clamp01(+e.target.value || 0); renderEditor(); renderCmp(); };
+document.getElementById('delstop').onclick = () => {
+  if (edit.stops.length > 2) { edit.stops.splice(edit.sel,1); edit.sel = 0; renderEditor(); renderCmp(); }
+};
+document.getElementById('addstop').onclick = () => {
+  edit.stops.push({at: 0.5, c: [0.9,0.4,0.7]}); edit.sel = edit.stops.length-1; renderEditor(); renderCmp();
+};
+document.getElementById('segspace').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('segspace').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+  edit.space = b.dataset.v; renderEditor();
+});
+document.getElementById('segmethod').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('segmethod').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+  edit.method = b.dataset.v; renderEditor();
+});
+
+/* comparison grid */
+function renderCmp() {
+  const grid = document.getElementById('cmpgrid');
+  grid.querySelectorAll('.cl,.cell').forEach(n => n.remove());
+  for (const space of ['srgb','oklab']) {
+    const lab = document.createElement('span'); lab.className = 'cl'; lab.textContent = space; grid.appendChild(lab);
+    for (const method of ['step','linear','smooth']) {
+      const cell = document.createElement('div'); cell.className = 'cell';
+      const cv = document.createElement('canvas'); cv.className = 'strip'; cell.appendChild(cv);
+      grid.appendChild(cell);
+      renderStrip(cv, { stops: edit.stops }, space, method);
+    }
+  }
+}
+
+/* ============ section 4 ============ */
+const inh = {
+  host: CATALOG.findIndex(p => p.name === 'Aurora'),
+  g1: { engaged: false, pal: CATALOG.findIndex(p => p.name === 'Lava') },
+  g2: { engaged: false, pal: CATALOG.findIndex(p => p.name === 'Icefire') },
+};
+function renderInherit() {
+  const host = document.getElementById('hostpal');
+  renderStrip(host.querySelector('canvas'), CATALOG[inh.host]);
+  host.querySelector('.pname').textContent = dispName(CATALOG[inh.host]);
+  host.querySelector('.state-slot').innerHTML = '<span class="statechip held">held</span><button class="clearbtn" title="release">↺</button>';
+  [['grp1','g1'],['grp2','g2']].forEach(([gid, key]) => {
+    const g = document.getElementById(gid), s = inh[key];
+    const row = g.querySelector('.pal');
+    row.classList.toggle('pal-state-engaged', s.engaged);
+    const shown = s.engaged ? CATALOG[s.pal] : CATALOG[inh.host];
+    renderStrip(row.querySelector('canvas'), shown);
+    row.querySelector('.pname').textContent = dispName(shown);
+    row.querySelector('.state-slot').innerHTML = s.engaged
+      ? '<span class="statechip held">held</span><button class="clearbtn" title="release">↺</button>'
+      : '<span class="statechip inherit">↑ aurora-dome</span>';
+    g.querySelector('.flow').innerHTML = s.engaged
+      ? `<span class="heldtxt">● own writer in Scope(${gid === 'grp1' ? 'plasma₁' : 'plasma₂'})</span> — detached from host (R11); ↺ re-attaches`
+      : `○ no local writer — resolves <span class="via">outward</span> to aurora-dome's palette (R5)`;
+    row.querySelector('.swatchwrap').onclick = () => {
+      if (!s.engaged) { s.engaged = true; }
+      else { s.pal = (s.pal + 1) % CATALOG.length; }
+      renderInherit();
+    };
+    const clr = () => { s.engaged = false; renderInherit(); };
+    g.querySelector('.reset').onclick = clr;
+    row.querySelector('.state-slot').onclick = e => { if (e.target.closest('.clearbtn')) clr(); };
+  });
+  host.querySelector('.swatchwrap').onclick = () => {
+    inh.host = (inh.host + 1) % CATALOG.length;
+    renderInherit();
+  };
+}
+
+/* ============ boot ============ */
+function renderAll() { renderS1(); renderPickers(); renderInherit(); heroPreview(state.current); }
+renderAll();
+renderEditor();
+renderCmp();
+heroTick();
+</script>
+</body>
+</html>
