@@ -177,6 +177,7 @@ pub(crate) fn build_js_args_scalar_only(
     export_param_slots: usize,
     args: &[LpsValueF32],
     fm: FloatMode,
+    vmctx_base: f64,
 ) -> Result<Array, WasmError> {
     if args.len() != param_types.len() {
         return Err(WasmError::runtime(format!(
@@ -186,7 +187,7 @@ pub(crate) fn build_js_args_scalar_only(
         )));
     }
     let arr = Array::new();
-    arr.push(&JsValue::from_f64(0.0));
+    arr.push(&JsValue::from_f64(vmctx_base));
     for (v, ty) in args.iter().zip(param_types.iter()) {
         for slot in glsl_value_to_js_flat(ty, v, fm)? {
             arr.push(&slot);
@@ -207,9 +208,10 @@ pub(crate) fn build_js_args_q32_scalar_only(
     param_types: &[LpsType],
     export_param_slots: usize,
     words: &[i32],
+    vmctx_base: f64,
 ) -> Result<Array, WasmError> {
     let arr = Array::new();
-    arr.push(&JsValue::from_f64(0.0));
+    arr.push(&JsValue::from_f64(vmctx_base));
     let mut woff = 0;
     for ty in param_types {
         let n = glsl_component_count(ty);
@@ -673,6 +675,7 @@ pub(crate) fn build_js_args_for_call(
     args: &[LpsValueF32],
     fm: FloatMode,
     return_ty: &LpsType,
+    vmctx_base: f64,
 ) -> Result<(Array, Option<BrowserSretPlan>), WasmError> {
     if args.len() != export.param_types.len() {
         return Err(WasmError::runtime(format!(
@@ -682,7 +685,7 @@ pub(crate) fn build_js_args_for_call(
         )));
     }
     let arr = Array::new();
-    arr.push(&JsValue::from_f64(0.0));
+    arr.push(&JsValue::from_f64(vmctx_base));
     let mut sret = None;
     if export.uses_sret {
         let size_u = type_size(return_ty, LayoutRules::Std430);
@@ -726,9 +729,10 @@ pub(crate) fn build_js_args_q32_for_call(
     export: &WasmExport,
     words: &[i32],
     return_ty: &LpsType,
+    vmctx_base: f64,
 ) -> Result<(Array, Option<BrowserSretPlan>), WasmError> {
     let arr = Array::new();
-    arr.push(&JsValue::from_f64(0.0));
+    arr.push(&JsValue::from_f64(vmctx_base));
     let mut sret = None;
     if export.uses_sret {
         let size_u = type_size(return_ty, LayoutRules::Std430);

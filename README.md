@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup-marketing__lg.png" alt="LightPlayer" width="720">
+  <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup__lg.png" alt="LightPlayer" width="720">
 </p>
 
 LightPlayer is an open platform for LED art: author effects as GLSL shaders in a browser studio,
