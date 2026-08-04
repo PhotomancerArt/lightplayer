@@ -202,11 +202,13 @@ mod tests {
                             semantics: Default::default(),
                             role: Default::default(),
                             default_bind: None,
+                            panel: None,
                         }],
                     },
                     semantics: Default::default(),
                     role: Default::default(),
                     default_bind: None,
+                    panel: None,
                 },
                 SlotFieldShape {
                     name: SlotName::parse("compile_error").unwrap(),
@@ -214,6 +216,7 @@ mod tests {
                     semantics: Default::default(),
                     role: Default::default(),
                     default_bind: None,
+                    panel: None,
                 },
             ],
         }

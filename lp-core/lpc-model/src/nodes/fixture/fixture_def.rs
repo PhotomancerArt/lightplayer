@@ -34,10 +34,14 @@ pub struct FixtureDef {
     pub color_order: ValueSlot<ColorOrder>,
     /// Texture-space 2D affine transform.
     pub transform: Affine2dSlot,
-    /// Brightness level (0-255) — the fixture card's front-panel fader
-    /// ([`Brightness`] carries the panel meta + slider hint). A linear light
-    /// scale, applied after the gamma encode: half the slider is half the
-    /// photons (which the eye reads as ~78% brightness).
+    /// Brightness amplitude (0–1) — the fixture card's front-panel fader
+    /// ([`Brightness`] carries the slider hint). A linear light scale,
+    /// applied after the gamma encode: half the slider is half the photons
+    /// (which the eye reads as ~78% brightness). Default-bound to the bus
+    /// `brightness` channel with `panel = "show"`: the fader is public with
+    /// zero authoring, and every fixture in a scope shares the one master
+    /// fader (one `(scope, channel)` is one control).
+    #[slot(consumed, default_bind = "bus:brightness", panel = "show")]
     pub brightness: OptionSlot<ValueSlot<Brightness>>,
     /// Enable gamma correction.
     pub gamma_correction: OptionSlot<ValueSlot<bool>>,

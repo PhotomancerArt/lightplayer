@@ -2049,6 +2049,27 @@ fn slot_path_semantics_segments(
     }
 }
 
+/// The declared panel hint of the slot a binding consumes: the hint sits on
+/// the TOP-LEVEL declared field (`brightness.some` reads field
+/// `brightness`) in the node's def shape. `None` for undeclared slots
+/// (shader dynamic slots have no hint spelling yet) and for defs that are
+/// not loaded.
+pub(crate) fn authored_def_slot_panel_hint(
+    registry: &ProjectRegistry,
+    slot_shapes: &SlotShapeRegistry,
+    location: &NodeDefLocation,
+    slot: &SlotPath,
+) -> Option<lpc_model::PanelHint> {
+    let def = loaded_registry_def(registry, location).ok()?;
+    let shape = slot_shapes.get_shape(def.shape_id())?;
+    let shape = resolve_shape_projection(shape, slot_shapes).ok()?;
+    let SlotPathSegment::Field(name) = slot.segments().first()? else {
+        return None;
+    };
+    let (_, field) = shape.record_field_by_name(name)?;
+    field.panel()
+}
+
 fn resolve_shape_projection<'a>(
     shape: SlotShapeView<'a>,
     registry: &'a (impl SlotShapeLookup + ?Sized),

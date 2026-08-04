@@ -17,6 +17,12 @@ pub(crate) struct FieldAttrs {
     pub(crate) merge: FieldMergeAttr,
     pub(crate) role: Option<SlotRoleAttr>,
     pub(crate) default_bind: Option<LitStr>,
+    pub(crate) panel: Option<PanelHintAttr>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PanelHintAttr {
+    Show,
 }
 
 pub(crate) struct VariantAttrs {
@@ -113,9 +119,21 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
     let mut merge = FieldMergeAttr::Latest;
     let mut role = None;
     let mut default_bind: Option<LitStr> = None;
+    let mut panel: Option<PanelHintAttr> = None;
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("default_bind") {
+            if meta.path.is_ident("panel") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                if value.value() != "show" {
+                    return Err(syn::Error::new(
+                        value.span(),
+                        "panel hint must be \"show\" (absent = derived default)",
+                    ));
+                }
+                panel = Some(PanelHintAttr::Show);
+                Ok(())
+            } else if meta.path.is_ident("default_bind") {
                 let value = meta.value()?;
                 let value: LitStr = value.parse()?;
                 // Only bus endpoints may be defaults (ADR 2026-07-09); the
@@ -184,6 +202,14 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
             }
         })?;
     }
+    if panel.is_some() && default_bind.is_none() {
+        if let Some(attr) = slot_attrs(attrs).next() {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "a panel hint promotes a default binding; declare default_bind beside it",
+            ));
+        }
+    }
     Ok(FieldAttrs {
         name,
         shape: shape.unwrap_or(FieldShapeAttr::Infer),
@@ -191,6 +217,7 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
         merge,
         role,
         default_bind,
+        panel,
     })
 }
 

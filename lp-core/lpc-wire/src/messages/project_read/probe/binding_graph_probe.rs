@@ -70,6 +70,12 @@ pub struct WireEffectiveBinding {
     pub priority: i32,
     /// Semantic value kind carried by the binding.
     pub kind: Kind,
+    /// The consumed slot's declared `panel = "show"` hint: a Default-origin
+    /// binding so marked still presents a panel control (the additive
+    /// override on ADR 2026-08-03-panel-visibility-is-derived). Additive
+    /// field — a server that predates it simply never promotes.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub panel_show: bool,
 }
 
 /// Which way the anchor slot participates in the binding.
@@ -210,6 +216,7 @@ mod tests {
                 origin: WireBindingOrigin::Authored,
                 priority: 0,
                 kind: Kind::Instant,
+                panel_show: false,
             }],
             channels: vec![WireBusChannel {
                 scope: Some(WireScopeRef::Module {

@@ -383,10 +383,7 @@ fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
         br#"
 {
   "kind": "Texture",
-  "size": { "width": 2, "height": 2 },
-  "bindings": {
-    "input": { "source": "bus:visual.out" }
-  }
+  "size": { "width": 2, "height": 2 }
 }
 "#,
     )
