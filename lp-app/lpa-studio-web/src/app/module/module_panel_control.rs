@@ -225,7 +225,7 @@ fn ModulePanelControlBody(
 
     match control.widget.clone() {
         UiPanelWidget::Knob { min, max, step } => {
-            let Some((value, emit)) = PanelEmit::for_value(&control.value.kind) else {
+            let Some((value, emit)) = PanelEmit::for_control(&control) else {
                 return mismatch(&control.label, &control.value.display);
             };
             rsx! {
@@ -248,7 +248,7 @@ fn ModulePanelControlBody(
             }
         }
         UiPanelWidget::Fader { min, max, step } => {
-            let Some((value, emit)) = PanelEmit::for_value(&control.value.kind) else {
+            let Some((value, emit)) = PanelEmit::for_control(&control) else {
                 return mismatch(&control.label, &control.value.display);
             };
             rsx! {
@@ -348,8 +348,8 @@ fn mismatch(label: &str, display: &str) -> Element {
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{
-        UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelWidget, UiSlotAspectKind,
-        UiSlotFieldState, UiSlotValue,
+        UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelWidget,
+        UiSlotAspectKind, UiSlotFieldState, UiSlotValue,
     };
 
     use super::{panel_state_label_class, panel_state_readout_class};
@@ -358,6 +358,7 @@ mod tests {
         UiPanelControlView::new(
             "speed",
             UiPanelControl {
+                emit: UiPanelEmit::Value,
                 label: "speed".to_string(),
                 address: None,
                 widget: UiPanelWidget::Knob {

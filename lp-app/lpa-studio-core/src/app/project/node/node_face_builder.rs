@@ -51,8 +51,8 @@
 //!   sections.
 
 use lpc_model::{
-    FixtureDef, HwEndpointSpec, LpValue, OutputDef, PlaylistDef, ShaderDef, ShaderValueShapeRef,
-    shader_panel_step,
+    ClockDef, FixtureDef, HwEndpointSpec, LpValue, OutputDef, PlaylistDef, ShaderDef,
+    ShaderValueShapeRef, shader_panel_step,
 };
 
 use crate::app::project::format_lp_value;
@@ -104,9 +104,33 @@ pub(in crate::app::project) fn kind_face(
             Some(UiNodeFace::Playlist(face))
         }
         OutputDef::KIND => output_face(sections).map(UiNodeFace::Output),
+        ClockDef::KIND => clock_face(sections).map(UiNodeFace::Clock),
         // Unknown kinds stay on the generic fallback permanently.
         _ => None,
     }
+}
+
+/// The clock card's face: the published time product, the plain seconds
+/// readings beside it, and (after the decoration pass) the read-only
+/// listing of the phasors riding this timebase — parent D10.
+///
+/// `None` — generic-sections fallback — when the node publishes no time
+/// product row, which is the state of a clock whose runtime state has not
+/// landed yet. The phasor rows are deliberately NOT derivable here: they
+/// live in the engine's timebase store, not in any slot, so they arrive
+/// through `ProjectController::apply_clock_faces` exactly the way the
+/// output face's board facts do.
+fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
+    let product = product_of_kind(sections, UiProductKind::Time)?;
+    let mut face = crate::UiClockFace::new(product);
+    face.readings = sections
+        .iter()
+        .find_map(|section| match section {
+            UiNodeSection::ProducedValues(values) => Some(values.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    Some(face)
 }
 
 /// The shader card's face: visual hero, panel knobs, code drawer. `None`
@@ -284,8 +308,146 @@ fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
     consumed
         .fields
         .iter()
-        .filter_map(|entry| shader_uniform_control(entry, &rows))
+        .filter_map(|entry| match uniform_kind(entry).as_deref() {
+            // A timebase uniform has no `default` to turn: its value comes
+            // from the scope's clock. The ONE thing a person tunes about a
+            // phasor is how long a cycle takes, so that is the one control
+            // it gets (settled D11 v1 — waveform and phase offset stay
+            // card-face/def-editable, because a waveform is how ONE reader
+            // shapes a possibly-shared phase).
+            Some(PHASOR_SLOT_KIND) => phasor_period_control(entry, &rows),
+            // `seconds` is unbounded time. There is nothing to set: no
+            // period, no range, no default. It gets no knob at all.
+            Some(SECONDS_SLOT_KIND) => None,
+            _ => shader_uniform_control(entry, &rows),
+        })
         .collect()
+}
+
+/// The `kind` discriminant string on a uniform's record row
+/// (`value` / `phasor` / `seconds`).
+fn uniform_kind(entry: &UiConfigSlot) -> Option<String> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    string_field(&record.fields, "kind")
+}
+
+/// `ShaderSlotKind::Phasor`'s wire tag.
+const PHASOR_SLOT_KIND: &str = "phasor";
+/// `ShaderSlotKind::Seconds`'s wire tag.
+const SECONDS_SLOT_KIND: &str = "seconds";
+
+/// Widest period a phasor knob reaches when the uniform authors no range:
+/// two minutes. Past that a "cycle" is not something a person watching the
+/// lights can perceive as one, and the longest period in the whole migrated
+/// example corpus is 100 s — so the default range covers every shipped
+/// phasor with headroom, and an author who wants more says so with
+/// `min`/`max` like any other uniform.
+const PHASOR_PERIOD_MAX_SECONDS: f32 = 120.0;
+
+/// One phasor uniform → its **period** knob (P7 item 5).
+///
+/// Unlike a value uniform's knob, this one exists whether or not the slot's
+/// wiring is public: a phasor's period is the card's own affordance the way
+/// a fixture's brightness fader is. What publicity decides is only where
+/// the knob *also* shows up and what a gesture writes:
+///
+/// - **authored config channel** (public `panel_target`) → the knob joins
+///   the enclosing module's panel and gestures are PANEL WRITES of a whole
+///   `PhasorConfig` onto that channel, which is what every reader of the
+///   channel then integrates at (parent D3: one shared integrator);
+/// - **slot-local, or `default_bind`-only wiring** → card face only, and
+///   gestures are ordinary slot edits at `consumed[<name>].phasor.some`.
+///
+/// Both paths carry the slot's own waveform and phase offset through
+/// untouched ([`crate::UiPanelEmit::PhasorPeriod`]) — the period is the
+/// only field a panel may move.
+fn phasor_period_control(
+    entry: &UiConfigSlot,
+    top_rows: &[&UiConfigSlot],
+) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    let name = map_entry_name(entry);
+    // The authored config row. Absent (option off) = nothing to turn: the
+    // engine runs the slot on `PhasorConfig::default()`, and a knob that
+    // edited a slot which is not there would need the option-on gesture the
+    // generic row already owns.
+    let config_row = uniform_field(fields, "phasor")
+        .filter(|row| row.optionality.is_some_and(|opt| opt.included))?;
+    let UiConfigSlotBody::Value(config_value) = &config_row.body else {
+        return None;
+    };
+    let UiSlotValueKind::Struct { fields: config, .. } = &config_value.kind else {
+        return None;
+    };
+    let period = struct_f32(config, "period_seconds")?;
+
+    let min = option_f32_field(fields, "min").unwrap_or(0.0);
+    let max = option_f32_field(fields, "max").unwrap_or(PHASOR_PERIOD_MAX_SECONDS);
+    let mut control = UiPanelControl {
+        // The knob's LABEL says what it does, not what the uniform is
+        // called: "Phase" is the uniform, seconds-per-cycle is the control.
+        label: format!(
+            "{} period",
+            string_field(fields, "label")
+                .filter(|label| !label.is_empty())
+                .unwrap_or_else(|| entry.label.clone())
+        ),
+        address: row_edit_address(config_row),
+        widget: UiPanelWidget::Knob {
+            min,
+            max,
+            // Continuous: a period is seconds, not a count.
+            step: None,
+        },
+        // The knob turns the PERIOD, so its value is that one number even
+        // though the slot it writes is the whole record.
+        value: UiSlotValue::f32(period).with_unit(crate::UiSlotUnit::seconds()),
+        emit: crate::UiPanelEmit::PhasorPeriod {
+            waveform: struct_waveform(config),
+            phase_offset: struct_f32(config, "phase_offset").unwrap_or(0.0),
+        },
+        live_value: None,
+        panel_target: None,
+        unit: Some(crate::UiSlotUnit::seconds()),
+        state: config_row.state.clone(),
+        aspects: config_row.visible_aspects(),
+    };
+    // The wiring facts live on the binding-derived row keyed by the bare
+    // uniform name, exactly as they do for a value uniform's knob.
+    if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
+        replace_binding_aspect(&mut control.aspects, binding);
+    }
+    control.panel_target = top_rows
+        .iter()
+        .find(|row| row.key == name)
+        .and_then(|row| public_panel_target(row));
+    Some(control)
+}
+
+/// A named `f32` inside a struct-valued slot payload.
+fn struct_f32(fields: &[(String, UiSlotValue)], name: &str) -> Option<f32> {
+    match fields.iter().find(|(field, _)| field == name)?.1.kind {
+        UiSlotValueKind::F32(value) => Some(value),
+        _ => None,
+    }
+}
+
+/// The config's waveform, defaulting to `Ramp` — the same fallback the
+/// model uses, so an unreadable payload cannot silently reshape a phasor
+/// the next time its period is turned.
+fn struct_waveform(fields: &[(String, UiSlotValue)]) -> lpc_model::Waveform {
+    let Some((_, value)) = fields.iter().find(|(field, _)| field == "waveform") else {
+        return lpc_model::Waveform::default();
+    };
+    let UiSlotValueKind::String(tag) = &value.kind else {
+        return lpc_model::Waveform::default();
+    };
+    lpc_model::Waveform::parse(tag).unwrap_or_default()
 }
 
 /// One uniform entry (a `ShaderSlotDef` record row) → its knob control.
@@ -802,6 +964,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         address: row_edit_address(slot),
         widget,
         value: value.clone(),
+        emit: crate::UiPanelEmit::Value,
         live_value: bound_live_value(slot),
         panel_target: public_panel_target(slot),
         unit: value.unit.clone(),
@@ -1625,6 +1788,271 @@ mod tests {
                 bound_row("speed", endpoint),
             ]),
         ]
+    }
+
+    // -- phasor period knob (P7 item 5) -----------------------------------
+
+    /// A `phasor`-kind uniform record with an authored config.
+    fn phasor_uniform(name: &str, period: f32, waveform: &str, offset: f32) -> UiConfigSlot {
+        let prefix = format!("consumed[{name}]");
+        let config = UiSlotValue {
+            kind: UiSlotValueKind::Struct {
+                name: Some("PhasorConfig".to_string()),
+                fields: vec![
+                    ("period_seconds".to_string(), UiSlotValue::f32(period)),
+                    ("waveform".to_string(), UiSlotValue::string(waveform)),
+                    ("phase_offset".to_string(), UiSlotValue::f32(offset)),
+                ],
+            },
+            ..UiSlotValue::f32(period)
+        };
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("phasor"),
+            ),
+            UiConfigSlot::value(format!("{prefix}.phasor"), "Phasor", config)
+                .with_address(address(&format!("{prefix}.phasor")))
+                .with_optionality(UiSlotOptionality::included(true)),
+            option_f32(&format!("{prefix}.default"), "Default", 0.0),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Phase"),
+            ),
+        ];
+        UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
+    }
+
+    fn phasor_sections(uniform: UiConfigSlot, wiring: Option<UiConfigSlot>) -> Vec<UiNodeSection> {
+        let mut rows = vec![UiConfigSlot::record("consumed", "Consumed", vec![uniform])];
+        rows.extend(wiring);
+        vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
+            UiNodeSection::ConfigSlots(rows),
+        ]
+    }
+
+    fn phasor_face(sections: &[UiNodeSection]) -> UiShaderFace {
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        face
+    }
+
+    /// A phasor slot gets ONE knob — the period, in seconds — and it gets it
+    /// whether or not the slot is wired: unlike a value uniform's default,
+    /// a period is the card's own affordance. Slot-local means the gesture
+    /// is an ordinary slot edit at `…phasor.some`.
+    #[test]
+    fn a_phasor_slot_gets_exactly_one_knob_and_it_edits_the_config_slot() {
+        let face = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 20.0, "ramp", 0.0),
+            None,
+        ));
+
+        assert_eq!(face.controls.len(), 1, "one control per phasor slot");
+        let control = &face.controls[0];
+        assert_eq!(control.label, "Phase period");
+        assert_eq!(control.value.kind, UiSlotValueKind::F32(20.0));
+        assert_eq!(
+            control.unit.as_ref().map(|unit| unit.short.as_str()),
+            Some("s"),
+            "a period reads in seconds"
+        );
+        assert_eq!(
+            control.widget,
+            UiPanelWidget::Knob {
+                min: 0.0,
+                max: PHASOR_PERIOD_MAX_SECONDS,
+                step: None,
+            },
+            "unauthored range falls back to 0..120 s, continuous"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("period edits are addressed")
+                .path
+                .to_string(),
+            "consumed[phase].phasor.some",
+            "the knob edits the interior config slot"
+        );
+        assert!(
+            control.panel_target.is_none(),
+            "unwired: the knob is the card's own, not a panel entry"
+        );
+    }
+
+    /// The gesture writes a WHOLE config, so the slot's shaping has to ride
+    /// along — a panel may move the period and nothing else (settled D11 v1).
+    #[test]
+    fn the_period_knob_carries_the_slots_shaping_through_the_gesture() {
+        let face = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 4.0, "triangle", 0.25),
+            None,
+        ));
+
+        assert_eq!(
+            face.controls[0].emit,
+            crate::UiPanelEmit::PhasorPeriod {
+                waveform: lpc_model::Waveform::Triangle,
+                phase_offset: 0.25,
+            }
+        );
+    }
+
+    /// Publicity follows the ordinary derived rules: an AUTHORED binding on
+    /// the phasor slot puts the knob on the enclosing module's panel and
+    /// turns its gestures into panel writes onto the config channel (parent
+    /// D3 — one shared integrator for every reader). `default_bind`-only
+    /// wiring is not publicity, so the knob stays on the card.
+    #[test]
+    fn phasor_publicity_follows_the_authored_binding() {
+        let authored = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 100.0, "ramp", 0.0),
+            Some(bound_row(
+                "phase",
+                channel_endpoint("bus:speed", "speed", 3),
+            )),
+        ));
+        let target = authored.controls[0]
+            .panel_target
+            .as_ref()
+            .expect("an authored config channel is a panel write target");
+        assert_eq!(target.channel, "speed");
+
+        let defaulted = phasor_face(&phasor_sections(
+            phasor_uniform("phase", 100.0, "ramp", 0.0),
+            Some(bound_row(
+                "phase",
+                channel_endpoint("bus:speed", "speed", 3).with_default_origin(),
+            )),
+        ));
+        assert_eq!(defaulted.controls.len(), 1, "the card keeps its knob");
+        assert!(
+            defaulted.controls[0].panel_target.is_none(),
+            "default-origin wiring is not publicity"
+        );
+    }
+
+    /// An authored `min`/`max` beats the default range, exactly as it does
+    /// for a value uniform's knob.
+    #[test]
+    fn an_authored_range_bounds_the_period_knob() {
+        let mut uniform = phasor_uniform("phase", 20.0, "ramp", 0.0);
+        if let UiConfigSlotBody::Record(record) = &mut uniform.body {
+            record
+                .fields
+                .push(option_f32("consumed[phase].min", "Min", 1.0));
+            record
+                .fields
+                .push(option_f32("consumed[phase].max", "Max", 30.0));
+        }
+
+        let face = phasor_face(&phasor_sections(uniform, None));
+
+        assert_eq!(
+            face.controls[0].widget,
+            UiPanelWidget::Knob {
+                min: 1.0,
+                max: 30.0,
+                step: None,
+            }
+        );
+    }
+
+    /// `seconds` is unbounded time: no period, no range, no default —
+    /// nothing to turn, so no knob anywhere.
+    #[test]
+    fn a_seconds_slot_gets_no_knob() {
+        let mut uniform = phasor_uniform("t", 0.0, "ramp", 0.0);
+        if let UiConfigSlotBody::Record(record) = &mut uniform.body
+            && let Some(kind) = record.fields.first_mut()
+        {
+            *kind = UiConfigSlot::value("consumed[t].kind", "Kind", UiSlotValue::string("seconds"));
+        }
+
+        let face = phasor_face(&phasor_sections(
+            uniform,
+            Some(bound_row("t", channel_endpoint("bus:time", "time", 3))),
+        ));
+
+        assert!(
+            face.controls.is_empty(),
+            "seconds has nothing to set, got {:?}",
+            face.controls
+                .iter()
+                .map(|control| control.label.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A phasor whose config option is OFF has no slot to edit: the engine
+    /// runs it on the default shaping, and turning a knob would have to
+    /// perform the option-on gesture the generic row already owns.
+    #[test]
+    fn a_phasor_with_no_authored_config_gets_no_knob() {
+        let mut uniform = phasor_uniform("phase", 20.0, "ramp", 0.0);
+        if let UiConfigSlotBody::Record(record) = &mut uniform.body {
+            record
+                .fields
+                .retain(|field| !field.key.ends_with(".phasor"));
+        }
+
+        assert!(
+            phasor_face(&phasor_sections(uniform, None))
+                .controls
+                .is_empty()
+        );
+    }
+
+    // -- clock face (P7 item 4) --------------------------------------------
+
+    /// The clock's face is the published handle plus the readings beside it;
+    /// the phasor listing arrives later, from the timebase probe, so a
+    /// freshly derived face is `Unread` with no rows — NOT an empty listing,
+    /// which would read as "nothing is running".
+    #[test]
+    fn clock_face_derives_the_product_and_waits_for_the_timebase_probe() {
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::ProducedValues(vec![
+                UiProducedValue::new("Seconds", "3.5"),
+                UiProducedValue::new("Delta seconds", "0.033"),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        assert_eq!(face.product.kind, UiProductKind::Time);
+        assert_eq!(face.readings.len(), 2);
+        assert_eq!(face.timebase, crate::UiTimebaseState::Unread);
+        assert!(face.phasors.is_empty());
+    }
+
+    /// A clock with no produced product row keeps the generic sections —
+    /// the same stable-face rule every other kind follows.
+    #[test]
+    fn a_clock_with_no_product_row_stays_generic() {
+        assert_eq!(
+            kind_face(
+                "clock",
+                &test_address(),
+                &[UiNodeSection::ConfigSlots(Vec::new())],
+                &mut Vec::new()
+            ),
+            None
+        );
     }
 
     /// The binding-derived row the project walk appends for a wired uniform

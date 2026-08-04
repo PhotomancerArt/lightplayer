@@ -142,8 +142,8 @@ pub(crate) fn ProductPreview(
                     ProductSkeleton {
                         kind,
                         tone: ProductSkeletonTone::Quiet,
-                        title: "Metadata only",
-                        detail: "Studio does not render this product type yet.",
+                        title: metadata_only_title(kind),
+                        detail: metadata_only_detail(kind),
                         show_text: true,
                     }
                 },
@@ -157,6 +157,26 @@ pub(crate) fn ProductPreview(
                 }
             }
         }
+    }
+}
+
+/// Metadata-only heading. A **time** product is metadata-only by design, not
+/// by omission: there is nothing to draw behind the handle, and the way to
+/// look at it is the clock face's phasor listing. Saying "Studio does not
+/// render this yet" there would report a gap that is not one.
+fn metadata_only_title(kind: UiProductKind) -> &'static str {
+    match kind {
+        UiProductKind::Time => UiProductKind::Time.detail_label(),
+        _ => "Metadata only",
+    }
+}
+
+fn metadata_only_detail(kind: UiProductKind) -> &'static str {
+    match kind {
+        UiProductKind::Time => {
+            "A queryable timebase: seconds, this tick's delta, and the phasors riding it."
+        }
+        _ => "Studio does not render this product type yet.",
     }
 }
 

@@ -30,6 +30,13 @@ pub struct WellKnownChannel {
     pub kind: Kind,
     /// One-line description shown by the picker.
     pub doc: &'static str,
+    /// The channel carries a **product handle** (a lazy graph capability),
+    /// not a plain scalar. Binding one onto a scalar slot resolves to a
+    /// value the consumer cannot convert — the engine reports that as a
+    /// per-input failure and a `Warn` card, which is the backstop; this
+    /// flag is what lets the binding picker say so BEFORE the pick
+    /// (`bus:time` carries a `TimeProduct` since the M2 break).
+    pub carries_product: bool,
 }
 
 /// The canonical channel set, in picker display order.
@@ -38,26 +45,31 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         name: "time",
         kind: Kind::Instant,
         doc: "Project time product; query it for seconds, delta, and phasors.",
+        carries_product: true,
     },
     WellKnownChannel {
         name: "trigger",
         kind: Kind::Instant,
         doc: "Control events (button presses, remote triggers); map readers merge by message id.",
+        carries_product: false,
     },
     WellKnownChannel {
         name: "brightness",
         kind: Kind::Amplitude,
         doc: "Master output brightness (0-1); fixtures consume it by default.",
+        carries_product: false,
     },
     WellKnownChannel {
         name: PRIMARY_VISUAL_CHANNEL,
         kind: Kind::Color,
         doc: "The project's primary visual output; fixtures sample it.",
+        carries_product: true,
     },
     WellKnownChannel {
         name: PRIMARY_CONTROL_CHANNEL,
         kind: Kind::Color,
         doc: "Rendered control samples; hardware outputs drive from it.",
+        carries_product: true,
     },
 ];
 

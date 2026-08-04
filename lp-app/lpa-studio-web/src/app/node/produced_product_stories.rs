@@ -43,6 +43,23 @@ pub(crate) fn visual_pending() -> Element {
     }
 }
 
+/// P7 item 1. A time product wears the same product chip as the other two
+/// families, and it is metadata-only BY DESIGN rather than by omission:
+/// there is nothing to draw behind the handle, and the way to look at it is
+/// the clock face's phasor listing. The copy must not report a gap.
+#[story(
+    description = "The time product a clock publishes on bus:time. Same chip as visual/control, no preview — the handle has no picture, and its detail line says what it is instead of 'Studio does not render this yet'."
+)]
+pub(crate) fn time_product() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: UiProducedProduct::time("product")
+                .with_detail("node 2 output 0")
+                .with_tracking(UiProductTrackingState::Tracking)
+        }
+    }
+}
+
 #[story(description = "A visual product with loaded RGB preview bytes.")]
 pub(crate) fn visual_loaded() -> Element {
     rsx! {

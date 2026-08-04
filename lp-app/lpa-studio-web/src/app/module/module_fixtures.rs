@@ -20,9 +20,9 @@ use lpa_studio_core::{
     LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
     UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace,
     UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
-    UiPanelControlState, UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState,
-    UiSlotFieldState, UiSlotValue, UiStatus,
+    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreviewFrame,
+    UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -99,6 +99,7 @@ fn knob(
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Knob { min, max, step },
@@ -121,6 +122,7 @@ fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPan
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Fader {
@@ -147,6 +149,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
     UiPanelControlView::new(
         channel,
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: label.to_string(),
             address: Some(walk_address(scope, channel)),
             widget: UiPanelWidget::Toggle,

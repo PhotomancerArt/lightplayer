@@ -640,7 +640,7 @@ impl ProjectController {
     /// first (M4). Kinds come from the registry, falling back to the wire
     /// graph's established kind.
     pub fn ui_channel_choices(&self) -> Vec<crate::UiChannelChoice> {
-        let observed: Vec<(String, Option<String>)> = self
+        let observed: Vec<(String, Option<String>, bool)> = self
             .binding_graph()
             .map(|graph| {
                 graph
@@ -654,6 +654,16 @@ impl ProjectController {
                         (
                             channel.name.clone(),
                             channel.kind.map(|kind| format!("{kind:?}")),
+                            // What the channel is OBSERVED to carry beats
+                            // any registry claim: a project channel Studio
+                            // has never heard of can still hold a product.
+                            matches!(
+                                channel
+                                    .value
+                                    .as_ref()
+                                    .and_then(|value| value.value.as_ref()),
+                                Some(lpc_model::LpValue::Product(_))
+                            ),
                         )
                     })
                     .collect()
@@ -666,10 +676,11 @@ impl ProjectController {
                 kind: Some(format!("{:?}", channel.kind)),
                 doc: Some(channel.doc),
                 well_known: true,
-                observed: observed.iter().any(|(name, _)| name == channel.name),
+                observed: observed.iter().any(|(name, _, _)| name == channel.name),
+                carries_product: channel.carries_product,
             })
             .collect();
-        for (name, kind) in observed {
+        for (name, kind, carries_product) in observed {
             if choices.iter().any(|choice| choice.name == name) {
                 continue;
             }
@@ -679,6 +690,7 @@ impl ProjectController {
                 doc: None,
                 well_known: false,
                 observed: true,
+                carries_product,
             });
         }
         choices
@@ -816,6 +828,11 @@ impl ProjectController {
                 ),
                 authored: (binding.origin == lpc_wire::WireBindingOrigin::Authored)
                     .then(|| endpoint.clone()),
+                // A binding-DERIVED row: the slot is implicit (no shape
+                // arrived with it), so the picker's product guard has
+                // nothing to test against and stays quiet rather than
+                // guessing.
+                scalar_slot: false,
             };
             // The live bus reading rides the (display-only) endpoint AFTER
             // the authoring surface is built, so Retarget/Unbind state never
@@ -1622,7 +1639,7 @@ impl ProjectController {
     /// current reading (P6 item 1) — the display-only `live_value` a bound
     /// panel control renders in the violet family. Values come off the
     /// binding-graph snapshot that already rides every pull; quantization
-    /// and the monotonic/time-kind exclusion live in
+    /// and the scalar-instant exclusion live in
     /// [`live_channel_value`], so this pass only dirties DTOs when a
     /// displayed reading actually moves. Runs after the binding overlays,
     /// which (re)build the endpoints it decorates.
@@ -1895,6 +1912,10 @@ impl ProjectController {
         if let Some(root) = nodes.first_mut() {
             root.header.title = project_name.clone();
         }
+        // The clock face's phasor listing is engine state, not slot state
+        // (D10) — it lands here, before the module pass, the same way the
+        // output face's board facts do.
+        self.apply_clock_faces(&mut nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -2503,6 +2524,107 @@ impl ProjectController {
             ) {
                 child.face = Some(crate::UiNodeFace::Module(face));
             }
+        }
+    }
+
+    /// Fill every clock face's phasor listing from the cached timebase
+    /// probe (parent D10).
+    ///
+    /// The rows cannot derive from the card walk: what rides a timebase
+    /// lives in the engine's timebase store, keyed by the clock's node,
+    /// and nothing in the project's slots knows about it. So this is a
+    /// decoration pass over already-built faces, exactly like the output
+    /// face's board facts.
+    ///
+    /// A face with no cached read stays [`crate::UiTimebaseState::Unread`]
+    /// rather than rendering an empty listing: "no read has landed" and
+    /// "nothing is running" are different sentences, and only the second
+    /// one is reassuring.
+    fn apply_clock_faces(&self, nodes: &mut [UiNodeView]) {
+        fn walk(controller: &ProjectController, face: Option<&mut crate::UiNodeFace>) {
+            let Some(crate::UiNodeFace::Clock(clock)) = face else {
+                return;
+            };
+            let Some(product) = clock.product.product else {
+                return;
+            };
+            let (state, phasors) = match controller.sync.as_ref().and_then(|s| s.timebase(&product))
+            {
+                Some(crate::UiTimebaseRead::Live { phasors, .. }) => (
+                    crate::UiTimebaseState::Live,
+                    phasors
+                        .iter()
+                        .map(|row| controller.ui_phasor_row(row))
+                        .collect(),
+                ),
+                Some(crate::UiTimebaseRead::Unknown) => {
+                    (crate::UiTimebaseState::Unknown, Vec::new())
+                }
+                None => (crate::UiTimebaseState::Unread, Vec::new()),
+            };
+            clock.timebase = state;
+            clock.phasors = phasors;
+        }
+        fn walk_children(controller: &ProjectController, children: &mut [crate::UiNodeChild]) {
+            for child in children {
+                walk(controller, child.face.as_mut());
+                walk_children(controller, &mut child.children);
+            }
+        }
+        for node in nodes {
+            walk(self, node.face.as_mut());
+            walk_children(self, &mut node.children);
+        }
+    }
+
+    /// One wire phasor row → its display row.
+    ///
+    /// The two origins are the two ways a phasor gets its identity, and the
+    /// listing names them the way a reader would ask about them:
+    ///
+    /// - **`Node`** — config private to one node's slot. Named by that
+    ///   node's card title when the tree still carries it ("plasma"), with
+    ///   the slot path as the detail. Nobody else rides this phase.
+    /// - **`Channel`** — config driven by a bus channel. Named `bus:<name>`,
+    ///   and marked SHARED: every reader of that `(scope, channel)` is on
+    ///   this one integrator (parent D3), so moving its period moves all of
+    ///   them at once. That consequence is the single most useful thing the
+    ///   listing can say, which is why `shared` is a field and not a hint.
+    fn ui_phasor_row(&self, row: &lpc_wire::WirePhasorRow) -> crate::UiPhasorRow {
+        let (origin, detail, shared) = match &row.origin {
+            lpc_wire::WirePhasorOrigin::Node { node, slot } => {
+                let id = lpc_model::NodeId::new(*node);
+                let name = self
+                    .node_by_runtime_id(id)
+                    .map(|node| node.label().to_string())
+                    // A node that just left the tree still has rows in the
+                    // store until the next sweep; naming it by id beats
+                    // dropping the row and pretending it stopped.
+                    .unwrap_or_else(|| format!("node {node}"));
+                (name, Some(slot.clone()), false)
+            }
+            lpc_wire::WirePhasorOrigin::Channel { scope, channel } => {
+                let owner = self
+                    .node_by_runtime_id(scope.owner())
+                    .map(|node| node.label().to_string())
+                    .unwrap_or_else(|| format!("node {}", scope.owner().0));
+                let detail = match scope {
+                    lpc_wire::WireScopeRef::Module { .. } => format!("in {owner}"),
+                    lpc_wire::WireScopeRef::Sink { entry, .. } => {
+                        format!("in {owner} entry {entry}")
+                    }
+                };
+                (format!("bus:{channel}"), Some(detail), true)
+            }
+        };
+        crate::UiPhasorRow {
+            origin,
+            detail,
+            shared,
+            phase: row.phase,
+            phase_display: crate::format_phase(row.phase),
+            cycle: row.cycle,
+            period_display: crate::format_period_seconds(row.period_seconds),
         }
     }
 
@@ -5458,11 +5580,15 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
             }
             // A module's own panel controls are its subtree's, already
             // collected by this walk; a playlist face carries entry chips,
-            // not controls; an output face carries wires, not panel widgets.
+            // not controls; an output face carries wires, not panel widgets;
+            // a clock face carries a READ-ONLY phasor listing (D10) — the one
+            // editable period lives on the consuming shader's knob, never
+            // here.
             Some(
                 crate::UiNodeFace::Module(_)
                 | crate::UiNodeFace::Playlist(_)
-                | crate::UiNodeFace::Output(_),
+                | crate::UiNodeFace::Output(_)
+                | crate::UiNodeFace::Clock(_),
             )
             | None => {}
         }
@@ -5481,20 +5607,27 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
 /// The live reading for a consumed bus channel, prepared for display on a
 /// bound panel control (P6 item 1). `None` — no live display — for:
 ///
-/// - **monotonic/time-kind channels** (`Kind::Instant`: `time`, `trigger`),
-///   excluded BY KIND so the per-tick clock advance never dirties node DTOs
-///   (the whole-DTO change gate would fire on every pull otherwise);
+/// - **scalar instant channels** (`Kind::Instant` carrying a number:
+///   `trigger`, and `time` before the M2 break), excluded so the per-tick
+///   advance never dirties node DTOs (the whole-DTO change gate would fire
+///   on every pull otherwise);
 /// - channels without a resolved scalar value ([`format_live_scalar`], which
 ///   also quantizes floats to ≤2 decimals before DTO entry).
+///
+/// **The Instant exclusion is narrower than it used to be (P7 item 2).** It
+/// was never about the *kind*; it was about CHURN. A product handle does not
+/// churn — `bus:time` now carries a `TimeProduct`, whose identity is
+/// `(node, output)` and is stable across every tick the clock keeps
+/// producing — so a product-valued channel displays its product chip
+/// regardless of kind, exactly as `visual.out` does, and the DTO gate stays
+/// quiet. What remains excluded is the case the gate was written for: an
+/// Instant channel whose value is a live-advancing NUMBER.
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
     binding_kind: lpc_model::Kind,
 ) -> Option<String> {
-    if binding_kind == lpc_model::Kind::Instant {
-        return None;
-    }
     // The reading is the CONSUMING endpoint's row — channels are keyed
     // (scope, name) since wire 6, and a playlist entry's sink row (wire 8)
     // must never be confused with an enclosing scope's same-named channel.
@@ -5503,10 +5636,21 @@ fn live_channel_value(
     let channel = graph.channels.iter().find(|channel| {
         channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
     })?;
-    if channel.kind == Some(lpc_model::Kind::Instant) {
+    let value = channel.value.as_ref()?.value.as_ref()?;
+    // A product handle first, before any kind test: the chip is revision-
+    // stable, so no exclusion applies to it.
+    if let lpc_model::LpValue::Product(product) = value {
+        return Some(
+            crate::UiProductKind::of_product_ref(*product)
+                .detail_label()
+                .to_string(),
+        );
+    }
+    let instant =
+        binding_kind == lpc_model::Kind::Instant || channel.kind == Some(lpc_model::Kind::Instant);
+    if instant {
         return None;
     }
-    let value = channel.value.as_ref()?.value.as_ref()?;
     crate::app::project::format_live_scalar(value)
 }
 
@@ -8058,7 +8202,7 @@ mod tests {
     }
 
     #[test]
-    fn bound_rows_carry_quantized_live_values_and_skip_time_kind() {
+    fn bound_rows_carry_quantized_live_values_and_skip_scalar_instants() {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_test_slots(&mut view, 1, Revision::new(2), false);
         let mut project = ProjectController::new();
@@ -8152,14 +8296,83 @@ mod tests {
             bound_endpoint("Wired in").live_value.as_deref(),
             Some("0.12")
         );
-        // Time-kind channels are excluded so the per-tick clock advance
-        // never dirties the DTO change gate.
+        // A SCALAR instant channel stays excluded: its number advances every
+        // tick and would dirty the DTO change gate on every pull.
         assert_eq!(bound_endpoint("Wired time").live_value, None);
         // Def-root slot wired by the overlay: the live pass decorates it.
         assert_eq!(
             bound_endpoint("Brightness").live_value.as_deref(),
             Some("0.12")
         );
+    }
+
+    /// P7 item 2: the Instant exclusion was about CHURN, not about the kind.
+    /// Since the M2 break `bus:time` carries a `TimeProduct` handle, whose
+    /// identity is revision-stable, so it displays its product chip like
+    /// `visual.out` does — and the chip is a constant string, so the
+    /// whole-DTO change gate stays quiet across ticks.
+    #[test]
+    fn a_product_valued_instant_channel_shows_its_chip_instead_of_being_excluded() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let product_channel = |name: &str, value: LpValue| lpc_wire::WireBusChannel {
+            scope: None,
+            name: name.to_string(),
+            kind: Some(lpc_model::Kind::Instant),
+            providers: Vec::new(),
+            consumers: Vec::new(),
+            value: Some(lpc_wire::WireBusChannelValue {
+                revision: Revision::new(2),
+                value: Some(value),
+                error: None,
+            }),
+            primary_visual: false,
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: vec![lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("wired_time").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
+                        channel: "time".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Authored,
+                    priority: 0,
+                    kind: lpc_model::Kind::Instant,
+                    panel_show: false,
+                }],
+                channels: vec![product_channel(
+                    "time",
+                    LpValue::Product(lpc_model::ProductRef::time(lpc_model::TimeProduct::new(
+                        lpc_model::NodeId::new(2),
+                        0,
+                    ))),
+                )],
+            });
+        project.apply_default_binding_overlay();
+        project.apply_bound_live_values();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let row = config
+            .iter()
+            .find(|slot| slot.label == "Wired time")
+            .unwrap();
+        let UiSlotSourceState::Bound(endpoint) = &row.source else {
+            panic!("expected the time row to be bound, got {:?}", row.source);
+        };
+        assert_eq!(endpoint.live_value.as_deref(), Some("Time product"));
     }
 
     /// GV fix 5: a panel write echoes locally, so the control reads its new
@@ -8750,6 +8963,187 @@ mod tests {
             NodeRuntimeStatus::Ok,
         ));
         view
+    }
+
+    /// P7 item 4: the listing names the SOURCE a reader can go look at, and
+    /// marks the one fact that changes what a period edit means — whether
+    /// the integrator is shared.
+    #[test]
+    fn phasor_rows_name_their_origin_and_mark_the_shared_ones() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let private = project.ui_phasor_row(&lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Node {
+                node: 1,
+                slot: "phase".to_string(),
+            },
+            phase: 0.256,
+            cycle: 3,
+            period_seconds: 4.0,
+        });
+        assert_eq!(
+            private.origin, "Orbit",
+            "named by the consuming node's card"
+        );
+        assert_eq!(
+            private.detail.as_deref(),
+            Some("phase"),
+            "the CONSUMED slot, which is what makes the key private"
+        );
+        assert!(!private.shared, "a node+slot key is nobody else's");
+        assert_eq!(private.phase_display, "0.26");
+        assert_eq!(private.period_display, "4s");
+        assert_eq!(private.cycle, 3);
+
+        let shared = project.ui_phasor_row(&lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Channel {
+                scope: lpc_wire::WireScopeRef::Module {
+                    owner: lpc_model::NodeId::new(1),
+                },
+                channel: "speed".to_string(),
+            },
+            phase: 0.5,
+            cycle: 0,
+            period_seconds: 0.0,
+        });
+        assert_eq!(shared.origin, "bus:speed");
+        assert_eq!(shared.detail.as_deref(), Some("in Orbit"));
+        assert!(
+            shared.shared,
+            "a channel-keyed integrator is every reader's at once"
+        );
+        assert_eq!(
+            shared.period_display, "frozen",
+            "a zero period holds the phase; the row says so rather than printing a rate"
+        );
+
+        // A node the tree no longer carries still has rows in the store
+        // until the next sweep: name it by id rather than dropping it.
+        let orphan = project.ui_phasor_row(&lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Node {
+                node: 99,
+                slot: "x".to_string(),
+            },
+            phase: 0.0,
+            cycle: 0,
+            period_seconds: 1.0,
+        });
+        assert_eq!(orphan.origin, "node 99");
+    }
+
+    /// P7 item 4, the decoration seam: the listing is engine state, so it
+    /// lands on an already-built face from the cached probe — and the three
+    /// answers stay three answers. "No read yet" must NOT collapse into
+    /// "nothing is running".
+    #[test]
+    fn the_clock_face_takes_its_listing_from_the_cached_timebase_probe() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let product = lpc_model::TimeProduct::new(lpc_model::NodeId::new(2), 0);
+        let product_ref = crate::UiProductRef::from_time_product(product);
+        let clock_node = || {
+            let face = crate::UiClockFace::new(
+                crate::UiProducedProduct::time("Product").with_product(product_ref),
+            );
+            let mut node = crate::UiNodeView::new(
+                crate::UiNodeHeader::new("Clock", "Clock", "/demo.module/clock.clock"),
+                vec![crate::UiNodeTab::main(Vec::new())],
+            );
+            node.face = Some(crate::UiNodeFace::Clock(face));
+            vec![node]
+        };
+        let listing = |nodes: &[crate::UiNodeView]| {
+            let Some(crate::UiNodeFace::Clock(face)) = &nodes[0].face else {
+                panic!("clock face");
+            };
+            (face.timebase, face.phasors.clone())
+        };
+
+        // Nothing cached: Unread, not an empty listing.
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(listing(&nodes).0, crate::UiTimebaseState::Unread);
+
+        project.sync_mut().unwrap().set_timebase_for_test(
+            product_ref,
+            crate::UiTimebaseRead::Live {
+                seconds: 3.5,
+                delta_seconds: 0.033,
+                phasors: vec![lpc_wire::WirePhasorRow {
+                    origin: lpc_wire::WirePhasorOrigin::Node {
+                        node: 1,
+                        slot: "phase".to_string(),
+                    },
+                    phase: 0.5,
+                    cycle: 2,
+                    period_seconds: 4.0,
+                }],
+            },
+        );
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        let (state, rows) = listing(&nodes);
+        assert_eq!(state, crate::UiTimebaseState::Live);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].origin, "Orbit");
+        assert_eq!(rows[0].period_display, "4s");
+
+        // A live answer with no rows is STILL Live: nothing is riding it.
+        project.sync_mut().unwrap().set_timebase_for_test(
+            product_ref,
+            crate::UiTimebaseRead::Live {
+                seconds: 3.5,
+                delta_seconds: 0.033,
+                phasors: Vec::new(),
+            },
+        );
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(
+            listing(&nodes),
+            (crate::UiTimebaseState::Live, Vec::new()),
+            "an empty listing is a real answer, not the unread state"
+        );
+
+        project
+            .sync_mut()
+            .unwrap()
+            .set_timebase_for_test(product_ref, crate::UiTimebaseRead::Unknown);
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(listing(&nodes).0, crate::UiTimebaseState::Unknown);
+    }
+
+    /// P7 item 3: the picker knows which channels carry a HANDLE, so it can
+    /// mark a pick that could only earn a Warn — without moving `time` off
+    /// the head of the list or refusing anything.
+    #[test]
+    fn channel_choices_flag_the_product_carrying_channels() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let choices = project.ui_channel_choices();
+        let carries = |name: &str| {
+            choices
+                .iter()
+                .find(|choice| choice.name == name)
+                .unwrap_or_else(|| panic!("{name} is a well-known channel"))
+                .carries_product
+        };
+        assert_eq!(choices[0].name, "time", "time still leads the list");
+        assert!(carries("time"), "bus:time carries a TimeProduct since M2");
+        assert!(carries("visual.out"));
+        assert!(carries("control.out"));
+        assert!(!carries("brightness"), "brightness is a plain amplitude");
+        assert!(!carries("trigger"));
     }
 
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {
