@@ -40,7 +40,20 @@ pub struct UpsertParamInput {
     pub step: Option<f32>,
     #[serde(default)]
     pub unit: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub period_seconds: Option<f32>,
+    #[serde(default)]
+    pub waveform: Option<String>,
+    #[serde(default)]
+    pub phase_offset: Option<f32>,
 }
+
+/// Slot kinds this tool can author (`"map"` is not authorable here).
+const VALID_KINDS: [&str; 3] = ["value", "phasor", "seconds"];
+/// Phasor output shaping tags.
+const VALID_WAVEFORMS: [&str; 4] = ["ramp", "sine", "triangle", "square"];
 
 impl UpsertParamInput {
     fn into_upsert(self) -> ParamUpsert {
@@ -52,6 +65,10 @@ impl UpsertParamInput {
             max: self.max,
             step: self.step,
             unit: self.unit,
+            kind: self.kind,
+            period_seconds: self.period_seconds,
+            waveform: self.waveform,
+            phase_offset: self.phase_offset,
         }
     }
 }
@@ -74,6 +91,39 @@ pub async fn run_upsert_param(
     };
     let upsert = input.into_upsert();
     let name = upsert.name.clone();
+
+    if let Some(kind) = &upsert.kind
+        && !VALID_KINDS.contains(&kind.as_str())
+    {
+        return data_outcome(
+            json!({ "error": format!(
+                "`{kind}` is not a valid param kind for `{name}` — use one of {VALID_KINDS:?}"
+            ) }),
+            json!({ "note": format!("param `{name}`"), "error": "invalid kind" }),
+        );
+    }
+    let wants_phasor_fields = upsert.period_seconds.is_some()
+        || upsert.waveform.is_some()
+        || upsert.phase_offset.is_some();
+    if wants_phasor_fields && upsert.kind.as_deref() != Some("phasor") {
+        return data_outcome(
+            json!({ "error": format!(
+                "`period_seconds`/`waveform`/`phase_offset` on `{name}` require \
+                 `kind: \"phasor\"` in the same call"
+            ) }),
+            json!({ "note": format!("param `{name}`"), "error": "phasor fields without kind" }),
+        );
+    }
+    if let Some(waveform) = &upsert.waveform
+        && !VALID_WAVEFORMS.contains(&waveform.as_str())
+    {
+        return data_outcome(
+            json!({ "error": format!(
+                "`{waveform}` is not a valid waveform for `{name}` — use one of {VALID_WAVEFORMS:?}"
+            ) }),
+            json!({ "note": format!("param `{name}`"), "error": "invalid waveform" }),
+        );
+    }
 
     if name == RESERVED_UNIFORM {
         return data_outcome(
@@ -242,6 +292,18 @@ fn upsert_echo(upsert: &ParamUpsert) -> Value {
     if let Some(unit) = &upsert.unit {
         obj.insert("unit".into(), json!(unit));
     }
+    if let Some(kind) = &upsert.kind {
+        obj.insert("kind".into(), json!(kind));
+    }
+    if let Some(period_seconds) = upsert.period_seconds {
+        obj.insert("period_seconds".into(), json!(round_sig4(period_seconds)));
+    }
+    if let Some(waveform) = &upsert.waveform {
+        obj.insert("waveform".into(), json!(waveform));
+    }
+    if let Some(phase_offset) = upsert.phase_offset {
+        obj.insert("phase_offset".into(), json!(round_sig4(phase_offset)));
+    }
     Value::Object(obj)
 }
 
@@ -256,16 +318,20 @@ pub fn upsert_param_tool_def() -> ToolDef {
 
 const DESCRIPTION: &str = "\
 Create or update the def-side param record for one float uniform: label, \
-default value, min/max range, an optional `step` the knob snaps to, and \
-display unit. (Whether the param appears as a knob is not set here: a param \
-is on the panel exactly when it is BOUND to a bus channel.) Use it to \
-repair a `declared_only` orphan from \
-`iterate`'s params section (the engine cannot render a declared uniform \
-without a record) or to polish an existing record. Only the fields you pass \
-are written; `name` must match a declared uniform or an existing record. \
-f32 params only. The edit lands as an unsaved change exactly like staged \
-source — the user Saves or reverts it. Returns the engine's post-update \
-verdict.";
+default value, min/max range, an optional `step` the knob snaps to, display \
+unit, and slot `kind`. (Whether the param appears as a knob is not set here: \
+a param is on the panel exactly when it is BOUND to a bus channel.) Use it \
+to repair a `declared_only` orphan from `iterate`'s params section (the \
+engine cannot render a declared uniform without a record) or to polish an \
+existing record. Declare a phasor uniform by passing `kind: \"phasor\"` \
+together with `period_seconds` (the period IS the speed control — do not \
+also add a speed multiplier uniform); `waveform`/`phase_offset` are \
+optional shaping on top. `period_seconds`/`waveform`/`phase_offset` are \
+rejected unless `kind: \"phasor\"` is in the same call. Only the fields you \
+pass are written; `name` must match a declared uniform or an existing \
+record. f32 params only. The edit lands as an unsaved change exactly like \
+staged source — the user Saves or reverts it. Returns the engine's \
+post-update verdict.";
 
 fn input_schema() -> Value {
     json!({
@@ -284,7 +350,15 @@ fn input_schema() -> Value {
             "step": { "type": "number",
                 "description": "Knob quantization: values snap to whole multiples of this. Pass 1 for a whole-number param (\"how many\"); omit for a continuous one." },
             "unit": { "type": "string",
-                "description": "Display unit suffix (e.g. \"Hz\", \"%\")." }
+                "description": "Display unit suffix (e.g. \"Hz\", \"%\")." },
+            "kind": { "enum": ["value", "phasor", "seconds"],
+                "description": "Slot kind; default \"value\". \"phasor\" reads the scope's timebase as a wrapped [0,1) cycle position — declare this for periodic motion instead of computing time % period yourself. \"seconds\" reads unbounded effective seconds — only for genuinely unbounded motion (noise advance, dt integration)." },
+            "period_seconds": { "type": "number",
+                "description": "Phasor cycle length in seconds; requires kind \"phasor\". This IS the speed control." },
+            "waveform": { "enum": ["ramp", "sine", "triangle", "square"],
+                "description": "Phasor output shaping; requires kind \"phasor\". Default \"ramp\" (the raw wrapped cycle position)." },
+            "phase_offset": { "type": "number",
+                "description": "Added to the phasor's wrapped phase, then re-wrapped; requires kind \"phasor\"." }
         }
     })
 }
@@ -333,10 +407,15 @@ mod tests {
         let input: UpsertParamInput = serde_json::from_value(json!({
             "name": "speed", "label": "Speed", "default": 1.0,
             "min": 0.0, "max": 4.0, "unit": "x", "step": 0.25,
+            "kind": "phasor", "period_seconds": 2.0, "waveform": "sine", "phase_offset": 0.1,
         }))
         .expect("full input parses");
         assert_eq!(input.name, "speed");
         assert_eq!(input.step, Some(0.25));
+        assert_eq!(input.kind, Some("phasor".to_string()));
+        assert_eq!(input.period_seconds, Some(2.0));
+        assert_eq!(input.waveform, Some("sine".to_string()));
+        assert_eq!(input.phase_offset, Some(0.1));
 
         // Q13: publicity is a BINDING, never an argument here — `panel` is
         // no longer part of the surface and reads as any other typo.
@@ -396,6 +475,73 @@ mod tests {
                 ToolPhase::Finishing,
             ]
         );
+    }
+
+    #[test]
+    fn phasor_kind_writes_period_waveform_and_offset() {
+        let mut host = FakeHost::new(SPEED_SHADER);
+        let outcome = run(
+            &json!({
+                "name": "speed", "kind": "phasor",
+                "period_seconds": 2.5, "waveform": "sine", "phase_offset": 0.25,
+            }),
+            &mut host,
+        );
+        assert!(!outcome.is_error);
+        let content: Value = serde_json::from_str(&outcome.content).expect("json");
+        assert_eq!(content["param"]["kind"], "phasor");
+        assert_eq!(content["param"]["period_seconds"], 2.5);
+        assert_eq!(content["param"]["waveform"], "sine");
+        assert_eq!(content["param"]["phase_offset"], 0.25);
+        assert_eq!(host.upserts.borrow()[0].kind, Some("phasor".to_string()));
+    }
+
+    #[test]
+    fn invalid_kind_is_an_actionable_in_band_error() {
+        let mut host = FakeHost::new(SPEED_SHADER);
+        let outcome = run(&json!({ "name": "speed", "kind": "lfo" }), &mut host);
+        assert!(!outcome.is_error);
+        let content: Value = serde_json::from_str(&outcome.content).expect("json");
+        let error = content["error"].as_str().expect("error");
+        assert!(error.contains("`lfo`"), "{error}");
+        assert!(host.upserts.borrow().is_empty(), "nothing dispatched");
+    }
+
+    #[test]
+    fn invalid_waveform_is_an_actionable_in_band_error() {
+        let mut host = FakeHost::new(SPEED_SHADER);
+        let outcome = run(
+            &json!({ "name": "speed", "kind": "phasor", "waveform": "saw" }),
+            &mut host,
+        );
+        assert!(!outcome.is_error);
+        let content: Value = serde_json::from_str(&outcome.content).expect("json");
+        let error = content["error"].as_str().expect("error");
+        assert!(error.contains("`saw`"), "{error}");
+        assert!(host.upserts.borrow().is_empty(), "nothing dispatched");
+    }
+
+    #[test]
+    fn phasor_fields_without_kind_phasor_are_refused() {
+        let mut host = FakeHost::new(SPEED_SHADER);
+        let outcome = run(
+            &json!({ "name": "speed", "period_seconds": 2.0 }),
+            &mut host,
+        );
+        assert!(!outcome.is_error);
+        let content: Value = serde_json::from_str(&outcome.content).expect("json");
+        let error = content["error"].as_str().expect("error");
+        assert!(error.contains("kind: \"phasor\""), "{error}");
+        assert!(host.upserts.borrow().is_empty(), "nothing dispatched");
+
+        // Same refusal when kind is present but set to something else.
+        let outcome = run(
+            &json!({ "name": "speed", "kind": "seconds", "phase_offset": 0.1 }),
+            &mut host,
+        );
+        let content: Value = serde_json::from_str(&outcome.content).expect("json");
+        assert!(content["error"].as_str().unwrap().contains("phasor"));
+        assert!(host.upserts.borrow().is_empty());
     }
 
     #[test]
