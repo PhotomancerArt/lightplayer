@@ -35,13 +35,28 @@ pub fn ProducedValueView(
             treatment,
             on_action,
             authoring: value.authoring.clone(),
-            span { class: "{reading_class}",
-                strong { class: "ux-produced-value-number", "{display_value}" }
-                if let Some(unit) = unit {
-                    span { class: "ux-produced-value-unit",
-                        SlotUnitDisplay {
-                            unit,
-                            mode: SlotUnitDisplayMode::Short,
+            // Composite (struct) values: a compact type tag plus one row per
+            // field. The scalar stat hero would clip the whole struct string
+            // to its first word.
+            if !value.fields.is_empty() {
+                div { class: "ux-produced-struct",
+                    span { class: "ux-produced-struct-type", "{value.value}" }
+                    for (field_name, field_value) in value.fields.iter() {
+                        div { class: "ux-produced-struct-field",
+                            span { class: "ux-produced-struct-field-name", "{field_name}" }
+                            span { class: "ux-produced-struct-field-value", "{field_value}" }
+                        }
+                    }
+                }
+            } else {
+                span { class: "{reading_class}",
+                    strong { class: "ux-produced-value-number", "{display_value}" }
+                    if let Some(unit) = unit {
+                        span { class: "ux-produced-value-unit",
+                            SlotUnitDisplay {
+                                unit,
+                                mode: SlotUnitDisplayMode::Short,
+                            }
                         }
                     }
                 }
