@@ -183,5 +183,8 @@ pub use slot::{
     role_matches_direction, set_slot_option_none, set_slot_option_some_default, set_slot_value,
     set_slot_variant_default, slot_data_revision,
 };
-pub use time::{SECONDS_SHAPE_NAME, seconds_shape, static_seconds_shape};
+pub use time::{
+    DEFAULT_PHASOR_PERIOD_SECONDS, PHASOR_CONFIG_SHAPE_NAME, PhasorConfig, SECONDS_SHAPE_NAME,
+    WAVEFORM_SHAPE_NAME, Waveform, seconds_shape, static_seconds_shape,
+};
 pub use value::value_path::ValuePath;

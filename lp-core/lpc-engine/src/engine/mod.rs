@@ -28,6 +28,16 @@ mod scoped_resolution_tests;
 mod srgb8_lut;
 #[cfg(test)]
 pub(crate) mod test_support;
+// Every project here drives a clock through an output → fixture → shader →
+// `bus:time` demand chain, so the module needs the clock, fixture and shader
+// node kinds.
+#[cfg(all(
+    test,
+    feature = "node-clock",
+    feature = "node-fixture",
+    feature = "node-shader"
+))]
+mod timebase_tests;
 
 pub use engine::Engine;
 // Consumed by fixture node tests directly and by `output_flush_tests`; both

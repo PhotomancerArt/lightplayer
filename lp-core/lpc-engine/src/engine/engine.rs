@@ -64,6 +64,13 @@ pub struct Engine {
     /// `apply_project_changes` rebuilds bindings from defs and must never
     /// destroy an engaged control.
     panel_writers: crate::dataflow::panel_writers::PanelWriterStore,
+    /// Published timebases and their phasor integrators, keyed by the node
+    /// that produces each (`dataflow::timebase`). A side store for the same
+    /// reason panel writers are one — it is Engine state that must outlive
+    /// `apply_project_changes` — and additionally because servicing a
+    /// per-uniform phasor read through node dispatch would put the
+    /// resolver's heaviest machinery on the hottest new path.
+    timebases: crate::dataflow::timebase::TimebaseStore,
     /// Device-level safe-mode output ceiling, Q16 (`None` = no clamp).
     ///
     /// DEVICE state, not project data: set by the embedder (firmware, from a
@@ -100,6 +107,7 @@ impl Engine {
             demand_roots: Vec::new(),
             graphics: None,
             panel_writers: crate::dataflow::panel_writers::PanelWriterStore::new(),
+            timebases: crate::dataflow::timebase::TimebaseStore::new(),
             safe_output_clamp_q16: None,
             #[cfg(debug_assertions)]
             last_structural_check: None,
@@ -333,6 +341,21 @@ impl Engine {
     /// The engaged panel writers (probes, persistence).
     pub fn panel_writers(&self) -> &crate::dataflow::panel_writers::PanelWriterStore {
         &self.panel_writers
+    }
+
+    /// The published timebases and their phasors (probes, tests). Runtime
+    /// state only — never persisted, never authored.
+    pub fn timebases(&self) -> &crate::dataflow::timebase::TimebaseStore {
+        &self.timebases
+    }
+
+    /// Mutable timebase access, so a test can stand in for the consumer that
+    /// P3 will add. Not public: outside the engine, a timebase is read-only
+    /// — only a producing node may publish one, and only a tick may advance
+    /// a phasor.
+    #[cfg(test)]
+    pub(crate) fn timebases_mut(&mut self) -> &mut crate::dataflow::timebase::TimebaseStore {
+        &mut self.timebases
     }
 
     pub fn set_graphics(&mut self, graphics: Option<Arc<dyn LpGraphics>>) {
@@ -606,6 +629,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -618,14 +642,27 @@ impl Engine {
             frame_revision: self.revision,
         };
 
-        {
+        let walk = (|| {
             for &root in &self.demand_roots {
                 consume_tree_node(&mut session, &mut host, root)?;
             }
-        }
+            Ok(())
+        })();
+
+        // End-of-tick timebase maintenance, deliberately OUTSIDE the `?`
+        // path above: a node erroring mid-walk must not stall the store's
+        // tick, or every phasor in the project would silently freeze until
+        // the offending node was fixed.
+        let tree = &self.tree;
+        self.timebases.sweep(|clock| {
+            matches!(
+                tree.get(clock).map(|entry| entry.state.value()),
+                Some(NodeEntryState::Alive(_))
+            )
+        });
 
         self.resolver = resolver;
-        Ok(())
+        walk
     }
 
     /// Fail loudly when the graph changed shape without anyone calling
@@ -676,6 +713,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -727,6 +765,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -782,6 +821,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -822,6 +862,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -862,6 +903,7 @@ impl Engine {
             tree: &mut self.tree,
             registry,
             panel_writers: &self.panel_writers,
+            timebases: &mut self.timebases,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -910,6 +952,7 @@ struct EngineResolveHost<'a> {
     tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     registry: &'a ProjectRegistry,
     panel_writers: &'a crate::dataflow::panel_writers::PanelWriterStore,
+    timebases: &'a mut crate::dataflow::timebase::TimebaseStore,
     producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -1251,6 +1294,82 @@ impl ResolveHost for EngineResolveHost<'_> {
         self.runtime_buffers
             .get_mut_mark_updated(id, frame)
             .map_err(|e| SessionResolveError::other(format!("runtime buffer mut: {e:?}")))
+    }
+
+    fn publish_timebase(
+        &mut self,
+        clock: NodeId,
+        effective_seconds: f32,
+        delta_seconds: f32,
+        at: Revision,
+    ) {
+        self.timebases
+            .set_timebase(clock, effective_seconds, delta_seconds, at);
+    }
+
+    fn time_product_seconds(
+        &self,
+        product: lpc_model::TimeProduct,
+    ) -> Result<f32, SessionResolveError> {
+        self.timebases
+            .seconds(product.node())
+            .ok_or_else(|| unpublished_timebase(product))
+    }
+
+    fn time_product_delta(
+        &self,
+        product: lpc_model::TimeProduct,
+    ) -> Result<f32, SessionResolveError> {
+        self.timebases
+            .delta(product.node())
+            .ok_or_else(|| unpublished_timebase(product))
+    }
+
+    fn time_product_phasor(
+        &mut self,
+        product: lpc_model::TimeProduct,
+        key: &crate::dataflow::timebase::PhasorKey,
+        config: &lpc_model::PhasorConfig,
+    ) -> Result<(f32, u32), SessionResolveError> {
+        self.timebases
+            .phasor_tick(product.node(), key, config)
+            .ok_or_else(|| unpublished_timebase(product))
+    }
+}
+
+/// A handle whose producer has not published a timebase this run.
+///
+/// Loud on purpose: the handle names a node, so a miss means the graph is
+/// wired to something that is not producing time — not that time is zero.
+fn unpublished_timebase(product: lpc_model::TimeProduct) -> SessionResolveError {
+    SessionResolveError::other(format!(
+        "node {:?} has published no timebase for time product output {}",
+        product.node(),
+        product.output()
+    ))
+}
+
+impl crate::node::TimebaseRead for EngineResolveHost<'_> {
+    fn time_product_seconds(&self, product: lpc_model::TimeProduct) -> Result<f32, NodeError> {
+        self.timebases
+            .seconds(product.node())
+            .ok_or_else(|| NodeError::msg(format!("{}", unpublished_timebase(product))))
+    }
+
+    fn time_product_delta(&self, product: lpc_model::TimeProduct) -> Result<f32, NodeError> {
+        self.timebases
+            .delta(product.node())
+            .ok_or_else(|| NodeError::msg(format!("{}", unpublished_timebase(product))))
+    }
+
+    fn time_product_phasor_read(
+        &self,
+        product: lpc_model::TimeProduct,
+        key: &crate::dataflow::timebase::PhasorKey,
+    ) -> Result<(f32, u32), NodeError> {
+        self.timebases
+            .phasor_read(product.node(), key)
+            .ok_or_else(|| NodeError::msg(format!("{}", unpublished_timebase(product))))
     }
 }
 
@@ -2177,6 +2296,7 @@ pub(crate) fn resolve_with_engine_host(
         tree: &mut eng.tree,
         registry,
         panel_writers: &eng.panel_writers,
+        timebases: &mut eng.timebases,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -2218,6 +2338,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         tree: &mut eng.tree,
         registry,
         panel_writers: &eng.panel_writers,
+        timebases: &mut eng.timebases,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
