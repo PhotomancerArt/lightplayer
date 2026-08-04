@@ -218,29 +218,24 @@ fn on_alloc_error(layout: core::alloc::Layout) -> ! {
 /// line — a nonzero value on a healthy board is this wrapper paying rent; a
 /// climbing one says the heap is running at the edge.
 ///
-/// Not compiled for `radio_ram_probe`: that build re-unifies esp-alloc's
-/// `global-allocator` default through esp-rtos/esp-radio (see Cargo.toml),
-/// so `esp_alloc::HEAP` is the allocator there and a second declaration
-/// would not link.
-#[cfg(not(feature = "radio_ram_probe"))]
+/// Unconditional across this crate's builds: esp-alloc's own
+/// `global-allocator` default is off on every edge that reaches it (this
+/// crate's declaration and esp-rtos's both say `default-features = false`),
+/// so this is the one allocator everywhere, `radio_ram_probe` included.
 struct RetryingHeap;
 
 /// Immediate re-attempts after a null return before the failure is real.
 /// Every observed save needed exactly one; the rest are margin at the cost
 /// of a few loads on a path that otherwise ends in a reset.
-#[cfg(not(feature = "radio_ram_probe"))]
 const OOM_RETRIES: u32 = 4;
 
 /// Allocations that failed once and succeeded on an immediate retry — each
 /// of these was a device reset before [`RetryingHeap`] existed.
-#[cfg(not(feature = "radio_ram_probe"))]
 static OOM_RETRY_SAVES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
-#[cfg(not(feature = "radio_ram_probe"))]
 #[global_allocator]
 static GLOBAL_ALLOC: RetryingHeap = RetryingHeap;
 
-#[cfg(not(feature = "radio_ram_probe"))]
 unsafe impl core::alloc::GlobalAlloc for RetryingHeap {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         // SAFETY: same contract as the wrapped allocator; this wrapper adds
