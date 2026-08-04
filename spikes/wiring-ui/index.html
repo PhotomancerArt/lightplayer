@@ -335,14 +335,14 @@
 
 <h1>Wiring UI — visualizing the bus</h1>
 <p class="hint">
-  <b>Converged at gate 1 (2026-08-03): the horizontal flow is the direction</b> —
-  writers enter left, the channel's <b>value box</b> is the junction, readers exit right.
-  This round makes the box <i>show</i> the value (the gate-1 gap): products render as pictures,
-  floats as big numbers with bars. Wire weight carries resolution — winning writer solid violet,
-  shadowed dashed, E3 contention orange with the <b>pick</b> affordance. Selection-as-a-concept
-  is parked (gate 1); clicking a site still flashes that node everywhere as a stand-in for
-  focus-jump, and hover highlights a node across the view. Node-graph view is later.
-  Set-aside concepts are archived at the bottom for contrast.
+  <b>Decision log.</b> Gate 1 (2026-08-03): horizontal flow is the direction; selection parked;
+  node-graph later. Gate 2: value box confirmed at this small size; wires grew <b>arrowheads</b>
+  to carry direction; nomenclature decided — <b>D: panel (module) + settings (leaf)</b>, with the
+  tint + ▶ play-surface treatment teaching the difference. Open: whether cross-scope readers
+  list on the channel (the toggle below). Wire weight carries resolution — winning writer solid
+  violet, shadowed dashed, E3 contention orange with the <b>pick</b> affordance. Hover highlights
+  a node everywhere; clicking flashes it (focus-jump stand-in). Set-aside concepts are archived
+  at the bottom.
 </p>
 
 <div class="xcontrols">
@@ -365,13 +365,14 @@
 <section class="concept" id="w2">
   <h2>1. The direction — [writers] → [value box] → [readers]</h2>
   <p class="thesis">
-    The channel box is now a real value box: name in the violet header, <i>what's on the channel</i>
-    as the body — a picture for visuals, a big number + bar for floats, the authored default
-    (italic) for R6 invitations, red for unresolved. The <b>show inherited readers</b> toggle above
-    is gate question 2 made concrete: with it ON, root's <code>time</code> row lists
-    <code>plasma_1 · sim</code> — a reader that lives <i>inside</i> the plasma scope and reaches
-    root time through R5 inheritance (dotted chips). With it OFF, those rows say
-    "2 inherited readers in child scopes" instead of listing them.
+    The channel box is a small value box: name in the violet header, <i>what's on the channel</i>
+    as the body — a picture for visuals, a number + bar for floats, the authored default
+    (italic) for R6 invitations, red for unresolved. Arrowheads on every wire carry direction:
+    writers point <i>into</i> the box, the box points <i>out to</i> readers.
+    The <b>show inherited readers</b> toggle: dotted chips like <code>plasma_1 · sim (child
+    scope)</code> are consumers living in a child module whose read found no writer locally and
+    walked out to this channel (R5) — they really are fed by it, but their binding lives in the
+    child scope, not here. OFF summarizes them as "2 readers in child scopes" instead.
   </p>
   <div class="mcard">
     <div class="mhead"><span class="chev">⌄</span><span class="name" id="w2name">Aurora Sign</span>
@@ -382,34 +383,17 @@
 </section>
 
 <section class="concept" id="nom">
-  <h2>2. Nomenclature — what do the rails say, and how do we teach it?</h2>
+  <h2>2. Nomenclature — decided at gate 2: panel + settings</h2>
   <p class="thesis">
-    Gate-1 steer: "panel everywhere" appeals but blurs two readings; "panel + settings" floated;
-    and if only modules have panels, the leaf/module strips <i>look identical</i> — the teaching
-    problem. The differentiated schemes below apply a "teach it" treatment to the module panel:
-    the existing <code>panel-primary</code> green tint plus a <b>▶ play surface</b> chip — the
-    claim being that the panel is <i>the thing play mode renders</i>, and that visual link is what
-    teaches the difference, whatever the words say.
+    <b>PANEL</b> is a module's performable product surface — tinted with the existing
+    <code>panel-primary</code> token and wearing a <b>▶ play surface</b> chip, because the panel
+    is <i>the thing play mode renders</i> and that visual link is what teaches the module/leaf
+    difference. A leaf's knob strip is its <b>SETTINGS</b> — you're configuring that one node.
+    (Alternatives A and E are in the archive below.)
   </p>
   <div class="nom-grid">
     <div class="nom-col">
-      <h3>A — “panel” everywhere</h3>
-      <div class="nom-card">
-        <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
-        <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
-        <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
-        <div class="sect"><div class="srail">wiring</div><div class="sbody"><span class="nom-wiring">6 channels · writers → readers</span></div></div>
-      </div>
-      <div class="nom-card">
-        <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
-        <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
-      </div>
-      <p class="why">One word matching R8 (“every node has a panel”). Honest to the model — but
-        the two rails read as the same surface when one is a node's own knobs and the other is a
-        whole scope's aggregate. This blur is exactly what gate 1 flagged.</p>
-    </div>
-    <div class="nom-col">
-      <h3>D — “panel” (module) + “settings” (leaf) <span class="lean">◈ lean</span></h3>
+      <h3>D — “panel” (module) + “settings” (leaf) <span class="lean">✓ chosen</span></h3>
       <div class="nom-card">
         <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
         <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
@@ -420,27 +404,10 @@
         <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
         <div class="sect"><div class="srail">settings</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
       </div>
-      <p class="why">Two words for two concepts: the module's <b>panel</b> is the performable
-        product surface (tinted + ▶ = what play mode renders); a leaf's knobs are its
-        <b>settings</b> — you're configuring <i>that node</i>. Caveat to weigh: a bound shader
-        speed knob is also a live performance control, and “settings” can read static/config-ish.</p>
-    </div>
-    <div class="nom-col">
-      <h3>E — “panel” (module) + “controls” (leaf), taught visually</h3>
-      <div class="nom-card">
-        <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
-        <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
-        <div class="sect paneltint"><div class="srail">panel</div><div class="sbody"><span class="playchip">▶ play surface</span><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
-        <div class="sect"><div class="srail">wiring</div><div class="sbody"><span class="nom-wiring">6 channels · writers → readers</span></div></div>
-      </div>
-      <div class="nom-card">
-        <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
-        <div class="sect"><div class="srail">controls</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
-      </div>
-      <p class="why">Today's words, kept — the differentiation does all the work: PANEL is tinted
-        and carries ▶; CONTROLS stays plain. Zero rename cost and “controls” stays honest about
-        liveness — but “controls” keeps its collision with the <code>control.out</code> channel,
-        and docs say every node <i>has</i> a panel (leaf panels would simply never be labeled).</p>
+      <p class="why">Noted for the plan: docs R8 currently says “every node has a panel” — this
+        scheme narrows the <i>label</i> to modules; the plan should reconcile the wording (leaf
+        publicity still feeds the enclosing module's panel, unchanged). “Settings” caveat: a
+        bound shader knob is also a live performance control.</p>
     </div>
   </div>
   <div class="nom-note">
@@ -484,8 +451,40 @@
     </div>
   </section>
 
+  <section class="concept" id="nomalt">
+    <h2>A4. Naming alternatives <span class="aside-reason">— set aside at gate 2 in favor of panel + settings</span></h2>
+    <div class="nom-grid">
+      <div class="nom-col">
+        <h3>A — “panel” everywhere</h3>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
+          <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        </div>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
+          <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
+        </div>
+        <p class="why">Rejected: one word for what reads as two concepts — a node's own knobs vs
+          a scope's aggregate surface (gate-1 flag, confirmed gate 2).</p>
+      </div>
+      <div class="nom-col">
+        <h3>E — “panel” (module) + “controls” (leaf)</h3>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
+          <div class="sect paneltint"><div class="srail">panel</div><div class="sbody"><span class="playchip">▶ play surface</span><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        </div>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
+          <div class="sect"><div class="srail">controls</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
+        </div>
+        <p class="why">Runner-up: zero rename cost, but “controls” keeps its collision with the
+          <code>control.out</code> channel and stays vague about whose controls they are.</p>
+      </div>
+    </div>
+  </section>
+
   <section class="concept" id="w4">
-    <h2>A4. Matrix <span class="aside-reason">— set aside: possible later second view ("node's bus footprint"), never the default</span></h2>
+    <h2>A5. Matrix <span class="aside-reason">— set aside: possible later second view ("node's bus footprint"), never the default</span></h2>
     <div class="mcard">
       <div class="mhead"><span class="chev">⌄</span><span class="name" id="w4name">Aurora Sign</span>
         <span class="kind">module</span><span class="info">i</span></div>
@@ -648,14 +647,14 @@ function siteChip(site, role) {
   const slot = site.s && !site.panel ? ` <span class="slot">.${esc(site.s)}</span>` : "";
   const marks = [];
   if (site.def) marks.push("default");
-  if (site.inh) marks.push("inherited");
+  if (site.inh) marks.push("child scope");
   if (site.pub) marks.push(role === "r" ? "publish ↑" : "publish");
   if (site.fb && !site.picked && !site.shadowed) marks.push("fallback");
   if (site.picked) marks.push("✓ picked");
   if (site.shadowed) marks.push("shadowed");
   const mark = marks.length ? ` <span class="mk">(${marks.join(", ")})</span>` : "";
   const title = site.panel ? "Engaged panel writer — unauthored runtime state (R10)"
-    : site.inh ? "Inner-scope consumer inheriting this channel (R5)"
+    : site.inh ? "Lives in a child module's scope; its input has no writer there, so it resolves outward to this channel (R5)"
     : site.def ? "Default binding"
     : site.pub ? "Module publish (R7)" : "";
   return `<span class="${cls.join(" ")}" data-node="${esc(nodeKey(site))}" title="${esc(title)}"><span class="lab">${label}${slot}</span>${mark}</span>`;
@@ -720,7 +719,7 @@ function renderW2() {
       ? ch.readers.map(r => siteChip(r, "r")).join("")
       : (ch.hiddenInh ? "" : `<span class="w2-none">no readers</span>`);
     if (ch.hiddenInh)
-      readers += `<span class="w2-hidden">${ch.hiddenInh} inherited reader${ch.hiddenInh > 1 ? "s" : ""} in child scopes</span>`;
+      readers += `<span class="w2-hidden">${ch.hiddenInh} reader${ch.hiddenInh > 1 ? "s" : ""} in child scopes</span>`;
     return `<div class="w2-row">
       <svg class="w2-svg"></svg>
       <div class="w2-writers">${writers}</div><div></div>
@@ -750,10 +749,16 @@ function drawW2Wires() {
     const hubL = { x: hb.left - rr.left, y: hb.top - rr.top + hb.height / 2 };
     const hubR = { x: hb.right - rr.left, y: hubL.y };
     let paths = "";
+    /* wires end travelling +x (horizontal control points), so the arrowhead
+       always points right; the path stops short so the tip stays crisp */
     const wire = (x1, y1, x2, y2, stroke, dash) => {
-      const dx = Math.max(18, (x2 - x1) * .5);
-      return `<path d="M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}"
-        fill="none" stroke="${stroke}" stroke-width="1.5" ${dash ? 'stroke-dasharray="4 3"' : ""}/>`;
+      const tipLen = 5.5;
+      const bx = x2 - tipLen;
+      const dx = Math.max(18, (bx - x1) * .5);
+      return `<path d="M ${x1} ${y1} C ${x1 + dx} ${y1}, ${bx - dx} ${y2}, ${bx} ${y2}"
+        fill="none" stroke="${stroke}" stroke-width="1.5" ${dash ? 'stroke-dasharray="4 3"' : ""}/>
+        <path d="M ${x2} ${y2} L ${x2 - tipLen - 1.5} ${y2 - 3.4} L ${x2 - tipLen - 1.5} ${y2 + 3.4} Z"
+        fill="${stroke}"/>`;
     };
     const cs = getComputedStyle(document.documentElement);
     const violet = cs.getPropertyValue("--bound-border").trim();
