@@ -274,7 +274,12 @@ echo "$oracle_out" | grep -a "\[ORACLE" || {
 echo
 echo "===== COMPARISON ====="
 hex_of() { echo "$1" | grep -a "^\[$2\] rgb=" | head -1 | cut -d= -f2; }
-device_hex="$(strip_ansi "$LOG" | grep -ao 'rgb=[0-9a-f]*' | head -1 | cut -d= -f2)"
+# The LAST dump, not the first: the first frame after a project load is the
+# compile-window black fallback (ADR 2026-08-03-memory-pressure-at-compile-
+# safe-points), and `frame_dump` dumps it before re-arming for the first lit
+# frame. Note this comparison assumes a single-channel output; a multi-channel
+# project prints one dump per wire and must be diffed per slice by hand.
+device_hex="$(strip_ansi "$LOG" | grep -ao 'rgb=[0-9a-f]*' | tail -1 | cut -d= -f2)"
 oracle_hex="$(hex_of "$oracle_out" ORACLE)"
 rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 
