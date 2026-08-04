@@ -524,11 +524,20 @@ pub(super) fn sync_shader_slot_def_from_authored(
         return Ok(changed);
     };
     changed |= set_slot_if_changed(&mut slot.value, value);
-    changed |= sync_optional_value_from_authored::<ShaderMapKeyDef>(
-        ctx,
-        &alloc::format!("{base_path}.key.some"),
-        &mut slot.key,
-    )?;
+    // `key` and `mapping` describe map STORAGE — `materialize_map_input`
+    // is the only reader, and a value slot never reaches it. Probing them
+    // on a value slot would ask the resolver for two paths that cannot
+    // exist, and every distinct query key it is handed persists a route
+    // entry across frames (ADR 2026-07-31), so the dead probes would cost
+    // resident bytes on every project forever.
+    let is_map = matches!(slot.kind.value(), ShaderSlotKind::Map);
+    if is_map {
+        changed |= sync_optional_value_from_authored::<ShaderMapKeyDef>(
+            ctx,
+            &alloc::format!("{base_path}.key.some"),
+            &mut slot.key,
+        )?;
+    }
     changed |= sync_optional_value_from_authored::<f32>(
         ctx,
         &alloc::format!("{base_path}.default.some"),
@@ -550,15 +559,16 @@ pub(super) fn sync_shader_slot_def_from_authored(
     // for "the authored side has a mapping at all" — the remaining fields
     // then sync onto the placeholder exactly as they would onto a loaded
     // record.
-    if slot.mapping.data.is_none()
-        && try_read_authored_value::<ShaderSlotMappingKind>(
+    if is_map && slot.mapping.data.is_none() {
+        if let Some(kind) = try_read_authored_value::<ShaderSlotMappingKind>(
             ctx,
             &alloc::format!("{base_path}.mapping.some.kind"),
-        )?
-        .is_some()
-    {
-        slot.mapping = OptionSlot::some(ShaderSlotMappingDef::default());
-        changed = true;
+        )? {
+            let mut mapping = ShaderSlotMappingDef::default();
+            mapping.kind.set(kind);
+            slot.mapping = OptionSlot::some(mapping);
+            changed = true;
+        }
     }
     if let Some(mapping) = slot.mapping.data.as_mut() {
         if let Some(value) = try_read_authored_value::<ShaderSlotMappingKind>(
