@@ -1,6 +1,7 @@
 //! Composite gesture field renderers: map entry add/remove and enum variant
-//! switch, plus the shared gesture icon-button treatment (P5) used by every
-//! row gesture (option set/clear included — `slot_option_presence.rs`).
+//! switch. Row gestures render through the shared
+//! [`crate::base::InlineButton`] family (P5's one-family rule, now
+//! app-wide): accent tone for available actions, neutral for cancels.
 //!
 //! Gestures ARE the wire ops (M3 decision D1): each control dispatches one
 //! `SlotEditOp::EnsurePresent`/`RemoveValue` at the target address and the
@@ -18,10 +19,7 @@ use crate::app::node::slot_edit_actions::{
     slot_ensure_present_action, slot_move_entry_action, slot_remove_value_action,
 };
 use crate::app::node::slot_fields::{dropdown_field_class, field_class, field_wiring};
-use crate::base::{StudioIcon, StudioIconName};
-
-/// Glyph size inside the fixed `h-6 w-6` gesture icon buttons.
-pub(crate) const GESTURE_ICON_SIZE: u32 = 14;
+use crate::base::{InlineButton, InlineButtonTone, StudioIconName};
 
 /// Variant switcher for an enum composite row. Selecting a variant dispatches
 /// `EnsurePresent enum_path.variant` (RAW declared ident, verbatim); the
@@ -104,44 +102,32 @@ pub fn MapAddEntry(
             let add_title = format!("Add entry at key {suggested}");
             return rsx! {
                 span { class: "tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
-                    button {
-                        class: gesture_icon_button_class(false),
-                        r#type: "button",
-                        title: "{add_title}",
-                        aria_label: "{add_title}",
-                        onclick: move |event| {
-                            event.stop_propagation();
+                    InlineButton {
+                        label: add_title,
+                        icon: StudioIconName::Add,
+                        on_press: move |_| {
                             dispatch_map_add(key_kind, &add_key, &add_address, &handler);
                         },
-                        StudioIcon { name: StudioIconName::Add, size: GESTURE_ICON_SIZE }
                     }
-                    button {
-                        class: gesture_text_button_class(),
-                        r#type: "button",
-                        title: "Add entry at a chosen key",
-                        aria_label: "Add entry at a chosen key",
-                        onclick: move |event| {
-                            event.stop_propagation();
+                    InlineButton {
+                        label: "Add entry at a chosen key",
+                        text: "at key\u{2026}",
+                        on_press: move |_| {
                             draft.set(suggested.clone());
                             open.set(true);
                         },
-                        "at key\u{2026}"
                     }
                 }
             };
         }
         return rsx! {
-            button {
-                class: gesture_icon_button_class(false),
-                r#type: "button",
-                title: "Add entry",
-                aria_label: "Add entry",
-                onclick: move |event| {
-                    event.stop_propagation();
+            InlineButton {
+                label: "Add entry",
+                icon: StudioIconName::Add,
+                on_press: move |_| {
                     draft.set(suggested.clone());
                     open.set(true);
                 },
-                StudioIcon { name: StudioIconName::Add, size: GESTURE_ICON_SIZE }
             }
         };
     }
@@ -167,29 +153,22 @@ pub fn MapAddEntry(
                     _ => {}
                 },
             }
-            button {
-                class: gesture_icon_button_class(false),
-                r#type: "button",
+            InlineButton {
+                label: "Confirm add entry",
                 title: "Add entry with this key",
-                aria_label: "Confirm add entry",
-                onclick: move |event| {
-                    event.stop_propagation();
+                icon: StudioIconName::Add,
+                on_press: move |_| {
                     if dispatch_map_add(key_kind, &draft(), &confirm_address, &handler) {
                         open.set(false);
                     }
                 },
-                StudioIcon { name: StudioIconName::Add, size: GESTURE_ICON_SIZE }
             }
-            button {
-                class: gesture_icon_button_class(false),
-                r#type: "button",
+            InlineButton {
+                label: "Cancel add entry",
                 title: "Cancel adding an entry",
-                aria_label: "Cancel add entry",
-                onclick: move |event| {
-                    event.stop_propagation();
-                    open.set(false);
-                },
-                StudioIcon { name: StudioIconName::Cancel, size: GESTURE_ICON_SIZE }
+                icon: StudioIconName::Cancel,
+                tone: InlineButtonTone::Neutral,
+                on_press: move |_| open.set(false),
             }
         }
     }
@@ -292,16 +271,10 @@ pub fn MapEntryRemoveButton(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     rsx! {
-        button {
-            class: gesture_icon_button_class(false),
-            r#type: "button",
-            title: "Remove this entry",
-            aria_label: "Remove this entry",
-            onclick: move |event| {
-                event.stop_propagation();
-                on_action.call(slot_remove_value_action(address.clone()));
-            },
-            StudioIcon { name: StudioIconName::Remove, size: GESTURE_ICON_SIZE }
+        InlineButton {
+            label: "Remove this entry",
+            icon: StudioIconName::Remove,
+            on_press: move |_| on_action.call(slot_remove_value_action(address.clone())),
         }
     }
 }
@@ -351,30 +324,6 @@ fn dispatch_map_add(
     true
 }
 
-/// The one small themed icon-button style for row gestures (P5): map add,
-/// entry remove, add-key confirm/cancel, and option set/clear all share it.
-/// Same sizing/radius family as the inline revert icon button (`h-6 w-6
-/// rounded-xs border`), but in a NEUTRAL-until-hover tone — gestures are
-/// available actions, not status, so they never borrow the warning/live
-/// status families. The disabled variant keeps the identical footprint on
-/// the muted surface (non-wireable rows stay anchored, just inert).
-pub(crate) fn gesture_icon_button_class(disabled: bool) -> &'static str {
-    if disabled {
-        "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-muted tw:bg-card-muted tw:p-0 tw:text-subtle-foreground"
-    } else {
-        "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground"
-    }
-}
-
-/// Compact text variant of the gesture button family, for the rare gesture
-/// that needs a word instead of a glyph — the numeric map's "at key…"
-/// key-override opener (P5: the self-explanatory replacement for "#"). Same
-/// height, radius, border, and neutral-until-hover tone as
-/// [`gesture_icon_button_class`]; only the width is content-sized.
-pub(crate) fn gesture_text_button_class() -> &'static str {
-    "tw:inline-flex tw:h-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:px-1.5 tw:py-0 tw:text-xs tw:font-medium tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground"
-}
-
 fn key_input_class(key_kind: UiSlotMapKeyKind) -> &'static str {
     if key_kind.is_numeric() {
         "tw:w-16 tw:min-w-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:px-1.5 tw:py-0.5 tw:text-right tw:font-mono tw:text-sm tw:text-muted-foreground tw:outline-none"
@@ -398,7 +347,7 @@ mod tests {
 
     fn entry_address(path: &str) -> ProjectSlotAddress {
         ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -420,19 +369,20 @@ mod tests {
         assert_eq!(split_map_entry(&entry_address("mapping.paths")), None);
         assert_eq!(split_map_entry(&entry_address("paths[3].diameter")), None);
         let root = ProjectSlotAddress::root(
-            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
             ProjectSlotRoot::def(),
         );
         assert_eq!(split_map_entry(&root), None);
     }
 
     #[test]
-    fn gesture_buttons_share_the_revert_footprint_in_a_neutral_tone() {
-        // One gesture-button family (P5): the revert icon-button's sizing and
-        // radius (`h-6 w-6 rounded-xs border`), in a neutral-until-hover tone
-        // — never a status family, so gestures don't read as state.
+    fn gesture_buttons_share_the_inline_family_in_the_accent_tone() {
+        // One button family (P5, now the app-wide InlineButton): gestures
+        // are available actions, so they wear the default ACCENT tone —
+        // never a status family, so a gesture can't read as state.
         for disabled in [false, true] {
-            let class = gesture_icon_button_class(disabled);
+            let class =
+                crate::base::inline_icon_button_class(InlineButtonTone::default(), disabled);
             for token in [
                 "tw:h-6",
                 "tw:w-6",
@@ -447,11 +397,6 @@ mod tests {
                 "gestures never wear status families: {class}"
             );
         }
-        let text = gesture_text_button_class();
-        for token in ["tw:h-6", "tw:flex-none", "tw:rounded-xs", "tw:border"] {
-            assert!(text.contains(token), "{token} missing: {text}");
-        }
-        assert!(!text.contains("status"), "{text}");
     }
 
     #[test]

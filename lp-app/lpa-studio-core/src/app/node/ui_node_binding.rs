@@ -18,6 +18,10 @@ pub struct UiBindingEndpoint {
     /// enters the DTO and absent for monotonic/time-kind channels, so the
     /// whole-DTO change gate does not fire per engine tick (P6 item 1).
     pub live_value: Option<String>,
+    /// The consumed bus channel's `(scope, channel)` panel-write target
+    /// (panel.md P1), present on Consumes-direction bus endpoints so the
+    /// panel control built over this wiring can dispatch panel commands.
+    pub panel_target: Option<crate::UiPanelTarget>,
 }
 
 impl UiBindingEndpoint {
@@ -28,6 +32,7 @@ impl UiBindingEndpoint {
             detail: None,
             default_origin: false,
             live_value: None,
+            panel_target: None,
         }
     }
 
@@ -46,6 +51,12 @@ impl UiBindingEndpoint {
     /// Attach the channel's quantized live reading (display-only).
     pub fn with_live_value(mut self, live_value: impl Into<String>) -> Self {
         self.live_value = Some(live_value.into());
+        self
+    }
+
+    /// Attach the consumed channel's panel-write target.
+    pub fn with_panel_target(mut self, panel_target: crate::UiPanelTarget) -> Self {
+        self.panel_target = Some(panel_target);
         self
     }
 }

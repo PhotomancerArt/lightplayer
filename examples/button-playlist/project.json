@@ -1,22 +1,4 @@
 {
-  "kind": "Project",
-  "format": 2,
-  "name": "button-playlist",
-  "nodes": {
-    "button": {
-      "ref": "./button.json"
-    },
-    "clock": {
-      "ref": "./clock.json"
-    },
-    "fixture": {
-      "ref": "./fixture.json"
-    },
-    "output": {
-      "ref": "./output.json"
-    },
-    "playlist": {
-      "ref": "./playlist.json"
-    }
-  }
+  "format": 3,
+  "name": "button-playlist"
 }

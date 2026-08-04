@@ -10,6 +10,7 @@
     --color-background: var(--studio-color-bg);
     --color-background-wash: var(--studio-color-bg-wash);
     --color-foreground: var(--studio-color-text);
+    --color-page: var(--studio-color-bg);
     --color-card: var(--studio-color-surface);
     --color-card-subtle: var(--studio-color-surface-subtle);
     --color-card-muted: var(--studio-color-surface-muted);
@@ -35,6 +36,7 @@
     --color-accent-border: var(--studio-color-accent-border);
     --color-accent-hover: var(--studio-color-accent-hover);
     --color-accent-foreground: var(--studio-color-accent-text-on-fill);
+    --color-accent-wash: var(--studio-color-accent-wash);
 
     --color-selection-border: var(--studio-color-selection-border);
     --color-selection-bg: var(--studio-color-selection-bg);

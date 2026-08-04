@@ -11,6 +11,11 @@
 //! signal; the widget itself still wears the violet bound family, so a
 //! bound control with an unsaved edit shows both at once).
 //!
+//! The readout carries exactly ONE value (GV fix 3): the live bus reading
+//! when the channel has one, else the authored value. It sits in a
+//! width-reserved, tabular-numeral slot ([`READOUT_CLASS`]) so a drag never
+//! reflows the control.
+//!
 //! The control IS the popover visual (P2c item 3): opening merges the
 //! CONTROL's outline with the aspect card below through the
 //! contiguous-outline system (`base/outline.rs` + `base/popover.rs`
@@ -27,6 +32,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::slot_detail_button::primary_affordance;
+use crate::app::node::slot_edit_actions::panel_clear_action;
 use crate::app::node::{SlotDetailButton, SlotUnitSuffix};
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -38,6 +44,11 @@ static NEXT_PANEL_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
 /// rides the inner visual, the hover affordance is a dotted underline (the
 /// persistent info glyph is the standing hint).
 const PANEL_LABEL_TRIGGER_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:decoration-dotted tw:underline-offset-2 tw:hover:underline";
+
+/// The value slot: tabular numerals in a reserved box, so 0.6 / 0.62 / 200
+/// all occupy the same width and the control does not reflow mid-drag (GV
+/// fix 3 — the same treatment the module panel's readout already had).
+const READOUT_CLASS: &str = "tw:inline-flex tw:min-w-[4.5ch] tw:items-baseline tw:justify-center tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:tabular-nums";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -84,7 +95,9 @@ pub fn PanelControl(
     let label_trigger = rsx! {
         SlotDetailButton {
             label: control.label.clone(),
-            aspects: control.aspects.clone(),
+            // The popup keeps the authored value the face may be
+            // displacing with a live reading (GV fix 3).
+            aspects: control.detail_aspects(),
             // The popover titles the control by its authored label (P6
             // item 2) instead of the backing field row's name ("Default").
             name_override: Some(control.label.clone()),
@@ -124,24 +137,55 @@ fn PanelControlBody(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let bound = control.bound();
-    // The live bus reading (display-only; P6 item 1): the readout leads
-    // with it in the bound-violet family while the authored default — still
-    // the edit target — rides secondary in parentheses.
-    let live = control.live_value.clone();
-    let readout = match &live {
-        Some(live) => rsx! {
-            span { class: "tw:inline-flex tw:items-baseline tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
-                span { class: "tw:text-status-bound-foreground", title: "live bus value", "{live}" }
-                SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
-                span { class: "tw:text-dim-foreground", title: "authored default", "({control.value.display})" }
+    // A panel-targeted control with an ENGAGED writer gets the clear
+    // affordance (panel.md P2): a small ↺ beside the readout releasing the
+    // held value back to the authored wiring.
+    let clear = control
+        .panel_target
+        .as_ref()
+        .filter(|target| target.engaged)
+        .map(|target| {
+            let action = panel_clear_action(target);
+            rsx! {
+                button {
+                    class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:leading-none tw:text-status-bound-foreground tw:opacity-70 tw:hover:opacity-100",
+                    r#type: "button",
+                    title: "Release the held panel value",
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        if let Some(handler) = on_action {
+                            handler.call(action.clone());
+                        }
+                    },
+                    StudioIcon { name: StudioIconName::Revert, size: 10 }
+                }
             }
-        },
-        None => rsx! {
-            span { class: "tw:inline-flex tw:items-baseline tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
-                span { "{control.value.display}" }
-                SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
-            }
-        },
+        });
+    // ONE value on the face (GV fix 3): the live bus reading when the
+    // channel has one — in the bound-violet family — else the authored
+    // value. The authored value the live reading displaces is a row in the
+    // detail popup ([`UiPanelControlData::detail_aspects`]); printed here
+    // in parentheses it read as a second value and, worse, reflowed the
+    // control's width on every step of a drag.
+    let live = control.live_value.is_some();
+    let readout_class = if live {
+        "tw:text-status-bound-foreground"
+    } else {
+        "tw:text-muted-foreground"
+    };
+    let readout_title = if live {
+        "live bus value"
+    } else {
+        "authored value"
+    };
+    let readout = rsx! {
+        // `relative` so the engaged clear hangs past the readout without
+        // occupying layout — its appearance must not reflow the row (GV2).
+        span { class: "tw:relative {READOUT_CLASS} {readout_class}",
+            span { title: readout_title, "{control.shown_display()}" }
+            SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
+            {clear}
+        }
     };
 
     match control.widget.clone() {
@@ -152,13 +196,14 @@ fn PanelControlBody(
             rsx! {
                 KnobField {
                     value,
-                    live_value: live_numeric(&control),
+                    live_value: control.live_numeric(),
                     min,
                     max,
                     step,
                     state: control.state.clone(),
                     bound,
                     address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
                 }
@@ -177,13 +222,14 @@ fn PanelControlBody(
                 }
                 HFaderField {
                     value,
-                    live_value: live_numeric(&control),
+                    live_value: control.live_numeric(),
                     min,
                     max,
                     step,
                     state: control.state.clone(),
                     bound,
                     address: control.address.clone(),
+                    panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
                 }
@@ -199,10 +245,11 @@ fn PanelControlBody(
                 span { class: "tw:flex tw:h-[46px] tw:items-center",
                     ToggleField {
                         value,
-                        live_value: live_bool(&control),
+                        live_value: control.live_bool(),
                         state: control.state.clone(),
                         bound,
                         address: control.address.clone(),
+                        panel_target: control.panel_target.clone(),
                         on_action,
                     }
                 }
@@ -278,18 +325,6 @@ fn bool_value(control: &UiPanelControlData) -> Option<bool> {
     }
 }
 
-/// The live bus reading as a number for the knob arc / fader fill (the DTO
-/// carries the quantized display string; an unparseable reading falls back
-/// to the authored value's geometry).
-fn live_numeric(control: &UiPanelControlData) -> Option<f32> {
-    control.live_value.as_deref()?.parse().ok()
-}
-
-/// The live bus reading as a bool for the toggle pill's rendered state.
-fn live_bool(control: &UiPanelControlData) -> Option<bool> {
-    control.live_value.as_deref()?.parse().ok()
-}
-
 /// Read-only fallback when the widget family and value family disagree —
 /// the plain label plus the slot's own display string, no gesture surface.
 fn mismatch_fallback(control: &UiPanelControlData) -> Element {
@@ -310,10 +345,7 @@ mod tests {
         UiSlotFieldState, UiSlotSourceState, UiSlotValue,
     };
 
-    use super::{
-        PanelEmit, bool_value, live_bool, live_numeric, numeric_value, panel_label_class,
-        value_matches_widget,
-    };
+    use super::{PanelEmit, bool_value, numeric_value, panel_label_class, value_matches_widget};
 
     fn control_with_source(
         value: UiSlotValue,
@@ -336,6 +368,7 @@ mod tests {
             },
             value,
             live_value: None,
+            panel_target: None,
             unit: None,
             state,
             aspects: aspect_slot.visible_aspects(),
@@ -432,15 +465,26 @@ mod tests {
             bound_source(),
         );
         bound.live_value = Some("2.72".to_string());
-        assert_eq!(live_numeric(&bound), Some(2.72));
-        assert_eq!(live_bool(&bound), None, "a number is not a pill state");
+        assert_eq!(bound.live_numeric(), Some(2.72));
+        assert_eq!(bound.live_bool(), None, "a number is not a pill state");
+        // GV fix 3: the readout is that ONE number — the authored 1.6 it
+        // displaces moved into the popup.
+        assert_eq!(bound.shown_display(), "2.72");
+        assert!(
+            bound.detail_aspects().iter().any(|aspect| aspect
+                .rows
+                .iter()
+                .any(|row| row.label == "Authored value" && row.value == "1.6")),
+            "the authored value keeps a home behind the label"
+        );
 
         bound.live_value = Some("true".to_string());
-        assert_eq!(live_bool(&bound), Some(true));
-        assert_eq!(live_numeric(&bound), None);
+        assert_eq!(bound.live_bool(), Some(true));
+        assert_eq!(bound.live_numeric(), None);
 
         bound.live_value = None;
-        assert_eq!(live_numeric(&bound), None);
+        assert_eq!(bound.live_numeric(), None);
+        assert_eq!(bound.shown_display(), "1.6");
     }
 
     #[test]

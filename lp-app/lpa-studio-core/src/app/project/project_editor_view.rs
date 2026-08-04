@@ -3,6 +3,16 @@ use crate::{
     UiConfigSlot, UiMetric, UiNodeView, UiPaneAction, UiPendingEdit, UiStatusKind,
 };
 
+/// The open project's container-manifest identity (`project.json`), shown
+/// read-only in the project popup's settings section. Post-mitosis these
+/// are library-owned workspace metadata, never authored def slots.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UiProjectManifest {
+    pub format: Option<u32>,
+    pub uid: Option<String>,
+    pub name: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectEditorView {
     pub project_id: String,
@@ -14,17 +24,22 @@ pub struct ProjectEditorView {
     pub sync: ProjectSyncSummary,
     pub stats: Vec<UiMetric>,
     pub tree: ProjectNodeTreeView,
-    /// Workspace node cards. Flat-root model (P6): the tree root itself is
-    /// never a card — its child panes are the top-level entries, and the
-    /// root's own slots live in [`Self::root_slots`].
+    /// Workspace node cards. Since the flat-root reversal the tree ROOT is
+    /// the single top-level entry (it wears the module face) and every
+    /// other node rides its [`UiNodeView::children`]; the root's own config
+    /// slot rows still live in [`Self::root_slots`].
     pub nodes: Vec<UiNodeView>,
     /// Channels the binding picker offers (observed ∪ well-known), shared by
     /// every bindable row in the workspace (M4).
     pub channel_choices: Vec<crate::UiChannelChoice>,
-    /// The workspace root's own config slot rows (`name` / `format` /
-    /// `uid` / `nodes` for a project root), rendered as the "Project
+    /// The workspace root's own config slot rows (post-mitosis just the
+    /// read-only `nodes` map for a module root), rendered in the "Project
     /// settings" section of the project pane's detail popup.
     pub root_slots: Vec<UiConfigSlot>,
+    /// The container manifest identity, when a library package backs the
+    /// open project. `None` for the storeless demo path and device-hosted
+    /// projects — those popups skip the identity rows.
+    pub manifest: Option<UiProjectManifest>,
     /// The open project's library identity (`prj_…` uid, slug), when a
     /// library package backs it. Drives the popup's share affordances,
     /// which read the library snapshot rather than the runtime. `None` for
@@ -84,6 +99,7 @@ impl ProjectEditorView {
             nodes,
             channel_choices: Vec::new(),
             root_slots: Vec::new(),
+            manifest: None,
             library_identity: None,
             dirty: DirtySummary::clean(),
             debug_overrides: 0,
@@ -110,6 +126,12 @@ impl ProjectEditorView {
 
     pub fn with_root_slots(mut self, root_slots: Vec<UiConfigSlot>) -> Self {
         self.root_slots = root_slots;
+        self
+    }
+
+    /// Attach the container-manifest identity rows.
+    pub fn with_manifest(mut self, manifest: Option<UiProjectManifest>) -> Self {
+        self.manifest = manifest;
         self
     }
 

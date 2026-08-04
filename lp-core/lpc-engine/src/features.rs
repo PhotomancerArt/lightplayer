@@ -148,7 +148,7 @@ mod tests {
     fn node_kind_features_are_engine_owned() {
         use lpc_model::NodeKind;
         for kind in [
-            NodeKind::Project,
+            NodeKind::Module,
             NodeKind::Output,
             NodeKind::Button,
             NodeKind::Clock,

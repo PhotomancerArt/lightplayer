@@ -8,6 +8,7 @@ use lpc_wire::{NodeRuntimeStatus, WireChildKind};
 
 use crate::dataflow::binding::BindingSet;
 use crate::node::node_entry_state::NodeEntryState;
+use crate::node::scope::ScopeRef;
 
 /// Server-side metadata for a node instance.
 ///
@@ -28,6 +29,18 @@ pub struct RuntimeNodeEntry<N> {
     pub bindings: WithRevision<BindingSet>,
 
     pub created_at: Revision,
+
+    /// The bus scope this node INHABITS (`None` for the root module, which
+    /// no scope contains). Structural per modules.md R1: assigned by
+    /// `ensure_runtime_spine` on both the load and apply paths, present for
+    /// `Pending`/`Failed` entries, and untouched by payload reattach.
+    pub scope: Option<ScopeRef>,
+
+    /// True when this node introduces a module scope around its project
+    /// children (module-kinded nodes). Playlist nodes introduce per-entry
+    /// SINK scopes instead, discoverable through their children's
+    /// [`Self::scope`] values.
+    pub introduces_scope: bool,
 
     /// Stable project-side identity for this runtime node, when projected from a project.
     pub project_use: Option<NodeUseLocation>,
@@ -69,6 +82,8 @@ impl<N> RuntimeNodeEntry<N> {
             state: WithRevision::new(revision, NodeEntryState::Pending),
             bindings: WithRevision::new(revision, BindingSet::new()),
             created_at: revision,
+            scope: None,
+            introduces_scope: false,
             project_use,
             def_location,
         }

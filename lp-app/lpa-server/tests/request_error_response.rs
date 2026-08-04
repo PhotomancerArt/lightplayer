@@ -28,13 +28,16 @@ use lpfs::LpFsMemory;
 #[test]
 fn failed_load_project_gets_error_response_and_later_requests_still_answer() {
     let mut server = memory_server();
-    // Manifest missing `format: 1` fails to load server-side (the original
-    // repro from the device-link e2e tests).
+    // A pre-mitosis, single-file `project.json` (kind-tagged root artifact)
+    // is not a valid container manifest — `kind`/`nodes` are unknown fields
+    // there now — so the load gate hard-refuses it server-side (the original
+    // repro from the device-link e2e tests, updated for the project/module
+    // split).
     server
         .base_fs_mut()
         .write_file(
             "/projects/bad/project.json".as_path(),
-            br#"{ "kind": "Project", "nodes": {} }"#,
+            br#"{ "kind": "Module", "nodes": {} }"#,
         )
         .expect("write bad manifest");
 

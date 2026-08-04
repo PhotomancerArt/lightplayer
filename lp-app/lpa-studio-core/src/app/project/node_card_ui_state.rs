@@ -12,7 +12,7 @@
 //! it did for device cards.
 //!
 //! The state is keyed by the node's ADDRESS PATH (`UiNodeHeader::path`,
-//! e.g. `/demo.project/orbit.shader`) so it follows the node, not the
+//! e.g. `/demo.module/orbit.shader`) so it follows the node, not the
 //! widget, and it is pruned when the loaded project closes.
 //!
 //! **The composer draft is deliberately a MIRROR, not the live value.**
@@ -36,6 +36,12 @@ pub struct NodeCardUiState {
     pub code_open: bool,
     /// Whether the advanced drawer (generic slot rows) is expanded.
     pub advanced_open: bool,
+    /// Whether the module face's **wiring** drawer is expanded — the
+    /// bus-as-writers/readers view that replaced the sidebar bus pane
+    /// (`docs/design/modules.md` §5). Default `false`: wiring is an
+    /// authoring diagnostic, and the panel above it is the product
+    /// surface.
+    pub wiring_open: bool,
     /// Whether the **Debug** section's rows are expanded. Default `false`:
     /// the section is collapsed to its (always striped) header, which keeps
     /// carrying the DEBUG label, the active-override count, and Clear — so
@@ -58,6 +64,7 @@ impl NodeCardUiState {
                 NodeCardDrawer::Code => self.code_open = *open,
                 NodeCardDrawer::Advanced => self.advanced_open = *open,
                 NodeCardDrawer::Debug => self.debug_open = *open,
+                NodeCardDrawer::Wiring => self.wiring_open = *open,
             },
             NodeUiOp::SetAgentCollapsed { collapsed, .. } => {
                 self.agent_collapsed = *collapsed;
@@ -79,6 +86,9 @@ pub enum NodeCardDrawer {
     /// The **Debug** section's rows (any node declaring a `SlotRole::Debug`
     /// field). Its header is never hidden — only the rows disclose.
     Debug,
+    /// The module face's **wiring** drawer: this scope's channels with
+    /// their writers and readers.
+    Wiring,
 }
 
 /// Mutations to a node card's UI view-state, dispatched by the card
@@ -138,9 +148,14 @@ mod tests {
 
     #[test]
     fn ops_round_trip_through_the_state() {
-        let node = "/demo.project/orbit.shader".to_string();
+        let node = "/demo.module/orbit.shader".to_string();
         let mut state = NodeCardUiState::default();
         assert!(!state.code_open && !state.advanced_open && !state.agent_collapsed);
+        assert!(
+            !state.wiring_open,
+            "the wiring drawer defaults to collapsed: the panel is the \
+             product surface, wiring is the diagnostic"
+        );
         assert!(
             !state.debug_open,
             "the Debug section defaults to collapsed (G1 feedback)"
@@ -162,6 +177,11 @@ mod tests {
             drawer: NodeCardDrawer::Debug,
             open: true,
         });
+        state.apply(&NodeUiOp::SetDrawer {
+            node: node.clone(),
+            drawer: NodeCardDrawer::Wiring,
+            open: true,
+        });
         state.apply(&NodeUiOp::SetDraft {
             node: node.clone(),
             draft: "make it pulse".to_string(),
@@ -175,6 +195,7 @@ mod tests {
             NodeCardUiState {
                 code_open: true,
                 advanced_open: true,
+                wiring_open: true,
                 debug_open: true,
                 agent_collapsed: true,
                 composer_draft: "make it pulse".to_string(),
@@ -201,21 +222,21 @@ mod tests {
     fn every_op_names_its_node() {
         let ops = [
             NodeUiOp::SetDrawer {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 drawer: NodeCardDrawer::Advanced,
                 open: true,
             },
             NodeUiOp::SetAgentCollapsed {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 collapsed: true,
             },
             NodeUiOp::SetDraft {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 draft: String::new(),
             },
         ];
         for op in &ops {
-            assert_eq!(op.node(), "/a.project/b.shader");
+            assert_eq!(op.node(), "/a.module/b.shader");
         }
     }
 
@@ -224,16 +245,16 @@ mod tests {
         // Order is the contract: the mirror must land before the collapse
         // flips, so the state a collapsed remount seeds from already
         // carries the half-typed text.
-        let ops = NodeUiOp::toggle_agent_section("/a.project/b.shader", false, "half a thought");
+        let ops = NodeUiOp::toggle_agent_section("/a.module/b.shader", false, "half a thought");
         assert_eq!(
             ops,
             vec![
                 NodeUiOp::SetDraft {
-                    node: "/a.project/b.shader".into(),
+                    node: "/a.module/b.shader".into(),
                     draft: "half a thought".into(),
                 },
                 NodeUiOp::SetAgentCollapsed {
-                    node: "/a.project/b.shader".into(),
+                    node: "/a.module/b.shader".into(),
                     collapsed: true,
                 },
             ]
@@ -245,11 +266,11 @@ mod tests {
         // Expanding must never write the draft: the composer is unmounted
         // while collapsed, so its live value is whatever the caller has on
         // hand — the mirror is the truth and stays untouched.
-        let ops = NodeUiOp::toggle_agent_section("/a.project/b.shader", true, "");
+        let ops = NodeUiOp::toggle_agent_section("/a.module/b.shader", true, "");
         assert_eq!(
             ops,
             vec![NodeUiOp::SetAgentCollapsed {
-                node: "/a.project/b.shader".into(),
+                node: "/a.module/b.shader".into(),
                 collapsed: false,
             }]
         );

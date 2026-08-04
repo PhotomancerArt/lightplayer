@@ -146,26 +146,16 @@ pub struct StaticSlotMeta {
     pub label: Option<&'static str>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<&'static str>,
-    /// Marks this slot for the owning node card's front panel (mirrors
-    /// [`SlotMeta::panel`]).
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub panel: bool,
     /// Display unit suffix rendered near the value (mirrors
     /// [`SlotMeta::unit`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<&'static str>,
 }
 
-/// Serde skip helper: omit `panel` when it carries the default `false`.
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
 impl StaticSlotMeta {
     pub const EMPTY: Self = Self {
         label: None,
         description: None,
-        panel: false,
         unit: None,
     };
 
@@ -177,7 +167,6 @@ impl StaticSlotMeta {
         SlotMeta {
             label: self.label.map(ToString::to_string),
             description: self.description.map(ToString::to_string),
-            panel: self.panel,
             unit: self.unit.map(ToString::to_string),
         }
     }

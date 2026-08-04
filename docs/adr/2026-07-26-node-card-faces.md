@@ -11,7 +11,11 @@
   anticipated). Builds on the pane grammar
   (`2026-07-05-studio-pane-grammar.md`) and the editing overlay model
   (`2026-07-04-studio-editing-model.md`).
-- **Superseded by:** None
+- **Superseded by:** Partially — `2026-08-03-panel-visibility-is-derived.md`
+  (`docs/design/modules.md` Q13, binding-is-publicity, implemented
+  2026-08-03) deletes the `panel` flags this ADR introduced. The face
+  grammar itself stands, and the Module face joins the family. See the
+  amendment under "Faces are type-aware".
 
 ## Context
 
@@ -71,11 +75,18 @@ appear on the panel and how:
   serde-defaulted, presentation-only (never affects validation,
   resolution, or writeback). `StaticSlotMeta` carries the same fields for
   shape-level seeding (fw graph, riscv-checked).
+  **Amended 2026-08-03 (modules.md Q13):** the `panel` flag is DELETED from
+  both `SlotMeta` and `StaticSlotMeta`. Publicity is the binding: a control
+  is on a panel exactly when it carries a `(scope, channel)` panel target.
+  `unit` and the editor hints below are unaffected, and the fixture face's
+  brightness fader is now named outright by the face rather than flagged.
 - `ValueEditorHint::Knob { min, max, step }` beside `Slider`.
 - Shader uniforms are per-instance data, not shape meta (all uniforms
   share the `ShaderSlotDef` record shape), so panel-ness is authored on
   the def: `ShaderSlotDef.panel` / `.unit`, widget derived from authored
-  `min`/`max`.
+  `min`/`max`. **Amended 2026-08-03 (Q13):** `ShaderSlotDef.panel` is
+  deleted; a uniform is on the panel when it is bound to a bus channel.
+  `.unit` and the min/max-derived widget stay as recorded.
 - Fixture brightness is seeded by the `lpc_model::Brightness(u32)`
   newtype (serde-transparent; def JSON/wire unchanged) carrying
   `panel: true` + a 0–255 slider hint.

@@ -1,8 +1,8 @@
 //! Child nodes extracted from config slots.
 
 use crate::{
-    DirtySummary, NodeCardUiState, UiAction, UiAffordance, UiNodeFace, UiNodeSection, UiPaneAction,
-    UiStatus,
+    DirtySummary, NodeCardUiState, UiAction, UiAddNodeMenu, UiAffordance, UiNodeFace, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiStatus,
 };
 
 /// A child node rendered outside its parent node pane.
@@ -48,6 +48,11 @@ pub struct UiNodeChild {
     /// controller-produced, currently the node-subtree batch revert while
     /// [`Self::dirty`] announces pending edits.
     pub header_actions: Vec<UiPaneAction>,
+    /// The add-node picker for container children (the symmetric seed of
+    /// [`crate::UiNodeView::add_node_menu`]). Since the flat-root reversal
+    /// a playlist is a NESTED card, so its "+ entry" chip has to ride the
+    /// child DTO to survive the promotion to a pane view.
+    pub add_node_menu: Option<UiAddNodeMenu>,
 }
 
 impl UiNodeChild {
@@ -73,6 +78,7 @@ impl UiNodeChild {
             dirty: DirtySummary::clean(),
             debug_overrides: 0,
             header_actions: Vec::new(),
+            add_node_menu: None,
         }
     }
 
@@ -107,5 +113,37 @@ impl UiNodeChild {
     /// [`crate::UiNodeHeader::debug_affordance`].
     pub fn debug_affordance(&self) -> UiAffordance {
         UiAffordance::from_debug_overrides(self.debug_overrides)
+    }
+
+    /// Promote an extracted child summary to a full pane view — nested
+    /// cards are the same card grammar, so this is a field mapping, not a
+    /// second projection.
+    ///
+    /// The renderer walks children through this (`NodeChildren`), and so do
+    /// the core e2e helpers that scan the workspace: since the flat-root
+    /// reversal every non-root card arrives as a [`UiNodeChild`], and both
+    /// consumers must agree on exactly what card it becomes.
+    pub fn into_node_view(self) -> UiNodeView {
+        let header = UiNodeHeader::new(self.label.clone(), self.kind.clone(), self.detail.clone())
+            .with_status(self.status)
+            .with_dirty(self.dirty)
+            // The debug channel promotes with the rest: a nested card marks
+            // its own active overrides (D8 tier b) exactly like a top-level
+            // one.
+            .with_debug_overrides(self.debug_overrides);
+        let header = match self.summary {
+            Some(summary) => header.with_summary(summary),
+            None => header,
+        };
+        let mut view = UiNodeView::new(header, vec![UiNodeTab::main(self.sections)])
+            .with_node_id(format!("child:{}", self.label))
+            .with_header_actions(self.header_actions)
+            .with_children(self.children);
+        view.face = self.face;
+        view.card_ui = self.card_ui;
+        view.focused = self.focused || self.active;
+        view.action = self.action;
+        view.add_node_menu = self.add_node_menu;
+        view
     }
 }

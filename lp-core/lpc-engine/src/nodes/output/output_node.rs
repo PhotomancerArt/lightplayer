@@ -187,15 +187,20 @@ impl NodeRuntime for OutputNode {
         self.publish_channel_buffer(ctx)
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
         _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
+        // Fully re-established on the next consume: the resolve path resizes
+        // to the control extent and renders the whole target. The runtime
+        // buffer this publishes into is deliberately NOT touched — its
+        // lifecycle belongs to the sink registration path.
+        self.control_samples = Vec::new();
         Ok(())
     }
 }

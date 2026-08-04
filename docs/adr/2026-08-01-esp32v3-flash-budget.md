@@ -615,6 +615,12 @@ headroom at four channels is 7 KB.
   split. Use `esp_alloc::HEAP.stats()` for a per-region breakdown before
   concluding a heap is fragmented. This matters for anyone reading the
   retry-succeeds-OOM signature.
+- **Heap deltas are ratcheted in CI** (added 2026-08-03): `just
+  heap-budget-check` measures per-window transient/retained/largest-alloc on
+  the RV32 emulator against a checked-in record, so the silent drift that
+  motivated this ledger fails a PR instead of surfacing on hardware weeks
+  later. Emulator covers the heap; `xt_classic_codemem_corpus.rs` covers the
+  code region. Fidelity limits in `docs/heap-budget-gate.md`.
 
 ## Reproducing
 

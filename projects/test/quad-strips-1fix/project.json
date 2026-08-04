@@ -1,19 +1,4 @@
 {
-  "kind": "Project",
-  "format": 2,
-  "name": "Quad strips (1 fixture)",
-  "nodes": {
-    "clock": {
-      "ref": "./clock.json"
-    },
-    "shader": {
-      "ref": "./shader.json"
-    },
-    "fixture1": {
-      "ref": "./fixture1.json"
-    },
-    "output1": {
-      "ref": "./output1.json"
-    }
-  }
+  "format": 3,
+  "name": "Quad strips (1 fixture)"
 }

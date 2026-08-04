@@ -3,6 +3,14 @@
   "source": "idle.glsl",
   "render_order": 0,
   "float_mode": "fixed",
+  "bindings": {
+    "glow": {
+      "source": "bus:glow"
+    },
+    "speed": {
+      "source": "bus:speed"
+    }
+  },
   "consumed": {
     "time": {
       "kind": "value",
@@ -19,8 +27,7 @@
       "min": 0,
       "max": 3,
       "label": "Speed",
-      "description": "Animation speed multiplier",
-      "panel": true
+      "description": "Animation speed multiplier"
     },
     "glow": {
       "kind": "value",
@@ -29,8 +36,7 @@
       "min": 0,
       "max": 1,
       "label": "Glow",
-      "description": "Rainbow highlight intensity",
-      "panel": true
+      "description": "Rainbow highlight intensity"
     }
   }
 }

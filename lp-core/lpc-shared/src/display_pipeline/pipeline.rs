@@ -26,11 +26,21 @@ const LOW_GRAY_THRESHOLD: u32 = 65535 / 20;
 /// buffer is left empty rather than allocated — 6 B/LED for `prev`, 3 B/LED
 /// for `dither_overflow`, on a device where a whole LED costs ~90 B. See
 /// [`Self::rotate_frames`] for why skipping the swap is output-identical.
+///
+/// With interpolation off, `next` is conditional too: [`Self::write_frame`]
+/// writes straight into `current` (another 6 B/LED), because the only thing
+/// `next` ever did with interpolation off was hold the frame until the next
+/// rotation promoted it — `tick` promotes an available `next` before
+/// rendering anyway, so the staging hop was pure copies. Safe on the same
+/// grounds as the recycled-buffer argument in [`Self::rotate_frames`]: the
+/// ESP32 provider rejects short frames, so a write always fully overwrites
+/// its target and the buffer's previous identity is unobservable.
 pub struct DisplayPipeline {
     num_leds: u32,
     /// Empty unless `options.interpolation_enabled`.
     prev: Vec<u16>,
     current: Vec<u16>,
+    /// Empty unless `options.interpolation_enabled` — see the struct docs.
     next: Vec<u16>,
     prev_ts: u64,
     current_ts: u64,
@@ -96,11 +106,15 @@ impl DisplayPipeline {
             return Err(DisplayPipelineError::AllocationFailed { num_leds: 0 });
         }
         let size = (num_leds as usize) * 3;
-        let prev_size = if options.interpolation_enabled {
+        // `prev` and `next` both exist only for interpolation — see the
+        // struct docs for why the single-buffer write is output-identical.
+        let interp_size = if options.interpolation_enabled {
             size
         } else {
             0
         };
+        let prev_size = interp_size;
+        let next_size = interp_size;
         let overflow_size = if options.dithering_enabled {
             num_leds as usize
         } else {
@@ -108,10 +122,10 @@ impl DisplayPipeline {
         };
         let mut prev = Vec::with_capacity(prev_size);
         let mut current = Vec::with_capacity(size);
-        let mut next = Vec::with_capacity(size);
+        let mut next = Vec::with_capacity(next_size);
         prev.resize(prev_size, 0);
         current.resize(size, 0);
-        next.resize(size, 0);
+        next.resize(next_size, 0);
         let mut dither_overflow = Vec::with_capacity(overflow_size);
         dither_overflow.resize(overflow_size, [0i8; 3]);
         let white_scale = [
@@ -209,6 +223,29 @@ impl DisplayPipeline {
 
     /// Submit 16-bit RGB frame for next buffer
     pub fn write_frame(&mut self, ts_us: u64, data: &[u16]) {
+        #[cfg(test)]
+        let single_buffer =
+            !self.options.interpolation_enabled && !self.force_three_buffer_rotation;
+        #[cfg(not(test))]
+        let single_buffer = !self.options.interpolation_enabled;
+        if single_buffer {
+            // Write straight into `current` — `next` is empty (struct docs).
+            // The timestamp/flag bookkeeping mirrors what the write-rotate
+            // plus tick-promote pair produced: the previous frame's stamp
+            // becomes `prev_ts` and still feeds `tick`'s frame-age decisions.
+            if self.has_current {
+                self.prev_ts = self.current_ts;
+                self.has_prev = true;
+            }
+            let len = cmp::min(data.len(), self.current.len());
+            self.current[..len].copy_from_slice(&data[..len]);
+            self.current_ts = ts_us;
+            self.has_current = true;
+            if self.has_prev {
+                self.prev_current_delta_us = self.current_ts.saturating_sub(self.prev_ts).max(1);
+            }
+            return;
+        }
         self.rotate_frames();
         let len = cmp::min(data.len(), self.next.len());
         self.next[..len].copy_from_slice(&data[..len]);
@@ -373,6 +410,7 @@ impl ReferencePipeline {
         // the dither carry always present, regardless of options.
         let size = (num_leds as usize) * 3;
         inner.prev.resize(size, 0);
+        inner.next.resize(size, 0);
         inner.dither_overflow.resize(num_leds as usize, [0i8; 3]);
         inner.force_three_buffer_rotation = true;
         Self { inner }
@@ -444,6 +482,20 @@ mod tests {
                         reference.write_frame(frame_ts, &frame);
                         actual.write_frame(frame_ts, &frame);
 
+                        // Occasionally a second frame lands before any tick —
+                        // the producer outrunning the output cadence. The
+                        // single-buffer path overwrites `current` where the
+                        // staged path quietly promotes, and the states must
+                        // still converge to identical output.
+                        if step % 11 == 4 {
+                            for sample in frame.iter_mut() {
+                                *sample = (lcg(&mut state) & 0xFFFF) as u16;
+                            }
+                            let burst_ts = frame_ts + INTERVAL_US / 4;
+                            reference.write_frame(burst_ts, &frame);
+                            actual.write_frame(burst_ts, &frame);
+                        }
+
                         // Tick inside the interval just before `frame_ts`, and
                         // occasionally well past it so the stale-frame
                         // catch-up branch is covered too.
@@ -494,6 +546,12 @@ mod tests {
             lut_enabled: true,
         };
         let mut pipeline = DisplayPipeline::new(100, opts).expect("pipeline");
+        assert_eq!(
+            pipeline.next.len(),
+            0,
+            "interpolation off must not allocate `next` — write_frame goes \
+             straight to `current`"
+        );
         assert_eq!(
             pipeline.prev.len(),
             0,

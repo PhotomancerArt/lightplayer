@@ -5,10 +5,22 @@
 
 use lpc_model::{ChannelName, NodeId, SlotAccessor, SlotPath};
 
+use crate::node::ScopeRef;
+
 /// Demand/cache key for one resolved value in the engine resolver.
+///
+/// Bus demand carries the READING scope (modules.md R5): the resolver
+/// stays scope-dumb — the host answers "which providers win for a read
+/// from this scope" — but the scope is part of the cache and
+/// cycle-detection identity, so same-named channels in different scopes
+/// can never collide or fake a cycle. `scope: None` is the unscoped form
+/// test fakes use; engine paths always carry the reading node's scope.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QueryKey {
-    Bus(ChannelName),
+    Bus {
+        scope: Option<ScopeRef>,
+        channel: ChannelName,
+    },
     ProducedSlot {
         node: NodeId,
         slot: SlotPath,
@@ -46,8 +58,14 @@ mod tests {
     #[test]
     fn query_key_works_as_btree_map_key() {
         let mut m = VecMap::new();
-        let k1 = QueryKey::Bus(ChannelName(String::from("a")));
-        let k2 = QueryKey::Bus(ChannelName(String::from("b")));
+        let k1 = QueryKey::Bus {
+            scope: None,
+            channel: ChannelName(String::from("a")),
+        };
+        let k2 = QueryKey::Bus {
+            scope: None,
+            channel: ChannelName(String::from("b")),
+        };
         m.insert(k1.clone(), 1u32);
         m.insert(
             QueryKey::ProducedSlot {

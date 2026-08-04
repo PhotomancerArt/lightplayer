@@ -3,8 +3,9 @@
 extern crate alloc;
 
 use crate::error::ServerError;
+use crate::panel_state::{self, PANEL_STATE_WRITE_INTERVAL_MS};
 use crate::server::MemoryStatsFn;
-use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
+use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::{ButtonService, Engine, EngineServices, LpGraphics, ProjectLoader, RadioService};
 use lpc_hardware::HwEndpointSpec;
@@ -47,6 +48,20 @@ pub struct Project {
     runtime: Option<Engine>,
     /// Last filesystem version processed by this project
     last_fs_version: FsVersion,
+    /// How many fs-event batches actually reached
+    /// `apply_project_changes`. Framework-tier writes (`/.lp/**`) are
+    /// filtered out before that seam, so this is the diagnostic that says
+    /// whether a write cost a binding-graph rebuild.
+    applied_refreshes: u64,
+    /// Whether panel state keeps saving (panel.md P11 — on by default,
+    /// restored from the state file itself).
+    panel_auto_save: bool,
+    /// Engine-time since the last panel-state write, for the flash
+    /// preservation throttle.
+    panel_state_age_ms: u32,
+    /// Writer-store mutation count as of the last write, so an idle
+    /// project writes nothing however long it runs.
+    panel_state_saved_mutations: u64,
 }
 
 impl Project {
@@ -92,7 +107,19 @@ impl Project {
         runtime.set_graphics(Some(graphics.clone()));
         log_memory(memory_stats, "project new after graphics");
 
+        // Panel state comes back BEFORE the first tick, therefore before
+        // the first render (panel.md P10): the scarf that was dimmed from
+        // a phone must not flash bright on replug, not for one frame.
+        // This is the boot seam on device too — `auto_load_project` runs
+        // here, ahead of the main loop.
+        backtrace::set_oom_context("project new: restore panel state");
+        let panel_auto_save = {
+            let fs_ref = fs.borrow();
+            panel_state::restore(&*fs_ref, &mut runtime)
+        };
+
         backtrace::set_oom_context("project new: build wrapper");
+        let panel_state_saved_mutations = runtime.panel_writers().mutations();
         let project = Self {
             name,
             path: path.to_path_buf(),
@@ -106,6 +133,10 @@ impl Project {
             registry,
             runtime: Some(runtime),
             last_fs_version: loaded_fs_version.next(),
+            applied_refreshes: 0,
+            panel_auto_save,
+            panel_state_age_ms: 0,
+            panel_state_saved_mutations,
         };
         log_memory(memory_stats, "project new after wrapper");
         backtrace::clear_oom_context();
@@ -161,9 +192,90 @@ impl Project {
             .runtime
             .as_mut()
             .expect("project runtime is only absent while reloading");
-        runtime
+        let result = runtime
             .tick(registry, delta_ms)
-            .map_err(|e| ServerError::Core(format!("{e}")))
+            .map_err(|e| ServerError::Core(format!("{e}")));
+        // Persistence rides the tick, throttled — a failed frame still
+        // gets its panel state written, since a crash loop is exactly
+        // when losing the user's dim would hurt most.
+        self.persist_panel_state_if_due(delta_ms);
+        result
+    }
+
+    /// Write panel state if it changed and the throttle window has
+    /// elapsed (panel.md P11: flash preservation — a knob wiggled for a
+    /// minute writes ~6 times, not once per input event).
+    fn persist_panel_state_if_due(&mut self, delta_ms: u32) {
+        self.panel_state_age_ms = self.panel_state_age_ms.saturating_add(delta_ms);
+        if !self.panel_auto_save || self.panel_state_age_ms < PANEL_STATE_WRITE_INTERVAL_MS {
+            return;
+        }
+        if self.panel_state_mutations() == self.panel_state_saved_mutations {
+            // Nothing engaged, cleared, or moved since the last write:
+            // an idle project never touches flash however long it runs.
+            self.panel_state_age_ms = 0;
+            return;
+        }
+        self.write_panel_state();
+    }
+
+    /// Write panel state now, regardless of the throttle — the
+    /// clean-shutdown flush (panel.md P11), so the last few seconds of a
+    /// gesture are not lost on an orderly stop.
+    pub fn flush_panel_state(&mut self) {
+        if !self.panel_auto_save || self.panel_state_mutations() == self.panel_state_saved_mutations
+        {
+            return;
+        }
+        self.write_panel_state();
+    }
+
+    fn write_panel_state(&mut self) {
+        let file = {
+            let runtime = self
+                .runtime
+                .as_ref()
+                .expect("project runtime is only absent while reloading");
+            panel_state::snapshot(runtime, self.panel_auto_save)
+        };
+        let fs_ref = self.fs.borrow();
+        panel_state::write(&*fs_ref, &file);
+        self.panel_state_saved_mutations = self.panel_state_mutations();
+        self.panel_state_age_ms = 0;
+    }
+
+    fn panel_state_mutations(&self) -> u64 {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.panel_writers().mutations())
+            .unwrap_or(self.panel_state_saved_mutations)
+    }
+
+    /// Whether panel state is being saved (panel.md P11 — on by default).
+    pub fn panel_auto_save(&self) -> bool {
+        self.panel_auto_save
+    }
+
+    /// Turn panel-state saving on or off. The choice is itself persisted,
+    /// so it survives a reboot; turning it OFF rewrites the file once so
+    /// the next boot knows, and turning it on flushes current state.
+    pub fn set_panel_auto_save(&mut self, auto_save: bool) {
+        if self.panel_auto_save == auto_save {
+            return;
+        }
+        self.panel_auto_save = auto_save;
+        let file = {
+            let runtime = self
+                .runtime
+                .as_ref()
+                .expect("project runtime is only absent while reloading");
+            panel_state::snapshot(runtime, auto_save)
+        };
+        let fs_ref = self.fs.borrow();
+        panel_state::write(&*fs_ref, &file);
+        drop(fs_ref);
+        self.panel_state_saved_mutations = self.panel_state_mutations();
+        self.panel_state_age_ms = 0;
     }
 
     /// Resolve the visual product handle currently carried by a bus channel.
@@ -233,6 +345,72 @@ impl Project {
             Err(error) => WireNodeCommandResponse::Rejected {
                 reason: format!("{error}"),
             },
+        }
+    }
+
+    /// Dispatch a panel write (panel.md P8): engage/update the writer at
+    /// `(scope, channel)`. Runtime state only — no overlay, no dirty.
+    pub fn panel_write(
+        &mut self,
+        request: &lpc_wire::WirePanelWriteRequest,
+    ) -> lpc_wire::WirePanelCommandResponse {
+        let scope = lpc_engine::node::ScopeRef::from_wire(request.scope);
+        // A write to a scope no node introduces is a stale gesture from a
+        // client racing an edit — reject normally, never poison.
+        let engine = self.engine_mut();
+        if engine.tree().get(scope.owner()).is_none() {
+            return lpc_wire::WirePanelCommandResponse::Rejected {
+                reason: alloc::format!("unknown scope owner {:?}", scope.owner()),
+            };
+        }
+        engine.panel_write(
+            scope,
+            lpc_model::ChannelName(request.channel.clone()),
+            request.value.clone(),
+            request.ttl_ms,
+        );
+        lpc_wire::WirePanelCommandResponse::Accepted {
+            engaged: engine.panel_writers().len() as u32,
+        }
+    }
+
+    /// Dispatch a panel clear (panel.md P3; P-Q4: `All` reaches sink
+    /// scopes too).
+    pub fn panel_clear(
+        &mut self,
+        request: &lpc_wire::WirePanelClearRequest,
+    ) -> lpc_wire::WirePanelCommandResponse {
+        let engine = self.engine_mut();
+        match request {
+            lpc_wire::WirePanelClearRequest::Channel { scope, channel } => {
+                let scope = lpc_engine::node::ScopeRef::from_wire(*scope);
+                engine.panel_clear(scope, &lpc_model::ChannelName(channel.clone()));
+            }
+            lpc_wire::WirePanelClearRequest::Scope { scope } => {
+                let scope = lpc_engine::node::ScopeRef::from_wire(*scope);
+                engine.panel_clear_scope(scope);
+            }
+            lpc_wire::WirePanelClearRequest::All => {
+                engine.panel_clear_all();
+            }
+        }
+        lpc_wire::WirePanelCommandResponse::Accepted {
+            engaged: engine.panel_writers().len() as u32,
+        }
+    }
+
+    /// Dispatch the panel-state auto-save toggle (panel.md P11). Always
+    /// accepted: the flag is project-level state with no scope to be stale
+    /// about, and [`Self::set_panel_auto_save`] is idempotent. The
+    /// engaged-writer count rides back so the toggle answers in exactly
+    /// the shape the other panel commands do.
+    pub fn panel_auto_save_command(
+        &mut self,
+        request: &lpc_wire::WirePanelAutoSaveRequest,
+    ) -> lpc_wire::WirePanelCommandResponse {
+        self.set_panel_auto_save(request.enabled);
+        lpc_wire::WirePanelCommandResponse::Accepted {
+            engaged: self.engine().panel_writers().len() as u32,
         }
     }
 
@@ -370,6 +548,22 @@ impl Project {
     }
 
     pub fn refresh_artifacts(&mut self, events: &[FsEvent]) -> Result<(), ServerError> {
+        // The framework tier is not authored content. Panel state
+        // (`/.lp/panel.json`) is written from inside the tick, and the
+        // write fires an FsEvent right back at us — without this filter
+        // every ~10s save would clear and re-register the whole binding
+        // graph, and a knob left engaged would rebuild the project
+        // forever. Filter FIRST, before anything reads the batch.
+        let events: Vec<FsEvent> = events
+            .iter()
+            .filter(|event| is_project_artifact_path(&event.path))
+            .cloned()
+            .collect();
+        if events.is_empty() {
+            return Ok(());
+        }
+        self.applied_refreshes = self.applied_refreshes.saturating_add(1);
+        let events = events.as_slice();
         let frame = current_revision();
         let shapes = self.engine().slot_shapes().clone();
         let ctx = ParseCtx { shapes: &shapes };
@@ -422,11 +616,29 @@ impl Project {
         log_memory(self.memory_stats, "project reload after core project");
         backtrace::set_oom_context("project reload: set graphics");
         runtime.set_graphics(Some(self.graphics.clone()));
+        // Reload rebuilds the Engine — and with it an empty writer store —
+        // so panel state must be restored here too, on the same
+        // before-first-frame rule as `new()`. (`apply_project_changes`
+        // does NOT rebuild the Engine, which is why an ordinary edit
+        // leaves engaged writers alone and touches no file.)
+        backtrace::set_oom_context("project reload: restore panel state");
+        self.panel_auto_save = {
+            let fs_ref = self.fs.borrow();
+            panel_state::restore(&*fs_ref, &mut runtime)
+        };
+        self.panel_state_saved_mutations = runtime.panel_writers().mutations();
+        self.panel_state_age_ms = 0;
         self.registry = registry;
         self.runtime = Some(runtime);
         log_memory(self.memory_stats, "project reload after swap");
         backtrace::clear_oom_context();
         Ok(())
+    }
+
+    /// How many fs-event batches actually rebuilt project state. A write
+    /// into the framework tier (`/.lp/**`) must never move this.
+    pub fn applied_refresh_count(&self) -> u64 {
+        self.applied_refreshes
     }
 
     /// Get the last filesystem version processed by this project
@@ -497,6 +709,20 @@ impl OutputProvider for SharedOutputProvider {
     }
 }
 
+/// Whether a project-relative fs path is authored content, as opposed to
+/// the framework-owned `/.lp/` tier (panel state, meta) that the project
+/// itself writes.
+///
+/// This is the same boundary `lpc_history::is_hashed_path` draws for the
+/// canonical package hash and `SnapshotStore` draws for device copies —
+/// stated once more here because the artifact refresh path is a third
+/// consumer of it, and the one where getting it wrong costs a rebuild
+/// loop rather than a wrong hash.
+fn is_project_artifact_path(path: &LpPath) -> bool {
+    let path = path.as_str();
+    path != lpc_history::hash::hash_rules::RESERVED_META_DIR && !path.starts_with("/.lp/")
+}
+
 fn project_root_path(name: &str) -> Result<TreePath, ServerError> {
     let mut sanitized = String::new();
     for c in name.chars() {
@@ -522,9 +748,27 @@ fn project_root_path(name: &str) -> Result<TreePath, ServerError> {
 
 #[cfg(test)]
 mod tests {
-    use lpc_model::TreePath;
+    use lpc_model::{LpPath, TreePath};
 
-    use super::project_root_path;
+    use super::{is_project_artifact_path, project_root_path};
+
+    #[test]
+    fn the_framework_tier_is_not_an_artifact_change() {
+        // Panel state is written from inside the tick; if these counted as
+        // artifact changes, each save would rebuild the binding graph and
+        // the rebuild would fire the next save.
+        assert!(!is_project_artifact_path(LpPath::new("/.lp")));
+        assert!(!is_project_artifact_path(LpPath::new("/.lp/panel.json")));
+        assert!(!is_project_artifact_path(LpPath::new("/.lp/meta.json")));
+        assert!(!is_project_artifact_path(LpPath::new("/.lp/nested/x.json")));
+
+        assert!(is_project_artifact_path(LpPath::new("/project.json")));
+        assert!(is_project_artifact_path(LpPath::new("/module.json")));
+        assert!(is_project_artifact_path(LpPath::new("/shader.glsl")));
+        // Not a prefix match on the name: a real artifact may start with
+        // the same letters.
+        assert!(is_project_artifact_path(LpPath::new("/.lponly.json")));
+    }
 
     #[test]
     fn project_root_path_accepts_demo_folder_names() {

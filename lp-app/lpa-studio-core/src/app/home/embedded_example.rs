@@ -4,8 +4,15 @@
 //! section lists these. The id doubles as the seed-once provenance source
 //! (`SeededFrom { source }`), so a package seeded by the pre-M4 demo flow
 //! and one opened from the gallery are the same package.
+//!
+//! Each package's files are `include_bytes!`d from `examples/<name>/`, so
+//! the wasm bundle carries them and the checked-in example IS what the
+//! gallery opens. Adding an example means adding its file table here —
+//! and remembering that an existing library store keeps the package it
+//! already seeded (delete the gallery package to re-seed).
 
-use crate::app::project::demo_project::{DEMO_PROJECT_ID, demo_project_files};
+/// One file in an embedded package: its package-relative path and bytes.
+pub type ExampleFile = (&'static str, &'static [u8]);
 
 /// One compiled-in example.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13,27 +20,189 @@ pub struct EmbeddedExample {
     pub id: &'static str,
     pub name: &'static str,
     pub kind: &'static str,
+    /// The package's files, in deploy order (`project.json` first).
+    pub files: &'static [ExampleFile],
 }
 
 impl EmbeddedExample {
-    /// The example's package files as (relative path, bytes).
+    /// The example's package files as owned (relative path, bytes) pairs.
     pub fn files(&self) -> Vec<(String, Vec<u8>)> {
-        // every embedded example currently ships the demo file set; a second
-        // example would grow a match here
-        demo_project_files()
+        self.files
             .iter()
-            .map(|file| (file.relative_path.to_string(), file.bytes.to_vec()))
+            .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
             .collect()
     }
 }
 
+/// `examples/fyeah-sign` — the Studio demo project (see
+/// [`crate::app::project::demo_project`] for why this one).
+pub static FYEAH_SIGN_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/fyeah-sign/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/fyeah-sign/module.json"),
+    ),
+    (
+        "button.json",
+        include_bytes!("../../../../../examples/fyeah-sign/button.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/fyeah-sign/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/fyeah-sign/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/fyeah-sign/output.json"),
+    ),
+    (
+        "playlist.json",
+        include_bytes!("../../../../../examples/fyeah-sign/playlist.json"),
+    ),
+    (
+        "radio.json",
+        include_bytes!("../../../../../examples/fyeah-sign/radio.json"),
+    ),
+    (
+        "idle.json",
+        include_bytes!("../../../../../examples/fyeah-sign/idle.json"),
+    ),
+    (
+        "idle.glsl",
+        include_bytes!("../../../../../examples/fyeah-sign/idle.glsl"),
+    ),
+    (
+        "blast.json",
+        include_bytes!("../../../../../examples/fyeah-sign/blast.json"),
+    ),
+    (
+        "blast.glsl",
+        include_bytes!("../../../../../examples/fyeah-sign/blast.glsl"),
+    ),
+    (
+        "fyeah.map2d.json",
+        include_bytes!("../../../../../examples/fyeah-sign/fyeah.map2d.json"),
+    ),
+];
+
+/// `examples/plasma` — one shader, two public knobs. The smallest module
+/// whose root panel is not empty: `speed` and `scale` are bound to root
+/// scope channels, so binding-is-publicity (Q13) puts them on the module
+/// card's panel with nothing else authored.
+pub static PLASMA_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/plasma/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/plasma/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/plasma/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/plasma/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/plasma/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/plasma/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/plasma/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/plasma/fixture.map2d.json"),
+    ),
+];
+
+/// `examples/meteor` — a compute/render pair: `sim` integrates meteor heads
+/// into a persistent map, `render` draws their tails from it over a
+/// node-to-node binding. Publishes `speed`, `count` (a stepped knob) and
+/// `decay` on the root panel.
+pub static METEOR_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/meteor/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/meteor/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/meteor/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/meteor/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/meteor/output.json"),
+    ),
+    (
+        "sim.json",
+        include_bytes!("../../../../../examples/meteor/sim.json"),
+    ),
+    (
+        "sim.glsl",
+        include_bytes!("../../../../../examples/meteor/sim.glsl"),
+    ),
+    (
+        "render.json",
+        include_bytes!("../../../../../examples/meteor/render.json"),
+    ),
+    (
+        "render.glsl",
+        include_bytes!("../../../../../examples/meteor/render.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/meteor/fixture.map2d.json"),
+    ),
+];
+
+/// The gallery's *Examples* section, in order — the demo first, then the
+/// two single-effect modules.
+static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
+    EmbeddedExample {
+        id: crate::STUDIO_DEMO_PROJECT_ID,
+        name: "Fyeah Sign",
+        kind: "Module",
+        files: FYEAH_SIGN_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/plasma",
+        name: "Plasma",
+        kind: "Module",
+        files: PLASMA_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/meteor",
+        name: "Meteor",
+        kind: "Module",
+        files: METEOR_FILES,
+    },
+];
+
 /// All embedded examples, gallery order.
 pub fn embedded_examples() -> &'static [EmbeddedExample] {
-    &[EmbeddedExample {
-        id: DEMO_PROJECT_ID,
-        name: "Fyeah Sign",
-        kind: "Project",
-    }]
+    EMBEDDED_EXAMPLES
 }
 
 /// Look up an embedded example by id.
@@ -47,12 +216,13 @@ pub fn embedded_example(id: &str) -> Option<EmbeddedExample> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::project::demo_project::DEMO_PROJECT_ID;
 
     #[test]
     fn demo_example_is_embedded_with_files() {
         let example = embedded_example(DEMO_PROJECT_ID).expect("demo example is embedded");
         assert_eq!(example.name, "Fyeah Sign");
-        assert_eq!(example.kind, "Project");
+        assert_eq!(example.kind, "Module");
         let files = example.files();
         assert!(
             files
@@ -64,5 +234,37 @@ mod tests {
     #[test]
     fn unknown_example_is_none() {
         assert!(embedded_example("examples/unknown").is_none());
+    }
+
+    #[test]
+    fn every_example_ships_the_two_container_files() {
+        // Mitosis (modules.md §1/§6): a package is unopenable without BOTH
+        // the container manifest and the root module. Found the hard way
+        // when a fixture's mapping document was left out of the demo list.
+        for example in embedded_examples() {
+            let files = example.files();
+            for required in ["project.json", "module.json"] {
+                assert!(
+                    files.iter().any(|(path, _)| path == required),
+                    "{} must ship {required}",
+                    example.id
+                );
+            }
+            assert_eq!(
+                files.first().map(|(path, _)| path.as_str()),
+                Some("project.json"),
+                "{} deploys the container manifest first",
+                example.id
+            );
+        }
+    }
+
+    #[test]
+    fn example_ids_and_names_are_unique() {
+        let mut ids: Vec<&str> = embedded_examples().iter().map(|it| it.id).collect();
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "example ids collide");
     }
 }

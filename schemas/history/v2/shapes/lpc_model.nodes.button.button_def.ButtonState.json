@@ -1,0 +1,70 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "down",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "held",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "up",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

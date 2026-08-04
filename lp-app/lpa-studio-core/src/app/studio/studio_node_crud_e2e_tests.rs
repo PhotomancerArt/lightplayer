@@ -16,7 +16,7 @@ use lpc_model::{AsLpPath, NodeKind};
 use lpfs::LpFsMemory;
 
 use crate::app::studio::studio_edit_e2e_tests::{
-    InProcessServerIo, drive, edit_e2e_files, edit_e2e_server, project_action,
+    InProcessServerIo, drive, edit_e2e_files, edit_e2e_server, project_action, workspace_cards,
 };
 use crate::{
     ControllerId, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, ProjectController,
@@ -36,7 +36,9 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    assert_eq!(project_editor(&snapshot).nodes.len(), 2, "clock + fixture");
+    // Root card restored: the workspace has one top card (the root module)
+    // and the clock and fixture ride beneath it.
+    assert_eq!(child_card_paths(&snapshot).len(), 2, "clock + fixture");
 
     // (kind, expected auto-name, expected tree ty). `clock` and `fixture`
     // collide with the fixture project's existing key/file → `_2` dedup.
@@ -44,6 +46,9 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         (NodeKind::Shader, "shader", "shader"),
         (NodeKind::Texture, "texture", "texture"),
         (NodeKind::Playlist, "playlist", "playlist"),
+        // An embedded module (settled D-C): an empty child def whose node
+        // introduces a scope, creatable like anything else.
+        (NodeKind::Module, "module_2", "module"),
         (NodeKind::Clock, "clock_2", "clock"),
         (NodeKind::Fixture, "fixture_2", "fixture"),
         (NodeKind::Output, "output", "output"),
@@ -66,23 +71,17 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         );
         let suffix = format!("/{name}.{ty}");
         assert!(
-            project_editor(&snapshot)
-                .nodes
+            child_card_paths(&snapshot)
                 .iter()
-                .any(|node| node.node_id.ends_with(&suffix)),
+                .any(|path| path.ends_with(&suffix)),
             "{kind:?}: node card {suffix} present, got {:?}",
-            project_editor(&snapshot)
-                .nodes
-                .iter()
-                .map(|node| node.node_id.clone())
-                .collect::<Vec<_>>()
+            child_card_paths(&snapshot)
         );
         // The created node takes focus (the user lands on what they made).
         assert!(
-            project_editor(&snapshot)
-                .nodes
+            workspace_cards(&snapshot)
                 .iter()
-                .any(|node| node.node_id.ends_with(&suffix) && node.focused),
+                .any(|card| card.header.path.ends_with(&suffix) && card.focused),
             "{kind:?}: the created node is focused"
         );
     }
@@ -110,13 +109,35 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         fixture_def.contains("Map2d") && fixture_def.contains("fixture_2.map2d.json"),
         "fixture def references its mapping document: {fixture_def}"
     );
-    // Project root gained every key (the collision case as `clock_2`).
-    let manifest = read_file(&server, "project.json");
+    // The root module gained every key (the collision case as `clock_2`).
+    let module = read_file(&server, "module.json");
     for (_, name, _) in cases {
         assert!(
-            manifest.contains(&format!("\"{name}\"")),
-            "project.json carries {name}: {manifest}"
+            module.contains(&format!("\"{name}\"")),
+            "module.json carries {name}: {module}"
         );
+    }
+
+    // The created embedded module wears the module face: an empty panel of
+    // its own scope, nested as a group on the root's panel would be once it
+    // has channels — for now the card itself is the assertion.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let created = workspace_cards(&snapshot)
+        .into_iter()
+        .find(|card| card.header.path.ends_with("/module_2.module"))
+        .expect("the embedded module card renders");
+    assert_eq!(created.header.kind, "Module");
+    match &created.face {
+        Some(crate::UiNodeFace::Module(face)) => {
+            assert!(
+                face.panel.is_empty(),
+                "a fresh module has no public channels yet"
+            );
+            assert!(face.panel.target.is_some(), "its scope is real");
+        }
+        other => panic!("embedded module derives a module face, got {other:?}"),
     }
 }
 
@@ -137,19 +158,14 @@ fn create_into_playlist_adds_entry_and_child() {
     ));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("playlist create emits a snapshot");
-    let playlist_id = project_editor(&snapshot)
-        .nodes
-        .iter()
-        .find(|node| node.node_id.contains(".playlist"))
-        .expect("playlist card present")
-        .node_id
-        .clone();
-    // …offers the add-node picker on its card (playlist attach site).
-    let playlist_card = project_editor(&snapshot)
-        .nodes
-        .iter()
-        .find(|node| node.node_id == playlist_id)
-        .unwrap();
+    let playlist_id = child_card_paths(&snapshot)
+        .into_iter()
+        .find(|path| path.contains(".playlist"))
+        .expect("playlist card present");
+    // …offers the add-node picker on its card (playlist attach site). The
+    // playlist is a NESTED card now, so the picker only survives because it
+    // rides `UiNodeChild::add_node_menu`.
+    let playlist_card = card_at(&snapshot, &playlist_id);
     let menu = playlist_card
         .add_node_menu
         .as_ref()
@@ -201,11 +217,9 @@ fn create_into_playlist_adds_entry_and_child() {
     // Removing the entry via its child card's delete action stages the
     // playlist-site removal as a labeled NodeRemoved row (`entries[<k>]`),
     // same presentation as a root-child removal.
-    let entry_child = project_editor(&snapshot)
-        .nodes
-        .iter()
-        .flat_map(|node| node.children.iter())
-        .find(|child| child.detail.contains("entry_1"))
+    let entry_child = workspace_cards(&snapshot)
+        .into_iter()
+        .find(|card| card.header.path.contains("entry_1"))
         .expect("entry child card present");
     let delete = entry_child
         .header_actions
@@ -241,11 +255,7 @@ fn create_into_playlist_adds_entry_and_child() {
     // Adding again BEFORE saving must work: the base file still holds the
     // staged-removed `entries[1]`, so the next create skips to `entries[2]`
     // (a create at 1 would reject as TargetOccupied — review-found bug).
-    let playlist_card = project_editor(&snapshot)
-        .nodes
-        .iter()
-        .find(|node| node.node_id == playlist_id)
-        .expect("playlist card still present");
+    let playlist_card = card_at(&snapshot, &playlist_id);
     let entry = playlist_card
         .add_node_menu
         .as_ref()
@@ -263,18 +273,11 @@ fn create_into_playlist_adds_entry_and_child() {
         "the re-added entry landed in the base def at key 2: {playlist_def}"
     );
     assert!(
-        project_editor(&snapshot)
-            .nodes
+        child_card_paths(&snapshot)
             .iter()
-            .flat_map(|node| node.children.iter())
-            .any(|child| child.detail.contains("entry_2")),
+            .any(|path| path.contains("entry_2")),
         "the re-added entry mounted as entry_2 (staged entries[1] skipped): {:?}",
-        project_editor(&snapshot)
-            .nodes
-            .iter()
-            .flat_map(|node| node.children.iter())
-            .map(|child| child.detail.clone())
-            .collect::<Vec<_>>()
+        child_card_paths(&snapshot)
     );
     assert!(
         project_editor(&snapshot)
@@ -294,20 +297,13 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let clock_id = project_editor(&snapshot)
-        .nodes
-        .iter()
-        .find(|node| node.node_id.ends_with("/clock.clock"))
-        .expect("clock card")
-        .node_id
-        .clone();
+    let clock_id = child_card_paths(&snapshot)
+        .into_iter()
+        .find(|path| path.ends_with("/clock.clock"))
+        .expect("clock card");
 
     // The clock card offers the ungated delete action with confirmation.
-    let delete = project_editor(&snapshot)
-        .nodes
-        .iter()
-        .find(|node| node.node_id == clock_id)
-        .unwrap()
+    let delete = card_at(&snapshot, &clock_id)
         .header_actions
         .iter()
         .find(|action| action.icon == "remove")
@@ -324,7 +320,7 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
     let snapshot = view.try_recv().expect("remove emits a snapshot");
     let editor = project_editor(&snapshot);
     assert!(
-        !editor.nodes.iter().any(|node| node.node_id == clock_id),
+        !child_card_paths(&snapshot).contains(&clock_id),
         "the removed node left the workspace"
     );
     let removed_row = editor
@@ -365,7 +361,7 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
     let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
     let editor = project_editor(&snapshot);
     assert!(
-        editor.nodes.iter().any(|node| node.node_id == clock_id),
+        child_card_paths(&snapshot).contains(&clock_id),
         "revert restored the node"
     );
     assert!(
@@ -553,10 +549,9 @@ fn copy_then_paste_round_trips_a_shader_with_its_asset() {
         "and no longer at the original: {pasted_def}"
     );
     assert!(
-        project_editor(&snapshot)
-            .nodes
+        child_card_paths(&snapshot)
             .iter()
-            .any(|node| node.node_id.ends_with("/shader_2.shader")),
+            .any(|path| path.ends_with("/shader_2.shader")),
         "the pasted node is in the tree"
     );
     // Both shaders' GLSL is byte-identical: paste copies content, not a
@@ -612,9 +607,7 @@ fn pasting_junk_reports_it_and_changes_nothing() {
         .tx
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
-    let before = project_editor(&view.try_recv().expect("connect"))
-        .nodes
-        .len();
+    let before = child_card_paths(&view.try_recv().expect("connect")).len();
 
     for junk in [
         "not json",
@@ -633,9 +626,7 @@ fn pasting_junk_reports_it_and_changes_nothing() {
         .tx
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
-    let after = project_editor(&view.try_recv().expect("refresh"))
-        .nodes
-        .len();
+    let after = child_card_paths(&view.try_recv().expect("refresh")).len();
     assert_eq!(before, after, "a refused paste leaves the tree alone");
 }
 
@@ -763,6 +754,24 @@ fn create_action(kind: NodeKind, attach: UiAttachTarget) -> StudioCommand {
         ControllerId::new(ProjectController::NODE_ID),
         NodeCreateOp { kind, attach },
     ))
+}
+
+/// The addresses of every card BELOW the root module card — the workspace
+/// as it read before the flat-root reversal restored the root card.
+fn child_card_paths(view: &UiStudioView) -> Vec<String> {
+    workspace_cards(view)
+        .into_iter()
+        .skip(1)
+        .map(|card| card.header.path)
+        .collect()
+}
+
+/// The workspace card at a node address.
+fn card_at(view: &UiStudioView, path: &str) -> crate::UiNodeView {
+    workspace_cards(view)
+        .into_iter()
+        .find(|card| card.header.path == path)
+        .unwrap_or_else(|| panic!("workspace carries a card at {path}"))
 }
 
 fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {

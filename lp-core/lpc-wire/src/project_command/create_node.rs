@@ -103,7 +103,7 @@ mod tests {
         let created = WireCreateNodeResponse::Created {
             artifact_changes: ArtifactChangeSummary {
                 added: alloc::vec![ArtifactLocation::file("/shader-2.json")],
-                changed: alloc::vec![ArtifactLocation::file("/project.json")],
+                changed: alloc::vec![ArtifactLocation::file("/module.json")],
                 removed: Vec::new(),
             },
             revision: Revision::new(7),

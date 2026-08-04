@@ -26,12 +26,12 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
     DeviceController, DeviceOp, NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PlaylistActivateOp, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
-    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
-    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiNotice, UiPaneView, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
-    UxUpdate, UxUpdateSink,
+    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
+    ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot,
+    ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
+    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
+    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -811,7 +811,11 @@ impl StudioController {
             UiViewContent::ProjectEditor(editor) => editor.dirty,
             _ => crate::DirtySummary::clean(),
         };
-        let panes = vec![project_pane, self.bus_pane()];
+        // The sidebar bus pane is GONE (P3): bus-as-controls lives on the
+        // module face's panel and bus-as-wiring in its drawer, both hung
+        // off the module that owns the scope. The pane column is the
+        // Project pane alone.
+        let panes = vec![project_pane];
         UiStudioView::new(panes, self.console_view())
             .with_lens(self.lens_runtime())
             .with_open_project(
@@ -1139,28 +1143,6 @@ impl StudioController {
             .lens_session()
             .and_then(crate::RuntimeSession::requested_log_level);
         console
-    }
-
-    /// The bus pane: a derived view over the binding-graph snapshot.
-    ///
-    /// Temporary placement (roadmap M3): rides the main column under the
-    /// Project pane; the pane's final home is an open UX question.
-    fn bus_pane(&self) -> UiPaneView {
-        let (status, view) = match self.project.ui_bus_view() {
-            Some(view) if !view.channels.is_empty() => (
-                UiStatus::good(format!("{} channels", view.channels.len())),
-                view,
-            ),
-            Some(view) => (UiStatus::neutral("No channels"), view),
-            None => (UiStatus::working("Reading"), crate::UiBusView::empty()),
-        };
-        UiPaneView::new(
-            "bus",
-            "Bus",
-            status,
-            UiViewContent::Bus(Box::new(view)),
-            Vec::new(),
-        )
     }
 
     /// The current project revision, or `None` before any sync.
@@ -2325,6 +2307,18 @@ impl StudioController {
             if action.op_as::<PlaylistActivateOp>().is_some() {
                 let op = action.into_op::<PlaylistActivateOp>()?;
                 return self.execute_playlist_activate_op(op).await;
+            }
+            if action.op_as::<PanelWriteOp>().is_some() {
+                let op = action.into_op::<PanelWriteOp>()?;
+                return self.execute_panel_write_op(op).await;
+            }
+            if action.op_as::<PanelClearOp>().is_some() {
+                let op = action.into_op::<PanelClearOp>()?;
+                return self.execute_panel_clear_op(op).await;
+            }
+            if action.op_as::<PanelAutoSaveOp>().is_some() {
+                let op = action.into_op::<PanelAutoSaveOp>()?;
+                return self.execute_panel_auto_save_op(op).await;
             }
             if action.op_as::<NodeCreateOp>().is_some() {
                 let op = action.into_op::<NodeCreateOp>()?;
@@ -3595,6 +3589,42 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.activate_playlist_entry(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Panel-control gesture: dispatch the `(scope, channel)` panel write
+    /// down the runtime command channel (no overlay, no dirty flag).
+    ///
+    /// The value is echoed locally FIRST (GV fix 5). A panel-target widget
+    /// has no edit buffer behind it, so without the echo its only feedback
+    /// was the probe round trip and drags moved at probe cadence; the echo
+    /// retires as soon as a snapshot shows the engine holding the writer.
+    async fn execute_panel_write_op(&mut self, op: PanelWriteOp) -> UiResult {
+        self.project
+            .note_panel_write(op.scope, &op.channel, op.value.clone());
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.panel_write(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_panel_clear_op(&mut self, op: PanelClearOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.panel_clear(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// The P11 auto-save switch: project-level, so it takes no scope. Like
+    /// the clear path it is quiet on acceptance — the new value comes back
+    /// on the next read's `ServerRuntimeStatus`.
+    async fn execute_panel_auto_save_op(&mut self, op: PanelAutoSaveOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.set_panel_auto_save(server, op).await
         };
         self.record_project_edit_run(run)
     }
@@ -5476,12 +5506,6 @@ fn body_actions(body: &UiViewContent) -> Vec<UiAction> {
             .iter()
             .flat_map(project_tree_item_actions)
             .collect(),
-        UiViewContent::Bus(bus) => bus
-            .channels
-            .iter()
-            .flat_map(|channel| channel.writers.iter().chain(&channel.readers))
-            .filter_map(|site| site.focus.clone())
-            .collect(),
     }
 }
 
@@ -6355,17 +6379,23 @@ mod tests {
     }
 
     #[test]
-    fn loaded_project_gets_project_and_bus_panes_plus_the_lens_card() {
+    fn loaded_project_gets_the_project_pane_plus_the_lens_card() {
         let studio = connected_studio();
 
         let view = studio.view();
 
-        // The editor is project + bus, with the device surface docked as
-        // the lens CARD. The retired step-stack device pane was the
-        // third pane; it is gone.
-        assert_eq!(view.panes.len(), 2);
+        // The editor is the Project pane ALONE, with the device surface
+        // docked as the lens CARD. Two panes have been retired from this
+        // column: the step-stack device pane, and — with P3 — the bus
+        // pane, whose content now hangs off the module card that owns the
+        // scope (controls on the panel, writers/readers in the wiring
+        // drawer).
+        assert_eq!(view.panes.len(), 1);
         assert_eq!(view.panes[0].node_id.as_str(), ProjectController::NODE_ID);
-        assert_eq!(view.panes[1].node_id.as_str(), "bus");
+        assert!(
+            !view.panes.iter().any(|pane| pane.node_id.as_str() == "bus"),
+            "no bus pane"
+        );
         assert!(view.lens_card.is_some());
         assert!(
             !view
@@ -6655,7 +6685,7 @@ mod tests {
             .unwrap();
         let product = VisualProduct::new(NodeId::new(3), 0);
         let target = ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
-            ProjectNodeAddress::new(TreePath::parse("/demo.project/orbit.shader").unwrap()),
+            ProjectNodeAddress::new(TreePath::parse("/demo.module/orbit.shader").unwrap()),
             NodeId::new(3),
         ));
         let action = UiAction::from_op(target.node_id(), ProjectEditorOp::Focus);
@@ -6918,7 +6948,7 @@ mod tests {
 
     fn single_product_project_view(node_id: u32) -> ProjectView {
         let revision = Revision::new(1);
-        let path = TreePath::parse("/demo.project/orbit.shader").unwrap();
+        let path = TreePath::parse("/demo.module/orbit.shader").unwrap();
         let state_shape = SlotShapeId::new(700);
         let mut view = ProjectView::new();
         view.tree.insert(TreeEntryView::new(
@@ -7017,6 +7047,7 @@ mod tests {
                                     used_bytes: 2048,
                                     total_bytes: 6144,
                                 }),
+                                panel_auto_save: Some(true),
                             }),
                         }),
                     },
