@@ -23,7 +23,9 @@ use std::rc::Rc;
 
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
-use crate::app::layout::{SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge};
+use crate::app::layout::{
+    PlayToggle, SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
+};
 use crate::local_store::{self, LocalStoreStatus};
 use crate::router::{self, StudioRoute};
 use crate::unsaved_gate;
@@ -253,8 +255,12 @@ pub fn App() -> Element {
                 // #/sim/<slug>; lens on a device → #/device/<uid>.
                 let current = route.peek().clone();
                 if editor_showing {
+                    // `same_session`, not `!=`: play is a lens ZOOM on the
+                    // same document, and the lens's own route always reads
+                    // non-play — comparing by equality would rewrite the
+                    // user straight back out of `#/…/play`.
                     if let Some(target) = bound
-                        && target != current
+                        && !target.same_session(&current)
                     {
                         if matches!(current, StudioRoute::Home) {
                             // a gallery open: a real navigation, so a real
@@ -368,11 +374,13 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Sim { key } => {
+                StudioRoute::Sim { key, play: _ } => {
                     // already the focused document? (the bound route
-                    // carries the slug; the open ids cover a uid-keyed URL)
+                    // carries the slug; the open ids cover a uid-keyed URL).
+                    // Play is ignored on purpose: entering or leaving play
+                    // must never re-open the session.
                     let already_bound = match &*nav_bound_route.borrow() {
-                        Some(StudioRoute::Sim { key: bound }) => {
+                        Some(StudioRoute::Sim { key: bound, .. }) => {
                             bound == key
                                 || nav_open_ids
                                     .borrow()
@@ -394,10 +402,10 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Device { uid } => {
+                StudioRoute::Device { uid, play: _ } => {
                     let already_bound = matches!(
                         &*nav_bound_route.borrow(),
-                        Some(StudioRoute::Device { uid: bound }) if bound == uid
+                        Some(StudioRoute::Device { uid: bound, .. }) if bound == uid
                     );
                     if !already_bound {
                         // attach the existing session for this uid, or
@@ -465,7 +473,7 @@ pub fn App() -> Element {
             // connecting/failed window rendering honestly on the gallery's
             // device card.
             match &startup_route {
-                StudioRoute::Sim { key } => {
+                StudioRoute::Sim { key, play: _ } => {
                     startup_pending_route_open.set(true);
                     startup_bridge
                         .tx
@@ -474,7 +482,7 @@ pub fn App() -> Element {
                             HomeOp::OpenPackage { key: key.clone() },
                         )));
                 }
-                StudioRoute::Device { uid } => {
+                StudioRoute::Device { uid, play: _ } => {
                     startup_pending_route_open.set(true);
                     startup_bridge
                         .tx
@@ -568,6 +576,12 @@ pub fn App() -> Element {
     let current_route = route.read().clone();
     let opening_frame = matches!(current_route, StudioRoute::Sim { .. })
         && !current_route.sim_matches_view(&current_view);
+    // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
+    // picks what the shell renders, and the toggle only rewrites the URL.
+    let play = current_route.is_play();
+    let play_toggle = current_route
+        .is_lens()
+        .then(|| current_route.with_play(!play).hash());
 
     // One shell for every section: the chrome renders at the same offset
     // whatever is below it, and switching sections swaps only the body —
@@ -587,6 +601,12 @@ pub fn App() -> Element {
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
         main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
             SiteChrome { section, on_action,
+                if let Some(href) = play_toggle {
+                    // A plain hash link, like the nav tabs: the route
+                    // listener picks it up, sees the same session, and
+                    // swaps only what the shell renders.
+                    PlayToggle { href, playing: play }
+                }
                 VersionBadge {}
                 StudioSettingsPopover { settings, on_settings }
             }
@@ -606,6 +626,7 @@ pub fn App() -> Element {
                         view: current_view,
                         running: false,
                         opening_frame,
+                        play,
                         on_action,
                     }
                 },

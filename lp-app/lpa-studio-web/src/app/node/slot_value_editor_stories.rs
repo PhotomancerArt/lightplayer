@@ -12,7 +12,7 @@ use crate::app::node::{SliderSlotField, SlotValueEditor, XySlotField};
 
 fn story_slot_address(path: &str) -> ProjectSlotAddress {
     ProjectSlotAddress::new(
-        ProjectNodeAddress::parse("/demo.project/pixels.fixture").expect("valid story address"),
+        ProjectNodeAddress::parse("/demo.module/pixels.fixture").expect("valid story address"),
         ProjectSlotRoot::def(),
         SlotPath::parse(path).expect("valid story slot path"),
     )

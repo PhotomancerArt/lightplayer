@@ -841,7 +841,7 @@ mod tests {
                 "Basic",
                 &[(
                     "project.json".to_string(),
-                    br#"{"kind":"Project","name":"Basic"}"#.to_vec(),
+                    br#"{"format":3,"name":"Basic"}"#.to_vec(),
                 )],
                 PackageProvenance::SeededFrom {
                     source: "examples/fyeah-sign".to_string(),
@@ -868,7 +868,7 @@ mod tests {
             .find(|card| card.slug == "2026-07-09-1421-scratch")
             .unwrap();
         assert_eq!(scratch.provenance, None);
-        assert_eq!(scratch.kind, "Project");
+        assert_eq!(scratch.kind, "Module");
     }
 
     #[test]
@@ -1263,7 +1263,10 @@ mod tests {
         assert_eq!(
             view.render_text_lines(),
             vec![
-                "Home: 0 devices, 0 projects, 1 examples".to_string(),
+                format!(
+                    "Home: 0 devices, 0 projects, {} examples",
+                    embedded_examples().len()
+                ),
                 "  opening prj_x".to_string(),
                 "  issue: boom".to_string(),
             ]

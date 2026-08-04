@@ -33,6 +33,26 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 9: panel-state auto-save reaches the wire —
+///   `WireProjectCommand::PanelAutoSave` (the P11 toggle, beside
+///   `PanelWrite`/`PanelClear`) and `ServerRuntimeStatus.panel_auto_save`,
+///   which carries the CURRENT value back on every project read so the
+///   module face can render the switch without a dedicated pull.
+/// - 8: sink scopes list on the probe surface — `WireBusChannel` rows now
+///   include playlist-entry sink scopes (same shape; new content
+///   contract), which is what carries a bound panel control's live value
+///   and engaged state for entry children. Presentation surfaces filter
+///   `scope.is_sink()` rows; probe value resolution refuses values whose
+///   winning provider is a sink-scope producer (R2 no-demand).
+/// - 7: structured scope on the probe surface — `WireBusChannel` gains
+///   `scope` (channels list per scope) and `WireBindingEndpoint::Bus`
+///   carries the endpoint's scope; display strings become a client
+///   concern. Same train: `WireProjectCommand::PanelWrite`/`PanelClear`
+///   (the `(scope, channel)` panel command surface) and
+///   `WireBindingOrigin::Panel`.
+/// - 6: node kind `project` renamed to `module` — `NodeKind::Module`
+///   serializes as `"Module"` in inventory frames, and `TreePath`
+///   segments carry `.module` instead of `.project`.
 /// - 5: `ServerHello` reshaped into distinct build and hardware facts.
 ///   `fw: FwProvenance` is gone: its four provenance fields moved onto
 ///   `build: BuildFacts` alongside the build's `LpFeature` list, and
@@ -54,12 +74,12 @@ use serde::{Deserialize, Serialize};
 /// Every entry above is a BREAKING change — that is what earns a bump,
 /// because a differing version means "assume nothing works". Purely
 /// ADDITIVE optional fields do not: `HardwareFacts`'s chip-identity
-/// fields (2026-08-03) carry `#[serde(default)]` and nothing sets
-/// `deny_unknown_fields`, so an old firmware's hello reads as `None` on
-/// new Studio and a new firmware's extra fields are ignored by old
-/// Studio. Bumping for those would have marked every board running
+/// fields (2026-08-03, landed beside v9) carry `#[serde(default)]` and
+/// nothing sets `deny_unknown_fields`, so an old firmware's hello reads
+/// as `None` on new Studio and a new firmware's extra fields are ignored
+/// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 5;
+pub const WIRE_PROTO_VERSION: u32 = 9;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

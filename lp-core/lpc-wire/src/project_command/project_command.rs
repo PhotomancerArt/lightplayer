@@ -39,6 +39,21 @@ pub enum WireProjectCommand {
         node: NodeId,
         command: WireNodeCommand,
     },
+    /// Engage/update a panel writer at `(scope, channel)` — runtime state,
+    /// no overlay, no dirty (see [`crate::WirePanelWriteRequest`]).
+    PanelWrite {
+        request: crate::WirePanelWriteRequest,
+    },
+    /// Clear engaged panel writers (see [`crate::WirePanelClearRequest`]).
+    PanelClear {
+        request: crate::WirePanelClearRequest,
+    },
+    /// Turn panel-state auto-save on or off (panel.md P11). Project-level,
+    /// like the `.lp/state.json` file it governs — see
+    /// [`crate::WirePanelAutoSaveRequest`].
+    PanelAutoSave {
+        request: crate::WirePanelAutoSaveRequest,
+    },
 }
 
 /// Project command response.
@@ -65,6 +80,18 @@ pub enum WireProjectCommandResponse {
     },
     NodeCommand {
         response: WireNodeCommandResponse,
+    },
+    PanelWrite {
+        response: crate::WirePanelCommandResponse,
+    },
+    PanelClear {
+        response: crate::WirePanelCommandResponse,
+    },
+    /// Reuses the panel command response: `Accepted { engaged }` carries
+    /// the same engaged-writer count every panel command answers with, so
+    /// the toggle needs no shape of its own.
+    PanelAutoSave {
+        response: crate::WirePanelCommandResponse,
     },
 }
 

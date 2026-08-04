@@ -1,0 +1,17 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "button": {
+      "ref": "./button.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}

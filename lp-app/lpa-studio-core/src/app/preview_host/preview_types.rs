@@ -109,9 +109,50 @@ pub enum PreviewSlotStatus {
     },
 }
 
+/// Whether a worker-boot / lease failure reason is the expected artifact
+/// of the page tearing down mid-boot (navigation, refresh, HMR): the
+/// browser aborts the in-flight wasm fetch and the worker reports a
+/// "compilation aborted" / "loading was aborted" network error. These are
+/// non-actionable — loggers downgrade them to debug so a refresh doesn't
+/// spray per-worker stack traces — while every other boot failure stays
+/// loud.
+pub fn is_teardown_abort_reason(reason: &str) -> bool {
+    let reason = reason.to_ascii_lowercase();
+    reason.contains("loading was aborted")
+        || reason.contains("compilation aborted")
+        || reason.contains("the operation was aborted")
+        || reason.contains("fetch is aborted")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn teardown_abort_reasons_are_recognized_across_browsers() {
+        // Chrome, wrapped in the pool's failure chain.
+        assert!(is_teardown_abort_reason(
+            "preview workers unavailable: boot worker: browser worker boot failed: \
+             CompileError: WebAssembly compilation aborted: Network error: \
+             Response body loading was aborted"
+        ));
+        // Firefox / Safari abort wordings.
+        assert!(is_teardown_abort_reason("The operation was aborted."));
+        assert!(is_teardown_abort_reason("Fetch is aborted"));
+    }
+
+    #[test]
+    fn genuine_boot_failures_stay_loud() {
+        assert!(!is_teardown_abort_reason(
+            "boot worker: expected magic word 00 61 73 6d, found 3c 21 44 4f"
+        ));
+        assert!(!is_teardown_abort_reason(
+            "spawn worker: SecurityError: blocked by CSP"
+        ));
+        assert!(!is_teardown_abort_reason(
+            "timed out waiting for browser worker boot"
+        ));
+    }
 
     #[test]
     fn config_defaults_match_the_adr() {

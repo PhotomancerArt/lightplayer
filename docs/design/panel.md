@@ -27,10 +27,15 @@ from* (publicity, channels, scopes); this document defines how controls
 >    module — ordinary authored dataflow and bus vocabulary, not a panel
 >    mechanism.
 >
-> **Related:** `docs/design/modules.md` (publicity, scopes, resolution),
+> **Related:** `docs/design/modules.md` (publicity, scopes, resolution;
+> §10 carries the shared future-work register),
 > `docs/glossary.md` (terms),
 > `docs/adr/2026-07-26-node-card-faces.md` (widget grammar the panel
-> renders with).
+> renders with),
+> `docs/adr/2026-08-02-panel-writers-and-state-persistence.md` (the
+> writer tier and its persistence),
+> `docs/adr/2026-08-03-panel-visibility-is-derived.md` (what reaches a
+> panel at all).
 
 ## 1. Concepts
 
@@ -90,6 +95,10 @@ the same channel until cleared. Across scopes, ordinary writer-shadowing
 applies: an engaged writer in an inner scope shadows outer writers for
 that subtree — touching detaches, clearing re-attaches.
 
+> Status: implemented 2026-08-02 (engine writer store at panel priority,
+> replacing the scope's provider set — max-priority-wins holds on ByKey
+> merge channels too; survives `apply_project_changes` by construction).
+
 ### P5 — Takeover: jump, by default
 
 Grabbing a channel that authored dataflow is actively moving acquires it
@@ -136,6 +145,16 @@ silently destroyed.)
   staged, nothing dirty, no overlay interaction. Studio, play mode,
   phones, and future hardware inputs all speak exactly these two ops.
 
+> Status: implemented 2026-08-02. `WireProjectCommand::PanelWrite` /
+> `PanelClear` (project-level arms — they address a scope, not a node),
+> `PanelWriteOp` / `PanelClearOp` in Studio, coalesced per
+> `(scope, channel)` in the actor's batch planner beside the slot-edit
+> flood rule. The panel controls that already existed (shader uniform
+> knobs, the fixture brightness fader) were re-pointed off
+> `SlotEditOp::SetValue` onto this path wherever the backing slot
+> consumes a bus channel; a control with no channel behind it still
+> edits its authored default.
+
 ### P9 — Multi-client: the engine is the authority
 
 Panel state lives in the engine (sim or device), never in a client. All
@@ -154,9 +173,17 @@ must come back dim, with not one bright frame; next night, connect and
 reset.* A boot that renders even one frame at authored brightness before
 applying restored panel state is non-conforming.
 
+> Status: implemented 2026-08-02. The seam is Engine construction —
+> `Project::new`, and `Project::reload` because it rebuilds the Engine —
+> so restore completes before the first tick and therefore before the
+> first render. On device that is the boot path (`auto_load_project` runs
+> ahead of the main loop). `apply_project_changes` does NOT rebuild the
+> Engine, which is why an ordinary edit leaves engaged writers alone and
+> touches no file.
+
 ### P11 — Persistence
 
-- Panel state persists to **`.lp/state.json`** in the project folder
+- Panel state persists to **`.lp/panel.json`** in the project folder
   (the framework-owned tier — modules.md §6); on device, to the
   device's own filesystem. Never in authored artifacts.
 - Contents: a versioned map `scope-path / channel → { value }` — raw
@@ -167,12 +194,44 @@ applying restored panel state is non-conforming.
 - **Auto-save is on by default** with a user toggle; Clear (P2) removes
   the corresponding persisted entries immediately.
 
+> Status: implemented 2026-08-02 (`lpa-server/src/panel_state.rs`;
+> ADR `2026-08-02-panel-writers-and-state-persistence.md`). The USER
+> TOGGLE reached the UI 2026-08-03: `WireProjectCommand::PanelAutoSave`
+> plus `ServerRuntimeStatus.panel_auto_save` (wire proto 9 — the current
+> value rides every project read rather than a dedicated pull), rendered
+> once on the project's ROOT module face, since the state file is
+> per project folder.
+>
+> **Device-first, per settled D-B**: both sim tiers run on `LpFsMemory`,
+> so sims stay ephemeral by construction; the unit tests are the
+> correctness story and the device walk confirms it. Persistent sims are
+> recorded future work.
+>
+> The throttle gates on a writer-store mutation COUNTER, not on the
+> writer set: a clear followed by a re-write inside one window leaves an
+> identically-shaped map, so comparing size-and-revision would miss it.
+> An idle project writes nothing at all. Turning auto-save off records
+> itself in the file, so the choice survives a reboot instead of quietly
+> re-enabling overnight.
+>
+> **Prerequisite that made this safe:** a write inside the project fs
+> fires an FsEvent back at the artifact-refresh path, so `/.lp/**` is
+> filtered out of project changes before anything reads the batch —
+> otherwise every save would rebuild the binding graph and the rebuild
+> would schedule the next save. `Project::applied_refresh_count` makes
+> that observable rather than assumed.
+
 ### P12 — Play mode
 
 Play mode renders **panels only** — the root module's panel, which
 recursively presents nested module groups (modules.md R8) — no faces, no
 authoring surfaces. It speaks only P8's two ops plus reads. Anything
 play mode can do, an end user is allowed to do.
+
+> Status: implemented 2026-08-03 — mounted at
+> `#/sim|device/<key>/play`, the same session as the editor route (the
+> segment changes the surface, never the runtime). What a panel PUBLISHES
+> is `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
 
 ### P13 — External inputs (future, seam only)
 
@@ -205,6 +264,15 @@ mode switch.
   is domain logic and belongs to a node (a gate with a timeout param),
   never to writer resolution.
 
+> Status: implemented 2026-08-02 (engine-side lifecycle). A momentary
+> write carries a renewal deadline; the engine despawns the writer past
+> it, in the tick. That makes despawn survive a dropped client — a
+> gesture nobody is renewing releases on its own — and renewal is simply
+> the next write. The wire shape is our own; PR #233's TTL/press_id
+> direction was design reference only. Widget-side gesture classes (which
+> channel kinds ARE momentary) arrive with the touch-set vocabulary,
+> P-Q5.
+
 ## 3. Worked walkthroughs
 
 - **The scarf**: boot → P10 restores `brightness` writer before frame 1
@@ -235,15 +303,40 @@ this document never specifies resolution.
 - **P-Q1:** slew defaults — which widget kinds slew at all (brightness
   fader: yes; stepped knob: no?), and is the time constant per-widget
   meta or one project default?
-- **P-Q2:** engaged-affordance treatment (distinct from bound-violet) —
+  *Disposition 2026-08-02: still open, deliberately unimplemented.*
+  Emission is immediate (P5 takeover = jump), which is correct behavior
+  on its own and not a placeholder. The seam when slew arrives is
+  **writer-side shaping**: the panel writer holds the raw value (P7) and
+  what it emits is shaped on the way out, so nothing downstream of the
+  writer — resolution, persistence, identity — changes.
+- **P-Q2:** ~~engaged-affordance treatment (distinct from bound-violet) —
   UX spike owns the visual; confirm the *requirement* that Read-following
   -automation, Read-at-default, and Latch are three visibly distinct
-  states.
-- **P-Q3:** `state.json` schema version field name/shape, and whether a
-  clean-shutdown flush is feasible on device (or throttle-only).
-- **P-Q4:** does Clear-all also clear *sink-scope* (playlist entry)
-  state, or only visible panels? Lean: everything under the cleared
-  scope, sinks included — "reset means reset".
+  states.~~ **Requirement CONFIRMED and shipped 2026-08-03** (gate GV):
+  the three states are visibly distinct and walkable — Read-following
+  -automation names its driver, Read-at-default reads its authored value,
+  and Latch is amber with an off-flow reset glyph that never reflows the
+  control. Two threads stay open and are NOT to be changed without Yona:
+  (a) amber (`status-attention`) may be too intense for "held" — he leans
+  maybe-blue, "more thinking needed"; (b) the treatment still borrows
+  `status-attention` rather than a minted `status-engaged` token family.
+- **P-Q3:** ~~`panel.json` schema version field name/shape, and whether a
+  clean-shutdown flush is feasible on device (or throttle-only).~~
+  **Settled 2026-08-02.** The file is
+  `{ version, auto_save, entries: [{ scope, channel, value }] }` with
+  `version: 1` and **bump-and-refuse** semantics — an unknown version is
+  ignored wholesale, never migrated, matching the alpha posture in the
+  rest of the format story. Losing panel state costs one re-dim; a
+  half-applied migration costs trust. A clean-shutdown flush IS included
+  (project unload flushes past the throttle); an unclean power cut simply
+  loses at most one throttle window, which is the trade the ~10 s
+  interval buys.
+- **P-Q4:** ~~does Clear-all also clear *sink-scope* (playlist entry)
+  state, or only visible panels?~~ **Settled 2026-08-02 as leaned:
+  clear-all reaches sink scopes** — a playlist entry's latched value
+  clears with everything else. "Reset means reset"; a reset that leaves
+  values latched in scopes the user cannot currently see is a haunting,
+  not a safety feature. Implemented and pinned by test.
 - **P-Q5:** the touch-set value shape (per-touch id, position,
   pressure/z, velocity — carried or derived?) and the multi-XY pad
   widget spec. Prior art: old lightPlayer's `MultiTouchInput.Touch`

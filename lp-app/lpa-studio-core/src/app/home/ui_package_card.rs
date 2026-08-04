@@ -7,7 +7,7 @@
 pub struct UiPackageCard {
     /// `prj_…` uid string — the identity every card action carries.
     pub uid: String,
-    /// Manifest kind ("Project" today, "Module" later).
+    /// Manifest kind (`"Module"`; pre-rename packages said `"Project"`).
     pub kind: String,
     /// THE user-facing identifier (dated: `2026-07-09-1421-basic`): card
     /// title, URL, export name. Rename edits it.

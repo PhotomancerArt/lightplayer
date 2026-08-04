@@ -8,7 +8,7 @@ use alloc::string::String;
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectNodePlacement {
-    /// Child from `ProjectDef.nodes[name]`.
+    /// Child from `ModuleDef.nodes[name]`.
     ProjectChild { name: String },
     /// Child from `PlaylistDef.entries[entry].node`.
     PlaylistEntry { entry: u32, name: Option<String> },

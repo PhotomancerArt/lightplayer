@@ -16,9 +16,9 @@ use crate::nodes::button::ButtonDef;
 use crate::nodes::clock::ClockDef;
 use crate::nodes::fixture::{FixtureDef, MappingConfig};
 use crate::nodes::fluid::FluidDef;
+use crate::nodes::module::ModuleDef;
 use crate::nodes::output::OutputDef;
 use crate::nodes::playlist::PlaylistDef;
-use crate::nodes::project::ProjectDef;
 use crate::nodes::radio::ControlRadioDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
@@ -29,7 +29,7 @@ use crate::{
     SlotShapeRegistry, Slotted, StaticSlotShape,
 };
 
-const PROJECT_VARIANT: &str = "Project";
+const MODULE_VARIANT: &str = "Module";
 const BUTTON_VARIANT: &str = "Button";
 const CLOCK_VARIANT: &str = "Clock";
 const TEXTURE_VARIANT: &str = "Texture";
@@ -41,7 +41,7 @@ const CONTROL_RADIO_VARIANT: &str = "ControlRadio";
 const OUTPUT_VARIANT: &str = "Output";
 const FIXTURE_VARIANT: &str = "Fixture";
 const NODE_DEF_VARIANT_NAMES: &[&str] = &[
-    PROJECT_VARIANT,
+    MODULE_VARIANT,
     BUTTON_VARIANT,
     CLOCK_VARIANT,
     TEXTURE_VARIANT,
@@ -57,12 +57,12 @@ const NODE_DEF_VARIANT_NAMES: &[&str] = &[
 /// Authored body of a node artifact.
 ///
 /// A `NodeDef` is source data: it is what a JSON artifact defines before the
-/// engine instantiates a runtime node. Project artifacts are included because
+/// engine instantiates a runtime node. Module artifacts are included because
 /// a project defines the root project node and its child node invocations.
 #[derive(Clone, Debug, PartialEq, Slotted)]
 pub enum NodeDef {
     #[default]
-    Project(ProjectDef),
+    Module(ModuleDef),
     Button(ButtonDef),
     Clock(ClockDef),
     Texture(TextureDef),
@@ -165,7 +165,7 @@ impl NodeDef {
     /// Default-authored node definition for a kind.
     pub fn default_for_kind(kind: NodeKind) -> Self {
         match kind {
-            NodeKind::Project => Self::Project(ProjectDef::default()),
+            NodeKind::Module => Self::Module(ModuleDef::default()),
             NodeKind::Button => Self::Button(ButtonDef::default()),
             NodeKind::Clock => Self::Clock(ClockDef::default()),
             NodeKind::Texture => Self::Texture(TextureDef::default()),
@@ -182,7 +182,7 @@ impl NodeDef {
     /// Core node kind for this definition.
     pub fn kind(&self) -> NodeKind {
         match self {
-            Self::Project(_) => NodeKind::Project,
+            Self::Module(_) => NodeKind::Module,
             Self::Button(_) => NodeKind::Button,
             Self::Clock(_) => NodeKind::Clock,
             Self::Texture(_) => NodeKind::Texture,
@@ -199,7 +199,7 @@ impl NodeDef {
     /// Stable authored `kind` string used in TOML and diagnostics.
     pub fn kind_name(&self) -> &'static str {
         match self {
-            Self::Project(_) => ProjectDef::KIND,
+            Self::Module(_) => ModuleDef::KIND,
             Self::Button(_) => ButtonDef::KIND,
             Self::Clock(_) => ClockDef::KIND,
             Self::Texture(_) => TextureDef::KIND,
@@ -216,7 +216,7 @@ impl NodeDef {
     /// Slot enum discriminator used by authored TOML.
     pub fn variant_name(&self) -> &'static str {
         match self {
-            Self::Project(_) => PROJECT_VARIANT,
+            Self::Module(_) => MODULE_VARIANT,
             Self::Button(_) => BUTTON_VARIANT,
             Self::Clock(_) => CLOCK_VARIANT,
             Self::Texture(_) => TEXTURE_VARIANT,
@@ -242,7 +242,7 @@ impl NodeDef {
         let base = SlotPath::root();
         let base = &base;
         match self {
-            Self::Project(project) => project
+            Self::Module(project) => project
                 .nodes
                 .entries
                 .iter()
@@ -321,9 +321,9 @@ impl NodeDef {
         Self::body_changed(before, after)
     }
 
-    pub fn as_project(&self) -> Option<&ProjectDef> {
+    pub fn as_module(&self) -> Option<&ModuleDef> {
         match self {
-            Self::Project(def) => Some(def),
+            Self::Module(def) => Some(def),
             _ => None,
         }
     }
@@ -488,7 +488,7 @@ pub fn resolve_artifact_specifier(
 impl SlotAccess for NodeDef {
     fn shape_id(&self) -> SlotShapeId {
         match self {
-            Self::Project(def) => def.shape_id(),
+            Self::Module(def) => def.shape_id(),
             Self::Button(def) => def.shape_id(),
             Self::Clock(def) => def.shape_id(),
             Self::Texture(def) => def.shape_id(),
@@ -504,7 +504,7 @@ impl SlotAccess for NodeDef {
 
     fn data(&self) -> SlotDataAccess<'_> {
         match self {
-            Self::Project(def) => def.data(),
+            Self::Module(def) => def.data(),
             Self::Button(def) => def.data(),
             Self::Clock(def) => def.data(),
             Self::Texture(def) => def.data(),
@@ -530,7 +530,7 @@ impl SlotAccess for NodeDef {
 impl SlotMutAccess for NodeDef {
     fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
         match self {
-            Self::Project(def) => def.data_mut(),
+            Self::Module(def) => def.data_mut(),
             Self::Button(def) => def.data_mut(),
             Self::Clock(def) => def.data_mut(),
             Self::Texture(def) => def.data_mut(),
@@ -574,102 +574,6 @@ impl core::fmt::Display for NodeDefWriteError {
 }
 
 impl core::error::Error for NodeDefWriteError {}
-
-/// Result of probing an authored JSON artifact for the project format version.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProjectFormatProbe {
-    /// The top-level `kind` is `Project`; carries the top-level `format` key.
-    Project { format: Option<u32> },
-    /// Not a project artifact; format gating does not apply.
-    NotProject,
-}
-
-/// Streaming probe for the top-level `"format"` version in an authored JSON
-/// project root. Uses syntax events like the `kind` probe so loaders can gate
-/// [`crate::PROJECT_FORMAT_VERSION`] without materializing a value tree.
-///
-/// Kinds other than `Project` (or a missing/non-string `kind`) probe as
-/// [`ProjectFormatProbe::NotProject`]: format gating applies only to project
-/// roots, and the real parse owns diagnostics for malformed artifacts. A
-/// present but non-integer `format` is a syntax error.
-pub fn read_project_format_json(text: &str) -> Result<ProjectFormatProbe, NodeDefParseError> {
-    use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
-
-    let syntax_error = |error: crate::slot_codec::SyntaxError| NodeDefParseError::Syntax {
-        error: error.to_string(),
-    };
-
-    let mut source = JsonSyntaxSource::new(text).map_err(syntax_error)?;
-    match source.next_event().map_err(syntax_error)? {
-        Some(SyntaxEvent::StartObject { .. }) => {}
-        _ => {
-            return Err(NodeDefParseError::Syntax {
-                error: String::from("node definition JSON root must be an object"),
-            });
-        }
-    }
-
-    // Scan top-level props, skipping nested values by depth.
-    let mut is_project = false;
-    let mut format = None;
-    let mut depth = 0usize;
-    loop {
-        let Some(event) = source.next_event().map_err(syntax_error)? else {
-            break;
-        };
-        match event {
-            SyntaxEvent::Prop { name, .. } if depth == 0 && name == "kind" => {
-                let mut kind = String::new();
-                loop {
-                    match source.next_event().map_err(syntax_error)? {
-                        Some(SyntaxEvent::StringChunk { text, is_last, .. }) => {
-                            kind.push_str(&text);
-                            if is_last {
-                                break;
-                            }
-                        }
-                        // Non-string kind: the real parse owns that diagnostic.
-                        _ => return Ok(ProjectFormatProbe::NotProject),
-                    }
-                }
-                if kind != PROJECT_VARIANT {
-                    return Ok(ProjectFormatProbe::NotProject);
-                }
-                is_project = true;
-            }
-            SyntaxEvent::Prop { name, .. } if depth == 0 && name == "format" => {
-                let value = match source.next_event().map_err(syntax_error)? {
-                    Some(SyntaxEvent::Number { text, .. }) => text.parse::<u32>().ok(),
-                    _ => None,
-                };
-                let Some(value) = value else {
-                    return Err(NodeDefParseError::Syntax {
-                        error: String::from("field `format` must be an unsigned integer"),
-                    });
-                };
-                format = Some(value);
-            }
-            SyntaxEvent::StartObject { .. } | SyntaxEvent::StartArray { .. } => depth += 1,
-            SyntaxEvent::EndArray { .. } => depth = depth.saturating_sub(1),
-            SyntaxEvent::EndObject { .. } => {
-                if depth == 0 {
-                    break;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-        if is_project && format.is_some() {
-            break;
-        }
-    }
-
-    if is_project {
-        Ok(ProjectFormatProbe::Project { format })
-    } else {
-        Ok(ProjectFormatProbe::NotProject)
-    }
-}
 
 fn downcast_node_artifact(
     object: alloc::boxed::Box<dyn crate::SlotMutAccess>,
@@ -903,14 +807,14 @@ mod tests {
         let project = NodeDef::read_json(
             &registry,
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "nodes": {
     "texture": { "ref": "./texture.json" }
   }
 }"#,
         )
         .expect("project");
-        assert!(matches!(project, NodeDef::Project(_)));
+        assert!(matches!(project, NodeDef::Module(_)));
 
         let texture = NodeDef::read_json(
             &registry,
@@ -985,46 +889,6 @@ mod tests {
         )
         .expect("fixture");
         assert!(matches!(fixture, NodeDef::Fixture(_)));
-    }
-
-    #[test]
-    fn project_format_probe_reads_top_level_format() {
-        // Deliberately not PROJECT_FORMAT_VERSION: the probe reports whatever
-        // the file says, and the gate compares — the probe must not know the
-        // current version.
-        let probe = read_project_format_json(r#"{ "kind": "Project", "format": 1, "nodes": {} }"#)
-            .expect("probe");
-        assert_eq!(probe, ProjectFormatProbe::Project { format: Some(1) });
-
-        let probe = read_project_format_json(r#"{ "kind": "Project", "nodes": {} }"#)
-            .expect("probe missing format");
-        assert_eq!(probe, ProjectFormatProbe::Project { format: None });
-
-        let probe = read_project_format_json(
-            r#"{ "kind": "Texture", "size": { "width": 1, "height": 2 } }"#,
-        )
-        .expect("probe non-project");
-        assert_eq!(probe, ProjectFormatProbe::NotProject);
-    }
-
-    #[test]
-    fn project_format_probe_skips_nested_format_keys() {
-        let probe = read_project_format_json(
-            r#"{ "kind": "Project", "nodes": { "child": { "format": 7 } } }"#,
-        )
-        .expect("probe");
-        assert_eq!(probe, ProjectFormatProbe::Project { format: None });
-    }
-
-    #[test]
-    fn project_format_probe_rejects_non_integer_format() {
-        let err = read_project_format_json(r#"{ "kind": "Project", "format": "one" }"#)
-            .expect_err("string format");
-        assert!(err.to_string().contains("unsigned integer"), "{err}");
-
-        let err = read_project_format_json(r#"{ "kind": "Project", "format": -1 }"#)
-            .expect_err("negative format");
-        assert!(err.to_string().contains("unsigned integer"), "{err}");
     }
 
     #[test]
@@ -1107,7 +971,7 @@ mod tests {
     fn node_def_invocation_sites_cover_project_and_playlist() {
         let project = NodeDef::from_json_str(
             r#"{
-  "kind": "Project",
+  "kind": "Module",
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -1230,11 +1094,11 @@ mod tests {
     #[test]
     fn node_def_shell_change_tracks_child_ref_changes() {
         let before = NodeDef::from_json_str(
-            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./a.json" } } }"#,
+            r#"{ "kind": "Module", "nodes": { "a": { "ref": "./a.json" } } }"#,
         )
         .expect("before");
         let ref_changed = NodeDef::from_json_str(
-            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./b.json" } } }"#,
+            r#"{ "kind": "Module", "nodes": { "a": { "ref": "./b.json" } } }"#,
         )
         .expect("ref changed");
 
@@ -1246,7 +1110,7 @@ mod tests {
     #[test]
     fn node_def_default_for_kind_covers_every_kind() {
         for kind in [
-            NodeKind::Project,
+            NodeKind::Module,
             NodeKind::Button,
             NodeKind::Clock,
             NodeKind::Texture,

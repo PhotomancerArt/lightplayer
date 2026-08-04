@@ -208,7 +208,7 @@ impl ClientIo for ScriptedClientIo {
 
 fn single_product_project_view(node_id: u32) -> ProjectView {
     let revision = Revision::new(1);
-    let path = TreePath::parse("/demo.project/orbit.shader").unwrap();
+    let path = TreePath::parse("/demo.module/orbit.shader").unwrap();
     let state_shape = SlotShapeId::new(700);
     let mut view = ProjectView::new();
     view.tree.insert(TreeEntryView::new(
@@ -661,7 +661,7 @@ fn console_commands_are_never_coalesced_and_keep_their_order() {
 
 fn slot_address(path: &str) -> crate::ProjectSlotAddress {
     crate::ProjectSlotAddress::new(
-        crate::ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+        crate::ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
         crate::ProjectSlotRoot::def(),
         lpc_model::SlotPath::parse(path).unwrap(),
     )
@@ -784,6 +784,103 @@ fn revert_between_set_values_is_a_coalescing_barrier() {
             ("controls.rate".to_string(), Some(2.0)),
         ],
         "nothing coalesces across a Revert"
+    );
+}
+
+// P9 (panel.md P8): per-(scope, channel) PanelWrite coalescing — a knob
+// drag over the command path floods exactly like a SetValue drag and must
+// bound the same way.
+// ---------------------------------------------------------------------------
+
+fn panel_scope(owner: u32) -> lpc_wire::WireScopeRef {
+    lpc_wire::WireScopeRef::Module {
+        owner: lpc_model::NodeId::new(owner),
+    }
+}
+
+fn panel_write_action(owner: u32, channel: &str, value: f32) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PanelWriteOp {
+            scope: panel_scope(owner),
+            channel: channel.to_string(),
+            value: LpValue::F32(value),
+            ttl_ms: None,
+        },
+    ))
+}
+
+fn planned_panel_writes(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
+    plan.actions
+        .iter()
+        .map(|action| match action.op_as::<crate::PanelWriteOp>() {
+            Some(op) => (
+                op.channel.clone(),
+                match &op.value {
+                    LpValue::F32(value) => Some(*value),
+                    _ => None,
+                },
+            ),
+            None => ("other".to_string(), None),
+        })
+        .collect()
+}
+
+#[test]
+fn rapid_panel_writes_for_one_target_coalesce_to_the_last() {
+    let plan = CommandPlan::from_batch(vec![
+        panel_write_action(1, "speed", 1.0),
+        panel_write_action(1, "speed", 2.0),
+        panel_write_action(1, "speed", 3.0),
+    ]);
+
+    assert_eq!(
+        planned_panel_writes(&plan),
+        vec![("speed".to_string(), Some(3.0))],
+        "a drag flood collapses to the newest value"
+    );
+}
+
+#[test]
+fn panel_writes_coalesce_per_scope_and_channel_not_globally() {
+    let plan = CommandPlan::from_batch(vec![
+        panel_write_action(1, "speed", 1.0),
+        panel_write_action(1, "hue", 0.2),
+        panel_write_action(2, "speed", 9.0),
+        panel_write_action(1, "speed", 2.0),
+    ]);
+
+    assert_eq!(
+        planned_panel_writes(&plan),
+        vec![
+            ("speed".to_string(), Some(2.0)),
+            ("hue".to_string(), Some(0.2)),
+            ("speed".to_string(), Some(9.0)),
+        ],
+        "same (scope, channel) coalesces; a different scope or channel never does"
+    );
+}
+
+#[test]
+fn a_panel_clear_is_a_coalescing_barrier_between_writes() {
+    let plan = CommandPlan::from_batch(vec![
+        panel_write_action(1, "speed", 1.0),
+        StudioCommand::Action(UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            crate::PanelClearOp {
+                request: lpc_wire::WirePanelClearRequest::Channel {
+                    scope: panel_scope(1),
+                    channel: "speed".to_string(),
+                },
+            },
+        )),
+        panel_write_action(1, "speed", 2.0),
+    ]);
+
+    assert_eq!(
+        plan.actions.len(),
+        3,
+        "write → clear → write must reach the server in order"
     );
 }
 

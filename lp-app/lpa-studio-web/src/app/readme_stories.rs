@@ -229,7 +229,7 @@ fn readme_home_view() -> UiHomeView {
     let projects = vec![
         UiPackageCard {
             uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
-            kind: "Project".to_string(),
+            kind: "Module".to_string(),
             slug: "2026-07-02-0930-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 2.0 * 3600.0),
             provenance: None,
@@ -244,7 +244,7 @@ fn readme_home_view() -> UiHomeView {
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
-            kind: "Project".to_string(),
+            kind: "Module".to_string(),
             slug: "2026-07-04-1102-evening-glow".to_string(),
             last_saved_at: Some(STORY_NOW - 5.0 * 86_400.0),
             provenance: Some("Remixed from Basic".to_string()),
@@ -255,7 +255,7 @@ fn readme_home_view() -> UiHomeView {
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
-            kind: "Project".to_string(),
+            kind: "Module".to_string(),
             slug: "2026-05-28-1740-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 40.0 * 86_400.0),
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
@@ -311,7 +311,7 @@ fn readme_home_view() -> UiHomeView {
         examples: vec![UiExampleCard {
             id: "examples/basic".to_string(),
             name: "Basic".to_string(),
-            kind: "Project".to_string(),
+            kind: "Module".to_string(),
         }],
         library_available: true,
         opening: None,

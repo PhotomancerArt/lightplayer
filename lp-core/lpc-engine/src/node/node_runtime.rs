@@ -2,7 +2,7 @@
 
 use crate::resource::RuntimeBufferId;
 use lpc_model::{
-    AssetLocation, NodeRuntimeStatus, SlotAccess, SlotPath, SlotShapeRegistry,
+    AssetLocation, NodeRuntimeStatus, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
     SlotShapeRegistryError,
 };
 use lpc_wire::WireNodeCommand;
@@ -96,13 +96,32 @@ pub trait NodeRuntime {
         Ok(AssetRefreshResult::Unused)
     }
 
-    fn destroy(&mut self, ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError>;
+    fn destroy(&mut self, ctx: &mut DestroyCtx) -> Result<(), NodeError>;
 
     fn handle_memory_pressure(
         &mut self,
         level: PressureLevel,
-        ctx: &mut MemPressureCtx<'_>,
+        ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError>;
+
+    /// Whether this node was denied a heavy allocation transient (a shader
+    /// compile) and is waiting for a compile window.
+    ///
+    /// When any alive node reports true, the engine broadcasts
+    /// [`Self::handle_memory_pressure`] to every node at the top of the next
+    /// tick — a safe point where no render borrow is live — and then calls
+    /// [`Self::open_compile_window`], so the deferred transient runs against
+    /// a heap where rebuildable state has been dropped. See the
+    /// memory-pressure contract in
+    /// `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+    fn wants_compile_window(&self) -> bool {
+        false
+    }
+
+    /// The engine broadcast memory pressure and is opening a compile window
+    /// for the tick at `revision`. A node that deferred heavy work may run
+    /// it during this frame's render; the window expires with the frame.
+    fn open_compile_window(&mut self, _revision: Revision) {}
 
     /// Current runtime health, when the node has a more specific status than "ok".
     ///
@@ -182,14 +201,14 @@ mod tests {
     }
 
     impl NodeRuntime for DummyNode {
-        fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+        fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
             Ok(())
         }
 
         fn handle_memory_pressure(
             &mut self,
             _level: PressureLevel,
-            _ctx: &mut MemPressureCtx<'_>,
+            _ctx: &mut MemPressureCtx,
         ) -> Result<(), NodeError> {
             Ok(())
         }

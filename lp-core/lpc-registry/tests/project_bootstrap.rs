@@ -20,18 +20,18 @@ fn can_create_fyeah_sign_project_from_empty_fs_with_artifact_body_mutations() {
     assert!(
         scenario
             .fs()
-            .file_exists(LpPath::new("/project.json"))
+            .file_exists(LpPath::new("/module.json"))
             .unwrap()
     );
 
-    let load = scenario.load_root("/project.json");
+    let load = scenario.load_root("/module.json");
     assert_eq!(load.changes.defs.added.len(), 9);
     assert_eq!(load.changes.assets.added.len(), 3);
 
     assert_loaded_def_kinds(
         scenario.registry(),
         &[
-            ("/project.json", NodeKind::Project),
+            ("/module.json", NodeKind::Module),
             ("/blast.json", NodeKind::Shader),
             ("/button.json", NodeKind::Button),
             ("/clock.json", NodeKind::Clock),

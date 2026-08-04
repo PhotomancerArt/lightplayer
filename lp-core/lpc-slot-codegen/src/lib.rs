@@ -105,7 +105,7 @@ pub struct Wrapped(Nested);
             src.join("node").join("project").join("mod.rs"),
             r#"
 #[derive(Slotted)]
-pub struct ProjectDef {}
+pub struct ModuleDef {}
 "#,
         )
         .unwrap();
@@ -115,7 +115,7 @@ pub struct ProjectDef {}
         assert_eq!(
             shapes,
             vec![StaticRegisteredShape {
-                type_path: String::from("crate::node::project::ProjectDef"),
+                type_path: String::from("crate::node::project::ModuleDef"),
                 has_default_factory: true,
             }]
         );

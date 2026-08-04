@@ -16,16 +16,17 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeCardUiState, NodeUiOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
-    PlaylistActivateOp, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotEditOp, StudioOverlayMutation, StudioProjectReadOutcome,
-    StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError,
-    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
-    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
-    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
+    NodeCardUiState, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PendingAssetEdit,
+    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState,
+    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
+    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
+    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
+    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
+    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
+    UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -134,6 +135,20 @@ pub struct ProjectController {
     /// `ProjectRead`, so the ack-time refresh usually resolves it
     /// immediately; a slower delta resolves on the next applied read).
     pending_focus: Option<PendingNodeFocus>,
+    /// Panel writes dispatched but not yet visible in a probe snapshot —
+    /// the panel's LOCAL ECHO (GV fix 5).
+    ///
+    /// A panel-target knob has no edit buffer behind it (a panel write is a
+    /// runtime command, not an overlay edit), so before this its only
+    /// feedback was the probe round trip and a drag moved at probe cadence.
+    /// An entry here displays as the channel's live reading and reads
+    /// ENGAGED immediately. **Display and control state only** — it never
+    /// touches authored values, the edit buffer, dirty tracking, or the
+    /// wiring drawer's writer/reader lists, all of which stay probe truth.
+    ///
+    /// Entries expire the moment probe truth can carry the value itself:
+    /// see [`ProjectController::expire_converged_panel_writes`].
+    pending_panel_writes: BTreeMap<(lpc_wire::WireScopeRef, String), lpc_model::LpValue>,
     /// The local library, when the platform mounted a store (browser).
     /// Absent on host tests — flows degrade to the legacy deploy path.
     library: Option<LibraryContext>,
@@ -207,6 +222,7 @@ impl ProjectController {
             next_mutation_cmd_id: 1,
             staged_removals: BTreeMap::new(),
             pending_focus: None,
+            pending_panel_writes: BTreeMap::new(),
             library: None,
         }
     }
@@ -364,13 +380,22 @@ impl ProjectController {
         self.sync.as_ref()?.binding_graph()
     }
 
-    /// Project the binding-graph snapshot into the bus pane view.
+    /// Project ONE scope's slice of the binding-graph snapshot into the
+    /// wiring view its module card's drawer renders.
     ///
-    /// `None` before the first snapshot arrives; the pane shows its loading/
-    /// empty state. Node labels and focus actions come from the same node
-    /// controllers the project pane renders, so clicking a site lands on
-    /// exactly that node (D7 linked navigation).
-    pub fn ui_bus_view(&self) -> Option<crate::UiBusView> {
+    /// This is the sidebar bus pane's projection, scoped: the pane listed
+    /// every non-sink channel in the project at once, and the wiring drawer
+    /// lists the channels of the scope whose module owns the card. The row
+    /// shape is untouched (P3 relocates the bus surface, it does not
+    /// redesign it) — node labels and focus actions still come from the
+    /// same node controllers the project pane renders, so clicking a site
+    /// lands on exactly that node (D7 linked navigation).
+    ///
+    /// `None` before the first snapshot arrives; a scope with no channels
+    /// projects `Some` with an empty list, so the drawer can say so (a
+    /// module publishing nothing is a legitimate shape, not a loading
+    /// state).
+    pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
         let site = |index: &u32| -> Option<crate::UiBusSiteView> {
             let binding = graph.bindings.get(*index as usize)?;
@@ -387,7 +412,19 @@ impl ProjectController {
         let channels = graph
             .channels
             .iter()
+            // Sink rows (playlist entries, wire 8) feed panel liveness only
+            // — the wiring drawer keeps R2's presentation: channels private
+            // to an entry never show as project wiring. A sink scope can
+            // never equal a module scope, so this is belt-and-braces.
+            .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
+            .filter(|channel| channel.scope == Some(scope))
             .map(|channel| crate::UiBusChannelView {
+                scope: channel.scope,
+                // No scope label: every row here belongs to the scope of
+                // the card the drawer hangs off, so the card header
+                // already carries the identity the sidebar pane had to
+                // spell out per row.
+                scope_label: None,
                 name: channel.name.clone(),
                 kind: channel.kind.map(|kind| format!("{kind:?}")),
                 value: channel
@@ -396,7 +433,7 @@ impl ProjectController {
                     .and_then(|value| value.value.as_ref())
                     .map(format_lp_value),
                 value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
-                primary_visual: channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL,
+                primary_visual: channel.primary_visual,
                 writers: channel.providers.iter().filter_map(site).collect(),
                 readers: channel.consumers.iter().filter_map(site).collect(),
             })
@@ -417,7 +454,7 @@ impl ProjectController {
         let channel = graph
             .channels
             .iter()
-            .find(|channel| channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL)?;
+            .find(|channel| channel.primary_visual)?;
         let value = channel.value.as_ref()?.value.as_ref()?;
         let lpc_model::LpValue::Product(product) = value else {
             return None;
@@ -437,6 +474,10 @@ impl ProjectController {
                 graph
                     .channels
                     .iter()
+                    // Sink rows feed panel liveness, not the authoring
+                    // surface: a channel private to a playlist entry is not
+                    // something the picker should offer (R2 presentation).
+                    .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
                     .map(|channel| {
                         (
                             channel.name.clone(),
@@ -482,8 +523,28 @@ impl ProjectController {
         self.root_nodes.iter().find_map(|node| walk(node, id))
     }
 
-    /// Toggle the binding-graph probe on project reads (bus pane visible,
-    /// binding detail open, …).
+    /// Whether the server is saving panel state for this project
+    /// (panel.md P11), as of the last runtime read.
+    ///
+    /// The P11 switch's READ path. It rides `ServerRuntimeStatus` on the
+    /// ordinary project read Studio makes every refresh rather than a
+    /// message of its own, so the toggle converges exactly the way engaged
+    /// panel writers do — a rejected or racing write simply loses on the
+    /// next pull. `None` from a server that does not report it (an
+    /// engine-only read), which renders NO toggle rather than a wrong one.
+    pub fn panel_auto_save(&self) -> Option<bool> {
+        self.sync
+            .as_ref()?
+            .project_view()
+            .runtime
+            .as_ref()?
+            .server
+            .as_ref()?
+            .panel_auto_save
+    }
+
+    /// Toggle the binding-graph probe on project reads (module faces need
+    /// the graph, binding detail open, …).
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
         if let Some(sync) = self.sync.as_mut() {
             sync.set_binding_graph_subscribed(subscribed);
@@ -585,10 +646,24 @@ impl ProjectController {
             // the authoring surface is built, so Retarget/Unbind state never
             // carries the churning value (P6 item 1).
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
-                && let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint
-                && let Some(live) = live_channel_value(graph, channel, binding.kind)
+                && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
+                && let Some(live) =
+                    self.live_channel_display(graph, scope.as_ref(), channel, binding.kind)
             {
                 endpoint = endpoint.with_live_value(live);
+            }
+            // A consumed bus channel is a panel-write target (panel.md P1):
+            // the control built over this wiring dispatches PanelWrite at
+            // this (scope, channel) instead of editing the authored default.
+            if binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint
+                && let Some(scope) = scope
+            {
+                endpoint = endpoint.with_panel_target(crate::UiPanelTarget {
+                    scope: *scope,
+                    channel: channel.clone(),
+                    engaged: self.panel_engaged(graph, scope, channel),
+                });
             }
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
                 .with_description("Runtime slot wired by binding; it has no authored value here.")
@@ -612,7 +687,7 @@ impl ProjectController {
         endpoint: &lpc_wire::WireBindingEndpoint,
     ) -> crate::UiBindingEndpoint {
         match endpoint {
-            lpc_wire::WireBindingEndpoint::Bus { channel } => {
+            lpc_wire::WireBindingEndpoint::Bus { channel, .. } => {
                 crate::UiBindingEndpoint::new(format!("bus:{channel}"))
             }
             lpc_wire::WireBindingEndpoint::NodeSlot { node, slot } => {
@@ -911,11 +986,13 @@ impl ProjectController {
         out
     }
 
-    /// Human-readable project name for the agent's system prompt (the
-    /// synced root label, like the project pane title).
+    /// Human-readable project name for the agent's system prompt — the
+    /// same title the project pane and the root card show.
     pub(crate) fn agent_project_name(&self) -> String {
         match &self.state {
-            ProjectState::Ready { project_id, .. } => self.project_name(project_id),
+            ProjectState::Ready { project_id, .. } => {
+                self.project_name(self.active_manifest().as_ref(), project_id)
+            }
             _ => "project".to_string(),
         }
     }
@@ -1383,7 +1460,7 @@ impl ProjectController {
             if binding.direction != lpc_wire::WireBindingDirection::Consumes {
                 continue;
             }
-            let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint else {
+            let lpc_wire::WireBindingEndpoint::Bus { scope, channel } = &binding.endpoint else {
                 continue;
             };
             let Some(slot) = binding.slot.as_ref() else {
@@ -1392,7 +1469,9 @@ impl ProjectController {
             let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
                 continue;
             };
-            let Some(live) = live_channel_value(graph, channel, binding.kind) else {
+            let Some(live) =
+                self.live_channel_display(graph, scope.as_ref(), channel, binding.kind)
+            else {
                 continue;
             };
             updates.push((binding.node, name.as_str().to_string(), live));
@@ -1549,12 +1628,19 @@ impl ProjectController {
 
     /// Project the synced controller tree into the project editor shell DTO.
     ///
-    /// Flat-root workspace (P6): a tree root never renders as a workspace
-    /// card — its child panes are the top-level `nodes` entries, and the
-    /// root's own config slot rows ride `root_slots` into the project pane's
-    /// detail popup ("Project settings"). The project-level [`DirtySummary`]
-    /// therefore walks the controllers (root included) rather than summing
-    /// the card headers, so root-slot edits (a project rename) still count.
+    /// **Root card restored** (`docs/design/modules.md` §5, the flat-root
+    /// reversal): the tree root IS the single top-level `nodes` entry, and
+    /// every other node rides its `UiNodeView::children` as a nested card.
+    /// The root now does something — it wears the module face, whose panel
+    /// is the root scope's channel list — so hiding it stopped making
+    /// sense.
+    ///
+    /// Its own config slot rows still ride `root_slots` into the project
+    /// pane's detail popup ("Project settings"); moving them onto the
+    /// restored card is a later step. The project-level [`DirtySummary`]
+    /// keeps walking the controllers (root included) rather than summing
+    /// the card headers, so root-slot edits (a project rename) still count
+    /// exactly once.
     pub fn editor_view(
         &self,
         project_id: &str,
@@ -1574,7 +1660,6 @@ impl ProjectController {
         let mut nodes = self
             .root_nodes
             .iter()
-            .flat_map(NodeController::children)
             .map(|node| {
                 node.ui_node_with_product_previews(
                     &product_preview,
@@ -1598,6 +1683,25 @@ impl ProjectController {
             // playlist's picker honest with the project pane's.
             self.gate_add_node_menus(node);
         }
+        // The root card IS the project (GV fix 4): its header carries the
+        // project's display name rather than the runtime tree's root
+        // segment, which is derived from the storage folder and read
+        // "Studio" for every library project. Applied before the faces
+        // derive so the root panel group wears the same name.
+        //
+        // The manifest is read once and threaded to both consumers (the
+        // title and the project popup's identity rows) — reading
+        // `project.json` off the package fs is the expensive half, and this
+        // runs on every view build.
+        let manifest = self.active_manifest();
+        let project_name = self.project_name(manifest.as_ref(), project_id);
+        if let Some(root) = nodes.first_mut() {
+            root.header.title = project_name.clone();
+        }
+        // Module faces derive LAST: a module's panel aggregates the panel
+        // targets its finished subtree carries, so every card below it must
+        // already be built (and card-UI-overlaid) before it can be read.
+        self.apply_module_faces(&mut nodes);
         let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
         gate_add_node_menu(
             &mut root_add_node_menu,
@@ -1625,9 +1729,10 @@ impl ProjectController {
             self.node_tree_view(),
             nodes,
         )
-        .with_project_name(self.project_name(project_id))
+        .with_project_name(project_name)
         .with_channel_choices(self.ui_channel_choices())
         .with_root_slots(root_slots)
+        .with_manifest(manifest)
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
         .with_debug_overrides(edits.debug_override_count())
@@ -1637,16 +1742,31 @@ impl ProjectController {
         .with_edits_in_flight(self.edits_in_flight())
     }
 
-    /// Human-readable project name for the project pane title: the synced
-    /// root node's label, falling back to the project id until the tree has
-    /// synced (the pane's kind label already says "Project", so the title
-    /// carries the name).
-    fn project_name(&self, project_id: &str) -> String {
-        self.root_nodes
-            .first()
-            .map(|node| node.label().to_string())
-            .filter(|label| !label.is_empty())
-            .unwrap_or_else(|| project_id.to_string())
+    /// Human-readable project name for the project pane title and the root
+    /// card's header (GV fix 4).
+    ///
+    /// The **container manifest's `name`** leads: it is the field whose
+    /// whole job is to be the project's display name. The root node's
+    /// tree label is only a fallback, because that label is derived from
+    /// the runtime tree's root path, which the server sanitizes out of the
+    /// project's STORAGE FOLDER (`lpa_server::project_root_path`) — and the
+    /// Studio's own library projects live in a folder called `studio`, so
+    /// every one of them read "Studio". Last resort is the project id.
+    ///
+    /// The root module def carries no authored label slot today; when one
+    /// arrives it takes precedence over all of this. Naming a node after
+    /// its type/role automatically is deliberately NOT attempted here (see
+    /// the auto-naming entry in the modules-vision future-work register).
+    fn project_name(
+        &self,
+        manifest: Option<&crate::UiProjectManifest>,
+        project_id: &str,
+    ) -> String {
+        project_display_title(
+            manifest.and_then(|manifest| manifest.name.as_deref()),
+            self.root_nodes.first().map(|node| node.label()),
+            project_id,
+        )
     }
 
     pub fn mark_connecting_running(&mut self) {
@@ -1681,9 +1801,14 @@ impl ProjectController {
             handle_id,
             inventory,
         };
-        // The bus pane ships with every loaded project, so its probe rides
-        // along from the first read (unsubscribing stays available for
-        // consumers without the pane).
+        // The binding-graph probe rides EVERY read of a ready project: the
+        // sidebar bus pane it was originally armed for is gone (P3), and
+        // what needs the graph now is the module-face derivation itself —
+        // panel control state, the wiring drawer, the scope's channels.
+        // Without a snapshot a module card has no face at all, so the
+        // subscription is a property of "a project is connected", not of
+        // any pane's visibility. (Unsubscribing stays available for
+        // consumers that render no faces.)
         let mut sync = ProjectSync::new();
         sync.set_binding_graph_subscribed(true);
         self.sync = Some(sync);
@@ -2103,9 +2228,361 @@ impl ProjectController {
     /// see the session; the gate therefore lands here, at the one place
     /// that knows the lens, so a playlist's "+" agrees with the project
     /// pane's.
+    ///
+    /// The walk descends the nested-card tree: after the flat-root reversal
+    /// a playlist is always a [`crate::UiNodeChild`] under the root card, so
+    /// an un-recursed gate would leave every playlist picker ungated.
     fn gate_add_node_menus(&self, node: &mut UiNodeView) {
         if let Some(menu) = node.add_node_menu.as_mut() {
             gate_add_node_menu(menu, self.lens_device_features.as_deref());
+        }
+        self.gate_child_add_node_menus(&mut node.children);
+    }
+
+    fn gate_child_add_node_menus(&self, children: &mut [crate::UiNodeChild]) {
+        for child in children {
+            if let Some(menu) = child.add_node_menu.as_mut() {
+                gate_add_node_menu(menu, self.lens_device_features.as_deref());
+            }
+            self.gate_child_add_node_menus(&mut child.children);
+        }
+    }
+
+    /// Derive the **module face** for every module card in the workspace
+    /// (`docs/design/modules.md` §5, `docs/design/panel.md` P1).
+    ///
+    /// A module card's face is its output mirror plus its scope's panel; the
+    /// panel's controls are exactly the widget controls its subtree already
+    /// derived whose `panel_target` names THIS module's scope. Nothing is
+    /// re-derived here — a knob appears on the module panel and on its own
+    /// card as the SAME `UiPanelControl`, which is what keeps one control's
+    /// two views in lockstep.
+    ///
+    /// The walk is bottom-up: a child module's panel is a nested group on
+    /// its parent's, so children must be finished first.
+    ///
+    /// Nothing derives without a binding-graph snapshot — panel state
+    /// (following / at default) is read off the graph's channel rows, and a
+    /// face that guessed them would be worse than no face.
+    fn apply_module_faces(&self, nodes: &mut [UiNodeView]) {
+        let Some(graph) = self.binding_graph() else {
+            return;
+        };
+        for node in nodes {
+            self.apply_child_module_faces(&mut node.children, graph);
+            if node.header.kind != MODULE_KIND_LABEL {
+                continue;
+            }
+            if let Some(face) = self.module_face(
+                graph,
+                &node.header.title,
+                &node.header.path,
+                view_sections(node),
+                &node.children,
+                node.card_ui.wiring_open,
+            ) {
+                node.face = Some(crate::UiNodeFace::Module(face));
+            }
+        }
+    }
+
+    fn apply_child_module_faces(
+        &self,
+        children: &mut [crate::UiNodeChild],
+        graph: &lpc_wire::WireBindingGraph,
+    ) {
+        for child in children {
+            self.apply_child_module_faces(&mut child.children, graph);
+            if child.kind != MODULE_KIND_LABEL {
+                continue;
+            }
+            if let Some(face) = self.module_face(
+                graph,
+                &child.label,
+                &child.detail,
+                &child.sections,
+                &child.children,
+                child.card_ui.wiring_open,
+            ) {
+                child.face = Some(crate::UiNodeFace::Module(face));
+            }
+        }
+    }
+
+    /// One module card's face. `None` when the card's address resolves to no
+    /// controller (a card built from a tree the controllers no longer carry).
+    fn module_face(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        label: &str,
+        path: &str,
+        sections: &[crate::UiNodeSection],
+        children: &[crate::UiNodeChild],
+        wiring_open: bool,
+    ) -> Option<crate::UiModuleFace> {
+        let address = ProjectNodeAddress::parse(path).ok()?;
+        let node = self.node(&address)?;
+        let owner = node.target().node_id;
+        let scope = lpc_wire::WireScopeRef::Module { owner };
+
+        let controls = self.scoped_panel_controls(graph, scope, children);
+
+        // Presentation recursion (R8): each direct child module's finished
+        // panel rides along as a nested group. Nothing is promoted — the
+        // group still belongs to the child's own scope.
+        let mut groups: Vec<crate::UiPanelGroup> = children
+            .iter()
+            .filter_map(|child| match &child.face {
+                Some(crate::UiNodeFace::Module(face)) => Some(face.panel.clone()),
+                _ => None,
+            })
+            .collect();
+        // R9: the ACTIVE playlist entry's controls bubble up too. An entry's
+        // scope is a SINK, not a module, so its controls match no module
+        // panel by scope and would otherwise be visible only on the entry's
+        // own card — which is how fyeah's root panel came to render empty
+        // while its idle shader carried two knobs. The group is the entry's,
+        // not the playlist's: its reset clears the entry's writers.
+        self.collect_playlist_entry_groups(graph, children, &mut groups);
+
+        // The module's own visual mirror (R7); a module with no visual
+        // simply has no hero (E6). The mirror ROW supplies identity and
+        // meta, but its bytes ride the scope's resolved `visual.out`
+        // product: the mirror's own product ref is outside the preview
+        // stream (only the primary visual and the focused node's products
+        // are tracked), so without this rehoming the root hero renders
+        // black while the shader card below it is live.
+        let mut preview =
+            super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
+        if let Some(hero) = preview.as_mut()
+            && let Some(product) = graph
+                .channels
+                .iter()
+                .find(|channel| {
+                    channel.scope == Some(scope)
+                        && channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL
+                })
+                .and_then(|channel| channel.value.as_ref())
+                .and_then(|value| value.value.as_ref())
+                .and_then(|value| match value {
+                    lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
+                        Some(UiProductRef::from_product_ref(*product))
+                    }
+                    _ => None,
+                })
+            && let Some(bytes) = self
+                .sync
+                .as_ref()
+                .and_then(|sync| sync.product_preview(&product))
+        {
+            hero.preview = bytes.clone();
+            let primary = self.primary_visual_product();
+            hero.tracking = if primary.as_ref() == Some(&product) {
+                crate::UiProductTrackingState::Tracking
+            } else {
+                crate::UiProductTrackingState::Paused
+            };
+            hero.product = Some(product);
+        }
+
+        Some(crate::UiModuleFace {
+            preview,
+            panel: crate::UiPanelGroup::new(label, path)
+                .with_target(scope)
+                .with_controls(controls)
+                .with_groups(groups),
+            // Bus-as-wiring, hung off the module that OWNS the scope — the
+            // sidebar bus pane's whole content, relocated (P3). `Some` even
+            // with no channels: the drawer's empty state explains scope
+            // publicity, and a module publishing nothing is a real shape.
+            wiring: self.ui_bus_view_for_scope(scope),
+            wiring_open,
+            provenance: self.module_provenance(node),
+            // The panel-state file is per project folder, so the switch
+            // belongs to the project's ROOT module and an embedded one
+            // repeats nothing (P11).
+            auto_save: self
+                .is_root_module(owner)
+                .then(|| self.panel_auto_save())
+                .flatten(),
+        })
+    }
+
+    /// Every panel control a card subtree already derived whose
+    /// `panel_target` names `scope`, deduplicated per channel.
+    ///
+    /// One `(scope, channel)` is ONE control (panel.md P1) however many
+    /// cards below consume it; the first one found wins. Shared by the
+    /// module panel and by a playlist entry's bubbled-up group, so a knob
+    /// reaching a panel through either door is the SAME `UiPanelControl`
+    /// the card below renders.
+    fn scoped_panel_controls(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: lpc_wire::WireScopeRef,
+        children: &[crate::UiNodeChild],
+    ) -> Vec<crate::UiPanelControlView> {
+        let mut controls: Vec<crate::UiPanelControlView> = Vec::new();
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for control in subtree_panel_controls(children) {
+            let Some(target) = control
+                .panel_target
+                .as_ref()
+                .filter(|target| target.scope == scope)
+            else {
+                continue;
+            };
+            if !seen.insert(target.channel.clone()) {
+                continue;
+            }
+            let (state, source) = self.panel_control_state(graph, scope, target);
+            controls.push(crate::UiPanelControlView {
+                channel: target.channel.clone(),
+                control: control.clone(),
+                state,
+                source,
+            });
+        }
+        controls
+    }
+
+    /// Walk a module's card subtree for playlists and append one group per
+    /// playlist whose ACTIVE entry publishes controls (R9).
+    ///
+    /// The walk stops at two kinds of card: a child MODULE owns its own
+    /// scope (its panel already rides along as its own group), and a
+    /// PLAYLIST's entry subtree belongs to that entry's sink scope, not to
+    /// this module's — so neither is descended past.
+    fn collect_playlist_entry_groups(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        children: &[crate::UiNodeChild],
+        out: &mut Vec<crate::UiPanelGroup>,
+    ) {
+        for child in children {
+            if child.kind == MODULE_KIND_LABEL {
+                continue;
+            }
+            let Some(crate::UiNodeFace::Playlist(face)) = child.face.as_ref() else {
+                self.collect_playlist_entry_groups(graph, &child.children, out);
+                continue;
+            };
+            if let Some(group) = self.playlist_entry_group(graph, child, face) {
+                out.push(group);
+            }
+        }
+    }
+
+    /// One playlist's ACTIVE-entry group: the entry's own controls, labeled
+    /// by the entry (fyeah's root panel shows an "idle" cluster), targeting
+    /// the entry's SINK scope so the group reset clears exactly the writers
+    /// that entry engaged.
+    ///
+    /// `None` — no group at all — when the playlist has no resolved active
+    /// entry, its card is not backed by a controller, or the active entry
+    /// publishes nothing: an empty cluster is worse than no cluster.
+    fn playlist_entry_group(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        card: &crate::UiNodeChild,
+        face: &crate::UiPlaylistFace,
+    ) -> Option<crate::UiPanelGroup> {
+        let entry = face.active?;
+        let address = ProjectNodeAddress::parse(&card.detail).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        let scope = lpc_wire::WireScopeRef::Sink { owner, entry };
+        // The playlist face keeps ONLY the active entry's child (the one
+        // live surface rule), so the shown child IS the entry's card.
+        let entry_card = card.children.first()?;
+        let controls = self.scoped_panel_controls(graph, scope, core::slice::from_ref(entry_card));
+        if controls.is_empty() {
+            return None;
+        }
+        let label = face
+            .entries
+            .iter()
+            .find(|candidate| candidate.key == entry)
+            .map(|candidate| candidate.name.clone())
+            .unwrap_or_else(|| entry_card.label.clone());
+        Some(
+            crate::UiPanelGroup::new(label, entry_card.detail.clone())
+                .with_target(scope)
+                .with_controls(controls),
+        )
+    }
+
+    /// Whether `owner` is the project's root module — the one card that
+    /// presents project-level switches (today: panel auto-save).
+    fn is_root_module(&self, owner: NodeId) -> bool {
+        self.root_nodes
+            .first()
+            .is_some_and(|root| root.target().node_id == owner)
+    }
+
+    /// The compact provenance footer ("Yona · v0.4 · CC0-1.0"): the
+    /// authored [`lpc_model::nodes::ProvenanceDef`] fields the module's def
+    /// carries, present ones only, in declaration order. `None` when the
+    /// module authored none — most do not, and an empty rule line would be
+    /// worse than no line (§8).
+    fn module_provenance(&self, node: &NodeController) -> Option<String> {
+        let parts: Vec<String> = ["author", "version", "license", "created"]
+            .into_iter()
+            .filter_map(|field| {
+                // `OptionSlot<ValueSlot<String>>` under `OptionSlot<Provenance>`:
+                // both options contribute a `some` hop.
+                match def_slot_value(node, &["provenance", "some", field, "some"])? {
+                    lpc_model::LpValue::String(text) if !text.is_empty() => Some(text.clone()),
+                    _ => None,
+                }
+            })
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
+    /// Which of the three panel states a control is in, and what owns its
+    /// displayed value while it is reading (`docs/design/panel.md` P2).
+    fn panel_control_state(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: lpc_wire::WireScopeRef,
+        target: &crate::UiPanelTarget,
+    ) -> (crate::UiPanelControlState, Option<String>) {
+        // `target.engaged` already folds in the local echo (GV fix 5); the
+        // pending map is consulted again here because a control can reach a
+        // panel carrying a target built before the write.
+        if target.engaged
+            || self
+                .pending_panel_write(Some(&scope), &target.channel)
+                .is_some()
+        {
+            // The panel itself holds the channel; "who drives it" is this
+            // control, so there is nothing else to name.
+            return (crate::UiPanelControlState::Engaged, None);
+        }
+        let automation = graph
+            .channels
+            .iter()
+            .find(|channel| channel.scope == Some(scope) && channel.name == target.channel)
+            .and_then(|channel| {
+                channel.providers.iter().find_map(|index| {
+                    let binding = graph.bindings.get(*index as usize)?;
+                    // A Panel-origin provider is a writer this very panel
+                    // engaged; it can never be what the control "follows".
+                    (binding.origin != lpc_wire::WireBindingOrigin::Panel).then(|| {
+                        self.node_by_runtime_id(binding.node)
+                            .map(|node| node.label().to_string())
+                            .unwrap_or_else(|| format!("node {}", binding.node.0))
+                    })
+                })
+            });
+        match automation {
+            Some(source) => (crate::UiPanelControlState::ReadFollowing, Some(source)),
+            // No writer anywhere: the consuming slot falls back to its own
+            // authored default (R6), which is exactly what the widget shows.
+            None => (
+                crate::UiPanelControlState::ReadDefault,
+                Some("authored default".to_string()),
+            ),
         }
     }
 
@@ -2157,20 +2634,31 @@ impl ProjectController {
 
     fn node_tree_view(&self) -> ProjectNodeTreeView {
         let edits = self.slot_edit_join();
-        // Flat-root: the project root is the project pane, not a tree row —
-        // its children are the tree's top-level items, matching the workspace
-        // (which renders `root_nodes.flat_map(children)` as the top panes).
+        // The root card is back (the flat-root reversal), so the sidebar
+        // agrees with the workspace: the project root is the tree's one top
+        // row and every other node hangs beneath it. The count includes the
+        // root, since it is now a row like any other. The root row wears
+        // the same display title as the root card and the pane (the
+        // manifest name when authored — the raw tree label is the storage
+        // folder's humanization, "Studio" for every library project).
+        let manifest = self.active_manifest();
+        let root_title = manifest
+            .as_ref()
+            .and_then(|manifest| manifest.name.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
         ProjectNodeTreeView::new(
             self.root_nodes
                 .iter()
-                .flat_map(NodeController::children)
-                .map(|node| self.node_tree_item(node, &edits))
+                .map(|node| {
+                    let mut item = self.node_tree_item(node, &edits);
+                    if let Some(title) = root_title {
+                        item.label = title.to_string();
+                    }
+                    item
+                })
                 .collect(),
-            self.root_nodes
-                .iter()
-                .flat_map(NodeController::children)
-                .map(count_nodes)
-                .sum(),
+            self.root_nodes.iter().map(count_nodes).sum(),
         )
     }
 
@@ -2472,6 +2960,9 @@ impl ProjectController {
         self.root_shape_ids.clear();
         self.staged_removals.clear();
         self.pending_focus = None;
+        // Panel echoes belong to the runtime that was holding the channels
+        // (GV fix 5); the next project's controls start from probe truth.
+        self.pending_panel_writes.clear();
         // the library binding follows the loaded project: a disconnected or
         // failed project must not keep pulling saves into (or advertising)
         // the previously open package. Its host lock is queued for release
@@ -2481,6 +2972,22 @@ impl ProjectController {
                 library.pending_close.push(previous.handle.uid.to_string());
             }
         }
+    }
+
+    /// The container-manifest identity of the open library package, for the
+    /// project popup's read-only settings rows. `None` when no library
+    /// package backs the running project (demo path, unknown device
+    /// project) or the manifest fails to parse — the popup then skips the
+    /// identity rows rather than rendering a broken section.
+    pub fn active_manifest(&self) -> Option<crate::UiProjectManifest> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        let fields = crate::app::library::package_manifest::read_manifest(&*view).ok()?;
+        Some(crate::UiProjectManifest {
+            format: fields.format,
+            uid: fields.uid,
+            name: fields.name,
+        })
     }
 
     /// The `prj_…` uid of the open library package, when the running
@@ -2521,6 +3028,10 @@ impl ProjectController {
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
         let result = self.apply_project_view(sync.project_view());
         self.sync = Some(sync);
+        // A fresh binding-graph snapshot retires the panel's local echoes
+        // it has caught up with (GV fix 5) — before the presentation pass,
+        // which is what reads them.
+        self.expire_converged_panel_writes();
         // The binding presentation reads the overlay mirror and the binding
         // graph through `self.sync`, which was taken out during the view
         // apply — run it now that it is restored.
@@ -2659,6 +3170,195 @@ impl ProjectController {
             WireNodeCommandResponse::Rejected { reason } => UiNotices::new().with_notice(
                 UiNotice::warning(format!("Couldn't activate entry {}: {reason}", op.entry)),
             ),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Record a panel write's value as the control's LOCAL ECHO (GV fix 5).
+    ///
+    /// Called by the studio controller's op executor for every
+    /// [`PanelWriteOp`] it runs, *before* and independent of the wire send:
+    /// the point is to be faster than the round trip, and a write the
+    /// server later refuses simply never converges, so the next snapshot
+    /// carrying no Panel provider leaves probe truth showing through.
+    pub fn note_panel_write(
+        &mut self,
+        scope: lpc_wire::WireScopeRef,
+        channel: &str,
+        value: lpc_model::LpValue,
+    ) {
+        self.pending_panel_writes
+            .insert((scope, channel.to_string()), value);
+    }
+
+    /// Drop echo entries the engine has taken over: a channel whose row now
+    /// carries a Panel-origin provider IS the panel's write, and probe truth
+    /// (including whatever the engine did to the value — clamping, kind
+    /// coercion) is strictly better than the echo of it.
+    ///
+    /// Runs on every applied binding-graph snapshot, so an echo lives at
+    /// most one probe round trip: exactly the window it exists to cover.
+    fn expire_converged_panel_writes(&mut self) {
+        let Some(graph) = self.sync.as_ref().and_then(|sync| sync.binding_graph()) else {
+            return;
+        };
+        self.pending_panel_writes
+            .retain(|(scope, channel), _| !panel_writer_engaged(graph, scope, channel));
+    }
+
+    /// Drop the echo entries a clear releases, immediately — the control
+    /// must fall back to Read on the gesture, not on the next probe.
+    fn drop_pending_panel_writes(&mut self, request: &lpc_wire::WirePanelClearRequest) {
+        match request {
+            lpc_wire::WirePanelClearRequest::Channel { scope, channel } => {
+                self.pending_panel_writes.remove(&(*scope, channel.clone()));
+            }
+            lpc_wire::WirePanelClearRequest::Scope { scope } => {
+                self.pending_panel_writes
+                    .retain(|(pending, _), _| pending != scope);
+            }
+            lpc_wire::WirePanelClearRequest::All => self.pending_panel_writes.clear(),
+        }
+    }
+
+    /// The echoed value for `(scope, channel)`, when a panel write is still
+    /// waiting for probe truth to catch up.
+    fn pending_panel_write(
+        &self,
+        scope: Option<&lpc_wire::WireScopeRef>,
+        channel: &str,
+    ) -> Option<&lpc_model::LpValue> {
+        self.pending_panel_writes
+            .get(&(*scope?, channel.to_string()))
+    }
+
+    /// The channel's live reading for display, echo first: a just-written
+    /// value reads back immediately instead of at probe cadence (GV fix 5).
+    fn live_channel_display(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: Option<&lpc_wire::WireScopeRef>,
+        channel: &str,
+        binding_kind: lpc_model::Kind,
+    ) -> Option<String> {
+        match self.pending_panel_write(scope, channel) {
+            Some(value) => crate::app::project::format_live_scalar(value),
+            None => live_channel_value(graph, scope, channel, binding_kind),
+        }
+    }
+
+    /// Whether a panel writer holds `(scope, channel)` — an echoed write
+    /// counts, so the control reads Engaged (and offers its reset) on the
+    /// gesture rather than a round trip later.
+    fn panel_engaged(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: &lpc_wire::WireScopeRef,
+        channel: &str,
+    ) -> bool {
+        self.pending_panel_write(Some(scope), channel).is_some()
+            || panel_writer_engaged(graph, scope, channel)
+    }
+
+    /// Engage (or update) the panel writer for `(scope, channel)` via
+    /// `WireProjectCommand::PanelWrite` — the runtime command channel, so
+    /// no overlay entry, no dirty flag, no Save-panel row. Quiet on
+    /// acceptance — the engaged badge and live value follow through the
+    /// tightened refresh ticks; a rejection comes back as a warning notice.
+    pub async fn panel_write(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelWriteOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let run = server
+            .panel_write(
+                handle_id,
+                lpc_wire::WirePanelWriteRequest {
+                    scope: op.scope,
+                    channel: op.channel.clone(),
+                    value: op.value,
+                    ttl_ms: op.ttl_ms,
+                },
+            )
+            .await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't set panel control {}: {reason}",
+                    op.channel
+                ))),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Clear engaged panel writers (one control, one scope, or all) via
+    /// `WireProjectCommand::PanelClear`. Same runtime-command posture as
+    /// [`Self::panel_write`].
+    pub async fn panel_clear(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelClearOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        // The echo goes with the writer it echoes (GV fix 5) — releasing a
+        // held control must read as released on the gesture.
+        self.drop_pending_panel_writes(&op.request);
+        let run = server.panel_clear(handle_id, op.request).await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't reset panel control: {reason}"
+                ))),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Flip panel-state auto-save (panel.md P11) via
+    /// `WireProjectCommand::PanelAutoSave`. Same runtime-command posture as
+    /// [`Self::panel_write`]: the new value is not applied locally — it
+    /// arrives on the next read as `ServerRuntimeStatus::panel_auto_save`,
+    /// so a refused write can never leave the switch lying.
+    pub async fn set_panel_auto_save(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PanelAutoSaveOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let run = server
+            .panel_auto_save(
+                handle_id,
+                lpc_wire::WirePanelAutoSaveRequest {
+                    enabled: op.enabled,
+                },
+            )
+            .await?;
+        let notices = match run.response {
+            lpc_wire::WirePanelCommandResponse::Accepted { .. } => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            lpc_wire::WirePanelCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!(
+                    "Couldn't change panel auto-save: {reason}"
+                ))),
         };
         Ok(ProjectEditRun {
             notices,
@@ -3452,6 +4152,16 @@ impl ProjectController {
     /// pattern). `None` when the node's attachment site cannot be resolved
     /// (no delete affordance is offered).
     pub fn node_remove_action(&self, address: &ProjectNodeAddress) -> Option<UiAction> {
+        // The ROOT is never deletable. Since the flat-root reversal it
+        // renders as a card like any other, so it would otherwise wear a
+        // Delete button that removes the project itself — and a root has no
+        // attachment site to remove it from. A one-segment tree path IS the
+        // root (`/demo.module`); `resolve_remove_site` also refuses it (no
+        // parent), but the guard is stated here so the affordance can never
+        // reappear through a different resolution path.
+        if address.path().0.len() <= 1 {
+            return None;
+        }
         let preflight = self.node_remove_preflight(address)?;
         Some(
             UiAction::from_op(
@@ -4484,6 +5194,88 @@ fn count_nodes(node: &NodeController) -> usize {
     1 + node.children().iter().map(count_nodes).sum::<usize>()
 }
 
+/// The card kind label module nodes wear (`node_kind_label`: `module`,
+/// `project`, and `show` all read as one kind).
+const MODULE_KIND_LABEL: &str = "Module";
+
+/// The main tab's anatomy sections for a built card, empty for a card whose
+/// body is text.
+fn view_sections(node: &UiNodeView) -> &[crate::UiNodeSection] {
+    node.tabs
+        .first()
+        .and_then(|tab| match &tab.body {
+            crate::UiNodeTabBody::Sections(sections) => Some(sections.as_slice()),
+            crate::UiNodeTabBody::Text { .. } => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The mirrored value of one of a node's **def** slots, addressed by its
+/// field-name path (e.g. `["provenance", "some", "author", "some"]`).
+///
+/// A read straight off the slot controllers the card walk already built —
+/// no new plumbing, which is what keeps the provenance footer cheap.
+/// `None` for an unauthored path, a structural slot, or a name the slot
+/// grammar rejects.
+fn def_slot_value<'a>(node: &'a NodeController, path: &[&str]) -> Option<&'a lpc_model::LpValue> {
+    fn descend<'a>(slots: &'a [SlotController], path: &[&str]) -> Option<&'a SlotController> {
+        let (head, rest) = path.split_first()?;
+        let slot = slots.iter().find(|slot| {
+            matches!(
+                slot.address().path.segments().last(),
+                Some(lpc_model::SlotPathSegment::Field(name)) if name.as_str() == *head
+            )
+        })?;
+        match rest.is_empty() {
+            true => Some(slot),
+            false => descend(slot.children(), rest),
+        }
+    }
+    // `node.slots()` holds one controller per slot ROOT; the def root's
+    // children are its field slots.
+    node.slots()
+        .iter()
+        .filter(|slot| slot.address().root == ProjectSlotRoot::Def)
+        .find_map(|root| descend(root.children(), path))
+        .and_then(SlotController::value)
+}
+
+/// Every widget control any face in a card subtree carries, depth-first.
+///
+/// This is the module panel's whole input: a control's `panel_target` says
+/// which scope it belongs to, so membership is read off the controls
+/// themselves rather than re-derived from the tree shape. The walk descends
+/// through nested modules too — a leaf deep inside an embedded module can
+/// consume a channel that resolves in an OUTER scope (R5), and that control
+/// belongs on the outer module's panel.
+fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPanelControl> {
+    fn face_controls<'a>(
+        face: Option<&'a crate::UiNodeFace>,
+        out: &mut Vec<&'a crate::UiPanelControl>,
+    ) {
+        match face {
+            Some(crate::UiNodeFace::Shader(shader)) => out.extend(shader.controls.iter()),
+            Some(crate::UiNodeFace::Fixture(fixture)) => out.push(&fixture.brightness),
+            Some(crate::UiNodeFace::Controls(group)) => {
+                out.extend(group.controls.iter().map(|view| &view.control));
+            }
+            // A module's own panel controls are its subtree's, already
+            // collected by this walk; a playlist face carries entry chips,
+            // not controls.
+            Some(crate::UiNodeFace::Module(_) | crate::UiNodeFace::Playlist(_)) | None => {}
+        }
+    }
+    fn walk<'a>(children: &'a [crate::UiNodeChild], out: &mut Vec<&'a crate::UiPanelControl>) {
+        for child in children {
+            face_controls(child.face.as_ref(), out);
+            walk(&child.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(children, &mut out);
+    out
+}
+
 /// The live reading for a consumed bus channel, prepared for display on a
 /// bound panel control (P6 item 1). `None` — no live display — for:
 ///
@@ -4494,21 +5286,71 @@ fn count_nodes(node: &NodeController) -> usize {
 ///   also quantizes floats to ≤2 decimals before DTO entry).
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
+    scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
     binding_kind: lpc_model::Kind,
 ) -> Option<String> {
     if binding_kind == lpc_model::Kind::Instant {
         return None;
     }
-    let channel = graph
-        .channels
-        .iter()
-        .find(|channel| channel.name == channel_name)?;
+    // The reading is the CONSUMING endpoint's row — channels are keyed
+    // (scope, name) since wire 6, and a playlist entry's sink row (wire 8)
+    // must never be confused with an enclosing scope's same-named channel.
+    // A scope-less endpoint (pre-scope test fakes) falls back to the first
+    // name match.
+    let channel = graph.channels.iter().find(|channel| {
+        channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
+    })?;
     if channel.kind == Some(lpc_model::Kind::Instant) {
         return None;
     }
     let value = channel.value.as_ref()?.value.as_ref()?;
     crate::app::project::format_live_scalar(value)
+}
+
+/// The display title for a project, in preference order (GV fix 4):
+/// the container manifest's `name`, the synced root node's tree label, the
+/// project id. Blank candidates are skipped rather than shown.
+///
+/// Split out from [`ProjectController::project_name`] so the ladder itself
+/// is testable without standing up a library package: the root label — the
+/// only candidate before this fix — is derived from the runtime tree's root
+/// path, which the server sanitizes out of the project's storage folder,
+/// and the Studio's library projects all live in one called `studio`.
+fn project_display_title(
+    manifest_name: Option<&str>,
+    root_label: Option<&str>,
+    project_id: &str,
+) -> String {
+    manifest_name
+        .into_iter()
+        .chain(root_label)
+        .map(str::trim)
+        .find(|candidate| !candidate.is_empty())
+        .unwrap_or(project_id)
+        .to_string()
+}
+
+/// Whether a panel writer is engaged for `(scope, channel)`: the probe
+/// surfaces one as a Panel-origin provider row on the scoped channel
+/// listing, so engagement reads from the graph the UI already pulls.
+fn panel_writer_engaged(
+    graph: &lpc_wire::WireBindingGraph,
+    scope: &lpc_wire::WireScopeRef,
+    channel_name: &str,
+) -> bool {
+    graph
+        .channels
+        .iter()
+        .find(|channel| channel.scope.as_ref() == Some(scope) && channel.name == channel_name)
+        .is_some_and(|channel| {
+            channel.providers.iter().any(|index| {
+                graph
+                    .bindings
+                    .get(*index as usize)
+                    .is_some_and(|binding| binding.origin == lpc_wire::WireBindingOrigin::Panel)
+            })
+        })
 }
 
 /// Collect `node` and every descendant controller (preorder) into `out`.
@@ -4928,10 +5770,6 @@ fn agent_param_def_records(
             min: f32_of(field_value(entry, "min")),
             max: f32_of(field_value(entry, "max")),
             step: f32_of(field_value(entry, "step")),
-            panel: matches!(
-                field_value(entry, "panel"),
-                Some(lpc_model::LpValue::Bool(true))
-            ),
             unit,
             bound: bound.contains(name),
         });
@@ -5123,6 +5961,33 @@ mod tests {
         assert!(project.actions(false).is_empty());
     }
 
+    /// GV fix 4: the project title (pane AND root card) comes from the
+    /// container manifest, not from the runtime tree's root label.
+    ///
+    /// The regression shape: every Studio library project runs out of a
+    /// storage folder called `studio`, and the server derives the runtime
+    /// root path from that folder — so the root label humanized to
+    /// "Studio" and the fyeah example's card and pane both said so.
+    #[test]
+    fn the_project_title_prefers_the_manifests_name_over_the_tree_root_label() {
+        assert_eq!(
+            project_display_title(Some("Fyeah Sign"), Some("Studio"), "examples/fyeah-sign"),
+            "Fyeah Sign"
+        );
+        // No package behind the project (device projects, fixture servers):
+        // the tree label is still the best thing there is.
+        assert_eq!(
+            project_display_title(None, Some("Aurora"), "prj_x"),
+            "Aurora"
+        );
+        // Blank candidates never win — an empty title is worse than an id.
+        assert_eq!(
+            project_display_title(Some("   "), Some(""), "prj_x"),
+            "prj_x"
+        );
+        assert_eq!(project_display_title(None, None, "prj_x"), "prj_x");
+    }
+
     #[test]
     fn connected_not_loaded_project_offers_attach_and_demo_actions() {
         let project = ProjectController::new();
@@ -5284,7 +6149,7 @@ mod tests {
     fn project_view_keeps_existing_focus_when_syncing() {
         let mut project = ProjectController::new();
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = node_address("/demo.project/orbit.shader");
+        let orbit = node_address("/demo.module/orbit.shader");
 
         clear_node_focus(&mut project.root_nodes);
         project.node_mut(&orbit).unwrap().state_mut().focused = true;
@@ -5293,7 +6158,7 @@ mod tests {
         assert!(project.node(&orbit).unwrap().state().focused);
         assert!(
             !project
-                .node(&node_address("/demo.project/clock.clock"))
+                .node(&node_address("/demo.module/clock.clock"))
                 .unwrap()
                 .state()
                 .focused
@@ -5302,7 +6167,7 @@ mod tests {
 
     #[test]
     fn node_update_preserves_local_state_and_refreshes_runtime_id() {
-        let address = node_address("/demo.project/orbit.shader");
+        let address = node_address("/demo.module/orbit.shader");
         let mut project = ProjectController::new();
         project
             .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
@@ -5335,15 +6200,15 @@ mod tests {
         let mut project = ProjectController::new();
         project
             .apply_project_view(&root_view(&[
-                (1, "/demo.project/a.shader"),
-                (2, "/demo.project/b.shader"),
+                (1, "/demo.module/a.shader"),
+                (2, "/demo.module/b.shader"),
             ]))
             .unwrap();
 
         project
             .apply_project_view(&root_view(&[
-                (3, "/demo.project/c.shader"),
-                (1, "/demo.project/a.shader"),
+                (3, "/demo.module/c.shader"),
+                (1, "/demo.module/a.shader"),
             ]))
             .unwrap();
 
@@ -5357,7 +6222,7 @@ mod tests {
         );
         assert!(
             project
-                .node(&node_address("/demo.project/b.shader"))
+                .node(&node_address("/demo.module/b.shader"))
                 .is_none()
         );
     }
@@ -5403,7 +6268,7 @@ mod tests {
                     event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
                         deltas: vec![lpc_wire::WireTreeDelta::Created {
                             id: NodeId::new(1),
-                            path: TreePath::parse("/demo.project").unwrap(),
+                            path: TreePath::parse("/demo.module").unwrap(),
                             parent: None,
                             child_kind: None,
                             children: Vec::new(),
@@ -5439,7 +6304,7 @@ mod tests {
         project.apply_project_view(&view).unwrap();
 
         let node = project
-            .node(&node_address("/demo.project/orbit.shader"))
+            .node(&node_address("/demo.module/orbit.shader"))
             .unwrap();
         assert_eq!(
             node.slots()
@@ -5453,7 +6318,7 @@ mod tests {
 
     #[test]
     fn slot_update_preserves_local_state() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let brightness = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -5485,7 +6350,7 @@ mod tests {
 
     #[test]
     fn record_to_scalar_shape_change_removes_stale_slot_children() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let root = ProjectSlotAddress::root(node.clone(), ProjectSlotRoot::def());
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_test_slots(&mut view, 1, Revision::new(2), false);
@@ -5504,7 +6369,7 @@ mod tests {
 
     #[test]
     fn map_entry_changes_reconcile_keyed_slot_children() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_map_slot(&mut view, 1, Revision::new(2), &["a", "b"]);
         let mut project = ProjectController::new();
@@ -5559,7 +6424,7 @@ mod tests {
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 2, Revision::new(4));
         project.apply_project_view(&view).unwrap();
-        let node = node_address("/demo.project");
+        let node = node_address("/demo.module");
         project.node_mut(&node).unwrap().state_mut().focused = true;
         project.node_mut(&node).unwrap().state_mut().collapsed = true;
 
@@ -5567,8 +6432,8 @@ mod tests {
 
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].header.title, "Demo");
-        assert_eq!(nodes[0].header.kind, "Project");
-        assert_eq!(nodes[0].header.path, "/demo.project");
+        assert_eq!(nodes[0].header.kind, "Module");
+        assert_eq!(nodes[0].header.path, "/demo.module");
         assert_eq!(nodes[0].header.status.label, "Running");
         assert!(nodes[0].focused);
         assert!(nodes[0].collapsed);
@@ -5589,7 +6454,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Clock", "Orbit"]
         );
-        assert_eq!(nodes[0].children[0].detail, "/demo.project/clock.clock");
+        assert_eq!(nodes[0].children[0].detail, "/demo.module/clock.clock");
         assert!(!nodes[0].children[0].sections.is_empty());
     }
 
@@ -5599,7 +6464,7 @@ mod tests {
         let mut view = tree_view();
         install_ui_projection_slots(&mut view, 3, Revision::new(4));
         project.apply_project_view(&view).unwrap();
-        let child_address = node_address("/demo.project/orbit.shader");
+        let child_address = node_address("/demo.module/orbit.shader");
         project
             .node_mut(&child_address)
             .unwrap()
@@ -5639,21 +6504,26 @@ mod tests {
         // never the literal project id or the word "project".
         assert_eq!(view.project_name, "Demo");
         assert_eq!(view.handle_id, 7);
-        // Flat-root: the tree omits the project root too — its children are
-        // the tree's top-level items, matching the workspace cards.
-        assert_eq!(view.tree.total_count, 2);
-        assert_eq!(view.tree.roots[0].label, "Clock");
-        assert_eq!(view.tree.roots[1].label, "Orbit");
-        assert_eq!(view.nodes.len(), 2);
-        assert_eq!(view.nodes[0].header.title, "Clock");
-        assert_eq!(view.nodes[1].header.title, "Orbit");
+        // Root card restored: the root is the tree's one top row (and is
+        // counted like any other), with the project's nodes beneath it —
+        // the sidebar mirrors the workspace exactly.
+        assert_eq!(view.tree.total_count, 3);
+        assert_eq!(view.tree.roots.len(), 1);
+        assert_eq!(view.tree.roots[0].label, "Demo");
+        assert_eq!(view.tree.roots[0].children[0].label, "Clock");
+        assert_eq!(view.tree.roots[0].children[1].label, "Orbit");
+        assert_eq!(view.nodes.len(), 1, "one top-level card: the root module");
+        assert_eq!(view.nodes[0].header.title, "Demo");
+        let cards = root_children(&view);
+        assert_eq!(cards[0].label, "Clock");
+        assert_eq!(cards[1].label, "Orbit");
 
-        let target = ProjectEditorTarget::parse(&view.tree.roots[1].action.node_id())
+        let target = ProjectEditorTarget::parse(&view.tree.roots[0].children[1].action.node_id())
             .expect("tree action should be typed");
         assert_eq!(
             target,
             ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
-                node_address("/demo.project/orbit.shader"),
+                node_address("/demo.module/orbit.shader"),
                 NodeId::new(3),
             ))
         );
@@ -5668,6 +6538,13 @@ mod tests {
         let view = project.editor_view("studio-demo", 7, &inventory);
 
         assert_eq!(view.project_name, "studio-demo");
+    }
+
+    /// The workspace's nested cards. Since the flat-root reversal the
+    /// editor carries ONE top-level card — the root module — and every
+    /// other node rides its `children`.
+    fn root_children(view: &ProjectEditorView) -> &[crate::UiNodeChild] {
+        &view.nodes.first().expect("the root module card").children
     }
 
     /// Dispatch a `NodeUi` mutation exactly as the web does: through the
@@ -5688,7 +6565,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = "/demo.project/orbit.shader".to_string();
+        let orbit = "/demo.module/orbit.shader".to_string();
 
         dispatch_node_ui(
             &mut project,
@@ -5707,8 +6584,9 @@ mod tests {
         );
 
         let view = project.editor_view("studio-demo", 7, &inventory);
+        let cards = root_children(&view);
         assert_eq!(
-            view.nodes[1].card_ui,
+            cards[1].card_ui,
             NodeCardUiState {
                 code_open: true,
                 agent_collapsed: true,
@@ -5717,7 +6595,7 @@ mod tests {
             "the Orbit pane wears its saved card UI state"
         );
         assert_eq!(
-            view.nodes[0].card_ui,
+            cards[0].card_ui,
             NodeCardUiState::default(),
             "state is keyed per node — the Clock pane stays fresh"
         );
@@ -5733,7 +6611,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
-        let orbit = "/demo.project/orbit.shader".to_string();
+        let orbit = "/demo.module/orbit.shader".to_string();
 
         dispatch_node_ui(
             &mut project,
@@ -5750,9 +6628,9 @@ mod tests {
             },
         );
         let collapsed = project.editor_view("studio-demo", 7, &inventory);
-        assert!(collapsed.nodes[1].card_ui.agent_collapsed);
+        assert!(root_children(&collapsed)[1].card_ui.agent_collapsed);
         assert_eq!(
-            collapsed.nodes[1].card_ui.composer_draft,
+            root_children(&collapsed)[1].card_ui.composer_draft,
             "make it pulse slowly"
         );
 
@@ -5764,9 +6642,10 @@ mod tests {
             },
         );
         let expanded = project.editor_view("studio-demo", 7, &inventory);
-        assert!(!expanded.nodes[1].card_ui.agent_collapsed);
+        assert!(!root_children(&expanded)[1].card_ui.agent_collapsed);
         assert_eq!(
-            expanded.nodes[1].card_ui.composer_draft, "make it pulse slowly",
+            root_children(&expanded)[1].card_ui.composer_draft,
+            "make it pulse slowly",
             "expanding never clears the mirrored draft"
         );
     }
@@ -5780,7 +6659,7 @@ mod tests {
         dispatch_node_ui(
             &mut project,
             NodeUiOp::SetDraft {
-                node: "/demo.project/orbit.shader".to_string(),
+                node: "/demo.module/orbit.shader".to_string(),
                 draft: "stale draft".to_string(),
             },
         );
@@ -5791,7 +6670,7 @@ mod tests {
 
         let view = project.editor_view("studio-demo", 8, &inventory);
         assert_eq!(
-            view.nodes[1].card_ui,
+            root_children(&view)[1].card_ui,
             NodeCardUiState::default(),
             "card UI state follows the loaded project"
         );
@@ -5801,7 +6680,7 @@ mod tests {
     fn nested_child_cards_wear_their_own_card_ui_overlay() {
         let mut project = ProjectController::new();
         project.apply_node_ui_op(NodeUiOp::SetDrawer {
-            node: "/demo.project/list.playlist/glow.shader".to_string(),
+            node: "/demo.module/list.playlist/glow.shader".to_string(),
             drawer: crate::NodeCardDrawer::Advanced,
             open: true,
         });
@@ -5811,12 +6690,12 @@ mod tests {
         let mut children = vec![crate::UiNodeChild::new(
             "List",
             "Playlist",
-            "/demo.project/list.playlist",
+            "/demo.module/list.playlist",
         )];
         children[0].children = vec![crate::UiNodeChild::new(
             "Glow",
             "Shader",
-            "/demo.project/list.playlist/glow.shader",
+            "/demo.module/list.playlist/glow.shader",
         )];
 
         project.overlay_child_card_ui(&mut children);
@@ -5948,7 +6827,7 @@ mod tests {
     }
 
     #[test]
-    fn ui_bus_view_projects_channels_with_labels_and_focus() {
+    fn ui_bus_view_for_scope_projects_channels_with_labels_and_focus() {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_test_slots(&mut view, 1, Revision::new(2), false);
         let mut project = ProjectController::new();
@@ -5956,6 +6835,11 @@ mod tests {
         project.apply_project_view(&view).unwrap();
 
         let node = lpc_model::NodeId::new(1);
+        let root_scope = lpc_wire::WireScopeRef::Module { owner: node };
+        let sink_scope = lpc_wire::WireScopeRef::Sink {
+            owner: node,
+            entry: 1,
+        };
         let graph = lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: vec![
@@ -5965,6 +6849,7 @@ mod tests {
                     slot: Some(SlotPath::parse("input").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Consumes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "visual.out".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Authored,
@@ -5977,6 +6862,7 @@ mod tests {
                     slot: Some(SlotPath::parse("output").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Publishes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "visual.out".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -5984,25 +6870,65 @@ mod tests {
                     kind: lpc_model::Kind::Color,
                 },
             ],
-            channels: vec![lpc_wire::WireBusChannel {
-                name: "visual.out".to_string(),
-                kind: Some(lpc_model::Kind::Color),
-                providers: vec![1],
-                consumers: vec![0],
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::F32(0.5)),
-                    error: None,
-                }),
-            }],
+            channels: vec![
+                lpc_wire::WireBusChannel {
+                    scope: Some(root_scope),
+                    name: "visual.out".to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: vec![1],
+                    consumers: vec![0],
+                    value: Some(lpc_wire::WireBusChannelValue {
+                        revision: Revision::new(2),
+                        value: Some(LpValue::F32(0.5)),
+                        error: None,
+                    }),
+                    primary_visual: true,
+                },
+                // A playlist entry's sink row (wire 8): feeds panel
+                // liveness, but the bus listing and the binding picker
+                // must both leave it out (R2 presentation).
+                lpc_wire::WireBusChannel {
+                    scope: Some(sink_scope),
+                    name: "glow".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![],
+                    consumers: vec![],
+                    value: None,
+                    primary_visual: false,
+                },
+            ],
         };
         project
             .sync_mut()
             .unwrap()
             .set_binding_graph_for_test(graph);
 
-        let bus = project.ui_bus_view().expect("bus view");
-        assert_eq!(bus.channels.len(), 1);
+        assert!(
+            !project
+                .ui_channel_choices()
+                .iter()
+                .any(|choice| choice.name == "glow"),
+            "the picker never offers a sink-private channel"
+        );
+
+        assert!(
+            project
+                .ui_bus_view_for_scope(sink_scope)
+                .expect("a graph is loaded")
+                .channels
+                .is_empty(),
+            "a sink scope never projects wiring, even when asked for by \
+             identity (R2 presentation) — the drawer belongs to modules"
+        );
+
+        let bus = project
+            .ui_bus_view_for_scope(root_scope)
+            .expect("wiring view for the root scope");
+        assert_eq!(
+            bus.channels.len(),
+            1,
+            "only this scope's channels list; the sink row stays out"
+        );
         let channel = &bus.channels[0];
         assert_eq!(channel.name, "visual.out");
         assert!(channel.primary_visual);
@@ -6016,6 +6942,15 @@ mod tests {
         // action (D7 linked navigation).
         assert_eq!(channel.readers[0].node_label, "Orbit");
         assert!(channel.readers[0].focus.is_some());
+        assert_eq!(
+            channel.scope,
+            Some(root_scope),
+            "rows keep the structured scope they were filtered by"
+        );
+        assert_eq!(
+            channel.scope_label, None,
+            "the card the drawer hangs off already names the scope"
+        );
     }
 
     #[test]
@@ -6036,6 +6971,7 @@ mod tests {
                     slot: Some(SlotPath::parse("seconds").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Publishes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "time".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -6048,6 +6984,7 @@ mod tests {
                     slot: Some(SlotPath::parse("time").unwrap()),
                     direction: lpc_wire::WireBindingDirection::Consumes,
                     endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: None,
                         channel: "time".to_string(),
                     },
                     origin: lpc_wire::WireBindingOrigin::Default,
@@ -6116,6 +7053,7 @@ mod tests {
                 slot: Some(SlotPath::parse("seconds").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Publishes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "other".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6201,6 +7139,7 @@ mod tests {
             revision: Revision::new(2),
             bindings: Vec::new(),
             channels: vec![lpc_wire::WireBusChannel {
+                scope: None,
                 name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
                 kind: Some(lpc_model::Kind::Color),
                 providers: Vec::new(),
@@ -6210,6 +7149,7 @@ mod tests {
                     value,
                     error: None,
                 }),
+                primary_visual: true,
             }],
         }
     }
@@ -6358,7 +7298,7 @@ mod tests {
         );
 
         // An explicit opt-out still wins over the sim policy.
-        let address = node_address("/demo.project/orbit.shader");
+        let address = node_address("/demo.module/orbit.shader");
         project
             .node_mut(&address)
             .unwrap()
@@ -6384,6 +7324,7 @@ mod tests {
                 slot: Some(SlotPath::parse("time").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "time".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6419,6 +7360,7 @@ mod tests {
                 slot: Some(SlotPath::parse("time").unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "time".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Default,
@@ -6431,7 +7373,7 @@ mod tests {
 
     fn orbit_def_address(path: &str) -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -6565,18 +7507,22 @@ mod tests {
             bindings: Vec::new(),
             channels: vec![
                 lpc_wire::WireBusChannel {
+                    scope: None,
                     name: "time".to_string(),
                     kind: Some(lpc_model::Kind::Instant),
                     providers: vec![0],
                     consumers: vec![1],
                     value: None,
+                    primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
+                    scope: None,
                     name: "wobble".to_string(),
                     kind: None,
                     providers: vec![0],
                     consumers: Vec::new(),
                     value: None,
+                    primary_visual: false,
                 },
             ],
         };
@@ -6619,6 +7565,7 @@ mod tests {
                 slot: Some(SlotPath::parse(slot).unwrap()),
                 direction,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: "visual.out".to_string(),
                 },
                 origin: lpc_wire::WireBindingOrigin::Authored,
@@ -6673,6 +7620,7 @@ mod tests {
                 slot: Some(SlotPath::parse(slot).unwrap()),
                 direction: lpc_wire::WireBindingDirection::Consumes,
                 endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    scope: None,
                     channel: channel.to_string(),
                 },
                 origin,
@@ -6682,6 +7630,7 @@ mod tests {
         };
         let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
             lpc_wire::WireBusChannel {
+                scope: None,
                 name: name.to_string(),
                 kind: Some(kind),
                 providers: Vec::new(),
@@ -6691,6 +7640,7 @@ mod tests {
                     value: Some(LpValue::F32(value)),
                     error: None,
                 }),
+                primary_visual: false,
             }
         };
         project
@@ -6754,20 +7704,162 @@ mod tests {
         );
     }
 
+    /// GV fix 5: a panel write echoes locally, so the control reads its new
+    /// value (and Engaged) BEFORE any probe — the jerky-drag fix — and the
+    /// echo retires the moment probe truth can carry it.
+    #[test]
+    fn a_panel_write_echoes_locally_until_the_graph_carries_it() {
+        let owner = lpc_model::NodeId::new(1);
+        let scope = lpc_wire::WireScopeRef::Module { owner };
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        // One authored consume of a scoped channel nothing writes: the
+        // control reads its own default and offers a panel target.
+        let graph = |panel_provider: bool, value: f32| lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![
+                lpc_wire::WireEffectiveBinding {
+                    owner,
+                    node: owner,
+                    slot: Some(SlotPath::parse("wired_in").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: Some(scope),
+                        channel: "wobble".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Authored,
+                    priority: 0,
+                    kind: lpc_model::Kind::Amplitude,
+                },
+                lpc_wire::WireEffectiveBinding {
+                    owner,
+                    node: owner,
+                    slot: None,
+                    direction: lpc_wire::WireBindingDirection::Publishes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        scope: Some(scope),
+                        channel: "wobble".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Panel,
+                    priority: 100,
+                    kind: lpc_model::Kind::Amplitude,
+                },
+            ],
+            channels: vec![lpc_wire::WireBusChannel {
+                scope: Some(scope),
+                name: "wobble".to_string(),
+                kind: Some(lpc_model::Kind::Amplitude),
+                providers: if panel_provider { vec![1] } else { Vec::new() },
+                consumers: vec![0],
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::F32(value)),
+                    error: None,
+                }),
+                primary_visual: false,
+            }],
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph(false, 0.1));
+        project.refresh_binding_presentation();
+
+        let wired_endpoint = |project: &ProjectController| -> crate::UiBindingEndpoint {
+            let nodes = project.ui_nodes();
+            let config = section_config_slots(node_sections(&nodes[0]));
+            let row = config
+                .iter()
+                .find(|slot| slot.label == "Wired in")
+                .expect("the wired row");
+            let UiSlotSourceState::Bound(endpoint) = &row.source else {
+                panic!("expected a bound row, got {:?}", row.source);
+            };
+            endpoint.clone()
+        };
+
+        let before = wired_endpoint(&project);
+        assert_eq!(before.live_value.as_deref(), Some("0.1"));
+        assert!(
+            !before
+                .panel_target
+                .as_ref()
+                .expect("a scoped consume is a panel target")
+                .engaged
+        );
+
+        // The write — nothing else. No probe, no refresh, no graph change.
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.9));
+        let echoed = wired_endpoint(&project);
+        assert_eq!(
+            echoed.live_value.as_deref(),
+            Some("0.9"),
+            "the panel's own write reads back immediately, not at probe cadence"
+        );
+        assert!(
+            echoed.panel_target.expect("target survives").engaged,
+            "and the control reads Engaged at once (its reset is reachable)"
+        );
+        // …including on the module panel's own state derivation.
+        let target = crate::UiPanelTarget {
+            scope,
+            channel: "wobble".to_string(),
+            engaged: false,
+        };
+        let snapshot = project.binding_graph().expect("graph").clone();
+        assert_eq!(
+            project.panel_control_state(&snapshot, scope, &target).0,
+            crate::UiPanelControlState::Engaged
+        );
+
+        // A snapshot whose channel row carries the Panel provider IS the
+        // engine holding the writer: probe truth takes over, echo retires.
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph(true, 0.9));
+        project.expire_converged_panel_writes();
+        assert!(project.pending_panel_writes.is_empty());
+        let converged = wired_endpoint(&project);
+        assert_eq!(converged.live_value.as_deref(), Some("0.9"));
+        assert!(
+            converged.panel_target.expect("target survives").engaged,
+            "still engaged — now on the graph's authority"
+        );
+
+        // A clear drops the echo on the gesture, not a round trip later.
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.3));
+        project.drop_pending_panel_writes(&lpc_wire::WirePanelClearRequest::Channel {
+            scope,
+            channel: "wobble".to_string(),
+        });
+        assert!(project.pending_panel_writes.is_empty());
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.3));
+        project.drop_pending_panel_writes(&lpc_wire::WirePanelClearRequest::Scope { scope });
+        assert!(project.pending_panel_writes.is_empty());
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.3));
+        project.drop_pending_panel_writes(&lpc_wire::WirePanelClearRequest::All);
+        assert!(project.pending_panel_writes.is_empty());
+
+        // And the echo never leaks into authored state or dirty tracking.
+        project.note_panel_write(scope, "wobble", LpValue::F32(0.42));
+        assert!(project.pending_edits().is_empty());
+        assert!(project.edit_buffer.is_empty());
+    }
+
     #[test]
     fn playlist_children_visual_products_stay_tracked_for_entry_thumbs() {
         let mut view = ProjectView::new();
-        let mut playlist = node_entry(
-            1,
-            "/demo.project/list.playlist",
-            None,
-            NodeRuntimeStatus::Ok,
-        );
+        let mut playlist = node_entry(1, "/demo.module/list.playlist", None, NodeRuntimeStatus::Ok);
         playlist.children = vec![NodeId::new(2)];
         view.tree.insert(playlist);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/list.playlist/glow.shader",
+            "/demo.module/list.playlist/glow.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -6778,7 +7870,7 @@ mod tests {
         // The child picks up default focus (only shader in the tree) which
         // would subscribe ALL its products; pin it unsubscribed so the
         // assertion isolates the warming path.
-        let child = crate::ProjectNodeAddress::parse("/demo.project/list.playlist/glow.shader")
+        let child = crate::ProjectNodeAddress::parse("/demo.module/list.playlist/glow.shader")
             .expect("valid address");
         project
             .node_mut(&child)
@@ -6801,7 +7893,7 @@ mod tests {
 
     #[test]
     fn binding_removal_clears_bound_state_on_refresh() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let time = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -6827,7 +7919,7 @@ mod tests {
 
     #[test]
     fn focused_default_node_subscribes_product_preview_probes() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -6893,8 +7985,8 @@ mod tests {
                     height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
                 }),
-                // The bus pane's binding-graph probe rides along on every
-                // loaded-project read.
+                // The binding-graph probe rides along on every
+                // loaded-project read — module faces cannot derive without it.
                 ProjectProbeRequest::BindingGraph(lpc_wire::BindingGraphProbeRequest {
                     include_values: true,
                 }),
@@ -7038,7 +8130,7 @@ mod tests {
 
     #[test]
     fn projected_ui_value_updates_while_slot_state_is_preserved() {
-        let node = node_address("/demo.project/orbit.shader");
+        let node = node_address("/demo.module/orbit.shader");
         let brightness = ProjectSlotAddress::new(
             node.clone(),
             ProjectSlotRoot::def(),
@@ -7136,18 +8228,18 @@ mod tests {
 
     fn tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/orbit.shader",
+            "/demo.module/orbit.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -7156,24 +8248,24 @@ mod tests {
 
     fn fixture_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3), NodeId::new(4)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/orbit.shader",
+            "/demo.module/orbit.shader",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             4,
-            "/demo.project/pixels.fixture",
+            "/demo.module/pixels.fixture",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -7182,18 +8274,18 @@ mod tests {
 
     fn clock_output_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(3)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             2,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             3,
-            "/demo.project/dmx.output",
+            "/demo.module/dmx.output",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
@@ -7203,7 +8295,7 @@ mod tests {
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {
         let mut view = ProjectView::new();
         view.tree
-            .insert(node_entry(id, "/demo.project/orbit.shader", None, status));
+            .insert(node_entry(id, "/demo.module/orbit.shader", None, status));
         view
     }
 
@@ -8018,7 +9110,7 @@ mod tests {
 
     fn brightness_address() -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse("brightness").unwrap(),
         )
@@ -8026,7 +9118,7 @@ mod tests {
 
     fn rate_address() -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse("rate").unwrap(),
         )
@@ -8327,18 +9419,18 @@ mod tests {
         // pending; it lands with the next applied view that contains the
         // created node.
         let mut view = three_level_tree_view();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(4), NodeId::new(9)];
         view.tree.insert(root);
         view.tree.insert(node_entry(
             9,
-            "/demo.project/clock_2.clock",
+            "/demo.module/clock_2.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
         project.apply_project_view(&view).unwrap();
         let created = project
-            .node(&node_address("/demo.project/clock_2.clock"))
+            .node(&node_address("/demo.module/clock_2.clock"))
             .expect("created node landed");
         assert!(created.state().focused, "the created node takes focus");
     }
@@ -8408,7 +9500,7 @@ mod tests {
         ]);
 
         let run = block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
         )
         .unwrap();
         // The scripted refresh carried no tree events, so the controllers
@@ -8478,10 +9570,8 @@ mod tests {
             authoring_inventory_read_response(4),
             mutation_response(5, vec![accepted(1), accepted(2)], 7),
         ]);
-        block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
-        )
-        .unwrap();
+        block_on_ready(project.remove_node(&mut client, &node_address("/demo.module/clock.clock")))
+            .unwrap();
         // Restore the controller tree (the scripted refresh carried no tree
         // events) so the site address resolves its def artifact.
         project
@@ -8490,7 +9580,7 @@ mod tests {
 
         // Revert the NodeRemoved row exactly as the save panel would.
         let site = crate::ProjectSlotAddress::new(
-            node_address("/demo.project"),
+            node_address("/demo.module"),
             ProjectSlotRoot::def(),
             SlotPath::parse("nodes[clock]").unwrap(),
         );
@@ -8559,7 +9649,7 @@ mod tests {
             )]);
 
         let run = block_on_ready(
-            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+            project.remove_node(&mut client, &node_address("/demo.module/clock.clock")),
         )
         .unwrap();
 
@@ -8582,7 +9672,7 @@ mod tests {
         // carries no playlist slot mirror), so no wire op is sent.
         let run = block_on_ready(project.remove_node(
             &mut client,
-            &node_address("/demo.project/group.playlist/leaf.shader"),
+            &node_address("/demo.module/group.playlist/leaf.shader"),
         ))
         .unwrap();
 
@@ -8604,14 +9694,20 @@ mod tests {
         // Clean project: no header actions — adding rides the tree row and
         // the workspace button, both fed by the picker data on the view.
         assert!(view.header_actions.is_empty());
-        let menu = view.add_node_menu.expect("picker data rides the editor");
-        assert_eq!(menu.entries.len(), 10);
+        let menu = view
+            .add_node_menu
+            .as_ref()
+            .expect("picker data rides the editor");
+        assert_eq!(
+            menu.entries.len(),
+            11,
+            "every instantiable kind, Module included"
+        );
 
         // Root children carry the ungated delete action with confirmation.
-        let clock = view
-            .nodes
+        let clock = root_children(&view)
             .iter()
-            .find(|node| node.node_id == "/demo.project/clock.clock")
+            .find(|child| child.detail == "/demo.module/clock.clock")
             .expect("clock card");
         let delete = clock
             .header_actions
@@ -8625,6 +9721,17 @@ mod tests {
         assert!(
             delete.action.op_as::<crate::NodeRemoveOp>().is_some(),
             "delete dispatches NodeRemoveOp"
+        );
+
+        // …and the ROOT card never does: deleting the project from its own
+        // card is not an affordance, and the root has no attachment site to
+        // be removed from.
+        assert!(
+            !view.nodes[0]
+                .header_actions
+                .iter()
+                .any(|action| action.icon == "remove"),
+            "the restored root card offers no Delete"
         );
     }
 
@@ -8958,7 +10065,7 @@ mod tests {
     fn set_value_outside_def_root_fails_client_side() {
         let (mut project, mut client, sent) = editable_project_with_scripted_client(Vec::new());
         let state_address = crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::state(),
             SlotPath::parse("output").unwrap(),
         );
@@ -9128,7 +10235,7 @@ mod tests {
 
     fn structural_address(path: &str) -> crate::ProjectSlotAddress {
         crate::ProjectSlotAddress::new(
-            node_address("/demo.project/orbit.shader"),
+            node_address("/demo.module/orbit.shader"),
             ProjectSlotRoot::def(),
             SlotPath::parse(path).unwrap(),
         )
@@ -9282,7 +10389,7 @@ mod tests {
         assert!(!project.dirty_summary().is_clean());
 
         let run = block_on_ready(
-            project.revert_node_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+            project.revert_node_edits(&mut client, &node_address("/demo.module/orbit.shader")),
         )
         .unwrap();
 
@@ -9337,7 +10444,7 @@ mod tests {
         );
 
         let run = block_on_ready(
-            project.revert_node_edits(&mut client, &node_address("/demo.project/other.clock")),
+            project.revert_node_edits(&mut client, &node_address("/demo.module/other.clock")),
         )
         .unwrap();
 
@@ -9386,7 +10493,7 @@ mod tests {
         assert_eq!(
             actions[0].action.op_as::<crate::NodeRevertOp>(),
             Some(&crate::NodeRevertOp {
-                node: node_address("/demo.project/orbit.shader"),
+                node: node_address("/demo.module/orbit.shader"),
             })
         );
     }
@@ -9497,8 +10604,7 @@ mod tests {
         let dirty_before = project.dirty_summary();
 
         let run = block_on_ready(
-            project
-                .clear_node_debug_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+            project.clear_node_debug_edits(&mut client, &node_address("/demo.module/orbit.shader")),
         )
         .unwrap();
 
@@ -9557,8 +10663,7 @@ mod tests {
         );
 
         let run = block_on_ready(
-            project
-                .clear_node_debug_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+            project.clear_node_debug_edits(&mut client, &node_address("/demo.module/orbit.shader")),
         )
         .unwrap();
 
@@ -9588,7 +10693,7 @@ mod tests {
         // A buffered (un-acked) debug edit joins the acked one in the sweep.
         project.insert_pending_edit_for_test(
             crate::ProjectSlotAddress::new(
-                node_address("/demo.project/orbit.shader"),
+                node_address("/demo.module/orbit.shader"),
                 ProjectSlotRoot::def(),
                 SlotPath::parse("rate").unwrap(),
             ),
@@ -9846,20 +10951,21 @@ mod tests {
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert_eq!(
             editor.dirty, expected,
-            "root-own edits count without a card"
+            "root-own edits count without a child card"
         );
-        // Flat-root workspace: the childless root renders no card; its rows
-        // (map dirty included) ride `root_slots` into the project popup.
-        assert!(editor.nodes.is_empty());
+        // The childless root is the one workspace card; its rows (map dirty
+        // included) still ride `root_slots` into the project popup.
+        assert_eq!(editor.nodes.len(), 1);
+        assert!(editor.nodes[0].children.is_empty());
         let entries = editor
             .root_slots
             .iter()
             .find(|slot| slot.label == "Entries")
             .expect("root settings carry the map row");
         assert_eq!(entries.state.dirty, UiNodeDirtyState::Dirty);
-        // Flat-root: a childless root has no tree rows; its own dirt shows on
-        // the project pane (editor.dirty + root_slots above), not the tree.
-        assert!(editor.tree.roots.is_empty());
+        // The root is a tree row again, so its own dirt shows there too.
+        assert_eq!(editor.tree.roots.len(), 1);
+        assert_eq!(editor.tree.roots[0].dirty, expected);
     }
 
     #[test]
@@ -11068,7 +12174,7 @@ mod tests {
         project.apply_project_view(&view).unwrap();
         project.insert_pending_edit_for_test(
             crate::ProjectSlotAddress::new(
-                node_address("/demo.project/group.playlist/leaf.shader"),
+                node_address("/demo.module/group.playlist/leaf.shader"),
                 ProjectSlotRoot::def(),
                 SlotPath::parse("brightness").unwrap(),
             ),
@@ -11099,15 +12205,22 @@ mod tests {
         );
 
         let editor = project.editor_view("demo", 1, &ProjectInventorySummary::default());
-        // Flat-root: the tree's top-level items are the project root's
-        // children (the root is the project pane, not a tree row).
-        let roots = &editor.tree.roots;
-        assert_eq!(roots[0].dirty, one_persisted, "group bubbles the edit");
+        // The root is the tree's one top row again, so the bubbling chain
+        // is one level longer: root → group → leaf.
+        let root = &editor.tree.roots[0];
+        assert_eq!(root.dirty, one_persisted, "the root row bubbles the edit");
         assert_eq!(
-            roots[0].children[0].dirty, one_persisted,
+            root.children[0].dirty, one_persisted,
+            "group bubbles the edit"
+        );
+        assert_eq!(
+            root.children[0].children[0].dirty, one_persisted,
             "grandchild carries its own edit"
         );
-        assert!(roots[1].dirty.is_clean(), "sibling branch stays clean");
+        assert!(
+            root.children[1].dirty.is_clean(),
+            "sibling branch stays clean"
+        );
         assert_eq!(editor.dirty, one_persisted);
         assert_eq!(project.dirty_summary(), one_persisted);
     }
@@ -11136,17 +12249,19 @@ mod tests {
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert_eq!(editor.dirty, expected);
         assert!(!editor.dirty.is_clean(), "failed edits need attention");
-        // Flat-root workspace: the childless root renders no card; its
-        // failed row rides `root_slots`.
-        assert!(editor.nodes.is_empty());
+        // The childless root is the one workspace card; its failed row
+        // still rides `root_slots`.
+        assert_eq!(editor.nodes.len(), 1);
+        assert!(editor.nodes[0].children.is_empty());
         let brightness = editor
             .root_slots
             .iter()
             .find(|slot| slot.label == "Brightness")
             .expect("root settings carry the brightness row");
         assert_eq!(brightness.state.dirty, UiNodeDirtyState::Error);
-        // Flat-root: root-own dirt is on the project pane, not the tree.
-        assert!(editor.tree.roots.is_empty());
+        // The root is a tree row again, carrying its own failed edit.
+        assert_eq!(editor.tree.roots.len(), 1);
+        assert_eq!(editor.tree.roots[0].dirty, expected);
         assert_eq!(
             editor
                 .header_actions
@@ -11165,9 +12280,10 @@ mod tests {
         assert!(project.dirty_summary().is_clean());
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert!(editor.dirty.is_clean());
-        // Flat-root workspace: the childless root has no card, but its rows
-        // ride `root_slots` (clean here).
-        assert!(editor.nodes.is_empty());
+        // The childless root is the one workspace card; its rows ride
+        // `root_slots` (clean here).
+        assert_eq!(editor.nodes.len(), 1);
+        assert!(editor.nodes[0].children.is_empty());
         assert!(!editor.root_slots.is_empty());
         assert!(
             editor
@@ -11175,8 +12291,9 @@ mod tests {
                 .iter()
                 .all(|slot| slot.state.dirty == UiNodeDirtyState::Clean)
         );
-        // Flat-root: a childless root contributes no tree rows.
-        assert!(editor.tree.roots.is_empty());
+        // A childless root is still exactly one tree row.
+        assert_eq!(editor.tree.roots.len(), 1);
+        assert!(editor.tree.roots[0].children.is_empty());
         // No header actions on a clean project (adding rides the node list).
         assert!(editor.header_actions.is_empty());
     }
@@ -11264,10 +12381,9 @@ mod tests {
 
     /// Regression parity: the project-level summary surfaced on the editor
     /// DTO equals the standalone walk and the tree-root DTO sum — one
-    /// aggregation everywhere. The workspace cards exclude the root (flat
-    /// root), so the card sum covers only non-root edits: here both edits
-    /// are root-own, the card list is empty, and `editor.dirty` still counts
-    /// them.
+    /// aggregation everywhere. With the root card restored the root IS the
+    /// one card and the one tree row, so both sums see the root-own edits
+    /// directly.
     #[test]
     fn editor_view_dirty_agrees_with_walk_and_dto_sums() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
@@ -11286,26 +12402,25 @@ mod tests {
             persisted: 1,
             failed: 0,
         };
-        // editor.dirty, the standalone walk, and dirty_summary agree — one
-        // aggregation over everything. The tree (like the cards) excludes the
-        // root, so with both edits root-own the tree contributes nothing;
-        // dirty_grandchild_bubbles covers the tree-carries-non-root-dirt case.
+        // editor.dirty, the standalone walk, dirty_summary, the tree-root
+        // sum and the card sum all agree — one aggregation over everything.
         let tree_sum: DirtySummary = editor.tree.roots.iter().map(|root| root.dirty).sum();
+        let card_sum: DirtySummary = editor.nodes.iter().map(|node| node.header.dirty).sum();
         assert_eq!(editor.dirty, expected);
         assert_eq!(project.dirty_summary(), expected);
-        assert!(tree_sum.is_clean(), "root-own edits are not tree rows");
-        assert!(editor.nodes.is_empty(), "root-own edits have no card");
+        assert_eq!(tree_sum, expected, "the root row carries root-own edits");
+        assert_eq!(card_sum, expected, "and so does the root card");
     }
 
     /// Root (1) → group (2) + clock sibling (4), group → leaf shader (3).
     fn three_level_tree_view() -> ProjectView {
         let mut view = ProjectView::new();
-        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
         root.children = vec![NodeId::new(2), NodeId::new(4)];
         view.tree.insert(root);
         let mut group = node_entry(
             2,
-            "/demo.project/group.playlist",
+            "/demo.module/group.playlist",
             Some(1),
             NodeRuntimeStatus::Ok,
         );
@@ -11313,13 +12428,13 @@ mod tests {
         view.tree.insert(group);
         view.tree.insert(node_entry(
             3,
-            "/demo.project/group.playlist/leaf.shader",
+            "/demo.module/group.playlist/leaf.shader",
             Some(2),
             NodeRuntimeStatus::Ok,
         ));
         view.tree.insert(node_entry(
             4,
-            "/demo.project/clock.clock",
+            "/demo.module/clock.clock",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));

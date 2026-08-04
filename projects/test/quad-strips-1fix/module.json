@@ -1,0 +1,17 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "fixture1": {
+      "ref": "./fixture1.json"
+    },
+    "output1": {
+      "ref": "./output1.json"
+    }
+  }
+}

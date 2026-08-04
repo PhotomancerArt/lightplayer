@@ -123,18 +123,26 @@ impl NodeRuntime for FluidNode {
         Ok(ProduceResult::Produced)
     }
 
-    fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
 
     fn handle_memory_pressure(
         &mut self,
-        _level: PressureLevel,
-        _ctx: &mut MemPressureCtx<'_>,
+        level: PressureLevel,
+        _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
-        self.solver = None;
-        self.solver_config = None;
-        self.last_step_time_seconds = None;
+        // The solver grid is SIMULATION state, not a rebuildable cache:
+        // dropping it visibly resets the fluid. Under the memory-pressure
+        // contract only `Critical` may trade visual continuity for survival;
+        // the routine compile-window broadcast is `High` and must leave the
+        // sim alone (it would also break the drop→tick→identical property
+        // the contract promises at High).
+        if level >= PressureLevel::Critical {
+            self.solver = None;
+            self.solver_config = None;
+            self.last_step_time_seconds = None;
+        }
         Ok(())
     }
 
@@ -334,12 +342,13 @@ mod tests {
     #[test]
     fn fluid_node_loaded_from_project_produces_sampleable_visual_product() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -441,12 +450,13 @@ mod tests {
     #[test]
     fn fluid_node_consumes_compute_emitter_map_through_bus() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -551,6 +561,25 @@ void tick() {
             .expect("fluid node");
         engine.tick(16).expect("tick fluid graph");
 
+        // This graph has no output node, so the tick demands nothing; the
+        // resolves below drive it. The first resolve defers the compute
+        // shader's compile (compile-window request). The tick between the
+        // resolves advances the frame — invalidating the cached deferred
+        // production — and broadcasts the requested compile window, so the
+        // second resolve compiles and republishes real emitters.
+        engine
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fluid,
+                    slot: fluid_output_path(),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("warm-up resolve");
+        // 40 ms, not 16: the solver is rate-limited at step_hz 25, and the
+        // warm-up resolve already consumed a step — the post-compile resolve
+        // must land a full step interval later to inject the emitters.
+        engine.tick(40).expect("tick to open the compile window");
         let (production, _) = engine
             .resolve_with_engine_host(
                 QueryKey::ProducedSlot {

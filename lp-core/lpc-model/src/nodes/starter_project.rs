@@ -21,8 +21,8 @@ use crate::nodes::fixture::{ColorOrder, FixtureSamplingConfig};
 use crate::nodes::node_def::NodeDefWriteError;
 use crate::nodes::starter::{starter_def_for_kind, starter_for_kind};
 use crate::{
-    ArtifactSpec, BindingDef, BindingDefs, BindingRef, BusSlotRef, ChannelName, MapSlot, NodeDef,
-    NodeInvocation, NodeInvocationSlot, OptionSlot, ProjectDef, SlotShapeRegistry, ValueSlot,
+    ArtifactSpec, BindingDef, BindingDefs, BindingRef, BusSlotRef, ChannelName, MapSlot, ModuleDef,
+    NodeDef, NodeInvocation, NodeInvocationSlot, ProjectManifest, SlotShapeRegistry, ValueSlot,
 };
 
 /// The starter project's complete file set as `(relative path, bytes)` —
@@ -36,7 +36,12 @@ pub fn starter_project_files(
 
     files.push((
         String::from("project.json"),
-        node_json(&starter_project_def(name), registry)?,
+        ProjectManifest::new_current(name).write_json().into_bytes(),
+    ));
+
+    files.push((
+        String::from("module.json"),
+        node_json(&starter_module_def(), registry)?,
     ));
 
     files.push((
@@ -91,7 +96,7 @@ pub fn starter_project_files(
     Ok(files)
 }
 
-fn starter_project_def(name: &str) -> NodeDef {
+fn starter_module_def() -> NodeDef {
     let mut nodes = VecMap::new();
     for node in ["output", "clock", "texture", "shader", "fixture"] {
         nodes.insert(
@@ -101,11 +106,9 @@ fn starter_project_def(name: &str) -> NodeDef {
             )))),
         );
     }
-    NodeDef::Project(ProjectDef {
-        format: ProjectDef::current_format_slot(),
-        uid: OptionSlot::none(),
-        name: OptionSlot::some(ValueSlot::new(String::from(name))),
+    NodeDef::Module(ModuleDef {
         nodes: MapSlot::new(nodes),
+        ..ModuleDef::default()
     })
 }
 
@@ -223,6 +226,7 @@ mod tests {
             names,
             [
                 "project.json",
+                "module.json",
                 "clock.json",
                 "texture.json",
                 "shader.json",
@@ -235,8 +239,10 @@ mod tests {
 
         for (name, bytes) in &files {
             // Only node-definition artifacts parse as NodeDef; the mapping
-            // document is an opaque asset (D1).
-            if !name.ends_with(".json") || name.ends_with(".map2d.json") {
+            // document is an opaque asset (D1) and `project.json` is the
+            // non-node container manifest (its canonical form is
+            // `ProjectManifest::write_json`, asserted below).
+            if !name.ends_with(".json") || name.ends_with(".map2d.json") || name == "project.json" {
                 continue;
             }
             let text = core::str::from_utf8(bytes).expect("utf-8");
@@ -250,23 +256,29 @@ mod tests {
     }
 
     #[test]
-    fn starter_project_root_carries_format_and_name() {
+    fn starter_project_manifest_carries_format_and_name_root_module_the_nodes() {
         let registry = SlotShapeRegistry::default();
         let files = starter_project_files("porch sign", &registry).expect("compose");
+
         let (_, bytes) = files
             .iter()
             .find(|(name, _)| name == "project.json")
             .unwrap();
+        let text = core::str::from_utf8(bytes).unwrap();
+        let manifest = ProjectManifest::read_json(text).expect("container manifest");
+        assert_eq!(manifest.format, Some(PROJECT_FORMAT_VERSION));
+        assert_eq!(manifest.name.as_deref(), Some("porch sign"));
+        assert_eq!(manifest.write_json(), text, "manifest must be canonical");
+
+        let (_, bytes) = files
+            .iter()
+            .find(|(name, _)| name == "module.json")
+            .unwrap();
         let def = NodeDef::read_json(&registry, core::str::from_utf8(bytes).unwrap()).unwrap();
-        let NodeDef::Project(project) = def else {
-            panic!("expected project root");
+        let NodeDef::Module(module) = def else {
+            panic!("expected module root");
         };
-        assert_eq!(
-            project.format.data.as_ref().map(|slot| *slot.value()),
-            Some(PROJECT_FORMAT_VERSION)
-        );
-        assert_eq!(project.name(), Some("porch sign"));
-        assert_eq!(project.nodes.entries.len(), 5);
+        assert_eq!(module.nodes.entries.len(), 5);
     }
 
     #[test]

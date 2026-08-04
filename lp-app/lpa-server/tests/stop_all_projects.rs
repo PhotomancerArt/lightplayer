@@ -33,12 +33,23 @@ fn test_stop_all_projects() {
     // Prepare base filesystem with project files
     let base_fs = Box::new(LpFsMemory::new());
 
-    let project_toml = temp_fs
+    let project_manifest = temp_fs
         .borrow()
         .read_file("/project.json".as_path())
         .unwrap();
     base_fs
-        .write_file(project_prefix.join("project.json").as_path(), &project_toml)
+        .write_file(
+            project_prefix.join("project.json").as_path(),
+            &project_manifest,
+        )
+        .unwrap();
+
+    let module_json = temp_fs
+        .borrow()
+        .read_file("/module.json".as_path())
+        .unwrap();
+    base_fs
+        .write_file(project_prefix.join("module.json").as_path(), &module_json)
         .unwrap();
 
     let node_paths = vec![

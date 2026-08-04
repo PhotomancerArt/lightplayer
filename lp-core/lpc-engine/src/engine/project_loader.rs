@@ -1,4 +1,4 @@
-//! Load authored `project.json` node-artifact trees into [`super::Engine`].
+//! Load authored module node-artifact trees into [`super::Engine`].
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -45,7 +45,6 @@ use crate::nodes::ButtonNode;
 use crate::nodes::ClockNode;
 #[cfg(feature = "node-radio")]
 use crate::nodes::ControlRadioNode;
-use crate::nodes::CorePlaceholderNode;
 #[cfg(feature = "node-fluid")]
 use crate::nodes::FluidNode;
 use crate::nodes::OutputNode;
@@ -111,12 +110,6 @@ pub(super) enum ProjectedNodeOwnership {
     PlaylistEntry { playlist: NodeId, entry: u32 },
 }
 
-impl ProjectedNodeOwnership {
-    fn suppress_visual_default_output(self) -> bool {
-        matches!(self, Self::PlaylistEntry { .. })
-    }
-}
-
 /// Loads the authored project artifact tree into a core engine-backed runtime.
 pub struct ProjectLoader;
 
@@ -125,7 +118,7 @@ impl ProjectLoader {
         root: &dyn LpFs,
         services: EngineServices,
     ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
-        Self::load_project_artifact(root, services, ArtifactSpec::path("/project.json"))
+        Self::load_project_artifact(root, services, ArtifactSpec::path("/module.json"))
     }
 
     pub fn load_project_artifact(
@@ -170,10 +163,10 @@ impl ProjectLoader {
             })?;
 
         match &entry.state {
-            NodeDefState::Loaded(NodeDef::Project(_)) => Ok(()),
+            NodeDefState::Loaded(NodeDef::Module(_)) => Ok(()),
             NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectParse {
                 file: path.as_str().to_string(),
-                error: format!("root artifact must be Project, got {:?}", other.kind()),
+                error: format!("root artifact must be Module, got {:?}", other.kind()),
             }),
             state => Err(project_load_error_for_root_state(path, state)),
         }
@@ -201,11 +194,7 @@ impl ProjectLoader {
             }
         }
         runtime
-            .attach_runtime_node(
-                root,
-                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
-                frame,
-            )
+            .attach_runtime_node(root, crate::nodes::ModuleNode::boxed(root), frame)
             .map_err(|e| ProjectLoadError::InvalidProjectReference {
                 path: artifact_specifier_label(&project_specifier),
                 reason: format!("attach project runtime: {e}"),
@@ -247,7 +236,7 @@ impl ProjectLoader {
             // per-kind attach loops below — it is present in the tree but
             // drives nothing. `mark_node_load_error` is what makes that
             // visible; do not read this fallback as "it is a project".
-            let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
+            let kind = def_entry.state.kind().unwrap_or(NodeKind::Module);
             let state_error = def_entry
                 .state
                 .is_error()
@@ -337,6 +326,39 @@ impl ProjectLoader {
                     project_node.def_location.clone(),
                 );
             }
+
+            // Structural scope (modules.md R1/R2), recomputed identically on
+            // BOTH entry points — fresh load and apply both run this spine
+            // pass, so an edited project can never wear different scopes
+            // than a reloaded one. Ownership already carries the answer:
+            // project children live in their parent module's scope; a
+            // playlist entry's child lives in that entry's sink scope.
+            {
+                let scope = match ownership {
+                    ProjectedNodeOwnership::Root => None,
+                    ProjectedNodeOwnership::ProjectChild => {
+                        parent.map(|owner| crate::node::ScopeRef::Module { owner })
+                    }
+                    ProjectedNodeOwnership::PlaylistEntry { playlist, entry } => {
+                        Some(crate::node::ScopeRef::Sink {
+                            owner: playlist,
+                            entry,
+                        })
+                    }
+                };
+                // The root introduces the root scope even while its def is
+                // broken (R1: the engine always answers); other nodes
+                // introduce iff their def is known module-kinded — the
+                // failed-def kind fallback above must not mint scopes.
+                let introduces = matches!(ownership, ProjectedNodeOwnership::Root)
+                    || matches!(def_entry.state.kind(), Some(NodeKind::Module));
+                let entry = runtime
+                    .tree_mut()
+                    .get_mut(node_id)
+                    .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(node_id)))?;
+                entry.scope = scope;
+                entry.introduces_scope = introduces;
+            }
             if let Some(message) = state_error {
                 mark_node_load_error(
                     runtime,
@@ -412,6 +434,28 @@ impl ProjectLoader {
             if !should_attach_projected_node(node, targets) {
                 continue;
             }
+            if node.kind != NodeKind::Module || node.ownership == ProjectedNodeOwnership::Root {
+                // Root already wears its ModuleNode from the spine pass —
+                // it must have a runtime even when its def is broken.
+                continue;
+            }
+            // Broken defs project with the module FALLBACK kind — they must
+            // stay error nodes, not wear a live module runtime.
+            let Ok(NodeDef::Module(_)) = projected_node_config(registry, node) else {
+                continue;
+            };
+            // Never feature-gated: every build carries the module runtime.
+            runtime
+                .attach_runtime_node(node.id, crate::nodes::ModuleNode::boxed(node.id), frame)
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("attach module runtime: {e}"),
+                })?;
+        }
+        for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Clock {
                 continue;
             }
@@ -432,7 +476,7 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Clock)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(NodeKind::Clock)),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -466,7 +510,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Button)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Button,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -501,7 +547,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::ControlRadio)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::ControlRadio,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -532,7 +580,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Texture)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Texture,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -605,7 +655,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Shader)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Shader,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -665,7 +717,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::ComputeShader)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::ComputeShader,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -699,7 +753,7 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Fluid)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(NodeKind::Fluid)),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -749,7 +803,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Playlist)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Playlist,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -803,7 +859,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Fixture)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Fixture,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -1346,10 +1404,28 @@ fn register_node_bindings(
     node: &ProjectedNode,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
-    // Unloaded/errored defs project with the `Project` fallback kind and
-    // register nothing — same tolerance the attach arms' kind filters gave
-    // them (the node renders as an error node; the load must not fail).
-    if node.kind == NodeKind::Project {
+    // Module nodes register their R7 output interface: authored bindings
+    // (the contention pick), authored exports, and — for NON-root modules —
+    // the automatic `output` → `visual.out` publish at fallback priority
+    // that makes an embedded module drop-in (root is excluded: its
+    // containing scope does not exist; its mirror is what playback reads).
+    // Unloaded/errored defs project with the module fallback kind and
+    // register nothing — the node renders as an error node; the load must
+    // not fail.
+    if node.kind == NodeKind::Module {
+        if let Ok(NodeDef::Module(config)) = projected_node_config(registry, node) {
+            let config = config.clone();
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+            register_module_exports(runtime, node, &config, frame)?;
+            register_module_output_default(runtime, node, &config.bindings, frame)?;
+        }
         return Ok(());
     }
     match projected_node_config(registry, node)?.clone() {
@@ -1590,7 +1666,7 @@ fn register_node_bindings(
             )?;
             register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
-        NodeDef::Project(_) | NodeDef::Texture(_) => {}
+        NodeDef::Module(_) | NodeDef::Texture(_) => {}
     }
     Ok(())
 }
@@ -1673,9 +1749,7 @@ fn register_default_bind(
         reason: format!("invalid default_bind slot `{name}`: {e}"),
     })?;
     let draft = if direction == SlotDirection::Produced {
-        if current.ownership.suppress_visual_default_output()
-            || binding_target(bindings, name).is_some()
-        {
+        if binding_target(bindings, name).is_some() {
             return Ok(());
         }
         let source = BindingSource::ProducedSlot {
@@ -1881,6 +1955,94 @@ fn register_target_binding(
 /// guess stamped e.g. `trigger` as Color because only the time-family
 /// names were listed (2026-07-16: bus pane showed "trigger COLOR").
 /// Endpoints outside the registry fall back to the slot-name heuristic.
+/// An embedded module contributes its visual to its host by default (R7):
+/// the mirror's produced `output` publishes `visual.out` at fallback
+/// priority. Per R4 that lands in the module NODE's own nearest scope (the
+/// parent's) — the node sits there; only its children are inside the scope
+/// it introduces. The ROOT module is skipped: its containing scope does
+/// not exist, and its mirror is what playback reads. An authored `output`
+/// binding (the contention pick) suppresses the default, same as every
+/// declared default bind.
+fn register_module_output_default(
+    engine: &mut Engine,
+    node: &ProjectedNode,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if node.ownership == ProjectedNodeOwnership::Root {
+        return Ok(());
+    }
+    if binding_target(bindings, "output").is_some() {
+        return Ok(());
+    }
+    let slot = SlotPath::parse("output").expect("module output path");
+    let channel = lpc_model::ChannelName(String::from(lpc_model::PRIMARY_VISUAL_CHANNEL));
+    let source = BindingSource::ProducedSlot {
+        node: node.id,
+        slot,
+    };
+    let target = BindingTarget::BusChannel(channel);
+    engine
+        .add_binding(
+            BindingDraft {
+                kind: binding_kind(&source, &target, "output"),
+                source,
+                target,
+                priority: BindingPriority::default_fallback(),
+                owner: node.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
+            path: node_label(node),
+            reason: format!("register module output mirror default: {e}"),
+        })?;
+    Ok(())
+}
+
+/// Authored exports (R7): each entry republishes an inner-scope channel
+/// outward under the export's name. The binding's SOURCE is the inner
+/// channel — module-owned bus reads resolve from the introduced scope (the
+/// engine host's reading-scope rule) — and its TARGET is the export-named
+/// channel in the module's own nearest scope. Deliberate curation, so it
+/// registers at authored priority.
+fn register_module_exports(
+    engine: &mut Engine,
+    node: &ProjectedNode,
+    config: &lpc_model::ModuleDef,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    for (name, inner) in config.exports.entries.iter() {
+        let inner_channel = match inner.value() {
+            lpc_model::BindingRef::Bus(bus) => bus.channel().clone(),
+            other => {
+                return Err(ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("export `{name}` must name a bus channel, got {other:?}"),
+                });
+            }
+        };
+        let source = BindingSource::BusChannel(inner_channel);
+        let target = BindingTarget::BusChannel(lpc_model::ChannelName(String::from(name.as_str())));
+        engine
+            .add_binding(
+                BindingDraft {
+                    kind: binding_kind(&source, &target, name),
+                    source,
+                    target,
+                    priority: BindingPriority::new(0),
+                    owner: node.id,
+                },
+                frame,
+            )
+            .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                path: node_label(node),
+                reason: format!("register module export `{name}`: {e}"),
+            })?;
+    }
+    Ok(())
+}
+
 fn binding_kind(source: &BindingSource, target: &BindingTarget, slot_name: &str) -> Kind {
     let channel = match (source, target) {
         (BindingSource::BusChannel(channel), _) => Some(channel),
@@ -2055,12 +2217,13 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -2180,12 +2343,13 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -2277,12 +2441,13 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2390,6 +2555,227 @@ mod tests {
         )
     }
 
+    fn examples_basic_fs() -> LpFsStd {
+        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/basic"))
+    }
+
+    /// The published output-channel bytes for the output node behind `path` —
+    /// the core-path end product the M4 differential tests compare.
+    fn output_buffer_bytes(rt: &Engine, path: &str) -> alloc::vec::Vec<u8> {
+        let out = node_for_def_path(rt, path).expect("output node");
+        let entry = rt.tree().get(out).expect("output entry");
+        let NodeEntryState::Alive(node) = entry.state.value() else {
+            panic!("output node alive");
+        };
+        let id = node
+            .runtime_output_sink_buffer_id()
+            .expect("output sink buffer");
+        rt.runtime_buffers()
+            .get(id)
+            .expect("runtime buffer")
+            .value()
+            .bytes
+            .clone()
+    }
+
+    fn loaded_basic_runtime() -> LoadedProjectRuntime {
+        let fs = examples_basic_fs();
+        let services = EngineServices::new(TreePath::parse("/basic.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load examples/basic");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        rt
+    }
+
+    /// Records every pressure broadcast the engine delivers, so tests can pin
+    /// WHEN the seam fires relative to compiles.
+    struct PressureProbe {
+        levels: Rc<core::cell::RefCell<alloc::vec::Vec<crate::node::PressureLevel>>>,
+    }
+
+    impl crate::node::NodeRuntime for PressureProbe {
+        fn destroy(
+            &mut self,
+            _ctx: &mut crate::node::DestroyCtx,
+        ) -> Result<(), crate::node::NodeError> {
+            Ok(())
+        }
+
+        fn handle_memory_pressure(
+            &mut self,
+            level: crate::node::PressureLevel,
+            _ctx: &mut crate::node::MemPressureCtx,
+        ) -> Result<(), crate::node::NodeError> {
+            self.levels.borrow_mut().push(level);
+            Ok(())
+        }
+    }
+
+    fn attach_pressure_probe(
+        rt: &mut Engine,
+    ) -> Rc<core::cell::RefCell<alloc::vec::Vec<crate::node::PressureLevel>>> {
+        let levels = Rc::new(core::cell::RefCell::new(alloc::vec::Vec::new()));
+        let root = rt.tree().root();
+        let frame = rt.revision();
+        let id = rt
+            .tree_mut()
+            .add_child(
+                root,
+                NodeName::parse("pressure_probe").expect("name"),
+                NodeName::parse("probe").expect("ty"),
+                lpc_wire::WireChildKind::Input {
+                    source: lpc_wire::WireSlotIndex(0),
+                },
+                lpc_model::NodeInvocation::new(lpc_model::ArtifactSpec::path("probe.json")),
+                frame,
+            )
+            .expect("add probe child");
+        rt.attach_runtime_node(
+            id,
+            alloc::boxed::Box::new(PressureProbe {
+                levels: Rc::clone(&levels),
+            }),
+            frame,
+        )
+        .expect("attach probe");
+        levels
+    }
+
+    /// M4 differential: after a `High` pressure broadcast at a safe point, the
+    /// next frame's published output bytes are bit-identical to an engine that
+    /// never dropped anything. Core path only — display-pipeline temporal
+    /// state (dither, interpolation) is firmware-side and exempt anyway; see
+    /// docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.md.
+    #[test]
+    fn memory_pressure_drop_and_rebuild_is_bit_identical_on_the_core_path() {
+        let warm = || {
+            let mut rt = loaded_basic_runtime();
+            // Frame 1 defers the shader compile (window request); frame 2
+            // opens the window, compiles, and renders for real.
+            rt.tick(40).expect("tick 1");
+            rt.tick(40).expect("tick 2");
+            rt
+        };
+
+        let mut reference = warm();
+        let mut dropped = warm();
+
+        dropped
+            .broadcast_memory_pressure(crate::node::PressureLevel::High)
+            .expect("broadcast pressure");
+
+        reference.tick(40).expect("reference tick");
+        dropped.tick(40).expect("dropped tick");
+
+        let expected = output_buffer_bytes(&reference, "/output.json");
+        let actual = output_buffer_bytes(&dropped, "/output.json");
+        assert!(
+            expected.iter().any(|byte| *byte != 0),
+            "reference output must not be black — a black baseline proves nothing"
+        );
+        assert_eq!(
+            expected, actual,
+            "state dropped under pressure must lazily rebuild to bit-identical output"
+        );
+    }
+
+    /// The boot path: the first frame defers the compile and requests a
+    /// window; the engine broadcasts exactly one `High` pressure at the top of
+    /// the next tick, and the compile runs inside that same frame.
+    #[test]
+    fn compile_window_broadcasts_pressure_before_the_boot_compile() {
+        let mut rt = loaded_basic_runtime();
+        let levels = attach_pressure_probe(&mut rt);
+
+        rt.tick(40).expect("boot tick");
+        assert!(
+            levels.borrow().is_empty(),
+            "no pressure before any node requested a compile window"
+        );
+        assert!(
+            output_buffer_bytes(&rt, "/output.json")
+                .iter()
+                .all(|byte| *byte == 0),
+            "the deferral frame renders the black fallback"
+        );
+
+        rt.tick(40).expect("window tick");
+        assert_eq!(
+            &*levels.borrow(),
+            &[crate::node::PressureLevel::High],
+            "exactly one High broadcast opens the compile window"
+        );
+        assert!(
+            output_buffer_bytes(&rt, "/output.json")
+                .iter()
+                .any(|byte| *byte != 0),
+            "the compile ran inside the window frame, after the broadcast"
+        );
+
+        rt.tick(40).expect("steady tick");
+        assert_eq!(
+            levels.borrow().len(),
+            1,
+            "steady state broadcasts nothing — the window is not a per-frame event"
+        );
+    }
+
+    /// The switch path: activating a playlist entry whose shader never
+    /// compiled requests a fresh window, and pressure fires again before that
+    /// compile — the worse peak the seam exists for (the transient would land
+    /// on already-allocated per-LED buffers).
+    #[test]
+    fn playlist_switch_requests_a_second_compile_window() {
+        let fs = examples_button_playlist_fs();
+        let fs: &dyn LpFs = &fs;
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let time = Rc::new(TestTimeProvider::new());
+        let time_provider: Rc<dyn TimeProvider> = time.clone();
+        let mut services =
+            EngineServices::new(TreePath::parse("/button_playlist.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_time_provider(Some(time_provider));
+
+        let mut rt =
+            ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let levels = attach_pressure_probe(&mut rt);
+
+        // Boot: deferral frame, then the window frame compiles the idle shader.
+        tick_with_test_time(&mut rt, &time, 16, "boot deferral");
+        tick_with_test_time(&mut rt, &time, 16, "boot window");
+        let boot_broadcasts = levels.borrow().len();
+        assert_eq!(boot_broadcasts, 1, "boot opens one compile window");
+
+        // Switch: the active-entry shader has never compiled. The switch
+        // frame defers it; the following tick must broadcast again.
+        control.set_pressed(HwAddress::gpio(20), true);
+        tick_with_test_time(&mut rt, &time, 16, "press candidate");
+        tick_with_test_time(&mut rt, &time, 30, "press stable — switch, deferral");
+        tick_with_test_time(&mut rt, &time, 16, "switch window");
+        assert_eq!(
+            levels.borrow().len(),
+            2,
+            "the playlist switch must open a second compile window"
+        );
+        assert!(
+            levels
+                .borrow()
+                .iter()
+                .all(|level| *level == crate::node::PressureLevel::High),
+            "compile windows broadcast High, never Critical"
+        );
+    }
+
     #[test]
     fn project_json_loads_into_runtime_with_expected_nodes() {
         let fs = flat_project();
@@ -2456,12 +2842,13 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_bus() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2531,7 +2918,10 @@ mod tests {
         rt.tick(1000).expect("first tick");
         let first = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time"))),
+                QueryKey::Bus {
+                    scope: None,
+                    channel: ChannelName(String::from("time")),
+                },
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2558,7 +2948,10 @@ mod tests {
         rt.tick(1000).expect("second tick");
         let second = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time"))),
+                QueryKey::Bus {
+                    scope: None,
+                    channel: ChannelName(String::from("time")),
+                },
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2586,12 +2979,13 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "shader": {
       "def": {
@@ -2615,12 +3009,13 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2743,7 +3138,11 @@ mod tests {
     }
 
     #[test]
-    fn playlist_entry_children_do_not_get_default_visual_output_binding() {
+    fn playlist_entry_children_publish_into_their_sink_scope_only() {
+        // The old ownership-suppression rule is GONE: entry children
+        // default-publish `visual.out` like every producer — into their
+        // entry's sink scope, where writer-shadowing (R2/R5) keeps them
+        // invisible to any enclosing read by construction.
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
@@ -2757,7 +3156,8 @@ mod tests {
             .lookup_sibling(playlist, NodeName::parse("active").unwrap())
             .expect("active");
 
-        assert!(!rt.tree().bindings().any(|binding| {
+        // The binding exists…
+        assert!(rt.tree().bindings().any(|binding| {
             matches!(
                 (&binding.source, &binding.target),
                 (
@@ -2769,6 +3169,20 @@ mod tests {
                     && binding.priority == BindingPriority::default_fallback()
             )
         }));
+        // …its owner writes a SINK scope…
+        let active_scope = rt.tree().node_scope(active).expect("active scope");
+        assert!(active_scope.is_sink());
+        // …and a root-scoped read never selects it: the winning provider
+        // set for the root scope contains no entry-child publisher.
+        let root_scope = rt.tree().node_scope(root).expect("root scope");
+        let winners = rt.tree().providers_for_bus_read(
+            Some(root_scope),
+            &lpc_model::ChannelName(String::from("visual.out")),
+        );
+        assert!(
+            winners.iter().all(|(_, entry)| entry.owner != active),
+            "sink-scope publishers must be invisible to root-scope demand"
+        );
     }
 
     #[test]
@@ -2971,12 +3385,13 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -2997,7 +3412,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_project_json_returns_io_error() {
+    fn missing_project_json_refuses_via_the_manifest_gate() {
+        // D-A: no `project.json` container manifest = hard refuse before
+        // anything parses; the error names the manifest, not a deep Io path.
         let fs = LpFsMemory::new();
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3005,21 +3422,41 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("expected load error"),
         };
+        let text = err.to_string();
+        assert!(text.contains("project.json"), "{text}");
+        assert!(text.contains("manifest"), "{text}");
+    }
+
+    #[test]
+    fn missing_module_json_returns_io_error() {
+        let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = EngineServices::new(root_path);
+        let err = match ProjectLoader::load_from_root(&fs, services) {
+            Err(e) => e,
+            Ok(_) => panic!("expected load error"),
+        };
         assert!(
-            matches!(err, ProjectLoadError::Io { .. }),
-            "expected Io, got {err:?}"
+            matches!(
+                err,
+                ProjectLoadError::Io { .. } | ProjectLoadError::ProjectParse { .. }
+            ),
+            "expected Io/parse, got {err:?}"
         );
     }
 
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -3184,12 +3621,13 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3238,6 +3676,16 @@ mod tests {
         ))));
         let node = node_for_def_path(&rt, "/compute.json").expect("compute node");
 
+        // First resolve requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        rt.resolve_with_engine_host(
+            QueryKey::ProducedSlot {
+                node,
+                slot: SlotPath::parse("phase").expect("phase"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("warm-up resolve");
         let production = rt
             .resolve_with_engine_host(
                 QueryKey::ProducedSlot {
@@ -3325,6 +3773,16 @@ mod tests {
             assert!(rt.tree().get(id).expect("entry").state.value().is_alive());
         }
 
+        // First resolve requests a compile window (deferral); the second
+        // compiles under the at-most-once progress guarantee.
+        rt.resolve_with_engine_host(
+            QueryKey::ProducedSlot {
+                node: compute,
+                slot: SlotPath::parse("emitters").expect("emitters"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("warm-up resolve");
         let (emitters, _) = rt
             .resolve_with_engine_host(
                 QueryKey::ProducedSlot {
@@ -3735,12 +4193,13 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3805,12 +4264,13 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -4098,13 +4558,13 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
-  "name": "basic",
+  "kind": "Module",
   "nodes": {
     "output": {
       "ref": "./output.json"
@@ -4292,11 +4752,11 @@ mod tests {
             }
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
-        let project = format!(
-            "{{\n  \"kind\": \"Project\",\n  \"format\": 2,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
-        );
-        fs.write_file("/project.json".as_path(), project.as_bytes())
-            .expect("project.json");
+        let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
+        fs.write_file("/module.json".as_path(), module.as_bytes())
+            .expect("module.json");
         for (name, json) in nodes {
             fs.write_file(format!("/{name}.json").as_str().as_path(), json.as_bytes())
                 .unwrap_or_else(|_| panic!("{name}.json"));
@@ -4466,9 +4926,9 @@ mod tests {
             })
             .count();
         assert_eq!(
-            default_publishers, 1,
-            "only the playlist itself default-publishes visual.out; entry \
-             children are ownership-suppressed"
+            default_publishers, 3,
+            "the playlist plus each entry child default-publishes visual.out \
+             (entries into their own sink scopes)"
         );
     }
 
@@ -4486,7 +4946,7 @@ mod tests {
     fn every_node_kind_is_explicitly_gated_or_always_on() {
         fn classify(kind: NodeKind) -> &'static str {
             match kind {
-                NodeKind::Project => "always-on",
+                NodeKind::Module => "always-on",
                 NodeKind::Output => "always-on",
                 NodeKind::Button => "node-button",
                 NodeKind::Clock => "node-clock",
@@ -4500,7 +4960,7 @@ mod tests {
             }
         }
         for kind in [
-            NodeKind::Project,
+            NodeKind::Module,
             NodeKind::Output,
             NodeKind::Button,
             NodeKind::Clock,
@@ -4541,12 +5001,13 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+            .expect("container manifest");
         fs.write_file(
-            "/project.json".as_path(),
+            "/module.json".as_path(),
             br#"
 {
-  "kind": "Project",
-  "format": 2,
+  "kind": "Module",
   "nodes": {
     "button": {
       "ref": "./button.json"

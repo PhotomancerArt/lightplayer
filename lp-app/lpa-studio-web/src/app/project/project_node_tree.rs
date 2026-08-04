@@ -322,7 +322,7 @@ mod tests {
                 ProjectNodeStatusView::new("Running", None, tone),
                 false,
                 UiAction::from_op(
-                    lpa_studio_core::ControllerId::new("story.project"),
+                    lpa_studio_core::ControllerId::new("story.module"),
                     lpa_studio_core::ProjectEditorOp::Focus,
                 ),
                 Vec::new(),

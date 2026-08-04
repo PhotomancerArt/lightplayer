@@ -1,4 +1,4 @@
-use crate::{ProjectEditorView, UiActivityView, UiBusView, UiIssue, UiMetric, UiProgress};
+use crate::{ProjectEditorView, UiActivityView, UiIssue, UiMetric, UiProgress};
 
 /// Generic body content for panes and workflow steps.
 ///
@@ -19,8 +19,6 @@ pub enum UiViewContent {
     Metrics(Vec<UiMetric>),
     /// Project editor surface.
     ProjectEditor(Box<ProjectEditorView>),
-    /// Bus channel surface.
-    Bus(Box<UiBusView>),
 }
 
 impl UiViewContent {
@@ -65,20 +63,6 @@ impl UiViewContent {
                 .iter()
                 .map(|metric| format!("{}: {}", metric.label, metric.value))
                 .collect(),
-            Self::Bus(bus) => {
-                let mut lines = vec![format!("Channels: {}", bus.channels.len())];
-                for channel in &bus.channels {
-                    let value = channel.value.as_deref().unwrap_or("—");
-                    lines.push(format!(
-                        "{} = {} (writers {}, readers {})",
-                        channel.name,
-                        value,
-                        channel.writers.len(),
-                        channel.readers.len()
-                    ));
-                }
-                lines
-            }
             Self::ProjectEditor(editor) => {
                 let mut lines = vec![
                     format!("Project: {}", editor.project_id),

@@ -24,7 +24,11 @@ composite-effects spike, is recorded in
 > `docs/glossary.md` (terms),
 > `docs/adr/2026-07-26-node-card-faces.md` (face grammar),
 > `docs/adr/2026-07-09-declarative-default-bindings.md` (default binds),
-> `docs/adr/2026-07-27-node-authoring-operations.md` (create/vendor seam).
+> `docs/adr/2026-07-27-node-authoring-operations.md` (create/vendor seam),
+> `docs/adr/2026-08-01-scoped-bus-engine-architecture.md` (R1–R7 as
+> built),
+> `docs/adr/2026-08-03-panel-visibility-is-derived.md` (R3/R8/Q13 as
+> built).
 
 ## 1. Concepts
 
@@ -64,6 +68,10 @@ no format bump semantics to preserve (alpha). Inventory:
   that no identifier may use "project" to mean the node kind.
 - Studio copy: users "open a project", "add a module", browse "Effects".
 - "Plugin" is rejected (connotes third-party binaries / dynamic loading).
+
+> Status: the kind/type rename (`ModuleDef`, `NodeKind::Module`, kind
+> strings `Module`/`module`, tree paths `.module`, schemas, corpora,
+> wire bump) landed 2026-08-01. The file split (§6) is the next phase.
 
 ## 3. Bus rules (normative)
 
@@ -175,6 +183,12 @@ public input is an *invitation*, not an error.
 Inputs need no counterpart: consumed inheritance (R5) already lets a host
 feed a module's inner consumers with zero authoring (see E6).
 
+> Status: implemented 2026-08-01 (engine C1–C3) — structural scopes,
+> scoped resolver keys with writer-shadowing, the module mirror runtime
+> (root included), automatic publish + authored exports, and the
+> engine-reported primary-visual role. See
+> `docs/adr/2026-08-01-scoped-bus-engine-architecture.md`.
+
 ### R8 — The panel: one concept, every node, derived from publicity
 
 The **panel** is a first-class per-node concept, not a feature of
@@ -184,8 +198,9 @@ promoted between levels.
 
 - A **leaf node's** panel presents its public (bound) slots. Publicity
   (R3) is the one gesture that puts a control on a panel — this
-  **subsumes the legacy `panel: bool` slot flag**: "add to panel" *means*
-  "bind to a channel". (Widget choice, step, unit remain slot meta.)
+  **subsumes the legacy `panel: bool` slot flag** — deleted outright in
+  P2: "add to panel" *means* "bind to a channel". (Widget choice, step,
+  unit remain slot meta.)
 - A **module's** panel presents its scope's channel list — which is the
   aggregate of its children's publicity — plus each child module's panel
   as a **nested group** (presentation recursion). Two embedded instances
@@ -238,7 +253,7 @@ restoring R5/R6 resolution and dropping the persisted entries.
 
 ### R13 — Persistence *(summary — normative: panel.md P10/P11)*
 
-Panel state persists by default to `.lp/state.json` (§6) with throttled
+Panel state persists by default to `.lp/panel.json` (§6) with throttled
 writes (≥ ~10 s, flash preservation), auto-save on by default, and
 restore **before first render** on boot. Never in authored artifacts.
 
@@ -420,17 +435,25 @@ F (module, "fluid-draw"):
   friend-count, and the sim's public params — *is* the installation
   controller.
 
-## 5. UI corollaries (the UX spike owns the shape)
+## 5. UI corollaries
 
 One face, three zoom levels: the **effect author** works inside the module
 (children expanded); the **artist** sees the module face as a card
 (preview + panel group); the **end user** sees the root module's face
-alone (play mode). Consequences the UX spike must exercise: the root
-module returns to the node area as the single top-level card (flat-root
-reversal — the root now *does* something); the sidebar bus pane dissolves
-into the module face (bus-as-controls) plus a wiring drawer
-(bus-as-writers/readers, today's pane content); engaged-vs-inheriting
-state and the reset gesture (R11/R12); the drop-time contention pick (E3).
+alone (play mode). The consequences: the root module returns to the node
+area as the single top-level card (flat-root reversal — the root now
+*does* something); the sidebar bus pane dissolves into the module face
+(bus-as-controls) plus a wiring drawer (bus-as-writers/readers, the
+pane's own rows); engaged-vs-inheriting state and the reset gesture
+(R11/R12); the drop-time contention pick (E3).
+
+> Status: landed 2026-08-03 (`planning/2026-08-03-1021-modules-vision-push`
+> P2–P3, gate GV). The flat-root reversal, the module face at every depth
+> (children below as sibling cards), the per-scope wiring drawer, and play
+> mode (`#/sim|device/<key>/play`) are all real; the sidebar bus pane is
+> deleted. What the drawer's rows LOOK like is unchanged from the pane —
+> that redesign is §10 future work, not this slice. The contention pick
+> (E3) is authorable on `ModuleDef.bindings` but has no gesture yet.
 
 ## 6. File layout
 
@@ -451,7 +474,7 @@ my-project/
 │     ├─ module.json     #   (no project.json, no format — see below)
 │     └─ …
 └─ .lp/                  # the ONE framework-owned dir: never authored,
-   └─ state.json         #   always safe to delete (panel state per R13;
+   └─ panel.json         #   always safe to delete (panel state per R13;
                          #   future caches/locks land here, never beside content)
 ```
 
@@ -470,13 +493,18 @@ my-project/
   in-tree dir.
 - `.lp/` is a project-folder concept; the device keeps its own filesystem
   conventions and needs only the panel-state *data*, not the layout.
-- `state.json` shape (proposed, Q3): a versioned map of
+- `panel.json` shape (proposed, Q3): a versioned map of
   `scope-path / channel → { value, engaged }`. Scope paths are node
   paths, so vendoring/renames invalidate entries gracefully (unknown
   paths are dropped on load).
 - Relative `node:` refs and file-relative artifact refs survive vendoring
   by construction — a module folder's internal wiring is
   location-independent.
+
+> Status: the project.json/module.json split, the container-manifest
+> format gate (missing manifest = hard refuse, format bumped to 3), and
+> the split schemas landed 2026-08-01. `.lp/panel.json` arrives with the
+> panel phases.
 
 ## 7. Bus vocabulary — under discovery
 
@@ -492,27 +520,109 @@ Known vocabulary pressure beyond scalars: **touch/gesture sets** (E7 —
 multi-point, per-touch identity; shape question tracked as panel.md
 P-Q5) and the `phase` convention (panel.md P3).
 
-## 8. Provenance (proposed field set — Q7)
+## 8. Provenance (field set settled — Q7)
 
 `author`, `version`, `license`, `created` (ISO date). Optional on any
 node and on `project.json`; skip-if-default; no semver semantics yet.
 Copy-on-extract per R14.
 
+> Status: landed 2026-08-01 as `ProvenanceDef` (module defs carry it;
+> the container manifest carries the same four keys at its top level).
+> Copy-on-extract mechanics arrive with the vendoring flows.
+
 ## 9. Open questions (G1 redline register)
 
 - **Q3:** → specced as `panel.md` P8/P11 (wire ops, state file shape);
   ratify there.
-- **Q7:** provenance field set (§8) — enough? (`description`/`homepage`
-  deferred?)
-- **Q10:** bare-module-folder open assumes current format (§6) — fine for
-  alpha?
+- **Q7:** SETTLED (2026-08-01, implementation P3): the §8 four-field set
+  as proposed (`author`/`version`/`license`/`created`); `description`/
+  `homepage` deferred until a real need shows up in the registry/import
+  flow.
+- **Q10:** SETTLED (2026-08-01, implementation P2): format is a
+  container-level concept. A module folder inside a project is gated by
+  the project's container manifest; the loader never re-runs the gate for
+  child artifacts (pinned by test). Bare-module-folder standalone opening
+  keeps the §6 assume-current posture; import-time gating arrives with
+  the registry/import flow.
 - **Q11:** → moved to `panel.md` P6 (merge/tiebreak rules); ratify there.
 - **Q12:** → resolved by the latch model: grabbing authored-driven
   channels is core behavior (`panel.md` P2/P5), not an increment.
-- **Q13:** R8 subsumes the `panel: bool` slot flag under publicity — a
-  leaf node's knobs are exactly its bound slots, and "add to panel" is
-  the binding gesture. Confirm the flag (and `ShaderSlotDef.panel`) is
-  deleted rather than kept as a parallel card-local mechanism.
-- `panel.md` carries its own register (P-Q1–P-Q4: slew defaults,
+- **Q13:** SETTLED — IMPLEMENTED (2026-08-03, P2; refined P6). The flag
+  is deleted, not kept in parallel. `ShaderSlotDef.panel`,
+  `SlotMeta.panel` and their DTO/agent surfaces are gone; a shader
+  uniform reaches a panel exactly when its binding derives a
+  `(scope, channel)` panel target, and the fixture face's brightness
+  fader is that face's own named affordance. **Refinement (2026-08-03,
+  P6): publicity is AUTHORED wiring only** — a binding the loader
+  materialized from a slot's own `default_bind` is not publicity, so
+  `bus:time` no longer materializes a time knob on every panel. Recorded
+  as `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+- `panel.md` carries its own register (P-Q1–P-Q5: slew defaults,
   three-state affordance requirement, state-file versioning/flush,
-  clear-all vs sink scopes).
+  clear-all vs sink scopes, touch-set value shape).
+
+## 10. Future work register
+
+Not open *questions* — settled directions with no home yet. Each is
+either a named spike, a registered defect/debt entry, or a design pass
+somebody owes. Recorded 2026-08-03 at the close of
+`planning/2026-08-03-1021-modules-vision-push` unless noted.
+
+**Design passes owed**
+
+- **Wiring-drawer redesign.** The drawer reuses the retired bus pane's
+  channel rows verbatim (relocate, don't redesign — settled DY4). A
+  proper look for bus-as-writers/readers needs its own UX spike, and
+  that spike owns the vocabulary below.
+- **CONTROLS-vs-PANEL nomenclature.** "Controls" (the `control.out`
+  product; a card's control affordances) and "panel" (a scope's public
+  channel surface) name different things and read as the same thing.
+  Likely the wiring spike's to settle, since it surrounds both.
+- **Auto-naming.** Manually naming nodes is a tax the node type usually
+  pays for you. A node/module should present a good name with nothing
+  authored — derived from kind, role, or position, with an authored
+  label overriding. The root card shipped only the minimal fix (it
+  wears the project's manifest display name).
+- **What a module's canonical self-portrait is.** The hero draws the
+  scope's resolved `visual.out` (live beats black). Yona leans
+  `control.out` — the fixture view — with 3D mapping renders later.
+- **Driving time from a panel.** With `default_bind` wiring no longer
+  publicity (Q13 refinement), `bus:time` has no panel presence at all.
+  The sanctioned answer should be the CLOCK's own transport/scrub
+  controls published to the panel, not a knob materialized from a
+  default binding. See `docs/debt/clock-transport-has-no-transport-ui.md`.
+- **Playlist edit-vs-play, and entry progress.** A playlist card is both
+  an authoring surface and a live transport; the two readings collide,
+  and an entry's progress has no presentation. Spun off at GV2.
+- **Parenthood rules.** Add-node should only offer kinds that make sense
+  at the site — one `can_attach(parent_kind, child_kind)` legality
+  function shared by the picker, drag-reparent, and wrap. Belongs with
+  `planning/2026-08-03-1515-module-authoring-ops`.
+- **Authored panel layouts.** A curated promoted-control list per module
+  (the closed #218 spike's `controls{}`), as an additive override on the
+  derived default. See the rejected-alternatives section of
+  `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+- **Data-driven playlist activation** (R2.2 carve-out), an **input
+  design doc** (R13's external sources), **vocabulary lock-down** (§7),
+  and a **module registry** (§6 import/vendor flows) — carried from the
+  predecessor plan's register, unchanged.
+
+**Known gaps in what shipped**
+
+- **A kind with no face publishes no controls.** Module panels are
+  assembled from face controls, so a `ComputeShader`'s bound uniforms
+  reach the wiring drawer but never a knob — `examples/meteor` publishes
+  `speed` and `count` as channels with no control above them. Either
+  compute shaders grow a face, or panel assembly stops depending on one.
+- **Authored source bindings on non-hand-listed slots are dropped
+  silently** — `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md`.
+  Met again 2026-08-03: binding a fixture's `brightness` to a bus channel
+  registers nothing, so a fixture fader cannot currently be published.
+- **Sims do not restore panel state** (settled D-B: device-first,
+  deliberately). Persistent sims are the follow-up, not a bug — do not
+  "fix" a sim that fails to restore.
+- **Panel-state serde flash cost** — parked by decision (Q3 of the
+  vision push); `docs/debt/panel-state-serde-flash-cost.md`.
+- **G4 hardware walk is still owed.** Decoupled from merging (DY2,
+  opportunistic); materials at
+  `planning/2026-08-01-1003-modules-impl-roadmap/g4-hardware-walk.md`.

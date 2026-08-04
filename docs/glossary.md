@@ -49,9 +49,12 @@ of implementation — code can lag these names during the transition.
 - **Default bind** — a slot-declared binding (`default_bind`) materialized
   at load at fallback priority; the mechanism behind zero-wiring behavior
   like `time`.
-- **Public / private slot** — public = has a bus binding (and therefore a
-  channel, and therefore a panel presence); private = unbound. Binding
-  *is* publicity. (module model)
+- **Public / private slot** — public = has an **authored** bus binding
+  (and therefore a channel, and therefore a panel presence); private =
+  unbound. Binding *is* publicity. A binding the loader materialized from
+  the slot's own `default_bind` does NOT make it public — the channel is
+  wired and listed, but there is no control
+  ([ADR](adr/2026-08-03-panel-visibility-is-derived.md)). (module model)
 - **Writer-shadowing** — consume resolution: a read resolves to the
   nearest enclosing scope with a writer; writes always land in the
   producer's own scope. Reads inherit, writes stay local. (module model)
@@ -72,9 +75,13 @@ of implementation — code can lag these names during the transition.
   (preview hero, entries strip, drawers): the authoring instrument. A face
   *hosts* the node's panel; play mode renders panels without faces.
 - **Drawer** — a collapsible authoring surface below a face (code,
-  advanced slots, bus wiring).
+  advanced slots, wiring).
+- **Wiring drawer** — the drawer on a module card listing its scope's
+  channels as writers → readers, with focus affordances: bus-as-plumbing,
+  where the panel above is bus-as-controls. One per scope, hung off the
+  module that owns it. It replaced the sidebar *bus pane*, which is gone.
 - **Panel state** — unauthored runtime writer state per (scope, channel);
-  persisted to `.lp/state.json` with throttled writes; never dirties the
+  persisted to `.lp/panel.json` with throttled writes; never dirties the
   project. (module model)
 - **Engaged (Latch)** — a panel control whose lazy runtime writer has
   materialized (it was touched): it captures the channel, overriding
