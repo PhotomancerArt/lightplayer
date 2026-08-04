@@ -135,7 +135,7 @@ pub fn NodeFaceBody(
                 // Same widgets and same panel state as the module panel
                 // above, because it is literally the same control (P1).
                 UiNodeFace::Controls(panel) => rsx! {
-                    NodeCardSection { label: "controls", first: true,
+                    NodeCardSection { label: "settings", first: true,
                         ModulePanel { panel, on_panel: module_panel, on_action }
                     }
                     NodeCardDrawers {
