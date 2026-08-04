@@ -236,6 +236,7 @@ fn readme_home_view() -> UiHomeView {
             on_device: None,
             open_elsewhere: false,
             connected_device: Some(lpa_studio_core::UiCardConnection {
+                device_key: "runtime-1".to_string(),
                 device_name: "Workbench ESP32".to_string(),
                 relation: lpa_studio_core::SyncRelation::AtHead,
             }),
