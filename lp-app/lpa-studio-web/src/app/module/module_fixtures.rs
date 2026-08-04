@@ -18,11 +18,11 @@
 
 use lpa_studio_core::{
     LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelView, UiBusSiteView, UiBusView, UiModuleFace, UiNodeChild, UiNodeFace,
-    UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl, UiPanelControlState,
-    UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
-    UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState,
-    UiSlotValue, UiStatus,
+    UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace,
+    UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
+    UiPanelControlState, UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry,
+    UiPlaylistFace, UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState,
+    UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -558,6 +558,8 @@ fn channel(
         value: value.map(str::to_string),
         value_error: (value.is_none()).then(|| "no writer in any enclosing scope".to_string()),
         primary_visual: false,
+        contended: false,
+        preview: None,
         writers,
         readers,
     }
@@ -568,7 +570,10 @@ fn site(node_label: &str, slot: &str) -> UiBusSiteView {
     UiBusSiteView {
         node_label: node_label.to_string(),
         slot: Some(slot.to_string()),
-        default_origin: false,
+        origin: UiBusSiteOrigin::Authored,
+        publish: false,
+        shadowed: false,
+        child_scope: None,
         focus: None,
     }
 }

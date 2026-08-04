@@ -12,4 +12,6 @@
 
 pub mod ui_bus_view;
 
-pub use ui_bus_view::{UiBusChannelView, UiBusSiteView, UiBusView};
+pub use ui_bus_view::{
+    UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
+};

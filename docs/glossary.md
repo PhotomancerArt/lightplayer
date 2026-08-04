@@ -70,16 +70,31 @@ of implementation — code can lag these names during the transition.
 - **Panel** — a node's *control surface*: the presentation of its public
   surface. Leaf node → its bound slots; module → its scope's channels plus
   nested child-module groups; playlist → the active entry's panel. The
-  root module's panel is the end-user surface. (module model)
+  root module's panel is the end-user surface. In Studio the section
+  *labeled* `panel` appears on module cards only, wearing the
+  panel-primary tint and a ▶ rail mark — the panel is the thing play mode
+  renders (wiring spike gate 2, ADR
+  2026-08-04-wiring-flow-and-panel-settings). (module model)
+- **Settings** — the label on a *leaf* card's own bound-slot strip: the
+  knobs configuring that one node. Same publicity underneath as a panel
+  control — the leaf's bound slots simultaneously surface on the
+  enclosing module's panel — the label just distinguishes "one node's
+  knobs" from "a scope's performable surface". Replaced the leaf-side
+  `controls` section label. (module model)
 - **Face** — a node's kind-specific card presentation in the workspace
   (preview hero, entries strip, drawers): the authoring instrument. A face
   *hosts* the node's panel; play mode renders panels without faces.
 - **Drawer** — a collapsible authoring surface below a face (code,
   advanced slots, wiring).
-- **Wiring drawer** — the drawer on a module card listing its scope's
-  channels as writers → readers, with focus affordances: bus-as-plumbing,
-  where the panel above is bus-as-controls. One per scope, hung off the
-  module that owns it. It replaced the sidebar *bus pane*, which is gone.
+- **Wiring drawer** — the drawer on a module card drawing its scope's
+  channels as a flow: writer chips → arrowed wires → the channel's value
+  box (name + live value/product) → reader chips, wire color matching
+  chip color (violet = driving write, orange = engaged panel writer,
+  grey = reader / out-ranked); child-scope readers list with their scope
+  path (R5). Bus-as-plumbing, where the panel above is bus-as-controls.
+  One per scope, hung off the module that owns it. It replaced the
+  sidebar *bus pane*, which is gone. (wiring spike, ADR
+  2026-08-04-wiring-flow-and-panel-settings)
 - **Panel state** — unauthored runtime writer state per (scope, channel);
   persisted to `.lp/panel.json` with throttled writes; never dirties the
   project. (module model)

@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wiring UI — visualizing the bus (design spike)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
+  :root {
+    color-scheme: dark;
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --raised: #20272e;
+    --terminal: #0c1114;
+    --track: #10151a;
+
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-strong: #3e4852;
+
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+
+    --sel-border: #d6dae0;
+    --sel-bg: rgba(214,218,224,.12);
+
+    --bound-bg: #241a33;
+    --bound-border: #5f4a85;
+    --bound-text: #c9b1f5;
+
+    --attn-bg: #291f14;   --attn-border: #795833;  --attn-text: #f0b97a;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --err-bg: #301b1d;    --err-border: #874b4b;   --err-text: #ffc7c7;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --good-text: #7be0b2;
+
+    --panel-primary: #18201d;
+    --panel-primary-border: #34463e;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 780px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 34px 0 4px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 12px; max-width: 780px; }
+  code { font-family: var(--mono); font-size: .92em; color: var(--muted); }
+
+  details.archive { margin-top: 40px; border-top: 1px solid var(--border-muted); padding-top: 10px; }
+  details.archive > summary { cursor: pointer; font-size: 12px; letter-spacing: .1em;
+    color: var(--subtle); text-transform: uppercase; user-select: none; }
+  details.archive .aside-reason { color: var(--dim); font-size: 11.5px; font-style: italic; }
+
+  /* ---- exploration controls ---- */
+  .xcontrols {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md); color: var(--subtle); font-size: 12px;
+    position: sticky; top: 8px; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .xcontrols .grp { display: inline-flex; gap: 9px; align-items: center; }
+  .xcontrols .grp > b { color: var(--muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .07em; }
+  .xcontrols label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .xcontrols input { accent-color: var(--accent); }
+
+  /* ---- module card frame ---- */
+  .mcard {
+    width: 100%; max-width: 760px; border-radius: var(--r-md); overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .mhead {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; background: var(--terminal);
+    border-bottom: 1px solid var(--border);
+  }
+  .mhead .chev { color: var(--dim); font-size: 10px; width: 14px; }
+  .mhead .name { font-weight: 700; font-size: 14.5px; color: var(--strong); }
+  .mhead .kind { margin-left: auto; color: var(--subtle); font-size: 12px; }
+  .mhead .info {
+    width: 26px; height: 24px; border: 1px solid var(--border-strong);
+    border-radius: var(--r-xs); background: var(--surface-subtle);
+    color: var(--muted); font-size: 12px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .sect { display: grid; grid-template-columns: 24px minmax(0,1fr); border-top: 1px solid var(--border-muted); }
+  .sect:first-of-type { border-top: 0; }
+  .sect > .srail {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 9px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); display: flex; align-items: center; justify-content: center;
+    padding: 10px 0; user-select: none;
+  }
+  .sect > .sbody { min-width: 0; padding: 10px 14px 12px 2px; }
+
+  .empty-scope { font-size: 12.5px; color: var(--subtle); }
+  .empty-scope p { margin: 0 0 4px; }
+  .empty-scope .sub { font-size: 11.5px; color: var(--dim); }
+
+  /* ---- shared vocabulary: chips, capsules, badges ---- */
+  .site {
+    display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; max-width: 100%;
+    border: 1px solid var(--border-strong); border-radius: var(--r-xs);
+    padding: 1px 7px 2px; font-size: 11.5px; color: var(--muted);
+    background: var(--surface-subtle); cursor: pointer; white-space: nowrap;
+    transition: border-color .12s, color .12s, background .12s;
+  }
+  .site .lab { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .site .slot { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+  .site .sc { font-size: 10.5px; color: var(--dim); }
+  .site .mk { font-size: 10px; color: var(--dim); flex: none; }
+  .site:hover { color: var(--text); border-color: var(--sel-border); }
+  .site.hl { border-color: var(--sel-border); color: var(--text); background: var(--sel-bg); }
+  .site.def { border-style: dashed; }             /* default-origin binding */
+  .site.inh { border-style: dotted; }             /* inherited (inner-scope) reader */
+  .site.panelw { border-color: var(--attn-border); color: var(--attn-text);
+                 background: var(--attn-bg); }    /* engaged panel writer */
+  .site.pub { border-color: var(--bound-border); color: var(--bound-text); } /* module publish */
+  .site.shadowed { opacity: .5; }
+  .site.picked { border-color: var(--good-text); }
+
+  .chan {
+    display: inline-flex; align-items: baseline; gap: 6px;
+    border: 1px solid var(--bound-border); border-radius: var(--r-xs);
+    background: var(--bound-bg); color: var(--bound-text);
+    padding: 2px 8px; font-family: var(--mono); font-size: 12px; font-weight: 600;
+    white-space: nowrap; max-width: 100%; min-width: 0;
+  }
+  .chan .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .chan.contended { border-color: var(--attn-border); box-shadow: 0 0 0 1px var(--attn-border) inset; }
+  .kindb { font-size: 8.5px; font-weight: 700; letter-spacing: .07em; color: var(--subtle);
+           text-transform: uppercase; font-family: var(--sans); flex: none; }
+  .primaryb {
+    font-size: 8.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase;
+    background: var(--bound-border); color: #efe7ff; border-radius: 3px;
+    padding: 0 4px; font-family: var(--sans); flex: none;
+  }
+  .contendb {
+    font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--attn-text); background: var(--attn-bg); border: 1px solid var(--attn-border);
+    border-radius: 3px; padding: 0 5px; font-family: var(--sans); cursor: pointer; flex: none;
+  }
+  .vval { font-family: var(--mono); font-size: 12px; color: var(--strong); font-weight: 600;
+          font-variant-numeric: tabular-nums; }
+  .vval.err { color: var(--err-text); font-weight: 400; font-size: 11.5px; }
+  .vval.none { color: var(--dim); font-weight: 400; }
+  .vval.invite { color: var(--dim); font-weight: 400; font-size: 11px; font-style: italic; }
+
+  /* rich values: product thumb + float bar */
+  .vthumb { display: inline-block; border-radius: 3px; border: 1px solid var(--border-strong);
+            background: linear-gradient(115deg, #16324a, #1f6f65 45%, #79d6a3);
+            vertical-align: -3px; }
+  .vthumb.sm { width: 26px; height: 13px; }
+  .vthumb.md { width: 64px; height: 20px; vertical-align: -6px; }
+  .vthumb.lg { width: 100%; height: 40px; display: block; }
+  .vbar { display: inline-block; width: 46px; height: 3px; border-radius: 2px;
+          background: var(--track); vertical-align: 2px; margin-left: 6px;
+          border: 1px solid var(--border-muted); position: relative; overflow: hidden; }
+  .vbar i { position: absolute; inset: 0; right: auto; background: var(--live-text); opacity: .75; }
+  .vbar.wide { width: 84px; height: 4px; }
+
+  .scope-head {
+    display: flex; align-items: center; gap: 8px; margin: 12px 0 6px;
+    font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--bound-text);
+  }
+  .scope-head:first-child { margin-top: 0; }
+  .scope-head::after { content: ""; flex: 1; height: 1px; background: var(--border-muted); }
+  .scope-head .tag { color: var(--dim); font-weight: 600; letter-spacing: .05em; }
+  .scope-indent { border-left: 2px solid var(--bound-bg); padding-left: 10px; margin-left: 2px; }
+
+  /* =============== horizontal flow (THE direction) =============== */
+  .w2-row { position: relative; display: grid;
+            grid-template-columns: minmax(0,1fr) 40px minmax(176px,220px) 40px minmax(0,1fr);
+            align-items: center; padding: 10px 2px; border-top: 1px solid var(--border-muted); }
+  .w2-row:first-child, .scope-indent .w2-row:first-of-type { border-top: 0; }
+  .w2-writers { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; min-width: 0; }
+  .w2-readers { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; min-width: 0; }
+  .w2-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+  .w2-none { font-size: 10.5px; color: var(--dim); font-style: italic; padding: 2px 0;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .w2-hidden { font-size: 10px; color: var(--dim); font-style: italic; padding: 1px 0 2px;
+               border-top: 1px dotted var(--border-strong); margin-top: 2px; }
+
+  /* the value box: channel header + live value body */
+  .hubcard { z-index: 1; width: 100%; border: 1px solid var(--bound-border);
+             border-radius: var(--r-sm); background: var(--terminal); overflow: hidden; }
+  .hubcard.contended { border-color: var(--attn-border); }
+  .hub-h { display: flex; align-items: baseline; gap: 6px; padding: 3px 8px 4px;
+           background: var(--bound-bg); border-bottom: 1px solid var(--bound-border); min-width: 0; }
+  .hubcard.contended .hub-h { border-bottom-color: var(--attn-border); }
+  .hub-h .nm { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--bound-text);
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .hub-h .kindb { margin-left: auto; }
+  .hub-v { padding: 7px 9px 8px; text-align: center; }
+  .hub-v .vval { font-size: 14px; }
+  .hub-v .cap { display: block; margin-top: 4px; font-family: var(--mono); font-size: 10px;
+                color: var(--subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hub-v .contendrow { margin-top: 5px; }
+
+  /* =============== vertical flow (archived) =============== */
+  .w3-wrap { overflow-x: auto; padding: 4px 2px 8px; }
+  .w3-strips { display: inline-flex; gap: 12px; min-width: 100%; align-items: flex-start; }
+  .w3-strip { width: 148px; flex: none; display: grid; justify-items: center; }
+  .w3-writers { min-height: 86px; display: flex; flex-direction: column; justify-content: flex-end;
+                align-items: center; gap: 4px; width: 100%; }
+  .w3-readers { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; }
+  .w3-strip .vline { width: 2px; height: 9px; background: var(--border-strong); flex: none; }
+  .w3-strip .vline.w { background: var(--bound-border); }
+  .w3-capbox { height: 84px; display: flex; align-items: center; width: 100%; justify-content: center; }
+  .w3-cap { display: grid; justify-items: center; gap: 3px; padding: 6px 9px; width: 100%;
+            border: 1px solid var(--bound-border); border-radius: var(--r-sm);
+            background: var(--bound-bg); }
+  .w3-cap.contended { border-color: var(--attn-border); }
+  .w3-cap .nm { font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+                color: var(--bound-text); max-width: 126px; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+  .w3-cap .vv { font-size: 11px; max-width: 126px; white-space: nowrap;
+                overflow: hidden; text-overflow: ellipsis; }
+  .w3-cap .vthumb.md { width: 116px; height: 26px; }
+  .w3-strip .site { max-width: 144px; }
+
+  /* =============== value cards (archived) =============== */
+  .wc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+  .wc-card { border: 1px solid var(--bound-border); border-radius: var(--r-sm);
+             background: var(--terminal); overflow: hidden; display: flex; flex-direction: column; }
+  .wc-card.contended { border-color: var(--attn-border); }
+  .wc-head { display: flex; align-items: center; gap: 7px; padding: 5px 8px;
+             background: var(--bound-bg); border-bottom: 1px solid var(--bound-border); min-width: 0; }
+  .wc-card.contended .wc-head { border-bottom-color: var(--attn-border); }
+  .wc-head .nm { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--bound-text);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wc-hero { padding: 10px 10px 8px; text-align: center; }
+  .wc-hero .vval { font-size: 14px; }
+  .wc-io { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--border-muted);
+           font-size: 11px; flex: 1; }
+  .wc-io > div { padding: 6px 8px 8px; min-width: 0; }
+  .wc-io > div + div { border-left: 1px solid var(--border-muted); }
+  .wc-io h4 { margin: 0 0 5px; font-size: 8.5px; font-weight: 800; letter-spacing: .12em;
+              text-transform: uppercase; color: var(--dim); }
+  .wc-io .list { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .wc-io .site { max-width: 100%; }
+
+  /* =============== matrix (archived) =============== */
+  .w4-scroll { overflow-x: auto; }
+  table.w4 { border-collapse: collapse; font-size: 11.5px; min-width: 100%; }
+  table.w4 th, table.w4 td { padding: 4px 8px; border: 1px solid var(--border-muted); }
+  table.w4 thead th { background: var(--surface-muted); font-family: var(--mono);
+                      font-size: 11px; color: var(--bound-text); font-weight: 600;
+                      text-align: center; vertical-align: bottom; }
+  table.w4 thead th .kindb { display: block; margin-top: 1px; }
+  table.w4 thead th .vv { display: block; margin-top: 2px; font-weight: 400; white-space: nowrap;
+                          overflow: hidden; text-overflow: ellipsis; max-width: 200px; margin-inline: auto; }
+  table.w4 thead th.contended { color: var(--attn-text); }
+  table.w4 tbody th { text-align: left; font-weight: 500; color: var(--muted);
+                      background: var(--surface-muted); white-space: nowrap; cursor: pointer; }
+  table.w4 tbody th .sc { color: var(--dim); font-size: 10px; }
+  table.w4 td { text-align: center; font-family: var(--mono); font-weight: 700; font-size: 10.5px; }
+  table.w4 td .W { color: var(--bound-text); }
+  table.w4 td .R { color: var(--subtle); font-weight: 400; }
+  table.w4 td .d { color: var(--dim); font-weight: 400; }
+  table.w4 tr.hlr td, table.w4 tr.hlr th { background: rgba(214,218,224,.05); }
+  table.w4 td.hlc, table.w4 th.hlc { background: rgba(201,177,245,.06); }
+  table.w4 .grp td, table.w4 .grp th { border: 0; background: transparent;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--bound-text); text-align: left; padding-top: 10px; }
+
+  /* =============== nomenclature =============== */
+  .nom-grid { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .nom-col { width: 302px; }
+  .nom-col h3 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+                color: var(--muted); margin: 0 0 8px; }
+  .nom-col h3 .lean { color: var(--good-text); font-size: 9.5px; margin-left: 6px; }
+  .nom-col p.why { font-size: 11.5px; color: var(--dim); margin: 8px 0 0; line-height: 1.45; }
+  .nom-card { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden;
+              background: var(--surface); margin-bottom: 10px; }
+  .nom-card .mhead { padding: 6px 10px; }
+  .nom-card .mhead .name { font-size: 12.5px; }
+  .nom-card .mhead .kind { font-size: 10.5px; }
+  .nom-card .sect > .srail { font-size: 8px; padding: 6px 0; }
+  .nom-card .sect > .sbody { padding: 7px 10px 8px 2px; }
+  /* the module-panel "teach it" treatment: panel-primary tint + framed edge + play chip */
+  .nom-card .sect.paneltint { background: linear-gradient(90deg, rgba(52,70,62,.28), rgba(52,70,62,.06)); }
+  .nom-card .sect.paneltint > .srail { color: var(--heading); }
+  .nom-card .sect.paneltint > .sbody { position: relative; }
+  .playchip { position: absolute; top: 4px; right: 8px; display: inline-flex; gap: 4px;
+              align-items: center; font-size: 8.5px; font-weight: 800; letter-spacing: .09em;
+              text-transform: uppercase; color: var(--heading);
+              border: 1px solid var(--panel-primary-border); border-radius: 3px;
+              background: var(--panel-primary); padding: 1px 5px; }
+  .nom-thumb { height: 34px; border-radius: 4px;
+               background: linear-gradient(115deg, #16324a, #1f6f65 45%, #79d6a3); opacity: .85; }
+  .nom-knobs { display: flex; gap: 14px; }
+  .mini-ctl { display: grid; justify-items: center; gap: 3px; }
+  .mini-ctl .lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .08em;
+                   text-transform: uppercase; color: var(--muted); }
+  .mini-ctl .val { font-family: var(--mono); font-size: 11px; color: var(--live-text); }
+  .nom-wiring { font-size: 10px; letter-spacing: .06em; color: var(--subtle);
+                text-transform: uppercase; font-weight: 600; }
+  .nom-note { max-width: 640px; border: 1px solid var(--warn-border); background: var(--warn-bg);
+              border-radius: var(--r-md); padding: 10px 14px; font-size: 12px; color: var(--warn-text);
+              margin-top: 18px; }
+  .nom-note code { color: inherit; }
+
+  .flash { animation: flashkf .9s ease-out; }
+  @keyframes flashkf {
+    0% { box-shadow: 0 0 0 3px rgba(214,218,224,.55); }
+    100% { box-shadow: 0 0 0 3px transparent; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Wiring UI — visualizing the bus</h1>
+<p class="hint">
+  <b>Decision log.</b> Gate 1 (2026-08-03): horizontal flow is the direction; selection parked;
+  node-graph later. Gate 2: value box confirmed at this small size; wires grew <b>arrowheads</b>
+  to carry direction; nomenclature decided — <b>D: panel (module) + settings (leaf)</b>, with the
+  tint + ▶ play-surface treatment teaching the difference. Gate 3: child-scope readers
+  <b>list</b> as chips (summarize-only rejected; revisit presentation later if big scopes get
+  noisy — the toggle below keeps both states comparable). Wire weight carries resolution — winning writer solid
+  violet, shadowed dashed, E3 contention orange with the <b>pick</b> affordance. Hover highlights
+  a node everywhere; clicking flashes it (focus-jump stand-in). Set-aside concepts are archived
+  at the bottom.
+</p>
+
+<div class="xcontrols">
+  <span class="grp"><b>Data</b>
+    <label><input type="radio" name="ds" value="aurora" checked> Aurora (nested)</label>
+    <label><input type="radio" name="ds" value="fyeah"> Fyeah Sign</label>
+    <label><input type="radio" name="ds" value="empty"> Empty scope</label>
+  </span>
+  <span class="grp"><b>visual.out</b>
+    <label><input type="radio" name="cont" value="ambiguous" checked> ambiguous (2× fallback)</label>
+    <label><input type="radio" name="cont" value="picked"> picked: plasma_1</label>
+  </span>
+  <span class="grp">
+    <label><input type="checkbox" id="engageHue" checked> engage <code>hue</code></label>
+    <label><input type="checkbox" id="showInh" checked> show inherited readers</label>
+    <label><input type="checkbox" id="live" checked> live values</label>
+  </span>
+</div>
+
+<section class="concept" id="w2">
+  <h2>1. The direction — [writers] → [value box] → [readers]</h2>
+  <p class="thesis">
+    The channel box is a small value box: name in the violet header, <i>what's on the channel</i>
+    as the body — a picture for visuals, a number + bar for floats, the authored default
+    (italic) for R6 invitations, red for unresolved. Arrowheads on every wire carry direction:
+    writers point <i>into</i> the box, the box points <i>out to</i> readers.
+    The <b>show inherited readers</b> toggle: dotted chips like <code>plasma_1 · sim (child
+    scope)</code> are consumers living in a child module whose read found no writer locally and
+    walked out to this channel (R5) — they really are fed by it, but their binding lives in the
+    child scope, not here. OFF summarizes them as "2 readers in child scopes" instead.
+  </p>
+  <div class="mcard">
+    <div class="mhead"><span class="chev">⌄</span><span class="name" id="w2name">Aurora Sign</span>
+      <span class="kind">module</span><span class="info">i</span></div>
+    <div class="sect"><div class="srail">wiring</div>
+      <div class="sbody"><div id="w2body"></div></div></div>
+  </div>
+</section>
+
+<section class="concept" id="nom">
+  <h2>2. Nomenclature — decided at gate 2: panel + settings</h2>
+  <p class="thesis">
+    <b>PANEL</b> is a module's performable product surface — tinted with the existing
+    <code>panel-primary</code> token and wearing a <b>▶ play surface</b> chip, because the panel
+    is <i>the thing play mode renders</i> and that visual link is what teaches the module/leaf
+    difference. A leaf's knob strip is its <b>SETTINGS</b> — you're configuring that one node.
+    (Alternatives A and E are in the archive below.)
+  </p>
+  <div class="nom-grid">
+    <div class="nom-col">
+      <h3>D — “panel” (module) + “settings” (leaf) <span class="lean">✓ chosen</span></h3>
+      <div class="nom-card">
+        <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
+        <div class="sect"><div class="srail">output</div><div class="sbody"><div class="nom-thumb"></div></div></div>
+        <div class="sect paneltint"><div class="srail">panel</div><div class="sbody"><span class="playchip">▶ play surface</span><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        <div class="sect"><div class="srail">wiring</div><div class="sbody"><span class="nom-wiring">6 channels · writers → readers</span></div></div>
+      </div>
+      <div class="nom-card">
+        <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
+        <div class="sect"><div class="srail">settings</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
+      </div>
+      <p class="why">Noted for the plan: docs R8 currently says “every node has a panel” — this
+        scheme narrows the <i>label</i> to modules; the plan should reconcile the wording (leaf
+        publicity still feeds the enclosing module's panel, unchanged). “Settings” caveat: a
+        bound shader knob is also a live performance control.</p>
+    </div>
+  </div>
+  <div class="nom-note">
+    Either way: <code>control.out</code> is a <i>bus channel</i> naming the fixture's rendered LED
+    product — an unrelated third meaning of "control". Bus vocabulary is under discovery (§7);
+    rename the channel (<code>fixture.out</code> / <code>led.out</code>) when vocabulary locks
+    down rather than bending the UI words around it.
+  </div>
+</section>
+
+<details class="archive" id="archive">
+  <summary>Explored and set aside at gate 1 (kept for contrast — open to compare)</summary>
+
+  <section class="concept" id="w0">
+    <h2>A1. Current production <span class="aside-reason">— the baseline the direction replaces: wiring invisible until a popup</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="w0name">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div id="w0body"></div></div></div>
+    </div>
+  </section>
+
+  <section class="concept" id="w3">
+    <h2>A2. Vertical flow <span class="aside-reason">— set aside: fights the card's width; sideways scroll hides the contended strip</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="w3name">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div id="w3body"></div></div></div>
+    </div>
+  </section>
+
+  <section class="concept" id="wc">
+    <h2>A3. Value cards <span class="aside-reason">— set aside as the default; strong monitor, but resolution isn't drawn. Its value treatment moved into the flow's box</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="wcname">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div id="wcbody"></div></div></div>
+    </div>
+  </section>
+
+  <section class="concept" id="nomalt">
+    <h2>A4. Naming alternatives <span class="aside-reason">— set aside at gate 2 in favor of panel + settings</span></h2>
+    <div class="nom-grid">
+      <div class="nom-col">
+        <h3>A — “panel” everywhere</h3>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
+          <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        </div>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
+          <div class="sect"><div class="srail">panel</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
+        </div>
+        <p class="why">Rejected: one word for what reads as two concepts — a node's own knobs vs
+          a scope's aggregate surface (gate-1 flag, confirmed gate 2).</p>
+      </div>
+      <div class="nom-col">
+        <h3>E — “panel” (module) + “controls” (leaf)</h3>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">Aurora Sign</span><span class="kind">module</span></div>
+          <div class="sect paneltint"><div class="srail">panel</div><div class="sbody"><span class="playchip">▶ play surface</span><div class="nom-knobs" data-knobs="SPEED:0.62:bound,HUE:0.41:bound"></div></div></div>
+        </div>
+        <div class="nom-card">
+          <div class="mhead"><span class="chev">⌄</span><span class="name">halo</span><span class="kind">fixture</span></div>
+          <div class="sect"><div class="srail">controls</div><div class="sbody"><div class="nom-knobs" data-knobs="BRIGHTNESS:96:bound"></div></div></div>
+        </div>
+        <p class="why">Runner-up: zero rename cost, but “controls” keeps its collision with the
+          <code>control.out</code> channel and stays vague about whose controls they are.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="concept" id="w4">
+    <h2>A5. Matrix <span class="aside-reason">— set aside: possible later second view ("node's bus footprint"), never the default</span></h2>
+    <div class="mcard">
+      <div class="mhead"><span class="chev">⌄</span><span class="name" id="w4name">Aurora Sign</span>
+        <span class="kind">module</span><span class="info">i</span></div>
+      <div class="sect"><div class="srail">wiring</div>
+        <div class="sbody"><div class="w4-scroll" id="w4body"></div></div></div>
+    </div>
+  </section>
+</details>
+
+<script>
+/* ------------------------------------------------------------------ data */
+// site: {n: node label, s: slot, def: default-origin, inh: inherited inner-scope reader,
+//        sc: scope prefix for inherited sites, panel: engaged panel writer,
+//        pub: module publish, fb: fallback priority}
+const DATASETS = {
+  fyeah: {
+    title: "Fyeah Sign",
+    scopes: [{
+      id: "root", label: null,
+      channels: [
+        { name: "time", kind: "Instant", live: t => (3.3 + t).toFixed(3),
+          writers: [{ n: "Clock", s: "seconds", def: true }],
+          readers: [{ n: "Playlist", s: "time" }] },
+        { name: "trigger", kind: "Instant", value: null,
+          writers: [{ n: "Button", s: "down" }, { n: "Radio", s: "output" }],
+          readers: [{ n: "Playlist", s: "trigger" }, { n: "Radio", s: "input" }] },
+        { name: "visual.out", kind: "Color", primary: true, visual: true,
+          value: "visual #5:0",
+          writers: [{ n: "Playlist", s: "output", def: true }],
+          readers: [{ n: "Fixture", s: "input" }] },
+        { name: "control.out", kind: "Color",
+          err: "no provider produced a value",
+          writers: [{ n: "Fixture", s: "output" }],
+          readers: [{ n: "Output", s: "input" }] },
+      ],
+    }],
+  },
+  aurora: {
+    title: "Aurora Sign",
+    scopes: [
+      { id: "root", label: null,
+        channels: [
+          { name: "time", kind: "Instant", live: t => (12.44 + t).toFixed(3),
+            writers: [{ n: "Clock", s: "seconds", def: true }],
+            readers: [
+              { n: "sim", s: "time", inh: true, sc: "plasma_1" },
+              { n: "sim", s: "time", inh: true, sc: "plasma_2" },
+            ] },
+          { name: "speed", kind: "Float", value: "0.620", frac: 0.62,
+            writers: [{ n: "Master speed", s: "value" }],
+            readers: [
+              { n: "sim", s: "speed", inh: true, sc: "plasma_1" },
+              { n: "sim", s: "speed", inh: true, sc: "plasma_2" },
+            ] },
+          { name: "hue", kind: "Float", value: "0.410", frac: 0.41, hueChan: true,
+            writers: [],   // engage toggle adds the panel writer
+            readers: [
+              { n: "sim", s: "hue", inh: true, sc: "plasma_1" },
+              { n: "sim", s: "hue", inh: true, sc: "plasma_2" },
+            ] },
+          { name: "brightness", kind: "Float", invite: true, value: "0.376", frac: 0.376,
+            writers: [],
+            readers: [{ n: "halo", s: "brightness" }] },
+          { name: "palette.gradient.stops", kind: "Map",
+            value: "7 stops · #12a0ff → #7be0b2 → #e4c065",
+            writers: [{ n: "Palette", s: "stops" }],
+            readers: [
+              { n: "sim", s: "palette", inh: true, sc: "plasma_1" },
+              { n: "sim", s: "palette", inh: true, sc: "plasma_2" },
+            ] },
+          { name: "visual.out", kind: "Color", primary: true, visual: true,
+            value: "visual #9:0", contendable: true,
+            writers: [
+              { n: "plasma_1", s: "visual.out", pub: true, fb: true },
+              { n: "plasma_2", s: "visual.out", pub: true, fb: true },
+            ],
+            readers: [{ n: "halo", s: "input" }] },
+        ] },
+      { id: "plasma_1", label: "plasma_1",
+        channels: [
+          { name: "speed", kind: "Float", value: "0.820", frac: 0.82,
+            writers: [{ n: "panel", panel: true }],
+            readers: [{ n: "sim", s: "speed" }] },
+          { name: "hue", kind: "Float", value: "0.320", frac: 0.32, invite: true,
+            writers: [], readers: [{ n: "sim", s: "hue" }] },
+          { name: "visual.out", kind: "Color", visual: true, value: "visual #5:0",
+            writers: [{ n: "sim", s: "visual" }],
+            readers: [{ n: "Aurora Sign", s: "visual.out", pub: true }] },
+        ] },
+      { id: "plasma_2", label: "plasma_2",
+        channels: [
+          { name: "speed", kind: "Float", value: "0.620", frac: 0.62, invite: true,
+            writers: [], readers: [{ n: "sim", s: "speed" }] },
+          { name: "visual.out", kind: "Color", visual: true, value: "visual #5:0",
+            writers: [{ n: "sim", s: "visual" }],
+            readers: [{ n: "Aurora Sign", s: "visual.out", pub: true }] },
+        ] },
+    ],
+  },
+  empty: { title: "New Module", scopes: [{ id: "root", label: null, channels: [] }] },
+};
+
+const state = {
+  ds: "aurora", cont: "ambiguous", engageHue: true, showInh: true, live: true, t: 0,
+};
+
+/* Copy of the active dataset with exploration state applied. */
+function activeData() {
+  const src = DATASETS[state.ds];
+  const scopes = src.scopes.map(sc => ({
+    ...sc,
+    channels: sc.channels.map(ch => {
+      const c = { ...ch, writers: ch.writers.slice(), readers: ch.readers.slice() };
+      if (c.hueChan && state.engageHue) {
+        c.writers = [{ n: "panel", panel: true }, ...c.writers];
+        c.value = "0.735"; c.frac = 0.735; c.invite = false;
+      } else if (c.hueChan) {
+        c.invite = true; c.value = "0.410"; c.frac = 0.41;
+      }
+      if (!state.showInh) {
+        c.hiddenInh = c.readers.filter(r => r.inh).length;
+        c.readers = c.readers.filter(r => !r.inh);
+      }
+      if (c.contendable) {
+        c.contended = state.cont === "ambiguous";
+        if (!c.contended) {
+          c.writers = c.writers.map((w, i) => ({ ...w, picked: i === 0, shadowed: i !== 0 }));
+        }
+      }
+      return c;
+    }),
+  }));
+  return { title: src.title, scopes };
+}
+
+function valueOf(ch) {
+  if (ch.err) return { kind: "err", text: "unresolved", title: ch.err };
+  if (ch.invite && !ch.writers.length)
+    return { kind: "invite", text: `default ${ch.value ?? "—"}` };
+  if (ch.live) return { kind: "val", text: ch.live(state.live ? state.t : 0) };
+  if (ch.value != null) return { kind: "val", text: ch.value };
+  return { kind: "none", text: "—" };
+}
+
+/* ------------------------------------------------------- shared builders */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function nodeKey(site) { return (site.sc ? site.sc + "/" : "") + (site.panel ? "panel" : site.n); }
+
+function siteChip(site, role) {
+  const cls = ["site"];
+  if (site.def) cls.push("def");
+  if (site.inh) cls.push("inh");
+  if (site.panel) cls.push("panelw");
+  if (site.pub) cls.push("pub");
+  if (site.shadowed) cls.push("shadowed");
+  if (site.picked) cls.push("picked");
+  const label = site.panel ? "panel · engaged"
+    : (site.sc ? `<span class="sc">${esc(site.sc)} ·</span> ${esc(site.n)}` : esc(site.n));
+  const slot = site.s && !site.panel ? ` <span class="slot">.${esc(site.s)}</span>` : "";
+  const marks = [];
+  if (site.def) marks.push("default");
+  if (site.inh) marks.push("child scope");
+  if (site.pub) marks.push(role === "r" ? "publish ↑" : "publish");
+  if (site.fb && !site.picked && !site.shadowed) marks.push("fallback");
+  if (site.picked) marks.push("✓ picked");
+  if (site.shadowed) marks.push("shadowed");
+  const mark = marks.length ? ` <span class="mk">(${marks.join(", ")})</span>` : "";
+  const title = site.panel ? "Engaged panel writer — unauthored runtime state (R10)"
+    : site.inh ? "Lives in a child module's scope; its input has no writer there, so it resolves outward to this channel (R5)"
+    : site.def ? "Default binding"
+    : site.pub ? "Module publish (R7)" : "";
+  return `<span class="${cls.join(" ")}" data-node="${esc(nodeKey(site))}" title="${esc(title)}"><span class="lab">${label}${slot}</span>${mark}</span>`;
+}
+
+function thumbStyle() {
+  const shift = state.live ? Math.round(Math.sin(state.t * .7) * 40) : 0;
+  return `filter:hue-rotate(${shift}deg)`;
+}
+
+/* what's ON the channel — sm (inline), md (strips), lg (card hero), hub (value box) */
+function valueRich(ch, size) {
+  const v = valueOf(ch);
+  if (ch.visual && v.kind === "val") {
+    if (size === "lg" || size === "hub") {
+      const h = size === "hub" ? "" : "";
+      return `<span class="vthumb lg" style="${thumbStyle()}"></span>
+        <span class="cap">${esc(v.text)}</span>`;
+    }
+    if (size === "md") return `<span class="vthumb md" style="${thumbStyle()}" title="${esc(v.text)}"></span>`;
+    return `<span class="vthumb sm" style="${thumbStyle()}"></span> <span class="vval">${esc(v.text)}</span>`;
+  }
+  const barCls = size === "hub" ? "vbar wide" : "vbar";
+  const bar = ch.frac != null && v.kind === "val" && size !== "sm"
+    ? `<span class="${barCls}"><i style="width:${Math.round(ch.frac * 100)}%"></i></span>` : "";
+  const big = (size === "lg" || size === "hub") ? ' style="font-size:15px"' : "";
+  return `<span class="vval ${v.kind === "val" ? "" : v.kind}"${big} ${v.title ? `title="${esc(v.title)}"` : ""}>${esc(v.text)}</span>${bar}`;
+}
+
+function contendBadge(ch) {
+  return ch.contended
+    ? `<span class="contendb" title="Two fallback writers — ambiguous until the author picks (E3). Click to pick.">2× fallback · pick</span>`
+    : "";
+}
+
+function emptyScope() {
+  return `<div class="empty-scope">
+    <p>No public channels yet.</p>
+    <p class="sub">The bus is this module's patch bay: binding a slot to <code>bus:…</code>
+    publishes it — the channel appears here and its control appears on the panel.</p></div>`;
+}
+
+function scopeGroups(data, renderScope) {
+  if (data.scopes.every(sc => !sc.channels.length)) return emptyScope();
+  return data.scopes.map(sc => {
+    const body = sc.channels.length ? renderScope(sc) : `<div class="w2-none">no channels</div>`;
+    if (!sc.label) return body;
+    return `<div class="scope-head"><span>${esc(sc.label)}</span><span class="tag">module scope</span></div>
+      <div class="scope-indent">${body}</div>`;
+  }).join("");
+}
+
+/* --------------------------------------------- THE DIRECTION: flow rows */
+function renderW2() {
+  const data = activeData();
+  document.getElementById("w2name").textContent = data.title;
+  document.getElementById("w2body").innerHTML = scopeGroups(data, sc => sc.channels.map(ch => {
+    const writers = ch.writers.length
+      ? ch.writers.map(w => siteChip(w, "w")).join("")
+      : `<span class="w2-none">no writer — authored default (R6)</span>`;
+    let readers = ch.readers.length
+      ? ch.readers.map(r => siteChip(r, "r")).join("")
+      : (ch.hiddenInh ? "" : `<span class="w2-none">no readers</span>`);
+    if (ch.hiddenInh)
+      readers += `<span class="w2-hidden">${ch.hiddenInh} reader${ch.hiddenInh > 1 ? "s" : ""} in child scopes</span>`;
+    return `<div class="w2-row">
+      <svg class="w2-svg"></svg>
+      <div class="w2-writers">${writers}</div><div></div>
+      <div class="hubcard ${ch.contended ? "contended" : ""}">
+        <div class="hub-h"><span class="nm">${esc(ch.name)}</span>
+          ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
+          <span class="kindb">${esc(ch.kind ?? "")}</span></div>
+        <div class="hub-v">${valueRich(ch, "hub")}
+          ${ch.contended ? `<div class="contendrow">${contendBadge(ch)}</div>` : ""}</div>
+      </div>
+      <div></div>
+      <div class="w2-readers">${readers}</div>
+    </div>`;
+  }).join(""));
+  requestAnimationFrame(drawW2Wires);
+}
+
+function drawW2Wires() {
+  document.querySelectorAll("#w2body .w2-row").forEach(row => {
+    const svg = row.querySelector(".w2-svg");
+    const rr = row.getBoundingClientRect();
+    svg.setAttribute("viewBox", `0 0 ${rr.width} ${rr.height}`);
+    svg.setAttribute("width", rr.width); svg.setAttribute("height", rr.height);
+    const hub = row.querySelector(".hubcard");
+    if (!hub) { svg.innerHTML = ""; return; }
+    const hb = hub.getBoundingClientRect();
+    const hubL = { x: hb.left - rr.left, y: hb.top - rr.top + hb.height / 2 };
+    const hubR = { x: hb.right - rr.left, y: hubL.y };
+    let paths = "";
+    /* wires end travelling +x (horizontal control points), so the arrowhead
+       always points right; the path stops short so the tip stays crisp */
+    const wire = (x1, y1, x2, y2, stroke, dash) => {
+      const tipLen = 5.5;
+      const bx = x2 - tipLen;
+      const dx = Math.max(18, (bx - x1) * .5);
+      return `<path d="M ${x1} ${y1} C ${x1 + dx} ${y1}, ${bx - dx} ${y2}, ${bx} ${y2}"
+        fill="none" stroke="${stroke}" stroke-width="1.5" ${dash ? 'stroke-dasharray="4 3"' : ""}/>
+        <path d="M ${x2} ${y2} L ${x2 - tipLen - 1.5} ${y2 - 3.4} L ${x2 - tipLen - 1.5} ${y2 + 3.4} Z"
+        fill="${stroke}"/>`;
+    };
+    const cs = getComputedStyle(document.documentElement);
+    const violet = cs.getPropertyValue("--bound-border").trim();
+    const dimc = cs.getPropertyValue("--border-strong").trim();
+    const orange = cs.getPropertyValue("--attn-border").trim();
+    const contended = hub.classList.contains("contended");
+    row.querySelectorAll(".w2-writers .site").forEach(chip => {
+      const cb = chip.getBoundingClientRect();
+      const shadowed = chip.classList.contains("shadowed");
+      const color = contended ? orange : (shadowed ? dimc : violet);
+      paths += wire(cb.right - rr.left, cb.top - rr.top + cb.height / 2, hubL.x, hubL.y, color, shadowed);
+    });
+    row.querySelectorAll(".w2-readers .site").forEach(chip => {
+      const cb = chip.getBoundingClientRect();
+      paths += wire(hubR.x, hubR.y, cb.left - rr.left, cb.top - rr.top + cb.height / 2, dimc,
+        chip.classList.contains("inh"));
+    });
+    svg.innerHTML = paths;
+  });
+}
+
+/* -------------------------------------------------- archived: baseline */
+function renderW0() {
+  const data = activeData();
+  document.getElementById("w0name").textContent = data.title;
+  const rows = [];
+  for (const sc of data.scopes)
+    for (const ch of sc.channels)
+      rows.push({ ...ch, title: sc.label ? `${sc.label} · ${ch.name}` : ch.name });
+  document.getElementById("w0body").innerHTML = rows.length ? rows.map(ch => {
+    const v = valueOf(ch);
+    return `<div style="border:1px solid var(--bound-border);border-radius:var(--r-sm);overflow:hidden;margin-bottom:8px;background:var(--terminal)">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bound-bg);border-bottom:1px solid var(--bound-border)">
+        <span style="color:var(--bound-text);font-size:11px">⚡︎</span>
+        <span style="font-weight:700;font-size:12.5px">${esc(ch.title)}</span>
+        ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
+        <span class="kindb">${esc(ch.kind ?? "")}</span>
+        <button style="margin-left:auto;width:30px;height:22px;border:1px solid var(--bound-border);border-radius:var(--r-xs);background:var(--bound-bg);color:var(--bound-text);font-size:11px;cursor:pointer" title="Writers → readers live in this popup">⛓</button></div>
+      <div style="padding:12px 10px;text-align:center"><span class="vval ${v.kind === "val" ? "" : v.kind}">${esc(v.text)}</span></div>
+    </div>`;
+  }).join("") : emptyScope();
+}
+
+/* --------------------------------------------- archived: vertical flow */
+function renderW3() {
+  const data = activeData();
+  document.getElementById("w3name").textContent = data.title;
+  document.getElementById("w3body").innerHTML = scopeGroups(data, sc => {
+    const strips = sc.channels.map(ch => {
+      const writers = ch.writers.length
+        ? ch.writers.map(w => siteChip(w, "w") + '<div class="vline w"></div>').join("")
+        : `<span class="w2-none">R6 default</span><div class="vline"></div>`;
+      let readers = ch.readers.length
+        ? ch.readers.map(r => '<div class="vline"></div>' + siteChip(r, "r")).join("")
+        : (ch.hiddenInh ? "" : `<div class="vline"></div><span class="w2-none">no readers</span>`);
+      if (ch.hiddenInh) readers += `<span class="w2-hidden">${ch.hiddenInh} inherited</span>`;
+      return `<div class="w3-strip">
+        <div class="w3-writers">${writers}</div>
+        <div class="w3-capbox"><div class="w3-cap ${ch.contended ? "contended" : ""}">
+          <span class="nm">${esc(ch.name)}</span>
+          ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
+          <span class="vv">${valueRich(ch, "md")}</span>
+          ${contendBadge(ch)}</div></div>
+        <div class="w3-readers">${readers}</div>
+      </div>`;
+    }).join("");
+    return `<div class="w3-wrap"><div class="w3-strips">${strips}</div></div>`;
+  });
+}
+
+/* ----------------------------------------------- archived: value cards */
+function renderWC() {
+  const data = activeData();
+  document.getElementById("wcname").textContent = data.title;
+  document.getElementById("wcbody").innerHTML = scopeGroups(data, sc => {
+    const cards = sc.channels.map(ch => {
+      const writers = ch.writers.length
+        ? ch.writers.map(w => siteChip(w, "w")).join("")
+        : `<span class="w2-none">none — invitation (R6)</span>`;
+      let readers = ch.readers.length
+        ? ch.readers.map(r => siteChip(r, "r")).join("")
+        : (ch.hiddenInh ? "" : `<span class="w2-none">none</span>`);
+      if (ch.hiddenInh) readers += `<span class="w2-hidden">${ch.hiddenInh} inherited hidden</span>`;
+      return `<div class="wc-card ${ch.contended ? "contended" : ""}">
+        <div class="wc-head">
+          <span class="nm">${esc(ch.name)}</span>
+          ${ch.primary ? '<span class="primaryb">primary</span>' : ""}
+          <span class="kindb" style="margin-left:auto">${esc(ch.kind ?? "")}</span></div>
+        <div class="wc-hero">${valueRich(ch, "lg")} ${contendBadge(ch)}</div>
+        <div class="wc-io">
+          <div><h4>Writers</h4><div class="list">${writers}</div></div>
+          <div><h4>Readers</h4><div class="list">${readers}</div></div>
+        </div>
+      </div>`;
+    }).join("");
+    return `<div class="wc-grid">${cards}</div>`;
+  });
+}
+
+/* ---------------------------------------------------- archived: matrix */
+function renderW4() {
+  const data = activeData();
+  document.getElementById("w4name").textContent = data.title;
+  const el = document.getElementById("w4body");
+  if (data.scopes.every(sc => !sc.channels.length)) { el.innerHTML = emptyScope(); return; }
+
+  let html = "";
+  for (const sc of data.scopes) {
+    if (!sc.channels.length) continue;
+    const chans = sc.channels;
+    const nodes = [];
+    for (const ch of chans) for (const [role, arr] of [["w", ch.writers], ["r", ch.readers]])
+      for (const s of arr) {
+        let node = nodes.find(x => x.key === nodeKey(s));
+        if (!node) { node = { key: nodeKey(s), site: s, cells: {} }; nodes.push(node); }
+        node.cells[ch.name] = (node.cells[ch.name] ?? "") + role.toUpperCase();
+      }
+    const scopeTitle = sc.label
+      ? `<tr class="grp"><th colspan="${chans.length + 1}">${esc(sc.label)} — module scope</th></tr>` : "";
+    html += `<table class="w4" data-scope="${sc.id}">
+      <thead>${scopeTitle}<tr><th style="background:transparent;border:0"></th>${chans.map(ch => `
+        <th class="${ch.contended ? "contended" : ""}" data-col="${esc(ch.name)}">${esc(ch.name)}
+          <span class="kindb">${ch.primary ? "primary · " : ""}${esc(ch.kind ?? "")}${ch.contended ? " · 2× fallback" : ""}</span>
+          <span class="vv">${valueRich(ch, "sm")}</span></th>`).join("")}</tr></thead>
+      <tbody>${nodes.map(node => {
+        const s = node.site;
+        const label = s.panel ? `<span style="color:var(--attn-text)">panel (engaged)</span>`
+          : `${s.sc ? `<span class="sc">${esc(s.sc)} · </span>` : ""}${esc(s.n)}`;
+        return `<tr><th data-node="${esc(node.key)}">${label}</th>${chans.map(ch => {
+          const v = node.cells[ch.name] ?? "";
+          const glyph = v.includes("W") && v.includes("R") ? '<span class="W">W</span><span class="R">R</span>'
+            : v === "W" ? '<span class="W">W</span>' : v === "R" ? '<span class="R">R</span>' : '<span class="d">·</span>';
+          return `<td data-col="${esc(ch.name)}">${glyph}</td>`;
+        }).join("")}</tr>`;
+      }).join("")}</tbody></table><div style="height:12px"></div>`;
+  }
+  el.innerHTML = html;
+
+  el.querySelectorAll("tbody tr").forEach(tr => {
+    tr.addEventListener("mouseenter", () => tr.classList.add("hlr"));
+    tr.addEventListener("mouseleave", () => tr.classList.remove("hlr"));
+  });
+  el.querySelectorAll("[data-col]").forEach(cell => {
+    cell.addEventListener("mouseenter", () => {
+      cell.closest("table").querySelectorAll(`[data-col="${CSS.escape(cell.dataset.col)}"]`)
+        .forEach(c => c.classList.add("hlc"));
+    });
+    cell.addEventListener("mouseleave", () => {
+      cell.closest("table").querySelectorAll(".hlc").forEach(c => c.classList.remove("hlc"));
+    });
+  });
+}
+
+/* ------------------------------------------------------------ knob svg */
+function knobSvg(size, tone) {
+  const stroke = tone === "attn" ? "var(--attn-text)" : "var(--bound-text)";
+  const r = size / 2 - 3;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="var(--terminal)" stroke="var(--border-strong)"/>
+    <path d="${arcPath(size / 2, size / 2, r + 2.2, 135, 335)}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round"/>
+    <line x1="${size / 2}" y1="${size / 2}" x2="${size / 2 + r * .62 * Math.cos(Math.PI * 335 / 180)}" y2="${size / 2 + r * .62 * Math.sin(Math.PI * 335 / 180)}" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+  </svg>`;
+}
+function arcPath(cx, cy, r, a0, a1) {
+  const p = a => [cx + r * Math.cos(Math.PI * a / 180), cy + r * Math.sin(Math.PI * a / 180)];
+  const [x0, y0] = p(a0), [x1, y1] = p(a1);
+  return `M ${x0} ${y0} A ${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+}
+document.querySelectorAll(".nom-knobs").forEach(el => {
+  el.innerHTML = el.dataset.knobs.split(",").map(k => {
+    const [lbl, val, tone] = k.split(":");
+    return `<div class="mini-ctl">${knobSvg(28, tone)}<span class="lbl">${lbl} <span style="color:var(--dim);font-weight:400">i</span></span><span class="val">${val}</span></div>`;
+  }).join("");
+});
+
+/* ------------------------------------------------------- orchestration */
+function renderAll() {
+  renderW2(); renderW0(); renderW3(); renderWC(); renderW4();
+}
+document.querySelectorAll('input[name=ds]').forEach(r =>
+  r.addEventListener("change", () => { state.ds = r.value; renderAll(); }));
+document.querySelectorAll('input[name=cont]').forEach(r =>
+  r.addEventListener("change", () => { state.cont = r.value; renderAll(); }));
+document.getElementById("engageHue").addEventListener("change", e => {
+  state.engageHue = e.target.checked; renderAll();
+});
+document.getElementById("showInh").addEventListener("change", e => {
+  state.showInh = e.target.checked; renderAll();
+});
+document.getElementById("live").addEventListener("change", e => {
+  state.live = e.target.checked; renderAll();
+});
+
+/* hover-linking + click = focus-jump preview (selection itself is parked) */
+document.body.addEventListener("mouseover", e => {
+  const chip = e.target.closest("[data-node]");
+  if (!chip) return;
+  document.querySelectorAll(`[data-node="${CSS.escape(chip.dataset.node)}"]`)
+    .forEach(c => c.classList.add("hl"));
+});
+document.body.addEventListener("mouseout", e => {
+  const chip = e.target.closest("[data-node]");
+  if (!chip) return;
+  document.querySelectorAll(".hl").forEach(c => c.classList.remove("hl"));
+});
+document.body.addEventListener("click", e => {
+  const pick = e.target.closest(".contendb");
+  if (pick) {
+    state.cont = "picked";
+    document.querySelector('input[name=cont][value=picked]').checked = true;
+    renderAll();
+    return;
+  }
+  const chip = e.target.closest("[data-node]");
+  if (chip) {
+    document.querySelectorAll(`[data-node="${CSS.escape(chip.dataset.node)}"]`)
+      .forEach(c => { c.classList.remove("flash"); void c.offsetWidth; c.classList.add("flash"); });
+  }
+});
+
+/* live ticking */
+setInterval(() => {
+  if (!state.live) return;
+  state.t += 0.25;
+  renderAll();
+}, 1000);
+
+window.addEventListener("resize", drawW2Wires);
+
+/* URL params (screenshot harness / linkable states):
+   ?only=<section-id> — show a single section; ?ds=, ?cont=, ?inh=0 — preset state */
+const params = new URLSearchParams(location.search);
+for (const [key, name] of [["ds", "ds"], ["cont", "cont"]]) {
+  const v = params.get(key);
+  if (v) {
+    state[key] = v;
+    const input = document.querySelector(`input[name=${name}][value=${v}]`);
+    if (input) input.checked = true;
+  }
+}
+if (params.get("inh") === "0") {
+  state.showInh = false;
+  document.getElementById("showInh").checked = false;
+}
+const only = params.get("only");
+if (only) {
+  document.querySelectorAll(".concept").forEach(s => {
+    if (s.id !== only) s.style.display = "none";
+  });
+  const archived = document.querySelector(`#archive #${CSS.escape(only)}`);
+  if (archived) document.getElementById("archive").open = true;
+  document.querySelector(".xcontrols").style.position = "static";
+}
+
+renderAll();
+</script>
+</body>
+</html>
