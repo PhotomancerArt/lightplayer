@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Device setup flow — deep spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via spikes/gallery-rework) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --gold: #e4c065;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text); font: 14px/1.45 var(--sans); }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 840px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 840px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button { font-family: var(--sans); }
+
+  .controls { position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong); border-radius: 8px;
+    color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent); backdrop-filter: blur(6px); }
+  .controls .group { display: inline-flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip { appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+  .chip.warnc[aria-pressed=true] { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+
+  .caprow { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .caprow .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .caprow .cnote { font-size: 11.5px; color: var(--dim); }
+  .leannote { font-size: 11.5px; color: var(--dim); max-width: 1400px; margin: 12px 0 0;
+    padding: 9px 12px; border: 1px solid var(--border-muted); border-radius: 8px;
+    background: var(--surface-muted); line-height: 1.55; }
+  .leannote b { color: var(--subtle); }
+
+  /* ---- mini gallery frames (§1) ---- */
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 16px; max-width: 1400px; }
+  .pframe { border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 120px), var(--bg);
+    display: flex; flex-direction: column; min-height: 300px; }
+  .pframe .plabel { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); padding: 10px 14px 0; display: flex; gap: 8px; align-items: baseline; }
+  .pframe .plabel .sel { color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 700; cursor: pointer; }
+  .pframe .pbody { padding: 12px 14px 16px; flex: 1; position: relative; }
+  .sech { font-size: 9.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin: 0 0 7px; }
+  .minirow { display: flex; gap: 9px; }
+  .minicard { flex: 1; border: 1px solid var(--border); border-left: 3px solid var(--good-text);
+    border-radius: 8px; background: var(--surface); overflow: hidden; min-height: 92px; }
+  .minicard.sim { border-left-color: var(--bound-text); }
+  .minicard .mh { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); font-size: 11px; font-weight: 700; color: var(--gold); }
+  .minicard .mh .tp { margin-left: auto; font: 700 8.5px/1 var(--mono); color: var(--dim); }
+  .minicard .mb { padding: 7px 9px; font-size: 10.5px; color: var(--subtle); }
+  .minicard .mb .run { color: var(--good-text); font-weight: 600; font-size: 10px; }
+  .minicard.dimmed { opacity: .45; }
+  .dashcard { flex: 1; border: 1px dashed var(--border-strong); border-radius: 8px; min-height: 92px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    color: var(--subtle); font-size: 11px; font-weight: 700; cursor: pointer; text-align: center; padding: 8px; }
+  .dashcard small { font-weight: 500; color: var(--dim); font-size: 9.5px; }
+  .dashcard:hover { border-color: var(--accent-border); color: var(--text); }
+  .dashcard.simfl:hover { border-color: var(--bound-border); }
+
+  /* mini wizard shapes used inside frames */
+  .miniwiz { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-subtle);
+    box-shadow: 0 12px 30px rgba(0,0,0,.45); padding: 10px 12px; font-size: 11px; color: var(--muted); }
+  .miniwiz .wh { display: flex; gap: 8px; align-items: center; font-size: 11.5px; font-weight: 700;
+    color: var(--strong); margin-bottom: 7px; }
+  .miniwiz .steps { color: var(--dim); font-size: 9.5px; font-weight: 700; letter-spacing: .04em; margin-bottom: 8px; }
+  .miniwiz .steps b { color: var(--accent); }
+  .ghost { border: 1px dashed var(--border-muted); border-radius: 6px; padding: 7px 9px; color: var(--dim);
+    font-size: 10px; margin-top: 6px; }
+  .backlink { color: var(--heading); font-size: 10.5px; font-weight: 700; cursor: pointer; }
+  .dimmedbg { position: absolute; inset: 0; background: rgba(8,10,13,.6); backdrop-filter: blur(1.5px);
+    display: grid; place-items: center; padding: 18px; border-radius: 0 0 10px 10px; }
+
+  /* ---- §2 naming cards ---- */
+  .ngrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; max-width: 1400px; }
+  .ncard { border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+    padding: 13px; display: flex; flex-direction: column; gap: 9px; }
+  .ncard h4 { margin: 0; font-size: 12.5px; color: var(--strong); }
+  .ncard h4 small { color: var(--dim); font-weight: 500; margin-left: 6px; }
+  .ncard .why { font-size: 11px; color: var(--dim); line-height: 1.45; }
+  .fieldlbl { font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+  input[type=text] { width: 100%; background: var(--terminal); border: 1px solid var(--border-strong);
+    border-radius: 7px; color: var(--text); font-size: 12.5px; padding: 7px 9px; outline: none; font-family: var(--sans); }
+  input[type=text]:focus { border-color: var(--accent-border); }
+
+  /* ---- the wizard (§3) ---- */
+  .wizwrap { max-width: 1400px; }
+  .wizard { border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden;
+    background: var(--surface-subtle); box-shadow: 0 16px 44px rgba(0,0,0,.45); position: relative; }
+  .wizard.simpath { border-color: var(--bound-border); }
+  .wizhead { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .wizhead .wt { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .wk { font: 700 9.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase;
+    border-radius: 999px; padding: 3px 9px; }
+  .wk.hw { color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border); }
+  .wk.sim { color: var(--bound-text); background: var(--bound-bg); border: 1px solid var(--bound-border); }
+  .wizhead .close { margin-left: auto; appearance: none; border: 0; background: transparent;
+    color: var(--dim); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 5px; }
+  .wizhead .close:hover { color: var(--text); background: var(--bg-wash); }
+  .steps2 { display: flex; gap: 4px; align-items: center; padding: 10px 16px 0; flex-wrap: wrap; }
+  .step { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700;
+    color: var(--dim); padding: 4px 10px 4px 6px; border-radius: 999px; }
+  .step .dotn { width: 17px; height: 17px; border-radius: 50%; display: inline-flex; align-items: center;
+    justify-content: center; font-size: 9.5px; border: 1px solid var(--border-strong); color: var(--subtle); }
+  .step.now { color: var(--text); background: var(--surface-raised); }
+  .step.now .dotn { border-color: var(--accent-border); color: var(--accent); }
+  .step.done { color: var(--heading); }
+  .step.done .dotn { border-color: var(--accent-border); background: var(--good-bg); color: var(--accent); }
+  .step.skip { opacity: .35; text-decoration: line-through; }
+  .steparrow { color: var(--dim); font-size: 10px; }
+  .wizbody { padding: 14px 16px 16px; min-height: 240px; }
+  .wizfoot { display: flex; gap: 8px; align-items: center; padding: 0 16px 16px; }
+  .wizfoot .spacer { flex: 1; }
+  .abtn { appearance: none; cursor: pointer; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--text); font-size: 12px; font-weight: 600; border-radius: 7px; padding: 6px 12px; }
+  .abtn:hover { border-color: var(--accent-border); color: var(--strong); }
+  .abtn.primary { border-color: var(--accent-border); color: var(--accent); }
+  .abtn.primary:hover { background: rgba(123,224,178,.08); }
+  .abtn.warn { border-color: var(--warn-border); color: var(--warn-text); }
+  .abtn.danger { border-color: var(--err-border); color: var(--err-text); }
+  .abtn.ghost { border-color: transparent; color: var(--subtle); }
+  .abtn.ghost:hover { color: var(--text); border-color: var(--border-strong); }
+  .abtn[disabled] { opacity: .4; pointer-events: none; }
+
+  .boardrow { display: flex; gap: 10px; flex-wrap: wrap; }
+  .bcard { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; cursor: pointer;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; width: 128px; text-align: center; }
+  .bcard:hover { border-color: var(--border-strong); }
+  .bcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .bcard .bn { font-size: 10.5px; font-weight: 700; color: var(--strong); line-height: 1.25; }
+  .bcard .bio { font: 500 8.5px/1.3 var(--mono); color: var(--dim); }
+  .bcard.generic svg { opacity: .45; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 8.5px; font-weight: 800;
+    letter-spacing: .08em; text-transform: uppercase; border-radius: 999px; padding: 1.5px 7px; }
+  .badge.detected { color: var(--live-text); background: var(--live-bg); border: 1px solid var(--live-border); }
+  .badge.warnb { color: var(--warn-text); background: var(--warn-bg); border: 1px solid var(--warn-border);
+    text-transform: none; letter-spacing: .02em; }
+  .badge.forboard { color: var(--subtle); background: var(--neutral-bg); border: 1px solid var(--neutral-border);
+    text-transform: none; letter-spacing: .02e; }
+
+  .contentsplit { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .contentsplit { grid-template-columns: 1fr; } }
+  .choicebox { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+  .choicebox.picked { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .choicebox h4 { margin: 0; font-size: 12.5px; color: var(--strong); }
+  .choicebox h4 small { color: var(--dim); font-weight: 500; font-size: 11px; margin-left: 6px; }
+  .compactgen { display: flex; align-items: center; gap: 8px; background: var(--terminal);
+    border: 1px solid var(--border-muted); border-radius: 8px; padding: 9px 11px;
+    font: 600 11px/1.4 var(--mono); color: var(--muted); flex-wrap: wrap; }
+  .compactgen .arr { color: var(--bound-text); }
+  .compactgen .inf { color: var(--dim); cursor: help; border-bottom: 1px dotted var(--dim); font-family: var(--sans); }
+  .projlist { display: flex; flex-direction: column; gap: 5px; max-height: 150px; overflow-y: auto; }
+  .prow { display: flex; align-items: center; gap: 9px; appearance: none; border: 1px solid transparent;
+    background: transparent; border-radius: 7px; padding: 6px 8px; cursor: pointer; text-align: left; }
+  .prow:hover { background: var(--bg-wash); }
+  .prow[aria-pressed=true] { border-color: var(--accent-border); background: rgba(123,224,178,.05); }
+  .prow .sw { width: 22px; height: 15px; border-radius: 3px; flex: none; }
+  .prow .pn { font-size: 11.5px; font-weight: 600; color: var(--text); flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .emptybox { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 12px;
+    color: var(--dim); font-size: 11.5px; text-align: center; line-height: 1.5; }
+
+  /* flash step — faithful to core activity-view (story: activity-view__flashing) */
+  .flashwrap { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .flashwrap { grid-template-columns: 1fr; } }
+  .flashmain { display: flex; flex-direction: column; gap: 10px; }
+  .flashtitle { font-size: 13px; font-weight: 700; color: var(--strong); }
+  .flashsub { font-size: 11.5px; color: var(--subtle); }
+  .pctrow { display: flex; justify-content: space-between; align-items: baseline; }
+  .pctrow .plabel { font-size: 12px; font-weight: 700; color: var(--warn-text); }
+  .pctrow .pct { font-size: 13px; font-weight: 800; color: var(--strong); }
+  .pbar { height: 7px; border-radius: 999px; background: var(--terminal); border: 1px solid var(--border-muted); overflow: hidden; }
+  .pbar .fill { height: 100%; width: 0%; background: var(--accent); transition: width .3s; }
+  .pbar .fill.err { background: var(--err-text); }
+  .steplist { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+  .fstep { display: flex; gap: 9px; align-items: baseline; color: var(--dim); }
+  .fstep .ic { width: 16px; height: 16px; border-radius: 50%; border: 1.4px solid var(--border-strong);
+    flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; transform: translateY(2px); }
+  .fstep.done { color: var(--good-text); } .fstep.done .ic { border-color: var(--good-border); color: var(--good-text); }
+  .fstep.now { color: var(--warn-text); font-weight: 700; } .fstep.now .ic { border-color: var(--warn-border); color: var(--warn-text); }
+  .fstep.fail { color: var(--err-text); font-weight: 700; } .fstep.fail .ic { border-color: var(--err-border); color: var(--err-text); }
+  .fstep small { display: block; color: var(--dim); font-weight: 500; font-size: 10.5px; }
+  .flashlog { font: 500 10.5px/1.65 var(--mono); color: var(--subtle); background: var(--terminal);
+    border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 10px; min-height: 80px; max-height: 130px; overflow-y: auto; }
+  .flashlog .err { color: var(--err-text); }
+  .namewhile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; display: flex; flex-direction: column; gap: 8px; align-self: start; }
+  .namewhile .nw { font-size: 12px; font-weight: 700; color: var(--strong); }
+  .namewhile .nd { font-size: 10.5px; color: var(--dim); line-height: 1.4; }
+
+  .errbox { border: 1px solid var(--err-border); background: var(--err-bg); border-radius: 9px;
+    padding: 11px 13px; font-size: 12px; color: var(--err-text); line-height: 1.5; }
+  .errbox b { color: var(--strong); }
+  .errbox .eactions { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+  .errbox .ehint { color: var(--dim); font-size: 10.5px; margin-top: 7px; }
+  .warnbox { border: 1px solid var(--warn-border); background: var(--warn-bg); border-radius: 9px;
+    padding: 11px 13px; font-size: 12px; color: var(--warn-text); line-height: 1.5; }
+  .warnbox b { color: var(--strong); }
+  .warnbox .eactions { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+  .adoptcard { display: flex; gap: 12px; align-items: center; background: var(--surface);
+    border: 1px solid var(--border); border-left: 3px solid var(--good-text); border-radius: 9px; padding: 11px 13px; }
+  .adoptcard .sw { width: 44px; height: 30px; border-radius: 5px; flex: none;
+    background: linear-gradient(90deg, #3f2114, #a34b1e, #f0b97a, #a34b1e, #3f2114); background-size: 300% 100%; }
+  .adoptcard .at { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .adoptcard .ad { font-size: 11px; color: var(--subtle); }
+
+  /* card-resident confirm sheet (device-card grammar) */
+  .sheet { position: absolute; inset: 0; z-index: 8; background: rgba(8,10,13,.72); backdrop-filter: blur(2px);
+    display: grid; place-items: center; padding: 20px; }
+  .sheetpanel { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--neutral-border);
+    border-radius: 10px; padding: 15px; box-shadow: 0 12px 34px rgba(0,0,0,.55); }
+  .sheetpanel h3 { margin: 0 0 7px; font-size: 13px; color: var(--strong); }
+  .sheetpanel p { margin: 0 0 12px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .sheetrow { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .glowrow { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .glowstrip { height: 26px; width: 320px; border-radius: 6px; border: 1px solid var(--border-muted);
+    background: linear-gradient(90deg, #14323f, #1d5c50, #7be0b2, #1d5c50, #14323f); background-size: 300% 100%;
+    animation: slide 4s linear infinite; }
+  @keyframes slide { to { background-position: 300% 0; } }
+
+  /* ---- §4 density ---- */
+  .dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; max-width: 1400px; }
+  .genflow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    background: var(--terminal); border: 1px solid var(--border-muted); border-radius: 8px; padding: 10px; }
+  .gnode { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px;
+    padding: 5px 8px; display: flex; flex-direction: column; gap: 2px; min-width: 64px; }
+  .gnode .gh { font-size: 9.5px; font-weight: 800; color: var(--muted); letter-spacing: .04em; }
+  .gnode .gv { font: 600 9.5px/1.2 var(--mono); color: var(--dim); }
+  .gnode.hot .gv { color: var(--accent); }
+  .garr { color: var(--bound-text); font-size: 12px; flex: none; }
+  .genline { font-size: 11px; color: var(--dim); line-height: 1.5; }
+  .genline b { color: var(--muted); }
+
+  /* ---- §5 editor mock (faithful to studio__readme__studio-hero) ---- */
+  .edmock { max-width: 1400px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: var(--bg); position: relative; display: flex; gap: 10px; padding: 10px; min-height: 400px; }
+  .edtree { width: 218px; flex: none; background: var(--surface-muted); border: 1px solid var(--border-muted);
+    border-radius: 9px; padding: 10px; align-self: flex-start; }
+  .edtree .ph { display: flex; gap: 7px; align-items: baseline; font-size: 13px; font-weight: 800;
+    color: var(--strong); margin-bottom: 9px; }
+  .edtree .ph small { color: var(--dim); font-weight: 600; font-size: 10px; }
+  .edtree .ti { display: flex; gap: 8px; align-items: center; font-size: 12px; font-weight: 600;
+    color: var(--muted); padding: 5px 8px; border-radius: 7px; cursor: pointer; }
+  .edtree .ti:hover { background: var(--bg-wash); }
+  .edtree .ti.sel { border: 1px solid var(--border-strong); background: var(--surface); color: var(--strong); }
+  .edtree .ti .g { color: var(--dim); font-size: 11px; width: 13px; text-align: center; }
+  .edtree .ti.ind1 { margin-left: 12px; } .edtree .ti.ind2 { margin-left: 24px; }
+  .ednode { flex: 1; background: var(--surface-subtle); border: 1px solid var(--border-muted);
+    border-radius: 9px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+  .ednode .nh { display: flex; gap: 9px; align-items: center; padding: 8px 12px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); }
+  .ednode .nh .nn { font-size: 13.5px; font-weight: 800; color: var(--strong); }
+  .ednode .nh .nk { margin-left: auto; font-size: 10px; color: var(--dim); font-weight: 600; }
+  .edsection { display: flex; border-bottom: 1px solid var(--border-muted); }
+  .edsection .slabel { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 8.5px; font-weight: 800;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--dim); padding: 8px 3px; flex: none;
+    border-right: 1px solid var(--border-muted); display: flex; align-items: center; justify-content: center; }
+  .edsection .scontent { flex: 1; padding: 10px 12px; min-width: 0; }
+  .edout { height: 96px; border-radius: 6px; background: linear-gradient(115deg, #1d5c50, #2b8064, #7be0b2, #3c5c78, #142330);
+    background-size: 280% 280%; animation: drift 7s ease-in-out infinite alternate; }
+  @keyframes drift { to { background-position: 100% 100%; } }
+  .knobrow { display: flex; gap: 20px; align-items: center; }
+  .knob { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .knob .kc { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--bound-border); position: relative; }
+  .knob .kc::after { content: ""; position: absolute; left: 50%; top: 3px; width: 2px; height: 9px;
+    background: var(--bound-text); transform-origin: bottom; transform: translateX(-50%) rotate(40deg); border-radius: 2px; }
+  .knob .kl { font-size: 8.5px; font-weight: 800; letter-spacing: .07em; color: var(--muted); text-transform: uppercase; }
+  .knob .kv { font: 600 10px/1 var(--mono); color: var(--subtle); }
+  .edcollapsed { display: flex; gap: 9px; align-items: center; padding: 8px 12px; font-size: 10px;
+    font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
+    border-bottom: 1px solid var(--border-muted); }
+  .edcollapsed span { color: var(--subtle); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  .edpane { width: 300px; flex: none; background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--good-text); border-radius: 9px; overflow: hidden; align-self: stretch;
+    display: flex; flex-direction: column; }
+  .edpane.simp { border-left-color: var(--bound-text); }
+  .edpane .dh { display: flex; gap: 7px; align-items: center; padding: 7px 10px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); font-size: 12px; font-weight: 700; color: var(--gold); }
+  .edpane .dh .tp { margin-left: auto; font: 700 9px/1 var(--mono); color: var(--dim); }
+  .edpane .tabsrow { display: flex; gap: 2px; padding: 4px 8px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); }
+  .edpane .tb { flex: 1; height: 24px; border-radius: 6px; border: 0; background: transparent; color: var(--dim);
+    cursor: pointer; font-size: 11px; }
+  .edpane .tb.on { color: var(--good-text); background: var(--good-bg); }
+  .edpane .pb { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .edpane .run { color: var(--good-text); font-size: 12px; font-weight: 700; }
+  .projchip { display: inline-flex; align-items: center; gap: 7px; }
+  .projchip .sw { width: 13px; height: 13px; border-radius: 3px;
+    background: linear-gradient(135deg, #1d5c50, #3c5c78); flex: none; }
+  .projchip .pn { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+  .edpane .console { margin-top: auto; border-top: 1px solid var(--border-muted); background: var(--terminal);
+    padding: 7px 10px; font: 500 9.5px/1.6 var(--mono); color: var(--dim); }
+  .edtoast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 5;
+    background: var(--good-bg); border: 1px solid var(--good-border); color: var(--good-text);
+    font-size: 12px; font-weight: 700; border-radius: 999px; padding: 6px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .hintstrip { position: absolute; right: 16px; top: 14px; z-index: 5; width: 250px;
+    background: var(--surface); border: 1px solid var(--live-border); border-radius: 9px; padding: 10px 12px;
+    font-size: 11px; color: var(--muted); line-height: 1.45; box-shadow: 0 10px 28px rgba(0,0,0,.5); }
+  .hintstrip b { color: var(--live-text); }
+  .hintstrip .hx { float: right; color: var(--dim); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-usb" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
+    <path d="M12 3v14M12 21v-4M8 8l4-5 4 5M7 14l5 3 5-3"/></g></symbol>
+  <symbol id="i-sim" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
+    <rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></g></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round">
+    <path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></g></symbol>
+  <symbol id="b-generic" viewBox="0 0 64 40">
+    <rect x="2" y="2" width="60" height="36" rx="4" fill="#101418" stroke="#2c3440" stroke-width="1.4"/>
+    <rect x="20" y="7" width="24" height="16" rx="2" fill="#1a2027" stroke="#3e4852"/>
+    <g fill="#8b93a0"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="32" r="2"/>
+      <circle cx="56" cy="8" r="2"/><circle cx="56" cy="32" r="2"/></g>
+    <rect x="26" y="27" width="12" height="7" rx="1.5" fill="#26313a"/>
+  </symbol>
+  <symbol id="b-q" viewBox="0 0 64 40">
+    <rect x="2" y="2" width="60" height="36" rx="4" fill="none" stroke="#3e4852" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="32" y="26" text-anchor="middle" fill="#9ba4ad" font-size="14" font-family="Inter, sans-serif">?</text>
+  </symbol>
+</defs></svg>
+
+<h1>Device setup flow — deep spike</h1>
+<p class="hint">
+  P01 of the gallery-rework plan (dir 2026-08-04-1053). The broad spike settled the shape —
+  panel wizard, board → project → flash → editor, sim skips flash, warn-don't-fix — this one
+  settles what it skipped: <b>where the wizard lives</b> on the current gallery page (§1),
+  <b>where naming goes</b> (§2), <b>every failure and edge state</b> (§3 — use the injector),
+  <b>how much machinery the project step shows</b> (§4), and <b>the landing into today's real
+  editor</b> (§5). Concept 0 everywhere is a faithful repro of the shipped flow (story baselines:
+  setup-board-picker, activity-view__flashing, studio-hero).
+</p>
+
+<div class="controls">
+  <span class="group"><b>Path</b>
+    <button class="chip" data-path="hw" aria-pressed="true">hardware</button>
+    <button class="chip" data-path="sim">simulator</button>
+  </span>
+  <span class="group"><b>Inject</b>
+    <button class="chip warnc" data-inj="none" aria-pressed="true">clean run</button>
+    <button class="chip warnc" data-inj="noprobe">probe finds nothing</button>
+    <button class="chip warnc" data-inj="portheld">port held</button>
+    <button class="chip warnc" data-inj="provisioned">already set up</button>
+    <button class="chip warnc" data-inj="flashfail">flash fails @42%</button>
+    <button class="chip warnc" data-inj="zeroproj">zero projects</button>
+  </span>
+  <span class="group"><b>Landing</b>
+    <button class="chip" data-land="toast" aria-pressed="true">A · cut + toast</button>
+    <button class="chip" data-land="hint">B · + hint strip</button>
+  </span>
+</div>
+
+<!-- ================== 1 · placement ================== -->
+<h2 id="s1"><span class="n">1</span> Where the wizard lives</h2>
+<p class="sub">Four treatments of the same gallery page (devices row + the split creation cards).
+  Click a frame's <b>open</b> to see its wizard-open state. The question is what happens to the
+  roster while you set up: does it stay, dim, or yield? My lean: <b>A · takeover</b>.</p>
+
+<div class="pgrid">
+  <div class="pframe" data-pl="0">
+    <span class="plabel">0 · Today (baseline) <span class="sel" data-open="0">open ›</span></span>
+    <div class="pbody" data-plbody>
+      <div class="sech">Devices</div>
+      <div class="minirow">
+        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+        <div class="dashcard" data-open="0">⚡ Connect a device<small>Connect a LightPlayer device over USB.</small></div>
+      </div>
+      <div class="ghost">setup = a form <b>inside the new card</b> (board thumbs + name + Install firmware),
+        then you're left on the card's Project tab to find a project yourself — the six-step detour.</div>
+    </div>
+  </div>
+  <div class="pframe" data-pl="a">
+    <span class="plabel">A · Takeover (lean) <span class="sel" data-open="a">open ›</span></span>
+    <div class="pbody" data-plbody>
+      <div class="sech">Devices</div>
+      <div class="minirow">
+        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+        <div class="dashcard" data-open="a">⚡ Connect a device<small>detect · flash · first project</small></div>
+      </div>
+      <div class="ghost">wizard <b>replaces the page content</b>; a "‹ devices" backlink is the only chrome.
+        The flow gets the whole room; nothing competes during flash.</div>
+    </div>
+  </div>
+  <div class="pframe" data-pl="b">
+    <span class="plabel">B · Overlay sheet <span class="sel" data-open="b">open ›</span></span>
+    <div class="pbody" data-plbody>
+      <div class="sech">Devices</div>
+      <div class="minirow">
+        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+        <div class="dashcard" data-open="b">⚡ Connect a device<small>detect · flash · first project</small></div>
+      </div>
+      <div class="ghost">wizard floats <b>over the dimmed gallery</b> — context stays visible, but a
+        modal holding a 60s flash is a lot of modal.</div>
+    </div>
+  </div>
+  <div class="pframe" data-pl="c">
+    <span class="plabel">C · In-grid expansion <span class="sel" data-open="c">open ›</span></span>
+    <div class="pbody" data-plbody>
+      <div class="sech">Devices</div>
+      <div class="minirow">
+        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+        <div class="dashcard" data-open="c">⚡ Connect a device<small>detect · flash · first project</small></div>
+      </div>
+      <div class="ghost">the creation card <b>grows in place</b> to grid width (device-card ⤢ grammar);
+        the roster stays live above. Cozy, but the wizard fights the grid for width at sm.</div>
+    </div>
+  </div>
+</div>
+
+<p class="leannote"><b>Lean — A · takeover:</b> setup is a mode, not a sidebar errand: you came to
+  the page to do exactly this, and mid-flash there is nothing else you should be doing. B keeps
+  context nobody needs and puts a long-running operation in a dialog; C inherits the card-grammar
+  charm but at 390px the wizard would be fighting its own container. Takeover also survives the
+  chrome reorg unchanged (it becomes the Devices page's mode).</p>
+
+<!-- ================== 2 · naming ================== -->
+<h2 id="s2"><span class="n">2</span> Where naming goes</h2>
+<p class="sub">Today the name field sits in the setup form next to the board picker. Naming is
+  hardware-only (the single sim stays "Simulator"), and the stamp lands post-flash at hello
+  anyway — so the field can move. My lean: <b>B · name it while it flashes</b>.</p>
+
+<div class="ngrid">
+  <div class="ncard">
+    <h4>A · With the board step<small>today's grouping</small></h4>
+    <span class="why">Board thumbs + name field together, like the shipped form. Familiar; but it's
+      a second decision before anything happens, and the default name ("2026-08-04 - esp32c6")
+      gets accepted unread.</span>
+    <span class="fieldlbl">Name your device</span>
+    <input type="text" value="2026-08-04 - esp32c6">
+  </div>
+  <div class="ncard" style="border-color: var(--accent-border)">
+    <h4>B · During flash<small>lean — the dead minute</small></h4>
+    <span class="why">Flash takes ~a minute of enforced waiting. The name field rides beside the
+      progress view: "while it writes, what should this board be called?" Zero added steps; the
+      name is stamped at hello right after. (Live in §3's flash step.)</span>
+    <span class="fieldlbl">While it writes — name this board</span>
+    <input type="text" placeholder="e.g. Porch sign">
+  </div>
+  <div class="ncard">
+    <h4>C · At the end<small>after first light</small></h4>
+    <span class="why">"It's glowing — call it something." Emotionally right (name the thing you can
+      see), but it gates the editor handoff on one more decision, exactly where momentum matters
+      most.</span>
+    <span class="fieldlbl">It's glowing — name it</span>
+    <input type="text" placeholder="e.g. Porch sign">
+  </div>
+</div>
+
+<!-- ================== 3 · the wizard, live ================== -->
+<h2 id="s3"><span class="n">3</span> The flow, live — inject failures</h2>
+<p class="sub">The A-takeover wizard with every state reachable. <b>Path</b> and <b>Inject</b> in
+  the controls strip; injections land where they would in reality (port check at open, probe at
+  board, flash at 42%). Close (✕) during a flash to see the abandon guard. Boards filter to the
+  detected chip on the hardware path, exactly like the shipped picker (+ Generic escape hatch).</p>
+
+<div class="wizwrap">
+  <div class="wizard" id="wizard">
+    <div class="wizhead">
+      <span class="backlink" id="wizback2">‹ devices</span>
+      <span class="wt" id="wiztitle">Connect a device</span>
+      <span class="wk hw" id="wizkind">Hardware</span>
+      <button class="close" id="wizclose" title="Close">✕</button>
+    </div>
+    <div class="steps2" id="wizsteps"></div>
+    <div class="wizbody" id="wizbody"></div>
+    <div class="wizfoot" id="wizfoot"></div>
+  </div>
+</div>
+
+<p class="leannote"><b>Failure treatments shown (lean per state):</b>
+  <b>port held</b> — blocking error at open with "try again" + name-the-culprit hint (a serial
+  monitor or another Studio tab), because retry actually fixes it once the culprit closes.
+  <b>probe finds nothing</b> — never blocks: full catalog + Generic, with a quiet warn note; flash
+  refusal stays the device's job later.
+  <b>already set up</b> — an adopt branch before the board step: adopt as-is (no flash) is the
+  primary action, full re-setup is the escape.
+  <b>flash fails</b> — fail in place on the checklist (✗ Write firmware), log tail kept, Retry
+  re-runs from erase; a second failure adds the replug guidance (never trust an incomplete flash).
+  <b>close mid-flash</b> — confirm sheet; abandoning marks the card "incomplete flash — needs
+  re-flash", not silently fine.
+  <b>zero projects</b> — Load pane empty-states and New is preselected; the flow never dead-ends.</p>
+
+<!-- ================== 4 · project step density ================== -->
+<h2 id="s4"><span class="n">4</span> Project step — how much machinery</h2>
+<p class="sub">The New box, two densities. Gate question from the broad spike: full node flow vs
+  compact. My lean: <b>compact</b> — first-run users don't know what a fixture is yet; the flow
+  drawing belongs in the editor they're about to land in. <span style="color:var(--muted)">
+  (§3 uses the compact form.)</span></p>
+
+<div class="dgrid">
+  <div class="choicebox">
+    <h4>Full node flow<small>broad-spike treatment</small></h4>
+    <div class="genflow">
+      <span class="gnode hot"><span class="gh">clock</span><span class="gv">time.s</span></span>
+      <span class="garr">⟶</span>
+      <span class="gnode"><span class="gh">playlist</span><span class="gv">1 entry · meteor</span></span>
+      <span class="garr">⟶</span>
+      <span class="gnode"><span class="gh">fixture</span><span class="gv">strip · 256 px</span></span>
+      <span class="garr">⟶</span>
+      <span class="gnode hot"><span class="gh">output</span><span class="gv">ws281x local:IO8</span></span>
+    </div>
+    <span class="genline">Wired for this board: <b>2 outputs</b> available, first on <b>IO8</b>.
+      Target recorded on the project (<span style="font-family:var(--mono)">target:
+      espressif/esp32-c6-devkitc-1</span>) — advisory only, the engine never reads it.</span>
+  </div>
+  <div class="choicebox picked">
+    <h4>Compact<small>lean</small></h4>
+    <div class="compactgen">meteor <span class="arr">→</span> 256-px strip <span class="arr">→</span> IO8
+      <span class="inf" title="Also: a clock, a one-entry playlist, and target: espressif/esp32-c6-devkitc-1 recorded on the project (advisory — the engine never reads it).">ⓘ what's inside</span></div>
+    <span class="genline">One glance: the effect, the strip, the pin. The clock/playlist plumbing
+      and the target line live behind ⓘ. The editor explains the rest better than this panel can.</span>
+  </div>
+</div>
+
+<!-- ================== 5 · landing ================== -->
+<h2 id="s5"><span class="n">5</span> The landing — today's editor, faithfully</h2>
+<p class="sub">Finish §3's flow (or just look): the real three-column shell — project tree, lensed
+  node, the device card grown as the right pane (story: studio-hero). <b>A</b> cuts straight in
+  with a toast naming the target. <b>B</b> adds a one-time dismissible hint pointing at the device
+  pane. Toggle in the controls. My lean: <b>A</b> — the glowing output strip and the running device
+  pane explain themselves.</p>
+
+<div class="edmock" id="edmock">
+  <div class="edtoast" id="edtoast" hidden>Running on <b id="toastname">Porch sign</b></div>
+  <div class="hintstrip" id="edhint" hidden><span class="hx" id="hintx">✕</span>
+    <b>Your board is live →</b> This pane is the device itself — its console, settings, and
+    danger zone ride along while you edit.</div>
+  <div class="edtree">
+    <div class="ph">2026-08-04 - esp32c6 <small>Project</small></div>
+    <div class="ti"><span class="g">◈</span> 2026-08-04 - esp32c6</div>
+    <div class="ti ind1"><span class="g">≣</span> First set</div>
+    <div class="ti ind2 sel"><span class="g">✦</span> Meteor</div>
+    <div class="ti ind1"><span class="g">▤</span> Strip 256</div>
+  </div>
+  <div class="ednode">
+    <div class="nh"><span class="nn">Meteor</span><span class="nk">shader ⓘ</span></div>
+    <div class="edsection"><span class="slabel">output</span>
+      <div class="scontent"><div class="edout"></div></div></div>
+    <div class="edsection"><span class="slabel">controls</span>
+      <div class="scontent"><div class="knobrow">
+        <span class="knob"><span class="kc"></span><span class="kl">speed</span><span class="kv">1.40</span></span>
+        <span class="knob"><span class="kc"></span><span class="kl">tail</span><span class="kv">0.62</span></span>
+        <span class="knob"><span class="kc"></span><span class="kl">hue</span><span class="kv">0.31</span></span>
+      </div></div></div>
+    <div class="edcollapsed">› code <span>meteor.glsl</span></div>
+    <div class="edcollapsed">› advanced <span>slots · bindings</span></div>
+  </div>
+  <div class="edpane" id="edpane">
+    <div class="dh" id="edpanename">Porch sign<span class="tp" id="edpanetp">USB</span></div>
+    <div class="tabsrow"><button class="tb on">▷</button><button class="tb">⚙</button><button class="tb">▣</button><button class="tb">⚠</button></div>
+    <div class="pb">
+      <span class="run">Running</span>
+      <span class="projchip"><span class="sw"></span><span class="pn">2026-08-04 - esp32c6</span></span>
+      <div class="glowstrip" style="width:100%; height:18px"></div>
+    </div>
+    <div class="console">engine: project loaded · 256 points<br>engine: frame 112 · 60fps<br>ws281x: IO8 · first light</div>
+  </div>
+</div>
+
+<script>
+/* ===================== data ===================== */
+const BOARDS = [
+  { id: "generic", name: "Generic",             chip: null,       pin: "IO2",  wires: 1, q: true },
+  { id: "c6",      name: "ESP32-C6 DevKitC-1",  chip: "ESP32-C6", pin: "IO8",  wires: 2 },
+  { id: "xc6",     name: "XIAO ESP32-C6",       chip: "ESP32-C6", pin: "D0",   wires: 1 },
+  { id: "s3",      name: "ESP32-S3 DevKitC-1",  chip: "ESP32-S3", pin: "IO18", wires: 4 },
+  { id: "v4",      name: "ESP32 DevKitC v4",    chip: "ESP32",    pin: "IO18", wires: 3 },
+  { id: "uno",     name: "QuinLED Dig-Uno",     chip: "ESP32",    pin: "IO16", wires: 2 },
+];
+const boardById = id => BOARDS.find(b => b.id === id);
+const DETECTED_CHIP = "ESP32-C6";
+const PROJECTS = [
+  { name: "2026-07-02-0930-porch-sign",   target: "c6",  grad: "linear-gradient(90deg,#3f2114,#a34b1e,#f0b97a)" },
+  { name: "2026-07-04-1102-evening-glow", target: null,  grad: "linear-gradient(90deg,#14323f,#1d5c50,#7be0b2)" },
+  { name: "dome-mapper-test",             target: "s3",  grad: "linear-gradient(90deg,#0e2438,#2d5f8a,#9cc8ee)" },
+];
+
+const state = { path: "hw", inject: "none", landing: "toast" };
+
+/* ===================== §1 placement open-states ===================== */
+const PLACEMENT_OPEN = {
+  "0": `
+    <div class="sech">Devices</div>
+    <div class="minirow">
+      <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+        <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+      <div class="minicard" style="border-left-color: var(--warn-text)">
+        <div class="mh">2026-08-04 - esp32c6<span class="tp">USB</span></div>
+        <div class="mb" style="font-size:9.5px">
+          <b style="color:var(--muted)">Select your board</b> · [?] [C6-DevKitC] [XIAO-C6]<br>
+          <b style="color:var(--muted)">Name your device</b> · <span style="font-family:var(--mono)">2026-08-04 - esp32c6</span><br>
+          <span style="color:var(--accent)">[ ⚡ Install firmware ]</span></div></div>
+    </div>
+    <div class="ghost">…then flash runs in the card, and the card's Project tab waits for you to
+      go find a project. Faithful to shipped.</div>`,
+  "a": `
+    <div class="miniwiz">
+      <div class="wh"><span class="backlink">‹ devices</span> Connect a device
+        <span class="wk hw" style="font-size:8px">HW</span></div>
+      <div class="steps">① <b>Board</b> › ② Project › ③ Flash › ④ Editor</div>
+      <div style="display:flex; gap:6px">
+        <span class="ghost" style="margin:0; flex:1; text-align:center">board grid<br>(detected first)</span>
+        <span class="ghost" style="margin:0; flex:1; text-align:center">project<br>new · load</span>
+        <span class="ghost" style="margin:0; flex:1; text-align:center">flash + name</span>
+      </div>
+      <div class="ghost" style="border-style:solid">the roster is gone; "‹ devices" is the way back.
+        Full width for board thumbs and the flash view.</div>
+    </div>`,
+  "b": `
+    <div class="sech">Devices</div>
+    <div class="minirow">
+      <div class="minicard sim dimmed"><div class="mh">Simulator<span class="tp">SIM</span></div>
+        <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+      <div class="minicard dimmed" style="border-left-color: var(--neutral-border)">
+        <div class="mh">Workbench ESP32<span class="tp">USB</span></div>
+        <div class="mb">Running<br>porch-sign</div></div>
+    </div>
+    <div class="dimmedbg"><div class="miniwiz" style="width:88%">
+      <div class="wh">Connect a device <span class="wk hw" style="font-size:8px">HW</span></div>
+      <div class="steps">① <b>Board</b> › ② Project › ③ Flash › ④ Editor</div>
+      <div class="ghost">floats over the dimmed roster — a modal that will hold a 60-second flash.</div>
+    </div></div>`,
+  "c": `
+    <div class="sech">Devices</div>
+    <div class="minirow" style="margin-bottom:9px">
+      <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+        <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+      <div class="minicard"><div class="mh">Workbench ESP32<span class="tp">USB</span></div>
+        <div class="mb"><span class="run">Running</span><br>porch-sign</div></div>
+    </div>
+    <div class="miniwiz">
+      <div class="wh">Connect a device <span class="wk hw" style="font-size:8px">HW</span>
+        <span style="margin-left:auto; color:var(--dim); cursor:pointer">⤡ shrink</span></div>
+      <div class="steps">① <b>Board</b> › ② Project › ③ Flash › ④ Editor</div>
+      <div class="ghost">the creation card, grown to row width (⤢ grammar); the live roster stays above.</div>
+    </div>`,
+};
+const PLACEMENT_CLOSED = {};
+document.querySelectorAll(".pframe").forEach(f => {
+  PLACEMENT_CLOSED[f.dataset.pl] = f.querySelector("[data-plbody]").innerHTML;
+});
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-open]");
+  if (!t) return;
+  const key = t.dataset.open;
+  const frame = document.querySelector(`.pframe[data-pl="${key}"]`);
+  const body = frame.querySelector("[data-plbody]");
+  const isOpen = frame.dataset.openState === "1";
+  body.innerHTML = isOpen ? PLACEMENT_CLOSED[key] : PLACEMENT_OPEN[key];
+  frame.dataset.openState = isOpen ? "0" : "1";
+  frame.querySelectorAll(".sel").forEach(s => s.textContent = isOpen ? "open ›" : "‹ close");
+});
+
+/* ===================== §3 wizard state machine ===================== */
+const wiz = {
+  open: true, path: "hw", step: "board", board: null, content: null, loadPick: null,
+  entryError: null,      // "portheld" | null
+  adoptOffer: false,     // provisioned branch shown
+  flashPct: 0, flashFailed: false, failCount: 0, flashTimer: null,
+  name: "", abandoned: false,
+};
+
+function resetWizard() {
+  clearInterval(wiz.flashTimer);
+  wiz.open = true; wiz.path = state.path; wiz.step = "board";
+  wiz.board = null; wiz.content = null; wiz.loadPick = null;
+  wiz.flashPct = 0; wiz.flashFailed = false; wiz.failCount = 0;
+  wiz.name = ""; wiz.abandoned = false;
+  wiz.entryError = state.inject === "portheld" && wiz.path === "hw" ? "portheld" : null;
+  wiz.adoptOffer = state.inject === "provisioned" && wiz.path === "hw";
+  if (wiz.path === "hw" && !wiz.entryError && !wiz.adoptOffer && state.inject !== "noprobe") wiz.board = "c6";
+  renderWizard();
+}
+
+function stepDefs() {
+  return [
+    ["board", "Board"], ["content", "Project"],
+    ["flash", "Flash", wiz.path !== "hw"], ["editor", "Editor"],
+  ];
+}
+
+function detectedBoards() {
+  if (wiz.path === "sim") return BOARDS.filter(b => !b.q);
+  if (state.inject === "noprobe") return BOARDS;
+  return BOARDS.filter(b => b.q || b.chip === DETECTED_CHIP);
+}
+
+function renderWizard() {
+  const w = document.getElementById("wizard");
+  w.classList.toggle("simpath", wiz.path === "sim");
+  document.getElementById("wiztitle").textContent =
+    wiz.path === "hw" ? "Connect a device" : "Simulate a device";
+  const wk = document.getElementById("wizkind");
+  wk.textContent = wiz.path === "hw" ? "Hardware" : "Simulator";
+  wk.className = "wk " + (wiz.path === "hw" ? "hw" : "sim");
+
+  const order = ["board", "content", "flash", "editor"];
+  const idx = order.indexOf(wiz.step);
+  document.getElementById("wizsteps").innerHTML = stepDefs().map(([k, label, skipped], i) => {
+    const st = skipped ? "skip" : (order.indexOf(k) < idx ? "done" : (k === wiz.step ? "now" : ""));
+    return (i ? '<span class="steparrow">›</span>' : "") +
+      `<span class="step ${st}"><span class="dotn">${order.indexOf(k) < idx && !skipped ? "✓" : i + 1}</span>${label}</span>`;
+  }).join("");
+
+  const body = document.getElementById("wizbody");
+  const foot = document.getElementById("wizfoot");
+  foot.innerHTML = "";
+
+  if (!wiz.open) {
+    body.innerHTML = wiz.abandoned
+      ? `<div class="warnbox"><b>Flash abandoned at ${wiz.flashPct}%.</b> The board's card now reads
+         "incomplete flash — needs re-flash"; an interrupted image is never trusted.
+         <div class="eactions"><button class="abtn primary" id="reopen">Re-open the wizard</button></div></div>`
+      : `<span style="color:var(--dim); font-size:12px">Closed — reopen from the controls
+         (or <button class="abtn ghost" id="reopen" style="padding:2px 8px">here</button>).</span>`;
+    const r = document.getElementById("reopen");
+    if (r) r.onclick = resetWizard;
+    return;
+  }
+
+  /* entry gate: port held */
+  if (wiz.entryError === "portheld") {
+    body.innerHTML = `
+      <div class="errbox"><b>The serial port is held by another program.</b>
+        Studio needs exclusive access to talk to the board.
+        <div class="eactions"><button class="abtn primary" id="retryport">Try again</button></div>
+        <div class="ehint">Usual culprits: a serial monitor (esptool, screen, Arduino IDE) or
+          another Studio tab. Close it, then try again.</div></div>`;
+    document.getElementById("retryport").onclick = () => { wiz.entryError = null; wiz.board = "c6"; renderWizard(); };
+    return;
+  }
+
+  /* entry branch: already provisioned */
+  if (wiz.adoptOffer) {
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:10px; max-width:560px">
+        <span style="font-size:12.5px; color:var(--muted)">This board is already set up:</span>
+        <div class="adoptcard"><span class="sw"></span>
+          <span><span class="at">Luna's porch sign</span><br>
+          <span class="ad">running <b>2026-07-02-0930-porch-sign</b> · fw adef46b1 · ESP32-C6 DevKitC-1</span></span></div>
+        <div class="eactions" style="display:flex; gap:8px">
+          <button class="abtn primary" id="adopt">Adopt it as-is</button>
+          <button class="abtn ghost" id="resetup">Set it up fresh…</button>
+        </div>
+        <span style="color:var(--dim); font-size:10.5px">Adopt = it just appears in your roster,
+          nothing is written. Fresh setup re-flashes and replaces what's on it (it will warn again
+          before writing).</span>
+      </div>`;
+    document.getElementById("adopt").onclick = () => { wiz.adoptOffer = false; wiz.step = "editor"; wiz.board = "c6"; wiz.content = "adopt"; renderWizard(); };
+    document.getElementById("resetup").onclick = () => { wiz.adoptOffer = false; wiz.board = "c6"; renderWizard(); };
+    return;
+  }
+
+  /* step: board */
+  if (wiz.step === "board") {
+    const list = detectedBoards();
+    const noprobe = wiz.path === "hw" && state.inject === "noprobe";
+    body.innerHTML = `
+      ${noprobe ? `<div class="warnbox" style="margin-bottom:12px">Couldn't identify the chip over
+        serial — pick your board (or Generic). If the image doesn't match, the device refuses it at
+        flash time; nothing bricks here.</div>` : ""}
+      <div class="boardrow">${list.map(b => `
+        <button class="bcard ${b.q ? "generic" : ""}" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
+          <svg width="64" height="40"><use href="${b.q ? "#b-q" : "#b-generic"}"/></svg>
+          <span class="bn">${b.name}</span>
+          ${b.q ? `<span class="bio">any ESP32-family</span>` : `<span class="bio">${b.chip} · ${b.wires} wire${b.wires > 1 ? "s" : ""} · ${b.pin}</span>`}
+          ${wiz.path === "hw" && !noprobe && b.chip === DETECTED_CHIP ? `<span class="badge detected">detected</span>` : ""}
+        </button>`).join("")}
+      </div>`;
+    body.querySelectorAll("[data-board]").forEach(el =>
+      el.onclick = () => { wiz.board = el.dataset.board; renderWizard(); });
+    foot.innerHTML = `<span class="spacer"></span>
+      <button class="abtn primary" id="wnext" ${wiz.board ? "" : "disabled"}>
+        Continue${wiz.board ? " with " + boardById(wiz.board).name : ""} →</button>`;
+    document.getElementById("wnext").onclick = () => { wiz.step = "content"; renderWizard(); };
+  }
+
+  /* step: content */
+  if (wiz.step === "content") {
+    const b = boardById(wiz.board);
+    const zero = state.inject === "zeroproj";
+    if (zero && wiz.content === null) wiz.content = "new";
+    const pick = wiz.loadPick ? PROJECTS.find(p => p.name === wiz.loadPick) : null;
+    const mismatch = pick && pick.target && pick.target !== wiz.board;
+    body.innerHTML = `
+      <div class="contentsplit">
+        <div class="choicebox ${wiz.content === "new" ? "picked" : ""}" id="ch-new">
+          <h4>New — made for the ${b.name}<small>recommended</small></h4>
+          <div class="compactgen">meteor <span class="arr">→</span> 256-px strip <span class="arr">→</span> ${b.pin}
+            <span class="inf" title="Also: a clock, a one-entry playlist, and target: espressif/${b.id === "c6" ? "esp32-c6-devkitc-1" : b.name.toLowerCase().replaceAll(" ", "-")} recorded on the project (advisory — the engine never reads it).">ⓘ what's inside</span></div>
+        </div>
+        <div class="choicebox ${wiz.content === "load" ? "picked" : ""}" id="ch-load">
+          <h4>Load one of yours</h4>
+          ${zero ? `<div class="emptybox">No projects yet — <b>New</b> is the way in.<br>
+              Everything you make lands in your library for next time.</div>`
+            : `<div class="projlist">${PROJECTS.map(p => `
+              <button class="prow" data-load="${p.name}" aria-pressed="${wiz.loadPick === p.name}">
+                <span class="sw" style="background:${p.grad}"></span><span class="pn">${p.name}</span>
+                ${p.target ? (p.target === wiz.board
+                  ? `<span class="badge forboard">for ${boardById(p.target).chip}</span>`
+                  : `<span class="badge warnb">for ${boardById(p.target).chip}</span>`)
+                  : `<span class="badge forboard">no target</span>`}
+              </button>`).join("")}</div>`}
+          ${mismatch ? `
+            <div class="warnbox"><b>${pick.name}</b> targets the
+              <b>${boardById(pick.target).name}</b> — ${boardById(pick.target).wires} wires from
+              ${boardById(pick.target).pin}; this board has ${b.wires} on ${b.pin}. It may not
+              light up as wired.
+              <div class="eactions">
+                <button class="abtn warn" id="loadanyway">Load anyway</button>
+                <button class="abtn primary" id="newinstead">New for this board instead</button>
+              </div></div>` : ""}
+        </div>
+      </div>`;
+    document.getElementById("ch-new").onclick = e => {
+      if (e.target.closest(".prow,.abtn")) return;
+      wiz.content = "new"; wiz.loadPick = null; renderWizard();
+    };
+    body.querySelectorAll("[data-load]").forEach(el => el.onclick = () => {
+      wiz.content = "load"; wiz.loadPick = el.dataset.load; renderWizard();
+    });
+    if (mismatch) {
+      document.getElementById("loadanyway").onclick = advanceFromContent;
+      document.getElementById("newinstead").onclick = () => { wiz.content = "new"; wiz.loadPick = null; renderWizard(); };
+    }
+    const ready = wiz.content === "new" || (wiz.content === "load" && wiz.loadPick && !mismatch);
+    foot.innerHTML = `
+      <button class="abtn ghost" id="wback">← Board</button><span class="spacer"></span>
+      <button class="abtn primary" id="wnext" ${ready ? "" : "disabled"}>
+        ${wiz.path === "hw" ? "Flash and run →" : "Start the simulator →"}</button>`;
+    document.getElementById("wback").onclick = () => { wiz.step = "board"; renderWizard(); };
+    document.getElementById("wnext").onclick = advanceFromContent;
+  }
+
+  /* step: flash (hardware) — activity-view treatment + name-while-it-writes */
+  if (wiz.step === "flash") {
+    const b = boardById(wiz.board);
+    const failed = wiz.flashFailed;
+    const steps = [
+      ["Connect bootloader", 10], ["Erase flash", 25],
+      ["Write firmware", 90, "app image at 0x10000"], ["Verify image", 100],
+    ];
+    body.innerHTML = `
+      <div class="flashwrap">
+        <div class="flashmain">
+          <span class="flashtitle">Flashing firmware</span>
+          <span class="flashsub">Keep the device connected while Studio writes the image.</span>
+          <div class="pctrow"><span class="plabel" id="fl-label">${failed ? "Write failed" : "Writing firmware"}</span>
+            <span class="pct" id="fl-pct">${wiz.flashPct}%</span></div>
+          <div class="pbar"><div class="fill ${failed ? "err" : ""}" id="fl-fill" style="width:${wiz.flashPct}%"></div></div>
+          <div class="steplist">${steps.map(([label, at, sub]) => {
+            let cls = "", ic = "○";
+            if (failed && wiz.flashPct < at) { cls = ""; }
+            if (wiz.flashPct >= at) { cls = "done"; ic = "✓"; }
+            else if (failed && label === "Write firmware") { cls = "fail"; ic = "✗"; }
+            else if (!failed && wiz.flashPct >= (at === 10 ? 0 : steps[steps.findIndex(s => s[1] === at) - 1][1]))
+              { cls = "now"; ic = "✳"; }
+            return `<span class="fstep ${cls}"><span class="ic">${ic}</span>
+              <span>${label}${sub && cls !== "" && cls !== "done" ? `<small>${sub}</small>` : ""}</span></span>`;
+          }).join("")}</div>
+          <div class="flashlog" id="fl-log"></div>
+          ${failed ? `
+            <div class="errbox"><b>Write failed at 0x6a000</b> — the device reset mid-write. An
+              incomplete image is never kept; retry re-runs from erase.
+              <div class="eactions">
+                <button class="abtn primary" id="fl-retry">Retry flash</button>
+                <button class="abtn ghost" id="fl-abandon">Abandon</button>
+              </div>
+              ${wiz.failCount > 1 ? `<div class="ehint"><b>Still failing:</b> unplug the board,
+                plug it back in, and retry — a wedged serial state survives soft resets. If it
+                fails a third time, try another cable or port.</div>` : ""}
+            </div>` : ""}
+        </div>
+        <div class="namewhile">
+          <span class="nw">While it writes — name this board</span>
+          <span class="nd">Stamped onto the device the moment it boots; Studio remembers it by name.</span>
+          <input type="text" id="fl-name" placeholder="e.g. Porch sign" value="${wiz.name}">
+          <span style="font-size:10px; color:var(--dim)">blank = keep <span style="font-family:var(--mono)">2026-08-04 - esp32c6</span></span>
+        </div>
+      </div>`;
+    const nameEl = document.getElementById("fl-name");
+    nameEl.oninput = () => wiz.name = nameEl.value;
+    if (failed) {
+      document.getElementById("fl-retry").onclick = () => {
+        wiz.flashFailed = false; wiz.flashPct = 0;
+        if (state.inject === "flashfail" && wiz.failCount >= 2) state.inject = "none"; /* third try succeeds */
+        runFlash(); renderWizard();
+      };
+      document.getElementById("fl-abandon").onclick = () => { wiz.open = false; wiz.abandoned = true; renderWizard(); };
+    }
+    fillFlashLog();
+  }
+
+  /* step: editor handoff */
+  if (wiz.step === "editor") {
+    const b = boardById(wiz.board);
+    const adopted = wiz.content === "adopt";
+    body.innerHTML = `
+      <div class="glowrow">
+        <span style="font-size:13px; color:var(--strong); font-weight:700">
+          ${adopted ? "Adopted — it never stopped glowing." : wiz.path === "hw" ? "It's glowing." : "The simulator is running."}</span>
+        <span style="font-size:12px; color:var(--muted)">
+          ${adopted ? "Luna's porch sign · 2026-07-02-0930-porch-sign"
+            : (wiz.content === "new" ? "Your new project" : wiz.loadPick) + " is live on " +
+              (wiz.path === "hw" ? `<b>${wiz.name || "2026-08-04 - esp32c6"}</b>` : `the sim (as ${b.name})`)}
+          · output ws281x local:${b.pin}.</span>
+        <div class="glowstrip"></div>
+      </div>`;
+    foot.innerHTML = `<span class="spacer"></span>
+      <button class="abtn primary" id="wnext">Open the editor →</button>`;
+    document.getElementById("wnext").onclick = finishToEditor;
+  }
+}
+
+function advanceFromContent() {
+  if (wiz.path === "hw") { wiz.step = "flash"; wiz.flashPct = 0; wiz.flashFailed = false; runFlash(); }
+  else wiz.step = "editor";
+  renderWizard();
+}
+
+const FLASH_LOG_LINES = [
+  [5,  "[lpa-link] Connected to ESP32-C6 bootloader"],
+  [12, "[lpa-link] Erasing flash"],
+  [28, "[lpa-link] Writing app image at 0x10000"],
+  [55, "[lpa-link] Progress 55%"],
+  [92, "[lpa-link] Verifying image"],
+  [100,"[lpa-link] Verified · rebooting"],
+];
+function fillFlashLog() {
+  const log = document.getElementById("fl-log");
+  if (!log) return;
+  log.innerHTML = FLASH_LOG_LINES.filter(([at]) => at <= wiz.flashPct)
+    .map(([, l]) => `<div>${l}</div>`).join("") +
+    (wiz.flashFailed ? `<div class="err">[lpa-link] write failed at 0x6a000 — device reset</div>` : "");
+  log.scrollTop = log.scrollHeight;
+}
+function runFlash() {
+  clearInterval(wiz.flashTimer);
+  wiz.flashTimer = setInterval(() => {
+    if (wiz.step !== "flash" || wiz.flashFailed) { clearInterval(wiz.flashTimer); return; }
+    wiz.flashPct = Math.min(100, wiz.flashPct + 7);
+    if (state.inject === "flashfail" && wiz.flashPct >= 42 && !wiz.flashFailed) {
+      wiz.flashPct = 42; wiz.flashFailed = true; wiz.failCount++;
+      clearInterval(wiz.flashTimer); renderWizard(); return;
+    }
+    if (wiz.flashPct >= 100) {
+      clearInterval(wiz.flashTimer);
+      setTimeout(() => { wiz.step = "editor"; renderWizard(); }, 500);
+    }
+    const fill = document.getElementById("fl-fill"), pct = document.getElementById("fl-pct");
+    if (fill) fill.style.width = wiz.flashPct + "%";
+    if (pct) pct.textContent = wiz.flashPct + "%";
+    if (wiz.flashPct === 28 || wiz.flashPct === 56 || wiz.flashPct === 91 || wiz.flashPct >= 100) renderWizard();
+    else fillFlashLog();
+  }, 380);
+}
+
+/* close guard during flash */
+document.getElementById("wizclose").onclick = () => {
+  if (wiz.step === "flash" && !wiz.flashFailed && wiz.flashPct < 100) {
+    const w = document.getElementById("wizard");
+    const sheet = document.createElement("div");
+    sheet.className = "sheet";
+    sheet.innerHTML = `<div class="sheetpanel">
+      <h3>Flash in progress — ${wiz.flashPct}%</h3>
+      <p>Leaving now abandons the write. The board keeps its bootloader (nothing bricks), but it
+        won't run until a flash completes.</p>
+      <div class="sheetrow">
+        <button class="abtn primary" data-keep>Keep flashing</button>
+        <button class="abtn danger" data-go>Abandon</button>
+      </div></div>`;
+    sheet.querySelector("[data-keep]").onclick = () => sheet.remove();
+    sheet.querySelector("[data-go]").onclick = () => {
+      sheet.remove(); clearInterval(wiz.flashTimer);
+      wiz.open = false; wiz.abandoned = true; renderWizard();
+    };
+    w.appendChild(sheet);
+    return;
+  }
+  wiz.open = false; renderWizard();
+};
+document.getElementById("wizback2").onclick = () => document.getElementById("wizclose").click();
+
+/* landing */
+function finishToEditor() {
+  const b = boardById(wiz.board);
+  const name = wiz.content === "adopt" ? "Luna's porch sign"
+    : wiz.path === "hw" ? (wiz.name || "2026-08-04 - esp32c6") : "Simulator";
+  document.getElementById("edpanename").innerHTML =
+    `${name}<span class="tp">${wiz.path === "hw" ? "USB" : "SIM"}</span>`;
+  document.getElementById("edpane").classList.toggle("simp", wiz.path === "sim");
+  document.getElementById("toastname").textContent = name;
+  const toast = document.getElementById("edtoast");
+  toast.hidden = false; setTimeout(() => toast.hidden = true, 3000);
+  document.getElementById("edhint").hidden = state.landing !== "hint";
+  document.getElementById("s5").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+document.getElementById("hintx").onclick = () => document.getElementById("edhint").hidden = true;
+
+/* ===================== controls ===================== */
+document.querySelectorAll("[data-path]").forEach(el => el.onclick = () => {
+  state.path = el.dataset.path;
+  document.querySelectorAll("[data-path]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  resetWizard();
+});
+document.querySelectorAll("[data-inj]").forEach(el => el.onclick = () => {
+  state.inject = el.dataset.inj;
+  document.querySelectorAll("[data-inj]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  resetWizard();
+  document.getElementById("s3").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+document.querySelectorAll("[data-land]").forEach(el => el.onclick = () => {
+  state.landing = el.dataset.land;
+  document.querySelectorAll("[data-land]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  document.getElementById("edhint").hidden = state.landing !== "hint";
+});
+
+/* ===================== boot + hash capture ===================== */
+resetWizard();
+(function bootFromHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("path")) { state.path = h.get("path"); }
+  if (h.get("inj")) { state.inject = h.get("inj"); }
+  if (h.get("path") || h.get("inj")) resetWizard();
+  if (h.get("step")) {
+    wiz.step = h.get("step");
+    if (!wiz.board) wiz.board = "c6";
+    if (wiz.step === "flash") { wiz.flashPct = parseInt(h.get("pct") || "42");
+      wiz.flashFailed = h.get("inj") === "flashfail"; if (wiz.flashFailed) wiz.failCount = parseInt(h.get("fails") || "1");
+      wiz.content = "new"; }
+    if (wiz.step === "content") { wiz.content = h.get("content") || null;
+      if (h.get("load")) { wiz.content = "load"; wiz.loadPick = h.get("load"); } }
+    if (wiz.step === "editor") wiz.content = h.get("content") || "new";
+    renderWizard();
+  }
+  if (h.has("hint")) { state.landing = "hint"; document.getElementById("edhint").hidden = false; }
+  if (h.has("solo")) {
+    document.querySelectorAll("body > *").forEach(el => {
+      if (!el.matches(".wizwrap, svg[aria-hidden], #s3")) el.style.display = "none";
+    });
+    document.body.style.padding = "16px";
+  }
+  if (h.has("soloed")) {
+    document.querySelectorAll("body > *").forEach(el => {
+      if (!el.matches(".edmock, svg[aria-hidden]")) el.style.display = "none";
+    });
+    document.body.style.padding = "16px";
+    finishToEditor();
+  }
+})();
+</script>
+</body>
+</html>
