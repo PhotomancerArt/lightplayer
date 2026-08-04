@@ -2053,6 +2053,49 @@ label:has(> input:not(:disabled)) {
         rgba(8, 12, 14, 0.46);
 }
 
+/* Composite (struct) produced values: type tag + per-field rows. */
+.ux-produced-struct {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.ux-produced-struct-type {
+    color: var(--studio-color-text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.ux-produced-struct-field {
+    display: flex;
+    gap: 0.6rem;
+    align-items: baseline;
+    justify-content: space-between;
+    min-width: 0;
+}
+
+.ux-produced-struct-field-name {
+    flex: none;
+    color: var(--studio-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ux-produced-struct-field-value {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--studio-color-text-strong);
+    font-family: var(--studio-font-mono);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .ux-produced-value-reading {
     display: inline-grid;
     position: relative;
