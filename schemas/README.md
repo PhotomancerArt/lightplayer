@@ -57,9 +57,8 @@ Two more guards keep the schemas honest:
 ## Format version and the bump procedure
 
 `project.json` carries `"format": N` (`PROJECT_FORMAT_VERSION` in
-`lp-core/lpc-model/src/nodes/module/module_def.rs`); loaders reject a
-missing or mismatched version before parsing. To make a breaking format
-change:
+`lp-core/lpc-model/src/project/manifest.rs`); loaders reject a missing or
+mismatched version before parsing. To make a breaking format change:
 
 1. `just format-bump` — snapshots the *outgoing* schemas, shape dumps, and
    a few real fixture artifacts into `schemas/history/v<N>/` (the future
@@ -71,7 +70,12 @@ change:
 4. `just schema-gen`, then `just check` and `cargo test -p lp-cli`.
 5. Commit the snapshot together with the bump.
 
-`schemas/history/` does not exist yet — it appears at the first real bump.
+`schemas/history/` holds one directory per retired format (`v1/`, `v2/`, …),
+each with that format's schemas, shape dumps, and `fixtures/<project>/`
+copies of real authored artifacts. Snapshots are frozen history: never
+rewrite them when the model changes, and keep the fixture set covering both
+a single-output and a multi-output project so a future upgrader is never
+exercised against a one-shape-only corpus.
 
 ## Editor integration
 

@@ -711,6 +711,15 @@ impl StudioController {
         if let UiViewContent::ProjectEditor(editor) = &mut project_pane.body {
             self.agent
                 .decorate_editor_view(editor, self.pool.lens(), &self.agent_view_context());
+            // Output faces get the facts their node's sections cannot carry:
+            // which board the lens device is (registry truth), and the lamp
+            // extent feeding the node (the upstream card's produced control
+            // product). "No board known" is a first-class state — a device
+            // provisioned outside Studio simply has no board id.
+            crate::app::studio::output_face_decoration::decorate_output_faces(
+                editor,
+                self.lens_board_id(),
+            );
         }
         // Hoist the project's edit state to the shell: the web edge arms the
         // unload gate from here rather than walking the pane tree.
@@ -733,6 +742,33 @@ impl StudioController {
             .with_lens_card(self.lens_device_card())
             .with_settings(self.settings.ui_view())
             .with_dirty(dirty)
+    }
+
+    /// The board the LENS device is known to be — `RegisteredDevice.board_id`,
+    /// stamped at provisioning (board-selection M5) and cached with the
+    /// gallery's registry rows.
+    ///
+    /// `None` is ORDINARY, not exceptional: no lens, a sim lens (the sim is
+    /// not a device — D22), an unidentified board, or a device provisioned
+    /// outside Studio. The wire's `HardwareFacts.board_id` is not a fallback
+    /// — it is always `None` today, so the registry is the only source.
+    fn lens_board_id(&self) -> Option<&str> {
+        let session = self.pool.lens_session()?;
+        if session.is_sim() {
+            return None;
+        }
+        let uid = session.device_uid().or_else(|| {
+            session
+                .device_sync()
+                .and_then(|sync| sync.identity.as_ref())
+                .map(|identity| identity.uid.clone())
+        })?;
+        self.home_inputs
+            .as_ref()?
+            .registered
+            .iter()
+            .find(|device| device.uid == uid)
+            .and_then(|device| device.board_id.as_deref())
     }
 
     /// The settings-derived slice the agent view decoration needs:

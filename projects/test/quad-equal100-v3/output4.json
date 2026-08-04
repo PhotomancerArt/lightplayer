@@ -1,6 +1,10 @@
 {
   "kind": "Output",
-  "endpoint": "ws281x:rmt:IO2",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:IO2"
+    }
+  },
   "bindings": {
     "input": {
       "source": "bus:control.out/ch4"

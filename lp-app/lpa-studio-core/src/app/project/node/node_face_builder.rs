@@ -38,21 +38,30 @@
 //!   preview snapshot, node-select action). Deriving the face ALSO
 //!   enforces the sibling invariant: the children list keeps ONLY the
 //!   active entry's child (see [`kind_face`]).
+//! - **Output**: face = one row per authored `channels[k]` wire (endpoint,
+//!   pin label parsed out of the endpoint spec, authored count, derived
+//!   slice start) plus the slot addresses the web edits through. Everything
+//!   the builder cannot see from this node's sections — the running device's
+//!   BOARD, and the incoming lamp extent that resolves the remainder
+//!   channel — is filled afterwards by the studio controller's decoration
+//!   pass (`app::studio::output_face_decoration`), the same shape as the
+//!   shader face's agent handle.
 //! - Every other kind returns `None` — the card keeps today's generic
 //!   sections.
 
 use lpc_model::{
-    FixtureDef, LpValue, PlaylistDef, ShaderDef, ShaderValueShapeRef, shader_panel_step,
+    FixtureDef, HwEndpointSpec, LpValue, OutputDef, PlaylistDef, ShaderDef, ShaderValueShapeRef,
+    shader_panel_step,
 };
 
 use crate::app::project::format_lp_value;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
-    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue,
-    UiSlotValueKind,
+    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiOutputChannelRow, UiOutputFace,
+    UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
+    UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect, UiSlotAspectKind,
+    UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -93,6 +102,7 @@ pub(in crate::app::project) fn kind_face(
             // ACTIVE placard is the active-ness presentation.
             Some(UiNodeFace::Playlist(face))
         }
+        OutputDef::KIND => output_face(sections).map(UiNodeFace::Output),
         // Unknown kinds stay on the generic fallback permanently.
         _ => None,
     }
@@ -661,6 +671,131 @@ fn option_list_field_is_non_empty(fields: &[UiConfigSlot], name: &str) -> bool {
                 }) if !values.is_empty()
             )
     })
+}
+
+// -- output face ---------------------------------------------------------------
+
+/// The output card's face: one row per authored `channels[k]` wire, plus the
+/// slice arithmetic that can be done from the authored counts alone.
+///
+/// `None` — generic-sections fallback — only when the node carries no
+/// `channels` map row at all. An EMPTY map still derives a face: an output
+/// with no wires is exactly the state whose surface should be "add a wire",
+/// the same reasoning as the playlist's empty strip.
+///
+/// Board identity and the incoming lamp extent are deliberately absent here:
+/// neither is visible from this node's sections, and the builder never reads
+/// controller state. The studio controller's decoration pass fills them.
+fn output_face(sections: &[UiNodeSection]) -> Option<UiOutputFace> {
+    let rows = config_rows(sections);
+    let channels_row = rows.iter().find(|row| row.key == "channels")?;
+    let UiConfigSlotBody::Record(channels_map) = &channels_row.body else {
+        return None;
+    };
+    let mut channels: Vec<UiOutputChannelRow> = channels_map
+        .fields
+        .iter()
+        .filter_map(output_channel_row)
+        .collect();
+    // The slice order IS the key order (the engine's `planned_wires` walks
+    // the map ascending); the projected map is already sorted, and sorting
+    // here keeps the face's arithmetic true to the engine regardless.
+    channels.sort_by_key(|channel| channel.key);
+    resolve_authored_slices(&mut channels);
+
+    Some(UiOutputFace {
+        channels,
+        channels_address: channels_row.address.clone(),
+        input_binding: bound_endpoint_label(&rows, "input"),
+        // Filled by the decoration pass (board + upstream extent).
+        total_lamps: None,
+        span_boundaries: Vec::new(),
+        board: None,
+    })
+}
+
+/// Walk the channels in key order and hand each its slice start, mirroring
+/// the engine's `planned_wires`: a lamp count advances the cursor, and the
+/// count-less channel takes the remainder — so nothing after it has a
+/// defined start (an authoring mistake the engine refuses outright; the face
+/// leaves those starts `None` rather than inventing one).
+fn resolve_authored_slices(channels: &mut [UiOutputChannelRow]) {
+    let mut start = Some(0u32);
+    for channel in channels {
+        channel.slice_start = start;
+        match channel.count {
+            Some(count) => {
+                channel.resolved_count = Some(count);
+                start = start.map(|start| start.saturating_add(count));
+            }
+            None => start = None,
+        }
+    }
+}
+
+/// One `channels[<key>]` record row → its wire row. Rows whose key does not
+/// parse as a channel index, or which carry no `endpoint` field, are not
+/// wires and are dropped.
+fn output_channel_row(row: &UiConfigSlot) -> Option<UiOutputChannelRow> {
+    let UiConfigSlotBody::Record(record) = &row.body else {
+        return None;
+    };
+    let key: u32 = map_entry_name(row).parse().ok()?;
+    let fields = &record.fields;
+    let endpoint_row = uniform_field(fields, "endpoint")?;
+    let endpoint_display = string_field(fields, "endpoint").unwrap_or_default();
+
+    Some(UiOutputChannelRow {
+        key,
+        pin_label: endpoint_pin_label(&endpoint_display),
+        endpoint_display,
+        // Resolved by the decoration pass against the known board.
+        gpio: None,
+        count: option_u32_field(fields, "count"),
+        resolved_count: None,
+        slice_start: None,
+        endpoint_address: row_edit_address(endpoint_row),
+        // The count is an `OptionSlot`, so a PRESENT count edits its
+        // interior `some` and an ABSENT one has no value address (including
+        // it is the option-toggle gesture the generic row already owns) —
+        // exactly the rule `row_edit_address` encodes.
+        count_address: uniform_field(fields, "count").and_then(row_edit_address),
+    })
+}
+
+/// The board's own label for the wire an endpoint spec names — the spec's
+/// config segment (`ws281x:local:IO18` → `IO18`).
+///
+/// Endpoint↔pin translation lives in core, never in the web layer. An
+/// unparseable spec yields an empty label, which reads downstream as
+/// "unresolved": shown, never hidden.
+fn endpoint_pin_label(endpoint: &str) -> String {
+    HwEndpointSpec::parse(endpoint)
+        .map(|spec| spec.config().to_string())
+        .unwrap_or_default()
+}
+
+/// A present `OptionSlot<ValueSlot<u32>>` field's value.
+fn option_u32_field(fields: &[UiConfigSlot], name: &str) -> Option<u32> {
+    let field = uniform_field(fields, name)?;
+    if !field.optionality.is_some_and(|opt| opt.included) {
+        return None;
+    }
+    match &field.body {
+        UiConfigSlotBody::Value(UiSlotValue {
+            kind: UiSlotValueKind::U32(value),
+            ..
+        }) => Some(*value),
+        _ => None,
+    }
+}
+
+/// The endpoint label a top-level row is bound to, when it is bound.
+fn bound_endpoint_label(rows: &[&UiConfigSlot], key: &str) -> Option<String> {
+    match &rows.iter().find(|row| row.key == key)?.source {
+        UiSlotSourceState::Bound(endpoint) => Some(endpoint.label.clone()),
+        _ => None,
+    }
 }
 
 // -- generic panel controls --------------------------------------------------
@@ -1259,7 +1394,191 @@ mod tests {
         assert!(entry.action.is_some(), "matched via the entry_<key> rule");
     }
 
+    #[test]
+    fn output_face_projects_every_wire_with_its_slice_and_edit_addresses() {
+        let sections = output_sections(&[
+            (0, "ws281x:local:IO18", Some(100)),
+            (1, "ws281x:local:IO2", None),
+        ]);
+
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+
+        assert_eq!(face.channels.len(), 2);
+        let first = &face.channels[0];
+        assert_eq!((first.key, first.pin_label.as_str()), (0, "IO18"));
+        assert_eq!(first.endpoint_display, "ws281x:local:IO18");
+        assert_eq!((first.count, first.resolved_count), (Some(100), Some(100)));
+        assert_eq!(first.slice_start, Some(0));
+        assert_eq!(
+            slot_path(&first.endpoint_address),
+            "channels[0].endpoint",
+            "the wire is edited through the normal slot write path"
+        );
+        assert_eq!(
+            slot_path(&first.count_address),
+            "channels[0].count.some",
+            "a PRESENT count edits its interior option slot"
+        );
+
+        let second = &face.channels[1];
+        assert_eq!((second.key, second.pin_label.as_str()), (1, "IO2"));
+        assert_eq!(second.count, None, "the highest key may omit its count");
+        assert_eq!(
+            second.resolved_count, None,
+            "the remainder waits for the decoration pass to say how big it is"
+        );
+        assert_eq!(
+            second.slice_start,
+            Some(100),
+            "slices start where the previous one ended"
+        );
+        assert_eq!(
+            second.count_address, None,
+            "an ABSENT option has no value address — including it is the toggle"
+        );
+
+        assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
+        assert_eq!(slot_path(&face.channels_address), "channels");
+        // Hardware and upstream facts are the decoration pass's business.
+        assert_eq!(face.board, None);
+        assert_eq!(face.total_lamps, None);
+        assert!(face.channels.iter().all(|channel| channel.gpio.is_none()));
+        assert_eq!(face.authored_lamps(), None, "the remainder is open-ended");
+    }
+
+    #[test]
+    fn the_single_countless_channel_takes_the_whole_extent() {
+        // The shape every format-2 output migrated into: one wire, no count.
+        let sections = output_sections(&[(0, "ws281x:local:D10", None)]);
+
+        let Some(UiNodeFace::Output(mut face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+        assert_eq!(face.channels[0].slice_start, Some(0));
+        assert_eq!(face.channels[0].resolved_count, None);
+
+        // What the decoration pass then does with a 241-lamp buffer.
+        face.resolve_extent(241);
+        assert_eq!(face.total_lamps, Some(241));
+        assert_eq!(face.channels[0].resolved_count, Some(241));
+    }
+
+    #[test]
+    fn fully_counted_channels_total_without_any_runtime_help() {
+        let sections = output_sections(&[
+            (0, "ws281x:local:IO18", Some(60)),
+            (1, "ws281x:local:IO16", Some(60)),
+            (2, "ws281x:local:IO14", Some(30)),
+        ]);
+
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+        assert_eq!(
+            face.channels
+                .iter()
+                .map(|channel| channel.slice_start)
+                .collect::<Vec<_>>(),
+            [Some(0), Some(60), Some(120)]
+        );
+        assert_eq!(face.authored_lamps(), Some(150));
+    }
+
+    #[test]
+    fn an_empty_channels_map_still_derives_a_face_and_a_missing_one_does_not() {
+        // No wires yet: the face's empty state (with the map's own add
+        // affordance) is the card's surface, exactly like a new playlist.
+        let empty = output_sections(&[]);
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &empty, &mut Vec::new())
+        else {
+            panic!("expected an empty output face");
+        };
+        assert!(face.channels.is_empty());
+        assert_eq!(face.authored_lamps(), Some(0));
+
+        // No `channels` row at all is not an output card we understand.
+        let no_channels = vec![UiNodeSection::ConfigSlots(Vec::new())];
+        assert_eq!(
+            kind_face("output", &test_address(), &no_channels, &mut Vec::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unparseable_endpoint_leaves_the_pin_unresolved_but_shown() {
+        let sections = output_sections(&[(0, "nonsense", Some(4))]);
+
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+        assert_eq!(face.channels[0].endpoint_display, "nonsense");
+        assert_eq!(face.channels[0].pin_label, "");
+    }
+
     // -- fixtures ------------------------------------------------------------
+
+    fn slot_path(address: &Option<ProjectSlotAddress>) -> String {
+        address
+            .as_ref()
+            .expect("the row is addressed")
+            .path
+            .to_string()
+    }
+
+    /// Output sections as the project walk projects them: the bound `input`
+    /// product row plus the `channels` map, one record per authored wire.
+    fn output_sections(wires: &[(u32, &str, Option<u32>)]) -> Vec<UiNodeSection> {
+        let entries = wires
+            .iter()
+            .map(|(key, endpoint, count)| {
+                let prefix = format!("channels[{key}]");
+                let endpoint_key = format!("{prefix}.endpoint");
+                let count_key = format!("{prefix}.count");
+                let count_row = match count {
+                    Some(count) => {
+                        UiConfigSlot::value(&count_key, "Count", UiSlotValue::u32(*count))
+                            .with_address(address(&count_key))
+                            .with_optionality(UiSlotOptionality::included(true))
+                    }
+                    None => UiConfigSlot::empty(&count_key, "Count")
+                        .with_address(address(&count_key))
+                        .with_optionality(UiSlotOptionality::excluded(true)),
+                };
+                UiConfigSlot::record(
+                    prefix.clone(),
+                    key.to_string(),
+                    vec![
+                        UiConfigSlot::value(
+                            &endpoint_key,
+                            "Endpoint",
+                            UiSlotValue::string(*endpoint),
+                        )
+                        .with_address(address(&endpoint_key)),
+                        count_row,
+                    ],
+                )
+                .with_address(address(&prefix))
+            })
+            .collect();
+
+        vec![UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value("input", "Input", UiSlotValue::unset()).with_source(
+                UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:control.out")),
+            ),
+            UiConfigSlot::record("channels", "Channels", entries).with_address(address("channels")),
+        ])]
+    }
 
     fn address(path: &str) -> ProjectSlotAddress {
         ProjectSlotAddress::new(

@@ -518,7 +518,7 @@ fn output_node_child() -> UiNodeChild {
         UiConfigSlot::value(
             "endpoint",
             "Endpoint",
-            UiSlotValue::string("ws281x:rmt:D10"),
+            UiSlotValue::string("ws281x:local:D10"),
         ),
         UiConfigSlot::value("samples", "Samples", UiSlotValue::u32(241)),
     ])])

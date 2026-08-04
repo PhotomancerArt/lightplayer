@@ -33,7 +33,7 @@ pub async fn run_button_test(_: embassy_executor::Spawner) -> ! {
     let button_endpoint = button_driver
         .endpoints()
         .into_iter()
-        .find(|endpoint| endpoint.spec().as_str() == "button:gpio:D9")
+        .find(|endpoint| endpoint.spec().as_str() == "button:local:D9")
         .expect("D9/GPIO20 button endpoint exists");
     let mut button = button_driver
         .open(button_endpoint.id(), ButtonConfig::default())

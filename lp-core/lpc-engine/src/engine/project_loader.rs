@@ -616,7 +616,7 @@ impl ProjectLoader {
                 })?;
             runtime
                 .services_mut()
-                .register_output_sink(sink_id, &config);
+                .register_output_sink(sink_id, node.id, &config);
             runtime.add_demand_root(node.id);
         }
 
@@ -2217,7 +2217,7 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2313,9 +2313,9 @@ mod tests {
     fn a_node_whose_definition_does_not_parse_is_marked_failed() {
         let fs = char_project(&[(
             "output",
-            // Endpoint specs are `capability:driver:config`; the config part
+            // Endpoint specs are `capability:target:config`; the config part
             // is empty here, exactly as a mis-edited `outputN.json` had it.
-            r#"{ "kind": "Output", "endpoint": "ws281x:rmt:",
+            r#"{ "kind": "Output", "channels": { "0": { "endpoint": "ws281x:local:" } },
                  "bindings": { "input": { "source": "bus:control.out" } } }"#,
         )]);
 
@@ -2343,7 +2343,7 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2441,7 +2441,7 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2475,7 +2475,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {
@@ -2912,7 +2912,7 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3049,7 +3049,7 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3079,7 +3079,7 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3455,7 +3455,7 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3500,7 +3500,7 @@ mod tests {
     #[test]
     fn missing_module_json_returns_io_error() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3520,7 +3520,7 @@ mod tests {
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3691,7 +3691,7 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4263,7 +4263,7 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4284,7 +4284,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1
 }
 "#,
@@ -4334,7 +4334,7 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4358,7 +4358,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {
@@ -4374,7 +4374,7 @@ mod tests {
             br#"
 {
   "kind": "ControlRadio",
-  "endpoint": "radio:virtual:0",
+  "endpoint": "radio:local:0",
   "channel": 1,
   "repeat_count": 2,
   "bindings": {
@@ -4628,7 +4628,7 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4699,7 +4699,11 @@ mod tests {
             br#"
 {
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": {
       "source": "bus:control.out"
@@ -4823,7 +4827,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file("/module.json".as_path(), module.as_bytes())
             .expect("module.json");
@@ -5071,7 +5075,7 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5092,7 +5096,7 @@ mod tests {
             br#"
 {
   "kind": "Button",
-  "endpoint": "button:gpio:D9",
+  "endpoint": "button:local:D9",
   "stable_ms": 1,
   "bindings": {
     "down": {

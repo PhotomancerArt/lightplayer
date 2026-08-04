@@ -5,7 +5,7 @@
   "description": "Workspace identity of a project folder: format version, library uid, and display name. Not a node artifact — the root module node lives in module.json.",
   "properties": {
     "format": {
-      "const": 3,
+      "const": 4,
       "title": "Authored format version"
     },
     "name": {
