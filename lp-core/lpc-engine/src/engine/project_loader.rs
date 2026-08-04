@@ -5289,10 +5289,11 @@ mod tests {
     /// disabled; under the crate's own `default` (all eight node gates on)
     /// this cfg compiles the test out entirely, same as the disabled-path
     /// arm it exercises in `attach_projected_nodes_filtered` above. It does
-    /// **not** run under `just test` or any CI job today — nothing in this
-    /// workspace tests lpc-engine with a non-default feature set yet. It
-    /// runs when invoked directly with the gate off, mirroring the P4
-    /// compile matrix but for `test` instead of `check`:
+    /// **not** run under `just test` — nothing there tests lpc-engine with a
+    /// non-default feature set. Its home is `just check-lpc-engine-gates`
+    /// (part of `check-lint`, so CI's Lint job runs it), whose final step
+    /// invokes it with the gate off, mirroring the P4 compile matrix but for
+    /// `test` instead of `check`:
     ///
     /// ```sh
     /// cargo test -p lpc-engine --no-default-features --features \
