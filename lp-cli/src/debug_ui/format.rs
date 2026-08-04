@@ -148,6 +148,9 @@ pub(crate) fn format_product_ref(product: ProductRef) -> String {
                 extent.samples_per_row
             )
         }
+        ProductRef::Time(product) => {
+            format!("time product #{}:{}", product.node().0, product.output())
+        }
     }
 }
 

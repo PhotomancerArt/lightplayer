@@ -6,7 +6,7 @@ use lp_collection::VecMap;
 
 use crate::{
     ControlExtent, ControlProduct, LpType, LpValue, ModelEnumVariant, ModelStructMember, NodeId,
-    ProductKind, ProductRef, ResourceDomain, ResourceRef, VisualProduct,
+    ProductKind, ProductRef, ResourceDomain, ResourceRef, TimeProduct, VisualProduct,
 };
 
 use super::{
@@ -95,6 +95,9 @@ where
         (LpType::Product(ProductKind::Control), LpValue::Product(ProductRef::Control(product))) => {
             write_control_product(value, product)
         }
+        (LpType::Product(ProductKind::Time), LpValue::Product(ProductRef::Time(product))) => {
+            write_time_product(value, product)
+        }
         _ => Err(SlotWriteError::Serialize),
     }
 }
@@ -145,6 +148,7 @@ where
         LpValue::Resource(resource) => write_resource_ref(value, resource),
         LpValue::Product(ProductRef::Visual(product)) => write_visual_product(value, product),
         LpValue::Product(ProductRef::Control(product)) => write_control_product(value, product),
+        LpValue::Product(ProductRef::Time(product)) => write_time_product(value, product),
         LpValue::IVec2(_)
         | LpValue::IVec3(_)
         | LpValue::IVec4(_)
@@ -237,6 +241,7 @@ where
             output,
             preferred_extent,
         ))),
+        ProductKind::Time => Ok(ProductRef::Time(TimeProduct::new(node, output))),
     }
 }
 
@@ -248,10 +253,13 @@ where
     match text.as_str() {
         "visual" => Ok(ProductKind::Visual),
         "control" => Ok(ProductKind::Control),
+        "time" => Ok(ProductKind::Time),
         _ => Err(SyntaxError::new(
             "",
             None,
-            alloc::format!("invalid product kind {text:?}. Expected one of: visual, control."),
+            alloc::format!(
+                "invalid product kind {text:?}. Expected one of: visual, control, time."
+            ),
         )),
     }
 }
@@ -320,6 +328,20 @@ where
     object.finish()
 }
 
+fn write_time_product<W>(
+    value: SlotValueWriter<'_, W>,
+    product: &TimeProduct,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut object = value.object()?;
+    object.prop("kind")?.string("time")?;
+    object.prop("node")?.u32(product.node().as_u32())?;
+    object.prop("output")?.u32(product.output())?;
+    object.finish()
+}
+
 fn write_control_extent<W>(
     value: SlotValueWriter<'_, W>,
     extent: ControlExtent,
@@ -346,6 +368,7 @@ fn product_kind_name(kind: ProductKind) -> &'static str {
     match kind {
         ProductKind::Visual => "visual",
         ProductKind::Control => "control",
+        ProductKind::Time => "time",
     }
 }
 
@@ -690,7 +713,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        ModelEnumVariant, RuntimeBufferId, VisualProduct,
+        ModelEnumVariant, RuntimeBufferId, TimeProduct, VisualProduct,
         slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter},
     };
     use alloc::boxed::Box;
@@ -750,6 +773,21 @@ mod tests {
         assert_eq!(
             write_json_value(&ty, &value),
             r#"{"kind":"control","node":3,"output":2,"preferred_extent":{"rows":4,"samples_per_row":12}}"#
+        );
+    }
+
+    #[test]
+    fn slot_value_codec_reads_and_writes_time_products() {
+        let ty = LpType::Product(ProductKind::Time);
+        let value = read_json_value(ty.clone(), r#"{"kind":"time","node":4,"output":0}"#);
+
+        assert_eq!(
+            value,
+            LpValue::Product(ProductRef::time(TimeProduct::new(NodeId::new(4), 0)))
+        );
+        assert_eq!(
+            write_json_value(&ty, &value),
+            r#"{"kind":"time","node":4,"output":0}"#
         );
     }
 
