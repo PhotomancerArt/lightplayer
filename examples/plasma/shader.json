@@ -8,6 +8,9 @@
     },
     "scale": {
       "source": "bus:scale"
+    },
+    "phase": {
+      "source": "bus:speed"
     }
   },
   "float_mode": "fixed",
