@@ -45,6 +45,19 @@ rather than re-attaching into a loop; the ROM reset reason as the
 sub-line when it is available. Sequencing note: M5 revisits the sweep
 and is the natural home for the back-off half.
 
+**Endpoint identity is NOT stable across the loop** (found 2026-08-03
+while planning the fix). The two captured cycles ran on DIFFERENT endpoint
+ids — `browser-serial-esp32-port-1`, then `…-port-2` — for one physical
+board on one port. `create_granted_endpoint` mints its id from a monotonic
+counter and only reuses one when the JS layer reports the same `port.id`,
+which is keyed by SerialPort object identity; a USB re-enumeration
+produces a new object. So the obvious fix shape — a per-ENDPOINT sweep
+back-off — would never fire here. (Checked that this is not the retired
+L1 dedupe bug: the capture postdates that fix, and the JS session map is
+never pruned.) The same question decides whether a card-owned op flow can
+follow its board across the replug that ends a recovery write; both are
+carried in `lp2025/2026-08-03-1710-unstable-board-handling`.
+
 **Regression coverage** — `s5-foreign-firmware.failed.jsonl` is a real
 capture of the loop and can serve as the fixture; the trace replay
 harness (`lp-app/lpa-link/tests/trace_replay.rs`) already parses it.
