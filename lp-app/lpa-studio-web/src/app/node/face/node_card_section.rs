@@ -212,8 +212,18 @@ mod tests {
 
     #[test]
     fn only_non_first_sections_carry_the_divider() {
-        assert!(!section_container_class(true).contains("border-t"));
-        assert!(section_container_class(false).contains("tw:border-t tw:border-border-strong"));
+        assert!(!section_container_class(true, false).contains("border-t"));
+        assert!(
+            section_container_class(false, false).contains("tw:border-t tw:border-border-strong")
+        );
+    }
+
+    #[test]
+    fn the_panel_tint_is_opt_in() {
+        // The module PANEL's teaching wash (spike gate 2) must never leak
+        // onto ordinary sections.
+        assert!(section_container_class(false, true).contains("linear-gradient"));
+        assert!(!section_container_class(false, false).contains("linear-gradient"));
     }
 
     #[test]
