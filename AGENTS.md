@@ -512,7 +512,12 @@ churn the whole set. On drift, CI commits the refresh itself:
    summarizing the changes. Review the PNG diff in the PR's Files-changed
    view, and **`git pull` before pushing again** — the bot commit is now the
    branch head. Note the green run sits on the commit *before* the bot's
-   (GITHUB_TOKEN pushes don't trigger CI runs); that is expected.
+   (GITHUB_TOKEN pushes don't trigger CI runs); that is expected — the bot
+   commit only adds PNGs the green run itself produced, so it is known-safe
+   by construction. **Do not kick an empty commit to get a green run on the
+   head**: merging with the run one commit back is the accepted tradeoff of
+   the auto-commit design (2026-08-03), and the kick just burns a full CI
+   cycle re-proving the same tree.
 3. Fallback (fork PRs, push races, main-push drift): the job fails and
    uploads the fresh set as the `story-images-fresh` artifact. On the branch,
    run `just studio-story-pull` to stage it, review, commit, push, and
