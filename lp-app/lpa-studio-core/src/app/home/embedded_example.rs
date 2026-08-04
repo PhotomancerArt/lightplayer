@@ -92,9 +92,10 @@ pub static FYEAH_SIGN_FILES: &[ExampleFile] = &[
 ];
 
 /// `examples/plasma` — one shader, two public knobs. The smallest module
-/// whose root panel is not empty: `speed` and `scale` are bound to root
-/// scope channels, so binding-is-publicity (Q13) puts them on the module
-/// card's panel with nothing else authored.
+/// whose root panel is not empty: `scale` and the phasor slot's period
+/// (bound to the `speed` channel, which carries the whole `PhasorConfig`)
+/// are bound to root scope channels, so binding-is-publicity (Q13) puts
+/// them on the module card's panel with nothing else authored.
 pub static PLASMA_FILES: &[ExampleFile] = &[
     (
         "project.json",
