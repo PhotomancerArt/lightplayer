@@ -57,10 +57,7 @@
 // failure reaches the RTC ledger as an `Oom` record carrying free/used, rather
 // than as a generic panic with no heap numbers. Same reason fw-esp32c6 takes
 // the feature; the esp toolchain is nightly-based, so it is available here too.
-#![cfg_attr(
-    feature = "server",
-    feature(alloc_error_handler)
-)]
+#![cfg_attr(feature = "server", feature(alloc_error_handler))]
 #![allow(
     unstable_features,
     reason = "alloc_error_handler required for custom OOM handler in no_std"
@@ -373,9 +370,7 @@ static NET_STACK_RESOURCES: static_cell::StaticCell<
 /// executor for the whole image, no second runtime.
 #[cfg(all(feature = "server", feature = "net-eth"))]
 #[embassy_executor::task]
-async fn net_runner_task(
-    mut runner: embassy_net::Runner<'static, board::esp32v3::eth::EthDriver>,
-) {
+async fn net_runner_task(mut runner: embassy_net::Runner<'static, board::esp32v3::eth::EthDriver>) {
     runner.run().await
 }
 
@@ -735,7 +730,6 @@ fn main() -> ! {
         "[INIT] chip=esp32 arch=xtensa heap_free={}",
         esp_alloc::HEAP.free()
     );
-
 
     esp_println::println!("[INIT] ready");
 
