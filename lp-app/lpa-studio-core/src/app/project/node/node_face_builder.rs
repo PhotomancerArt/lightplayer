@@ -461,6 +461,14 @@ fn phasor_period_control(
         .iter()
         .find(|row| row.key == name)
         .and_then(|row| public_panel_target(row));
+    // The live reading rides the same binding-derived row (the channel's
+    // PhasorConfig reads back as its period) — without it the knob snapped
+    // back to the authored value after every gesture, because the writes it
+    // was landing had no display path (G2: "stuck at 100").
+    control.live_value = top_rows
+        .iter()
+        .find(|row| row.key == name)
+        .and_then(|row| bound_live_value(row));
     Some(control)
 }
 
