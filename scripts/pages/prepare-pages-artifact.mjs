@@ -37,7 +37,13 @@ const configs = {
     ],
     required: [
       "index.html",
-      { prefix: "assets/tailwind-", suffix: ".css" },
+      // `minBytes` is the guard against shipping the Tailwind PLACEHOLDER.
+      // `assets/tailwind.css` is gitignored and written by dx on every build;
+      // lpa-studio-web's build.rs drops a ~130-byte stub in its place so plain
+      // `cargo check` resolves `asset!()` on a fresh clone. A real bundle runs
+      // ~68 KiB, so anything under this floor means dx did not regenerate and
+      // the deploy would be unstyled.
+      { prefix: "assets/tailwind-", suffix: ".css", minBytes: 8 * 1024 },
       { prefix: "assets/lpa-studio-web-", suffix: ".js" },
       { prefix: "assets/lpa-studio-web_bg-", suffix: ".wasm" },
       "pkg/fw_browser.js",
@@ -78,6 +84,16 @@ for (const required of config.required) {
   const file = await findRequiredAsset(outDir, required);
   if (!existsSync(file)) {
     throw new Error(`missing required deploy asset: ${formatRequiredAsset(required)}`);
+  }
+  const minBytes = typeof required === "object" ? required.minBytes : undefined;
+  if (minBytes !== undefined) {
+    const { size } = await stat(file);
+    if (size < minBytes) {
+      throw new Error(
+        `required deploy asset ${formatRequiredAsset(required)} is ${size} bytes, below the ` +
+          `${minBytes}-byte floor — this is a build-time placeholder, not a real bundle`,
+      );
+    }
   }
 }
 
