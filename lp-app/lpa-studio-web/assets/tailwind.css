@@ -847,8 +847,8 @@
   .tw\:grid-cols-\[auto_minmax\(0\,1fr\)_auto\] {
     grid-template-columns: auto minmax(0,1fr) auto;
   }
-  .tw\:grid-cols-\[minmax\(0\,1fr\)_36px_minmax\(150px\,200px\)_36px_minmax\(0\,1fr\)\] {
-    grid-template-columns: minmax(0,1fr) 36px minmax(150px,200px) 36px minmax(0,1fr);
+  .tw\:grid-cols-\[minmax\(0\,1fr\)_36px_minmax\(150px\,224px\)_36px_minmax\(0\,1fr\)\] {
+    grid-template-columns: minmax(0,1fr) 36px minmax(150px,224px) 36px minmax(0,1fr);
   }
   .tw\:grid-cols-\[minmax\(0\,1fr\)_auto\] {
     grid-template-columns: minmax(0,1fr) auto;
