@@ -1,12 +1,14 @@
 //! Mapping point generation from configuration
 //!
-//! Generates LED sample points (texture-space centers + radii) from a
-//! [`MappingConfig`]. Lives in the model crate so both the engine and
+//! Generates LED sample points (texture-space centers + radii) from either
+//! fixture mapping representation — the slot-modelled [`MappingConfig`] or
+//! the document-resolved [`ResolvedMappingCompact`], both viewed through
+//! [`MappingRef`]. Lives in the model crate so both the engine and
 //! Studio-side tooling can share the generator.
 
 use alloc::vec::Vec;
 
-use crate::nodes::fixture::{MappingConfig, PathSpec};
+use crate::nodes::fixture::{MappingConfig, MappingRef, PathSpec, ResolvedMappingCompact};
 
 /// Mapping point representing a single LED sampling location
 #[derive(Debug, Clone)]
@@ -17,21 +19,22 @@ pub struct MappingPoint {
 }
 
 /// Number of mapping points [`for_each_mapping_point`] will visit for
-/// `config`, without generating any of them.
+/// `mapping`, without generating any of them.
 ///
 /// Lets consumers size their output buffers exactly — the whole point of
 /// the streaming API is that nothing on these paths grows by doubling.
-pub fn mapping_point_count(config: &MappingConfig) -> usize {
-    match config {
-        MappingConfig::Unset => 0,
-        MappingConfig::Map2d { .. } => 0,
-        MappingConfig::PathPoints { paths, .. } => paths
+pub fn mapping_point_count<'a>(mapping: impl Into<MappingRef<'a>>) -> usize {
+    match mapping.into() {
+        MappingRef::Slots(MappingConfig::Unset) => 0,
+        MappingRef::Slots(MappingConfig::Map2d { .. }) => 0,
+        MappingRef::Slots(MappingConfig::PathPoints { paths, .. }) => paths
             .entries
             .values()
             .map(|path_spec| match path_spec.value() {
                 PathSpec::PointList { points, .. } => points.entries.len(),
             })
             .sum(),
+        MappingRef::Compact(compact) => compact.lamp_count(),
     }
 }
 
@@ -46,9 +49,33 @@ pub fn mapping_point_count(config: &MappingConfig) -> usize {
 /// contract every consumer's buffer layout depends on; see
 /// `visitor_matches_generate_mapping_points_across_configs`.
 ///
-/// `Map2d` is an authored source reference: the loader resolves it into
-/// `PathPoints` before this runs, so it yields no sample points here.
-pub fn for_each_mapping_point(
+/// `Map2d` is an authored source reference: the loader resolves it into a
+/// [`MappingRef::Compact`] carrier before this runs, so it yields no sample
+/// points here.
+///
+/// The `Compact` arm walks the span-concatenated point list with a running
+/// cursor, taking each point's channel from its span's `first_channel` plus
+/// its offset within the span — the same `first_channel + offset` rule the
+/// slot arm applies to point-list entry keys, and the same visit order
+/// (spans in channel-assignment order, points in span order). Radius is
+/// computed identically from the sample diameter.
+pub fn for_each_mapping_point<'a>(
+    mapping: impl Into<MappingRef<'a>>,
+    texture_width: u32,
+    texture_height: u32,
+    f: impl FnMut(usize, MappingPoint),
+) {
+    match mapping.into() {
+        MappingRef::Slots(config) => {
+            for_each_slot_mapping_point(config, texture_width, texture_height, f)
+        }
+        MappingRef::Compact(compact) => {
+            for_each_compact_mapping_point(compact, texture_width, texture_height, f)
+        }
+    }
+}
+
+fn for_each_slot_mapping_point(
     config: &MappingConfig,
     texture_width: u32,
     texture_height: u32,
@@ -92,19 +119,54 @@ pub fn for_each_mapping_point(
     }
 }
 
-/// Generate mapping points from MappingConfig.
+fn for_each_compact_mapping_point(
+    compact: &ResolvedMappingCompact,
+    texture_width: u32,
+    texture_height: u32,
+    mut f: impl FnMut(usize, MappingPoint),
+) {
+    let normalized_radius =
+        normalized_sample_radius(compact.sample_diameter, texture_width, texture_height);
+    let mut visit_index = 0usize;
+
+    for span in &compact.spans {
+        // Clamp against the point list rather than indexing on faith: the
+        // carrier's invariant says these agree, and a carrier that broke it
+        // should truncate, not panic. `mapping_point_count` clamps the same
+        // way, so the count and the visit can never disagree.
+        let end = visit_index
+            .saturating_add(span.count as usize)
+            .min(compact.points.len());
+        for (offset, [x, y]) in compact.points[visit_index..end].iter().copied().enumerate() {
+            f(
+                visit_index + offset,
+                MappingPoint {
+                    channel: span.first_channel.saturating_add(offset as u32),
+                    // Already clamped by the document fit; clamped again so
+                    // both arms answer identically for any input.
+                    center: [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)],
+                    radius: normalized_radius,
+                },
+            );
+        }
+        visit_index = end;
+    }
+}
+
+/// Generate mapping points from either mapping representation.
 ///
 /// A thin exact-capacity wrapper over [`for_each_mapping_point`] — kept for
 /// the consumers that genuinely need random access over the whole list
 /// (the texture-area precompute and the display-layout probe). Streaming
 /// consumers should call the visitor directly.
-pub fn generate_mapping_points(
-    config: &MappingConfig,
+pub fn generate_mapping_points<'a>(
+    mapping: impl Into<MappingRef<'a>>,
     texture_width: u32,
     texture_height: u32,
 ) -> Vec<MappingPoint> {
-    let mut all_points = Vec::with_capacity(mapping_point_count(config));
-    for_each_mapping_point(config, texture_width, texture_height, |_, point| {
+    let mapping = mapping.into();
+    let mut all_points = Vec::with_capacity(mapping_point_count(mapping));
+    for_each_mapping_point(mapping, texture_width, texture_height, |_, point| {
         all_points.push(point)
     });
     all_points
@@ -121,6 +183,7 @@ mod tests {
     use alloc::vec;
     use lp_collection::VecMap;
 
+    use crate::nodes::fixture::ResolvedSpan;
     use crate::{EnumSlot, MapSlot, ValueSlot, Xy, XySlot};
 
     fn config(paths: alloc::vec::Vec<PathSpec>) -> MappingConfig {
@@ -181,16 +244,24 @@ mod tests {
     /// Paths keyed explicitly and inserted out of key order, so the test
     /// exercises `paths.entries.values()` order rather than insertion order.
     fn config_with_path_keys(paths: &[(u32, PathSpec)]) -> MappingConfig {
+        config_with_diameter(paths, 2.0)
+    }
+
+    fn config_with_diameter(paths: &[(u32, PathSpec)], sample_diameter: f32) -> MappingConfig {
         let mut entries = VecMap::new();
         for (key, spec) in paths {
             entries.insert(*key, EnumSlot::new(spec.clone()));
         }
-        MappingConfig::path_points(MapSlot::new(entries), 2.0)
+        MappingConfig::path_points(MapSlot::new(entries), sample_diameter)
     }
 
-    fn visited(config: &MappingConfig, w: u32, h: u32) -> alloc::vec::Vec<(usize, MappingPoint)> {
+    fn visited<'a>(
+        mapping: impl Into<MappingRef<'a>>,
+        w: u32,
+        h: u32,
+    ) -> alloc::vec::Vec<(usize, MappingPoint)> {
         let mut out = alloc::vec::Vec::new();
-        for_each_mapping_point(config, w, h, |index, point| out.push((index, point)));
+        for_each_mapping_point(mapping, w, h, |index, point| out.push((index, point)));
         out
     }
 
@@ -273,7 +344,11 @@ mod tests {
                 let wrapped = generate_mapping_points(&config, w, h);
                 let actual = visited(&config, w, h);
 
-                assert_eq!(actual.len(), golden.len(), "{name} @ {w}x{h}: visited count");
+                assert_eq!(
+                    actual.len(),
+                    golden.len(),
+                    "{name} @ {w}x{h}: visited count"
+                );
                 assert_eq!(
                     wrapped.len(),
                     golden.len(),
@@ -329,6 +404,164 @@ mod tests {
             .map(|(_, point)| point.channel)
             .collect();
         assert_eq!(channels, vec![100, 107, 203]);
+    }
+
+    fn compact(
+        spans: &[(u32, u32, u32)],
+        points: &[[f32; 2]],
+        sample_diameter: f32,
+    ) -> ResolvedMappingCompact {
+        ResolvedMappingCompact {
+            spans: spans
+                .iter()
+                .map(|(object, first_channel, count)| ResolvedSpan {
+                    object: *object,
+                    first_channel: *first_channel,
+                    count: *count,
+                })
+                .collect(),
+            points: points.to_vec(),
+            sample_diameter,
+        }
+    }
+
+    /// The compact arm's own ordering contract, pinned against hand-written
+    /// goldens — the same shape of pin the slot arm gets above.
+    #[test]
+    fn compact_visitor_matches_golden_sequences() {
+        let cases: alloc::vec::Vec<(&str, ResolvedMappingCompact, &[(u32, [f32; 2])])> = vec![
+            ("empty", compact(&[], &[], 2.0), &[]),
+            (
+                "single span",
+                compact(&[(0, 9, 1)], &[[0.25, 0.75]], 2.0),
+                &[(9, [0.25, 0.75])],
+            ),
+            (
+                "zero-count span between populated ones",
+                compact(
+                    &[(0, 0, 1), (1, 1, 0), (2, 1, 2)],
+                    &[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+                    2.0,
+                ),
+                &[(0, [0.1, 0.2]), (1, [0.3, 0.4]), (2, [0.5, 0.6])],
+            ),
+            (
+                "sparse spans: channel ranges with gaps between objects",
+                compact(
+                    &[(0, 100, 2), (1, 10, 3), (2, u32::MAX - 1, 1)],
+                    &[
+                        [0.1, 0.1],
+                        [0.2, 0.2],
+                        [0.3, 0.3],
+                        [0.4, 0.4],
+                        [0.5, 0.5],
+                        [-0.5, 1.5],
+                    ],
+                    2.0,
+                ),
+                &[
+                    (100, [0.1, 0.1]),
+                    (101, [0.2, 0.2]),
+                    (10, [0.3, 0.3]),
+                    (11, [0.4, 0.4]),
+                    (12, [0.5, 0.5]),
+                    // Out-of-range coordinates clamp, exactly as the slot arm.
+                    (u32::MAX - 1, [0.0, 1.0]),
+                ],
+            ),
+        ];
+
+        for (name, carrier, golden) in cases {
+            for (w, h) in [(1u32, 1u32), (100, 100), (200, 100)] {
+                let visited = visited(&carrier, w, h);
+                let wrapped = generate_mapping_points(&carrier, w, h);
+                assert_eq!(
+                    visited.len(),
+                    golden.len(),
+                    "{name} @ {w}x{h}: visited count"
+                );
+                assert_eq!(
+                    mapping_point_count(&carrier),
+                    golden.len(),
+                    "{name} @ {w}x{h}: mapping_point_count"
+                );
+                assert_eq!(
+                    wrapped.len(),
+                    golden.len(),
+                    "{name} @ {w}x{h}: wrapper count"
+                );
+                for (position, ((visit_index, got), (want_channel, want_center))) in
+                    visited.iter().zip(golden.iter()).enumerate()
+                {
+                    assert_eq!(*visit_index, position, "{name} @ {w}x{h}: visit index");
+                    assert_eq!(
+                        got.channel, *want_channel,
+                        "{name} @ {w}x{h}: channel at {position}"
+                    );
+                    assert_eq!(
+                        got.center, *want_center,
+                        "{name} @ {w}x{h}: center at {position}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A compact carrier resolves to exactly what the equivalent slot form
+    /// resolves to — same channels, centers, and radii — which is the
+    /// property the engine's document differential test rides on.
+    #[test]
+    fn compact_matches_the_equivalent_slot_form() {
+        let points = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]];
+        let carrier = compact(&[(0, 0, 3), (1, 3, 1)], &points, 3.0);
+        let slots = config_with_diameter(
+            &[
+                (
+                    0,
+                    path_with_keys(0, &[(0, points[0]), (1, points[1]), (2, points[2])]),
+                ),
+                (1, path_with_keys(3, &[(0, points[3])])),
+            ],
+            3.0,
+        );
+
+        for (w, h) in [(1u32, 1u32), (100, 100), (200, 100), (64, 128)] {
+            let from_slots = generate_mapping_points(&slots, w, h);
+            let from_compact = generate_mapping_points(&carrier, w, h);
+            assert_eq!(from_slots.len(), from_compact.len(), "count @ {w}x{h}");
+            for (index, (a, b)) in from_slots.iter().zip(from_compact.iter()).enumerate() {
+                assert_eq!(a.channel, b.channel, "channel {index} @ {w}x{h}");
+                assert_eq!(a.center, b.center, "center {index} @ {w}x{h}");
+                assert_eq!(a.radius, b.radius, "radius {index} @ {w}x{h}");
+            }
+        }
+    }
+
+    /// A carrier whose spans disagree with its point list truncates rather
+    /// than panicking — and `mapping_point_count` reports what the visitor
+    /// will actually visit, in both directions of the disagreement.
+    #[test]
+    fn broken_carrier_invariant_truncates_and_stays_countable() {
+        // Spans claim more lamps than there are points.
+        let over = compact(
+            &[(0, 0, 2), (1, 2, 5)],
+            &[[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]],
+            2.0,
+        );
+        assert_eq!(mapping_point_count(&over), 3);
+        assert_eq!(visited(&over, 10, 10).len(), 3);
+        assert_eq!(
+            visited(&over, 10, 10)
+                .into_iter()
+                .map(|(_, point)| point.channel)
+                .collect::<alloc::vec::Vec<_>>(),
+            vec![0, 1, 2]
+        );
+
+        // Spans claim fewer lamps than there are points.
+        let under = compact(&[(0, 0, 1)], &[[0.0, 0.0], [0.1, 0.1]], 2.0);
+        assert_eq!(mapping_point_count(&under), 1);
+        assert_eq!(visited(&under, 10, 10).len(), 1);
     }
 
     #[test]

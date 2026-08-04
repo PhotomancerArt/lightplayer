@@ -5,7 +5,8 @@ use alloc::format;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{
-    ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec,
+    ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, MappingRef, PathSpec,
+    ResolvedMappingCompact,
 };
 use lpc_model::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
@@ -53,10 +54,51 @@ pub struct FixtureMap2dSource {
     pub render_height: u32,
 }
 
+/// A fixture's resolved mapping, in whichever representation it was built
+/// from — the node's single source of truth for its geometry.
+///
+/// Hand-authored `PathPoints` stay `Slots`: Studio's generic slot UI edits
+/// individual lamps there, and overlay mutations address them by slot path.
+/// Document-sourced geometry (a `.map2d.json`, or a legacy SVG import
+/// through the same resolver) is `Compact`: derived data nobody addresses
+/// per-point, carried at 8 B/lamp instead of the slot form's 41 B/LED live.
+///
+/// Consumers take the borrowed [`MappingRef`] view rather than matching on
+/// this, so the two representations share one set of ordering rules.
+pub enum FixtureMapping {
+    /// Slot-modelled mapping, as authored on the fixture def.
+    Slots(MappingConfig),
+    /// Resolved document geometry. Never serialized, never slot-addressed.
+    Compact(ResolvedMappingCompact),
+}
+
+impl FixtureMapping {
+    /// Borrowed view for the mapping consumers (point visitor, path spans,
+    /// precompute, display layout).
+    pub fn as_mapping_ref(&self) -> MappingRef<'_> {
+        match self {
+            FixtureMapping::Slots(config) => MappingRef::Slots(config),
+            FixtureMapping::Compact(compact) => MappingRef::Compact(compact),
+        }
+    }
+}
+
+impl From<MappingConfig> for FixtureMapping {
+    fn from(config: MappingConfig) -> Self {
+        FixtureMapping::Slots(config)
+    }
+}
+
+impl From<ResolvedMappingCompact> for FixtureMapping {
+    fn from(compact: ResolvedMappingCompact) -> Self {
+        FixtureMapping::Compact(compact)
+    }
+}
+
 /// Fixture node: resolves a shader visual product and exposes a control product for outputs.
 pub struct FixtureNode {
     state: FixtureState,
-    mapping: MappingConfig,
+    mapping: FixtureMapping,
     sampling: FixtureSamplingConfig,
     mapping_version: Revision,
     /// Present when the mapping came from a `.map2d.json` document.
@@ -94,11 +136,12 @@ pub struct FixtureNode {
 impl FixtureNode {
     pub fn new(
         node_id: lpc_model::NodeId,
-        mapping: MappingConfig,
+        mapping: impl Into<FixtureMapping>,
         sampling: FixtureSamplingConfig,
         mapping_version: Revision,
     ) -> Self {
-        let preferred_extent = fixture_control_extent(&mapping);
+        let mapping = mapping.into();
+        let preferred_extent = fixture_control_extent(mapping.as_mapping_ref());
         Self {
             state: FixtureState::new(node_id, 0, preferred_extent),
             mapping,
@@ -179,7 +222,7 @@ impl FixtureNode {
                 height,
                 mapping_ver.as_i64()
             );
-            let m = compute_mapping(&self.mapping, width, height, mapping_ver);
+            let m = compute_mapping(self.mapping.as_mapping_ref(), width, height, mapping_ver);
             log::info!(
                 "[fixture] frame={} texture-area mapping entries={}",
                 ver.as_i64(),
@@ -201,9 +244,10 @@ impl FixtureNode {
             // to exist at all. The coordinates the sampler needs are
             // regenerated transiently in `ensure_fixture_sample_points` when
             // its buffer key changes.
+            let mapping = self.mapping.as_mapping_ref();
             let mut channels =
-                Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(&self.mapping));
-            lpc_model::nodes::fixture::for_each_mapping_point(&self.mapping, 1, 1, |_, point| {
+                Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(mapping));
+            lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
                 channels.push(point.channel)
             });
             self.direct_channels = Some((mapping_ver, channels));
@@ -223,8 +267,18 @@ impl FixtureNode {
     /// write itself on the value makes that structurally impossible now:
     /// nothing writes a slot on the no-change path, so there is nothing to
     /// compare and nothing to rebuild.
+    ///
+    /// A document-sourced mapping has no def-synced parameters at all — its
+    /// sample diameter comes from the document, and the def carries a
+    /// `Map2d` source ref with no `PathPoints` subtree to read — so the
+    /// whole walk is skipped, resolver call included. (Before the compact
+    /// carrier, the resolved-into-slots form still made that resolver call
+    /// every tick and still discarded its `None`.)
     fn sync_mapping_from_def(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        if sync_mapping_config_from_def(&mut self.mapping, ctx)? {
+        let FixtureMapping::Slots(mapping) = &mut self.mapping else {
+            return Ok(());
+        };
+        if sync_mapping_config_from_def(mapping, ctx)? {
             self.mapping_version = ctx.revision();
             self.precomputed = None;
             self.direct_channels = None;
@@ -383,7 +437,11 @@ impl NodeRuntime for FixtureNode {
         });
         self.state.output.set_with_version(
             ver,
-            ControlProduct::new(ctx.node_id(), 0, fixture_control_extent(&self.mapping)),
+            ControlProduct::new(
+                ctx.node_id(),
+                0,
+                fixture_control_extent(self.mapping.as_mapping_ref()),
+            ),
         );
         // Published from the last completed render, so these trail the frame
         // they describe by one — the same trail the scale itself carries.
@@ -463,7 +521,7 @@ impl NodeRuntime for FixtureNode {
             });
         match resolved {
             Ok(mapping) => {
-                self.mapping = mapping;
+                self.mapping = FixtureMapping::Compact(mapping);
                 self.mapping_version = ctx.revision();
                 if let Some(source) = &mut self.map2d_source {
                     source.revision = asset_revision;
@@ -628,7 +686,7 @@ impl ControlNode for FixtureNode {
                 request,
                 target,
                 settings,
-                &self.mapping,
+                self.mapping.as_mapping_ref(),
                 ctx.time_seconds(),
             );
         }
@@ -684,7 +742,7 @@ impl FixtureNode {
         let dt_ms = previous_seconds
             .map(|previous| ((now_seconds - previous).max(0.0) * 1000.0) as u32)
             .unwrap_or(0);
-        let lamp_count = fixture_lamp_channel_count(&self.mapping);
+        let lamp_count = fixture_lamp_channel_count(self.mapping.as_mapping_ref());
         let estimate = power_limit::estimate_ma(
             preset_for(power.lamp_type).model,
             lamp_count,
@@ -724,7 +782,7 @@ impl FixtureNode {
                 request,
                 target,
                 &accumulators,
-                &self.mapping,
+                self.mapping.as_mapping_ref(),
                 settings.color_order,
                 settings.brightness,
                 settings.gamma_correction,
@@ -740,7 +798,7 @@ impl FixtureNode {
             return render_direct_fixture_control(
                 &mut self.sample_points,
                 &mut self.sample_target,
-                &self.mapping,
+                self.mapping.as_mapping_ref(),
                 channels_version,
                 channels,
                 visual_product,
@@ -781,7 +839,7 @@ impl FixtureNode {
             request,
             target,
             &accumulators,
-            &self.mapping,
+            self.mapping.as_mapping_ref(),
             settings.color_order,
             settings.brightness,
             settings.gamma_correction,
@@ -797,33 +855,47 @@ impl FixtureNode {
             .last_settings
             .ok_or_else(|| NodeError::msg("fixture display layout missing cached settings"))?;
         let revision = self.control_display_layout_revision(settings, ctx);
-        let points = lpc_model::nodes::fixture::generate_mapping_points(
-            &self.mapping,
-            settings.width,
-            settings.height,
-        );
-        let lamps = points
-            .into_iter()
-            .map(|point| ControlLamp2d {
-                lamp_index: point.channel,
-                sample_start: point.channel.saturating_mul(3),
-                center: point.center,
-                radius: point.radius,
-            })
-            .collect();
-
-        let paths = fixture_path_spans(&self.mapping)
-            .into_iter()
-            .map(|span| ControlPathSpan2d {
-                first_lamp: span.first_lamp,
-                lamp_count: span.lamp_count,
-            })
-            .collect();
         Ok(Some(ControlDisplayLayout::Layout2d(
-            ControlLayout2d::new(revision, settings.width, settings.height, lamps)
-                .with_paths(paths),
+            fixture_control_layout_2d(
+                self.mapping.as_mapping_ref(),
+                revision,
+                settings.width,
+                settings.height,
+            ),
         )))
     }
+}
+
+/// The 2D display layout a fixture publishes to clients: one lamp per
+/// mapping point, plus one path span per authored/document path.
+///
+/// Split out of `control_display_layout_impl` so the mapping-representation
+/// differential test can compare the published layout directly, without an
+/// engine or a render context.
+fn fixture_control_layout_2d(
+    mapping: MappingRef<'_>,
+    revision: Revision,
+    width: u32,
+    height: u32,
+) -> ControlLayout2d {
+    let lamps = lpc_model::nodes::fixture::generate_mapping_points(mapping, width, height)
+        .into_iter()
+        .map(|point| ControlLamp2d {
+            lamp_index: point.channel,
+            sample_start: point.channel.saturating_mul(3),
+            center: point.center,
+            radius: point.radius,
+        })
+        .collect();
+
+    let paths = fixture_path_spans(mapping)
+        .into_iter()
+        .map(|span| ControlPathSpan2d {
+            first_lamp: span.first_lamp,
+            lamp_count: span.lamp_count,
+        })
+        .collect();
+    ControlLayout2d::new(revision, width, height, lamps).with_paths(paths)
 }
 
 fn ensure_fixture_render_target<'a>(
@@ -885,7 +957,7 @@ fn ensure_fixture_sample_target<'a>(
 
 fn ensure_fixture_sample_points<'a>(
     current: &'a mut Option<FixtureSamplePoints>,
-    mapping: &MappingConfig,
+    mapping: MappingRef<'_>,
     mapping_version: Revision,
     count: u32,
     output_width: u32,
@@ -924,17 +996,7 @@ fn ensure_fixture_sample_points<'a>(
             "fixture sample points out of sync with channels: mapping generated {generated_count} points for {count} channels"
         )));
     }
-    let mut coords = Vec::with_capacity(generated_count * 2);
-    lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
-        coords.push(normalized_q16_to_pixel_q16(
-            normalized_f32_to_q16(point.center[0]),
-            output_width,
-        ));
-        coords.push(normalized_q16_to_pixel_q16(
-            normalized_f32_to_q16(point.center[1]),
-            output_height,
-        ));
-    });
+    let coords = fixture_sample_point_coords(mapping, output_width, output_height);
     graphics
         .write_sample_points(&mut handle, &coords)
         .map_err(err_ctx("fixture sample point write"))?;
@@ -948,10 +1010,37 @@ fn ensure_fixture_sample_points<'a>(
     Ok(&mut current.as_mut().expect("just stored").handle)
 }
 
+/// The interleaved `[x, y]` pixel-space Q16 sample coordinates the graphics
+/// backend samples the visual at, in mapping visit order.
+///
+/// Exact-capacity and streamed: the point list is never materialized. Split
+/// out of `ensure_fixture_sample_points` so the mapping-representation
+/// differential test can compare the coordinates themselves without a
+/// graphics backend.
+fn fixture_sample_point_coords(
+    mapping: MappingRef<'_>,
+    output_width: u32,
+    output_height: u32,
+) -> Vec<i32> {
+    let mut coords =
+        Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(mapping) * 2);
+    lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
+        coords.push(normalized_q16_to_pixel_q16(
+            normalized_f32_to_q16(point.center[0]),
+            output_width,
+        ));
+        coords.push(normalized_q16_to_pixel_q16(
+            normalized_f32_to_q16(point.center[1]),
+            output_height,
+        ));
+    });
+    coords
+}
+
 fn render_direct_fixture_control(
     sample_points: &mut Option<FixtureSamplePoints>,
     sample_target: &mut Option<SampleOutHandle>,
-    mapping: &MappingConfig,
+    mapping: MappingRef<'_>,
     mapping_version: Revision,
     channels: &[u32],
     visual_product: VisualProduct,
@@ -1052,7 +1141,7 @@ fn render_fixture_diagnostic_control(
     request: &ControlRenderRequest,
     target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
-    mapping: &MappingConfig,
+    mapping: MappingRef<'_>,
     time_seconds: f32,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
@@ -1391,7 +1480,7 @@ fn render_fixture_control_target(
     request: &ControlRenderRequest,
     target: ControlRenderTarget<'_>,
     accumulators: &ChannelAccumulators,
-    mapping: &MappingConfig,
+    mapping: MappingRef<'_>,
     color_order: ColorOrder,
     brightness_u8: u8,
     gamma_correction: bool,
@@ -1488,7 +1577,7 @@ fn ordered_rgb_u16(color_order: ColorOrder, r: u16, g: u16, b: u16) -> [u16; 3] 
     }
 }
 
-fn fixture_control_extent(config: &MappingConfig) -> ControlExtent {
+fn fixture_control_extent(config: MappingRef<'_>) -> ControlExtent {
     ControlExtent::new(1, fixture_lamp_channel_count(config).saturating_mul(3))
 }
 
@@ -1509,7 +1598,7 @@ impl FixturePathSpan {
     }
 }
 
-fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
+fn fixture_lamp_channel_count(config: MappingRef<'_>) -> u32 {
     fixture_path_spans(config)
         .into_iter()
         .map(FixturePathSpan::end_lamp)
@@ -1530,7 +1619,7 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
 /// (unset, or a map2d document that has not resolved yet) keeps the single
 /// covering span, which is exactly what every fixture published before.
 fn fixture_control_spans(
-    mapping: &MappingConfig,
+    mapping: MappingRef<'_>,
     color_order: ColorOrder,
     written_samples: u32,
 ) -> Vec<ControlSpan> {
@@ -1571,11 +1660,11 @@ fn fixture_control_spans(
     spans
 }
 
-fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
+fn fixture_path_spans(config: MappingRef<'_>) -> Vec<FixturePathSpan> {
     match config {
-        MappingConfig::Unset => Vec::new(),
-        MappingConfig::Map2d { .. } => Vec::new(),
-        MappingConfig::PathPoints { paths, .. } => {
+        MappingRef::Slots(MappingConfig::Unset) => Vec::new(),
+        MappingRef::Slots(MappingConfig::Map2d { .. }) => Vec::new(),
+        MappingRef::Slots(MappingConfig::PathPoints { paths, .. }) => {
             let mut spans = Vec::new();
             for path in paths.entries.values() {
                 let PathSpec::PointList {
@@ -1590,6 +1679,24 @@ fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
                         palette_index: spans.len() as u32,
                         first_lamp,
                         lamp_count,
+                    });
+                }
+            }
+            spans
+        }
+        // One span per document object, in the same channel-assignment
+        // order the slot form's `paths.entries.values()` walk produced —
+        // empty objects skipped, so `palette_index` stays a running index
+        // over the spans that actually have lamps. Studio's wiring arrows
+        // and universe coloring read these.
+        MappingRef::Compact(compact) => {
+            let mut spans = Vec::new();
+            for span in &compact.spans {
+                if span.count > 0 {
+                    spans.push(FixturePathSpan {
+                        palette_index: spans.len() as u32,
+                        first_lamp: span.first_channel,
+                        lamp_count: span.count,
                     });
                 }
             }
@@ -1613,7 +1720,9 @@ mod tests {
     use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
-    use crate::dataflow::resolver::{Production, ProductionSource, QueryKey, ResolveError, TickResolver};
+    use crate::dataflow::resolver::{
+        Production, ProductionSource, QueryKey, ResolveError, TickResolver,
+    };
     use crate::resource::{RuntimeBuffer, RuntimeBufferId};
     // Read-probe types exercised only by
     // `fixture_project_read_control_probe_returns_native_samples_and_cached_layout`.
@@ -1909,8 +2018,16 @@ mod tests {
         let ver = Revision::new(7);
         let mut current = None;
 
-        let handle = ensure_fixture_sample_points(&mut current, &mapping, ver, 2, 4, 4, &ctx)
-            .expect("first ensure");
+        let handle = ensure_fixture_sample_points(
+            &mut current,
+            MappingRef::Slots(&mapping),
+            ver,
+            2,
+            4,
+            4,
+            &ctx,
+        )
+        .expect("first ensure");
         assert_eq!(
             graphics.read_sample_points(handle).expect("read"),
             vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
@@ -1923,8 +2040,16 @@ mod tests {
         graphics
             .write_sample_points(handle, &[111, 222, 333, 444])
             .expect("poke");
-        let handle = ensure_fixture_sample_points(&mut current, &mapping, ver, 2, 4, 4, &ctx)
-            .expect("same-key ensure");
+        let handle = ensure_fixture_sample_points(
+            &mut current,
+            MappingRef::Slots(&mapping),
+            ver,
+            2,
+            4,
+            4,
+            &ctx,
+        )
+        .expect("same-key ensure");
         assert_eq!(
             graphics.read_sample_points(handle).expect("read"),
             vec![111, 222, 333, 444],
@@ -1932,8 +2057,16 @@ mod tests {
         );
 
         // A render-size change is part of the key and must rewrite.
-        let handle = ensure_fixture_sample_points(&mut current, &mapping, ver, 2, 4, 8, &ctx)
-            .expect("resized ensure");
+        let handle = ensure_fixture_sample_points(
+            &mut current,
+            MappingRef::Slots(&mapping),
+            ver,
+            2,
+            4,
+            8,
+            &ctx,
+        )
+        .expect("resized ensure");
         assert_eq!(
             graphics.read_sample_points(handle).expect("read"),
             vec![2 * 65536, 4 * 65536, 4 * 65536, 4 * 65536],
@@ -1944,9 +2077,16 @@ mod tests {
         graphics
             .write_sample_points(handle, &[9, 9, 9, 9])
             .expect("poke");
-        let handle =
-            ensure_fixture_sample_points(&mut current, &mapping, Revision::new(8), 2, 4, 8, &ctx)
-                .expect("remapped ensure");
+        let handle = ensure_fixture_sample_points(
+            &mut current,
+            MappingRef::Slots(&mapping),
+            Revision::new(8),
+            2,
+            4,
+            8,
+            &ctx,
+        )
+        .expect("remapped ensure");
         assert_eq!(
             graphics.read_sample_points(handle).expect("read"),
             vec![2 * 65536, 4 * 65536, 4 * 65536, 4 * 65536],
@@ -2337,7 +2477,7 @@ mod tests {
             2.0,
         );
 
-        let spans = fixture_control_spans(&mapping, ColorOrder::Rgb, 27);
+        let spans = fixture_control_spans(MappingRef::Slots(&mapping), ColorOrder::Rgb, 27);
 
         assert_eq!(spans.len(), 3);
         assert!(spans.iter().all(|span| span.row == 0), "the buffer is flat");
@@ -2366,7 +2506,7 @@ mod tests {
             2.0,
         );
 
-        let spans = fixture_control_spans(&mapping, ColorOrder::Grb, 36);
+        let spans = fixture_control_spans(MappingRef::Slots(&mapping), ColorOrder::Grb, 36);
 
         assert_eq!(spans.len(), 1);
         assert_eq!((spans[0].row, spans[0].start, spans[0].len), (0, 0, 36));
@@ -2393,7 +2533,7 @@ mod tests {
             2.0,
         );
 
-        let spans = fixture_control_spans(&mapping, ColorOrder::Rgb, 9);
+        let spans = fixture_control_spans(MappingRef::Slots(&mapping), ColorOrder::Rgb, 9);
 
         assert_eq!(
             spans
@@ -2409,7 +2549,8 @@ mod tests {
     /// publishing nothing.
     #[test]
     fn a_fixture_with_no_authored_paths_keeps_the_covering_span() {
-        let spans = fixture_control_spans(&MappingConfig::Unset, ColorOrder::Rgb, 6);
+        let spans =
+            fixture_control_spans(MappingRef::Slots(&MappingConfig::Unset), ColorOrder::Rgb, 6);
 
         assert_eq!(spans.len(), 1);
         assert_eq!((spans[0].start, spans[0].len), (0, 6));
@@ -3074,7 +3215,9 @@ mod tests {
             _product: VisualProduct,
             _request: &RenderTextureRequest,
         ) -> Result<TextureRenderProduct, ResolveError> {
-            Err(ResolveError::new("FakeDefResolver: render_texture is unused"))
+            Err(ResolveError::new(
+                "FakeDefResolver: render_texture is unused",
+            ))
         }
 
         fn render_control(
@@ -3083,7 +3226,9 @@ mod tests {
             _request: &ControlRenderRequest,
             _target: ControlRenderTarget<'_>,
         ) -> Result<ControlLayout, ResolveError> {
-            Err(ResolveError::new("FakeDefResolver: render_control is unused"))
+            Err(ResolveError::new(
+                "FakeDefResolver: render_control is unused",
+            ))
         }
 
         fn runtime_buffer_mut(
@@ -3158,9 +3303,9 @@ mod tests {
 
         node.sync_mapping_from_def(&mut ctx).expect("sync");
 
-        let MappingConfig::PathPoints {
+        let FixtureMapping::Slots(MappingConfig::PathPoints {
             sample_diameter, ..
-        } = &node.mapping
+        }) = &node.mapping
         else {
             panic!("expected a PathPoints mapping");
         };
@@ -3207,9 +3352,9 @@ mod tests {
         let direct_channels_before = node.direct_channels.clone();
         let display_layout_before = node.display_layout_revision;
         let slot_revision_before = {
-            let MappingConfig::PathPoints {
+            let FixtureMapping::Slots(MappingConfig::PathPoints {
                 sample_diameter, ..
-            } = &node.mapping
+            }) = &node.mapping
             else {
                 panic!("expected a PathPoints mapping");
             };
@@ -3254,9 +3399,9 @@ mod tests {
             node.display_layout_revision, display_layout_before,
             "display_layout_revision must be untouched"
         );
-        let MappingConfig::PathPoints {
+        let FixtureMapping::Slots(MappingConfig::PathPoints {
             sample_diameter, ..
-        } = &node.mapping
+        }) = &node.mapping
         else {
             panic!("expected a PathPoints mapping");
         };
@@ -3443,7 +3588,7 @@ mod tests {
             &request,
             ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples),
             &accumulators,
-            &MappingConfig::Unset,
+            MappingRef::Slots(&MappingConfig::Unset),
             ColorOrder::Rgb,
             brightness_u8,
             gamma_correction,
@@ -3526,6 +3671,330 @@ mod tests {
         assert!(
             power.demand8() < 3 * 255,
             "full white at half brightness must not demand full duty"
+        );
+    }
+}
+
+/// The mapping-representation differential: a document-sourced fixture
+/// carried as [`FixtureMapping::Compact`] must be indistinguishable from the
+/// same document expanded into the slot form, at every seam that leaves the
+/// fixture node.
+///
+/// P3 stopped expanding resolved map2d/SVG geometry into
+/// `MappingConfig::PathPoints`. Nothing authored changed and nothing on the
+/// wire changed, so "identical" here is not a design goal to be traded off —
+/// it is the correctness condition for the whole change. The pre-P3
+/// expansion is kept below, in test code only, as the oracle.
+#[cfg(test)]
+mod mapping_representation_differential {
+    use super::*;
+
+    use alloc::vec;
+    use lp_collection::VecMap;
+    use lpc_mapping::{
+        GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape, RingDir,
+        RingOrder, RingShape, fit_points, resolve,
+    };
+    use lpc_model::{EnumSlot, MapSlot};
+
+    /// The pre-P3 `mapping_from_map2d_doc`, verbatim: resolve, aspect-fit,
+    /// then expand into one `PathSpec::PointList` slot path per document
+    /// object. This is the behaviour the compact carrier replaced; it exists
+    /// here only to be differenced against.
+    fn expand_doc_into_slots(
+        doc: &Map2dDoc,
+        texture_width: u32,
+        texture_height: u32,
+    ) -> MappingConfig {
+        let resolved = resolve(doc).expect("resolve document");
+        let mut paths = VecMap::new();
+        if !resolved.lamps.is_empty() {
+            let fitted = fit_points(
+                &resolved.positions(),
+                doc.canvas_bounds(),
+                texture_width,
+                texture_height,
+            )
+            .expect("fit points");
+            for span in &resolved.spans {
+                let start = span.start as usize;
+                let end = start + span.count as usize;
+                paths.insert(
+                    span.object,
+                    EnumSlot::new(PathSpec::point_list(
+                        span.start,
+                        fitted[start..end].to_vec(),
+                    )),
+                );
+            }
+        }
+        MappingConfig::path_points(MapSlot::new(paths), doc.sample_diameter)
+    }
+
+    fn object(shape: Map2dShape) -> Map2dObject {
+        Map2dObject {
+            name: alloc::string::String::new(),
+            shape,
+        }
+    }
+
+    fn grid(origin: [f32; 2], cols: u32, rows: u32) -> Map2dObject {
+        object(Map2dShape::Grid(GridShape {
+            origin,
+            cols,
+            rows,
+            pitch: 1.5,
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        }))
+    }
+
+    /// A multi-ring ring: its per-ring counts are circumference-derived, so
+    /// the object's span is a remainder-style total (7 + 5 + 2 = 14) rather
+    /// than a round number.
+    fn ring(center: [f32; 2], outer_count: u32, rings: u32) -> Map2dObject {
+        object(Map2dShape::Ring(RingShape {
+            center,
+            radius: 4.0,
+            outer_count,
+            rings,
+            counts: Vec::new(),
+            order: RingOrder::OuterFirst,
+            start_angle_deg: -90.0,
+            dir: RingDir::Cw,
+        }))
+    }
+
+    fn path(points: &[[f32; 2]], count: u32) -> Map2dObject {
+        object(Map2dShape::Path(PathShape {
+            points: points.to_vec(),
+            count,
+            reversed: false,
+        }))
+    }
+
+    fn doc(objects: Vec<Map2dObject>, sample_diameter: f32, canvas: Option<[f32; 4]>) -> Map2dDoc {
+        Map2dDoc {
+            format: lpc_mapping::MAP2D_FORMAT,
+            sample_diameter,
+            canvas,
+            objects,
+        }
+    }
+
+    /// Documents chosen for the shapes that make span arithmetic go wrong:
+    /// multiple objects, a ring whose concentric counts are derived (uneven
+    /// spans), a single-lamp remainder object, and both canvas-framed and
+    /// geometry-framed fits.
+    fn differential_documents() -> Vec<(&'static str, Map2dDoc)> {
+        vec![
+            ("empty document", doc(Vec::new(), 2.0, None)),
+            ("single grid", doc(vec![grid([0.0, 0.0], 4, 3)], 2.0, None)),
+            (
+                "multi-object: grid + ring + paths, uneven spans",
+                doc(
+                    vec![
+                        grid([0.0, 0.0], 5, 3),
+                        ring([10.0, 10.0], 7, 3),
+                        // A one-lamp object: the degenerate remainder span.
+                        path(&[[0.0, 20.0], [6.0, 20.0]], 1),
+                        path(&[[0.0, 24.0], [6.0, 24.0], [6.0, 30.0]], 9),
+                    ],
+                    2.0,
+                    None,
+                ),
+            ),
+            (
+                "multi-object with an authored canvas and odd diameter",
+                doc(
+                    vec![
+                        ring([5.0, 5.0], 13, 2),
+                        grid([20.0, 0.0], 3, 7),
+                        path(&[[0.0, 0.0], [30.0, 30.0]], 4),
+                    ],
+                    3.5,
+                    Some([-2.0, -2.0, 40.0, 40.0]),
+                ),
+            ),
+            (
+                "ring only, single ring",
+                doc(vec![ring([0.0, 0.0], 24, 1)], 1.0, None),
+            ),
+        ]
+    }
+
+    /// Every fixture texture extent shape: square, wide, tall, and the 1x1
+    /// the channel/coordinate seams use internally.
+    const EXTENTS: [(u32, u32); 5] = [(1, 1), (16, 16), (64, 32), (32, 64), (100, 100)];
+
+    fn direct_channels(mapping: MappingRef<'_>) -> Vec<u32> {
+        // Exactly what `ensure_direct_channels` stores.
+        let mut channels =
+            Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(mapping));
+        lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
+            channels.push(point.channel)
+        });
+        channels
+    }
+
+    fn path_spans(mapping: MappingRef<'_>) -> Vec<(u32, u32, u32)> {
+        fixture_path_spans(mapping)
+            .into_iter()
+            .map(|span| (span.palette_index, span.first_lamp, span.lamp_count))
+            .collect()
+    }
+
+    fn points(mapping: MappingRef<'_>, w: u32, h: u32) -> Vec<(u32, [f32; 2], f32)> {
+        lpc_model::nodes::fixture::generate_mapping_points(mapping, w, h)
+            .into_iter()
+            .map(|point| (point.channel, point.center, point.radius))
+            .collect()
+    }
+
+    /// Assert both representations of `doc` agree at every consumer seam.
+    /// Returns the lamp count so callers can assert the case was not vacuous.
+    fn assert_representations_agree(name: &str, doc: &Map2dDoc) -> usize {
+        let mut lamps = 0usize;
+        for (w, h) in EXTENTS {
+            let compact = mapping_from_map2d_doc(doc, w, h).expect("compact resolve");
+            let slots = expand_doc_into_slots(doc, w, h);
+            let compact = MappingRef::Compact(&compact);
+            let slots = MappingRef::Slots(&slots);
+            let at = alloc::format!("{name} @ {w}x{h}");
+
+            // The point stream itself: channels, texture-space centers, radii.
+            assert_eq!(points(slots, w, h), points(compact, w, h), "{at}: points");
+            lamps = points(compact, w, h).len();
+
+            // 1. Direct channels — the resident 4 B/lamp per-lamp state.
+            assert_eq!(
+                direct_channels(slots),
+                direct_channels(compact),
+                "{at}: direct channels"
+            );
+
+            // 2. Sample coordinates — what the graphics backend samples.
+            assert_eq!(
+                fixture_sample_point_coords(slots, w, h),
+                fixture_sample_point_coords(compact, w, h),
+                "{at}: sample coords"
+            );
+
+            // 3. Path spans — studio wiring arrows and universe coloring.
+            assert_eq!(path_spans(slots), path_spans(compact), "{at}: path spans");
+
+            // 4. The published 2D display layout.
+            let revision = Revision::new(7);
+            assert_eq!(
+                fixture_control_layout_2d(slots, revision, w, h),
+                fixture_control_layout_2d(compact, revision, w, h),
+                "{at}: control layout 2d"
+            );
+
+            // Plus the seams those feed: the published control spans, the
+            // control extent, and the texture-area precompute (a map2d
+            // fixture with `sampling: texture` is legal).
+            assert_eq!(
+                fixture_lamp_channel_count(slots),
+                fixture_lamp_channel_count(compact),
+                "{at}: lamp channel count"
+            );
+            assert_eq!(
+                fixture_control_extent(slots),
+                fixture_control_extent(compact),
+                "{at}: control extent"
+            );
+            let written = fixture_lamp_channel_count(slots) * 3;
+            for written_samples in [0, written / 2, written] {
+                assert_eq!(
+                    fixture_control_spans(slots, ColorOrder::Grb, written_samples),
+                    fixture_control_spans(compact, ColorOrder::Grb, written_samples),
+                    "{at}: control spans at {written_samples} written"
+                );
+            }
+            if w * h <= 32 * 32 {
+                let revision = Revision::new(11);
+                assert_eq!(
+                    compute_mapping(slots, w, h, revision).entries,
+                    compute_mapping(compact, w, h, revision).entries,
+                    "{at}: texture-area precompute"
+                );
+            }
+        }
+        lamps
+    }
+
+    #[test]
+    fn compact_carrier_matches_the_expanded_slot_form() {
+        for (name, doc) in differential_documents() {
+            let lamps = assert_representations_agree(name, &doc);
+            if name == "empty document" {
+                assert_eq!(lamps, 0, "{name}: expected no lamps");
+            } else {
+                assert!(lamps > 0, "{name}: differential ran on zero lamps");
+            }
+        }
+    }
+
+    /// The differential's teeth, checked in-band: perturbing one span start
+    /// by one — the exact mistake the compact arm could make when deriving
+    /// channels from `first_channel + offset` — must be caught. Without this,
+    /// a green differential proves nothing about the differential.
+    ///
+    /// (The same sabotage was applied to `mapping_from_map2d_doc` itself and
+    /// observed to fail `compact_carrier_matches_the_expanded_slot_form`
+    /// before being reverted; this test pins the detection permanently.)
+    #[test]
+    fn the_differential_catches_an_off_by_one_span_start() {
+        let (_, doc) = differential_documents()
+            .into_iter()
+            .find(|(name, _)| name.starts_with("multi-object: grid"))
+            .expect("multi-object case");
+        let (w, h) = (64u32, 32u32);
+
+        let mut sabotaged = mapping_from_map2d_doc(&doc, w, h).expect("compact resolve");
+        assert!(sabotaged.spans.len() > 1, "need a multi-span document");
+        sabotaged.spans[1].first_channel += 1;
+
+        let slots = expand_doc_into_slots(&doc, w, h);
+        let slots = MappingRef::Slots(&slots);
+        let sabotaged = MappingRef::Compact(&sabotaged);
+
+        assert_ne!(
+            direct_channels(slots),
+            direct_channels(sabotaged),
+            "an off-by-one span start left the direct channels unchanged"
+        );
+        assert_ne!(
+            path_spans(slots),
+            path_spans(sabotaged),
+            "an off-by-one span start left the path spans unchanged"
+        );
+        assert_ne!(
+            fixture_control_layout_2d(slots, Revision::new(7), w, h),
+            fixture_control_layout_2d(sabotaged, Revision::new(7), w, h),
+            "an off-by-one span start left the display layout unchanged"
+        );
+    }
+
+    /// Truncating a span must be caught too — the other half of the span
+    /// arithmetic, and the one that would silently drop lamps.
+    #[test]
+    fn the_differential_catches_a_short_span() {
+        let (_, doc) = differential_documents()
+            .into_iter()
+            .find(|(name, _)| name.starts_with("multi-object: grid"))
+            .expect("multi-object case");
+        let (w, h) = (64u32, 32u32);
+
+        let mut sabotaged = mapping_from_map2d_doc(&doc, w, h).expect("compact resolve");
+        sabotaged.spans[0].count -= 1;
+
+        let slots = expand_doc_into_slots(&doc, w, h);
+        assert_ne!(
+            direct_channels(MappingRef::Slots(&slots)),
+            direct_channels(MappingRef::Compact(&sabotaged)),
+            "a short span left the direct channels unchanged"
         );
     }
 }
