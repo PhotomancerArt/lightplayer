@@ -36,7 +36,9 @@ s3_flash_size := "8mb"
 # directory — see `build-fw-esp32v3`.
 xt_v3_target := "xtensa-esp32-none-elf"
 fw_esp32v3_dir := "lp-fw/fw-esp32v3"
-fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
+# In the crate's OWN target dir: fw-esp32v3 is a standalone workspace as of
+# the networking M2-P2 esp-hal git pin (see its Cargo.toml).
+fw_esp32v3_elf := "lp-fw/fw-esp32v3/target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 
 # This crate's 4 MB flash size (docs/adr/2026-07-29-per-chip-fw-toolchains.md,
 # Q7 in the classic-ESP32 bring-up plan: C6-shaped table, not the S3's 8 MB
@@ -691,6 +693,10 @@ clippy-fw-esp32v3:
     # `cd` for the same reason the build recipe does it: .cargo/config.toml
     # here selects the Xtensa target, and cargo reads it from the CWD upward.
     cd {{ fw_esp32v3_dir }}
+    # Formatting first: as a standalone workspace (networking M2-P2), this
+    # crate is no longer covered by the root `fmt-check` — without this line,
+    # formatting drift here would go completely ungated.
+    cargo fmt --check
     # `--profile release-esp32v3`, NOT fw-esp32s3's `--release`: esp-storage's
     # build script hard-errors on this chip at the workspace release profile's
     # `opt-level = "z"` ("Building esp-storage for ESP32 needs optimization
@@ -700,10 +706,11 @@ clippy-fw-esp32v3:
     #
     # The app path (default features = esp32 + server).
     cargo clippy --profile release-esp32v3 -- --no-deps -D warnings
-    # The two non-default entrypoints in main.rs. Neither is reachable from
-    # the default build, so linting only the defaults would leave both
-    # completely uncovered — the same way 13 fw-esp32 harnesses once rotted.
-    for feats in "esp32" "esp32,radio_ram_probe"; do
+    # The bare-hello entrypoint in main.rs (the radio probe is retired; see
+    # the crate's Cargo.toml). Not reachable from the default build, so
+    # linting only the defaults would leave it uncovered — the same way 13
+    # fw-esp32 harnesses once rotted.
+    for feats in "esp32"; do
       echo "clippy: --no-default-features --features $feats"
       cargo clippy --profile release-esp32v3 --no-default-features --features "$feats" -- --no-deps -D warnings
     done
@@ -720,6 +727,12 @@ clippy-fw-esp32v3:
     # mismatch — precisely the moment a rotted diagnostic costs the most.
     echo "clippy: --features frame-dump"
     cargo clippy --profile release-esp32v3 --features frame-dump -- --no-deps -D warnings
+    # `net-eth` is additive too (ethernet control plane, networking M2) and is
+    # what every later networking milestone builds on; it is OFF in shipped
+    # builds until M2-P5 prices it, which is exactly the condition under which
+    # an unlinted feature rots.
+    echo "clippy: --features net-eth"
+    cargo clippy --profile release-esp32v3 --features net-eth -- --no-deps -D warnings
 
 
 # `features` is a comma-separated list added to the defaults — for the app path
@@ -749,9 +762,9 @@ build-fw-esp32s3 features="":
 #
 # `features` is a comma-separated list ADDED to the defaults, same contract as
 # `build-fw-esp32s3`: today that means `frame-dump` and `ws281x_telemetry`, the
-# two additive diagnostics. The harness-style entrypoints (`radio_ram_probe`)
-# are not passed this way — they REPLACE the entrypoint and need
-# `--no-default-features`, so they have their own invocations.
+# two additive diagnostics. The bare-hello entrypoint is not passed this way —
+# it REPLACES the entrypoint and needs `--no-default-features`, so it has its
+# own invocation (see clippy-fw-esp32v3).
 build-fw-esp32v3 features="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1317,7 +1330,7 @@ fmt-check:
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:

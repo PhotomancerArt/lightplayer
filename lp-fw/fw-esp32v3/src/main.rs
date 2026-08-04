@@ -33,8 +33,17 @@
 //!
 //! Absent on purpose:
 //!
-//! - **Radio.** Linked only behind `radio_ram_probe`, which replaces the
-//!   entrypoint entirely (M2-P3's RAM ledger).
+//! - **Radio.** Retired with the standalone-workspace split (networking
+//!   M2-P2): crates.io `esp-radio` and the git-pinned `esp-hal` cohort both
+//!   claim the `xtensa-lx-rt` links slot, and on the DOM-WLE-LAN the EMAC's
+//!   APLL clock excludes the radio anyway. The M2-P3 RAM probe's numbers
+//!   live in `docs/adr/2026-08-01-esp32v3-flash-budget.md`; its code is in
+//!   git history if a wifi-capable classic board ever needs it back.
+//! - **Ethernet — unless built with `--features net-eth`** (networking
+//!   M2-P2). With the feature, the DOM-WLE-LAN's EMAC comes up alongside the
+//!   app — embassy-net + DHCP, IP logged over the serial wire — with no HTTP
+//!   or websocket yet. See the feature's comment in `Cargo.toml` and
+//!   `board::esp32v3::eth`. Off (the default), the image is unchanged.
 //!
 //! ## Panic posture
 //!
@@ -48,10 +57,7 @@
 // failure reaches the RTC ledger as an `Oom` record carrying free/used, rather
 // than as a generic panic with no heap numbers. Same reason fw-esp32c6 takes
 // the feature; the esp toolchain is nightly-based, so it is available here too.
-#![cfg_attr(
-    all(feature = "server", not(feature = "radio_ram_probe")),
-    feature(alloc_error_handler)
-)]
+#![cfg_attr(feature = "server", feature(alloc_error_handler))]
 #![allow(
     unstable_features,
     reason = "alloc_error_handler required for custom OOM handler in no_std"
@@ -60,7 +66,7 @@
 // The server path is the whole LightPlayer stack. The hello and probe
 // entrypoints install the allocator but never name `alloc` themselves, and
 // `unused_extern_crates` is deny-by-default in this workspace's lint table.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 extern crate alloc;
 
 // The build's self-description, embedded as a scannable blob (extracted by
@@ -85,21 +91,21 @@ lpc_model::lp_embed_manifest_core! {
 }
 
 // `board::esp32v3::init` is the server path's sole `esp_hal::init` call site.
-// The hello/probe entrypoint at the bottom of this file keeps its own inline
-// init on purpose: it needs the `WIFI` peripheral that `init_board` does not
-// hand back, and it is M2-P3's measured code, worth preserving byte for byte.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+// The bare hello entrypoint at the bottom of this file keeps its own inline
+// init so the minimal bring-up image stays self-contained (the radio probe
+// that once shared it is retired; see the module docs' "Radio" note).
+#[cfg(feature = "server")]
 mod board;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod flash_storage;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod output;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod recovery;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod serial;
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32v3::init::{init_board, start_runtime},
@@ -155,20 +161,25 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// competition with `.stack`; the second region costs `.stack` nothing,
 /// which is exactly why it was worth reclaiming. Total heap is
 /// `HEAP_SIZE + 65,536`.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(all(feature = "server", not(feature = "net-eth")))]
 const HEAP_SIZE: usize = 110 * 1024;
+
+/// `net-eth` builds: the EMAC DMA rings + embassy-net statics cost ~15.9 KiB
+/// of `.bss`, which `.stack` — the zero-sum residue — would otherwise absorb
+/// entirely, leaving 25,488 B. Measured on the bench (2026-08-04): that image
+/// blows the stack guard during project auto-load, inside the recursive GLSL
+/// parse — twice, then safe mode. So the network feature pays for its statics
+/// out of heap instead: 88 KiB puts `.stack` back at ≈48 KiB, the proven
+/// non-net figure. The heap it costs (22 KiB of the arena the shader compiler
+/// fights for) is the trade M2-P5 formally gates; until then this constant is
+/// the measured "boots, loads, compiles" setting, not a tuned optimum.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+const HEAP_SIZE: usize = 88 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
 /// skeleton, kept buildable as the minimal bring-up image.
-#[cfg(all(not(feature = "server"), not(feature = "radio_ram_probe")))]
+#[cfg(not(feature = "server"))]
 const HEAP_SIZE: usize = 100 * 1024;
-
-/// Probe heap: the radio stack's own DRAM statics come out of the same 192 KB
-/// `dram_seg` the arena does, so the arena must shrink for the image to link
-/// at all. 72 KB is the experiment repo's proven radio-coexistent size on this
-/// chip (led-lab-esp32 `test_stress`).
-#[cfg(feature = "radio_ram_probe")]
-const HEAP_SIZE: usize = 72 * 1024;
 
 /// Abort-tier panic handler for the **app** image: stage a breadcrumb into the
 /// RTC ledger, commit it, then print and reset.
@@ -179,7 +190,7 @@ const HEAP_SIZE: usize = 72 * 1024;
 /// handler controls, and once the record is already committed to RTC RAM,
 /// spending 40 ms per line to protect the *serial copy* of information the next
 /// boot will print anyway buys nothing.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     recovery::panic_path::stage_and_reset(info)
@@ -191,7 +202,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// then the request size is only a formatted string and the free/used numbers
 /// are gone. On a chip whose whole difficulty is a 110 KB arena, "how much was
 /// left" is the question, so it gets its own path.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[alloc_error_handler]
 fn on_alloc_error(layout: core::alloc::Layout) -> ! {
     recovery::panic_path::stage_oom_and_reset(layout)
@@ -215,7 +226,7 @@ fn on_alloc_error(layout: core::alloc::Layout) -> ! {
 /// state is exactly what may have just gone wrong. 240 MHz × ~40 ms is far
 /// more than the ~1.4 ms a full 128-byte FIFO needs at 921600 baud, and the
 /// cost is paid only on a boot that is already dead.
-#[cfg(not(all(feature = "server", not(feature = "radio_ram_probe"))))]
+#[cfg(not(feature = "server"))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     /// Give the TX FIFO time to clock out before the next print or the reset.
@@ -279,7 +290,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 ///
 /// The probe is ~17 first-fit walks, once per heartbeat (5 s) — invisible next
 /// to a frame.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
@@ -340,7 +351,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// The span is `'static` (a fixed hardware address), exclusively the
 /// allocator's (the code region is the only other claimant on SRAM1, and the
 /// const-asserts prove they abut without overlap), and non-empty.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 fn add_sram1_heap_region() -> usize {
     let (base, len) = lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
     unsafe {
@@ -353,19 +364,110 @@ fn add_sram1_heap_region() -> usize {
     len as usize
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+/// embassy-net socket + iface storage for the Ethernet control plane. A
+/// static via `StaticCell`, not heap — the network must not be a claimant on
+/// the 110 KB arena the shader compiler fights for (see [`HEAP_SIZE`]). Sized
+/// by `fw_esp32_common::net::SOCKET_COUNT` so the count and the stack-init
+/// signature cannot drift.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+static NET_STACK_RESOURCES: static_cell::StaticCell<
+    embassy_net::StackResources<{ fw_esp32_common::net::SOCKET_COUNT }>,
+> = static_cell::StaticCell::new();
+
+/// The embassy-net runner: owns the EMAC driver and pumps frames forever.
+///
+/// Declared here, not in `fw-esp32-common`: embassy tasks cannot be generic,
+/// and `Runner` carries the concrete driver type (`board::esp32v3::eth`'s
+/// alias). Spawned on the SAME esp-rtos embassy executor as `io_task` — one
+/// executor for the whole image, no second runtime.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+#[embassy_executor::task]
+async fn net_runner_task(mut runner: embassy_net::Runner<'static, board::esp32v3::eth::EthDriver>) {
+    runner.run().await
+}
+
+/// Logs the network's lifecycle over the serial wire and keeps
+/// `fw_esp32_common::net::net_status()` truthful. The chip-agnostic loop does
+/// the work; the board-specific preamble is here because "fixed-link" is a
+/// DOM-WLE-LAN fact (no SMI — see `board::esp32v3::eth::FixedLinkPhy`) that
+/// the common crate is forbidden from knowing.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+#[embassy_executor::task]
+async fn net_status_task(stack: embassy_net::Stack<'static>) {
+    log::info!("net: link assumed up (fixed-link), waiting for IPv4 config");
+    fw_esp32_common::net::dhcp_status_loop(stack).await;
+}
+
+/// Ethernet bring-up (net-eth builds): settings gate → EMAC driver →
+/// embassy-net stack → runner + status tasks. Called from [`boot_firmware`]
+/// once the logger AND the filesystem are up — `/.lp/net.json` (M2-P3) shapes
+/// the stack, so the mount order is load-bearing.
+///
+/// Failure costs the board its network, never its boot — same posture as the
+/// RMT init below: a board that renders without an IP is strictly more
+/// diagnosable than one that reset-loops.
+#[cfg(all(feature = "server", feature = "net-eth"))]
+fn start_network(
+    spawner: embassy_executor::Spawner,
+    eth_peripherals: board::esp32v3::init::EthPeripherals,
+    fs: &dyn lpfs::LpFs,
+) {
+    use lpa_server::net_settings::NetMode;
+
+    let settings = lpa_server::net_settings::read(fs);
+    // The medium gate is a board fact: this carrier's one network is the
+    // wired one, and its APLL clock-out excludes the radio besides.
+    match settings.as_ref().and_then(|settings| settings.mode) {
+        None | Some(NetMode::Ethernet) => {}
+        Some(NetMode::Off) => {
+            log::info!("net: disabled by /.lp/net.json (mode=off)");
+            return;
+        }
+        Some(NetMode::Wifi) => {
+            log::warn!(
+                "net: /.lp/net.json asks for wifi, but this board's APLL ethernet \
+clock excludes the radio; network stays off (set mode=ethernet or remove the file)"
+            );
+            return;
+        }
+    }
+    let driver = match board::esp32v3::eth::create_driver(eth_peripherals) {
+        Ok(driver) => driver,
+        Err(error) => {
+            log::error!("net: EMAC init failed ({error:?}); no network this boot");
+            return;
+        }
+    };
+    // smoltcp wants a real random seed (TCP sequence numbers, DHCP XIDs);
+    // the hardware RNG is free to read and this is its one call site.
+    let rng = esp_hal::rng::Rng::new();
+    let seed = ((rng.random() as u64) << 32) | rng.random() as u64;
+    let (stack, runner) = fw_esp32_common::net::init_stack(
+        driver,
+        NET_STACK_RESOURCES.init(embassy_net::StackResources::new()),
+        seed,
+        fw_esp32_common::net::NetOptions::from_settings(settings.as_ref()),
+    );
+    spawner.spawn(net_runner_task(runner).unwrap());
+    spawner.spawn(net_status_task(stack).unwrap());
+}
+
+#[cfg(feature = "server")]
 struct FirmwareApp {
     server: LpServer,
     transport: transport::StreamingMessageRouterTransport,
     time_provider: Esp32TimeProvider,
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[inline(never)]
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
+    #[cfg(not(feature = "net-eth"))]
     let (sw_int, timg0, uart0, flash, rmt_peripheral) = init_board();
+    #[cfg(feature = "net-eth")]
+    let (sw_int, timg0, uart0, flash, rmt_peripheral, eth_peripherals) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     let sram1_heap = add_sram1_heap_region();
@@ -406,12 +508,24 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // `esp_println!` lines above are the pre-transport ones.
     logger::init(serial::io_task::log_write_to_outgoing);
 
+    // Filesystem before network: `/.lp/net.json` (M2-P3) shapes the stack
+    // config, so the mount has to come first. The network still starts ahead
+    // of the (expensive) server build below, so the lease is negotiated
+    // concurrently with the rest of boot.
+    let base_fs = mount_filesystem(flash);
+
+    // Ethernet control plane (net-eth builds): read settings, construct the
+    // EMAC driver and spawn the embassy-net runner + status tasks NOW. Placed
+    // after `logger::init` on purpose — every `net:` line, including the
+    // fixed-link note printed from inside `Ethernet::new`, goes through the
+    // normal logger onto the serial wire.
+    #[cfg(feature = "net-eth")]
+    start_network(spawner, eth_peripherals, base_fs.as_ref());
+
     let (incoming, _) = serial::io_task::get_message_channels();
     let (write_request, write_result) = serial::io_task::get_server_write_channels();
     let transport =
         transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
-
-    let base_fs = mount_filesystem(flash);
 
     // The compiled-in fallback is the DOM-Z-102 profile — the desk board and
     // the roadmap's WLED-class exemplar. An `/hardware.json` on the device
@@ -572,7 +686,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
 /// Mount the `lpfs` partition, falling back to RAM so an unformattable or
 /// mis-flashed board still comes up reachable and can say so over the wire.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs::LpFs> {
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
@@ -598,7 +712,7 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
     }
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
     let app = boot_firmware(spawner);
@@ -626,12 +740,10 @@ async fn main(spawner: embassy_executor::Spawner) {
     .await;
 }
 
-/// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build) and the M2-P3
-/// radio RAM probe. Both replace the server app rather than extending it.
-#[cfg(any(
-    feature = "radio_ram_probe",
-    all(not(feature = "server"), not(feature = "radio_ram_probe"))
-))]
+/// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build), kept buildable
+/// as the minimal bring-up image. Replaces the server app rather than
+/// extending it.
+#[cfg(not(feature = "server"))]
 #[esp_hal::main]
 fn main() -> ! {
     // `esp_hal::init` disables the RTC super watchdog (where present), the RTC
@@ -659,49 +771,6 @@ fn main() -> ! {
         "[INIT] chip=esp32 arch=xtensa heap_free={}",
         esp_alloc::HEAP.free()
     );
-
-    // M2-P3 RAM probe: bring the radio stack all the way up to an initialised
-    // STA controller — the deployment-shaped memory layout — printing the heap
-    // ledger at each stage. `[PROBE]` lines are the phase deliverable; the
-    // stage traces make a wedged boot attributable.
-    #[cfg(feature = "radio_ram_probe")]
-    {
-        esp_println::println!(
-            "[PROBE] stage=pre_rtos heap_size={HEAP_SIZE} heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
-        let sw_int =
-            esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-        esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
-        esp_println::println!(
-            "[PROBE] stage=rtos_started heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        let (mut controller, _interfaces) =
-            esp_radio::wifi::new(peripherals.WIFI, Default::default())
-                .expect("radio probe: wifi init");
-        esp_println::println!(
-            "[PROBE] stage=wifi_new heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        let station_config = esp_radio::wifi::sta::StationConfig::default();
-        controller
-            .set_config(&esp_radio::wifi::Config::Station(station_config))
-            .expect("radio probe: sta config");
-        esp_println::println!(
-            "[PROBE] stage=sta_started heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        // Keep the controller alive so the heartbeat below reports the
-        // steady-state radio-on ledger, not a post-drop one.
-        core::mem::forget(controller);
-        esp_println::println!("[PROBE] done — heartbeat shows steady-state radio-on heap");
-    }
 
     esp_println::println!("[INIT] ready");
 

@@ -32,10 +32,6 @@ members = [
     "lp-cli",
     "lp-fw/fw-esp32c6",
     "lp-fw/fw-esp32s3",
-    # NOT in default-members (like the two above): a cross-target Xtensa crate
-    # that only `just build-fw-esp32v3` / `just clippy-fw-esp32v3` build, under
-    # its own `esp` toolchain.
-    "lp-fw/fw-esp32v3",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lpc-mapping",
@@ -93,7 +89,13 @@ members = [
 ]
 # Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
 # workspace; lp-xt-emu-guest is its out-of-tree member (see lp-xt/README.md).
-exclude = ["lp-xt/fixtures", "lp-xt/lp-xt-emu-guest"]
+# fw-esp32v3 is a STANDALONE workspace (its own Cargo.lock), not a member:
+# it pins esp-hal to a git rev for the unreleased classic-ESP32 EMAC driver
+# (networking M2-P2, Q-M2), and [patch] is workspace-global — quarantining
+# the pin means quarantining the workspace, extending the per-chip toolchain
+# quarantine (docs/adr/2026-07-29-per-chip-fw-toolchains.md). Build it via
+# `just build-fw-esp32v3`, which already cd's into the crate.
+exclude = ["lp-xt/fixtures", "lp-xt/lp-xt-emu-guest", "lp-fw/fw-esp32v3"]
 resolver = "2"
 
 # Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)

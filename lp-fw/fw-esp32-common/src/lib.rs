@@ -17,6 +17,9 @@ pub mod output;
 pub mod serial;
 pub mod time;
 
+#[cfg(feature = "net")]
+pub mod net;
+
 #[cfg(feature = "server")]
 pub mod boot;
 #[cfg(feature = "server")]
