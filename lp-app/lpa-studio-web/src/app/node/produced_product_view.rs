@@ -86,6 +86,24 @@ pub(crate) fn ProductPreview(
     #[props(default)]
     map_view: MapViewOptions,
 ) -> Element {
+    // A time product is metadata-only BY DESIGN (nothing to draw behind the
+    // handle — the phasor listing below is its real face), so it gets a
+    // compact caption band instead of the aspect-framed hero the pictorial
+    // products fill. Keeping the hero frame here rendered a full-width box
+    // of nothing (G2 gate feedback).
+    if kind == UiProductKind::Time && matches!(preview, UiProductPreview::MetadataOnly) {
+        return rsx! {
+            div { class: "ux-produced-product-metadata",
+                strong { class: "tw:text-sm tw:text-strong-foreground",
+                    {metadata_only_title(kind)}
+                }
+                span { class: "tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                    {metadata_only_detail(kind)}
+                }
+            }
+        };
+    }
+
     let frame_class = product_frame_class(kind);
     let frame_style = preview_frame_style(&preview, frame);
     let overlay = product_tracking_overlay(kind, tracking);
