@@ -24,7 +24,10 @@ use crate::app::node::slot_detail_button::{SlotDetailRow, aspect_detail_rows, bi
 use crate::app::node::slot_edit_actions::{
     slot_ensure_present_action, slot_remove_value_action, slot_set_value_action,
 };
-use crate::base::{DetailSectionTint, StudioIcon, StudioIconName, detail_popover_section_class};
+use crate::base::{
+    DetailSectionTint, InlineButton, InlineButtonTone, StudioIcon, StudioIconName,
+    detail_popover_section_class,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -105,6 +108,20 @@ pub(crate) fn BindingAuthoringSection(
         }
     };
 
+    // Authoring entry point: one verb, worded for the current wiring state.
+    let (author_label, author_text) = if bound {
+        ("Edit binding", "Edit\u{2026}")
+    } else {
+        ("Author a binding", "Bind\u{2026}")
+    };
+    let author_title = if authored.is_some() {
+        "Point this slot's authored binding at a different channel"
+    } else if bound {
+        "The slot declares this default wiring; authoring a binding overrides it"
+    } else {
+        "Author a binding from this slot to a bus channel"
+    };
+
     let free_text_value = free_text();
     let free_text_trimmed = free_text_value.trim().to_string();
     let free_text_issue = channel_name_issue(&free_text_trimmed);
@@ -141,39 +158,25 @@ pub(crate) fn BindingAuthoringSection(
             }
             if !picker_open() {
                 div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5 tw:pl-[18px] tw:pt-1",
-                    button {
-                        class: authoring_button_class(),
-                        r#type: "button",
-                        title: if authored.is_some() {
-                            "Point this slot's authored binding at a different channel"
-                        } else if bound {
-                            "The slot declares this default wiring; authoring a binding overrides it"
-                        } else {
-                            "Author a binding from this slot to a bus channel"
-                        },
-                        onclick: move |event| {
-                            event.stop_propagation();
-                            picker_open.set(true);
-                        },
-                        if bound {
-                            "Edit\u{2026}"
-                        } else {
-                            "Bind\u{2026}"
-                        }
+                    InlineButton {
+                        label: author_label.to_string(),
+                        text: author_text.to_string(),
+                        tone: InlineButtonTone::Bound,
+                        title: author_title.to_string(),
+                        on_press: move |_| picker_open.set(true),
                     }
                     if authored.is_some() {
-                        button {
-                            class: authoring_button_class(),
-                            r#type: "button",
+                        InlineButton {
+                            label: "Unbind",
+                            text: "Unbind",
+                            tone: InlineButtonTone::Bound,
                             title: "Remove the authored binding entry; a slot-declared default (if any) takes over",
-                            onclick: {
+                            on_press: {
                                 let entry_address = entry_address.clone();
-                                move |event: Event<MouseData>| {
-                                    event.stop_propagation();
+                                move |_| {
                                     on_action.call(slot_remove_value_action(entry_address.clone()));
                                 }
                             },
-                            "Unbind"
                         }
                     }
                 }
@@ -211,28 +214,22 @@ pub(crate) fn BindingAuthoringSection(
                                 }
                             },
                         }
-                        button {
-                            class: authoring_button_class(),
-                            r#type: "button",
+                        InlineButton {
+                            label: "Bind",
+                            text: "Bind",
+                            tone: InlineButtonTone::Bound,
                             disabled: !free_text_ready,
                             title: "Bind to the entered channel (created lazily by reference)",
-                            onclick: {
+                            on_press: {
                                 let mut submit_free_text = submit_free_text.clone();
-                                move |event: Event<MouseData>| {
-                                    event.stop_propagation();
-                                    submit_free_text();
-                                }
+                                move |_| submit_free_text()
                             },
-                            "Bind"
                         }
-                        button {
-                            class: authoring_button_class(),
-                            r#type: "button",
-                            onclick: move |event| {
-                                event.stop_propagation();
-                                picker_open.set(false);
-                            },
-                            "Cancel"
+                        InlineButton {
+                            label: "Cancel",
+                            text: "Cancel",
+                            tone: InlineButtonTone::Neutral,
+                            on_press: move |_| picker_open.set(false),
                         }
                     }
                     if let Some(issue) = free_text_issue {
@@ -314,8 +311,4 @@ fn channel_name_issue(name: &str) -> Option<&'static str> {
         return Some("Channel names cannot contain `:` or whitespace.");
     }
     None
-}
-
-fn authoring_button_class() -> &'static str {
-    "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-[0.68rem] tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:opacity-50"
 }
