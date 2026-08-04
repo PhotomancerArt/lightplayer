@@ -243,7 +243,7 @@ deliberate choice (shaping is per-consumer) — v2 reverses it by making the car
   </div>
 </div>
 
-<h2>2 · Trace cards <small>— one card per downstream reading (the thesis)</small></h2>
+<h2>2 · Trace cards <small>— ★ CHOSEN at the gate (scrolling history confirmed; rate labels now auto-denominated)</small></h2>
 <p class="note">B/W scrolling traces of the <em>shaped</em> value each consumer actually reads.
 Violet border/label = a shared integrator (config channel). The header carries the whole
 seconds story now. Click nothing — this surface stays read-only; a later detail view answers
@@ -262,10 +262,9 @@ seconds story now. Click nothing — this surface stays read-only; a later detai
   </div>
 </div>
 
-<h2>3 · Integrator cards, readings overlaid <small>— one card per integrator</small></h2>
-<p class="note">The engine's truth: a shared channel is ONE integrator with N shaped readings.
-Each card is an integrator; its readers overlay as separate traces (line styles), named in
-chips below. Honest about sharing, heavier to scan.</p>
+<h2>3 · Integrator cards, readings overlaid <small>— REJECTED at the gate: "keep it really simple, overlapping graphs bad"</small></h2>
+<p class="note">Kept for contrast only. The shared story lives in concept 2's violet border +
+a future per-card detail view instead.</p>
 <div class="row">
   <div class="card" id="c-card">
     <header>Clock <span class="kind">clock</span></header>
@@ -280,10 +279,8 @@ chips below. Honest about sharing, heavier to scan.</p>
   </div>
 </div>
 
-<h2>4 · Scope strip <small>— everything on one oscilloscope</small></h2>
-<p class="note">Densest option: all readings overlaid on one scope, legend chips toggle
-emphasis. Reads beautifully with 2–3 phasors, becomes spaghetti in the crowd set — flip the
-data control and judge.</p>
+<h2>4 · Scope strip <small>— REJECTED at the gate: overlapping graphs, spaghettis under load</small></h2>
+<p class="note">Kept for contrast only.</p>
 <div class="row">
   <div class="card wide" id="d-card">
     <header>Clock <span class="kind">clock</span></header>
@@ -304,11 +301,10 @@ data control and judge.</p>
   </div>
 </div>
 
-<h2>5 · Speed-knob display language <small>— what does the number say?</small></h2>
-<p class="note">The knob edits <code style="font-family:var(--mono)">period_seconds</code> either
-way. Drag the shared slider — each card presents the same underlying value in a different
-language. The curve buttons change how drag distance maps to period (the "think more about
-this" from the gate).</p>
+<h2>5 · Speed-knob display language <small>— ★ CONVERGED: auto-denominated rate (2/s → 3/min → 15/hr), unit-aware by principle</small></h2>
+<p class="note">The knob still edits <code style="font-family:var(--mono)">period_seconds</code>.
+The readout picks the smallest time unit that keeps the count ≥ 1 — watch the unit flip as you
+drag. Curve buttons still compare drag mappings (open: my lean is log-period).</p>
 <div class="dragsim">
   <span>drag</span>
   <input type="range" id="lang-drag" min="0" max="1000" value="500">
@@ -368,7 +364,19 @@ function phaseOf(p, t) {
 }
 function valueOf(p, t) { return WF[p.wf](phaseOf(p, t)); }
 function cyclesOf(p, t) { return p.T > 0 ? Math.floor(t / p.T) : 0; }
-function rateLabel(p) { return p.T > 0 ? "1/" + trim(p.T) : "1/∞"; }
+// Auto-denominated rate (CONVERGED): smallest time unit keeping the count
+// >= 1 — 2/s, 3/min, 15/hr. Frozen never cycles: 0/s.
+function rateLabel(p) { return autoRate(p.T); }
+function autoRate(T) {
+  if (T <= 0) return "0/s";
+  const ladder = [[1, "s"], [60, "min"], [3600, "hr"]];
+  for (const [secs, unit] of ladder) {
+    const count = secs / T;
+    if (count >= 1 || unit === "hr")
+      return (count >= 9.95 ? Math.round(count)
+              : (Math.round(count * 10) / 10).toString().replace(/\.0$/, "")) + "/" + unit;
+  }
+}
 function trim(n) {
   const s = n < 10 ? n.toFixed(1) : Math.round(n).toString();
   return s.endsWith(".0") ? s.slice(0, -2) : s;
@@ -463,7 +471,7 @@ function renderB() {
     clearScope(ctx, w, h);
     drawTrace(ctx, w, h, p, tEff, windowFor(p),
       { color: p.shared ? "#c9b1f5" : "#e6e4de", width: Math.max(1.25, w / 200) });
-    rate.textContent = rateLabel(p) + " s";
+    rate.textContent = rateLabel(p);
     cyc.textContent = "×" + cyclesOf(p, tEff);
   }
 }
@@ -493,7 +501,7 @@ function buildC(set) {
     el.innerHTML = `<div class="head">
         <span class="key">${shared ? "bus:" + key : readers[0].id}</span>
         ${shared ? '<span class="stag" style="font:700 9px var(--mono);color:var(--bound-text);text-transform:uppercase">shared</span>' : ""}
-        <span class="rate">${rateLabel(readers[0])} s</span>
+        <span class="rate">${rateLabel(readers[0])}</span>
       </div><canvas></canvas><div class="readers"></div>`;
     const chips = el.querySelector(".readers");
     readers.forEach((p, i) => {
@@ -564,14 +572,15 @@ function renderD() {
 /* ================= section 5: language cards ================= */
 const AUTH_T = 100;               // plasma's authored period
 const LANGS = [
-  { name: "Speed — reciprocal", read: T => T > 0 ? `1/${trim(T)} <b>s</b>` : "1/∞ <b>s</b>",
-    verdict: "the gate's provisional. Honest about seconds; the '1/' asks a little math." },
-  { name: "Speed — multiplier", read: T => T > 0 ? `×${(AUTH_T / T).toFixed(2).replace(/\.?0+$/, "")}` : "×0",
-    verdict: "×1 = authored feel. Relative — needs a stable reference, breaks on card-local edits." },
-  { name: "Cycles per minute", read: T => T > 0 ? `${trim(60 / T)} <b>/min</b>` : "0 <b>/min</b>",
-    verdict: "absolute physical rate; awkward decimals for slow phasors (0.6/min)." },
-  { name: "Cycle time", read: T => T > 0 ? `${trim(T)} <b>s</b>` : "frozen",
-    verdict: "plainest words for the stored thing; direction stays inverted (bigger = slower)." },
+  { name: "Auto-denominated rate", read: T => { const r = autoRate(T); const i = r.indexOf("/");
+      return `${r.slice(0, i)} <b>${r.slice(i)}</b>`; },
+    verdict: "★ CHOSEN. Unit-aware: the denominator picks itself so the count is always natural. LightPlayer-wide principle." },
+  { name: "reciprocal (rejected)", read: T => T > 0 ? `1/${trim(T)} <b>s</b>` : "1/∞ <b>s</b>",
+    verdict: "the earlier provisional — asks the reader to do division." },
+  { name: "fixed /min (rejected)", read: T => T > 0 ? `${trim(60 / T)} <b>/min</b>` : "0 <b>/min</b>",
+    verdict: "right idea, wrong rigidity: 0.6/min for plasma. Auto-denomination fixes exactly this." },
+  { name: "cycle time (rejected)", read: T => T > 0 ? `${trim(T)} <b>s</b>` : "frozen",
+    verdict: "plain but direction-inverted vs the felt quantity." },
 ];
 const CURVES = {
   linP: u => 120 * (1 - u),                       // period linear, right = faster

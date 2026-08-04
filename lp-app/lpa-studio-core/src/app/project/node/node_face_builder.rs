@@ -440,7 +440,9 @@ fn phasor_period_control(
             step: None,
         },
         // The knob turns the PERIOD, so its value is that one number even
-        // though the slot it writes is the whole record.
+        // though the slot it writes is the whole record. The FACE readout
+        // presents it as an auto-denominated rate ("3/min") whose unit is
+        // part of the string, so the control carries no unit suffix.
         value: UiSlotValue::f32(period).with_unit(crate::UiSlotUnit::seconds()),
         emit: crate::UiPanelEmit::PhasorPeriod {
             waveform: struct_waveform(config),
@@ -448,7 +450,7 @@ fn phasor_period_control(
         },
         live_value: None,
         panel_target: None,
-        unit: Some(crate::UiSlotUnit::seconds()),
+        unit: None,
         state: config_row.state.clone(),
         aspects: config_row.visible_aspects(),
     };
@@ -1905,9 +1907,8 @@ mod tests {
         );
         assert_eq!(control.value.kind, UiSlotValueKind::F32(20.0));
         assert_eq!(
-            control.unit.as_ref().map(|unit| unit.short.as_str()),
-            Some("s"),
-            "a period reads in seconds"
+            control.unit, None,
+            "the auto-denominated rate readout carries its unit in the string"
         );
         assert_eq!(
             control.widget,

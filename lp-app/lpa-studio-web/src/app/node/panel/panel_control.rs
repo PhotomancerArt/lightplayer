@@ -271,19 +271,36 @@ fn PanelControlBody(
     }
 }
 
-/// A period reading presented as speed: `"100"` → `"1/100"` (one cycle per
-/// 100 seconds — the unit suffix supplies the "s"). A frozen phasor
-/// (period 0) never cycles, which is a period of ∞. A reading that does not
-/// parse passes through untouched.
+/// A period reading presented as an auto-denominated rate: `"0.5"` → `2/s`,
+/// `"20"` → `3/min`, `"240"` → `15/hr` (G2 convergence — pick the smallest
+/// time unit that keeps the number ≥ 1, so the reading is always a natural
+/// count; the unit is part of the string, so these controls carry no
+/// separate unit suffix). A frozen phasor (period 0) never cycles: `0/s`.
+/// A reading that does not parse passes through untouched.
 pub(crate) fn phasor_speed_display(shown: &str) -> String {
     let Ok(period) = shown.trim().parse::<f32>() else {
         return shown.to_string();
     };
     if period <= 0.0 {
-        return "1/∞".to_string();
+        return "0/s".to_string();
     }
-    let trimmed = shown.trim().trim_end_matches(".0");
-    format!("1/{trimmed}")
+    // Smallest unit whose count reaches 1; /hr is the floor either way.
+    let (count, unit) = [(1.0, "s"), (60.0, "min"), (3600.0, "hr")]
+        .into_iter()
+        .map(|(seconds, unit)| (seconds / period, unit))
+        .find(|(count, unit)| *count >= 1.0 || *unit == "hr")
+        .expect("the ladder always yields");
+    let number = if count >= 9.95 {
+        format!("{}", count.round() as i64)
+    } else {
+        let rounded = (count * 10.0).round() / 10.0;
+        if rounded.fract() == 0.0 {
+            format!("{}", rounded as i64)
+        } else {
+            format!("{rounded:.1}")
+        }
+    };
+    format!("{number}/{unit}")
 }
 
 /// The label visual shared by the trigger button and its top-layer copy:
@@ -515,14 +532,17 @@ mod tests {
     }
 
     #[test]
-    fn phasor_readouts_present_the_period_as_a_reciprocal() {
+    fn phasor_readouts_auto_denominate_the_rate() {
         use super::phasor_speed_display;
-        // "one cycle per N seconds" — the unit suffix supplies the "s".
-        assert_eq!(phasor_speed_display("100"), "1/100");
-        assert_eq!(phasor_speed_display("100.0"), "1/100");
-        assert_eq!(phasor_speed_display("2.5"), "1/2.5");
+        // The G2 examples verbatim: 2/s → 3/min → 15/hr.
+        assert_eq!(phasor_speed_display("0.5"), "2/s");
+        assert_eq!(phasor_speed_display("20"), "3/min");
+        assert_eq!(phasor_speed_display("240"), "15/hr");
+        // Plasma's 100 s: under one per minute, so it reads per hour.
+        assert_eq!(phasor_speed_display("100"), "36/hr");
+        assert_eq!(phasor_speed_display("45"), "1.3/min");
         // Period 0 is the frozen sentinel: it never cycles.
-        assert_eq!(phasor_speed_display("0.0"), "1/∞");
+        assert_eq!(phasor_speed_display("0.0"), "0/s");
         // A non-numeric reading (product chip label, etc.) passes through.
         assert_eq!(phasor_speed_display("Time product"), "Time product");
     }
