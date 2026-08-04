@@ -362,5 +362,6 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         });
 }

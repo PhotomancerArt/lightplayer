@@ -747,6 +747,7 @@ pub fn ready_state_for_test() -> DeviceState {
                 radio: true,
                 button: true,
                 board_id: None,
+                ..Default::default()
             },
             device_uid: None,
         },

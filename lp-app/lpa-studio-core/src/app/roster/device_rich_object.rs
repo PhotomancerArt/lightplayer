@@ -233,7 +233,16 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
     // strings, so chip (boot banner / probe) + endpoint label (VID:PID +
     // grant id) is the complete honest set.
     if let Some(chip) = input.detected_chip {
-        lines.push(RichLine::new("chip", chip));
+        // The silicon revision comes from the device's own efuse and only
+        // exists after a hello; `detected_chip` is the boot banner, which
+        // is all an unflashed board can offer. Combine them when both are
+        // known rather than spending two lines on one fact.
+        match input.hardware.and_then(|hw| hw.chip_revision.as_deref()) {
+            Some(revision) => {
+                lines.push(RichLine::new("chip", format!("{chip} · rev {revision}")));
+            }
+            None => lines.push(RichLine::new("chip", chip)),
+        }
     }
     if let Some(port) = input.port_label {
         lines.push(RichLine::new("port", port));
@@ -247,6 +256,20 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
             "firmware",
             format!("{} @ {}{dirty} · {}", fw.package, fw.commit, fw.profile),
         ));
+    }
+    // The chip's OWN identity, from efuse. Worth its own line above the
+    // capability gaps: unlike everything else here it is permanent — it
+    // survives an erase, which the `dev_…` uid does not, because that one
+    // lives in the device's filesystem.
+    if let Some(hardware) = input.hardware {
+        if let Some(mac) = hardware.base_mac.as_deref() {
+            lines.push(RichLine::new("mac", mac));
+        }
+        // 802.15.4 (Zigbee/Thread) — 64 bits, and only on parts that have
+        // that radio, so its absence is not a gap worth reporting.
+        if let Some(eui64) = hardware.eui64.as_deref() {
+            lines.push(RichLine::new("eui-64", eui64));
+        }
     }
     lines.extend(capability_lines(input.fw, input.hardware));
     if lines.is_empty() {
@@ -448,6 +471,82 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The chip's own efuse identity reaches the Technical tab (2026-08-03).
+    ///
+    /// The MAC matters beyond display: it is the only identity of a board
+    /// that SURVIVES AN ERASE. The `dev_…` uid lives in the device
+    /// filesystem and dies with it, so before this the card had no
+    /// permanent way to say which physical board it was.
+    #[test]
+    fn the_technical_tab_reports_the_chips_own_identity() {
+        let hardware = HardwareFacts {
+            radio: true,
+            button: true,
+            base_mac: Some("60:55:f9:01:02:03".to_string()),
+            chip_revision: Some("0.2".to_string()),
+            eui64: Some("60:55:f9:ff:fe:01:02:03".to_string()),
+            ..Default::default()
+        };
+        let state = RosterCardState::RunningUpToDate;
+        let mut input = input(&state);
+        input.fw = Some(&DEVICE_FW);
+        input.hardware = Some(&hardware);
+        input.detected_chip = Some("esp32c6");
+
+        let view = device_rich_object(&input);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .expect("a Technical section");
+        let lines: Vec<(&str, &str)> = technical
+            .lines
+            .iter()
+            .map(|line| (line.label.as_str(), line.value.as_str()))
+            .collect();
+
+        assert!(lines.contains(&("mac", "60:55:f9:01:02:03")), "{lines:?}");
+        assert!(
+            lines.contains(&("eui-64", "60:55:f9:ff:fe:01:02:03")),
+            "the 802.15.4 address is 64 bits and gets its own line: {lines:?}"
+        );
+        // The revision JOINS the chip line rather than taking its own —
+        // one fact, one row.
+        assert!(lines.contains(&("chip", "esp32c6 · rev 0.2")), "{lines:?}");
+    }
+
+    /// A board that has said nothing about itself yet (no hello, so no
+    /// efuse read) reports no identity lines rather than empty ones.
+    #[test]
+    fn an_unflashed_board_reports_no_chip_identity_lines() {
+        let state = RosterCardState::ConnectedEmpty;
+        let mut input = input(&state);
+        input.hardware = None;
+        input.detected_chip = Some("esp32c6");
+
+        let view = device_rich_object(&input);
+        let technical = view
+            .sections
+            .iter()
+            .find(|section| section.title == "Technical")
+            .expect("a Technical section");
+        let labels: Vec<&str> = technical
+            .lines
+            .iter()
+            .map(|line| line.label.as_str())
+            .collect();
+
+        assert!(!labels.contains(&"mac"), "{labels:?}");
+        assert!(!labels.contains(&"eui-64"), "{labels:?}");
+        // …and the chip line stays bare, with no dangling revision.
+        let chip = technical
+            .lines
+            .iter()
+            .find(|line| line.label == "chip")
+            .expect("the boot banner still identifies the chip");
+        assert_eq!(chip.value, "esp32c6");
+    }
 
     /// An UNFLASHED board's Technical tab identifies the device with
     /// everything Web Serial can honestly say — chip + port label — not
@@ -685,6 +784,7 @@ mod tests {
             radio: false,
             button: true,
             board_id: None,
+            ..Default::default()
         };
         let state = RosterCardState::RunningUpToDate;
         let mut input = input(&state);
@@ -767,6 +867,7 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         });
 
     fn titles(view: &RichObjectView<DeviceDetailAffordance>) -> Vec<&str> {
