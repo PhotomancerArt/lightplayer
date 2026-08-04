@@ -633,7 +633,7 @@ pub(crate) fn control_unsupported_product(name: &str) -> UiProducedProduct {
         })
 }
 
-fn visual_preview_bytes(width: u32, height: u32) -> Vec<u8> {
+pub(crate) fn visual_preview_bytes(width: u32, height: u32) -> Vec<u8> {
     let mut bytes = Vec::with_capacity((width * height * 3) as usize);
     for y in 0..height {
         for x in 0..width {

@@ -397,16 +397,44 @@ impl ProjectController {
     /// state).
     pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
-        let site = |index: &u32| -> Option<crate::UiBusSiteView> {
+        // Sites carry their binding's priority out so the per-channel pass
+        // below can mark shadowed writers and top-priority ties (E3).
+        let site = |index: &u32| -> Option<(crate::UiBusSiteView, i32)> {
             let binding = graph.bindings.get(*index as usize)?;
             let node = self.node_by_runtime_id(binding.node);
-            Some(crate::UiBusSiteView {
-                node_label: node
-                    .map(|node| node.label().to_string())
-                    .unwrap_or_else(|| format!("node {}", binding.node.0)),
-                slot: binding.slot.as_ref().map(|slot| format!("{slot}")),
-                default_origin: binding.origin == lpc_wire::WireBindingOrigin::Default,
-                focus: node.map(node_focus_action),
+            Some((
+                crate::UiBusSiteView {
+                    node_label: node
+                        .map(|node| node.label().to_string())
+                        .unwrap_or_else(|| format!("node {}", binding.node.0)),
+                    slot: binding.slot.as_ref().map(|slot| format!("{slot}")),
+                    origin: match binding.origin {
+                        lpc_wire::WireBindingOrigin::Authored => crate::UiBusSiteOrigin::Authored,
+                        lpc_wire::WireBindingOrigin::Panel => crate::UiBusSiteOrigin::Panel,
+                        lpc_wire::WireBindingOrigin::Default => crate::UiBusSiteOrigin::Default,
+                    },
+                    // R7 publish/export: the site is a module node
+                    // contributing a channel outward, not a leaf writing.
+                    publish: binding.direction == lpc_wire::WireBindingDirection::Publishes
+                        && node.is_some_and(|node| node.kind() == MODULE_KIND_LABEL),
+                    shadowed: false,
+                    child_scope: None,
+                    focus: node.map(node_focus_action),
+                },
+                binding.priority,
+            ))
+        };
+        // Descendant module scopes of this card's scope, for the
+        // child-scope reader listing (R5; wiring spike gate 3).
+        let descendants = self.descendant_module_scopes(scope.owner());
+        // Providers for `name` anywhere in a scope chain — the blocking
+        // test: a writer in an intermediate scope means inner consumers
+        // resolve there, not here.
+        let scope_has_writer = |owner: lpc_model::NodeId, name: &str| {
+            graph.channels.iter().any(|channel| {
+                channel.scope == Some(lpc_wire::WireScopeRef::Module { owner })
+                    && channel.name == name
+                    && !channel.providers.is_empty()
             })
         };
         let channels = graph
@@ -418,27 +446,171 @@ impl ProjectController {
             // never equal a module scope, so this is belt-and-braces.
             .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
             .filter(|channel| channel.scope == Some(scope))
-            .map(|channel| crate::UiBusChannelView {
-                scope: channel.scope,
-                // No scope label: every row here belongs to the scope of
-                // the card the drawer hangs off, so the card header
-                // already carries the identity the sidebar pane had to
-                // spell out per row.
-                scope_label: None,
-                name: channel.name.clone(),
-                kind: channel.kind.map(|kind| format!("{kind:?}")),
-                value: channel
+            .map(|channel| {
+                // Providers arrive highest-priority first (probe contract).
+                let ranked: Vec<(crate::UiBusSiteView, i32)> =
+                    channel.providers.iter().filter_map(site).collect();
+                let top = ranked.first().map(|(_, priority)| *priority);
+                let contended = ranked
+                    .iter()
+                    .filter(|(_, priority)| Some(*priority) == top)
+                    .count()
+                    > 1;
+                let writers: Vec<crate::UiBusSiteView> = ranked
+                    .into_iter()
+                    .map(|(mut writer, priority)| {
+                        writer.shadowed = Some(priority) < top;
+                        writer
+                    })
+                    .collect();
+
+                let mut readers: Vec<crate::UiBusSiteView> = channel
+                    .consumers
+                    .iter()
+                    .filter_map(site)
+                    .map(|(reader, _)| reader)
+                    .collect();
+                // Child-scope readers (R5): consumers registered on a
+                // descendant scope's same-named channel list HERE when no
+                // scope between them and this one has a writer — those
+                // reads genuinely resolve to this channel. They keep their
+                // scope path as a display prefix so the row never lies
+                // about where the binding lives.
+                for descendant in &descendants {
+                    if descendant
+                        .path_owners
+                        .iter()
+                        .any(|owner| scope_has_writer(*owner, &channel.name))
+                    {
+                        continue;
+                    }
+                    let entry = graph.channels.iter().find(|candidate| {
+                        candidate.scope
+                            == Some(lpc_wire::WireScopeRef::Module {
+                                owner: descendant.owner,
+                            })
+                            && candidate.name == channel.name
+                    });
+                    let Some(entry) = entry else { continue };
+                    for (mut reader, _) in entry.consumers.iter().filter_map(site) {
+                        reader.child_scope = Some(descendant.path_label.clone());
+                        readers.push(reader);
+                    }
+                }
+
+                // The value box shows the picture when the resolved value
+                // is a visual product in the tracked preview stream.
+                // Control products keep their formatted value only — their
+                // preview is the fixture face's lamp-layout business.
+                let preview = channel
                     .value
                     .as_ref()
                     .and_then(|value| value.value.as_ref())
-                    .map(format_lp_value),
-                value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
-                primary_visual: channel.primary_visual,
-                writers: channel.providers.iter().filter_map(site).collect(),
-                readers: channel.consumers.iter().filter_map(site).collect(),
+                    .and_then(|value| match value {
+                        lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
+                            let product = UiProductRef::from_product_ref(*product);
+                            let bytes = self
+                                .sync
+                                .as_ref()
+                                .and_then(|sync| sync.product_preview(&product))?
+                                .clone();
+                            let tracking =
+                                if self.primary_visual_product().as_ref() == Some(&product) {
+                                    crate::UiProductTrackingState::Tracking
+                                } else {
+                                    crate::UiProductTrackingState::Paused
+                                };
+                            Some(crate::UiBusChannelPreview {
+                                kind: crate::UiProductKind::Visual,
+                                preview: bytes,
+                                tracking,
+                                frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
+                            })
+                        }
+                        _ => None,
+                    });
+
+                crate::UiBusChannelView {
+                    scope: channel.scope,
+                    // No scope label: every row here belongs to the scope of
+                    // the card the drawer hangs off, so the card header
+                    // already carries the identity the sidebar pane had to
+                    // spell out per row.
+                    scope_label: None,
+                    name: channel.name.clone(),
+                    kind: channel.kind.map(|kind| format!("{kind:?}")),
+                    value: channel
+                        .value
+                        .as_ref()
+                        .and_then(|value| value.value.as_ref())
+                        .map(format_lp_value),
+                    value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
+                    primary_visual: channel.primary_visual,
+                    contended,
+                    preview,
+                    writers,
+                    readers,
+                }
             })
             .collect();
         Some(crate::UiBusView { channels })
+    }
+
+    /// Module scopes strictly inside `target`'s scope, each with the
+    /// display path from just below `target` down to it ("plasma_1", or
+    /// "rig/plasma_1" at depth 2) and the owner chain the child-scope
+    /// reader listing uses for its writer-blocking test.
+    ///
+    /// Playlist nodes are barriers: a module inside a playlist entry sits
+    /// behind a sink scope (R2 — inward invisibility), so its consumers
+    /// never surface on scopes above the playlist even though R5 lets the
+    /// VALUES walk out.
+    fn descendant_module_scopes(&self, target: lpc_model::NodeId) -> Vec<DescendantModuleScope> {
+        fn walk(
+            node: &NodeController,
+            stack: &mut Vec<(lpc_model::NodeId, String)>,
+            target: lpc_model::NodeId,
+            out: &mut Vec<DescendantModuleScope>,
+        ) {
+            if node.kind() == "Playlist" {
+                let mut behind_barrier = Vec::new();
+                for child in node.children() {
+                    walk(child, &mut behind_barrier, target, out);
+                }
+                return;
+            }
+            let is_module = node.kind() == MODULE_KIND_LABEL;
+            if is_module {
+                let id = node.target().node_id;
+                if let Some(position) = stack.iter().position(|(owner, _)| *owner == target) {
+                    let below = &stack[position + 1..];
+                    let mut labels: Vec<&str> =
+                        below.iter().map(|(_, label)| label.as_str()).collect();
+                    labels.push(node.label());
+                    let mut path_owners: Vec<lpc_model::NodeId> =
+                        below.iter().map(|(owner, _)| *owner).collect();
+                    path_owners.push(id);
+                    out.push(DescendantModuleScope {
+                        owner: id,
+                        path_label: labels.join("/"),
+                        path_owners,
+                    });
+                }
+                stack.push((id, node.label().to_string()));
+            }
+            for child in node.children() {
+                walk(child, stack, target, out);
+            }
+            if is_module {
+                stack.pop();
+            }
+        }
+        let mut out = Vec::new();
+        let mut stack = Vec::new();
+        for root in &self.root_nodes {
+            walk(root, &mut stack, target, &mut out);
+        }
+        out
     }
 
     /// The project's **primary visual product**: the resolved value of
@@ -5465,6 +5637,18 @@ fn human_field_label(name: &str) -> String {
     label
 }
 
+/// One descendant module scope of a wiring drawer's scope — see
+/// [`ProjectController::descendant_module_scopes`].
+struct DescendantModuleScope {
+    /// The descendant module node (its scope's owner).
+    owner: lpc_model::NodeId,
+    /// Display path from just below the target scope down to this module.
+    path_label: String,
+    /// Module owners from just below the target down to and including
+    /// this one — the scopes whose writers block R5 inheritance.
+    path_owners: Vec<lpc_model::NodeId>,
+}
+
 fn node_focus_action(node: &NodeController) -> UiAction {
     UiAction::from_op(
         ProjectEditorTarget::addressed_node(node.target().clone()).node_id(),
@@ -6940,8 +7124,8 @@ mod tests {
         assert_eq!(channel.value.as_deref(), Some("0.5"));
         assert_eq!(channel.writers.len(), 1);
         assert_eq!(channel.readers.len(), 1);
-        assert!(channel.writers[0].default_origin);
-        assert!(!channel.readers[0].default_origin);
+        assert!(channel.writers[0].default_origin());
+        assert!(!channel.readers[0].default_origin());
         assert_eq!(channel.readers[0].slot.as_deref(), Some("input"));
         // Sites resolve to the node controller's label and carry a focus
         // action (D7 linked navigation).
@@ -6955,6 +7139,240 @@ mod tests {
         assert_eq!(
             channel.scope_label, None,
             "the card the drawer hangs off already names the scope"
+        );
+    }
+
+    /// The flow view's derivations: writer flavor, shadowing, contention
+    /// (E3), module publishes (R7), and child-scope readers (R5 — spike
+    /// gate 3, including the writer-blocking case that mirrors E5).
+    #[test]
+    fn ui_bus_view_derives_flavor_contention_and_child_scope_readers() {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2), NodeId::new(3), NodeId::new(5)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.module/clock.clock",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            3,
+            "/demo.module/orbit.shader",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        let mut plasma = node_entry(
+            5,
+            "/demo.module/plasma.module",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        );
+        plasma.children = vec![NodeId::new(6)];
+        view.tree.insert(plasma);
+        view.tree.insert(node_entry(
+            6,
+            "/demo.module/plasma.module/sim.shader",
+            Some(5),
+            NodeRuntimeStatus::Ok,
+        ));
+
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let root_scope = lpc_wire::WireScopeRef::Module {
+            owner: NodeId::new(1),
+        };
+        let plasma_scope = lpc_wire::WireScopeRef::Module {
+            owner: NodeId::new(5),
+        };
+        let bus = |channel: &str| lpc_wire::WireBindingEndpoint::Bus {
+            scope: None,
+            channel: channel.to_string(),
+        };
+        let binding = |node: u32,
+                       slot: Option<&str>,
+                       direction: lpc_wire::WireBindingDirection,
+                       endpoint: lpc_wire::WireBindingEndpoint,
+                       origin: lpc_wire::WireBindingOrigin,
+                       priority: i32| {
+            lpc_wire::WireEffectiveBinding {
+                owner: NodeId::new(node),
+                node: NodeId::new(node),
+                slot: slot.map(|slot| SlotPath::parse(slot).unwrap()),
+                direction,
+                endpoint,
+                origin,
+                priority,
+                kind: lpc_model::Kind::Ratio,
+            }
+        };
+        use lpc_wire::{WireBindingDirection::*, WireBindingOrigin::*};
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![
+                // 0: clock publishes root time (default origin)
+                binding(2, Some("seconds"), Publishes, bus("time"), Default, 0),
+                // 1: plasma-inner sim consumes time in ITS scope
+                binding(6, Some("time"), Consumes, bus("time"), Authored, 0),
+                // 2: orbit publishes visual.out at fallback
+                binding(
+                    3,
+                    Some("visual"),
+                    Publishes,
+                    bus("visual.out"),
+                    Default,
+                    -1000,
+                ),
+                // 3: the plasma MODULE publishes visual.out at fallback (R7)
+                binding(5, None, Publishes, bus("visual.out"), Default, -1000),
+                // 4: an engaged panel writer holds hue
+                binding(3, None, Publishes, bus("hue"), Panel, 1000),
+                // 5: orbit's authored hue write, outranked by the panel
+                binding(3, Some("hue"), Publishes, bus("hue"), Authored, 0),
+                // 6: plasma-inner sim consumes hue in ITS scope (no local
+                //    writer -> resolves at root, must list there)
+                binding(6, Some("hue"), Consumes, bus("hue"), Authored, 0),
+                // 7: orbit publishes speed at root
+                binding(3, Some("speed"), Publishes, bus("speed"), Authored, 0),
+                // 8: plasma's OWN speed writer (blocks R5 inheritance)
+                binding(6, Some("speed"), Publishes, bus("speed"), Authored, 0),
+                // 9: plasma-inner sim consumes speed (resolves locally)
+                binding(6, Some("speed"), Consumes, bus("speed"), Authored, 0),
+            ],
+            channels: vec![
+                lpc_wire::WireBusChannel {
+                    scope: Some(root_scope),
+                    name: "time".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![0],
+                    consumers: vec![],
+                    value: None,
+                    primary_visual: false,
+                },
+                lpc_wire::WireBusChannel {
+                    scope: Some(plasma_scope),
+                    name: "time".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![],
+                    consumers: vec![1],
+                    value: None,
+                    primary_visual: false,
+                },
+                lpc_wire::WireBusChannel {
+                    scope: Some(root_scope),
+                    name: "visual.out".to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: vec![2, 3],
+                    consumers: vec![],
+                    value: None,
+                    primary_visual: true,
+                },
+                lpc_wire::WireBusChannel {
+                    scope: Some(root_scope),
+                    name: "hue".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![4, 5],
+                    consumers: vec![],
+                    value: None,
+                    primary_visual: false,
+                },
+                lpc_wire::WireBusChannel {
+                    scope: Some(plasma_scope),
+                    name: "hue".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![],
+                    consumers: vec![6],
+                    value: None,
+                    primary_visual: false,
+                },
+                lpc_wire::WireBusChannel {
+                    scope: Some(root_scope),
+                    name: "speed".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![7],
+                    consumers: vec![],
+                    value: None,
+                    primary_visual: false,
+                },
+                lpc_wire::WireBusChannel {
+                    scope: Some(plasma_scope),
+                    name: "speed".to_string(),
+                    kind: Some(lpc_model::Kind::Ratio),
+                    providers: vec![8],
+                    consumers: vec![9],
+                    value: None,
+                    primary_visual: false,
+                },
+            ],
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+
+        let bus = project
+            .ui_bus_view_for_scope(root_scope)
+            .expect("root wiring view");
+        let channel = |name: &str| {
+            bus.channels
+                .iter()
+                .find(|channel| channel.name == name)
+                .unwrap_or_else(|| panic!("channel {name}"))
+        };
+
+        // time: the inner sim has no local writer, so its read resolves at
+        // root and lists here with its scope path (R5, spike gate 3).
+        let time = channel("time");
+        assert_eq!(time.readers.len(), 1);
+        assert_eq!(time.readers[0].child_scope.as_deref(), Some("Plasma"));
+        assert_eq!(time.readers[0].slot.as_deref(), Some("time"));
+        assert!(
+            time.readers[0].focus.is_some(),
+            "child-scope chips jump too"
+        );
+        assert!(time.writers[0].default_origin());
+
+        // visual.out: two fallback writers tie -> contended, nobody
+        // shadowed; the module's publish is flagged as such (R7).
+        let visual = channel("visual.out");
+        assert!(visual.contended);
+        assert!(visual.writers.iter().all(|writer| !writer.shadowed));
+        let publish = visual
+            .writers
+            .iter()
+            .find(|writer| writer.node_label == "Plasma")
+            .expect("the module's publish site");
+        assert!(publish.publish);
+        assert!(
+            !visual
+                .writers
+                .iter()
+                .find(|writer| writer.node_label == "Orbit")
+                .unwrap()
+                .publish,
+            "a leaf's write is not a publish"
+        );
+
+        // hue: the engaged panel writer wins; the authored write is
+        // shadowed (R11); no tie, so not contended. The inner sim's read
+        // still resolves here and lists with its scope path.
+        let hue = channel("hue");
+        assert!(!hue.contended);
+        assert_eq!(hue.writers[0].origin, crate::UiBusSiteOrigin::Panel);
+        assert!(!hue.writers[0].shadowed);
+        assert!(hue.writers[1].shadowed);
+        assert_eq!(hue.readers.len(), 1);
+        assert_eq!(hue.readers[0].child_scope.as_deref(), Some("Plasma"));
+
+        // speed: plasma has its OWN writer, so its consumer resolves
+        // locally and must NOT list at root (the E5-shaped blocking case).
+        let speed = channel("speed");
+        assert!(
+            speed.readers.is_empty(),
+            "a writer in the child scope blocks R5 inheritance"
         );
     }
 

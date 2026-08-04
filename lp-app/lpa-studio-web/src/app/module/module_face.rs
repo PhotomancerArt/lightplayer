@@ -46,6 +46,7 @@ use lpa_studio_core::{NodeCardDrawer, NodeUiOp, UiAction, UiModuleFace as UiModu
 
 use crate::app::WiringDrawerBody;
 use crate::app::node::{NodeCardSection, ProductPreview, node_ui_action};
+use crate::base::StudioIconName;
 
 use super::{ModulePanel, PanelGesture};
 
@@ -82,7 +83,15 @@ pub fn ModuleFace(
                 }
             }
         }
-        NodeCardSection { label: "panel", first: face.preview.is_none(),
+        // The panel's teaching treatment (spike gate 2): the panel-primary
+        // wash + the ▶ rail icon mark THE performable surface — this
+        // section is what play mode renders. Leaf cards say "settings";
+        // only modules wear "panel".
+        NodeCardSection {
+            label: "panel",
+            first: face.preview.is_none(),
+            panel_tint: true,
+            icon: StudioIconName::Play,
             ModulePanel {
                 panel: face.panel.clone(),
                 auto_save: face.auto_save,
@@ -110,7 +119,7 @@ pub fn ModuleFace(
                 div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:px-4 tw:py-3",
                     p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground",
                         "Every channel in this module's scope, and what writes and reads it. "
-                        "The controls above are the same bus, presented for playing rather than patching."
+                        "The panel above is the same bus, presented for playing rather than patching."
                     }
                     WiringDrawerBody { view: wiring, on_action: move |action| {
                         if let Some(handler) = on_action {
