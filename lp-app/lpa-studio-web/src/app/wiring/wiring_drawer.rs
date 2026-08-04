@@ -14,14 +14,22 @@
 //! work, modules.md §5). Child-scope readers list as dotted chips with
 //! their scope path (R5 inheritance; spike gate 3).
 //!
+//! **Narrow containers stack vertically** (`@container` query on the
+//! drawer, below the `@md` width): writers become a tree — a trunk with
+//! elbow branches to each chip and an arrowhead dropping into the value
+//! box — and readers branch off a matching trunk below it. Same DOM,
+//! two layouts; the side gutters and the tree rails hide each other.
+//!
 //! The value box is a [`SlotPane`], so the detail popup
 //! (`UiBusChannelView::visible_aspects`) stays one click away and every
 //! site chip remains a focus affordance (D7: the UI feels linked).
 //!
 //! Geometry is deterministic: chips are fixed-height and ellipsize (they
-//! never wrap), rows top-align, and the wires anchor at the value box's
-//! header midline — so the connector SVGs render from site counts alone,
-//! with no DOM measurement.
+//! never wrap), and in the wide layout every row cell centers on the
+//! row's vertical axis — the connector SVG is exactly as tall as its
+//! chip stack, so chip midlines and the box's side midpoint (= the SVG's
+//! own vertical center) are knowable from site counts alone, with no DOM
+//! measurement. The tree rails derive from the same constants.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView};
@@ -29,17 +37,51 @@ use lpa_studio_core::{UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView
 use crate::app::node::value_display::fixed_decimal_display;
 use crate::app::node::{ProductPreview, SlotPane, SlotPaneTreatment};
 
+/// A writer wire's tone — always matching its chip, so the drawing needs
+/// no legend: orange = engaged panel writer, violet = a node write that
+/// is driving the channel, grey = out-ranked (and every reader).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WriterTone {
+    Panel,
+    Active,
+    Shadowed,
+}
+
+impl WriterTone {
+    fn of(site: &UiBusSiteView) -> Self {
+        if site.origin == UiBusSiteOrigin::Panel {
+            Self::Panel
+        } else if site.shadowed {
+            Self::Shadowed
+        } else {
+            Self::Active
+        }
+    }
+
+    fn color(self) -> &'static str {
+        match self {
+            Self::Panel => "var(--studio-status-attention-border)",
+            Self::Active => "var(--studio-status-bound-border)",
+            Self::Shadowed => "var(--studio-color-border-strong)",
+        }
+    }
+}
+
 /// Chip box height — shared by the chip class and the wire geometry.
 const CHIP_H: f64 = 22.0;
 /// Vertical gap inside a chip stack (`tw:gap-1.5`).
 const CHIP_GAP: f64 = 6.0;
-/// Connector gutter width.
+/// Connector gutter width (wide layout).
 const GUTTER_W: f64 = 36.0;
-/// Wires plug into the value box at its header midline (header is
-/// `tw:py-1` + one 12px text line ≈ 26px tall).
-const HUB_Y: f64 = 13.0;
-/// Arrowhead length.
+/// Arrowhead length (wide layout).
 const TIP: f64 = 6.0;
+/// Tree rail width (stacked layout): trunk at x=6, elbows reach the chips.
+const RAIL_W: f64 = 18.0;
+/// Trunk x position inside a tree rail.
+const RAIL_X: f64 = 6.0;
+/// Reader tree lead-in: the trunk drops this far below the value box
+/// before the first branch, so the box and the consumer chips breathe.
+const READER_LEAD: f64 = 10.0;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -59,16 +101,55 @@ pub fn WiringDrawerBody(view: UiBusView, on_action: EventHandler<UiAction>) -> E
     }
 
     rsx! {
-        div { class: "tw:grid tw:min-w-0",
+        // `@container`: rows morph on the DRAWER's own width, not the
+        // viewport — a narrow card stacks vertically wherever it lives.
+        div { class: "tw:@container tw:grid tw:min-w-0",
             for (index , channel) in view.channels.into_iter().enumerate() {
                 FlowChannelRow { channel, on_action, first: index == 0 }
             }
+            WireKey {}
+        }
+    }
+}
+
+/// The one-line key: wire/chip color says who drives the channel.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn WireKey() -> Element {
+    rsx! {
+        div { class: "tw:mt-1 tw:flex tw:flex-wrap tw:items-center tw:gap-x-3.5 tw:gap-y-1 tw:border-t tw:border-border-muted tw:pt-2",
+            KeyItem { color: "var(--studio-status-bound-border)", label: "driving write" }
+            KeyItem { color: "var(--studio-status-attention-border)", label: "engaged panel" }
+            KeyItem { color: "var(--studio-color-border-strong)", label: "reader / out-ranked" }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn KeyItem(color: &'static str, label: &'static str) -> Element {
+    rsx! {
+        span { class: "tw:inline-flex tw:items-center tw:gap-1.5",
+            svg {
+                width: "18",
+                height: "8",
+                view_box: "0 0 18 8",
+                path {
+                    d: "M 0 4 L 12 4",
+                    fill: "none",
+                    stroke: "{color}",
+                    stroke_width: "1.5",
+                }
+                polygon { points: "18,4 12,1 12,7", fill: "{color}" }
+            }
+            span { class: "tw:text-[10px] tw:text-dim-foreground", "{label}" }
         }
     }
 }
 
 /// One channel's flow row: writer chips → wires → value box → wires →
-/// reader chips.
+/// reader chips (wide), or the writer tree above the box and the reader
+/// tree below it (stacked).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn FlowChannelRow(
@@ -92,61 +173,72 @@ pub(crate) fn FlowChannelRow(
     } else {
         " tw:border-t tw:border-border-muted"
     };
-    let writer_shadows: Vec<bool> = channel.writers.iter().map(|site| site.shadowed).collect();
-    let reader_dotted: Vec<bool> = channel
-        .readers
-        .iter()
-        .map(|site| site.child_scope.is_some())
-        .collect();
+    let writer_tones: Vec<WriterTone> = channel.writers.iter().map(WriterTone::of).collect();
+    let reader_count = channel.readers.len();
 
     rsx! {
         div {
-            class: "tw:grid tw:min-w-0 tw:items-start tw:gap-y-1 tw:py-2.5{divider} tw:grid-cols-[minmax(0,1fr)_36px_minmax(150px,224px)_36px_minmax(0,1fr)]",
-            div { class: "tw:flex tw:min-w-0 tw:flex-col tw:items-end tw:gap-1.5 tw:pt-px",
-                if channel.writers.is_empty() {
-                    span { class: "tw:pt-1 tw:text-right tw:text-[10.5px] tw:italic tw:leading-snug tw:text-dim-foreground",
-                        if channel.value_error.is_some() {
-                            "no writer"
-                        } else {
-                            "no writer — authored default (R6)"
+            class: "tw:flex tw:min-w-0 tw:flex-col tw:gap-1 tw:py-2.5{divider} tw:@md:grid tw:@md:items-center tw:@md:gap-y-1 tw:@md:grid-cols-[minmax(0,1fr)_36px_minmax(150px,224px)_36px_minmax(0,1fr)]",
+            // Writer cell: tree rail beside a left-aligned chip column when
+            // stacked; right-aligned column beside the wire gutter at @md.
+            div { class: "tw:flex tw:min-w-0 tw:items-stretch tw:-mb-1 tw:@md:mb-0 tw:@md:w-full tw:@md:justify-end",
+                WriterTreeRail { tones: writer_tones.clone() }
+                div { class: "tw:flex tw:min-w-0 tw:flex-col tw:items-start tw:gap-1.5 tw:@md:items-end",
+                    if channel.writers.is_empty() {
+                        span { class: "tw:text-[10.5px] tw:italic tw:leading-snug tw:text-dim-foreground tw:@md:text-right",
+                            if channel.value_error.is_some() {
+                                "no writer"
+                            } else {
+                                "no writer — authored default (R6)"
+                            }
                         }
-                    }
-                } else {
-                    for site in channel.writers.clone() {
-                        BusSiteChip { site, on_action }
+                    } else {
+                        for site in channel.writers.clone() {
+                            BusSiteChip {
+                                active_writer: WriterTone::of(&site) == WriterTone::Active,
+                                site,
+                                on_action,
+                            }
+                        }
                     }
                 }
             }
-            WriterWires { shadows: writer_shadows, contended: channel.contended }
-            SlotPane {
-                title: channel.name.clone(),
-                aspects,
-                initially_open,
-                treatment,
-                on_action,
-                badges: rsx! {
-                    if channel.primary_visual {
-                        span {
-                            class: "tw:flex-none tw:rounded-xs tw:bg-status-bound-bg tw:px-1 tw:text-[9px] tw:font-bold tw:uppercase tw:leading-snug tw:text-status-bound-foreground",
-                            title: "The project's primary visual output",
-                            "primary"
+            WriterWires { tones: writer_tones }
+            div { class: "tw:w-full tw:min-w-0 tw:@md:w-auto",
+                SlotPane {
+                    title: channel.name.clone(),
+                    aspects,
+                    initially_open,
+                    treatment,
+                    on_action,
+                    badges: rsx! {
+                        if channel.primary_visual {
+                            span {
+                                class: "tw:flex-none tw:rounded-xs tw:bg-status-bound-bg tw:px-1 tw:text-[9px] tw:font-bold tw:uppercase tw:leading-snug tw:text-status-bound-foreground",
+                                title: "The project's primary visual output",
+                                "primary"
+                            }
                         }
-                    }
-                    if let Some(kind) = channel.kind.clone() {
-                        span { class: "tw:flex-none tw:text-[10px] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{kind}" }
-                    }
-                },
-                ChannelValueBody { channel: channel.clone() }
+                        if let Some(kind) = channel.kind.clone() {
+                            span { class: "tw:flex-none tw:text-[10px] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{kind}" }
+                        }
+                    },
+                    ChannelValueBody { channel: channel.clone() }
+                }
             }
-            ReaderWires { dotted: reader_dotted }
-            div { class: "tw:flex tw:min-w-0 tw:flex-col tw:items-start tw:gap-1.5 tw:pt-px",
-                if channel.readers.is_empty() {
-                    span { class: "tw:pt-1 tw:text-[10.5px] tw:italic tw:leading-snug tw:text-dim-foreground",
-                        "no readers"
-                    }
-                } else {
-                    for site in channel.readers.clone() {
-                        BusSiteChip { site, on_action }
+            ReaderWires { count: reader_count }
+            // Reader cell: mirrored tree below the box when stacked.
+            div { class: "tw:flex tw:min-w-0 tw:items-stretch tw:-mt-1 tw:@md:mt-0 tw:@md:w-full",
+                ReaderTreeRail { count: reader_count }
+                div { class: "tw:flex tw:min-w-0 tw:flex-col tw:items-start tw:gap-1.5 tw:pt-2.5 tw:@md:pt-0",
+                    if channel.readers.is_empty() {
+                        span { class: "tw:text-[10.5px] tw:italic tw:leading-snug tw:text-dim-foreground",
+                            "no readers"
+                        }
+                    } else {
+                        for site in channel.readers.clone() {
+                            BusSiteChip { site, on_action }
+                        }
                     }
                 }
             }
@@ -232,7 +324,14 @@ fn ContentionBadge(contended: bool) -> Element {
 /// half-faded = shadowed (R11).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BusSiteChip(site: UiBusSiteView, on_action: EventHandler<UiAction>) -> Element {
+fn BusSiteChip(
+    site: UiBusSiteView,
+    on_action: EventHandler<UiAction>,
+    /// Writer that is actually driving the channel — worn violet so the
+    /// chip matches its wire.
+    #[props(default = false)]
+    active_writer: bool,
+) -> Element {
     let UiBusSiteView {
         node_label,
         slot,
@@ -248,22 +347,16 @@ fn BusSiteChip(site: UiBusSiteView, on_action: EventHandler<UiAction>) -> Elemen
     // style.css's unlayered `button { font: inherit }` beats layered
     // Tailwind utilities on the element itself.
     let mut class = String::from(
-        "tw:inline-flex tw:h-[22px] tw:max-w-full tw:min-w-0 tw:flex-none tw:items-baseline \
-         tw:gap-1 tw:rounded-xs tw:border tw:px-1.5 tw:leading-[20px]",
+        "tw:inline-flex tw:h-[22px] tw:max-w-full tw:min-w-0 tw:flex-none tw:items-center \
+         tw:gap-1 tw:rounded-xs tw:border tw:px-1.5",
     );
     class.push_str(if panel_writer {
         " tw:border-status-attention-border tw:bg-status-attention-bg tw:text-status-attention-foreground"
-    } else if publish {
+    } else if publish || active_writer {
         " tw:border-status-bound-border tw:bg-card-subtle tw:text-status-bound-foreground"
     } else {
         " tw:border-border-strong tw:bg-card-subtle tw:text-muted-foreground"
     });
-    if origin == UiBusSiteOrigin::Default {
-        class.push_str(" tw:border-dashed");
-    }
-    if child_scope.is_some() {
-        class.push_str(" tw:border-dotted");
-    }
     if shadowed {
         class.push_str(" tw:opacity-50");
     }
@@ -331,74 +424,171 @@ fn BusSiteChip(site: UiBusSiteView, on_action: EventHandler<UiAction>) -> Elemen
     }
 }
 
-/// The writer-side connector gutter: one wire per chip converging on the
-/// value box's header midline, plus a single arrowhead at the box edge.
+/// Stacked layout: the writer tree — a trunk with an elbow branch to
+/// each chip and an arrowhead dropping toward the value box below:
+///
+/// ```text
+///  |- writer-1
+///  |- writer-2
+///  v
+/// ```
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn WriterWires(shadows: Vec<bool>, contended: bool) -> Element {
-    let count = shadows.len();
+fn WriterTreeRail(tones: Vec<WriterTone>) -> Element {
+    let count = tones.len();
     if count == 0 {
         return rsx! {
-            div {}
+            div { class: "tw:hidden" }
         };
     }
-    let height = wire_gutter_height(count);
-    let tip_x = GUTTER_W;
-    let base_x = GUTTER_W - TIP;
-    let arrow_color = if contended {
-        "var(--studio-status-attention-border)"
-    } else {
-        "var(--studio-status-bound-border)"
-    };
+    let stack = stack_height(count);
+    let height = stack + 12.0;
+    let first_mid = CHIP_H / 2.0;
+    let trunk_end = height - 5.0;
+    // The trunk and arrow wear the top-priority writer's tone (providers
+    // arrive winner-first), so what enters the box matches who drives it.
+    let trunk = tones[0].color();
     rsx! {
         svg {
-            class: "tw:flex-none",
-            width: "{GUTTER_W}",
+            class: "tw:flex-none tw:@md:hidden",
+            width: "{RAIL_W}",
             height: "{height}",
-            view_box: "0 0 {GUTTER_W} {height}",
-            for (index , shadowed) in shadows.into_iter().enumerate() {
+            view_box: "0 0 {RAIL_W} {height}",
+            path {
+                d: "M {RAIL_X} {first_mid} L {RAIL_X} {trunk_end}",
+                fill: "none",
+                stroke: "{trunk}",
+                stroke_width: "1.5",
+            }
+            for (index , tone) in tones.into_iter().enumerate() {
                 path {
-                    d: wire_path(0.0, chip_mid_y(index), base_x, HUB_Y),
+                    d: "M {RAIL_X} {chip_mid_y(index)} L {RAIL_W} {chip_mid_y(index)}",
                     fill: "none",
-                    stroke: if contended { "var(--studio-status-attention-border)" } else if shadowed { "var(--studio-color-border-strong)" } else { "var(--studio-status-bound-border)" },
+                    stroke: "{tone.color()}",
                     stroke_width: "1.5",
-                    stroke_dasharray: if shadowed && !contended { "4 3" } else { "" },
                 }
             }
             polygon {
-                points: "{tip_x},{HUB_Y} {base_x - 1.0},{HUB_Y - 3.4} {base_x - 1.0},{HUB_Y + 3.4}",
+                points: "{RAIL_X},{height} {RAIL_X - 3.4},{height - 6.0} {RAIL_X + 3.4},{height - 6.0}",
+                fill: "{trunk}",
+            }
+        }
+    }
+}
+
+/// Stacked layout: the reader tree below the value box — a trunk the
+/// consumers branch off:
+///
+/// ```text
+///  +- reader-1
+///  +- reader-2
+/// ```
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ReaderTreeRail(count: usize) -> Element {
+    if count == 0 {
+        return rsx! {
+            div { class: "tw:hidden" }
+        };
+    }
+    let height = stack_height(count) + READER_LEAD;
+    let last_mid = READER_LEAD + chip_mid_y(count - 1);
+    rsx! {
+        svg {
+            class: "tw:flex-none tw:@md:hidden",
+            width: "{RAIL_W}",
+            height: "{height}",
+            view_box: "0 0 {RAIL_W} {height}",
+            path {
+                d: "M {RAIL_X} 0 L {RAIL_X} {last_mid}",
+                fill: "none",
+                stroke: "var(--studio-color-border-strong)",
+                stroke_width: "1.5",
+            }
+            for index in 0..count {
+                path {
+                    d: "M {RAIL_X} {READER_LEAD + chip_mid_y(index)} L {RAIL_W - 5.0} {READER_LEAD + chip_mid_y(index)}",
+                    fill: "none",
+                    stroke: "var(--studio-color-border-strong)",
+                    stroke_width: "1.5",
+                }
+                polygon {
+                    points: "{RAIL_W},{READER_LEAD + chip_mid_y(index)} {RAIL_W - 5.5},{READER_LEAD + chip_mid_y(index) - 3.2} {RAIL_W - 5.5},{READER_LEAD + chip_mid_y(index) + 3.2}",
+                    fill: "var(--studio-color-border-strong)",
+                }
+            }
+        }
+    }
+}
+
+/// Wide layout: the writer-side connector gutter — one wire per chip
+/// converging on the value box's side midpoint, plus a single arrowhead
+/// at the box edge.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn WriterWires(tones: Vec<WriterTone>) -> Element {
+    let count = tones.len();
+    if count == 0 {
+        return rsx! {
+            div { class: "tw:hidden tw:@md:block" }
+        };
+    }
+    let height = wire_gutter_height(count);
+    // Both the stack and this SVG are centered on the row axis, so the
+    // box's side midpoint is simply the SVG's own vertical center.
+    let hub_y = height / 2.0;
+    let tip_x = GUTTER_W;
+    let base_x = GUTTER_W - TIP;
+    // The arrowhead wears the top-priority writer's tone, matching the
+    // wire that actually drives the channel.
+    let arrow_color = tones[0].color();
+    rsx! {
+        svg {
+            class: "tw:hidden tw:flex-none tw:self-center tw:@md:block",
+            width: "{GUTTER_W}",
+            height: "{height}",
+            view_box: "0 0 {GUTTER_W} {height}",
+            for (index , tone) in tones.into_iter().enumerate() {
+                path {
+                    d: wire_path(0.0, chip_mid_y(index), base_x, hub_y),
+                    fill: "none",
+                    stroke: "{tone.color()}",
+                    stroke_width: "1.5",
+                }
+            }
+            polygon {
+                points: "{tip_x},{hub_y} {base_x - 1.0},{hub_y - 3.4} {base_x - 1.0},{hub_y + 3.4}",
                 fill: "{arrow_color}",
             }
         }
     }
 }
 
-/// The reader-side connector gutter: wires fanning out from the box's
-/// header midline, one arrowhead per reader chip. Child-scope readers
-/// (dotted chips) get dashed wires.
+/// Wide layout: the reader-side connector gutter — wires fanning out
+/// from the box's side midpoint, one arrowhead per reader chip.
+/// Child-scope readers (dotted chips) get dashed wires.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ReaderWires(dotted: Vec<bool>) -> Element {
-    let count = dotted.len();
+fn ReaderWires(count: usize) -> Element {
     if count == 0 {
         return rsx! {
-            div {}
+            div { class: "tw:hidden tw:@md:block" }
         };
     }
     let height = wire_gutter_height(count);
+    let hub_y = height / 2.0;
     rsx! {
         svg {
-            class: "tw:flex-none",
+            class: "tw:hidden tw:flex-none tw:self-center tw:@md:block",
             width: "{GUTTER_W}",
             height: "{height}",
             view_box: "0 0 {GUTTER_W} {height}",
-            for (index , dashed) in dotted.into_iter().enumerate() {
+            for index in 0..count {
                 path {
-                    d: wire_path(0.0, HUB_Y, GUTTER_W - TIP, chip_mid_y(index)),
+                    d: wire_path(0.0, hub_y, GUTTER_W - TIP, chip_mid_y(index)),
                     fill: "none",
                     stroke: "var(--studio-color-border-strong)",
                     stroke_width: "1.5",
-                    stroke_dasharray: if dashed { "2 3" } else { "" },
                 }
                 polygon {
                     points: "{GUTTER_W},{chip_mid_y(index)} {GUTTER_W - TIP - 1.0},{chip_mid_y(index) - 3.4} {GUTTER_W - TIP - 1.0},{chip_mid_y(index) + 3.4}",
@@ -414,10 +604,15 @@ fn chip_mid_y(index: usize) -> f64 {
     index as f64 * (CHIP_H + CHIP_GAP) + CHIP_H / 2.0
 }
 
-/// Gutter height covering `count` chips (and never clipping the hub).
+/// Height of a `count`-chip stack.
+fn stack_height(count: usize) -> f64 {
+    (count as f64 * (CHIP_H + CHIP_GAP) - CHIP_GAP).max(CHIP_H)
+}
+
+/// Gutter height: exactly the chip stack's height, so centering the SVG
+/// and the stack on the same row axis keeps their coordinates aligned.
 fn wire_gutter_height(count: usize) -> f64 {
-    let stack = count as f64 * (CHIP_H + CHIP_GAP) - CHIP_GAP;
-    stack.max(HUB_Y + 6.0)
+    stack_height(count)
 }
 
 /// A horizontal-tangent cubic between two points — the wire look.
