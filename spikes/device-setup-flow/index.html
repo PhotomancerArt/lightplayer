@@ -124,14 +124,18 @@
     border-radius: 7px; color: var(--text); font-size: 12.5px; padding: 7px 9px; outline: none; font-family: var(--sans); }
   input[type=text]:focus { border-color: var(--accent-border); }
 
-  /* ---- wizard chrome ---- */
-  .wizwrap { max-width: 1400px; }
-  .wizard { border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden;
-    background: var(--surface-subtle); box-shadow: 0 16px 44px rgba(0,0,0,.45); position: relative; }
-  .wizard.simpath { border-color: var(--bound-border); }
-  .wizhead { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
-  .wizhead .wt { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  /* ---- wizard chrome: THE WIZARD IS A CARD (fixed card width, in the grid) ---- */
+  .wizwrap { max-width: 1400px; display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+    position: relative; }
+  .ctxcard { width: 280px; flex: none; }
+  .wizard { width: 316px; flex: none; border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--warn-text); border-radius: 10px; overflow: hidden;
+    background: var(--surface); box-shadow: 0 16px 44px rgba(0,0,0,.45); position: relative; }
+  .wizard.simpath { border-color: var(--bound-border); border-left-color: var(--bound-text); }
+  .wizhead { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); min-height: 36px; }
+  .wizhead .wt { font-size: 12.5px; font-weight: 700; color: var(--gold);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .wk { font: 700 9.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase;
     border-radius: 999px; padding: 3px 9px; }
   .wk.hw { color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border); }
@@ -139,18 +143,19 @@
   .wizhead .close { margin-left: auto; appearance: none; border: 0; background: transparent;
     color: var(--dim); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 5px; }
   .wizhead .close:hover { color: var(--text); background: var(--bg-wash); }
-  .steps2 { display: flex; gap: 4px; align-items: center; padding: 10px 16px 0; flex-wrap: wrap; }
-  .step { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700;
-    color: var(--dim); padding: 4px 10px 4px 6px; border-radius: 999px; }
-  .step .dotn { width: 17px; height: 17px; border-radius: 50%; display: inline-flex; align-items: center;
-    justify-content: center; font-size: 9.5px; border: 1px solid var(--border-strong); color: var(--subtle); }
+  .steps2 { display: flex; gap: 3px; align-items: center; padding: 7px 10px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .step { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700;
+    color: var(--dim); padding: 3px 7px 3px 4px; border-radius: 999px; }
+  .step .dotn { width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center;
+    justify-content: center; font-size: 8.5px; border: 1px solid var(--border-strong); color: var(--subtle); flex: none; }
   .step.now { color: var(--text); background: var(--surface-raised); }
   .step.now .dotn { border-color: var(--accent-border); color: var(--accent); }
   .step.done { color: var(--heading); }
   .step.done .dotn { border-color: var(--accent-border); background: var(--good-bg); color: var(--accent); }
   .steparrow { color: var(--dim); font-size: 10px; }
-  .wizbody { padding: 14px 16px 16px; min-height: 250px; }
-  .wizfoot { display: flex; gap: 8px; align-items: center; padding: 0 16px 16px; }
+  .wizbody { padding: 11px 12px 12px; min-height: 200px; }
+  .wizfoot { display: flex; gap: 8px; align-items: center; padding: 0 12px 12px; flex-wrap: wrap; }
   .wizfoot .spacer { flex: 1; }
   .abtn { appearance: none; cursor: pointer; border: 1px solid var(--border-strong); background: transparent;
     color: var(--text); font-size: 12px; font-weight: 600; border-radius: 7px; padding: 6px 12px; }
@@ -176,7 +181,7 @@
   .cablewait svg { color: var(--subtle); flex: none; }
 
   /* fake browser port picker */
-  .portpick { position: absolute; z-index: 9; left: 50%; top: 54px; transform: translateX(-50%);
+  .portpick { position: absolute; z-index: 9; left: 50%; top: 8px; transform: translateX(-50%);
     width: 360px; background: #202124; border: 1px solid #3c4043; border-radius: 8px;
     box-shadow: 0 18px 48px rgba(0,0,0,.6); font-family: var(--sans); color: #e8eaed; }
   .portpick .pt { font-size: 12.5px; padding: 12px 14px 6px; }
@@ -205,12 +210,14 @@
   .verdictcard .at { font-size: 12.5px; font-weight: 700; color: var(--strong); }
   .verdictcard .ad { font-size: 11px; color: var(--subtle); }
 
-  .boardrow { display: flex; gap: 10px; flex-wrap: wrap; }
-  .bcard { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; cursor: pointer;
-    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; width: 128px; text-align: center; }
+  .boardrow { display: flex; flex-direction: column; gap: 6px; }
+  .bcard { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+    padding: 7px 9px; display: flex; flex-direction: row; gap: 9px; align-items: center; text-align: left; width: 100%; }
   .bcard:hover { border-color: var(--border-strong); }
   .bcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
-  .bcard .bn { font-size: 10.5px; font-weight: 700; color: var(--strong); line-height: 1.25; }
+  .bcard svg { flex: none; width: 44px; height: 28px; }
+  .bcard .bmid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .bcard .bn { font-size: 11px; font-weight: 700; color: var(--strong); line-height: 1.25; }
   .bcard .bio { font: 500 8.5px/1.3 var(--mono); color: var(--dim); }
   .bcard.generic svg { opacity: .45; }
   .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 8.5px; font-weight: 800;
@@ -221,10 +228,9 @@
   .badge.forboard { color: var(--subtle); background: var(--neutral-bg); border: 1px solid var(--neutral-border);
     text-transform: none; letter-spacing: .02em; }
 
-  .contentsplit { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 900px) { .contentsplit { grid-template-columns: 1fr; } }
-  .choicebox { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+  .contentsplit { display: grid; grid-template-columns: 1fr; gap: 9px; }
+  .choicebox { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 9px;
+    padding: 10px; display: flex; flex-direction: column; gap: 8px; }
   .choicebox.picked { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
   .choicebox h4 { margin: 0; font-size: 12.5px; color: var(--strong); }
   .choicebox h4 small { color: var(--dim); font-weight: 500; font-size: 11px; margin-left: 6px; }
@@ -281,8 +287,8 @@
 
   .sheet { position: absolute; inset: 0; z-index: 8; background: rgba(8,10,13,.72); backdrop-filter: blur(2px);
     display: grid; place-items: center; padding: 20px; }
-  .sheetpanel { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--neutral-border);
-    border-radius: 10px; padding: 15px; box-shadow: 0 12px 34px rgba(0,0,0,.55); }
+  .sheetpanel { width: 100%; max-width: 280px; background: var(--surface); border: 1px solid var(--neutral-border);
+    border-radius: 10px; padding: 13px; box-shadow: 0 12px 34px rgba(0,0,0,.55); }
   .sheetpanel h3 { margin: 0 0 7px; font-size: 13px; color: var(--strong); }
   .sheetpanel p { margin: 0 0 12px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
   .sheetrow { display: flex; gap: 8px; justify-content: flex-end; }
@@ -405,7 +411,8 @@
   now <b>derived at provision time</b> (§2), mostly untyped. The full state machine, every
   transition testable, is in the plan dir's <b>flow-spec.md</b>; this page walks it. Use
   <b>Inject</b> to route the live wizard (§3) down every path — including the fake Chrome port
-  picker. §1 (placement) and §4 (density) are still open from round one.
+  picker. Round 2b: <b>the wizard is a card</b> at the UI's fixed card width — §1 and §4 settled
+  by that.
 </p>
 
 <div class="controls">
@@ -426,61 +433,12 @@
 </div>
 
 <!-- ================== 1 · placement (still open) ================== -->
-<h2 id="s1"><span class="n">1</span> Where the wizard lives — still open from round 1</h2>
-<p class="sub">Unchanged question: what happens to the roster while you set up. Lean stays
-  <b>A · takeover</b>. Click a frame's <b>open</b>.</p>
-
-<div class="pgrid">
-  <div class="pframe" data-pl="0">
-    <span class="plabel">0 · Today (baseline) <span class="sel" data-open="0">open ›</span></span>
-    <div class="pbody" data-plbody>
-      <div class="sech">Devices</div>
-      <div class="minirow">
-        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
-          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
-        <div class="dashcard" data-open="0">⚡ Connect a device<small>Connect a LightPlayer device over USB.</small></div>
-      </div>
-      <div class="ghost">setup = a form <b>inside the new card</b>, then the Project tab waits for you
-        to find a project — the six-step detour.</div>
-    </div>
-  </div>
-  <div class="pframe" data-pl="a">
-    <span class="plabel">A · Takeover (lean) <span class="sel" data-open="a">open ›</span></span>
-    <div class="pbody" data-plbody>
-      <div class="sech">Devices</div>
-      <div class="minirow">
-        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
-          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
-        <div class="dashcard" data-open="a">⚡ Connect a device<small>connect · flash · first project</small></div>
-      </div>
-      <div class="ghost">wizard <b>replaces the page content</b>; "‹ devices" is the only chrome.</div>
-    </div>
-  </div>
-  <div class="pframe" data-pl="b">
-    <span class="plabel">B · Overlay sheet <span class="sel" data-open="b">open ›</span></span>
-    <div class="pbody" data-plbody>
-      <div class="sech">Devices</div>
-      <div class="minirow">
-        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
-          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
-        <div class="dashcard" data-open="b">⚡ Connect a device<small>connect · flash · first project</small></div>
-      </div>
-      <div class="ghost">wizard floats <b>over the dimmed gallery</b> — a modal holding a 60s flash.</div>
-    </div>
-  </div>
-  <div class="pframe" data-pl="c">
-    <span class="plabel">C · In-grid expansion <span class="sel" data-open="c">open ›</span></span>
-    <div class="pbody" data-plbody>
-      <div class="sech">Devices</div>
-      <div class="minirow">
-        <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
-          <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
-        <div class="dashcard" data-open="c">⚡ Connect a device<small>connect · flash · first project</small></div>
-      </div>
-      <div class="ghost">the creation card <b>grows in place</b>; the roster stays live above.</div>
-    </div>
-  </div>
-</div>
+<h2 id="s1"><span class="n">1</span> Where the wizard lives — settled: it's a card</h2>
+<p class="sub"><b>Settled by the system (Yona, G1r2): devices are cards with a fixed width set in
+  the UI.</b> The wizard renders at card width in the grid — exactly where today's setup form
+  lives — and becomes the device card at Done. Round 1's takeover/overlay/expansion concepts were
+  drawn at page width and are retired; see §3 for the real thing. The roster simply stays: the
+  wizard is one card among the others.</p>
 
 <!-- ================== 2 · naming — settled ================== -->
 <h2 id="s2"><span class="n">2</span> Naming — settled: derived at provision</h2>
@@ -506,18 +464,24 @@
 </div>
 
 <!-- ================== 3 · the flow, live ================== -->
-<h2 id="s3"><span class="n">3</span> The ratified flow, live — inject anything</h2>
-<p class="sub"><b>Connect</b> (port picker + driver help) → <b>Flash</b> (board-state detection:
-  blank / WLED / LightPlayer / unresponsive, then pick + flash) → <b>Provision</b> (project +
-  derived name) → <b>Device home</b>. Sim path: Board → Provision → Device home, same code from
-  Provision on. Every transition here is a row in flow-spec F2 and a unit test in P11.</p>
+<h2 id="s3"><span class="n">3</span> The ratified flow, live — at real card width</h2>
+<p class="sub"><b>The wizard IS the nascent device card</b> — it renders at the UI's fixed card
+  width, in the grid, exactly where today's setup form lives; the steps are card states and it
+  <i>becomes</i> the device card at Done. <b>Connect</b> (port picker + driver help) →
+  <b>Flash</b> (state detection: blank / WLED / LightPlayer / unresponsive) → <b>Provision</b>
+  (project + derived name) → <b>Device home</b>. Sim: Board → Provision → Device home. Every
+  transition = a flow-spec F2 row = a P11 unit test. The port picker overlays page-level, as the
+  browser's own dialog does.</p>
 
 <div class="wizwrap">
+  <div class="ctxcard minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+    <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+  <div class="ctxcard minicard"><div class="mh">Workbench ESP32<span class="tp">USB</span></div>
+    <div class="mb"><span class="run">Running</span><br>porch-sign</div></div>
   <div class="wizard" id="wizard">
     <div class="wizhead">
-      <span class="backlink" id="wizback2">‹ devices</span>
       <span class="wt" id="wiztitle">Connect a device</span>
-      <span class="wk hw" id="wizkind">Hardware</span>
+      <span class="wk hw" id="wizkind">HW</span>
       <button class="close" id="wizclose" title="Close">✕</button>
     </div>
     <div class="steps2" id="wizsteps"></div>
@@ -534,9 +498,10 @@
   ✕ mid-flash hits the abandon guard and an abandoned board's card reads "incomplete flash".</p>
 
 <!-- ================== 4 · density (still open) ================== -->
-<h2 id="s4"><span class="n">4</span> Provision density — still open from round 1</h2>
-<p class="sub">Lean stays <b>compact</b> (right, used live in §3 — now with the derived-name field
-  below it).</p>
+<h2 id="s4"><span class="n">4</span> Provision density — settled by width: compact</h2>
+<p class="sub">Card width decides it: the full node flow doesn't fit and never needed to. The
+  compact line + ⓘ (right) is what §3 uses; the left box stays only as the record of what was
+  rejected.</p>
 
 <div class="dgrid">
   <div class="choicebox">
@@ -619,74 +584,6 @@ const PROJECTS = [
 ];
 const state = { path: "hw", inject: "none" };
 
-/* ===================== §1 placement (unchanged from round 1) ===================== */
-const PLACEMENT_OPEN = {
-  "0": `<div class="sech">Devices</div>
-    <div class="minirow">
-      <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
-        <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
-      <div class="minicard" style="border-left-color: var(--warn-text)">
-        <div class="mh">2026-08-04 - esp32c6<span class="tp">USB</span></div>
-        <div class="mb" style="font-size:9.5px">
-          <b style="color:var(--muted)">Select your board</b> · [?] [C6-DevKitC] [XIAO-C6]<br>
-          <b style="color:var(--muted)">Name your device</b> · <span style="font-family:var(--mono)">2026-08-04 - esp32c6</span><br>
-          <span style="color:var(--accent)">[ ⚡ Install firmware ]</span></div></div>
-    </div>
-    <div class="ghost">…then the card's Project tab waits for you. Faithful to shipped.</div>`,
-  "a": `<div class="miniwiz">
-      <div class="wh"><span class="backlink">‹ devices</span> Connect a device
-        <span class="wk hw" style="font-size:8px">HW</span></div>
-      <div class="steps">① <b>Connect</b> › ② Flash › ③ Project › ④ Done</div>
-      <div style="display:flex; gap:6px">
-        <span class="ghost" style="margin:0; flex:1; text-align:center">connect<br>port picker</span>
-        <span class="ghost" style="margin:0; flex:1; text-align:center">detect state<br>pick + flash</span>
-        <span class="ghost" style="margin:0; flex:1; text-align:center">project<br>+ derived name</span>
-      </div>
-      <div class="ghost" style="border-style:solid">roster gone; "‹ devices" is the way back.</div>
-    </div>`,
-  "b": `<div class="sech">Devices</div>
-    <div class="minirow">
-      <div class="minicard sim dimmed"><div class="mh">Simulator<span class="tp">SIM</span></div>
-        <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
-      <div class="minicard dimmed" style="border-left-color: var(--neutral-border)">
-        <div class="mh">Workbench ESP32<span class="tp">USB</span></div>
-        <div class="mb">Running<br>porch-sign</div></div>
-    </div>
-    <div class="dimmedbg"><div class="miniwiz" style="width:88%">
-      <div class="wh">Connect a device <span class="wk hw" style="font-size:8px">HW</span></div>
-      <div class="steps">① <b>Connect</b> › ② Flash › ③ Project › ④ Done</div>
-      <div class="ghost">a modal that will hold a 60-second flash.</div>
-    </div></div>`,
-  "c": `<div class="sech">Devices</div>
-    <div class="minirow" style="margin-bottom:9px">
-      <div class="minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
-        <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
-      <div class="minicard"><div class="mh">Workbench ESP32<span class="tp">USB</span></div>
-        <div class="mb"><span class="run">Running</span><br>porch-sign</div></div>
-    </div>
-    <div class="miniwiz">
-      <div class="wh">Connect a device <span class="wk hw" style="font-size:8px">HW</span>
-        <span style="margin-left:auto; color:var(--dim); cursor:pointer">⤡ shrink</span></div>
-      <div class="steps">① <b>Connect</b> › ② Flash › ③ Project › ④ Done</div>
-      <div class="ghost">the creation card grown to row width; roster stays above.</div>
-    </div>`,
-};
-const PLACEMENT_CLOSED = {};
-document.querySelectorAll(".pframe").forEach(f => {
-  PLACEMENT_CLOSED[f.dataset.pl] = f.querySelector("[data-plbody]").innerHTML;
-});
-document.addEventListener("click", e => {
-  const t = e.target.closest("[data-open]");
-  if (!t) return;
-  const key = t.dataset.open;
-  const frame = document.querySelector(`.pframe[data-pl="${key}"]`);
-  const body = frame.querySelector("[data-plbody]");
-  const isOpen = frame.dataset.openState === "1";
-  body.innerHTML = isOpen ? PLACEMENT_CLOSED[key] : PLACEMENT_OPEN[key];
-  frame.dataset.openState = isOpen ? "0" : "1";
-  frame.querySelectorAll(".sel").forEach(s => s.textContent = isOpen ? "open ›" : "‹ close");
-});
-
 /* ===================== the state machine (flow-spec F2) ===================== */
 const wiz = {
   open: true, path: "hw",
@@ -727,7 +624,7 @@ function renderWizard() {
   document.getElementById("wiztitle").textContent =
     wiz.path === "hw" ? "Connect a device" : "Simulate a device";
   const wk = document.getElementById("wizkind");
-  wk.textContent = wiz.path === "hw" ? "Hardware" : "Simulator";
+  wk.textContent = wiz.path === "hw" ? "HW" : "SIM";
   wk.className = "wk " + (wiz.path === "hw" ? "hw" : "sim");
 
   const rail = wiz.path === "hw" ? RAIL_HW : RAIL_SIM;
@@ -773,7 +670,7 @@ function renderWizard() {
           <span class="lnk" id="drvlink">driver help</span>.</span>`}
       </div>`;
     foot.innerHTML = `<span class="spacer"></span>
-      <button class="abtn primary big" id="connectbtn">It's connected — pick the port →</button>`;
+      <button class="abtn primary big" id="connectbtn">It's connected →</button>`;
     document.getElementById("connectbtn").onclick = () => { wiz.st = "picking"; renderWizard(); };
     document.getElementById("drvlink").onclick = () => { wiz.st = "driverhelp"; renderWizard(); };
   }
@@ -794,7 +691,7 @@ function renderWizard() {
         <button class="pbtn" id="pcancel">Cancel</button>
         <button class="pbtn pri" id="pconnect" disabled>Connect</button>
       </div>`;
-    w.appendChild(pick);
+    document.querySelector(".wizwrap").appendChild(pick);
     const row = document.getElementById("prow1");
     if (row) row.onclick = () => { row.classList.add("selp");
       document.getElementById("pconnect").removeAttribute("disabled"); };
@@ -819,8 +716,8 @@ function renderWizard() {
           port showing up.</span>
         <div class="boardrow">${BOARDS.filter(b => !b.q).map(b => `
           <button class="bcard" data-drvboard="${b.id}" aria-pressed="${wiz.board === b.id}">
-            <svg width="64" height="40"><use href="#b-generic"/></svg>
-            <span class="bn">${b.name}</span></button>`).join("")}
+            <svg viewBox="0 0 64 40"><use href="#b-generic"/></svg>
+            <span class="bmid"><span class="bn">${b.name}</span></span></button>`).join("")}
         </div>
         ${wiz.board ? `<div class="drvsteps">
           <b>${boardById(wiz.board).name} on macOS</b>
@@ -921,11 +818,11 @@ function renderWizard() {
           <b style="color:var(--strong)">${DETECTED_CHIP}</b> — which board is it?</span>
         <div class="boardrow">${list.map(b => `
           <button class="bcard ${b.q ? "generic" : ""}" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
-            <svg width="64" height="40"><use href="${b.q ? "#b-q" : "#b-generic"}"/></svg>
-            <span class="bn">${b.name}</span>
-            ${b.q ? `<span class="bio">any ESP32-family</span>`
-              : `<span class="bio">${b.chip} · ${b.wires} wire${b.wires > 1 ? "s" : ""} · ${b.pin}</span>`}
-            ${!b.q ? `<span class="badge detected">matches chip</span>` : ""}
+            <svg viewBox="0 0 64 40"><use href="${b.q ? "#b-q" : "#b-generic"}"/></svg>
+            <span class="bmid"><span class="bn">${b.name}</span>
+              ${b.q ? `<span class="bio">any ESP32-family</span>`
+                : `<span class="bio">${b.chip} · ${b.wires} wire${b.wires > 1 ? "s" : ""} · ${b.pin}</span>`}</span>
+            ${!b.q ? `<span class="badge detected">chip ✓</span>` : ""}
           </button>`).join("")}
         </div>
       </div>`;
@@ -989,9 +886,9 @@ function renderWizard() {
           wires, and limits follow it, so what works here works when you flash the real one.</span>
         <div class="boardrow">${BOARDS.filter(b => !b.q).map(b => `
           <button class="bcard" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
-            <svg width="64" height="40"><use href="#b-generic"/></svg>
-            <span class="bn">${b.name}</span>
-            <span class="bio">${b.chip} · ${b.wires} wire${b.wires > 1 ? "s" : ""} · ${b.pin}</span>
+            <svg viewBox="0 0 64 40"><use href="#b-generic"/></svg>
+            <span class="bmid"><span class="bn">${b.name}</span>
+              <span class="bio">${b.chip} · ${b.wires} wire${b.wires > 1 ? "s" : ""} · ${b.pin}</span></span>
           </button>`).join("")}
         </div>
       </div>`;
@@ -1150,7 +1047,6 @@ document.getElementById("wizclose").onclick = () => {
   }
   wiz.open = false; renderWizard();
 };
-document.getElementById("wizback2").onclick = () => document.getElementById("wizclose").click();
 
 function finishToHome() {
   const name = wiz.adopted ? "Luna's porch sign" : wiz.path === "hw" ? derivedName() : "Simulator";
