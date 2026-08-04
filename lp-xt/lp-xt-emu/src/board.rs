@@ -173,13 +173,13 @@ impl BoardProfile {
         BoardProfile {
             name: "esp32",
             code_dbus_base: 0x3FFE_8000,
-            // 32 KiB. Kept in lockstep with `lpvm_native::codemem_esp32::
+            // 24 KiB. Kept in lockstep with `lpvm_native::codemem_esp32::
             // CodeRegion::ESP32_DEFAULT` — `lpvm-native`'s
             // `tests/xt_classic_profile.rs` asserts the two describe the same
             // region, so a change on either side alone fails there. Sized
             // from the measured shader corpus, not chosen; the remaining
-            // 64 KiB of SRAM1 is heap on the device.
-            code_region_len: 0x0000_8000,
+            // 72 KiB of SRAM1 is heap on the device.
+            code_region_len: 0x0000_6000,
             stack_dbus_base: 0x3FFC_0000,
             stack_region_len: 0x0001_0000, // 64 KiB
             stack_dual_mapped: false,

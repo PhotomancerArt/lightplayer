@@ -353,17 +353,25 @@ fn real_shaders_fit_the_classic_code_region_with_margin() {
         CodeRegion::ESP32_DEFAULT.len_bytes / 1024,
     );
 
-    // The guard. A single shader must fit the region with room for others
-    // beside it; the factor is deliberately generous because a shader is
+    // The guard, recast in measured terms at the 2026-08-04 shrink (it was
+    // `largest * 4 <= region` while the region carried #288's deliberate
+    // 5× slack): the region must hold the keep-last-good peak model — the
+    // worst project resident plus one recompile copy — AND one more
+    // largest-in-repo shader beside it, so editing the heaviest project can
+    // still grow by a shader without tripping `TooLarge`. A shader is
     // unbounded in principle and `TooLarge` — not this assert — is the
-    // production backstop. What this catches is the case that matters: the
-    // region shrinking (or the corpus growing) until a real, in-repo shader
-    // no longer has headroom.
+    // production backstop; on-device, `[JIT] fails=` / `alloc_failures` is
+    // the field tripwire. What this catches is the case that matters: the
+    // region shrinking (or the corpus growing) until a real, in-repo
+    // workload no longer has headroom.
     let region = CodeRegion::ESP32_DEFAULT.len_bytes;
     assert!(
-        largest.code_bytes * 4 <= region,
-        "largest corpus shader ({} B, {}) leaves too little headroom in a {} B region — \
-         four of it must fit. Either the region shrank too far or a shader grew a lot.",
+        peak_model + largest.code_bytes <= region,
+        "peak model ({} B: worst project {} + recompile copy) plus one more \
+         largest shader ({} B, {}) exceeds the {} B region — either the \
+         region shrank too far or a shader grew a lot.",
+        peak_model,
+        worst_project.0,
         largest.code_bytes,
         largest.name,
         region
