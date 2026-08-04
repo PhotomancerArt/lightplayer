@@ -88,7 +88,7 @@ pub fn ShaderFace(
             }
         }
         if !face.controls.is_empty() {
-            NodeCardSection { label: "controls",
+            NodeCardSection { label: "settings",
                 div { class: "tw:flex tw:flex-wrap tw:items-start tw:gap-4 tw:px-4 tw:py-3",
                     for control in face.controls.clone() {
                         PanelControl {

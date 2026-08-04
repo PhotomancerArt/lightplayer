@@ -27,6 +27,11 @@ pub enum SlotPaneTreatment {
     Neutral,
     /// The value is bound through the binding/bus system.
     Bound,
+    /// Bound, but needing a look — e.g. an E3-contended bus channel
+    /// (ambiguous until the author picks). Attention-orange, matching the
+    /// engaged-control family; never warning-yellow (that is the unsaved
+    /// color) and never error-red (nothing is broken).
+    Attention,
     /// The value carries unsaved authored edits.
     Unsaved,
     /// The value is being written back to the runtime.
@@ -130,6 +135,7 @@ fn slot_pane_frame_class(treatment: SlotPaneTreatment, fit: bool) -> String {
     let border = match treatment {
         SlotPaneTreatment::Neutral => "tw:border-border",
         SlotPaneTreatment::Bound => "tw:border-status-bound-border",
+        SlotPaneTreatment::Attention => "tw:border-status-attention-border",
         SlotPaneTreatment::Unsaved => "tw:border-status-warning-border",
         SlotPaneTreatment::Saving => "tw:border-status-working-border",
         SlotPaneTreatment::Invalid | SlotPaneTreatment::Error => "tw:border-status-error-border",
@@ -146,6 +152,9 @@ fn slot_pane_header_class(treatment: SlotPaneTreatment) -> &'static str {
         }
         SlotPaneTreatment::Bound => {
             "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:border-b tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-bound-bg),transparent_72%)] tw:py-1 tw:pl-2.5 tw:pr-1"
+        }
+        SlotPaneTreatment::Attention => {
+            "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:border-b tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-attention-bg),transparent_72%)] tw:py-1 tw:pl-2.5 tw:pr-1"
         }
         SlotPaneTreatment::Unsaved => {
             "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:border-b tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_72%)] tw:py-1 tw:pl-2.5 tw:pr-1"
