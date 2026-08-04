@@ -100,5 +100,17 @@ pub fn corpus_uniforms(shader: &CorpusShader, width: u32, height: u32, time: f32
     for (name, value) in shader.extra_uniforms {
         fields.push((String::from(*name), LpsValueF32::F32(*value)));
     }
+    for (name, period) in shader.phasors {
+        let phase = if *period > 0.0 {
+            let x = time / period;
+            x - x.floor()
+        } else {
+            0.0
+        };
+        fields.push((String::from(*name), LpsValueF32::F32(phase)));
+    }
+    // `time` stays in the tree for every shader: uniform binding is by name,
+    // extra fields are ignored, and the bodies that no longer declare it are
+    // exactly the ones that went fully phasor.
     LpsValueF32::Struct { name: None, fields }
 }
