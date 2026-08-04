@@ -6,8 +6,10 @@
 - **Supersedes:** None
 - **Superseded by:** None
 - **Relates:** `2026-07-31-output-sink-retry-policy.md` (parking, preserved here
-  per wire), `2026-07-05-artifact-format-version-and-schema-snapshots.md` (this
-  is the first real bump: format 2 → 3), `2026-07-27-map2d-document-architecture.md`
+  per wire), `2026-07-05-artifact-format-version-and-schema-snapshots.md`
+  (format 3 → 4; main's project/module mitosis took format 3 mid-flight, so
+  this plan's channels-map change landed as the bump after it, not the one
+  originally planned), `2026-07-27-map2d-document-architecture.md`
   (paths are what the spans are honest about)
 
 ## Context
@@ -102,15 +104,18 @@ An endpoint spec is an opaque, whole-string identity for **one wire**. Two
 wires are two specs. Nothing about slicing, ordering, or lamp counts belongs in
 it — that is exactly why the slice lives on the engine's sink record.
 
-### 4. Format 3, version-and-refuse
+### 4. Format 4, version-and-refuse
 
-`PROJECT_FORMAT_VERSION` goes 2 → 3, v2's schemas are snapshotted under
-`schemas/history/v2/`, and every in-repo artifact is rewritten in the same
-change. Old projects are **refused, never migrated** (the format-version ADR's
-posture). This is load-bearing rather than hygiene: `ws281x:rmt:D10` still
-*parses* — endpoint validation is structural — so without the version gate an
-old project would load happily and then fail per-tick at open time on real
-hardware, which is the worst possible place to learn about it.
+`PROJECT_FORMAT_VERSION` goes 3 → 4 (P1 snapshotted format 2 as work started;
+main's project/module mitosis landed format 3 mid-flight, so this change's own
+bump is the one after it — `PROJECT_FORMAT_VERSION` and its full history now
+live in `lp-core/lpc-model/src/project/manifest.rs`), and every in-repo
+artifact is rewritten in the same change. Old projects are **refused, never
+migrated** (the format-version ADR's posture). This is load-bearing rather
+than hygiene: `ws281x:rmt:D10` still *parses* — endpoint validation is
+structural — so without the version gate an old project would load happily
+and then fail per-tick at open time on real hardware, which is the worst
+possible place to learn about it.
 
 ### 5. Parking stays per wire
 
@@ -141,6 +146,27 @@ ws281x:local:IO14 failed" no longer identifies who asked.
   mechanical rather than a re-plumbing.
 - Historical documents keep their period spec strings. ADRs and defect records
   written when the vocabulary was `ws281x:rmt` are not rewritten.
+- **The shared per-channel cap moved to the engine seam, and raised.**
+  `WS281X_MAX_LEDS_PER_CHANNEL` went 256 → 1024, enforced once in
+  `EngineServices::wire_slice` (the seam every `OutputProvider` flushes
+  through) rather than trusted to each provider, with a loud one-time
+  warning on truncation and a second, config-time warning when an authored
+  count exceeds the bound. This closes
+  `docs/debt/output-channel-led-cap-silent-truncation.md` — see that entry's
+  2026-08-03 incident for the full before/after (host and emulator providers
+  never capped at all before this).
+- **The output node's studio face** ships: a board diagram with per-channel
+  pin assignment, and a "fit counts to strips" gesture (named `spread` during
+  design; renamed at the G-A visual gate because "spread" did not explain
+  itself — the gesture divides the node's lamp count evenly across the
+  authored channels and previews the resulting per-channel counts before
+  committing).
+- **Verified on silicon.** One output node opened four RMT channels
+  (IO18/IO16/IO14/IO2) from the desk DOM-Z-102 and drove all four wires
+  byte-exact against the host oracle (per-wire CRCs `0x4233b049` /
+  `0x7e3f40ad` / `0xf34d3f63` / `0xa6fe041e`; the four dumps concatenate to
+  the full oracle frame), with the remainder-channel count semantics
+  exercised on device.
 
 ## Alternatives Considered
 
@@ -163,13 +189,17 @@ wrong the moment a second device is addressable.
 
 ## Follow-ups
 
-- Shared per-channel LED cap (`WS281X_MAX_LEDS_PER_CHANNEL`) enforced
-  identically on host, emulator, and device, plus authoring-time validation of
-  counts against it — closes
-  `docs/debt/output-channel-led-cap-silent-truncation.md`.
-- The output node's studio face: board diagram, per-channel pin assignment, and
-  a spread-across-pins gesture.
-- Concurrent per-frame transmission of a node's wires (`send_blocking_all`).
-- Hardware walk: one node → four wires on the desk DOM-Z-102, per-wire oracle
-  comparison. The board declares four RMT channels; a fifth must never be
-  declared.
+Everything originally listed here (the shared cap, the studio face, the
+hardware walk) landed in this same plan — see the Consequences section above
+for what shipped and where. What remains open:
+
+- Concurrent per-frame transmission of a node's wires (`send_blocking_all`) —
+  wires are still written one at a time (Consequences, above).
+- Per-wire diagnostics / color discovery at the face (M7 of the
+  hardware/board-selection roadmap) — the face is pre-discovery by design
+  (settled Q6/G-A); swatch color-discovery mode already ships elsewhere and
+  the face is its natural next home.
+- A fifth concurrent RMT channel on the classic (M6 of the sibling
+  multi-channel-output-architecture roadmap) — out of scope here; the board
+  manifest stays the sole authority on channel count, and this plan's walk
+  confirms four is the ceiling this hardware proved, never five.
