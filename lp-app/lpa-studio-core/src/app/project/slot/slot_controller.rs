@@ -551,7 +551,22 @@ impl SlotController {
         }
         let value = self.value()?;
         let ui_value = UiSlotValue::from_lp_value(value);
-        let mut produced = UiProducedValue::new(self.label.clone(), ui_value.display);
+        // Composite values don't fit the scalar stat hero: surface the type
+        // name as the compact value and the per-field readings as rows.
+        let mut produced = match &ui_value.kind {
+            crate::UiSlotValueKind::Struct { name, fields } => {
+                let type_name = name
+                    .clone()
+                    .unwrap_or_else(|| String::from(ui_value.kind.type_label()));
+                let mut produced = UiProducedValue::new(self.label.clone(), type_name);
+                produced.fields = fields
+                    .iter()
+                    .map(|(name, field)| (name.clone(), field.display.clone()))
+                    .collect();
+                produced
+            }
+            _ => UiProducedValue::new(self.label.clone(), ui_value.display),
+        };
         produced.key = self.ui_key();
         produced.detail = Some(ui_value.kind.type_label().to_string());
         produced.unit = self.ui_unit();

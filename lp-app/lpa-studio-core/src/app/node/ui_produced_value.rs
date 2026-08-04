@@ -14,8 +14,12 @@ pub struct UiProducedValue {
     pub key: String,
     /// Human-readable value label.
     pub label: String,
-    /// Current formatted value.
+    /// Current formatted value. For composite (struct) values this is the
+    /// compact type name; the per-field readings ride `fields`.
     pub value: String,
+    /// Per-field `(name, formatted value)` rows for composite values; empty
+    /// for scalars, which render `value` as the stat hero instead.
+    pub fields: Vec<(String, String)>,
     /// Optional type, unit, or runtime detail.
     pub detail: Option<String>,
     /// Structured unit metadata for value presentation.
@@ -33,6 +37,7 @@ impl UiProducedValue {
     pub fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             key: String::new(),
+            fields: Vec::new(),
             label: label.into(),
             value: value.into(),
             detail: None,
