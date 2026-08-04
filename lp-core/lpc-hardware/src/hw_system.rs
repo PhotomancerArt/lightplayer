@@ -35,12 +35,10 @@ impl HardwareSystem {
         let mut system = Self::new(Rc::clone(&registry));
         system.add_ws281x_driver(Box::new(VirtualWs281xDriver::new(Rc::clone(&registry))));
         system.add_button_driver(Box::new(VirtualButtonDriver::new(Rc::clone(&registry))));
-        system.add_radio_driver(Box::new(VirtualRadioDriver::new(Rc::clone(&registry), 0)));
-        system.add_radio_driver(Box::new(VirtualRadioDriver::new_with_spec(
-            registry,
-            0,
-            "radio:espnow:0",
-        )));
+        // One radio spec now: the middle segment names the target device, so
+        // `radio:local:0` covers what used to need a `virtual` and an `espnow`
+        // registration side by side.
+        system.add_radio_driver(Box::new(VirtualRadioDriver::new(registry, 0)));
         system
     }
 
@@ -304,7 +302,9 @@ mod tests {
 
         assert!(!system.ws281x_endpoints().is_empty());
         assert!(!system.button_endpoints().is_empty());
-        assert_eq!(system.radio_endpoints().len(), 2);
+        // One spec per radio device: the middle segment names the target
+        // (`radio:local:0`), so there is no second transport-flavored alias.
+        assert_eq!(system.radio_endpoints().len(), 1);
     }
 
     #[test]
@@ -328,7 +328,7 @@ mod tests {
     fn virtual_system_opens_ws281x_by_endpoint_spec() {
         let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
-        let spec = HwEndpointSpec::from_static("ws281x:rmt:D10");
+        let spec = HwEndpointSpec::from_static("ws281x:local:D10");
         let output = system
             .open_ws281x_by_spec(&spec, Ws281xConfig::new(3))
             .unwrap();
@@ -346,7 +346,7 @@ mod tests {
     fn virtual_system_reports_unknown_ws281x_endpoint_spec() {
         let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
         let system = HardwareSystem::with_virtual_drivers(registry);
-        let spec = HwEndpointSpec::from_static("ws281x:rmt:NOPE");
+        let spec = HwEndpointSpec::from_static("ws281x:local:NOPE");
 
         let result = system.open_ws281x_by_spec(&spec, Ws281xConfig::new(3));
 
@@ -363,7 +363,7 @@ mod tests {
         let driver = VirtualButtonDriver::new(Rc::clone(&registry));
         let control = driver.clone();
         system.add_button_driver(Box::new(driver));
-        let spec = HwEndpointSpec::from_static("button:gpio:GPIO4");
+        let spec = HwEndpointSpec::from_static("button:local:GPIO4");
         let mut input = system
             .open_button_by_spec(&spec, ButtonConfig::new(10))
             .unwrap();
@@ -400,7 +400,7 @@ mod tests {
         let registry = Rc::new(HwRegistry::new(crate::default_esp32s3_hardware_manifest()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
         let specs = ["D10", "D9", "D8", "D7"]
-            .map(|pin| HwEndpointSpec::parse(alloc::format!("ws281x:rmt:{pin}")).expect("spec"));
+            .map(|pin| HwEndpointSpec::parse(alloc::format!("ws281x:local:{pin}")).expect("spec"));
 
         let outputs = specs
             .iter()
@@ -419,7 +419,7 @@ mod tests {
         }
 
         // A fifth output has no timing resource left to claim.
-        let fifth = HwEndpointSpec::from_static("ws281x:rmt:D6");
+        let fifth = HwEndpointSpec::from_static("ws281x:local:D6");
         assert!(matches!(
             system.open_ws281x_by_spec(&fifth, Ws281xConfig::new(3)),
             Err(HardwareEndpointError::Hardware { .. })
@@ -507,7 +507,7 @@ mod tests {
 
         let output = system
             .open_ws281x_by_spec(
-                &HwEndpointSpec::from_static("ws281x:rmt:D10"),
+                &HwEndpointSpec::from_static("ws281x:local:D10"),
                 Ws281xConfig::new(3),
             )
             .expect("D10 opens");

@@ -1,6 +1,6 @@
 //! Openable hardware endpoints derived from manifest resources.
 //!
-//! Endpoints are the bridge between authored specs such as `ws281x:rmt:D10` and
+//! Endpoints are the bridge between authored specs such as `ws281x:local:D10` and
 //! the lower-level [`crate::HwAddress`] resources that drivers claim. A driver
 //! reports endpoint status from the [`crate::HwRegistry`] so callers can see
 //! whether an endpoint is available, reserved, or already in use.

@@ -19,8 +19,13 @@ use super::device_state::DeviceState;
 /// One observable device-session event.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeviceEvent {
-    /// The session transitioned into `state`.
-    State { state: DeviceState },
+    /// The session transitioned from `from` into `to`. `from` is `None` only
+    /// for the initial transition into `Booting` at connect — there is no
+    /// predecessor state to name.
+    State {
+        from: Option<DeviceState>,
+        to: DeviceState,
+    },
     /// One non-protocol serial line from the device (boot output and runtime
     /// logs — the classifier feed doubles as the console feed), or one log
     /// line from a running management operation. `origin` says which, so
@@ -31,6 +36,16 @@ pub enum DeviceEvent {
     },
     /// Progress of a long-running management operation (flash/erase).
     Progress { label: String, percent: Option<u8> },
+    /// A protocol frame or line failed to parse (a malformed `M!` frame, a
+    /// mid-frame cut). Counted per session by consumers: garbled input that
+    /// precedes a disconnect attributes the failure to line corruption (see
+    /// docs/defects/2026-08-02-serial-line-interleaving.md) rather than a
+    /// clean drop.
+    ParseAnomaly { detail: String },
+    /// One app-protocol frame Studio WROTE to the wire, as its JSON body.
+    /// Chatty by design; consumers that record traces gate it on capture
+    /// mode and everyone else ignores it.
+    TxFrame { frame: String },
 }
 
 /// Who produced a [`DeviceEvent::LogLine`].

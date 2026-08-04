@@ -780,7 +780,7 @@ fn recorded_states(events: &Rc<RefCell<Vec<DeviceEvent>>>) -> Vec<DeviceState> {
         .borrow()
         .iter()
         .filter_map(|event| match event {
-            DeviceEvent::State { state } => Some(state.clone()),
+            DeviceEvent::State { to, .. } => Some(to.clone()),
             _ => None,
         })
         .collect()

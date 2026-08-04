@@ -27,7 +27,7 @@ use lpc_hardware::{
 
 const DRIVER_ID: &str = "esp32-espnow-radio0";
 const DISPLAY_LABEL: &str = "ESP32 ESP-NOW Radio 0";
-const ENDPOINT_SPEC: &str = "radio:espnow:0";
+const ENDPOINT_SPEC: &str = "radio:local:0";
 pub const DEFAULT_ESPNOW_CHANNEL: u8 = 11;
 const RADIO_QUEUE_CAPACITY: usize = 16;
 const SEEN_RING_LEN: usize = 32;

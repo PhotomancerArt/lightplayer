@@ -26,10 +26,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp,
     CardVerb, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController,
-    DeviceDetailAffordance, DeviceOp, DeviceRichInput, HomeOp, LinkProviderKind, ProjectController,
-    ProjectOp, RecoveryInstructions, RichObjectView, RichSection, RosterAffordance,
-    RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard,
-    UiDeviceProjectChip, UiStatusKind, device_card_tabs, device_rich_object, sim_rich_object,
+    DeviceDetailAffordance, DeviceOp, DeviceRichInput, DeviceTarget, HomeOp, LinkProviderKind,
+    ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
+    RosterAffordance, RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput,
+    UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind, device_card_tabs,
+    device_rich_object, sim_rich_object,
 };
 use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
@@ -93,8 +94,9 @@ impl CardRowAction {
 /// value, never a boxed op). Each verb names exactly one card action; the
 /// confirmation copy rides the action itself.
 fn verb_to_action(verb: &CardVerb, card: &UiDeviceCard) -> UiAction {
+    let card_key = card.identity_key();
     match verb {
-        CardVerb::Erase => erase_device_action(card.name.clone()),
+        CardVerb::Erase => erase_device_action(card_key, card.name.clone()),
         CardVerb::Forget => {
             forget_device_action(card.uid.clone().unwrap_or_default(), card.name.clone())
         }
@@ -102,10 +104,12 @@ fn verb_to_action(verb: &CardVerb, card: &UiDeviceCard) -> UiAction {
         // Base meta carries the confirm copy ("can't be backed up…").
         CardVerb::WipeProject => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::WipeProject,
+            DeviceOp::WipeProject {
+                target: DeviceTarget::card(card_key),
+            },
         ),
-        CardVerb::Flash => flash_device_action_destructive(),
-        CardVerb::PushDrop { key } => push_project_action(key.clone()).with_confirmation(
+        CardVerb::Flash => flash_device_action_destructive(card_key),
+        CardVerb::PushDrop { key } => push_project_action(card_key, key.clone()).with_confirmation(
             lpa_studio_core::ActionConfirmation::new(
                 "Push this project",
                 format!(
@@ -223,6 +227,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element {
+    let recovery_key = card_key.clone();
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-3",
             div { class: "tw:grid tw:gap-1",
@@ -233,7 +238,11 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         onclick: move |_| {
                             on_action.call(UiAction::from_op(
                                 ControllerId::new(DeviceController::NODE_ID),
-                                DeviceOp::ProvisionFirmware { setup_name: None, board_id: None },
+                                DeviceOp::ProvisionFirmware {
+                                    target: DeviceTarget::card(&recovery_key),
+                                    setup_name: None,
+                                    board_id: None,
+                                },
                             ));
                         },
                     }
@@ -249,7 +258,7 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         label: "Start in safe mode",
                         tone: SheetButtonTone::Quiet,
                         onclick: {
-                            let action = boot_safe_once_action();
+                            let action = boot_safe_once_action(&card_key);
                             move |_| on_action.call(action.clone())
                         },
                     }
@@ -266,7 +275,7 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         label: "Download a backup",
                         tone: SheetButtonTone::Quiet,
                         onclick: {
-                            let action = back_up_filesystem_action();
+                            let action = back_up_filesystem_action(&card_key);
                             move |_| on_action.call(action.clone())
                         },
                     }
@@ -336,52 +345,37 @@ fn SetupForm(
 
     let boards = provisionable_boards();
     let detected = detected_chip.as_deref().and_then(chip_id);
-    let (matching, other): (Vec<&'static lpa_boards::BoardDisplayFile>, Vec<_>) = boards
-        .iter()
-        .partition(|board| detected.is_some() && detected == chip_id(&board.family));
     // A board for another chip CANNOT be flashed onto this device — the
-    // guard refuses it — so when the chip is known, the non-matching boards
-    // are collapsed rather than merely sorted after the matching ones.
-    //
-    // Round 3 of the M5 gate flattened this to one grid, correctly: only the
-    // C6 image was served then, so `other` was always empty and the
-    // disclosure was a control that never had anything behind it. Serving
-    // three builds made it non-empty, and a C6 user was shown four boards
-    // they cannot use (Yona, hardware walk 2026-08-02). The spike's original
-    // collapse is back, and now it earns its place.
-    let collapse_others = detected.is_some() && !other.is_empty();
-    let ordered: Vec<&'static lpa_boards::BoardDisplayFile> = if collapse_others {
-        if show_all() {
-            matching.into_iter().chain(other.iter().copied()).collect()
-        } else {
-            matching
-        }
-    } else {
-        boards.clone()
+    // guard refuses it — so when the chip is known, the other-chip boards
+    // are not offered AT ALL. The 2026-08-02 walk collapsed them behind a
+    // "+N other boards" disclosure; the 2026-08-03 gate-1 sitting judged
+    // even that wrong — a disclosure reads as "more applicable choices",
+    // and everything behind it was a dead end. When the chip is UNKNOWN
+    // (no banner, unresolved report), the full list stands: detection, not
+    // the catalog, is the uncertain half then.
+    let applicable: Vec<&'static lpa_boards::BoardDisplayFile> = match detected {
+        Some(chip) => boards
+            .iter()
+            .filter(|board| chip_id(&board.family) == Some(chip))
+            .copied()
+            .collect(),
+        None => boards.clone(),
     };
     // Generic occupies the first cell, so the board capacity is one less;
-    // the overflow cell fills the 12th (4 rows of 3).
+    // the overflow cell fills the 12th (4 rows of 3). Plain grid
+    // truncation — every tile behind it IS applicable.
     let capacity = SETUP_TILE_LIMIT - 1;
-    let overflow = if collapse_others {
-        // The disclosure counts the other-chip boards, not grid overflow:
-        // "+4 other boards" is a different offer from "+4 more".
-        if show_all() { 0 } else { other.len() }
+    let overflow = if show_all() {
+        0
     } else {
-        ordered.len().saturating_sub(capacity)
+        applicable.len().saturating_sub(capacity)
     };
-    let shown: Vec<_> = if show_all() || overflow == 0 || collapse_others {
-        ordered
+    let shown: Vec<_> = if overflow == 0 {
+        applicable
     } else {
-        ordered.into_iter().take(capacity).collect()
+        applicable.into_iter().take(capacity).collect()
     };
-    let overflow_label = if collapse_others {
-        // Name what is behind it. "+4 more" reads as truncation; these are
-        // boards for a different chip and the user should know that before
-        // opening it.
-        format!("+{overflow} other boards")
-    } else {
-        format!("+{overflow} more")
-    };
+    let overflow_label = format!("+{overflow} more");
 
     let picked = setup_board
         .as_deref()
@@ -399,24 +393,22 @@ fn SetupForm(
     let name_value = typed_name().unwrap_or(derived_name);
     let submit_board = setup_board.clone();
     let submit_name = name_value.clone();
+    let submit_card_key = card_key.clone();
 
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-3.5",
-            div {
-                // The headline carries the chip, replacing the generic
-                // status line AND the old "BOARD detected:" label.
-                p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
-                    if let Some(chip) = &detected_chip {
-                        "Set up "
-                        span { style: "color: var(--edge-tint);", "{chip_display(chip)}" }
-                        " device"
-                    } else {
-                        "Set up this device"
-                    }
-                }
-                p { class: "tw:m-0 tw:mt-0.5 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
-                    "Select your board — or install generic and choose later"
-                }
+            // ONE line, and it is the ask (recovered from the parked
+            // card-labels branch, d7a881424). The card TITLE already names
+            // the chip (M1's chip-based title), so a "Set up ESP32-C6
+            // device" headline directly beneath it said the same thing
+            // twice. What went with it was the "or install generic and
+            // choose later" half: picking the board is not a decision to
+            // defer — generic writes no `/hardware.json`, so a device set
+            // up that way has no pin map until someone comes back for it.
+            // The offer is still there in the dashed cell, without the
+            // copy inviting people to take it.
+            p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+                "Select your board"
             }
             div { class: "tw:grid tw:grid-cols-3 tw:gap-2",
                 // Generic leads: it is the no-decision outcome, and it has
@@ -450,11 +442,14 @@ fn SetupForm(
                 }
             }
             div {
-                label { class: "tw:mb-1 tw:block tw:text-xs tw:font-semibold tw:text-subtle-foreground",
-                    "Device name"
+                // Same voice and same weight as "Select your board": the
+                // form is two asks in a row, and a quiet field LABEL beside
+                // a bold instruction read as two different kinds of thing.
+                label { class: "tw:mb-1 tw:block tw:text-sm tw:font-bold tw:text-strong-foreground",
+                    "Name your device"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-xs tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
                     value: "{name_value}",
                     oninput: move |event| typed_name.set(Some(event.value())),
                 }
@@ -468,6 +463,7 @@ fn SetupForm(
                     on_action.call(UiAction::from_op(
                         ControllerId::new(DeviceController::NODE_ID),
                         DeviceOp::ProvisionFirmware {
+                            target: DeviceTarget::card(&submit_card_key),
                             setup_name,
                             board_id: submit_board.clone(),
                         },
@@ -482,20 +478,6 @@ fn SetupForm(
 /// boards overflow — one is the "+N more" cell (gate round 3: the card is
 /// allowed to grow, but not without bound).
 const SETUP_TILE_LIMIT: usize = 11;
-
-/// A chip id as the headline shows it (`esp32c6` → `ESP32-C6`); unknown
-/// shapes pass through uppercased rather than being dropped.
-fn chip_display(chip: &str) -> String {
-    match chip_id(chip) {
-        Some("esp32c6") => "ESP32-C6".to_string(),
-        Some("esp32s3") => "ESP32-S3".to_string(),
-        Some("esp32c3") => "ESP32-C3".to_string(),
-        // The classic. Its probe answer is a die name — `ESP32-D0WD-V3
-        // (revision v3.0)` — which is not what the headline should read.
-        Some("esp32") => "ESP32".to_string(),
-        _ => chip.to_ascii_uppercase(),
-    }
-}
 
 /// One tile in the board grid: the board's own drawing over its name.
 /// `board: None` is the generic fallback, drawn as a dashed placeholder.
@@ -663,6 +645,8 @@ pub(crate) fn DeviceCard(
             fw: card.fw.as_ref(),
             hardware: card.hardware.as_ref(),
             bundled_fw: bundled_fw.as_ref(),
+            detected_chip: card.detected_chip.as_deref(),
+            port_label: card.port_label.as_deref(),
             now_secs: now,
         })
         .sections
@@ -953,7 +937,7 @@ pub(crate) fn DeviceCard(
                                 {console_tab_body(&card.console_tail)}
                             },
                             DeviceCardTab::Project if picker_mode => rsx! {
-                                {project_picker_body(&project_choices, on_action)}
+                                {project_picker_body(&card_key, &project_choices, on_action)}
                             },
                             _ => rsx! {
                                 {sections_tab_body(&tabs, active_tab, on_action, &card_key)}
@@ -1140,12 +1124,31 @@ fn console_tab_body(tail: &[UiLogEntry]) -> Element {
             p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
                 "No console output yet."
             }
+            {trace_footer()}
         };
     }
     rsx! {
         div { class: "ux-console-lines",
             for entry in tail {
                 div { class: console_line_class(entry.level), "{entry.message}" }
+            }
+        }
+        {trace_footer()}
+    }
+}
+
+/// The device-trace export affordance (M0): copies the lifecycle event
+/// trace — including the PREVIOUS session's, which survives the refresh
+/// that "fixed" the jank — as JSONL to the clipboard.
+fn trace_footer() -> Element {
+    rsx! {
+        div { class: "tw:mt-1.5 tw:flex tw:justify-end",
+            button {
+                class: "ux-card-op-copy",
+                r#type: "button",
+                title: "Copy the device lifecycle event trace (this session and the previous one) as JSONL",
+                onclick: move |_| crate::device_events_io::copy_trace(),
+                "Copy device trace"
             }
         }
     }
@@ -1275,6 +1278,18 @@ fn status_tab_body(
                 replaces: matches!(card.state, RosterCardState::OtherFirmware),
                 setup_board: card.ui.setup_board.clone(),
                 detected_chip: card.detected_chip.clone(),
+                on_action,
+            }
+        } else if !card.sim && card.state == RosterCardState::NeedsAName {
+            // The flashed-but-unstamped board names itself ON the card —
+            // the setup form's naming half, reused. The "Name it" button →
+            // sheet detour predates the on-card form (sitting feedback,
+            // 2026-08-03: "we moved mostly away from the little dialogs").
+            NameForm {
+                card_key: card_key.to_string(),
+                board_id: card.hardware.as_ref().and_then(|hw| hw.board_id.clone()),
+                detected_chip: card.detected_chip.clone(),
+                now_secs,
                 on_action,
             }
         } else if recovery_face {
@@ -1433,8 +1448,8 @@ fn TroubleshootSheet(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let reconnect = reconnect_device_action(uid);
-    let recovery_flash = flash_device_action(false);
-    let boot_safe_once = boot_safe_once_action();
+    let recovery_flash = flash_device_action(&card_key, false);
+    let boot_safe_once = boot_safe_once_action(&card_key);
     // The firmware package names the chip it was built for ("fw-esp32c6"),
     // which is the only chip source available before the user reaches
     // bootloader mode — a device that will not boot cannot tell us its board.
@@ -1667,7 +1682,66 @@ fn ConfirmSheet(action: UiAction, card_key: String, on_action: EventHandler<UiAc
     }
 }
 
-/// The name-stamping sheet (NeedsAName — spike round 3): input +
+/// The flashed-but-unstamped board's inline naming (NeedsAName): the
+/// SETUP FORM's naming half, reused — same voice ("Name your device"),
+/// same derived date + board/chip default, one primary verb, no dialog.
+/// The discriminator prefers what the board itself reports (`board_id`
+/// from the hello — the setup form's pick was stamped into
+/// /hardware.json), then the detected chip, then the bare fallback.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NameForm(
+    card_key: String,
+    board_id: Option<String>,
+    detected_chip: Option<String>,
+    now_secs: Option<f64>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut typed_name = use_signal(|| None::<String>);
+    let discriminator = board_id
+        .as_deref()
+        .map(|id| board_slug(id).to_string())
+        .or_else(|| {
+            detected_chip
+                .as_deref()
+                .and_then(|chip| chip_id(chip).map(str::to_string))
+        })
+        .unwrap_or_else(|| "lightplayer".to_string());
+    let derived = default_setup_name(now_secs, &discriminator);
+    let name_value = typed_name().unwrap_or(derived);
+    let submit_name = name_value.clone();
+    let name_card_key = card_key.clone();
+    rsx! {
+        div { class: "tw:mt-1 tw:grid tw:gap-3.5",
+            div {
+                label { class: "tw:mb-1 tw:block tw:text-sm tw:font-bold tw:text-strong-foreground",
+                    "Name your device"
+                }
+                input {
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    value: "{name_value}",
+                    oninput: move |event| typed_name.set(Some(event.value())),
+                }
+            }
+            CardSheetButton {
+                label: "Name device",
+                tone: SheetButtonTone::Primary,
+                onclick: move |_| {
+                    let value = submit_name.trim().to_string();
+                    if !value.is_empty() {
+                        on_action.call(home_action(HomeOp::NameDevice {
+                            target: DeviceTarget::card(&name_card_key),
+                            name: value,
+                        }));
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// The name-stamping sheet (retained for the title-bar naming path;
+/// the NeedsAName FACE now names inline via [`NameForm`]): input +
 /// Enter-to-save; naming stamps the uid and the card returns to Status.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -1736,7 +1810,10 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
     if value.is_empty() {
         return;
     }
-    on_action.call(home_action(HomeOp::NameDevice { name: value }));
+    on_action.call(home_action(HomeOp::NameDevice {
+        target: DeviceTarget::card(card_key),
+        name: value,
+    }));
     on_action.call(close_sheet_action(card_key));
 }
 
@@ -1820,10 +1897,12 @@ pub(crate) fn connect_device_action() -> UiAction {
 /// which the card's own state carries the flow.
 /// Write the boot-control record so the device's next restart skips its
 /// project. Non-destructive and one-shot — see `DeviceOp::BootSafeOnce`.
-pub(crate) fn boot_safe_once_action() -> UiAction {
+pub(crate) fn boot_safe_once_action(card_key: &str) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::BootSafeOnce,
+        DeviceOp::BootSafeOnce {
+            target: DeviceTarget::card(card_key),
+        },
     )
     .with_label("Start in safe mode")
 }
@@ -1833,10 +1912,12 @@ pub(crate) fn boot_safe_once_action() -> UiAction {
 /// No confirmation: nothing is written. It is deliberately the row people
 /// meet BEFORE the destructive verbs, because it is what makes them
 /// survivable — see `DeviceOp::BackUpFilesystem`.
-pub(crate) fn back_up_filesystem_action() -> UiAction {
+pub(crate) fn back_up_filesystem_action(card_key: &str) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::BackUpFilesystem,
+        DeviceOp::BackUpFilesystem {
+            target: DeviceTarget::card(card_key),
+        },
     )
     .with_label("Download a backup")
     .with_summary(
@@ -1846,11 +1927,12 @@ pub(crate) fn back_up_filesystem_action() -> UiAction {
     .with_icon("download")
 }
 
-pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
+pub(crate) fn flash_device_action(card_key: &str, device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
             DeviceOp::ProvisionFirmware {
+                target: DeviceTarget::card(card_key),
                 setup_name: None,
                 board_id: None,
             },
@@ -1871,10 +1953,13 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
 
 /// The in-card push op for one library project (M5's lane; M8′ reuses
 /// it for the picker rows and the drop-confirm sheet).
-fn push_project_action(key: String) -> UiAction {
+fn push_project_action(card_key: &str, key: String) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::PushProject { key },
+        DeployOp::PushProject {
+            key,
+            target: DeviceTarget::card(card_key),
+        },
     )
     .with_label("Push")
     .with_summary("Push this project to the device.")
@@ -1885,6 +1970,7 @@ fn push_project_action(key: String) -> UiAction {
 /// menu rows — one click pushes (the click is the D11 consent, exactly
 /// like the in-card Push). Rendered only on the Connected-empty card.
 fn project_picker_body(
+    card_key: &str,
     choices: &[UiDeviceProjectChip],
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -1895,7 +1981,7 @@ fn project_picker_body(
         div { class: "tw:grid",
             for chip in choices.iter() {
                 {
-                    let action = push_project_action(chip.uid.clone())
+                    let action = push_project_action(card_key, chip.uid.clone())
                         .with_label(chip.name.clone())
                         .with_summary(format!("Push {} to this device.", chip.name))
                         .with_icon("play");
@@ -1961,6 +2047,8 @@ pub(super) fn device_affordance_action(
     card: &UiDeviceCard,
     affordance: &RosterAffordance,
 ) -> Option<UiAction> {
+    // Every device verb below acts on THIS card's board (M4).
+    let card_key = card.identity_key();
     let action = match affordance {
         // the grow control (⤢) is the editor entry — no row
         // The visible editor CTA on the running card's face (2026-07-26
@@ -1979,6 +2067,7 @@ pub(super) fn device_affordance_action(
                 ControllerId::new(DEPLOY_NODE_ID),
                 DeployOp::PushProject {
                     key: chip.uid.clone(),
+                    target: DeviceTarget::card(card_key),
                 },
             )
             .with_summary("Push your newest version to this device.")
@@ -1988,19 +2077,25 @@ pub(super) fn device_affordance_action(
         // directly — both are non-destructive by construction (adopt keeps
         // the old head in history; keep-both forks), so neither needs a
         // gate. The copy SAYS so, which is what makes one click feel safe.
-        RosterAffordance::UseBoardCopy => {
-            UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::AdoptDeviceCopy)
-                .with_summary(
-                    "Make the board's copy your newest version — your local \
+        RosterAffordance::UseBoardCopy => UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::AdoptDeviceCopy {
+                target: DeviceTarget::card(card_key),
+            },
+        )
+        .with_summary(
+            "Make the board's copy your newest version — your local \
                      changes stay in your project history.",
-                )
-                .with_icon("download")
-        }
-        RosterAffordance::KeepBoth => {
-            UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::KeepBothFork)
-                .with_summary("Save the board's copy as its own project.")
-                .with_icon("copy")
-        }
+        )
+        .with_icon("download"),
+        RosterAffordance::KeepBoth => UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::KeepBothFork {
+                target: DeviceTarget::card(card_key),
+            },
+        )
+        .with_summary("Save the board's copy as its own project.")
+        .with_icon("copy"),
         // intercepted upstream: the troubleshoot sheet / the Project-tab
         // picker / the wipe confirm (`wire_card_affordance`)
         RosterAffordance::Troubleshoot
@@ -2015,6 +2110,7 @@ pub(super) fn device_affordance_action(
         RosterAffordance::SetUp => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
             DeviceOp::ProvisionFirmware {
+                target: DeviceTarget::card(card_key),
                 setup_name: None,
                 board_id: None,
             },
@@ -2027,6 +2123,7 @@ pub(super) fn device_affordance_action(
         RosterAffordance::UpdateFirmware => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
             DeviceOp::ProvisionFirmware {
+                target: DeviceTarget::card(card_key),
                 setup_name: None,
                 board_id: None,
             },
@@ -2085,6 +2182,7 @@ fn wire_card_affordance(
         // The name-stamping sheet (an unstamped board's one naming flow).
         DeviceDetailAffordance::Roster(RosterAffordance::NameDevice) => {
             let display = home_action(HomeOp::NameDevice {
+                target: DeviceTarget::card(card.identity_key()),
                 name: String::new(),
             })
             .with_label("Name this device…")
@@ -2109,6 +2207,7 @@ fn wire_card_affordance(
                 UiAction::from_op(
                     ControllerId::new(DeviceController::NODE_ID),
                     DeviceOp::ProvisionFirmware {
+                        target: DeviceTarget::card(card.identity_key()),
                         setup_name: None,
                         board_id: None,
                     },
@@ -2124,7 +2223,9 @@ fn wire_card_affordance(
         DeviceDetailAffordance::Roster(RosterAffordance::WipeProject) => {
             let action = UiAction::from_op(
                 ControllerId::new(DeviceController::NODE_ID),
-                DeviceOp::WipeProject,
+                DeviceOp::WipeProject {
+                    target: DeviceTarget::card(card.identity_key()),
+                },
             )
             .with_label(RosterAffordance::WipeProject.label())
             .with_summary("Remove the project from this device — back to blank.")
@@ -2134,6 +2235,19 @@ fn wire_card_affordance(
                 strip_confirmation(action),
             ))
         }
+        // The firmware UPDATE keeps its gate, but as the card's own sheet
+        // — every other confirmed verb on this card does (D41), and the
+        // generic ActionButton path put a BROWSER confirm() in the middle
+        // of an otherwise card-resident flow (gate-1 sitting, 2026-08-03:
+        // "I got a browser confirm, which is weird").
+        DeviceDetailAffordance::Roster(affordance @ RosterAffordance::UpdateFirmware) => {
+            device_affordance_action(card, affordance).map(|action| {
+                CardRowAction::Sheet(
+                    CardSheetState::Confirm(CardVerb::Flash),
+                    strip_confirmation(action),
+                )
+            })
+        }
         DeviceDetailAffordance::Roster(affordance) => {
             device_affordance_action(card, affordance).map(CardRowAction::from_action)
         }
@@ -2142,16 +2256,16 @@ fn wire_card_affordance(
         // action with the gate stripped (the sheet IS the gate).
         DeviceDetailAffordance::FlashFirmware => Some(CardRowAction::Sheet(
             CardSheetState::Confirm(CardVerb::Flash),
-            strip_confirmation(flash_device_action_destructive()),
+            strip_confirmation(flash_device_action_destructive(card.identity_key())),
         )),
         // Non-destructive, so it dispatches straight from the row — a
         // confirm gate on "save a copy of your work" would be theatre.
-        DeviceDetailAffordance::BackUpFilesystem => {
-            Some(CardRowAction::from_action(back_up_filesystem_action()))
-        }
+        DeviceDetailAffordance::BackUpFilesystem => Some(CardRowAction::from_action(
+            back_up_filesystem_action(card.identity_key()),
+        )),
         DeviceDetailAffordance::EraseDevice => Some(CardRowAction::Sheet(
             CardSheetState::Confirm(CardVerb::Erase),
-            strip_confirmation(erase_device_action(card.name.clone())),
+            strip_confirmation(erase_device_action(card.identity_key(), card.name.clone())),
         )),
         DeviceDetailAffordance::ForgetDevice => card.uid.clone().map(|uid| {
             CardRowAction::Sheet(
@@ -2159,7 +2273,32 @@ fn wire_card_affordance(
                 strip_confirmation(forget_device_action(uid, card.name.clone())),
             )
         }),
+        // Non-destructive (the board keeps running; reconnecting adds it
+        // back), so it dispatches straight from the row — no confirm
+        // theatre. Only live cards carry a session key to target.
+        DeviceDetailAffordance::DisconnectDevice => card
+            .session_key
+            .clone()
+            .map(|session_key| CardRowAction::from_action(disconnect_device_action(&session_key))),
     }
+}
+
+/// The Danger tab's disconnect row (multi-device M3): close THIS board's
+/// session, targeted by the card's session key so a second attached board
+/// is untouched.
+pub(crate) fn disconnect_device_action(card_key: &str) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::DisconnectDevice {
+            target: DeviceTarget::card(card_key),
+        },
+    )
+    .with_label("Disconnect")
+    .with_summary(
+        "Close this board's session and remove its card. The board keeps \
+         running; connecting it again adds it back.",
+    )
+    .with_icon("remove")
 }
 
 /// Map one sim section's affordance identities onto card rows (the
@@ -2193,8 +2332,8 @@ fn wire_sim_card_section(section: RichSection<SimDetailAffordance>) -> RichSecti
 /// The Danger tab's flash row: [`flash_device_action`] with a live
 /// device context, wearing the destructive treatment the tab's rows
 /// share (the inline red zone reads uniformly red).
-pub(super) fn flash_device_action_destructive() -> UiAction {
-    let action = flash_device_action(true);
+pub(super) fn flash_device_action_destructive(card_key: &str) -> UiAction {
+    let action = flash_device_action(card_key, true);
     let meta = action.meta().clone().destructive();
     action.with_meta(meta)
 }
@@ -2202,17 +2341,21 @@ pub(super) fn flash_device_action_destructive() -> UiAction {
 /// Erase the device's flash entirely, from the Danger tab. Confirmation
 /// states the honest facts: full wipe; anything Studio could read was
 /// banked at connect (D8) — unreadable content is gone for good.
-pub(crate) fn erase_device_action(name: String) -> UiAction {
-    UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::EraseDevice).with_confirmation(
-        lpa_studio_core::ActionConfirmation::new(
-            "Erase device",
-            format!(
-                "Erase everything on \"{name}\"? Its flash is wiped clean; \
-                 anything Studio could read was already saved to your library."
-            ),
-            "Erase",
-        ),
+pub(crate) fn erase_device_action(card_key: &str, name: String) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::EraseDevice {
+            target: DeviceTarget::card(card_key),
+        },
     )
+    .with_confirmation(lpa_studio_core::ActionConfirmation::new(
+        "Erase device",
+        format!(
+            "Erase everything on \"{name}\"? Its flash is wiped clean; \
+                 anything Studio could read was already saved to your library."
+        ),
+        "Erase",
+    ))
 }
 
 /// The forget action (D34 hygiene) for the offline card's Danger tab.
@@ -2289,7 +2432,7 @@ fn grow_button_class(push_right: bool) -> &'static str {
 
 #[cfg(test)]
 mod setup_name_tests {
-    use super::{board_slug, chip_display, default_setup_name};
+    use super::{board_slug, default_setup_name};
 
     /// Sortable date first (gate round 2), then the most specific thing
     /// known about the device.
@@ -2311,15 +2454,5 @@ mod setup_name_tests {
     fn board_slug_drops_the_vendor() {
         assert_eq!(board_slug("seeed/xiao-esp32-c6"), "xiao-esp32-c6");
         assert_eq!(board_slug("dom-z-102"), "dom-z-102");
-    }
-
-    /// The headline names the chip the way a datasheet does; anything
-    /// unrecognized still shows rather than vanishing.
-    #[test]
-    fn chip_display_is_datasheet_shaped() {
-        assert_eq!(chip_display("esp32c6"), "ESP32-C6");
-        assert_eq!(chip_display("ESP32-S3"), "ESP32-S3");
-        assert_eq!(chip_display("esp32"), "ESP32");
-        assert_eq!(chip_display("rp2040"), "RP2040");
     }
 }

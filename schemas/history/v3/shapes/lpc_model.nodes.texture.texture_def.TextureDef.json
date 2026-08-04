@@ -1,0 +1,48 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "size",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "dimensions",
+              "id": 2973013964,
+              "meta": {},
+              "ty": {
+                "struct": {
+                  "fields": [
+                    {
+                      "name": "width",
+                      "ty": "u32"
+                    },
+                    {
+                      "name": "height",
+                      "ty": "u32"
+                    }
+                  ],
+                  "name": "Dim2u"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

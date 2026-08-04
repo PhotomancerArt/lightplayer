@@ -18,7 +18,10 @@ use crate::app::places::device_session::{self, DeviceContent, DeviceSyncState};
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
-use crate::core::log::{LogClock, LogFilter, LogRing};
+use crate::core::log::{
+    DeviceEventKind, DeviceEventLog, DeviceEventRecord, DeviceEventRecorder, LogClock, LogFilter,
+    LogRing,
+};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
@@ -74,6 +77,12 @@ pub struct StudioController {
     /// [`ConsoleCommand`]s. Display-side only: the ring keeps everything, the
     /// filter shapes the emitted [`UiConsoleView`].
     log_filter: LogFilter,
+    /// The device lifecycle event ring (M0 of the multi-device roadmap):
+    /// state transitions, connect-flow changes, pool lifecycle, management
+    /// phases, sweep decisions, parse anomalies — and raw RX/TX in capture
+    /// mode. `Rc` because the device controller and per-connect event
+    /// sinks record into it through [`DeviceEventRecorder`] clones.
+    device_events: Rc<std::cell::RefCell<DeviceEventLog>>,
     /// The injected wall clock that stamps [`UiLogDraft`]s at push time.
     /// Producers never stamp — see the `core::log` module docs.
     now_secs: LogClock,
@@ -129,16 +138,24 @@ pub struct StudioController {
     /// never re-reads. The in-place `op` is NOT stored here — it derives
     /// live from the session's `operation_label`.
     card_ui: std::collections::HashMap<String, crate::CardUiState>,
-    /// The hardware card's CARD-OWNED op flow (state-flow model §2): set
-    /// at management dispatch, fed by the manage event sink, and — the
-    /// point (I1) — NOT cleared when the session dies, because heavy ops
-    /// sever the very session that used to narrate them. `Failed` stays
-    /// until the user takes its one exit (`CardUiOp::ClearOp`). Keyed by
-    /// the managed device's stamped uid when it has one (`None` = an
-    /// identity-less blank board — the op then rides the live non-sim
-    /// card). One slot because the pool holds one hardware session; this
-    /// grows into a per-identity map with the pool.
-    device_card_op: Option<(Option<String>, Rc<RefCell<crate::CardOp>>)>,
+    /// The CARD-OWNED op flows in flight (state-flow model §2), one per
+    /// managed SESSION: set at management dispatch, fed by the manage
+    /// event sink, and — the point (I1) — NOT cleared when the session
+    /// dies, because heavy ops sever the very session that used to
+    /// narrate them. `Failed` stays until the user takes its one exit
+    /// (`CardUiOp::ClearOp`).
+    ///
+    /// Keyed by `RuntimeId` (M4), not by the card key: a first-provision
+    /// flash STAMPS a uid mid-op, which moves the card's
+    /// `identity_key()` from its session key to that uid — an op keyed by
+    /// the card key would lose its card at the instant the flash
+    /// succeeded. The session id does not move.
+    ///
+    /// The one thing a session id does not survive is the replug that
+    /// ends a recovery write: the board comes back on the same ENDPOINT
+    /// under a new session. [`Self::migrate_card_op`] carries the flow
+    /// across, because the endpoint is the physical board's continuity.
+    device_card_ops: std::collections::BTreeMap<crate::RuntimeId, Rc<RefCell<crate::CardOp>>>,
     /// The most recent finished device filesystem backup, carried on the
     /// home view until the shell downloads it. Kept (rather than emitted and
     /// forgotten) because the view is a full snapshot; `device_backup_seq` is
@@ -202,13 +219,21 @@ impl StudioController {
     /// stepping fakes. Core takes the closure instead of reading a clock so
     /// the crate stays platform-free (P1).
     pub fn new(now_secs: impl Fn() -> f64 + 'static) -> Self {
+        let now_secs: LogClock = Rc::new(now_secs);
+        let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
+        let mut device = DeviceController::new();
+        device.set_event_recorder(DeviceEventRecorder::new(
+            Rc::clone(&device_events),
+            Rc::clone(&now_secs),
+        ));
         Self {
-            device: DeviceController::new(),
+            device,
             pool: RuntimePool::new(),
             project: ProjectController::new(),
             logs: LogRing::new(),
             log_filter: LogFilter::default(),
-            now_secs: Rc::new(now_secs),
+            device_events,
+            now_secs,
             #[cfg(test)]
             test_clock: None,
             on_entry: None,
@@ -223,7 +248,7 @@ impl StudioController {
             pending_open: None,
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
-            device_card_op: None,
+            device_card_ops: std::collections::BTreeMap::new(),
             device_backup: None,
             device_backup_seq: 0,
             sim_crash_reboot_at: None,
@@ -481,6 +506,49 @@ impl StudioController {
         }
     }
 
+    /// Install the device-event mirror hook: sees every record accepted by
+    /// the device event log (M0). The web shell uses it to persist the
+    /// trace across refreshes and to stream capture-mode records to a
+    /// scenario-runner sink. Install before the actor takes ownership.
+    pub fn set_on_device_event(&mut self, hook: impl Fn(&DeviceEventRecord) + 'static) {
+        self.device_events.borrow_mut().set_on_record(hook);
+    }
+
+    /// Turn device-event capture mode (raw RX/TX recording) on or off.
+    pub fn set_device_event_capture(&mut self, capture: bool) {
+        self.device_events.borrow_mut().set_capture(capture);
+    }
+
+    /// Whether device-event capture mode is on.
+    pub fn device_event_capture(&self) -> bool {
+        self.device_events.borrow().capture()
+    }
+
+    /// The retained device event records as JSONL (the export affordance).
+    pub fn device_events_jsonl(&self) -> String {
+        self.device_events.borrow().to_jsonl()
+    }
+
+    /// Read access to the device event log (tests, diagnostics).
+    pub fn device_events(&self) -> std::cell::Ref<'_, DeviceEventLog> {
+        self.device_events.borrow()
+    }
+
+    /// Record one device event stamped with the controller's clock.
+    fn record_device_event(
+        &self,
+        session: Option<&str>,
+        endpoint: Option<&str>,
+        kind: DeviceEventKind,
+    ) {
+        self.device_events.borrow_mut().record(DeviceEventRecord {
+            t: (self.now_secs)(),
+            session: session.map(str::to_string),
+            endpoint: endpoint.map(str::to_string),
+            kind,
+        });
+    }
+
     pub fn snapshot(&self) -> StudioSnapshot {
         StudioSnapshot::new(
             self.device.flow_state().clone(),
@@ -510,34 +578,59 @@ impl StudioController {
             .is_some_and(|session| matches!(session.server_state(), ServerState::Connected { .. }))
     }
 
-    /// The attached hardware's device state, when hardware is attached
-    /// (kind-filtered — the sim is not a device, D22).
-    fn device_state(&self) -> Option<lpa_link::DeviceState> {
+    /// Device `id`'s link state (M4: the board the flow named, never "the"
+    /// device — kind-asserted, so the sim is never a device, D22).
+    fn device_state_for(&self, id: crate::RuntimeId) -> Option<lpa_link::DeviceState> {
         self.pool
-            .device_session()
+            .device_session(id)
             .and_then(crate::RuntimeSession::device_state)
     }
 
-    /// The live hardware [`lpa_link::DeviceSession`], when one is attached
-    /// (test stubs have none).
-    fn hardware_session(&self) -> Option<&lpa_link::DeviceSession> {
+    /// Device `id`'s live hardware [`lpa_link::DeviceSession`] (test stubs
+    /// have none).
+    fn hardware_session_for(&self, id: crate::RuntimeId) -> Option<&lpa_link::DeviceSession> {
         self.pool
-            .device_session()
+            .device_session(id)
             .and_then(crate::RuntimeSession::hardware_session)
     }
 
-    /// Transport label for the attached HARDWARE device ("USB" for serial
-    /// classes), derived from the device SESSION's link record — never
-    /// from the shared connect flow, which the sim's open may have moved
-    /// on (P2 coexistence). `None` when no hardware is attached (the sim
-    /// is never a device — D22).
-    fn transport_label(&self) -> Option<&'static str> {
+    /// Transport label for device `id` ("USB" for serial classes), derived
+    /// from that SESSION's link record — never from the shared connect
+    /// flow, which the sim's open may have moved on (P2 coexistence).
+    fn transport_label_for(&self, id: crate::RuntimeId) -> Option<&'static str> {
         self.pool
-            .device_session()?
+            .device_session(id)?
             .payload()
             .link_session()?
             .provider_kind
             .transport_label()
+    }
+
+    /// The device an APP-LEVEL surface means when no card named one: the
+    /// lens session when the lens is on a device, else the oldest device
+    /// session.
+    ///
+    /// Reads only — the shell view's device summary, and the ops that
+    /// genuinely have no card to inherit from (the console's log-level
+    /// selector, `ConnectLightPlayer`'s documented lens fallback). An
+    /// operation reaches this ONLY through `DeviceTarget::Ambient`'s
+    /// enumerated set; anything else names a card.
+    /// The shell view's device summary: whatever board the app-level
+    /// surfaces mean ([`Self::ambient_device_id`]). The card surfaces read
+    /// their OWN session's sync instead (M3's per-session evidence).
+    fn ambient_device_sync(&self) -> Option<&DeviceSyncState> {
+        self.device_sync_for(self.ambient_device_id()?)
+    }
+
+    pub(crate) fn ambient_device_id(&self) -> Option<crate::RuntimeId> {
+        self.pool
+            .lens()
+            .filter(|id| self.pool.device_session(*id).is_some())
+            .or_else(|| {
+                self.pool
+                    .oldest_device_session()
+                    .map(crate::RuntimeSession::id)
+            })
     }
 
     /// The delay before the next passive tick: the MINIMUM over sessions
@@ -699,7 +792,7 @@ impl StudioController {
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
-                .with_device_sync(self.device_sync().cloned())
+                .with_device_sync(self.ambient_device_sync().cloned())
                 .with_settings(self.settings.ui_view());
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -711,6 +804,15 @@ impl StudioController {
         if let UiViewContent::ProjectEditor(editor) = &mut project_pane.body {
             self.agent
                 .decorate_editor_view(editor, self.pool.lens(), &self.agent_view_context());
+            // Output faces get the facts their node's sections cannot carry:
+            // which board the lens device is (registry truth), and the lamp
+            // extent feeding the node (the upstream card's produced control
+            // product). "No board known" is a first-class state — a device
+            // provisioned outside Studio simply has no board id.
+            crate::app::studio::output_face_decoration::decorate_output_faces(
+                editor,
+                self.lens_board_id(),
+            );
         }
         // Hoist the project's edit state to the shell: the web edge arms the
         // unload gate from here rather than walking the pane tree.
@@ -729,10 +831,37 @@ impl StudioController {
                 self.project.active_library_uid(),
                 self.project.active_library_slug(),
             )
-            .with_device_sync(self.device_sync().cloned())
+            .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
             .with_settings(self.settings.ui_view())
             .with_dirty(dirty)
+    }
+
+    /// The board the LENS device is known to be — `RegisteredDevice.board_id`,
+    /// stamped at provisioning (board-selection M5) and cached with the
+    /// gallery's registry rows.
+    ///
+    /// `None` is ORDINARY, not exceptional: no lens, a sim lens (the sim is
+    /// not a device — D22), an unidentified board, or a device provisioned
+    /// outside Studio. The wire's `HardwareFacts.board_id` is not a fallback
+    /// — it is always `None` today, so the registry is the only source.
+    fn lens_board_id(&self) -> Option<&str> {
+        let session = self.pool.lens_session()?;
+        if session.is_sim() {
+            return None;
+        }
+        let uid = session.device_uid().or_else(|| {
+            session
+                .device_sync()
+                .and_then(|sync| sync.identity.as_ref())
+                .map(|identity| identity.uid.clone())
+        })?;
+        self.home_inputs
+            .as_ref()?
+            .registered
+            .iter()
+            .find(|device| device.uid == uid)
+            .and_then(|device| device.board_id.as_deref())
     }
 
     /// The settings-derived slice the agent view decoration needs:
@@ -783,9 +912,13 @@ impl StudioController {
                 .as_ref()
                 .map(crate::app::home::home_view_builder::sim_card)
         } else {
+            // THE LENS session's entry, not the first (M3): with several
+            // boards attached the editor may be a lens on any of them.
+            let lens_key = session.id().to_string();
             evidence
                 .devices
-                .first()
+                .iter()
+                .find(|entry| entry.session_key.as_deref() == Some(lens_key.as_str()))
                 .map(crate::app::home::home_view_builder::device_card_from_live_evidence)
                 .map(|card| self.with_remembered_sighting(card))
         };
@@ -881,62 +1014,47 @@ impl StudioController {
         Some(view)
     }
 
-    /// The runtime pool's roster evidence (P4): one evidence bundle per
-    /// DEVICE session — reconcile state reads the device session, never
-    /// the lens, which may be on the sim (P2 coexistence) — plus the SIM
-    /// session's evidence while it lives (D36: the sim card exists exactly
-    /// as long as the session does). The connect flow's transient evidence
-    /// (a connect in flight before any session exists) rides the device
-    /// entry, exactly as the single-session shape carried it.
+    /// The runtime pool's roster evidence (P4 → multi-device M3): one
+    /// evidence bundle per DEVICE session — reconcile state reads each
+    /// device session, never the lens, which may be on the sim (P2
+    /// coexistence) — plus the SIM session's evidence while it lives
+    /// (D36: the sim card exists exactly as long as the session does).
+    ///
+    /// The card-owned op flow is per-session (M4) — each entry carries
+    /// its own board's `op_in_flight`. The connect FLOW is still
+    /// app-singular (M5 makes it targeted): its narration rides the
+    /// OLDEST device entry, or a session-less entry ("evidence of work,
+    /// not of a session") while nothing is attached. Recorded in the
+    /// multi-device ADR so M5 inherits the attribution decision.
     fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
-        let (observed_version, head_version) = self
+        let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
             .pool
-            .device_session()
-            .map(crate::RuntimeSession::device_versions)
-            .unwrap_or((None, None));
-        let (local_saved_at, pushed_at) = self
-            .pool
-            .device_session()
-            .map(crate::RuntimeSession::device_drift_times)
-            .unwrap_or((None, None));
-        // A long-running operation on the device session (flash / erase /
-        // push — the same flag that blocks pool replaces) owns the card's
-        // narration; the connect flow narrates otherwise.
-        let connect = match self
-            .pool
-            .device_session()
-            .and_then(|session| session.operation_label().map(str::to_string))
-        {
-            Some(label) => crate::ConnectEvidence::OperationInFlight {
-                label,
-                percent: None,
-            },
-            None => self.gallery_connect_evidence(),
-        };
-        let device = crate::app::home::HomeDeviceEvidence {
-            sync: self.device_sync().cloned(),
-            link: self.device_state(),
-            connect,
-            transport: self.transport_label().map(str::to_string),
-            observed_version,
-            head_version,
-            local_saved_at,
-            pushed_at,
-            pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
-            console_tail: self
-                .pool
-                .device_session()
-                .map(|session| session.console_tail().iter().cloned().collect())
-                .unwrap_or_default(),
-            op_in_flight: self.device_card_op.is_some(),
-            recovery: self
-                .pool
-                .device_session()
-                .and_then(|session| session.recovery_status().cloned()),
-            detected_chip: self
-                .hardware_session()
-                .and_then(|session| session.snapshot().detected_chip),
-        };
+            .device_sessions()
+            .map(|session| self.device_evidence(session))
+            .collect();
+        let flow_connect = self.gallery_connect_evidence();
+        let pending_uid = self.device.pending_reconnect_uid().map(str::to_string);
+        match devices.first_mut() {
+            Some(first) => {
+                // An in-flight operation on the session owns its card's
+                // narration (set in `device_evidence`); the connect flow
+                // narrates otherwise.
+                if first.connect == crate::ConnectEvidence::Idle {
+                    first.connect = flow_connect;
+                }
+                first.pending_uid = pending_uid;
+            }
+            None => {
+                // No session, so no op to pin: `op_in_flight` stays false
+                // here. It is evidence of work on A SESSION, and this
+                // entry is evidence of work with none.
+                devices.push(crate::app::home::HomeDeviceEvidence {
+                    connect: flow_connect,
+                    pending_uid,
+                    ..Default::default()
+                });
+            }
+        }
         let sim = self
             .pool
             .sim_session()
@@ -949,9 +1067,61 @@ impl StudioController {
                     }),
                 console_tail: session.console_tail().iter().cloned().collect(),
             });
-        crate::app::home::HomePoolEvidence {
-            devices: vec![device],
-            sim,
+        crate::app::home::HomePoolEvidence { devices, sim }
+    }
+
+    /// One device session's roster evidence — every field reads THIS
+    /// session (M3). The app-singular connect-flow/card-op narration is
+    /// overlaid by [`Self::home_pool_evidence`], not here.
+    fn device_evidence(
+        &self,
+        session: &crate::RuntimeSession,
+    ) -> crate::app::home::HomeDeviceEvidence {
+        let (observed_version, head_version) = session.device_versions();
+        let (local_saved_at, pushed_at) = session.device_drift_times();
+        // A long-running operation (flash / erase / push — the same flag
+        // that blocks pool replaces) owns this card's narration.
+        let connect = match session.operation_label() {
+            Some(label) => crate::ConnectEvidence::OperationInFlight {
+                label: label.to_string(),
+                percent: None,
+            },
+            None => crate::ConnectEvidence::Idle,
+        };
+        crate::app::home::HomeDeviceEvidence {
+            session_key: Some(session.id().to_string()),
+            // THIS session's card-owned op (M4) — the pin that keeps the
+            // card alive through a `Gone` link belongs to the board the
+            // op runs on, never to whichever board attached first.
+            op_in_flight: self.device_card_ops.contains_key(&session.id()),
+            sync: session.device_sync().cloned(),
+            link: session.device_state(),
+            connect,
+            transport: session
+                .payload()
+                .link_session()
+                .and_then(|link| link.provider_kind.transport_label())
+                .map(str::to_string),
+            observed_version,
+            head_version,
+            local_saved_at,
+            pushed_at,
+            pending_uid: None,
+            console_tail: session.console_tail().iter().cloned().collect(),
+            recovery: session.recovery_status().cloned(),
+            detected_chip: session
+                .hardware_session()
+                .and_then(|hardware| hardware.snapshot().detected_chip),
+            port_label: session.endpoint_label().map(|label| {
+                // Suffix the grant's short id ("port-2") so two identical
+                // VID:PID labels still read as different grants.
+                match session.payload().link_session().and_then(|link| {
+                    short_endpoint_id(link.endpoint_id.as_str()).map(str::to_string)
+                }) {
+                    Some(short) => format!("{label} · {short}"),
+                    None => label.to_string(),
+                }
+            }),
         }
     }
 
@@ -1176,28 +1346,99 @@ impl StudioController {
         self.mark_dirty();
     }
 
-    /// What the attached device holds (connect-as-pull result), for the
-    /// pane and cards. `None` while no hardware is
-    /// attached (the sim carries no reconcile bundle — D22). A pool read
-    /// since the runtime-pool extraction: the bundle lives on the DEVICE
-    /// session, wherever the lens is (P2 coexistence).
-    pub fn device_sync(&self) -> Option<&DeviceSyncState> {
+    /// What device `id` holds (connect-as-pull result), for the pane and
+    /// cards. `None` when that session carries no reconcile bundle (the sim
+    /// never does — D22). The bundle lives on the DEVICE session, wherever
+    /// the lens is (P2 coexistence).
+    pub fn device_sync_for(&self, id: crate::RuntimeId) -> Option<&DeviceSyncState> {
         self.pool
-            .device_session()
+            .device_session(id)
             .and_then(crate::RuntimeSession::device_sync)
     }
 
-    /// Connect-is-a-pull (D8): pull the attached device's copy, classify
-    /// it against the library, persist per the M4b locking model, refresh
-    /// the registry, and cache the result. Never fails the connect —
-    /// errors are logged and leave the state `None` (flash/erase must
-    /// stay reachable on a device we can't read).
-    pub(crate) async fn refresh_device_sync(&mut self) {
-        if let Ok(session) = self.pool.device_session_mut() {
+    /// Carry a card-owned op flow across a same-endpoint session replace.
+    ///
+    /// The flow is keyed by session (M4), and the replug that ENDS a
+    /// recovery write mints a new session for the same physical board —
+    /// so without this the "unplug the board and plug it back in"
+    /// instruction would vanish at the exact moment the user obeyed it
+    /// (the shape of the 2026-07-31 bench regression). The endpoint is
+    /// the board's continuity across a replug; the `RuntimeId` is not.
+    fn migrate_card_op(&mut self, replaced: Option<crate::RuntimeId>, installed: crate::RuntimeId) {
+        let Some(replaced) = replaced.filter(|old| *old != installed) else {
+            return;
+        };
+        if let Some(flow) = self.device_card_ops.remove(&replaced) {
+            self.device_card_ops.insert(installed, flow);
+        }
+    }
+
+    /// The live device session a CARD KEY names, if any.
+    ///
+    /// One vocabulary for op targeting (M4): `UiDeviceCard::identity_key()`
+    /// is a stamped device's `dev_…` uid, or an anonymous board's session
+    /// key — and this resolves both, session key first, because that is
+    /// the key an unstamped board wears. A registry (offline) card's uid
+    /// resolves to nothing, which is correct: there is no session to
+    /// operate on.
+    fn device_id_for_card_key(&self, card_key: &str) -> Option<crate::RuntimeId> {
+        self.pool
+            .device_sessions()
+            .find(|session| session.id().to_string() == card_key)
+            .or_else(|| {
+                self.pool.device_sessions().find(|session| {
+                    session
+                        .device_sync()
+                        .and_then(|sync| sync.identity.as_ref())
+                        .is_some_and(|identity| identity.uid == card_key)
+                        || session.device_uid().as_deref() == Some(card_key)
+                })
+            })
+            .map(crate::RuntimeSession::id)
+    }
+
+    /// The session a device operation acts on.
+    ///
+    /// An unresolvable target REFUSES (M4). It never falls back to "the"
+    /// device: falling back is exactly how an operation reaches a board
+    /// nobody named, and the worst thing this can produce — flashing the
+    /// wrong board — is silent when it happens.
+    fn resolve_device_target(
+        &self,
+        target: &crate::DeviceTarget,
+    ) -> Result<crate::RuntimeId, UiError> {
+        match target {
+            crate::DeviceTarget::Card(card_key) => {
+                self.device_id_for_card_key(card_key).ok_or_else(|| {
+                    UiError::MissingSession(format!("\"{card_key}\" is not a connected device"))
+                })
+            }
+            crate::DeviceTarget::Ambient => self
+                .ambient_device_id()
+                .ok_or_else(|| UiError::MissingSession("no device is connected".to_string())),
+        }
+    }
+
+    /// The DEVICE session `id`, mutably — `None` for a missing session or
+    /// a non-device id (device flows never land on the sim).
+    fn device_session_by_id(&mut self, id: crate::RuntimeId) -> Option<&mut crate::RuntimeSession> {
+        self.pool
+            .session_mut(id)
+            .filter(|session| session.is_device())
+    }
+
+    /// Connect-is-a-pull (D8) targeting session `id` (multi-device M3:
+    /// attaching a second board pulls THAT board): pull the device's copy,
+    /// classify it against the library, persist per the M4b locking model,
+    /// refresh the registry, and cache the result on that session. Never
+    /// fails the connect — errors are logged and leave the state `None`
+    /// (flash/erase must stay reachable on a device we can't read).
+    pub(crate) async fn refresh_device_sync_for(&mut self, id: crate::RuntimeId) {
+        if let Some(session) = self.device_session_by_id(id) {
             session.clear_reconcile();
         }
         let pulled = {
-            let Ok(session) = self.pool.device_session_mut() else {
+            let Some(session) = self.device_session_by_id(id) else {
                 return;
             };
             let Ok(server) = session.client_mut() else {
@@ -1219,7 +1460,7 @@ impl StudioController {
                     // an actionable state, never an eternal "Checking…":
                     // the dialog shows the unreadable note; flash/erase
                     // stay reachable
-                    if let Ok(session) = self.pool.device_session_mut() {
+                    if let Some(session) = self.device_session_by_id(id) {
                         session.set_device_sync(Some(DeviceSyncState {
                             identity: None,
                             content: DeviceContent::Unreadable {
@@ -1227,17 +1468,31 @@ impl StudioController {
                             },
                         }));
                     }
+                    self.record_device_event(
+                        Some(&id.to_string()),
+                        None,
+                        DeviceEventKind::Sync {
+                            content: "unreadable".to_string(),
+                        },
+                    );
                     self.mark_dirty();
                     return;
                 }
             }
         };
-        if let Ok(session) = self.pool.device_session_mut() {
+        if let Some(session) = self.device_session_by_id(id) {
             session.set_device_storage_id(Some(pulled.storage_id.clone()));
         }
-        match self.absorb_device_pull(pulled).await {
+        match self.absorb_device_pull(id, pulled).await {
             Ok(state) => {
-                if let Ok(session) = self.pool.device_session_mut() {
+                self.record_device_event(
+                    Some(&id.to_string()),
+                    None,
+                    DeviceEventKind::Sync {
+                        content: device_content_label(&state.content).to_string(),
+                    },
+                );
+                if let Some(session) = self.device_session_by_id(id) {
                     session.set_device_sync(Some(state));
                 }
                 self.mark_dirty();
@@ -1259,14 +1514,17 @@ impl StudioController {
     /// but not banked (that tab owns the history subtree).
     async fn absorb_device_pull(
         &mut self,
+        device_id: crate::RuntimeId,
         mut pulled: device_session::PulledDeviceCopy,
     ) -> Result<DeviceSyncState, UiError> {
         self.record_logs(core::mem::take(&mut pulled.logs));
         let now = (self.now_secs)();
-        let identity = self.reconcile_identity_name(pulled.identity.clone()).await;
+        let identity = self
+            .reconcile_identity_name(device_id, pulled.identity.clone())
+            .await;
 
         if let Some(identity) = &identity {
-            self.upsert_device_entry(identity, now).await;
+            self.upsert_device_entry(device_id, identity, now).await;
         }
 
         // a content read/hash failure on an IDENTIFIED device: partial
@@ -1381,7 +1639,7 @@ impl StudioController {
                 .as_ref()
                 .filter(|assoc| assoc.project == summary.uid)
                 .map(|assoc| assoc.at);
-            if let Ok(session) = self.pool.device_session_mut() {
+            if let Ok(session) = self.pool.device_session_mut(device_id) {
                 session.set_device_versions(versions);
                 session.set_device_drift_times((head_saved_at, pushed_at));
             }
@@ -1414,7 +1672,7 @@ impl StudioController {
                     project_uid: summary.uid.to_string(),
                     device: device_session::registry_entry_for(
                         &identity_value,
-                        self.transport_label().unwrap_or_default(),
+                        self.transport_label_for(device_id).unwrap_or_default(),
                         now,
                     ),
                     observed: pulled.observed,
@@ -1465,7 +1723,7 @@ impl StudioController {
                         relation = lpc_history::SyncRelation::AtHead;
                         // adopt appended the observed copy as the new head
                         let new_head = versions.1.map(|n| n + 1);
-                        if let Ok(session) = self.pool.device_session_mut() {
+                        if let Ok(session) = self.pool.device_session_mut(device_id) {
                             session.set_device_versions((new_head, new_head));
                         }
                         self.push_log(UiLogDraft::new(
@@ -1513,7 +1771,7 @@ impl StudioController {
             .catalog(CatalogOp::AdoptDevicePackage {
                 device: device_session::registry_entry_for(
                     identity_value,
-                    self.transport_label().unwrap_or_default(),
+                    self.transport_label_for(device_id).unwrap_or_default(),
                     now,
                 ),
                 files: pulled.files.clone(),
@@ -1547,6 +1805,7 @@ impl StudioController {
     /// the meantime (`upsert_device_merged`).
     async fn reconcile_identity_name(
         &mut self,
+        device_id: crate::RuntimeId,
         identity: Option<crate::app::places::DeviceIdentity>,
     ) -> Option<crate::app::places::DeviceIdentity> {
         let mut identity = identity?;
@@ -1570,7 +1829,7 @@ impl StudioController {
             identity.name = registry_name;
             match self
                 .pool
-                .device_session_mut()
+                .device_session_mut(device_id)
                 .and_then(crate::RuntimeSession::client_mut)
             {
                 Ok(server) => match server
@@ -1593,6 +1852,7 @@ impl StudioController {
     /// association survives sight-only upserts).
     async fn upsert_device_entry(
         &mut self,
+        device_id: crate::RuntimeId,
         identity: &crate::app::places::DeviceIdentity,
         now: f64,
     ) {
@@ -1601,7 +1861,7 @@ impl StudioController {
         };
         let entry = device_session::registry_entry_for(
             identity,
-            self.transport_label().unwrap_or_default(),
+            self.transport_label_for(device_id).unwrap_or_default(),
             now,
         );
         if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
@@ -1636,15 +1896,24 @@ impl StudioController {
     }
 
     async fn execute_deploy_op(&mut self, op: DeployOp, updates: UxUpdateSink) -> UiResult {
+        // Every deploy verb acts on ONE board: the card the gesture came
+        // from (M4). Push rows, drift sheets and the Danger tab all live
+        // on a card, so every variant carries its target.
+        let device_id = self.resolve_device_target(match &op {
+            DeployOp::PushProject { target, .. }
+            | DeployOp::AdoptDeviceCopy { target }
+            | DeployOp::KeepBothFork { target }
+            | DeployOp::EraseDevice { target } => target,
+        })?;
         match op {
-            DeployOp::PushProject { key } => {
+            DeployOp::PushProject { key, .. } => {
                 // The direct push (M5; since M8′ the ONLY push): the
                 // dispatching gesture is the D11 consent. The device must
                 // carry a stamped identity (the Running-family states and
                 // the picker's Connected-empty guarantee it; unstamped
                 // boards go through the name sheet first).
                 let device = self
-                    .device_sync()
+                    .device_sync_for(device_id)
                     .and_then(|sync| sync.identity.clone())
                     .ok_or_else(|| {
                         UiError::MissingSession("no named device is connected".to_string())
@@ -1658,11 +1927,13 @@ impl StudioController {
                 // replaces (DQ-A) and narrates the card's
                 // Operation-in-flight state; the progressive view emit
                 // below puts that state on screen while the push runs.
-                self.pool.device_session_mut()?.set_operation(Some(label));
+                self.pool
+                    .device_session_mut(device_id)?
+                    .set_operation(Some(label));
                 self.mark_dirty();
                 updates.emit(UxUpdate::View(self.view()));
-                let result = self.run_device_push(&device, &target).await;
-                if let Ok(session) = self.pool.device_session_mut() {
+                let result = self.run_device_push(device_id, &device, &target).await;
+                if let Ok(session) = self.pool.device_session_mut(device_id) {
                     session.set_operation(None);
                 }
                 self.mark_dirty();
@@ -1673,8 +1944,8 @@ impl StudioController {
                     target.slug, device.name
                 ))))
             }
-            DeployOp::AdoptDeviceCopy => {
-                let (project_uid, observed) = self.diverged_device_copy()?;
+            DeployOp::AdoptDeviceCopy { .. } => {
+                let (project_uid, observed) = self.diverged_device_copy(device_id)?;
                 let host = self.library_host()?;
                 host.catalog(CatalogOp::AdoptObservedVersion {
                     project_uid,
@@ -1683,16 +1954,16 @@ impl StudioController {
                 .await
                 .map_err(|error| self.library_error_with_name(error))?;
                 self.request_library_refresh();
-                self.refresh_device_sync().await;
+                self.refresh_device_sync_for(device_id).await;
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info("The device's version is now the newest")))
             }
-            DeployOp::KeepBothFork => {
-                let (project_uid, observed) = self.diverged_device_copy()?;
+            DeployOp::KeepBothFork { .. } => {
+                let (project_uid, observed) = self.diverged_device_copy(device_id)?;
                 // the fork's name: the live session's stamped identity
                 // (the D30 sheet is the one entry since M8′)
                 let device_name = self
-                    .device_sync()
+                    .device_sync_for(device_id)
                     .and_then(|sync| sync.identity.as_ref())
                     .map(|identity| identity.name.clone())
                     .unwrap_or_else(|| "device".to_string());
@@ -1713,9 +1984,9 @@ impl StudioController {
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
             }
-            DeployOp::EraseDevice => {
+            DeployOp::EraseDevice { .. } => {
                 // from the card's Danger tab, behind the D41 confirm sheet
-                self.reset_to_blank(updates).await
+                self.reset_to_blank(device_id, updates).await
             }
         }
     }
@@ -1723,8 +1994,11 @@ impl StudioController {
     /// The diverged copy an adopt/keep-both verb targets: the live
     /// device session's sync evidence (the D30 card sheet is the one
     /// entry since M8′ — there is no dialog).
-    fn diverged_device_copy(&mut self) -> Result<(String, lpc_history::ContentHash), UiError> {
-        match self.device_sync().map(|sync| &sync.content) {
+    fn diverged_device_copy(
+        &mut self,
+        device_id: crate::RuntimeId,
+    ) -> Result<(String, lpc_history::ContentHash), UiError> {
+        match self.device_sync_for(device_id).map(|sync| &sync.content) {
             Some(DeviceContent::Known {
                 project_uid,
                 observed,
@@ -1744,6 +2018,7 @@ impl StudioController {
     /// previously-anonymous content).
     async fn run_identity_stamp(
         &mut self,
+        device_id: crate::RuntimeId,
         name: String,
     ) -> Result<crate::app::places::DeviceIdentity, UiError> {
         use lpc_model::AsLpPath;
@@ -1753,7 +2028,7 @@ impl StudioController {
             name,
         };
         {
-            let server = self.pool.device_session_mut()?.client_mut()?;
+            let server = self.pool.device_session_mut(device_id)?.client_mut()?;
             let logs = server
                 .fs_write(
                     crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
@@ -1763,8 +2038,8 @@ impl StudioController {
             self.record_logs(logs);
         }
         let now = (self.now_secs)();
-        self.upsert_device_entry(&identity, now).await;
-        self.refresh_device_sync().await;
+        self.upsert_device_entry(device_id, &identity, now).await;
+        self.refresh_device_sync_for(device_id).await;
         Ok(identity)
     }
 
@@ -1774,7 +2049,11 @@ impl StudioController {
     /// the pin map takes effect on the device's NEXT restart. The picker
     /// only offers boards with a checked-in runtime manifest; a display-
     /// only id reaching here degrades honestly instead of writing junk.
-    async fn run_hardware_stamp(&mut self, board_id: &str) -> Result<(), UiError> {
+    async fn run_hardware_stamp(
+        &mut self,
+        device_id: crate::RuntimeId,
+        board_id: &str,
+    ) -> Result<(), UiError> {
         use lpc_model::AsLpPath;
         let manifest_json = lpa_boards::runtime_manifest_json(board_id).ok_or_else(|| {
             UiError::UnsupportedAction(format!(
@@ -1782,7 +2061,7 @@ impl StudioController {
             ))
         })?;
         {
-            let server = self.pool.device_session_mut()?.client_mut()?;
+            let server = self.pool.device_session_mut(device_id)?.client_mut()?;
             let logs = server
                 .fs_write(
                     crate::app::places::DEVICE_HARDWARE_MANIFEST_PATH.as_path(),
@@ -1793,12 +2072,15 @@ impl StudioController {
         }
         // The gallery remembers the board (roster cache, M6 reads it for
         // card art). Only an identified device has a registry row.
-        if let Some(identity) = self.device_sync().and_then(|sync| sync.identity.clone()) {
+        if let Some(identity) = self
+            .device_sync_for(device_id)
+            .and_then(|sync| sync.identity.clone())
+        {
             let now = (self.now_secs)();
             if let Ok(host) = self.library_host() {
                 let mut entry = device_session::registry_entry_for(
                     &identity,
-                    self.transport_label().unwrap_or_default(),
+                    self.transport_label_for(device_id).unwrap_or_default(),
                     now,
                 );
                 entry.board_id = Some(board_id.to_string());
@@ -1818,6 +2100,7 @@ impl StudioController {
     /// snapshot read + catalog transaction.
     async fn run_device_push(
         &mut self,
+        device_id: crate::RuntimeId,
         device: &crate::app::places::DeviceIdentity,
         target: &DeployTarget,
     ) -> Result<(), UiError> {
@@ -1854,12 +2137,12 @@ impl StudioController {
         {
             let storage_id = self
                 .pool
-                .device_session()
+                .device_session(device_id)
                 .and_then(|session| session.device_storage_id().map(str::to_string))
                 .unwrap_or_else(|| {
                     crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
                 });
-            let server = self.pool.device_session_mut()?.client_mut()?;
+            let server = self.pool.device_session_mut(device_id)?.client_mut()?;
             let loaded = server
                 .open_library_project(&storage_id, &files, &local_hash.to_string())
                 .await?;
@@ -1880,7 +2163,7 @@ impl StudioController {
             // association still goes through the registry (store root)
             let mut entry = device_session::registry_entry_for(
                 device,
-                self.transport_label().unwrap_or_default(),
+                self.transport_label_for(device_id).unwrap_or_default(),
                 now,
             );
             entry.association = Some(lpc_history::DeviceAssociation {
@@ -1900,7 +2183,7 @@ impl StudioController {
                 project_uid: target.project_uid.clone(),
                 device: device_session::registry_entry_for(
                     device,
-                    self.transport_label().unwrap_or_default(),
+                    self.transport_label_for(device_id).unwrap_or_default(),
                     now,
                 ),
                 version: local_hash,
@@ -1910,7 +2193,7 @@ impl StudioController {
         }
 
         // 4. the device now runs the pushed head
-        self.refresh_device_sync().await;
+        self.refresh_device_sync_for(device_id).await;
         Ok(())
     }
 
@@ -2113,34 +2396,61 @@ impl StudioController {
 
     async fn execute_device_op(&mut self, op: DeviceOp, updates: UxUpdateSink) -> UiResult {
         match op {
-            DeviceOp::DisconnectDevice => self.disconnect_device().await,
+            DeviceOp::DisconnectDevice { target } => {
+                let id = self.resolve_device_target(&target)?;
+                self.disconnect_device(id).await
+            }
             DeviceOp::StopSimulator => self.stop_simulator().await,
-            DeviceOp::DisconnectLightPlayer => self.disconnect_lightplayer().await,
+            DeviceOp::DisconnectLightPlayer { target } => {
+                self.disconnect_lightplayer(&target).await
+            }
+            // NOT a card op and NOT device-targeted: the console's
+            // selector shows the LENS session's level, so the request goes
+            // to the runtime whose console the user is looking at — which
+            // may be the sim. Nothing to target (D1a, 2026-08-03).
             DeviceOp::SetLogLevel { level } => self.set_device_log_level(level).await,
-            DeviceOp::ResetDevice => self.reset_device(updates).await,
-            DeviceOp::ConnectLightPlayer => {
-                // A device-pane op: target the hardware session when one
-                // exists; the lens session (the sim's reconnect) otherwise.
-                let id = self
-                    .pool
-                    .device_session()
-                    .map(crate::RuntimeSession::id)
-                    .or_else(|| self.pool.lens())
-                    .ok_or_else(|| {
-                        UiError::MissingSession("link connection is not open".to_string())
-                    })?;
+            DeviceOp::ResetDevice { target } => {
+                let id = self.resolve_device_target(&target)?;
+                self.reset_device(id, updates).await
+            }
+            DeviceOp::ConnectLightPlayer { target } => {
+                // The lens fallback is the sim's reconnect: `Ambient`
+                // resolves no device when only the sim is attached, and
+                // the lens is then the runtime to attach to.
+                let id = match self.resolve_device_target(&target) {
+                    Ok(id) => id,
+                    Err(error) => self.pool.lens().ok_or(error)?,
+                };
                 self.connect_server_from_link(id, updates).await
             }
             DeviceOp::ProvisionFirmware {
+                target,
                 setup_name,
                 board_id,
-            } => self.provision_firmware(updates, setup_name, board_id).await,
-            DeviceOp::WipeProject => self.wipe_project().await,
-            DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
-            DeviceOp::BootSafeOnce => self.boot_safe_once(updates).await,
-            DeviceOp::BackUpFilesystem => self.back_up_filesystem(updates).await,
+            } => {
+                let id = self.resolve_device_target(&target)?;
+                self.provision_firmware(id, updates, setup_name, board_id)
+                    .await
+            }
+            DeviceOp::WipeProject { target } => {
+                let id = self.resolve_device_target(&target)?;
+                self.wipe_project(id).await
+            }
+            DeviceOp::ResetToBlank { target } => {
+                let id = self.resolve_device_target(&target)?;
+                self.reset_to_blank(id, updates).await
+            }
+            DeviceOp::BootSafeOnce { target } => {
+                let id = self.resolve_device_target(&target)?;
+                self.boot_safe_once(id, updates).await
+            }
+            DeviceOp::BackUpFilesystem { target } => {
+                let id = self.resolve_device_target(&target)?;
+                self.back_up_filesystem(id, updates).await
+            }
             DeviceOp::ProbeBootloaderMode { card_key, flow } => {
-                self.probe_bootloader_mode(card_key, flow).await
+                let id = self.resolve_device_target(&crate::DeviceTarget::card(&card_key))?;
+                self.probe_bootloader_mode(id, card_key, flow).await
             }
             DeviceOp::RefreshConnections => {
                 // Drop the session (no provider close) + catalog refresh.
@@ -2184,7 +2494,14 @@ impl StudioController {
     /// a silent no-op. Card attribution targets the most-recently-seen
     /// remembered device (best effort; the hello reconciles identity).
     async fn run_auto_connect(&mut self, updates: UxUpdateSink) -> UiResult {
-        if self.pool.device_session().is_some() {
+        if self.pool.oldest_device_session().is_some() {
+            self.record_device_event(
+                None,
+                None,
+                DeviceEventKind::Sweep {
+                    disposition: "skipped-device-attached".to_string(),
+                },
+            );
             return Ok(UiNotices::new());
         }
         if matches!(
@@ -2193,8 +2510,22 @@ impl StudioController {
                 | ConnectFlowState::Connecting { .. }
                 | ConnectFlowState::Retrying { .. }
         ) {
+            self.record_device_event(
+                None,
+                None,
+                DeviceEventKind::Sweep {
+                    disposition: "skipped-flow-busy".to_string(),
+                },
+            );
             return Ok(UiNotices::new());
         }
+        self.record_device_event(
+            None,
+            None,
+            DeviceEventKind::Sweep {
+                disposition: "ran".to_string(),
+            },
+        );
         let pending_uid = self.most_recently_seen_device_uid();
         let outcome = self.device.auto_connect_granted(pending_uid).await;
         self.settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates)
@@ -2367,30 +2698,69 @@ impl StudioController {
         outcome: Result<DeviceOpenOutcome, UiError>,
         updates: UxUpdateSink,
     ) -> UiResult {
+        // Multi-device M3: a DEVICE connect that ends without a session no
+        // longer clears the kind's slot — with several boards attachable,
+        // opening the picker (or a cancelled/failed attempt at an
+        // ADDITIONAL board) must not tear down a live session. The ≤1-era
+        // "empty-slot ending" semantics survive for the sim (capacity 1),
+        // and a RECONNECT of an existing endpoint still replaces its own
+        // session at install time (the pool's per-endpoint rule).
+        let clear_on_empty_ending = kind != crate::RuntimeKind::Device;
         match outcome {
             Ok(DeviceOpenOutcome::Opened) => {
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 Ok(UiNotices::new())
             }
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
+                // Chrome's chooser cannot say which port is already
+                // connected (identical VID:PID, no OS path), so mis-picks
+                // are routine with several boards. The pool's per-endpoint
+                // rule makes the re-pick a clean reconnect; this notice
+                // makes it a VISIBLE one, so "I meant to add the other
+                // board" is diagnosable at a glance.
+                let repicked_live = kind == crate::RuntimeKind::Device
+                    && payload.link_session().is_some_and(|link| {
+                        self.pool.device_sessions().any(|session| {
+                            session
+                                .payload()
+                                .link_session()
+                                .is_some_and(|existing| existing.endpoint_id == link.endpoint_id)
+                        })
+                    });
                 let id = self.install_session(payload).await?;
-                self.attach_runtime(id, updates).await
+                let outcome = self.attach_runtime(id, updates).await?;
+                if repicked_live {
+                    Ok(outcome.with_notice(UiNotice::info(
+                        "That port was already connected — reconnected it. To add a \
+                         different board, pick another port in the chooser.",
+                    )))
+                } else {
+                    Ok(outcome)
+                }
             }
             Ok(DeviceOpenOutcome::SoftFailed) => {
                 // M6: the ladder's honest ending lives on the CARD
                 // (PortHeld/Unresponsive flow states → card evidence);
                 // nothing toasts, nothing errors.
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 self.mark_dirty();
                 Ok(UiNotices::new())
             }
             Err(error) => {
-                self.clear_connect_slot(kind);
+                if clear_on_empty_ending {
+                    self.clear_connect_slot(kind);
+                }
                 Err(error)
             }
         }
@@ -2415,7 +2785,16 @@ impl StudioController {
         {
             self.quiesce_lens();
         }
-        self.pool.remove_kind(kind);
+        if let Some(session) = self.pool.remove_kind(kind) {
+            self.record_device_event(
+                Some(&session.id().to_string()),
+                None,
+                DeviceEventKind::Pool {
+                    action: "clear-slot".to_string(),
+                    detail: format!("{kind:?}"),
+                },
+            );
+        }
     }
 
     /// Install a connected payload into the pool under the capacity
@@ -2435,8 +2814,28 @@ impl StudioController {
             .pool
             .lens_session()
             .is_some_and(|session| session.kind() == payload.kind());
+        let install_detail = format!("{:?}", payload.kind());
+        let install_endpoint = payload
+            .link_session()
+            .map(|session| session.endpoint_id.as_str().to_string());
+        // Which session (if any) this install is about to REPLACE at the
+        // same endpoint — read before the install, because that is the
+        // only moment both ids exist. A card-owned op flow rides across
+        // (see `migrate_card_op`).
+        let replaced = payload
+            .link_session()
+            .and_then(|link| self.pool.endpoint_session(&link.endpoint_id));
         match self.pool.install(payload) {
             Ok(id) => {
+                self.migrate_card_op(replaced, id);
+                self.record_device_event(
+                    Some(&id.to_string()),
+                    install_endpoint.as_deref(),
+                    DeviceEventKind::Pool {
+                        action: "install".to_string(),
+                        detail: install_detail,
+                    },
+                );
                 if lens_replaced {
                     self.project.reset();
                 }
@@ -2560,7 +2959,7 @@ impl StudioController {
                     .await?;
                 Ok(UiNotices::new().with_notice(UiNotice::info("Device forgotten")))
             }
-            HomeOp::NameDevice { name } => {
+            HomeOp::NameDevice { target, name } => {
                 let name = name.trim().to_string();
                 if name.is_empty() {
                     return Err(UiError::UnsupportedAction(
@@ -2571,7 +2970,8 @@ impl StudioController {
                 // upstream): stamp mints the uid, writes the identity over
                 // the wire, registers the device, and re-pulls (adoption
                 // may now run for previously-anonymous content)
-                let identity = self.run_identity_stamp(name).await?;
+                let device_id = self.resolve_device_target(&target)?;
+                let identity = self.run_identity_stamp(device_id, name).await?;
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!(
                     "This device is now \"{}\"",
                     identity.name
@@ -2599,10 +2999,13 @@ impl StudioController {
             CardUiOp::CloseSheet { card } => {
                 self.card_ui.entry(card).or_default().sheet = None;
             }
-            // The failed op's ONE exit (model §2 I4): drop the flow; the
-            // card re-derives its honest state on the next view build.
-            CardUiOp::ClearOp { .. } => {
-                self.device_card_op = None;
+            // The failed op's ONE exit (model §2 I4): drop THAT card's
+            // flow; the card re-derives its honest state on the next view
+            // build. Another board's op in flight is untouched.
+            CardUiOp::ClearOp { card } => {
+                if let Some(id) = self.device_id_for_card_key(&card) {
+                    self.device_card_ops.remove(&id);
+                }
             }
             CardUiOp::SelectSetupBoard { card, board_id } => {
                 self.card_ui.entry(card).or_default().setup_board = board_id;
@@ -2623,11 +3026,13 @@ impl StudioController {
         }
         // The CARD-OWNED op flow first (model §2, I1): it survives the
         // session the op severed, so it outranks session-derived
-        // narration. Targeting: the stamped uid when the managed device
-        // had one; an identity-less blank board's op rides the live
-        // (non-offline) hardware card.
-        if let Some((target_uid, slot)) = self.device_card_op.as_ref()
-            && card.takes_card_op(target_uid.as_deref())
+        // narration. Targeting is the managed SESSION (M4) — matched
+        // through the one shared rule, `takes_card_op`.
+        if let Some(slot) = self
+            .device_card_ops
+            .iter()
+            .find(|(id, _)| card.takes_card_op(&id.to_string()))
+            .map(|(_, slot)| slot)
         {
             card.ui.op = Some(slot.borrow().clone());
             return card;
@@ -2638,22 +3043,16 @@ impl StudioController {
                 .sim_session()
                 .and_then(|session| session.operation_label().map(str::to_string))
         } else {
-            // Only the session's OWN card narrates the session op: the
-            // stamped identity must match the card's uid. A remembered
-            // (offline) card also carries a uid, so a bare is_some()
-            // check smeared one device's push across every device card.
-            // An identity-less live board has no uid on either side —
-            // its card is the one mid-operation.
-            let live_uid = self
-                .device_sync()
-                .and_then(|sync| sync.identity.as_ref())
-                .map(|identity| identity.uid.as_str());
-            self.pool
-                .device_session()
-                .filter(|_| match (card.uid.as_deref(), live_uid) {
-                    (Some(card_uid), Some(live_uid)) => card_uid == live_uid,
-                    _ => matches!(card.state, crate::RosterCardState::OperationInFlight { .. }),
-                })
+            // Only the session's OWN card narrates its op — now by
+            // simple lookup (M4). What this replaces was an inference:
+            // with one session, "is this card the live one?" had to be
+            // guessed from the stamped identity, and a bare is_some()
+            // check once smeared one device's push across every device
+            // card. A card names its session; nothing needs guessing.
+            card.session_key
+                .as_deref()
+                .and_then(|key| self.device_id_for_card_key(key))
+                .and_then(|id| self.pool.device_session(id))
                 .and_then(|session| session.operation_label().map(str::to_string))
         };
         if let Some(label) = op_label {
@@ -2677,20 +3076,21 @@ impl StudioController {
         name: &str,
     ) -> Result<(), UiError> {
         use lpc_model::AsLpPath;
-        let is_live = self
-            .device_sync()
-            .and_then(|sync| sync.identity.as_ref())
-            .is_some_and(|identity| identity.uid == uid);
-        if !is_live {
+        // The renamed device names itself: `uid` IS the target (M4). It
+        // used to resolve "the" device and then check the uid matched —
+        // which wrote the new name to the wrong board's
+        // `/.lp/device.json` whenever the renamed one was not the oldest
+        // attached.
+        let Some(device_id) = self.device_id_for_card_key(uid) else {
             return Ok(());
-        }
+        };
         let identity = crate::app::places::DeviceIdentity {
             uid: uid.to_string(),
             name: name.to_string(),
         };
         let logs = self
             .pool
-            .device_session_mut()?
+            .device_session_mut(device_id)?
             .client_mut()?
             .fs_write(
                 crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
@@ -2700,7 +3100,7 @@ impl StudioController {
         self.record_logs(logs);
         if let Some(sync) = self
             .pool
-            .device_session_mut()
+            .device_session_mut(device_id)
             .ok()
             .and_then(crate::RuntimeSession::device_sync_mut)
         {
@@ -3326,8 +3726,15 @@ impl StudioController {
     ) -> UiResult {
         self.project.reset();
         // Quiesce the DEVICE slot this recovery open replaces; a sim
-        // session is untouched (P2 coexistence).
-        if let Ok(session) = self.pool.device_session_mut() {
+        // session is untouched (P2 coexistence). ⚠️ Still the OLDEST
+        // board — the recovery open has no session to name yet, so it is
+        // the connect flow's problem (M5), not an op-targeting one.
+        if let Some(id) = self
+            .pool
+            .oldest_device_session()
+            .map(crate::RuntimeSession::id)
+            && let Ok(session) = self.pool.device_session_mut(id)
+        {
             session.disconnect_server();
         }
         let outcome = self.device.open_provider(provider_id).await;
@@ -3511,7 +3918,10 @@ impl StudioController {
                         // reflash affordance instead of a dead-end error —
                         // reflashing is the ONE way out, and it must stay
                         // reachable (explicit, never automatic).
-                        if matches!(self.device_state(), Some(DeviceState::Incompatible { .. })) {
+                        if matches!(
+                            self.device_state_for(id),
+                            Some(DeviceState::Incompatible { .. })
+                        ) {
                             self.push_log(UiLogDraft::new(
                                 UiLogLevel::Warn,
                                 UiLogOrigin::Studio,
@@ -3558,7 +3968,9 @@ impl StudioController {
                 // the sim is not a device (D22). Failures are logged,
                 // never fatal (flash/erase must stay reachable).
                 if !is_sim {
-                    self.refresh_device_sync().await;
+                    // Multi-device M3: pull the session being ATTACHED,
+                    // not whatever the id-less seam resolves.
+                    self.refresh_device_sync_for(id).await;
                 }
                 Ok(outcome)
             }
@@ -3828,7 +4240,7 @@ impl StudioController {
                     .map(|identity| identity.uid.clone())
             })
         };
-        if let Some(session) = self.pool.device_session() {
+        if let Some(session) = self.pool.oldest_device_session() {
             let matches = match &uid {
                 Some(uid) => session_uid(session).as_deref() == Some(uid.as_str()),
                 None => true,
@@ -3858,7 +4270,7 @@ impl StudioController {
             .await?;
         let connected = self
             .pool
-            .device_session()
+            .oldest_device_session()
             .is_some_and(crate::RuntimeSession::is_connected);
         if !connected {
             // Chooser opened, cancelled, or a non-Ready device (blank /
@@ -3868,7 +4280,7 @@ impl StudioController {
         }
         let id = self
             .pool
-            .device_session()
+            .oldest_device_session()
             .map(crate::RuntimeSession::id)
             .unwrap_or_else(|| unreachable!("a connected device session exists"));
         let attach = self.attach_lens(id, updates).await?;
@@ -4017,22 +4429,31 @@ impl StudioController {
         }
     }
 
-    async fn disconnect_device(&mut self) -> UiResult {
-        self.project.reset();
-        // Taking a session out of the pool drops its wire client, server
-        // state, and reconcile bundle with it; the controller closes each
-        // payload and resets the connect flow. This is the EXPLICIT
-        // disconnect affordance and keeps its full teardown meaning (P3);
-        // the gallery-return route policy now dispatches the lens detach
-        // (`ProjectOp::DetachLens`) instead, which keeps every session.
-        let sessions = self.pool.take_all_sessions();
-        if sessions.is_empty() {
-            self.device.disconnect(None).await?;
-        } else {
-            for session in sessions {
-                self.device.disconnect(Some(session.into_payload())).await?;
-            }
+    /// Disconnect ONE device session (the card's Danger-zone affordance):
+    /// close its link and remove it from the pool — the other sessions (a
+    /// second board, the sim) stay attached. The caller resolved `id`
+    /// from the card's target (M4). (The pre-M3 shape took EVERY session
+    /// down, sim included — the ≤1-era "explicit disconnect = full
+    /// teardown" semantics.)
+    async fn disconnect_device(&mut self, id: crate::RuntimeId) -> UiResult {
+        // The mirror quiesces only when the editor was a lens on THIS
+        // session (a project open on the sim or another board survives).
+        if self.pool.lens() == Some(id) {
+            self.project.reset();
         }
+        let session = self.pool.remove_session(id);
+        self.record_device_event(
+            Some(&id.to_string()),
+            None,
+            DeviceEventKind::Pool {
+                action: "disconnect".to_string(),
+                detail: "user".to_string(),
+            },
+        );
+        if let Some(session) = session {
+            self.device.disconnect(Some(session.into_payload())).await?;
+        }
+        self.mark_dirty();
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
 
@@ -4043,13 +4464,13 @@ impl StudioController {
     /// targets the HARDWARE session when one exists, the lens session
     /// otherwise; the mirror only quiesces when the lens sat on the
     /// disconnected session (a project open on the sim survives).
-    async fn disconnect_lightplayer(&mut self) -> UiResult {
-        let id = self
-            .pool
-            .device_session()
-            .map(crate::RuntimeSession::id)
-            .or_else(|| self.pool.lens())
-            .ok_or_else(|| UiError::MissingSession("server client is not connected".to_string()))?;
+    async fn disconnect_lightplayer(&mut self, target: &crate::DeviceTarget) -> UiResult {
+        let id = match self.resolve_device_target(target) {
+            Ok(id) => id,
+            // The sim's own disconnect: no device to name, the lens is
+            // the runtime the pane is showing.
+            Err(error) => self.pool.lens().ok_or(error)?,
+        };
         if self.pool.lens() == Some(id) {
             self.quiesce_lens();
         }
@@ -4086,8 +4507,13 @@ impl StudioController {
         Ok(UiNotices::new())
     }
 
-    async fn reset_device(&mut self, updates: UxUpdateSink) -> UiResult {
+    async fn reset_device(
+        &mut self,
+        device_id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
         self.run_device_management(
+            device_id,
             ManagementFlowSpec {
                 request: LinkManagementRequest::ResetRuntime,
                 progress_label: "Resetting device",
@@ -4111,6 +4537,7 @@ impl StudioController {
 
     async fn provision_firmware(
         &mut self,
+        device_id: crate::RuntimeId,
         updates: UxUpdateSink,
         setup_name: Option<String>,
         board_id: Option<String>,
@@ -4121,10 +4548,56 @@ impl StudioController {
         // replugged. The shape follows the device's actual state rather
         // than which button was pressed, because that is what determines
         // whether waiting for a reattach is sensible.
-        let from_recovery = self.device_is_in_recovery_mode();
-        let build_id = self.provisioning_build_id(board_id.as_deref());
+        let from_recovery = self.device_is_in_recovery_mode(device_id);
+        // No image, no flash — there is no fallback build (Yona,
+        // 2026-08-03: "either it matches, or its a fail case"). The
+        // deployment default used to aim an unidentified board at the C6
+        // image and leave the flash-time chip guard to refuse a build
+        // nobody chose ("Refusing to flash: this device is ESP32-D0WD-V3
+        // … but the image is built for esp32c6"). Refuse HERE, where the
+        // evidence is, and say what would fix it.
+        let Some(build_id) = self.provisioning_build_id(device_id, board_id.as_deref()) else {
+            let detected = self
+                .hardware_session_for(device_id)
+                .and_then(|session| session.snapshot().detected_chip);
+            let subject = match detected
+                .as_deref()
+                .and_then(lpa_link::chip_id_from_reported)
+            {
+                Some(chip) => format!("this {chip} device"),
+                None => "this device (its chip could not be identified)".to_string(),
+            };
+            let message = format!(
+                "No firmware image matches {subject}. Pick your board on the set-up form — \
+                 and if it is not listed, this Studio build ships no image for that chip."
+            );
+            // The refusal must land ON THE CARD, not only in the console —
+            // the gate-1 sitting hit exactly this: "console did say there
+            // was no firmware, but nothing in the UI said that" (Yona,
+            // 2026-08-03). The card-owned op flow's Failed phase is the
+            // surface the user is already looking at, and it carries the
+            // copy-details affordance.
+            self.device_card_ops.insert(
+                device_id,
+                Rc::new(RefCell::new(crate::CardOp::failed(
+                    "Flashing firmware",
+                    message.clone(),
+                    "Back to set up",
+                ))),
+            );
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                message.clone(),
+            ));
+            self.mark_dirty();
+            updates.emit(UxUpdate::View(self.view()));
+            return Ok(UiNotices::new().with_notice(UiNotice::warning(message)));
+        };
+        let build_id = Some(build_id);
         let mut outcome = self
             .run_device_management(
+                device_id,
                 ManagementFlowSpec {
                     request: LinkManagementRequest::FlashFirmware { build_id },
                     progress_label: "Flashing firmware",
@@ -4162,10 +4635,10 @@ impl StudioController {
             .filter(|name| !name.is_empty());
         if let Some(name) = setup_name
             && self
-                .device_sync()
+                .device_sync_for(device_id)
                 .is_some_and(|sync| sync.identity.is_none())
         {
-            match self.run_identity_stamp(name).await {
+            match self.run_identity_stamp(device_id, name).await {
                 Ok(identity) => {
                     outcome = outcome.with_notice(UiNotice::info(format!(
                         "This device is now \"{}\"",
@@ -4186,7 +4659,7 @@ impl StudioController {
         // honestly — the flash and name stand; the pin map just stays
         // default until the board is set again.
         if let Some(board_id) = board_id.filter(|id| !id.trim().is_empty()) {
-            match self.run_hardware_stamp(&board_id).await {
+            match self.run_hardware_stamp(device_id, &board_id).await {
                 Ok(()) => {
                     outcome = outcome.with_notice(UiNotice::info(format!(
                         "Board set to {board_id} — the pin map loads on the next restart."
@@ -4210,17 +4683,17 @@ impl StudioController {
     /// The unreadable content cannot be banked (that's what unreadable
     /// means) — the confirm sheet's copy says so plainly; raw-image
     /// backup is the model-§5 backlog item.
-    async fn wipe_project(&mut self) -> UiResult {
+    async fn wipe_project(&mut self, device_id: crate::RuntimeId) -> UiResult {
         let storage_id = self
             .pool
-            .device_session()
+            .device_session(device_id)
             .and_then(|session| session.device_storage_id().map(str::to_string))
             .ok_or_else(|| {
                 UiError::MissingSession("no device project storage to wipe".to_string())
             })?;
         let logs = self
             .pool
-            .device_session_mut()?
+            .device_session_mut(device_id)?
             .client_mut()?
             .replace_project_files(
                 &storage_id,
@@ -4228,7 +4701,7 @@ impl StudioController {
             )
             .await?;
         self.record_logs(logs);
-        self.refresh_device_sync().await;
+        self.refresh_device_sync_for(device_id).await;
         self.mark_dirty();
         Ok(UiNotices::new().with_notice(UiNotice::info(
             "Wiped — this board is empty now. Pick a project to put on it.",
@@ -4249,6 +4722,7 @@ impl StudioController {
     /// just happened.
     async fn probe_bootloader_mode(
         &mut self,
+        device_id: crate::RuntimeId,
         card_key: String,
         flow: crate::BootloaderEntryFlow,
     ) -> UiResult {
@@ -4262,7 +4736,7 @@ impl StudioController {
             sheet: crate::CardSheet::BootloaderEntry(waiting.clone()),
         });
 
-        let Some(session) = self.hardware_session() else {
+        let Some(session) = self.hardware_session_for(device_id) else {
             return Err(UiError::MissingSession(
                 "no hardware device session to probe".to_string(),
             ));
@@ -4312,21 +4786,25 @@ impl StudioController {
     ///
     /// `None` — nothing picked and nothing detected — leaves the provider on
     /// its deployment default, and the guard catches it if that is wrong.
-    fn provisioning_build_id(&self, board_id: Option<&str>) -> Option<String> {
+    fn provisioning_build_id(
+        &self,
+        device_id: crate::RuntimeId,
+        board_id: Option<&str>,
+    ) -> Option<String> {
         // `detected_chip` arrives in either of two spellings — the ROM boot
         // banner's `esp32c6`, or the bootloader probe's esptool-js
         // description `ESP32-C6 (QFN32) (revision v0.2)` — so it has to be
         // resolved to an id, not merely lowercased.
         let detected_chip = self
-            .hardware_session()
+            .hardware_session_for(device_id)
             .and_then(|session| session.snapshot().detected_chip)
             .and_then(|chip| lpa_link::chip_id_from_reported(&chip));
         let board = board_id.and_then(lpa_boards::board_by_id);
         lpa_boards::provisioning_build_id(board, detected_chip).map(|build_id| build_id.to_string())
     }
 
-    fn device_is_in_recovery_mode(&self) -> bool {
-        self.hardware_session().is_some_and(|session| {
+    fn device_is_in_recovery_mode(&self, device_id: crate::RuntimeId) -> bool {
+        self.hardware_session_for(device_id).is_some_and(|session| {
             matches!(session.snapshot().state, lpa_link::DeviceState::Bootloader)
         })
     }
@@ -4338,14 +4816,19 @@ impl StudioController {
     /// so the lens is not severed and the user keeps their project. The
     /// device consumes the record as it boots, so this affects exactly one
     /// restart.
-    async fn boot_safe_once(&mut self, updates: UxUpdateSink) -> UiResult {
+    async fn boot_safe_once(
+        &mut self,
+        device_id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
         // From app mode the record is written and the device reboots into
         // its firmware by itself. From RECOVERY mode it cannot: the
         // manually-entered download mode latches until power-on reset
         // (bench-confirmed 2026-07-31), so the ending is the replug
         // instruction — the same physics as the recovery flash.
-        let from_recovery = self.device_is_in_recovery_mode();
+        let from_recovery = self.device_is_in_recovery_mode(device_id);
         self.run_device_management(
+            device_id,
             ManagementFlowSpec {
                 request: LinkManagementRequest::start_safe_mode(),
                 progress_label: "Arming safe mode",
@@ -4393,15 +4876,20 @@ impl StudioController {
     /// happens to it — so it deliberately reads like the gentle ops: nothing
     /// is erased, the lens is not severed, and a device in recovery mode is
     /// told it needs a replug rather than being reported as a failure.
-    async fn back_up_filesystem(&mut self, updates: UxUpdateSink) -> UiResult {
-        let from_recovery = self.device_is_in_recovery_mode();
+    async fn back_up_filesystem(
+        &mut self,
+        device_id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let from_recovery = self.device_is_in_recovery_mode(device_id);
         let device_label = self
-            .device_sync()
+            .device_sync_for(device_id)
             .and_then(|sync| sync.identity.as_ref())
             .map(|identity| identity.name.clone());
         let sink: Rc<RefCell<Option<LinkManagementResult>>> = Rc::new(RefCell::new(None));
         let mut outcome = self
             .run_device_management(
+                device_id,
                 ManagementFlowSpec {
                     request: LinkManagementRequest::ReadRawFilesystem,
                     progress_label: "Backing up",
@@ -4468,8 +4956,13 @@ impl StudioController {
         Ok(outcome)
     }
 
-    async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
+    async fn reset_to_blank(
+        &mut self,
+        device_id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
         self.run_device_management(
+            device_id,
             ManagementFlowSpec {
                 request: LinkManagementRequest::EraseDeviceFlash,
                 progress_label: "Wiping device",
@@ -4501,16 +4994,10 @@ impl StudioController {
     /// half fails.
     async fn run_device_management(
         &mut self,
+        device_id: crate::RuntimeId,
         spec: ManagementFlowSpec,
         updates: UxUpdateSink,
     ) -> UiResult {
-        let device_id = self
-            .pool
-            .device_session()
-            .map(crate::RuntimeSession::id)
-            .ok_or_else(|| {
-                UiError::MissingSession("no hardware device session for management".to_string())
-            })?;
         // Quiesce the editor's live edit-state only when it is a lens on
         // the device being managed (P2: a project open on the sim survives
         // a flash/erase). A destructive wipe additionally DETACHES the lens
@@ -4521,20 +5008,24 @@ impl StudioController {
         if severed_lens {
             self.project.reset();
         }
-        // The CARD-OWNED op flow starts here (model §2): the slot lives on
-        // the controller, keyed by the managed device's stamped uid, and
-        // survives whatever happens to the session below (I1). The event
-        // sink feeds it; the settle half flips it to Failed or clears it.
-        let managed_uid = self
-            .device_sync()
-            .and_then(|sync| sync.identity.as_ref())
-            .map(|identity| identity.uid.clone());
+        // The CARD-OWNED op flow starts here (model §2): the flow lives
+        // on the controller, keyed by the managed SESSION, and survives
+        // whatever happens to that session below (I1). The event sink
+        // feeds it; the settle half flips it to Failed or clears it.
         let card_op = Rc::new(RefCell::new(crate::CardOp::new(
             format!("{}…", spec.progress_label),
             None,
         )));
-        let managed_uid_for_events = managed_uid.clone();
-        self.device_card_op = Some((managed_uid, Rc::clone(&card_op)));
+        let session_key = device_id.to_string();
+        self.device_card_ops.insert(device_id, Rc::clone(&card_op));
+        self.record_device_event(
+            Some(&device_id.to_string()),
+            None,
+            DeviceEventKind::Mgmt {
+                phase: "start".to_string(),
+                label: spec.progress_label.to_string(),
+            },
+        );
         if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
             // The pool refuses a same-kind replace while this runs (DQ-A
@@ -4557,18 +5048,18 @@ impl StudioController {
             updates.clone(),
             Rc::clone(&captured_logs),
             Rc::clone(&card_op),
-            managed_uid_for_events.clone(),
+            session_key.clone(),
             spec.reconnect_detail,
         );
         let manage_result = {
-            let session = match self.hardware_session() {
+            let session = match self.hardware_session_for(device_id) {
                 Some(session) => session,
                 None => {
                     if let Some(session) = self.pool.session_mut(device_id) {
                         session.set_operation(None);
                     }
                     // The op never started — clean abort, no Failed render.
-                    self.device_card_op = None;
+                    self.device_card_ops.remove(&device_id);
                     return Err(UiError::MissingSession(
                         "no hardware device session for management".to_string(),
                     ));
@@ -4583,6 +5074,22 @@ impl StudioController {
         if let Some(session) = self.pool.session_mut(device_id) {
             session.set_operation(None);
         }
+        self.record_device_event(
+            Some(&device_id.to_string()),
+            None,
+            DeviceEventKind::Mgmt {
+                phase: "settle".to_string(),
+                label: format!(
+                    "{} — {}",
+                    spec.progress_label,
+                    if manage_result.is_ok() {
+                        "ok"
+                    } else {
+                        "failed"
+                    }
+                ),
+            },
+        );
         let management = match manage_result {
             Ok(management) => management,
             Err(error) => {
@@ -4616,7 +5123,7 @@ impl StudioController {
         // snapshot would otherwise carry the phase change.
         *card_op.borrow_mut() = crate::CardOp::awaiting(spec.reconnect_detail);
         updates.emit(UxUpdate::CardOp {
-            uid: managed_uid_for_events,
+            session_key: session_key.clone(),
             op: card_op.borrow().clone(),
         });
         self.mark_dirty();
@@ -4626,7 +5133,7 @@ impl StudioController {
         match self.attach_runtime(device_id, updates).await {
             Ok(mut attach_outcome) => {
                 outcome.notices.append(&mut attach_outcome.notices);
-                if spec.awaits_manual_replug && self.device_is_in_recovery_mode() {
+                if spec.awaits_manual_replug && self.device_is_in_recovery_mode(device_id) {
                     // Attached — but the board landed back in the BOOTLOADER.
                     // A C6 over USB-Serial-JTAG re-enters download mode on
                     // the post-write RTS reset (bench, 2026-07-31), so the
@@ -4650,7 +5157,7 @@ impl StudioController {
                 } else {
                     // Landed (I3): the flow ends; the card re-derives and its
                     // Status tab announces what's next.
-                    self.device_card_op = None;
+                    self.device_card_ops.remove(&device_id);
                 }
             }
             // The device was never going to come back by itself. Stay in
@@ -4770,6 +5277,35 @@ impl StudioController {
         self.project.runtime_storage_id_for_test()
     }
 
+    /// Test-only: the ONE device a single-device harness attached.
+    ///
+    /// Production code never asks for "the" device — it names the board
+    /// the gesture came from (M4). These harnesses attach exactly one, so
+    /// the ambient rule resolves it unambiguously.
+    pub(crate) fn the_device_for_test(&self) -> crate::RuntimeId {
+        self.ambient_device_id()
+            .expect("a device session is attached")
+    }
+
+    /// Test-only: a [`crate::DeviceTarget`] naming the one attached
+    /// device — what a card-owned op carries once a real UI supplies it.
+    pub(crate) fn device_target_for_test(&self) -> crate::DeviceTarget {
+        crate::DeviceTarget::card(self.the_device_for_test().to_string())
+    }
+
+    /// Test-only: [`Self::refresh_device_sync_for`] against
+    /// [`Self::the_device_for_test`].
+    pub(crate) async fn refresh_device_sync_for_test(&mut self) {
+        let id = self.the_device_for_test();
+        self.refresh_device_sync_for(id).await;
+    }
+
+    /// Test-only: [`Self::device_sync_for`] against the one attached
+    /// device, or `None` when nothing is attached.
+    pub(crate) fn device_sync_for_test(&self) -> Option<&DeviceSyncState> {
+        self.device_sync_for(self.ambient_device_id()?)
+    }
+
     /// The connect-flow state, for ladder assertions (M6).
     pub(crate) fn device_flow_state_for_test(&self) -> &ConnectFlowState {
         self.device.flow_state()
@@ -4778,8 +5314,11 @@ impl StudioController {
     /// Push a console line into the DEVICE session's buffer, as the live
     /// event sink would (heartbeat-drain tests).
     pub(crate) fn push_device_console_log_for_test(&mut self, draft: UiLogDraft) {
+        let id = self
+            .ambient_device_id()
+            .expect("a device session is attached");
         self.pool
-            .device_session_mut()
+            .device_session_mut(id)
             .expect("a device session is attached")
             .push_device_console_log_for_test(draft);
     }
@@ -4850,7 +5389,8 @@ impl StudioController {
 
     /// The attached hardware's device-session state, for e2e assertions.
     pub(crate) fn device_state_for_test(&self) -> Option<lpa_link::DeviceState> {
-        self.device_state()
+        self.ambient_device_id()
+            .and_then(|id| self.device_state_for(id))
     }
 }
 
@@ -4930,6 +5470,28 @@ fn runtime_kind_for(provider_id: LinkProviderKind) -> crate::RuntimeKind {
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough
+/// A pulled device content's classification as the event trace spells it
+/// (part of the JSONL contract — extend, do not rename).
+fn device_content_label(content: &DeviceContent) -> &'static str {
+    match content {
+        DeviceContent::Empty => "empty",
+        DeviceContent::Known { .. } => "known",
+        DeviceContent::Adopted { .. } => "adopted",
+        DeviceContent::PendingIdentity { .. } => "pending-identity",
+        DeviceContent::Unreadable { .. } => "unreadable",
+    }
+}
+
+/// The grant's short id for display: the trailing `port-N` of a
+/// browser-serial endpoint id ("browser-serial-esp32-port-2" → "port-2");
+/// `None` for ids without that shape (fake/host endpoints, whose full id
+/// adds nothing a label doesn't).
+fn short_endpoint_id(endpoint_id: &str) -> Option<&str> {
+    endpoint_id
+        .rfind("-port-")
+        .map(|index| &endpoint_id[index + 1..])
+}
+
 /// for tests; the web shell replaces it with crypto randomness via
 /// [`StudioController::set_random`].
 fn clock_fallback_random() -> [u8; 16] {
@@ -5123,6 +5685,58 @@ mod tests {
         ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTarget, ProjectState,
         ProjectSyncPhase, ServerState, StudioServerClient,
     };
+
+    /// A card-owned op flow rides across a same-ENDPOINT session replace
+    /// (M4 P2).
+    ///
+    /// The flow is keyed by session, and the replug that ENDS a recovery
+    /// write brings the board back as a NEW session on the same endpoint.
+    /// Without the migration the "unplug the board and plug it back in"
+    /// instruction would vanish at the exact moment the user obeyed it —
+    /// the shape of the 2026-07-31 bench regression, which the pre-M4
+    /// uid-less rule survived only by accident.
+    #[test]
+    fn a_card_op_flow_follows_its_board_across_a_replug() {
+        let mut studio = StudioController::new(|| 1.0);
+        let first = studio
+            .pool
+            .install(RuntimePayload::stub_device_for_test(
+                lpa_link::DeviceState::Bootloader,
+            ))
+            .unwrap_or_else(|_| panic!("first attach"));
+        studio.device_card_ops.insert(
+            first,
+            Rc::new(RefCell::new(crate::CardOp::awaiting("Replug the board"))),
+        );
+
+        // The replug: the board comes back on the same endpoint, so the
+        // pool replaces `first` with a session of its own.
+        let second = studio
+            .pool
+            .install(RuntimePayload::stub_device_for_test(
+                lpa_link::DeviceState::Booting,
+            ))
+            .unwrap_or_else(|_| panic!("re-attach"));
+        assert_ne!(second, first, "a replug mints a new session");
+        studio.migrate_card_op(Some(first), second);
+
+        assert!(
+            !studio.device_card_ops.contains_key(&first),
+            "the dead session keeps nothing"
+        );
+        assert_eq!(
+            *studio.device_card_ops[&second].borrow(),
+            crate::CardOp::awaiting("Replug the board"),
+            "the instruction survives onto the board that came back"
+        );
+
+        // A replace that is NOT a same-endpoint one (no outgoing session)
+        // leaves the newcomer's card clean — a fresh board must not
+        // inherit somebody else's instruction.
+        studio.device_card_ops.clear();
+        studio.migrate_card_op(None, second);
+        assert!(studio.device_card_ops.is_empty());
+    }
 
     #[test]
     fn streamed_logs_publish_on_a_throttle_not_per_batch() {
@@ -5898,7 +6512,8 @@ mod tests {
     fn lightplayer_disconnect_leaves_device_link_connected() {
         let mut studio = connected_studio();
 
-        block_on_ready(studio.disconnect_lightplayer()).unwrap();
+        let target = studio.device_target_for_test();
+        block_on_ready(studio.disconnect_lightplayer(&target)).unwrap();
 
         assert!(matches!(
             studio.project.snapshot().state,
@@ -5920,7 +6535,8 @@ mod tests {
     fn device_disconnect_clears_project_server_and_link() {
         let mut studio = connected_studio();
 
-        block_on_ready(studio.disconnect_device()).unwrap();
+        let id = studio.the_device_for_test();
+        block_on_ready(studio.disconnect_device(id)).unwrap();
 
         assert!(matches!(
             studio.project.snapshot().state,
@@ -5941,7 +6557,9 @@ mod tests {
         let mut studio = connected_studio();
         let action = UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::DisconnectDevice,
+            DeviceOp::DisconnectDevice {
+                target: studio.device_target_for_test(),
+            },
         );
 
         block_on_ready(studio.dispatch(action)).unwrap();
@@ -6288,13 +6906,17 @@ mod tests {
         );
     }
 
-    /// A connect that ends WITHOUT a session must not leave the mirror
-    /// dressed: when the ladder's soft ending clears the slot the lens
-    /// sits on, the project quiesces and the gallery comes back. The old
-    /// `remove_kind`-only teardown left `project.state` Ready with no
-    /// lens, which is the second path into the retired pane.
+    /// A DEVICE connect that ends WITHOUT a session leaves live sessions
+    /// alone (multi-device M3): a failed attempt at an ADDITIONAL board
+    /// must not tear down the board you are working on, so the lens, the
+    /// editor, and the existing session all stay. (Pre-M3 this scenario
+    /// cleared the kind's slot and quiesced back to the gallery — the
+    /// "empty-slot ending" semantics that only make sense at capacity 1;
+    /// the retired-pane hazard that teardown guarded against cannot arise
+    /// here because nothing is removed. A reconnect of the SAME endpoint
+    /// still replaces its own session at install time.)
     #[test]
-    fn a_soft_connect_ending_on_the_lens_kind_returns_to_the_gallery() {
+    fn a_soft_connect_ending_leaves_live_sessions_and_the_editor_alone() {
         let mut studio = StudioController::with_link_registry_for_test(
             || 0.0,
             registry_with_fake_connect_error("Failed to open serial port."),
@@ -6318,12 +6940,12 @@ mod tests {
 
         let view = studio.view();
         assert!(
-            studio.pool.lens_session().is_none(),
-            "the lens went with its session"
+            studio.pool.lens_session().is_some(),
+            "the live session and its lens survive the failed extra connect"
         );
         assert!(
-            view.panes.is_empty() && view.home.is_some(),
-            "the mirror quiesced with the session — the gallery shows"
+            !view.panes.is_empty() && view.home.is_none(),
+            "the editor stays open — a failed extra connect never yanks it"
         );
     }
 

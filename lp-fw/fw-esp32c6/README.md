@@ -78,7 +78,7 @@ imply `radio`, are off by default, and cost the shipping image nothing
 not a product feature.
 
 Which pins the two channels drive is authored, not fixed: an `Output` node names
-a board label (`ws281x:rmt:D10`) and the driver binds that GPIO when the project
+a board label (`ws281x:local:D10`) and the driver binds that GPIO when the project
 opens the endpoint. The desk jig used for M5 wires three strips — D10/GPIO18,
 D9/GPIO20, and D8/GPIO19. Only the first two can be RMT channels; D8 is spare
 for a future SPI-class output — **not an RMT resource**, since the chip has

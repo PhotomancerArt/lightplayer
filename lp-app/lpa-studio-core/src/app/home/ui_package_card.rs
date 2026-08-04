@@ -39,6 +39,11 @@ pub struct UiPackageCard {
 /// The live-device indication a unified project card carries (D24).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiCardConnection {
+    /// The connected device's CARD KEY — what a push from this project
+    /// card addresses (M4). Project-side push rows are the one place a
+    /// device verb is dispatched from a card that is not the device's,
+    /// so the key has to travel with the connection.
+    pub device_key: String,
     pub device_name: String,
     /// How the device's copy relates to the library line.
     pub relation: lpc_history::SyncRelation,

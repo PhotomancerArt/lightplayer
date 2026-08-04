@@ -706,6 +706,7 @@ impl FixtureNode {
                 request,
                 target,
                 &accumulators,
+                &self.mapping,
                 settings.color_order,
                 settings.brightness,
                 settings.gamma_correction,
@@ -762,6 +763,7 @@ impl FixtureNode {
             request,
             target,
             &accumulators,
+            &self.mapping,
             settings.color_order,
             settings.brightness,
             settings.gamma_correction,
@@ -1019,15 +1021,7 @@ fn render_direct_fixture_control(
     }
 
     Ok(ControlLayout {
-        spans: vec![ControlSpan {
-            row: 0,
-            start: 0,
-            len: written_samples as u32,
-            encoding: ControlHint::RgbPixels {
-                count: (written_samples / 3) as u32,
-                color_order: settings.color_order,
-            },
-        }],
+        spans: fixture_control_spans(mapping, settings.color_order, written_samples as u32),
     })
 }
 
@@ -1093,15 +1087,7 @@ fn render_fixture_diagnostic_control(
     }
 
     Ok(ControlLayout {
-        spans: vec![ControlSpan {
-            row: 0,
-            start: 0,
-            len: (rendered_lamps * 3) as u32,
-            encoding: ControlHint::RgbPixels {
-                count: rendered_lamps as u32,
-                color_order: settings.color_order,
-            },
-        }],
+        spans: fixture_control_spans(mapping, settings.color_order, (rendered_lamps * 3) as u32),
     })
 }
 
@@ -1382,6 +1368,7 @@ fn render_fixture_control_target(
     request: &ControlRenderRequest,
     target: ControlRenderTarget<'_>,
     accumulators: &ChannelAccumulators,
+    mapping: &MappingConfig,
     color_order: ColorOrder,
     brightness_u8: u8,
     gamma_correction: bool,
@@ -1463,15 +1450,7 @@ fn render_fixture_control_target(
     }
 
     Ok(ControlLayout {
-        spans: vec![ControlSpan {
-            row: 0,
-            start: 0,
-            len: written_samples as u32,
-            encoding: ControlHint::RgbPixels {
-                count: (written_samples / 3) as u32,
-                color_order,
-            },
-        }],
+        spans: fixture_control_spans(mapping, color_order, written_samples as u32),
     })
 }
 
@@ -1513,6 +1492,60 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
         .map(FixturePathSpan::end_lamp)
         .max()
         .unwrap_or(0)
+}
+
+/// One control span per authored path (D1: honest spans).
+///
+/// The buffer stays flat — `row` is always 0 — but a fixture that authors five
+/// strands says so, instead of publishing one span covering all of them. That
+/// is what lets an output slice the buffer along strand boundaries and a face
+/// snap to them, without anyone re-deriving the mapping.
+///
+/// `written_samples` clips the answer to what the render actually filled: a
+/// path whose lamps fall past the target's extent is reported short rather
+/// than promising samples that are not there. A mapping with no paths at all
+/// (unset, or a map2d document that has not resolved yet) keeps the single
+/// covering span, which is exactly what every fixture published before.
+fn fixture_control_spans(
+    mapping: &MappingConfig,
+    color_order: ColorOrder,
+    written_samples: u32,
+) -> Vec<ControlSpan> {
+    let mut spans = Vec::new();
+    for path in fixture_path_spans(mapping) {
+        let start = path.first_lamp.saturating_mul(3);
+        if start >= written_samples {
+            continue;
+        }
+        let len = path
+            .lamp_count
+            .saturating_mul(3)
+            .min(written_samples - start);
+        if len == 0 {
+            continue;
+        }
+        spans.push(ControlSpan {
+            row: 0,
+            start,
+            len,
+            encoding: ControlHint::RgbPixels {
+                count: len / 3,
+                color_order,
+            },
+        });
+    }
+    if spans.is_empty() {
+        spans.push(ControlSpan {
+            row: 0,
+            start: 0,
+            len: written_samples,
+            encoding: ControlHint::RgbPixels {
+                count: written_samples / 3,
+                color_order,
+            },
+        });
+    }
+    spans
 }
 
 fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
@@ -2256,8 +2289,104 @@ mod tests {
                 0, 65535, 0, // path 1
             ]
         );
-        assert_eq!(layout.spans.len(), 1);
-        assert_eq!(layout.spans[0].len, 15);
+        // Honest spans (D1): two authored paths are two spans, and the
+        // unassigned channel between them belongs to neither.
+        assert_eq!(layout.spans.len(), 2);
+        assert_eq!((layout.spans[0].start, layout.spans[0].len), (0, 6));
+        assert_eq!((layout.spans[1].start, layout.spans[1].len), (9, 6));
+    }
+
+    /// D1, honest spans: a fixture that authors three paths publishes three
+    /// spans, not one covering all of them. The buffer stays flat — `row` is
+    /// always 0 — but an output can now slice along the strand boundaries the
+    /// fixture actually has, instead of re-deriving them from the mapping.
+    #[test]
+    fn a_multi_path_fixture_publishes_one_span_per_path() {
+        let mapping = MappingConfig::path_points_vec(
+            vec![
+                PathSpec::point_list(0, vec![[0.5, 0.5]; 2]),
+                PathSpec::point_list(2, vec![[0.5, 0.5]; 3]),
+                PathSpec::point_list(5, vec![[0.5, 0.5]; 4]),
+            ],
+            2.0,
+        );
+
+        let spans = fixture_control_spans(&mapping, ColorOrder::Rgb, 27);
+
+        assert_eq!(spans.len(), 3);
+        assert!(spans.iter().all(|span| span.row == 0), "the buffer is flat");
+        assert_eq!(
+            spans
+                .iter()
+                .map(|span| (span.start, span.len))
+                .collect::<Vec<_>>(),
+            vec![(0, 6), (6, 9), (15, 12)],
+        );
+        assert_eq!(
+            spans[2].encoding,
+            ControlHint::RgbPixels {
+                count: 4,
+                color_order: ColorOrder::Rgb,
+            }
+        );
+    }
+
+    /// The single-path case — every project shipped today — must publish
+    /// exactly what it always did.
+    #[test]
+    fn a_single_path_fixture_publishes_one_covering_span() {
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::point_list(0, vec![[0.5, 0.5]; 12])],
+            2.0,
+        );
+
+        let spans = fixture_control_spans(&mapping, ColorOrder::Grb, 36);
+
+        assert_eq!(spans.len(), 1);
+        assert_eq!((spans[0].row, spans[0].start, spans[0].len), (0, 0, 36));
+        assert_eq!(
+            spans[0].encoding,
+            ControlHint::RgbPixels {
+                count: 12,
+                color_order: ColorOrder::Grb,
+            }
+        );
+    }
+
+    /// A span promises samples that exist. A path reaching past what the
+    /// render filled is reported short, and one entirely past it is not
+    /// reported at all.
+    #[test]
+    fn spans_never_promise_samples_the_render_did_not_write() {
+        let mapping = MappingConfig::path_points_vec(
+            vec![
+                PathSpec::point_list(0, vec![[0.5, 0.5]; 2]),
+                PathSpec::point_list(2, vec![[0.5, 0.5]; 3]),
+                PathSpec::point_list(5, vec![[0.5, 0.5]; 4]),
+            ],
+            2.0,
+        );
+
+        let spans = fixture_control_spans(&mapping, ColorOrder::Rgb, 9);
+
+        assert_eq!(
+            spans
+                .iter()
+                .map(|span| (span.start, span.len))
+                .collect::<Vec<_>>(),
+            vec![(0, 6), (6, 3)],
+        );
+    }
+
+    /// No paths to be honest about — an unset mapping, or a map2d document
+    /// that has not resolved yet — keeps the covering span rather than
+    /// publishing nothing.
+    #[test]
+    fn a_fixture_with_no_authored_paths_keeps_the_covering_span() {
+        let spans = fixture_control_spans(&MappingConfig::Unset, ColorOrder::Rgb, 6);
+
+        assert_eq!(spans.len(), 1);
+        assert_eq!((spans[0].start, spans[0].len), (0, 6));
     }
 
     #[test]
@@ -2975,6 +3104,7 @@ mod tests {
             &request,
             ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples),
             &accumulators,
+            &MappingConfig::Unset,
             ColorOrder::Rgb,
             brightness_u8,
             gamma_correction,

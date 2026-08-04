@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn strict_provider_rejects_unknown_endpoint_specs() {
         let provider = MemoryOutputProvider::new();
-        let unknown_endpoint = endpoint("ws281x:rmt:D4");
+        let unknown_endpoint = endpoint("ws281x:local:D4");
 
         let result = provider.open(&unknown_endpoint, 3, OutputFormat::Ws2811, None);
 
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn permissive_provider_accepts_any_endpoint_spec() {
         let provider = MemoryOutputProvider::new_permissive();
-        let demo_endpoint = endpoint("ws281x:rmt:D4");
+        let demo_endpoint = endpoint("ws281x:local:D4");
 
         let handle = provider
             .open(&demo_endpoint, 3, OutputFormat::Ws2811, None)
@@ -396,7 +396,7 @@ mod tests {
         let before_open = provider.hardware_generation();
 
         let handle = provider
-            .open(&endpoint("ws281x:rmt:D10"), 3, OutputFormat::Ws2811, None)
+            .open(&endpoint("ws281x:local:D10"), 3, OutputFormat::Ws2811, None)
             .expect("output opens");
         let after_open = provider.hardware_generation();
         assert_ne!(after_open, before_open, "claiming hardware is a change");
@@ -419,8 +419,8 @@ mod tests {
     #[test]
     fn opening_two_outputs_on_different_pins_contends_for_rmt() {
         let provider = MemoryOutputProvider::new();
-        let first_endpoint = endpoint("ws281x:rmt:D10");
-        let second_endpoint = endpoint("ws281x:rmt:GPIO19");
+        let first_endpoint = endpoint("ws281x:local:D10");
+        let second_endpoint = endpoint("ws281x:local:GPIO19");
         let first = provider
             .open(&first_endpoint, 3, OutputFormat::Ws2811, None)
             .expect("first output opens");

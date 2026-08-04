@@ -38,7 +38,8 @@ mod ui_slot_unit;
 mod ui_slot_value;
 
 pub use face::{
-    UiFixtureFace, UiFixturePower, UiModuleFace, UiNodeFace, UiPanelControl, UiPanelControlState,
+    UiFixtureFace, UiFixturePower, UiModuleFace, UiNodeFace, UiOutputBoardFacts,
+    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelControlState,
     UiPanelControlView, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPlaylistEntry,
     UiPlaylistFace, UiShaderFace,
 };

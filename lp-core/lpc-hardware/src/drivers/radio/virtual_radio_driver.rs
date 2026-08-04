@@ -14,6 +14,10 @@ use crate::{
     RadioMessageKind,
 };
 
+/// Endpoint spec the virtual radio answers to. The middle segment names the
+/// target device (`local`), not the transport, so host, emulator, and device
+/// all resolve the same authored spec.
+const DEFAULT_VIRTUAL_RADIO_SPEC: &str = "radio:local:0";
 const VIRTUAL_RADIO_DEVICE_ID: RadioDeviceId = RadioDeviceId::new(0);
 const VIRTUAL_RADIO_QUEUE_CAPACITY: usize = 16;
 
@@ -33,7 +37,7 @@ pub struct VirtualRadioDriver {
 
 impl VirtualRadioDriver {
     pub fn new(registry: Rc<HwRegistry>, radio_index: u8) -> Self {
-        Self::new_with_spec(registry, radio_index, "radio:virtual:0")
+        Self::new_with_spec(registry, radio_index, DEFAULT_VIRTUAL_RADIO_SPEC)
     }
 
     pub fn new_with_spec(registry: Rc<HwRegistry>, radio_index: u8, spec: &'static str) -> Self {

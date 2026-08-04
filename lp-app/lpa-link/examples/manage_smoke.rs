@@ -28,11 +28,13 @@ use lpa_link::{
 fn event_printer() -> DeviceEventSink {
     DeviceEventSink::new(|event| match event {
         DeviceEvent::LogLine { line, .. } => println!("  | {line}"),
-        DeviceEvent::State { state } => println!("  * state: {state:?}"),
+        DeviceEvent::State { to: state, .. } => println!("  * state: {state:?}"),
         DeviceEvent::Progress { label, percent } => match percent {
             Some(percent) => println!("  % {label}: {percent}%"),
             None => println!("  % {label}"),
         },
+        DeviceEvent::ParseAnomaly { detail } => println!("  ! parse anomaly: {detail}"),
+        DeviceEvent::TxFrame { .. } => {}
     })
 }
 

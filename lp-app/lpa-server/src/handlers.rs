@@ -59,6 +59,20 @@ pub fn handle_client_message(
     let ClientMessage { id, msg } = client_msg;
 
     let response = match msg {
+        // A FIXTURE build refuses the hello outright, which is what
+        // pre-hello firmware looks like from the client's side: the
+        // request goes unanswered and absence IS the mismatch signal
+        // (`docs/adr/2026-07-14-wire-hello-versioning.md`). Suppressing
+        // only the unsolicited hello would not do it — Studio's client
+        // asks as well, and an answer would make the board compatible
+        // again. Never enable this in a released image.
+        #[cfg(feature = "fixture-no-hello")]
+        lpc_wire::ClientRequest::Hello => {
+            return Err(ServerError::Core(alloc::string::String::from(
+                "hello is not supported",
+            )));
+        }
+        #[cfg(not(feature = "fixture-no-hello"))]
         lpc_wire::ClientRequest::Hello => {
             // The injected hello's `device_uid` is a boot-time hint; the
             // root identity file is live truth (stamping happens at

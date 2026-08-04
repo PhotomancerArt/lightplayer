@@ -38,17 +38,22 @@ pub enum DeployOp {
     /// picker row, the drop-confirm sheet's verb, the project card's
     /// Push-to row) IS the D11 consent. Progress folds into the card's
     /// Operation-in-flight state.
-    PushProject { key: String },
+    PushProject {
+        /// The library project to push.
+        key: String,
+        /// The board to push it TO (M4) — the card the gesture came from.
+        target: crate::DeviceTarget,
+    },
     /// Diverged verb (D11/D30): the device's copy becomes the project's
     /// new head (it was banked at connect). Dispatched from the card's
-    /// drift sheet; resolves the copy from the live session's sync.
-    AdoptDeviceCopy,
+    /// drift sheet; resolves the copy from that card's session sync.
+    AdoptDeviceCopy { target: crate::DeviceTarget },
     /// Diverged verb (D11/D30): fork the device's copy into a new
     /// project named after the device; the line stays where it is.
-    KeepBothFork,
+    KeepBothFork { target: crate::DeviceTarget },
     /// Erase the device's flash (firmware op; destructive). The card's
     /// Danger tab carries it behind the D41 confirm sheet.
-    EraseDevice,
+    EraseDevice { target: crate::DeviceTarget },
 }
 
 impl ControllerOp for DeployOp {
@@ -61,19 +66,19 @@ impl ControllerOp for DeployOp {
                 ActionPriority::Primary,
             )
             .with_icon("upload"),
-            Self::AdoptDeviceCopy => ActionMeta::new(
+            Self::AdoptDeviceCopy { .. } => ActionMeta::new(
                 "Adopt device version",
                 "Make the device's copy this project's newest version.",
                 ActionPriority::Secondary,
             ),
-            Self::KeepBothFork => ActionMeta::new(
+            Self::KeepBothFork { .. } => ActionMeta::new(
                 "Keep both",
                 "Save the device's copy as its own project, named after \
                  the device.",
                 ActionPriority::Secondary,
             )
             .with_icon("copy"),
-            Self::EraseDevice => ActionMeta::new(
+            Self::EraseDevice { .. } => ActionMeta::new(
                 "Erase device…",
                 "Erase the device's flash storage entirely.",
                 ActionPriority::Tertiary,
