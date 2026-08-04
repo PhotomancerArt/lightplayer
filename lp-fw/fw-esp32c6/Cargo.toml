@@ -84,6 +84,19 @@ test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-n
 test_f32_softfloat = ["dep:lpvm-native", "dep:lpvm", "dep:lps-glsl", "dep:lpir", "dep:lps-shared", "lps-builtins", "lpc-shared", "lpvm-native/float-f32", "lps-builtins/float-f32"]
 test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
 
+# FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
+# build misreport its hello so a current Studio classifies it Incompatible,
+# reproducing the s4 device scenario from source instead of from an
+# archived binary (`scripts/device-scenarios/s4-old-firmware.json`).
+#
+#   just fixture-fw fw-esp32c6 old-proto   → Incompatible (proto-mismatch)
+#   just fixture-fw fw-esp32c6 no-hello    → Incompatible (no-hello)
+#
+# ⚠️ Never enable either in a released image: they exist to make a device
+# LIE about its wire protocol.
+fixture-old-proto = ["lpa-server/fixture-old-proto"]
+fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
+
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 embassy-executor = "0.10.0"

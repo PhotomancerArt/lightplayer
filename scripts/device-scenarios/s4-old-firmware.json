@@ -1,21 +1,22 @@
 {
   "id": "s4-old-firmware",
-  "title": "Old firmware (wire proto mismatch / pre-hello)",
+  "title": "Old firmware (wire proto mismatch)",
   "board": "C6",
   "needs": [],
   "expect": [
-    "state:incompatible(no-hello)|state:incompatible(proto-mismatch)"
+    "state:incompatible(proto-mismatch)"
   ],
   "setup": [
     {
-      "describe": "NOT AUTOMATED YET \u2014 no archived old build exists on this desk (2026-08-03 sitting). Planned automation: a FIXTURE build of the CURRENT firmware with a forced old wire proto \u2014 a cargo feature (e.g. fixture-old-proto) that sends proto = WIRE_PROTO_VERSION - 1 in the hello (and a fixture-no-hello variant that suppresses it). Same toolchain, no archived binaries, lands Incompatible(proto-mismatch)/(no-hello) deterministically. Until that exists, SKIP this scenario.",
-      "run": null,
+      "describe": "Flash a FIXTURE build: today's firmware with `fixture-old-proto`, which reports WIRE_PROTO_VERSION - 1 in its hello. Built from source rather than restored from an archived binary \u2014 an archived old build rots against the toolchain and proves nothing about TODAY's classifier.",
+      "run": "just fixture-fw old-proto {port}",
       "verified": false
     }
   ],
   "manual": [
     "Connect to this board.",
-    "The card should land Incompatible with the reflash affordance."
+    "The card should land Incompatible with the reflash affordance \u2014 that affordance is the ONE way out and must be reachable.",
+    "AFTER capturing: put the board back with the card's Update/Flash, or `just build-fw-esp32c6` + espflash. It is running firmware that lies about its wire protocol."
   ],
   "port_filter": {
     "kind_contains": "USB-Serial/JTAG"

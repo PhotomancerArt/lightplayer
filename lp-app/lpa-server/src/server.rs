@@ -82,6 +82,21 @@ pub struct LpServer {
 /// still happening without drowning the console.
 const TICK_ERROR_RESTATE_EVERY: u32 = 512;
 
+/// The wire proto this build REPORTS.
+///
+/// Normally [`lpc_wire::WIRE_PROTO_VERSION`]. A `fixture-old-proto` build
+/// reports one LESS, so a current Studio classifies it Incompatible
+/// (proto-mismatch) — the s4 device scenario, reproducible from source
+/// instead of from an archived binary. Never enable this in a released
+/// image.
+const fn fixture_proto() -> u32 {
+    if cfg!(feature = "fixture-old-proto") {
+        lpc_wire::WIRE_PROTO_VERSION - 1
+    } else {
+        lpc_wire::WIRE_PROTO_VERSION
+    }
+}
+
 impl LpServer {
     /// Create a new LpServer instance
     ///
@@ -188,7 +203,7 @@ impl LpServer {
             radio_service,
             graphics,
             hello: lpc_wire::ServerHello {
-                proto: lpc_wire::WIRE_PROTO_VERSION,
+                proto: fixture_proto(),
                 build: lpc_wire::BuildFacts {
                     features,
                     package: "unknown".to_string(),
@@ -220,7 +235,14 @@ impl LpServer {
             profile,
             device_uid,
         } = identity;
-        self.hello.proto = proto;
+        // A fixture build keeps LYING even when the embedder states the
+        // truth — the whole point is that the wire reports the wrong
+        // version (see the `fixture-old-proto` feature).
+        self.hello.proto = if cfg!(feature = "fixture-old-proto") {
+            fixture_proto()
+        } else {
+            proto
+        };
         self.hello.build.package = package;
         self.hello.build.commit = commit;
         self.hello.build.dirty = dirty;
