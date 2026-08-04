@@ -98,7 +98,11 @@ impl Engine {
             scoped_rows.push((entry.owner, entry.clone()));
         }
         // Endpoint scopes need tree lookups, which borrow-conflict with the
-        // iteration above — annotate in a second pass.
+        // iteration above — annotate in a second pass. The same pass stamps
+        // the declared `panel = "show"` hint on Default-origin consuming
+        // bindings (the additive override on the derived membership rule) —
+        // authored bindings are public already, so the hint is only read
+        // where it can change the answer.
         for (binding, (owner, entry)) in bindings.iter_mut().zip(scoped_rows.iter()) {
             if let lpc_wire::WireBindingEndpoint::Bus { scope, .. } = &mut binding.endpoint {
                 *scope = match binding.direction {
@@ -109,6 +113,24 @@ impl Engine {
                         self.tree().bus_read_scope(*owner).map(wire_scope_ref)
                     }
                 };
+            }
+            if binding.origin == WireBindingOrigin::Default
+                && binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let Some(slot) = &binding.slot
+            {
+                binding.panel_show = self
+                    .tree()
+                    .get(binding.node)
+                    .and_then(|entry| entry.def_location.as_ref())
+                    .and_then(|location| {
+                        super::engine::authored_def_slot_panel_hint(
+                            registry,
+                            self.slot_shapes(),
+                            location,
+                            slot,
+                        )
+                    })
+                    .is_some();
             }
             let _ = entry;
         }
@@ -164,6 +186,7 @@ impl Engine {
                                 value: writer.value.clone(),
                             },
                             origin: WireBindingOrigin::Panel,
+                            panel_show: false,
                             priority: BindingPriority::panel().as_i32(),
                             kind,
                         })
@@ -410,6 +433,7 @@ fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
         origin,
         priority: entry.priority.as_i32(),
         kind: entry.kind,
+        panel_show: false,
     }
 }
 

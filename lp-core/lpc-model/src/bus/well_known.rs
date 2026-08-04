@@ -45,6 +45,11 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         doc: "Control events (button presses, remote triggers); map readers merge by message id.",
     },
     WellKnownChannel {
+        name: "brightness",
+        kind: Kind::Amplitude,
+        doc: "Master output brightness (0-1); fixtures consume it by default.",
+    },
+    WellKnownChannel {
         name: PRIMARY_VISUAL_CHANNEL,
         kind: Kind::Color,
         doc: "The project's primary visual output; fixtures sample it.",
