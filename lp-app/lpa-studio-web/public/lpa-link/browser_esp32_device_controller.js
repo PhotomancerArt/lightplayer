@@ -27,11 +27,19 @@ export class BrowserEsp32DeviceController {
     if (!this.isSupported()) {
       throw new Error("Web Serial is not supported in this browser.");
     }
-    // Espressif's USB vendor id (D32): the chooser lists only ESP32-class
-    // devices. An empty filtered chooser still rejects with NotFoundError,
-    // which upstream maps to "cancelled".
+    // The chooser admits Espressif native USB AND the serial-bridge chips
+    // ESP32 dev boards ship with (M2 of the multi-board roadmap: the
+    // Espressif-only filter made classic ESP32s unreachable through the
+    // browser, period). The bridge ids are generic — plenty of non-ESP32
+    // hardware wears them — and that is the correct trade: a chooser that
+    // hides a board the user owns is worse than one listing a port they
+    // will not pick, and a wrong pick fails safely at the readiness gate
+    // ("no LightPlayer firmware detected"). Do NOT narrow this back with
+    // product-id allowlists; dev-board vendors do not use stable ones.
+    // An empty filtered chooser still rejects with NotFoundError, which
+    // upstream maps to "cancelled".
     const port = await navigator.serial.requestPort({
-      filters: [{ usbVendorId: 0x303a }],
+      filters: ESP32_USB_VENDOR_IDS.map((usbVendorId) => ({ usbVendorId })),
     });
     return { port, label: labelForPort(port) };
   }
@@ -385,12 +393,27 @@ export class BrowserEsp32DeviceController {
   }
 }
 
+// USB vendor ids the chooser admits: Espressif native USB plus the three
+// bridge chips ESP32 dev boards ship with. See the requestPort comment for
+// why this is deliberately permissive.
+const ESP32_USB_VENDOR_IDS = [
+  0x303a, // Espressif native USB (C6, S3, ...)
+  0x1a86, // WCH CH34x bridge (classic ESP32 dev boards)
+  0x10c4, // Silicon Labs CP210x bridge
+  0x0403, // FTDI bridge
+];
+
 export function labelForPort(port) {
   const info = port.getInfo?.() ?? {};
   const vendor = numberToHex(info.usbVendorId);
   const product = numberToHex(info.usbProductId);
   if (vendor && product) {
-    return `ESP32 Serial (${vendor}:${product})`;
+    // Only Espressif native-USB ports are certainly ESP32s; a bridge chip
+    // is generic hardware, so its label must not overclaim.
+    if (info.usbVendorId === 0x303a) {
+      return `ESP32 Serial (${vendor}:${product})`;
+    }
+    return `Serial device (${vendor}:${product})`;
   }
   return "Browser serial device";
 }

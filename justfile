@@ -1671,6 +1671,45 @@ watch-pr *args:
 hardware-list *args:
     cargo run -q -p lp-cli -- hardware list {{ args }}
 
+# Build and flash a FIXTURE firmware — a CURRENT build that misreports its
+# hello, so a current Studio classifies it Incompatible on purpose.
+#
+# This is how the s4 device scenario is reproduced. The alternative — keeping
+# an archived old binary around — rots against the toolchain and proves
+# nothing about today's classifier; a fixture built from today's source at
+# every commit proves exactly the thing under test.
+#
+#   just fixture-fw old-proto            # → Incompatible (proto-mismatch)
+#   just fixture-fw no-hello             # → Incompatible (no-hello)
+#   just fixture-fw old-proto /dev/cu.usbmodem1101
+#
+# ⚠️ Leaves the board running firmware that LIES about its wire protocol.
+# Re-flash a normal build (Studio's Update, or `just build-fw-esp32c6` +
+# espflash) to put it back.
+fixture-fw variant port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ variant }}" in
+      old-proto|no-hello) ;;
+      *) echo "unknown fixture variant: {{ variant }} (want old-proto | no-hello)" >&2; exit 2 ;;
+    esac
+    feature="fixture-{{ variant }}"
+    just install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,"$feature"
+    cd - >/dev/null
+    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
+
+# Guided golden-trace capture runner (multi-device M8): status table with no
+# args; `run <id> [--port /dev/...]` sets a board to a known state, then
+# captures Studio's device-event stream to a committed trace fixture. See
+# scripts/device-scenarios/README.md.
+device-scenario *args:
+    node scripts/device-scenario.mjs {{ args }}
+
 # ============================================================================
 # Demo projects
 # ============================================================================

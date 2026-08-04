@@ -1,0 +1,23 @@
+{
+  "id": "s1-blank-flash",
+  "title": "Blank flash (fully erased)",
+  "board": "C6 or S3 (native USB)",
+  "needs": [],
+  "expect": [
+    "state:blank-flash"
+  ],
+  "setup": [
+    {
+      "describe": "Erase the ENTIRE flash (foreground \u2014 a backgrounded espflash has died silently mid-write before)",
+      "run": "espflash erase-flash --port {port}",
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Click Connect and pick this board's port in Chrome's chooser.",
+    "Wait for the card to settle \u2014 it should read as blank flash / needs firmware."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
+}

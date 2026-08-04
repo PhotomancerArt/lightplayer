@@ -183,6 +183,7 @@ mod tests {
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
+                DeviceDetailAffordance::DisconnectDevice,
             ]
         );
     }
@@ -328,6 +329,8 @@ mod tests {
             fw: Some(&DEVICE_FW),
             hardware: Some(&DEVICE_HW),
             bundled_fw: None,
+            detected_chip: None,
+            port_label: None,
             now_secs: NOW,
         }
     }
@@ -359,5 +362,6 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         });
 }

@@ -142,6 +142,8 @@ fn project_picker_open() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Project, None),
                     ..device_card(RosterCardState::ConnectedEmpty, false)
                 },
@@ -203,7 +205,7 @@ fn setup_card(detected_chip: Option<&str>, setup_board: Option<&str>) -> Element
 }
 
 #[story(
-    description = "Setup form with a detected C6 (boot-banner evidence): only the C6 boards are offered, because a board for another chip cannot be flashed onto this device — the guard refuses it. The other-chip boards are behind '+N other boards'; the generic fallback is the dashed cell."
+    description = "Setup form with a detected C6 (boot-banner evidence): only the C6 boards are offered, because a board for another chip cannot be flashed onto this device — the guard refuses it. Other-chip boards are not offered at all (gate-1 sitting 2026-08-03); the generic fallback is the dashed cell."
 )]
 fn setup_board_picker_detected_c6() -> Element {
     sheet(vec![setup_card(Some("esp32c6"), None)])
@@ -260,6 +262,8 @@ fn troubleshoot_sheet_open() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Status, Some(CardSheet::Troubleshoot)),
                     ..device_card(RosterCardState::NotResponding, false)
                 },
@@ -285,6 +289,8 @@ fn bootloader_entry_instructing() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(
                         DeviceCardTab::Status,
                         Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(Some(
@@ -308,6 +314,8 @@ fn bootloader_entry_generic() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(
                         DeviceCardTab::Status,
                         Some(CardSheet::BootloaderEntry(BootloaderEntryFlow::start(None))),
@@ -329,6 +337,8 @@ fn bootloader_entry_waiting() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(
                         DeviceCardTab::Status,
                         Some(CardSheet::BootloaderEntry(
@@ -352,6 +362,8 @@ fn bootloader_entry_confirmed() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(
                         DeviceCardTab::Status,
                         Some(CardSheet::BootloaderEntry(
@@ -377,6 +389,8 @@ fn bootloader_entry_not_yet() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(
                         DeviceCardTab::Status,
                         Some(CardSheet::BootloaderEntry(
@@ -453,6 +467,8 @@ fn settings_tab_running() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Settings, None),
                     ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
                 },
@@ -482,6 +498,8 @@ fn settings_tab_capability_gaps() -> Element {
             div { class: "tw:w-64",
                 DeviceCard {
                     card: UiDeviceCard {
+                        port_label: None,
+                        session_key: None,
                         ui: opened(DeviceCardTab::Settings, None),
                         ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
                     },
@@ -494,6 +512,8 @@ fn settings_tab_capability_gaps() -> Element {
             div { class: "tw:w-64",
                 DeviceCard {
                     card: UiDeviceCard {
+                        port_label: None,
+                        session_key: None,
                         ui: opened(DeviceCardTab::Settings, None),
                         ..device_card_with_capabilities(
                             RosterCardState::RunningUpToDate,
@@ -532,6 +552,8 @@ fn danger_tab_simulator() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Danger, None),
                     ..sim_card(true)
                 },
@@ -551,6 +573,8 @@ fn erase_sheet_open() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Danger, Some(CardSheet::Confirm(CardVerb::Erase))),
                     ..device_card(behind_state(), true)
                 },
@@ -569,6 +593,8 @@ fn name_sheet_open() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Status, Some(CardSheet::Name)),
                     ..device_card(RosterCardState::NeedsAName, false)
                 },
@@ -587,6 +613,8 @@ fn stop_sim_sheet_open() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Danger, Some(CardSheet::Confirm(CardVerb::StopSim))),
                     ..sim_card(true)
                 },
@@ -606,6 +634,8 @@ fn op_overlay_determinate() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: CardUiState {
                         op: Some(CardOp::new("Installing firmware…", Some(62))),
                         ..CardUiState::default()
@@ -627,6 +657,8 @@ fn op_overlay_awaiting_device() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: CardUiState {
                         op: Some(CardOp::awaiting("Waiting for firmware boot")),
                         ..CardUiState::default()
@@ -648,6 +680,8 @@ fn op_overlay_failed() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: CardUiState {
                         op: Some(CardOp::failed(
                             "Flashing firmware failed",
@@ -673,6 +707,8 @@ fn op_overlay_indeterminate() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: CardUiState {
                         op: Some(CardOp::new("Erasing device…", None)),
                         ..CardUiState::default()
@@ -709,6 +745,8 @@ fn console_tab_open() -> Element {
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(DeviceCardTab::Console, None),
                     ..device_card_with_console(RosterCardState::RunningUpToDate, true)
                 },
@@ -743,6 +781,8 @@ fn pane_grown_sim() -> Element {
         div { class: "tw:h-[560px] tw:w-[340px]",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     console_tail: device_card_with_console(RosterCardState::RunningUpToDate, true)
                         .console_tail,
                     ..sim_card(true)
@@ -819,6 +859,8 @@ fn tabbed(state: RosterCardState, with_project: bool, tab: DeviceCardTab) -> Ele
         div { class: "tw:w-64",
             DeviceCard {
                 card: UiDeviceCard {
+                    port_label: None,
+                    session_key: None,
                     ui: opened(tab, None),
                     ..device_card(state, with_project)
                 },
@@ -846,6 +888,8 @@ fn offline_state() -> RosterCardState {
 
 fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         uid: Some("dev_7pQr5St89uVwXy2C".to_string()),
         name: "Luna's porch sign".to_string(),
         transport: "USB".to_string(),
@@ -869,6 +913,8 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
 /// "nothing loaded".
 fn sim_card(with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         uid: None,
         name: "Simulator".to_string(),
         transport: String::new(),
@@ -904,6 +950,8 @@ fn device_card_with_console(state: RosterCardState, with_project: bool) -> UiDev
         )
     };
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         console_tail: vec![
             line(0.0, UiLogLevel::Info, "engine: project loaded · 241 points"),
             line(1.0, UiLogLevel::Info, "engine: frame 41022 · 60fps"),
@@ -955,6 +1003,8 @@ fn device_card_with_capabilities(
     radio: bool,
 ) -> UiDeviceCard {
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         fw: Some(BuildFacts {
             features,
             package: "fw-esp32c6".to_string(),
@@ -966,6 +1016,7 @@ fn device_card_with_capabilities(
             radio,
             button: true,
             board_id: None,
+            ..Default::default()
         }),
         ..device_card(state, with_project)
     }

@@ -39,6 +39,8 @@ fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
 /// "panes non-empty ⇒ lens card".
 pub(crate) fn simulator_lens_card() -> UiDeviceCard {
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         uid: None,
         name: "Simulator".to_string(),
         transport: String::new(),

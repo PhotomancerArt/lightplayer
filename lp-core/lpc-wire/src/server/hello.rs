@@ -70,6 +70,15 @@ use serde::{Deserialize, Serialize};
 ///   runtime command channel (playlist activate-entry;
 ///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
 /// - 1: hello handshake introduced.
+///
+/// Every entry above is a BREAKING change — that is what earns a bump,
+/// because a differing version means "assume nothing works". Purely
+/// ADDITIVE optional fields do not: `HardwareFacts`'s chip-identity
+/// fields (2026-08-03, landed beside v9) carry `#[serde(default)]` and
+/// nothing sets `deny_unknown_fields`, so an old firmware's hello reads
+/// as `None` on new Studio and a new firmware's extra fields are ignored
+/// by old Studio. Bumping for those would mark every board running
+/// current firmware Incompatible in exchange for nothing.
 pub const WIRE_PROTO_VERSION: u32 = 9;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
@@ -122,9 +131,13 @@ pub struct BuildFacts {
 
 /// Hardware facts of the unit answering the hello — runtime truth about
 /// what is actually wired, as distinct from what the build could drive.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HardwareFacts {
+    // `Default` is derived deliberately: every field's default is
+    // "nothing known" (no service wired, no identity read), which is the
+    // honest report for an embedder that cannot answer — and it keeps
+    // adding a field from churning every test fixture that builds one.
     /// A radio service is wired on this unit.
     pub radio: bool,
     /// A button input service is wired on this unit.
@@ -137,6 +150,57 @@ pub struct HardwareFacts {
     /// `/hardware.json` (board-selection roadmap M5); the field exists so
     /// that lands as a population change, not a wire change.
     pub board_id: Option<String>,
+    /// The chip's factory MAC, lowercase colon hex (`aa:bb:cc:dd:ee:ff`).
+    ///
+    /// THE permanent identity of this unit: burned into efuse at
+    /// manufacture, unique per chip, and — unlike the `dev_…` uid Studio
+    /// stamps into the filesystem — it survives an erase. `None` from
+    /// embedders with no efuse to read (the host server, the browser
+    /// worker, `lp-cli`).
+    ///
+    /// Deliberately the BASE address and not a list of per-interface
+    /// ones: Wi-Fi STA *is* the base, and SoftAP/BLE are derived from it
+    /// by a published rule (local-admin bit; BLE also bumps the last
+    /// octet). Shipping the derivations would be redundant and would drift
+    /// from what the radios actually use. An interface's own address is
+    /// reported only if that interface is genuinely wired — same rule as
+    /// [`Self::radio`] and [`Self::button`] — and by the DEVICE, which is
+    /// the only honest source once `override_mac_address` exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_mac: Option<String>,
+    /// The silicon revision as `major.minor` (e.g. `"0.2"`).
+    ///
+    /// Hardware fact the unit knows about itself and never used to say —
+    /// esptool reports a revision while probing, but the running firmware
+    /// stayed silent about it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chip_revision: Option<String>,
+    /// The IEEE 802.15.4 EUI-64 (Zigbee/Thread), lowercase colon hex.
+    ///
+    /// A DIFFERENT width from a MAC — 64 bits, not 48: the base MAC plus
+    /// the chip's `MAC_EXT` efuse field. Present only on chips that have
+    /// an 802.15.4 radio at all (the C6 does; the classic ESP32 has no
+    /// `MAC_EXT`), which is why it is reported separately rather than
+    /// folded into [`Self::base_mac`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eui64: Option<String>,
+}
+
+/// Chip-level identity the server CANNOT derive: it lives in efuse, and
+/// only the embedder can read it.
+///
+/// The counterpart of [`HelloIdentity`] for hardware rather than build
+/// provenance. Embedders without efuse (the host server, the browser
+/// worker, `lp-cli`) simply never call the setter and report `None`,
+/// exactly as they already do for build identity.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HardwareIdentity {
+    /// See [`HardwareFacts::base_mac`].
+    pub base_mac: Option<String>,
+    /// See [`HardwareFacts::chip_revision`].
+    pub chip_revision: Option<String>,
+    /// See [`HardwareFacts::eui64`].
+    pub eui64: Option<String>,
 }
 
 /// The embedder-supplied half of the hello: build identity the server has
@@ -220,6 +284,7 @@ mod tests {
                 radio: true,
                 button: true,
                 board_id: None,
+                ..Default::default()
             },
             device_uid: Some("dev_0000000000000001".to_string()),
         };
@@ -252,6 +317,7 @@ mod tests {
                 radio: false,
                 button: false,
                 board_id: None,
+                ..Default::default()
             },
             device_uid: None,
         };
@@ -278,6 +344,7 @@ mod tests {
                 radio: false,
                 button: true,
                 board_id: None,
+                ..Default::default()
             },
             device_uid: None,
         };

@@ -1,0 +1,71 @@
+{"t":1785797556.052,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.056,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.06,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.063,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.066,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.069,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.071,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.074,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797556.076,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797557.534,"kind":"sweep","disposition":"ran"}
+{"t":1785797557.534,"kind":"flow","from":"selecting-provider","to":"discovering-endpoints"}
+{"t":1785797557.537,"kind":"flow","from":"discovering-endpoints","to":"selecting-endpoint"}
+{"t":1785797557.537,"kind":"flow","from":"selecting-endpoint","to":"connecting"}
+{"t":1785797557.747,"endpoint":"browser-serial-esp32-port-1","kind":"state","to":"booting"}
+{"t":1785797557.747,"kind":"flow","from":"connecting","to":"connected"}
+{"t":1785797557.747,"session":"runtime-1","endpoint":"browser-serial-esp32-port-1","kind":"pool","action":"install","detail":"Device"}
+{"t":1785797557.747,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x3fc97e7c,len:0x2d38"}
+{"t":1785797557.747,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"ESP-ROM:esp32s3-20210327"}
+{"t":1785797557.747,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Build:Mar 27 2021"}
+{"t":1785797557.747,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)"}
+{"t":1785797557.747,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"Saved PC:0x403743c0"}
+{"t":1785797557.747,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785797557.748,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"mode:DIO, clock div:1"}
+{"t":1785797557.748,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x3c0f0020,len:0x2e374"}
+{"t":1785797557.748,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x3fc96200,len:0x1c7c"}
+{"t":1785797557.748,"endpoint":"browser-serial-esp32-port-1","kind":"rx","line":"load:0x42000020,len:0xe78f0"}
+{"t":1785797558.409,"endpoint":"browser-serial-esp32-port-1","kind":"state","from":"booting","to":"gone"}
+{"t":1785797558.638,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.64,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.642,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.643,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.645,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.646,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.647,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.649,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797558.65,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797560.181,"kind":"flow","from":"connected","to":"discovering-endpoints"}
+{"t":1785797563.135,"kind":"flow","from":"discovering-endpoints","to":"selecting-endpoint"}
+{"t":1785797563.135,"kind":"flow","from":"selecting-endpoint","to":"connecting"}
+{"t":1785797563.348,"endpoint":"browser-serial-esp32-port-2","kind":"state","to":"booting"}
+{"t":1785797563.348,"kind":"flow","from":"connecting","to":"connected"}
+{"t":1785797563.348,"session":"runtime-2","endpoint":"browser-serial-esp32-port-2","kind":"pool","action":"install","detail":"Device"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"load:0x3fc97e7c,len:0x2d38"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"ESP-ROM:esp32s3-20210327"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"Build:Mar 27 2021"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"Saved PC:0x4037a678"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"SPIWP:0xee"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"mode:DIO, clock div:1"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"load:0x3c0f0020,len:0x2e374"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"load:0x3fc96200,len:0x1c7c"}
+{"t":1785797563.349,"endpoint":"browser-serial-esp32-port-2","kind":"rx","line":"load:0x42000020,len:0xe78f0"}
+{"t":1785797563.953,"endpoint":"browser-serial-esp32-port-2","kind":"state","from":"booting","to":"gone"}
+{"t":1785797563.957,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.957,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.958,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.958,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.958,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.958,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.958,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.958,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797563.958,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.193,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.196,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.199,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.202,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.204,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.206,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.207,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.209,"kind":"sweep","disposition":"skipped-device-attached"}
+{"t":1785797564.211,"kind":"sweep","disposition":"skipped-device-attached"}

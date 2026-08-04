@@ -1,0 +1,26 @@
+{
+  "id": "s3-current-fw-valid-project",
+  "title": "Current firmware + valid project (the happy path)",
+  "board": "C6",
+  "needs": [
+    "s2-fresh-fw-no-lpfs"
+  ],
+  "expect": [
+    "state:ready"
+  ],
+  "setup": [
+    {
+      "describe": "Start from s2's state (fresh firmware), then push a project from Studio during the manual steps \u2014 the CLI upload path holds the port and must not race the browser.",
+      "run": null,
+      "verified": true
+    }
+  ],
+  "manual": [
+    "Connect to this board.",
+    "Name the board, then push an example project onto it from the gallery.",
+    "Wait until the card shows the running project."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
+}

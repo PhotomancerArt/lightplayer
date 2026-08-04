@@ -476,6 +476,7 @@ mod tests {
                     radio: true,
                     button: true,
                     board_id: None,
+                    ..Default::default()
                 },
                 device_uid: Some("dev_0000000000000001".to_string()),
             },
