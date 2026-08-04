@@ -18,11 +18,11 @@
 
 use lpa_studio_core::{
     LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace, UiNodeChild, UiNodeFace,
-    UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl, UiPanelControlState,
-    UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
-    UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState,
-    UiSlotValue, UiStatus,
+    UiAction, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView, UiModuleFace,
+    UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl,
+    UiPanelControlState, UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry,
+    UiPlaylistFace, UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState,
+    UiSlotFieldState, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;

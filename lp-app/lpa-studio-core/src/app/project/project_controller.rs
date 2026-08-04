@@ -507,9 +507,7 @@ impl ProjectController {
                     .as_ref()
                     .and_then(|value| value.value.as_ref())
                     .and_then(|value| match value {
-                        lpc_model::LpValue::Product(
-                            product @ lpc_model::ProductRef::Visual(_),
-                        ) => {
+                        lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
                             let product = UiProductRef::from_product_ref(*product);
                             let bytes = self
                                 .sync
@@ -7160,7 +7158,12 @@ mod tests {
             Some(1),
             NodeRuntimeStatus::Ok,
         ));
-        let mut plasma = node_entry(5, "/demo.module/plasma.module", Some(1), NodeRuntimeStatus::Ok);
+        let mut plasma = node_entry(
+            5,
+            "/demo.module/plasma.module",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        );
         plasma.children = vec![NodeId::new(6)];
         view.tree.insert(plasma);
         view.tree.insert(node_entry(
@@ -7210,7 +7213,14 @@ mod tests {
                 // 1: plasma-inner sim consumes time in ITS scope
                 binding(6, Some("time"), Consumes, bus("time"), Authored, 0),
                 // 2: orbit publishes visual.out at fallback
-                binding(3, Some("visual"), Publishes, bus("visual.out"), Default, -1000),
+                binding(
+                    3,
+                    Some("visual"),
+                    Publishes,
+                    bus("visual.out"),
+                    Default,
+                    -1000,
+                ),
                 // 3: the plasma MODULE publishes visual.out at fallback (R7)
                 binding(5, None, Publishes, bus("visual.out"), Default, -1000),
                 // 4: an engaged panel writer holds hue
@@ -7314,7 +7324,10 @@ mod tests {
         assert_eq!(time.readers.len(), 1);
         assert_eq!(time.readers[0].child_scope.as_deref(), Some("Plasma"));
         assert_eq!(time.readers[0].slot.as_deref(), Some("time"));
-        assert!(time.readers[0].focus.is_some(), "child-scope chips jump too");
+        assert!(
+            time.readers[0].focus.is_some(),
+            "child-scope chips jump too"
+        );
         assert!(time.writers[0].default_origin());
 
         // visual.out: two fallback writers tie -> contended, nobody

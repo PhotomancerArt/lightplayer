@@ -362,7 +362,9 @@ fn BusSiteChip(
     }
     let clickable = focus.is_some();
     if clickable {
-        class.push_str(" tw:cursor-pointer tw:hover:border-selection-border tw:hover:text-foreground");
+        class.push_str(
+            " tw:cursor-pointer tw:hover:border-selection-border tw:hover:text-foreground",
+        );
     }
 
     // One flavor mark at most (plus "shadowed" when it applies) — the
