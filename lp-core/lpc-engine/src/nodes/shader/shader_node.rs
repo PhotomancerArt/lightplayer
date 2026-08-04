@@ -566,16 +566,28 @@ pub(super) fn sync_shader_slot_def_from_authored(
         &alloc::format!("{base_path}.default.some"),
         &mut slot.default,
     )?;
-    changed |= sync_optional_value_from_authored::<f32>(
-        ctx,
-        &alloc::format!("{base_path}.min.some"),
-        &mut slot.min,
-    )?;
-    changed |= sync_optional_value_from_authored::<f32>(
-        ctx,
-        &alloc::format!("{base_path}.max.some"),
-        &mut slot.max,
-    )?;
+    // `min` and `max` deliberately keep the update-only shape: they belong
+    // with `step` and `unit` above. The only reader of either
+    // (`compute_shader_state::value_shape_for_slot`, for the Slider-vs-Number
+    // editor hint) shapes a compute node's PRODUCED slots, and this function
+    // only ever walks CONSUMED ones — so a created option here would have no
+    // reader, while the probe that creates it would persist a resolver route
+    // entry on every value slot forever (measured: ~223 B each). The panel
+    // gets a newly authored range from the authored `.def` root regardless.
+    if let Some(min) = slot.min.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.min.some"))?
+        {
+            changed |= set_slot_if_changed(min, value);
+        }
+    }
+    if let Some(max) = slot.max.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.max.some"))?
+        {
+            changed |= set_slot_if_changed(max, value);
+        }
+    }
     // `mapping` is an OptionSlot of a RECORD, not of a value slot, so it
     // cannot go through the helper: creation needs a whole struct before
     // the per-field reads below have anywhere to land. `kind` stands in
