@@ -402,6 +402,22 @@
     padding: 9px 12px; border: 1px solid var(--border-muted); border-radius: 8px;
     background: var(--surface-muted); line-height: 1.55; }
   .leannote b { color: var(--subtle); }
+
+  /* narrow overflow menu (chrome C @ sm) */
+  .popmenu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
+    min-width: 148px; padding: 6px;
+    background: var(--surface); border: 1px solid var(--neutral-border); border-radius: 10px;
+    box-shadow: 0 12px 34px rgba(0,0,0,.5);
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .popmenu .mi {
+    appearance: none; border: 0; background: transparent; cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px;
+    font: 600 12px/1 var(--sans); color: var(--muted);
+  }
+  .popmenu .mi:hover { background: var(--surface-raised); color: var(--strong); }
+  .popmenu .mi.active { color: var(--heading); }
 </style>
 </head>
 <body>
@@ -466,6 +482,8 @@
   <b>logo becomes the home link</b>. Creation inverts to device-first: pick the target (hardware or sim),
   pick the board, then get a project <b>generated for that board</b> or load one with a mismatch warning.
   You land in the editor with LEDs already animating. Everything below is interactive; §3 is the heart.
+  <b>Converged 2026-08-04:</b> chrome C (split weights, ⋯ menu at narrow), hero strip, panel wizard;
+  round one implements chrome + provisioning — home/explore stay placeholders, §4's graph is someday.
 </p>
 
 <div class="controls">
@@ -486,9 +504,10 @@
 
 <!-- ==================== 1 · chrome ==================== -->
 <h2 id="s1"><span class="n">1</span> The bar — six entries, two families</h2>
-<p class="sub">Concept 0 is today's shipped bar (frozen). A–C explore how <b>devices · projects</b> (yours)
-  and <b>explore · boards · docs</b> (not yours) share one bar, and what the logo-as-home feels like —
-  hover the brand in A–C. Click any tab; all reactive bars follow. My lean: <b>B</b>.</p>
+<p class="sub"><b>Chosen: C · split weights</b> (gate 2026-08-04 — "what I had always imagined").
+  Yours sits by the brand at full weight; not-yours drifts right, lighter. At narrow widths the
+  secondary family collapses into the <b>⋯ menu</b>. Concept 0 stays as the frozen baseline;
+  A and B shrink to the rejected note below. Hover the brand: logo → home.</p>
 
 <div class="barwrap">
   <p class="cap"><span class="cname">0 · Today (baseline)</span>
@@ -516,62 +535,7 @@
 </div>
 
 <div class="barwrap">
-  <p class="cap"><span class="cname">A · Flat six</span>
-    <span class="cnote">no grouping — five tabs in a row, logo → home; simplest, but yours/not-yours is invisible</span></p>
-  <div class="appframe">
-    <div class="bar" data-cbar>
-      <button class="brand aslink" data-nav="home" title="Home">
-        <svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></button>
-      <span class="navrow">
-        <button class="navlink" data-nav="devices">Devices</button>
-        <button class="navlink" data-nav="projects">Projects</button>
-        <button class="navlink" data-nav="explore">Explore</button>
-        <button class="navlink" data-nav="boards">Boards</button>
-        <button class="navlink" data-nav="docs">Docs</button>
-      </span>
-      <span class="rside">
-        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
-        <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
-      </span>
-    </div>
-    <div class="peek">
-      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
-      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
-      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
-    </div>
-  </div>
-</div>
-
-<div class="barwrap">
-  <p class="cap"><span class="cname">B · Grouped — hairline divider (lean)</span>
-    <span class="cnote">devices·projects | explore·boards·docs · a 1px divider marks the family seam · logo → home</span></p>
-  <div class="appframe">
-    <div class="bar" data-cbar>
-      <button class="brand aslink" data-nav="home" title="Home">
-        <svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></button>
-      <span class="navrow">
-        <button class="navlink" data-nav="devices">Devices</button>
-        <button class="navlink" data-nav="projects">Projects</button>
-        <span class="navdiv"></span>
-        <button class="navlink" data-nav="explore">Explore</button>
-        <button class="navlink" data-nav="boards">Boards</button>
-        <button class="navlink" data-nav="docs">Docs</button>
-      </span>
-      <span class="rside">
-        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
-        <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
-      </span>
-    </div>
-    <div class="peek">
-      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
-      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
-      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
-    </div>
-  </div>
-</div>
-
-<div class="barwrap">
-  <p class="cap"><span class="cname">C · Split weights</span>
+  <p class="cap"><span class="cname">C · Split weights (chosen)</span>
     <span class="cnote">yours sits by the brand at full weight; not-yours drifts right, lighter — no divider, hierarchy by position + weight</span></p>
   <div class="appframe">
     <div class="bar" data-cbar>
@@ -600,22 +564,25 @@
 </div>
 
 <div class="barwrap" style="max-width:390px">
-  <p class="cap"><span class="cname">B @ 390px</span>
-    <span class="cnote">word yields, divider survives, chips shrink</span></p>
+  <p class="cap"><span class="cname">C @ 390px — the ⋯ menu</span>
+    <span class="cnote">word yields; explore·boards·docs collapse into ⋯ next to the AI chip — tap it</span></p>
   <div class="appframe">
     <div class="bar" data-cbar style="padding:9px 12px; gap:8px">
       <button class="brand aslink" data-nav="home" title="Home" style="padding:4px">
         <svg width="22" height="22"><use href="#mark-e"/></svg></button>
       <span class="navrow" style="gap:0">
-        <button class="navlink" data-nav="devices" style="padding:8px 7px 9px">Devices</button>
-        <button class="navlink" data-nav="projects" style="padding:8px 7px 9px">Projects</button>
-        <span class="navdiv" style="margin:0 4px"></span>
-        <button class="navlink" data-nav="explore" style="padding:8px 7px 9px">Explore</button>
-        <button class="navlink" data-nav="boards" style="padding:8px 7px 9px">Boards</button>
-        <button class="navlink" data-nav="docs" style="padding:8px 7px 9px">Docs</button>
+        <button class="navlink" data-nav="devices" style="padding:8px 8px 9px">Devices</button>
+        <button class="navlink" data-nav="projects" style="padding:8px 8px 9px">Projects</button>
       </span>
-      <span class="rside" style="gap:6px">
+      <span class="rside" style="gap:6px; position:relative">
+        <button class="iconbtn" id="nmBtn" title="Explore, Boards, Docs"
+          style="width:25px;height:25px;font-size:15px;color:var(--subtle);line-height:1">⋯</button>
         <button class="iconbtn ai" style="width:25px;height:25px"><svg width="14" height="14"><use href="#i-bot"/></svg></button>
+        <div class="popmenu" id="nmMenu" hidden>
+          <button class="mi" data-nav="explore">Explore</button>
+          <button class="mi" data-nav="boards">Boards</button>
+          <button class="mi" data-nav="docs">Docs</button>
+        </div>
       </span>
     </div>
     <div class="peek" style="padding:12px 12px 16px">
@@ -625,18 +592,19 @@
   </div>
 </div>
 
-<p class="leannote"><b>Why B:</b> the divider makes the yours/not-yours model legible without
-  demoting anything (C's lighter right side risks reading as disabled), and A's flat row makes
-  Devices→Docs feel like five peers when they aren't. Logo-as-home in all three: no Home tab —
-  the brand is the only way home, which keeps six entries from becoming seven.</p>
+<p class="leannote"><b>Gate outcome (2026-08-04):</b> C chosen — split weights was the shape Yona
+  had always imagined; at small widths the secondary family goes into the ⋯ menu (his call, spiked
+  above). <b>Rejected:</b> A · flat six — five peers that aren't peers; B · hairline divider —
+  legible but the divider formalizes what position + weight already say. Logo-as-home stands:
+  no Home tab, the brand is the only way home.</p>
 
 <!-- ==================== 2 · devices page ==================== -->
 <h2 id="s2"><span class="n">2</span> Devices — the main jump-off</h2>
-<p class="sub">The old gallery's device roster becomes the whole page. The connect card splits:
-  <b>connect a device / simulate a device</b> — same flow, one skips flash. Cards show
-  <b>what's running, immediately</b> — toggle hero-strip vs header-chip in the controls (hover a
-  running card: the strip animates, Shadertoy-style). The sim wears the same grammar in violet.
-  Awkward cases included: long name, offline (dimmed last-known art), fresh board with nothing on it.</p>
+<p class="sub"><b>Gate: hero strip chosen</b> ("looks really good") — the header-chip toggle stays for
+  contrast. The old gallery's device roster becomes the whole page. The connect card splits:
+  <b>connect a device / simulate a device</b> — same flow, one skips flash. Hover a running card:
+  the strip animates, Shadertoy-style. The sim wears the same grammar in violet. Awkward cases
+  included: long name, offline (dimmed last-known art), fresh board with nothing on it.</p>
 
 <div class="pagewrap appframe">
   <div class="bar" data-cbar>
@@ -645,12 +613,13 @@
     <span class="navrow">
       <button class="navlink" data-nav="devices">Devices</button>
       <button class="navlink" data-nav="projects">Projects</button>
-      <span class="navdiv"></span>
-      <button class="navlink" data-nav="explore">Explore</button>
-      <button class="navlink" data-nav="boards">Boards</button>
-      <button class="navlink" data-nav="docs">Docs</button>
     </span>
     <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
       <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
       <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
     </span>
@@ -663,11 +632,12 @@
 
 <!-- ==================== 3 · the wizard ==================== -->
 <h2 id="s3"><span class="n">3</span> Creation wizard — board → content → (flash) → editor</h2>
-<p class="sub">Opens from either §2 card (or the controls strip). Hardware path: the probe suggests the
-  detected board and adds a flash step. Sim path: any board, no flash — <b>the sim inherits the board</b>
-  (vision D4). Content step: <b>New</b> shows the actual generated project for the chosen board;
-  <b>Load</b> lists your projects — pick one targeting another board to see the mismatch warning
-  (no auto-fixup, per D5). Finish to land in §4.</p>
+<p class="sub"><b>Gate: chosen direction</b> — the panel wizard stays. Opens from either §2 card (or the
+  controls strip). Hardware path: the probe suggests the detected board and adds a flash step.
+  Sim path: any board, no flash — <b>the sim inherits the board</b> (vision D4). Content step:
+  <b>New</b> shows the actual generated project for the chosen board; <b>Load</b> lists your
+  projects — pick one targeting another board to see the mismatch warning (no auto-fixup, per D5).
+  Finish to land in §4.</p>
 
 <div class="wizwrap">
   <div class="wizard" id="wizard">
@@ -684,9 +654,10 @@
 
 <!-- ==================== 4 · land in the editor ==================== -->
 <h2 id="s4"><span class="n">4</span> The landing — LEDs already animating</h2>
-<p class="sub">Where the wizard drops you: the generated project, wired and running on the target.
-  The playlist grows with <b>“+ add entry” at the insertion point</b> (opens the module picker);
-  each entry has <b>⇄ replace</b> — swap the effect you don't like without surgery. Try both.</p>
+<p class="sub"><b>Gate: aspirational — out of scope for round one.</b> This graph is not today's editor;
+  what carries forward is the <i>moment</i> (arrive with the project already running on the target)
+  and two ideas for later: <b>“+ add entry” at the insertion point</b> (opens the module picker)
+  and <b>⇄ replace</b> on entries. Round one lands you in the editor as it exists.</p>
 
 <div class="pagewrap appframe" id="edwrap">
   <div class="bar" data-cbar>
@@ -695,12 +666,13 @@
     <span class="navrow">
       <button class="navlink" data-nav="devices">Devices</button>
       <button class="navlink" data-nav="projects">Projects</button>
-      <span class="navdiv"></span>
-      <button class="navlink" data-nav="explore">Explore</button>
-      <button class="navlink" data-nav="boards">Boards</button>
-      <button class="navlink" data-nav="docs">Docs</button>
     </span>
     <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
       <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
       <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
     </span>
@@ -732,8 +704,9 @@
 
 <!-- ==================== 5 · home ==================== -->
 <h2 id="s5"><span class="n">5</span> Home — marketing with dive-in points</h2>
-<p class="sub">In-app for now (slow first load accepted — revisit later). Three doors + a taste of the
-  gallery, remixable on hover. The logo in the bar is lit: <b>you are home</b>.</p>
+<p class="sub"><b>Gate: fine as-is; placeholder-level for round one</b> — goes deeper later. In-app for
+  now (slow first load accepted — revisit later). Three doors + a taste of the gallery, remixable
+  on hover. The logo in the bar is lit: <b>you are home</b>.</p>
 
 <div class="pagewrap appframe">
   <div class="bar" data-cbar data-homeframe>
@@ -742,12 +715,13 @@
     <span class="navrow">
       <button class="navlink" data-nav="devices">Devices</button>
       <button class="navlink" data-nav="projects">Projects</button>
-      <span class="navdiv"></span>
-      <button class="navlink" data-nav="explore">Explore</button>
-      <button class="navlink" data-nav="boards">Boards</button>
-      <button class="navlink" data-nav="docs">Docs</button>
     </span>
     <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
       <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
       <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
     </span>
@@ -800,10 +774,11 @@
 
 <!-- ==================== 6 · explore ==================== -->
 <h2 id="s6"><span class="n">6</span> Explore — one content system, many sources</h2>
-<p class="sub">Backed by the modpack registry shape (wled-compat D3/M5) — embedded examples, repo packs,
-  later community. Two kinds: <b>full projects</b> (board-targeted demos, board badge) and
-  <b>effects</b> (.lpmod modules, provenance line). Previews are <b>static PNG, animate on hover</b>
-  (D7). Kind chips filter live.</p>
+<p class="sub"><b>Gate: fine as-is; placeholder-level for round one</b> — goes deeper later. Backed by
+  the modpack registry shape (wled-compat D3/M5) — embedded examples, repo packs, later community.
+  Two kinds: <b>full projects</b> (board-targeted demos, board badge) and <b>effects</b>
+  (.lpmod modules, provenance line). Previews are <b>static PNG, animate on hover</b> (D7).
+  Kind chips filter live.</p>
 
 <div class="pagewrap appframe">
   <div class="bar" data-cbar data-exploreframe>
@@ -812,12 +787,13 @@
     <span class="navrow">
       <button class="navlink" data-nav="devices">Devices</button>
       <button class="navlink" data-nav="projects">Projects</button>
-      <span class="navdiv"></span>
-      <button class="navlink active" data-nav="explore">Explore</button>
-      <button class="navlink" data-nav="boards">Boards</button>
-      <button class="navlink" data-nav="docs">Docs</button>
     </span>
     <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary active" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
       <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
       <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
     </span>
@@ -862,7 +838,7 @@ function setNav(nav) {
   document.querySelectorAll("[data-cbar]").forEach(bar => {
     // frames pinned to a section keep their own active tab
     if (bar.hasAttribute("data-homeframe") || bar.hasAttribute("data-exploreframe")) return;
-    bar.querySelectorAll(".navlink[data-nav]").forEach(el =>
+    bar.querySelectorAll(".navlink[data-nav], .mi[data-nav]").forEach(el =>
       el.classList.toggle("active", el.dataset.nav === nav));
     const brand = bar.querySelector(".brand.aslink");
     if (brand) brand.classList.toggle("athome", nav === "home");
@@ -870,6 +846,15 @@ function setNav(nav) {
 }
 document.querySelectorAll("[data-cbar] [data-nav]").forEach(el =>
   el.addEventListener("click", () => setNav(el.dataset.nav)));
+
+/* narrow ⋯ menu (chrome C @ sm) */
+const nmBtn = document.getElementById("nmBtn"), nmMenu = document.getElementById("nmMenu");
+nmBtn.addEventListener("click", e => { e.stopPropagation(); nmMenu.hidden = !nmMenu.hidden; });
+document.addEventListener("click", e => {
+  if (!e.target.closest("#nmMenu, #nmBtn")) nmMenu.hidden = true;
+});
+nmMenu.querySelectorAll("[data-nav]").forEach(el =>
+  el.addEventListener("click", () => { nmMenu.hidden = true; }));
 
 /* =================== section 2 · device cards =================== */
 const DEVICES = [
@@ -1286,6 +1271,7 @@ drawWires();
 /* hash boot for screenshot capture, e.g. #wiz=hw&step=content&board=c6&load=dome-mapper-test */
 (function bootFromHash() {
   const h = new URLSearchParams(location.hash.slice(1));
+  if (h.has("menu")) nmMenu.hidden = false;
   if (!h.get("wiz")) return;
   wiz.open = true;
   wiz.path = h.get("wiz");
