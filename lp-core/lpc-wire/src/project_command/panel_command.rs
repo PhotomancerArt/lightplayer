@@ -48,6 +48,19 @@ pub enum WirePanelClearRequest {
     All,
 }
 
+/// Turn panel-state auto-save on or off (panel.md P11 — on by default).
+///
+/// Project-level, not scoped: panel state persists per project folder
+/// (`.lp/state.json`), so the switch belongs to the project as a whole and
+/// the request carries no scope. The current value rides back on every
+/// project read as [`crate::ServerRuntimeStatus::panel_auto_save`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WirePanelAutoSaveRequest {
+    /// Whether panel state keeps being written.
+    pub enabled: bool,
+}
+
 /// Outcome of a panel command. Rejection is a NORMAL response (unknown
 /// scope, dead runtime): a stale gesture must never poison the connection.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -103,6 +116,17 @@ mod tests {
         ] {
             let json = serde_json::to_string(&request).unwrap();
             let back: WirePanelClearRequest = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, request);
+        }
+    }
+
+    #[test]
+    fn panel_auto_save_round_trips() {
+        for enabled in [true, false] {
+            let request = WirePanelAutoSaveRequest { enabled };
+            let json = serde_json::to_string(&request).unwrap();
+            assert!(json.contains("enabled"));
+            let back: WirePanelAutoSaveRequest = serde_json::from_str(&json).unwrap();
             assert_eq!(back, request);
         }
     }

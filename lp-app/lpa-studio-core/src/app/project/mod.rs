@@ -58,9 +58,9 @@ pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
     NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress,
-    ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry,
-    UiAttachTarget, UiNodeRemovePreflight,
+    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
+    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
+    UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;

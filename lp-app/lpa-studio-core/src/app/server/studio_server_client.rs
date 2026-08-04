@@ -572,6 +572,26 @@ impl StudioServerClient {
         })
     }
 
+    /// Flip panel-state auto-save (panel.md P11). The value Studio renders
+    /// comes back on the next project read, not from this response.
+    pub async fn panel_auto_save(
+        &mut self,
+        handle_id: u32,
+        request: lpc_wire::WirePanelAutoSaveRequest,
+    ) -> Result<StudioPanelCommand, UiError> {
+        let response = self
+            .client
+            .project_panel_auto_save(WireProjectHandle::new(handle_id), request)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(response.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioPanelCommand {
+            response: response.value,
+            logs,
+        })
+    }
+
     pub async fn node_command(
         &mut self,
         handle_id: u32,

@@ -31,8 +31,8 @@ pub struct ProjectSync {
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
-    /// Whether reads should carry the binding-graph probe (bus pane visible,
-    /// binding popover open, …).
+    /// Whether reads should carry the binding-graph probe. Armed for every
+    /// ready project: module faces derive from it.
     binding_graph_subscribed: bool,
     issue: Option<UiIssue>,
     /// Client mirror of the server's pending-edit overlay.
@@ -67,11 +67,11 @@ impl ProjectSync {
 
     pub fn begin_initial_sync(&mut self) {
         // Reset per-read data (mirror, previews, overlay) but preserve the
-        // binding-graph subscription: it is a UI preference (the bus pane
-        // ships with every loaded project, set at `mark_ready`), not
-        // per-read state. Without this, the reset here wipes the
-        // subscription that `mark_ready` just set, and the bus pane never
-        // gets its probe — showing "Reading" forever.
+        // binding-graph subscription: it is a property of "a project is
+        // connected" (set at `mark_ready`), not per-read state. Without
+        // this, the reset here wipes the subscription that `mark_ready`
+        // just set and the graph never arrives — which since P3 means
+        // every module card loses its face, not just a pane going quiet.
         let binding_graph_subscribed = self.binding_graph_subscribed;
         *self = Self {
             phase: ProjectSyncPhase::SyncingProject,
@@ -381,7 +381,8 @@ impl ProjectSync {
     }
 
     /// Toggle the binding-graph probe on project reads. Unsubscribing drops
-    /// the cached snapshot so stale topology never renders.
+    /// the cached snapshot so stale topology never renders — and with it
+    /// every module face, which cannot derive without a graph.
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
         self.binding_graph_subscribed = subscribed;
         if !subscribed {
@@ -833,9 +834,9 @@ mod tests {
     fn binding_graph_subscription_survives_begin_initial_sync() {
         // Regression: the demo flow sets the subscription at `mark_ready`,
         // then `sync_loaded_project` calls `begin_initial_sync`, which resets
-        // per-read state. The subscription is a UI preference, not read data,
-        // so it must survive — otherwise the initial read omits the probe and
-        // the bus pane shows "Reading" forever.
+        // per-read state. The subscription is a property of "a project is
+        // connected", not read data, so it must survive — otherwise the
+        // initial read omits the probe and every module card loses its face.
         let mut sync = ProjectSync::new();
         sync.set_binding_graph_subscribed(true);
 
