@@ -1,0 +1,25 @@
+{
+  "id": "s6-corrupt-lpfs-project",
+  "title": "Corrupted lpfs project data",
+  "board": "C6",
+  "needs": [
+    "s3-current-fw-valid-project"
+  ],
+  "expect": [
+    "sync:unreadable"
+  ],
+  "setup": [
+    {
+      "describe": "NEEDS REDESIGN (2026-08-03, three attempts \u2014 see FINDINGS.md): external partition garble cannot produce `unreadable`; it either bounces off littlefs redundancy, wedges the firmware, or reformats to empty. The right injection is OVER THE WIRE: start from s3 (firmware + project), then overwrite the loaded project's project.json with garbage via the filesystem API (lp-cli or a wire write), leaving the fs mountable. Until that exists, SKIP.",
+      "run": null,
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Connect to this board.",
+    "The card should surface the unreadable/recovery path, not hang on Checking."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
+}

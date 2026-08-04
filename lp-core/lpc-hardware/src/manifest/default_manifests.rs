@@ -285,19 +285,19 @@ mod tests {
 
         system
             .open_button_by_spec(
-                &HwEndpointSpec::from_static("button:gpio:D9"),
+                &HwEndpointSpec::from_static("button:local:D9"),
                 crate::ButtonConfig::new(30),
             )
             .expect("button D9");
         system
             .open_ws281x_by_spec(
-                &HwEndpointSpec::from_static("ws281x:rmt:D10"),
+                &HwEndpointSpec::from_static("ws281x:local:D10"),
                 crate::Ws281xConfig::new(3),
             )
             .expect("ws281x D10");
         system
             .open_radio_by_spec(
-                &HwEndpointSpec::from_static("radio:espnow:0"),
+                &HwEndpointSpec::from_static("radio:local:0"),
                 crate::RadioConfig::default(),
             )
             .expect("radio espnow");

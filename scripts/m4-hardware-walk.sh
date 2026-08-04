@@ -114,7 +114,7 @@ case "$chip" in
         ;;
 esac
 
-echo "==> chip=$chip recipe=just $FLASH_RECIPE endpoint=ws281x:rmt:$ENDPOINT_LABEL"
+echo "==> chip=$chip recipe=just $FLASH_RECIPE endpoint=ws281x:local:$ENDPOINT_LABEL"
 
 # ------------------------------------------------------------ port
 if [[ -z "$port" ]]; then
@@ -186,11 +186,14 @@ flash_and_watch() {
 # board's label, otherwise a scratch copy with the label rewritten. The copy
 # keeps the directory basename because that is the project's on-device name.
 prepare_project() {
+    # The endpoint lives inside the output's `channels` map (project format 3),
+    # one line per channel; this walk drives a single-channel output, so take
+    # the first.
     local authored
-    authored="$(sed -n 's/.*"endpoint"[[:space:]]*:[[:space:]]*"ws281x:rmt:\([^"]*\)".*/\1/p' \
+    authored="$(sed -n 's/.*"endpoint"[[:space:]]*:[[:space:]]*"ws281x:local:\([^"]*\)".*/\1/p' \
         "$PROJECT/output.json" | head -1)"
     if [[ -z "$authored" ]]; then
-        echo "FAIL: no ws281x:rmt endpoint found in $PROJECT/output.json." >&2
+        echo "FAIL: no ws281x:local channel endpoint found in $PROJECT/output.json." >&2
         exit 1
     fi
     if [[ "$authored" == "$ENDPOINT_LABEL" ]]; then
@@ -200,12 +203,12 @@ prepare_project() {
     UPLOAD_DIR="$LOG_DIR/m4-walk-project-$$/$(basename "$PROJECT")"
     mkdir -p "$UPLOAD_DIR"
     cp "$PROJECT"/* "$UPLOAD_DIR"/
-    sed -i.bak "s|\"ws281x:rmt:$authored\"|\"ws281x:rmt:$ENDPOINT_LABEL\"|" \
+    sed -i.bak "s|\"ws281x:local:$authored\"|\"ws281x:local:$ENDPOINT_LABEL\"|" \
         "$UPLOAD_DIR/output.json"
     rm -f "$UPLOAD_DIR/output.json.bak"
     # A silent no-op substitution would upload an endpoint this board does not
     # have, and the walk would then blame the JIT for a wiring mistake.
-    if ! grep -q "\"ws281x:rmt:$ENDPOINT_LABEL\"" "$UPLOAD_DIR/output.json"; then
+    if ! grep -q "\"ws281x:local:$ENDPOINT_LABEL\"" "$UPLOAD_DIR/output.json"; then
         echo "FAIL: could not rewrite the output endpoint to $ENDPOINT_LABEL." >&2
         exit 1
     fi
@@ -271,7 +274,12 @@ echo "$oracle_out" | grep -a "\[ORACLE" || {
 echo
 echo "===== COMPARISON ====="
 hex_of() { echo "$1" | grep -a "^\[$2\] rgb=" | head -1 | cut -d= -f2; }
-device_hex="$(strip_ansi "$LOG" | grep -ao 'rgb=[0-9a-f]*' | head -1 | cut -d= -f2)"
+# The LAST dump, not the first: the first frame after a project load is the
+# compile-window black fallback (ADR 2026-08-03-memory-pressure-at-compile-
+# safe-points), and `frame_dump` dumps it before re-arming for the first lit
+# frame. Note this comparison assumes a single-channel output; a multi-channel
+# project prints one dump per wire and must be diffed per slice by hand.
+device_hex="$(strip_ansi "$LOG" | grep -ao 'rgb=[0-9a-f]*' | tail -1 | cut -d= -f2)"
 oracle_hex="$(hex_of "$oracle_out" ORACLE)"
 rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 
@@ -289,7 +297,7 @@ if [[ -z "$device_hex" ]]; then
     echo "FAIL: the device printed no frame dump — nothing rendered." >&2
     echo "      (Or the image was built without '$FLASH_FEATURES', in which case" >&2
     echo "       it renders fine and simply says nothing about it. Or the output" >&2
-    echo "       node's endpoint ws281x:rmt:$ENDPOINT_LABEL is not one this board" >&2
+    echo "       node's endpoint ws281x:local:$ENDPOINT_LABEL is not one this board" >&2
     echo "       offers, in which case the DEVICE section above says so.)" >&2
     exit 1
 fi

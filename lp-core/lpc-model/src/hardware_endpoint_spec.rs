@@ -33,7 +33,11 @@ impl HwEndpointSpec {
         spec_parts(&self.0).0
     }
 
-    pub fn driver(&self) -> &str {
+    /// Target device the endpoint lives on, e.g. `local`.
+    ///
+    /// Never a driver mechanism: which peripheral drives the wire (RMT, I2S,
+    /// …) is firmware's business, resolved through the board manifest.
+    pub fn target(&self) -> &str {
         spec_parts(&self.0).1
     }
 
@@ -128,7 +132,7 @@ impl fmt::Display for HardwareEndpointSpecError {
         match self {
             Self::WrongPartCount { spec } => write!(
                 f,
-                "hardware endpoint spec must be cap:driver:config, got `{spec}`"
+                "hardware endpoint spec must be cap:target:config, got `{spec}`"
             ),
             Self::EmptyPart { spec } => {
                 write!(f, "hardware endpoint spec contains an empty part: `{spec}`")
@@ -154,7 +158,7 @@ fn validate_spec(spec: &str) -> Result<(), HardwareEndpointSpecError> {
             spec: spec.to_string(),
         });
     };
-    let Some(driver) = parts.next() else {
+    let Some(target) = parts.next() else {
         return Err(HardwareEndpointSpecError::WrongPartCount {
             spec: spec.to_string(),
         });
@@ -169,7 +173,7 @@ fn validate_spec(spec: &str) -> Result<(), HardwareEndpointSpecError> {
             spec: spec.to_string(),
         });
     }
-    if capability.is_empty() || driver.is_empty() || config.is_empty() {
+    if capability.is_empty() || target.is_empty() || config.is_empty() {
         return Err(HardwareEndpointSpecError::EmptyPart {
             spec: spec.to_string(),
         });
@@ -181,7 +185,7 @@ fn spec_parts(spec: &str) -> (&str, &str, &str) {
     let mut parts = spec.split(':');
     (
         parts.next().expect("validated spec has capability"),
-        parts.next().expect("validated spec has driver"),
+        parts.next().expect("validated spec has target"),
         parts.next().expect("validated spec has config"),
     )
 }
@@ -193,17 +197,22 @@ mod tests {
 
     #[test]
     fn endpoint_spec_splits_three_parts() {
-        let spec = HwEndpointSpec::parse("ws281x:rmt:D10").unwrap();
+        let spec = HwEndpointSpec::parse("ws281x:local:D10").unwrap();
 
         assert_eq!(spec.capability(), "ws281x");
-        assert_eq!(spec.driver(), "rmt");
+        assert_eq!(spec.target(), "local");
         assert_eq!(spec.config(), "D10");
-        assert_eq!(spec.as_str(), "ws281x:rmt:D10");
+        assert_eq!(spec.as_str(), "ws281x:local:D10");
     }
 
     #[test]
     fn endpoint_spec_rejects_malformed_values() {
-        for spec in ["ws281x:rmt", "ws281x:rmt:", ":rmt:D10", "ws281x:rmt:D10:x"] {
+        for spec in [
+            "ws281x:local",
+            "ws281x:local:",
+            ":local:D10",
+            "ws281x:local:D10:x",
+        ] {
             assert!(
                 HwEndpointSpec::parse(spec).is_err(),
                 "{spec} should be rejected"
@@ -213,7 +222,7 @@ mod tests {
 
     #[test]
     fn endpoint_spec_round_trips_through_lp_value() {
-        let spec = HwEndpointSpec::parse("ws281x:rmt:D10").unwrap();
+        let spec = HwEndpointSpec::parse("ws281x:local:D10").unwrap();
 
         assert_eq!(
             HwEndpointSpec::from_lp_value(&spec.to_lp_value()).unwrap(),

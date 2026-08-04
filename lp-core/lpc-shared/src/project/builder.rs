@@ -120,7 +120,7 @@ impl ProjectBuilder {
         }
     }
 
-    /// Start building an output node (defaults to `ws281x:rmt:D10`, no interpolation/dithering/LUT)
+    /// Start building an output node (defaults to `ws281x:local:D10`, no interpolation/dithering/LUT)
     pub fn output(&mut self) -> OutputBuilder {
         OutputBuilder {
             endpoint: OutputDef::default_endpoint(),
@@ -354,11 +354,9 @@ impl OutputBuilder {
         let path = artifact_path_for_node(&node_name);
 
         let config = OutputDef {
-            input: Default::default(),
-            endpoint: ValueSlot::new(self.endpoint),
             bindings: bus_input_binding_defs("control.out"),
             options: OptionSlot::some(self.options),
-            ..Default::default()
+            ..OutputDef::new(self.endpoint)
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Output(config));

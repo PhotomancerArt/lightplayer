@@ -1,4 +1,8 @@
 pub mod console_command;
+/// Studio-level decoration of output-node faces: board identity (device
+/// registry) and the incoming lamp extent (the upstream node's produced
+/// control product) — the facts the project walk cannot see.
+mod output_face_decoration;
 pub mod refresh_cadence;
 pub mod studio_actor;
 /// End-to-end agent-flow tests: scripted fake model over the real agent →

@@ -1,0 +1,28 @@
+{
+  "id": "s5-foreign-firmware",
+  "title": "Foreign firmware (recognized non-LightPlayer)",
+  "board": "S3 (or classic) \u2014 WLED has no C6 build",
+  "needs": [],
+  "expect": [
+    "state:foreign-firmware"
+  ],
+  "setup": [
+    {
+      "describe": "Fetch WLED 16.0.1 for the ESP32-S3 8MB OPI. The 8MB_qspi asset was WRONG for this board (2026-08-03): SHA-256 comparison failed at boot and the board watchdog-looped (rst:0x7 TG0WDT_SYS_RST), re-enumerating USB each cycle. Version pinned on purpose. For the classic instead, swap to WLED_16.0.1_ESP32.bin.",
+      "run": "curl -fL --proto '=https' --tlsv1.2 -o /tmp/wled.bin https://github.com/wled/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-S3_8MB_opi.bin && ls -l /tmp/wled.bin",
+      "verified": false
+    },
+    {
+      "describe": "Flash it at 0x0 (WLED release binaries are FULL images: bootloader + partitions + app). This overwrites LightPlayer entirely \u2014 that is the point; s2/s3 put it back.",
+      "run": "espflash write-bin --port {port} 0x0 /tmp/wled.bin",
+      "verified": false
+    }
+  ],
+  "manual": [
+    "Connect to this board.",
+    "EXPECTED TO FAIL TODAY: the card should read as replaceable foreign firmware, but the classifier's safe-to-replace list holds exactly one entry (the Seeed XIAO C6 factory demo), so WLED will most likely land Unresponsive. File the finding \u2014 the captured RX lines ARE the evidence needed to teach the classifier WLED's boot signature."
+  ],
+  "port_filter": {
+    "kind_contains": "USB-Serial/JTAG"
+  }
+}

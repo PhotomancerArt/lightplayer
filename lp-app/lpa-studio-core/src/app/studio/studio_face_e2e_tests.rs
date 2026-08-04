@@ -1156,7 +1156,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 3\n}\n";
+    let project_json = "{\n  \"format\": 4\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1217,7 +1217,11 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
@@ -1265,7 +1269,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 3\n}\n";
+    let project_json = "{\n  \"format\": 4\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -1325,7 +1329,9 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": { "endpoint": "ws281x:local:D10" }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
@@ -1371,7 +1377,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 3\n}\n";
+    let project_json = "{\n  \"format\": 4\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1432,7 +1438,9 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": { "endpoint": "ws281x:local:D10" }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
@@ -1481,7 +1489,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 3\n}\n";
+    let project_json = "{\n  \"format\": 4\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1527,7 +1535,11 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
@@ -1560,6 +1572,99 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
     server
 }
 
+const OUTPUT_PROJECT_DIR: &str = "/projects/output-face-e2e";
+
+/// A shader + 4x4 fixture (16 lamps) + ONE output node driving three wires:
+/// 6 lamps on IO18, 4 on IO16, and the rest on IO2.
+fn output_face_e2e_server() -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+
+    let project_json = "{\n  \"format\": 4\n}\n";
+    let module_json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "output": { "ref": "./output.json" }
+  }
+}"#;
+    let clock_json = r#"{
+  "kind": "Clock",
+  "controls": { "running": true, "rate": 1.0 }
+}"#;
+    let shader_json = r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "bindings": {
+    "output": { "target": "bus:visual.out" }
+  },
+  "consumed": {
+    "speed": { "kind": "value", "value": "f32", "default": 1 }
+  }
+}"#;
+    let fixture_json = r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 4, "height": 4 },
+  "mapping": { "kind": "Map2d", "source": "sign.map2d.json" },
+  "bindings": {
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
+  }
+}"#;
+    let map2d_json = r#"{
+  "format": 1,
+  "objects": [
+    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  ]
+}"#;
+    let output_json = r#"{
+  "kind": "Output",
+  "channels": {
+    "0": { "endpoint": "ws281x:local:IO18", "count": 6 },
+    "1": { "endpoint": "ws281x:local:IO16", "count": 4 },
+    "2": { "endpoint": "ws281x:local:IO2" }
+  },
+  "bindings": {
+    "input": { "source": "bus:control.out" }
+  }
+}"#;
+    let files: &[(&str, &str)] = &[
+        ("project.json", project_json),
+        ("module.json", module_json),
+        ("clock.json", clock_json),
+        ("shader.json", shader_json),
+        ("fixture.json", fixture_json),
+        ("sign.map2d.json", map2d_json),
+        ("output.json", output_json),
+        ("shader.glsl", FACE_SHADER),
+    ];
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(
+                format!("{OUTPUT_PROJECT_DIR}/{name}").as_path(),
+                body.as_bytes(),
+            )
+            .expect("write project file");
+    }
+    server
+        .load_project(OUTPUT_PROJECT_DIR.as_path())
+        .expect("load output-face-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
 fn set_value_action(address: ProjectSlotAddress, value: LpValue) -> StudioCommand {
     StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
@@ -1575,6 +1680,98 @@ fn node_ui_command(op: NodeUiOp) -> StudioCommand {
         ProjectEditorTarget::node_tree().node_id(),
         ProjectEditorOp::NodeUi(op),
     ))
+}
+
+/// The output face end-to-end: a real multi-channel output node against a
+/// real server, through the SAME view build the app renders — which is what
+/// makes this test worth having, because the face's lamp extents come from
+/// the studio controller's decoration pass, not from the project walk. The
+/// unit tests can only prove the two halves separately.
+#[test]
+fn output_face_derives_multi_channel_wires_end_to_end() {
+    let server = Rc::new(RefCell::new(output_face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let face = output_face(&snapshot);
+    assert_eq!(face.channels.len(), 3, "one row per authored wire");
+    let labels: Vec<&str> = face
+        .channels
+        .iter()
+        .map(|channel| channel.pin_label.as_str())
+        .collect();
+    assert_eq!(labels, ["IO18", "IO16", "IO2"], "in channel-key order");
+    assert_eq!(
+        face.channels
+            .iter()
+            .map(|channel| (channel.count, channel.slice_start))
+            .collect::<Vec<_>>(),
+        [(Some(6), Some(0)), (Some(4), Some(6)), (None, Some(10))]
+    );
+    // The decoration half: the 4x4 fixture's 16 lamps reach the face, so the
+    // count-less wire can finally say what it drives.
+    assert_eq!(face.total_lamps, Some(16));
+    assert_eq!(
+        face.channels[2].resolved_count,
+        Some(6),
+        "the remainder is what the counted wires left"
+    );
+    assert_eq!(
+        face.board, None,
+        "this harness has no device registry — 'no board known' is a normal state"
+    );
+    assert!(
+        face.channels.iter().all(|channel| channel.gpio.is_none()),
+        "and with no board, no pin resolves"
+    );
+    assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
+
+    // The addresses are real: editing a count rides the ordinary slot path
+    // and the whole slice plan re-derives from it.
+    let count_address = face.channels[0]
+        .count_address
+        .clone()
+        .expect("a present count is addressed");
+    assert_eq!(count_address.path.to_string(), "channels[0].count.some");
+    handle
+        .tx
+        .send(set_value_action(count_address, LpValue::U32(8)));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the edit emits a snapshot");
+
+    let face = output_face(&snapshot);
+    assert_eq!(face.channels[0].count, Some(8));
+    assert_eq!(
+        face.channels[1].slice_start,
+        Some(8),
+        "the following wires shift with it"
+    );
+    assert_eq!(
+        face.channels[2].resolved_count,
+        Some(4),
+        "and the remainder shrinks by the same four lamps"
+    );
+
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    let output_json = read_output_project_file(&server, "output.json");
+    assert!(
+        output_json.contains("\"count\":8"),
+        "the face's edit persisted through the normal save path: {output_json}"
+    );
 }
 
 fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
@@ -1595,6 +1792,26 @@ fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
 /// module's card, so this promotes as it descends.
 fn node_by_kind(view: &UiStudioView, kind: &str) -> UiNodeView {
     card_matching(view, kind, |card| card.header.kind == kind)
+}
+
+fn read_output_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
+    let bytes = server
+        .borrow()
+        .base_fs()
+        .read_file(format!("{OUTPUT_PROJECT_DIR}/{name}").as_path())
+        .expect("read project file");
+    String::from_utf8(bytes)
+        .expect("utf8 project file")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
+}
+
+fn output_face(view: &UiStudioView) -> crate::UiOutputFace {
+    let Some(UiNodeFace::Output(face)) = node_by_kind(view, "Output").face else {
+        panic!("output face present");
+    };
+    face
 }
 
 /// The root module card's face.

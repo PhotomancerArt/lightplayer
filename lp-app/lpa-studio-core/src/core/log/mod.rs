@@ -22,6 +22,7 @@
 //! the studio actor as origin-`Studio` drafts with the record target as
 //! detail; see [`log_sink`].
 
+pub mod device_event_log;
 pub mod log_clock;
 pub mod log_draft;
 pub mod log_entry;
@@ -32,6 +33,10 @@ pub mod log_ring;
 pub mod log_sink;
 pub mod log_source;
 
+pub use device_event_log::{
+    DEVICE_EVENT_LOG_CAPACITY, DeviceEventKind, DeviceEventLog, DeviceEventRecord,
+    DeviceEventRecorder,
+};
 pub use log_clock::LogClock;
 pub use log_draft::UiLogDraft;
 pub use log_entry::UiLogEntry;

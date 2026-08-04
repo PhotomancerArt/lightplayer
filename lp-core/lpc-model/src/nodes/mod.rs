@@ -26,7 +26,8 @@ pub use node_def::{
     NodeDefWriteError, resolve_artifact_specifier,
 };
 pub use output::{
-    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
+    OutputChannelDef, OutputChannelDefView, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    OutputDriverOptionsConfigView,
 };
 pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,

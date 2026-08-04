@@ -483,7 +483,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":3,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -524,8 +524,10 @@ fn device_connect_pulls_classifies_and_adopts() {
     controller.attach_library(host.clone());
 
     // 1) unknown uid + stamped identity → adoption
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     assert_eq!(
         sync.identity
             .as_ref()
@@ -550,8 +552,10 @@ fn device_connect_pulls_classifies_and_adopts() {
 
     // 2) reconnect: now the uid is known and the hashes match → AtHead,
     //    no second adoption
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, slug, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -570,8 +574,10 @@ fn device_connect_pulls_classifies_and_adopts() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known {
         relation, observed, ..
     } = &sync.content
@@ -606,7 +612,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
         let fs = server.base_fs();
         fs.write_file(
             format!("{device_project_dir}/project.json").as_path(),
-            br#"{"format":3,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
+            br#"{"format":4,"uid":"prj_devicedevicedevi","name":"Porch Wild"}"#,
         )
         .unwrap();
         fs.write_file(
@@ -645,7 +651,7 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
 
     // connect-as-pull adopts, then the device copy changes behind our
     // back → Diverged (the EditedOnDevice card)
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
     {
         let server = server.borrow();
         server
@@ -656,8 +662,10 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
-    let sync = controller.device_sync().expect("device state cached");
+    drive(controller.refresh_device_sync_for_test());
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -667,10 +675,14 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
     // project's new head, and the handler's own re-sync lands on AtHead.
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::AdoptDeviceCopy,
+        DeployOp::AdoptDeviceCopy {
+            target: controller.device_target_for_test(),
+        },
     )))
     .expect("adopt works straight from the card sheet");
-    let sync = controller.device_sync().expect("device state cached");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("device state cached");
     let DeviceContent::Known { relation, .. } = &sync.content else {
         panic!("known project classifies, got {:?}", sync.content);
     };
@@ -692,10 +704,12 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
             )
             .unwrap();
     }
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
-        DeployOp::KeepBothFork,
+        DeployOp::KeepBothFork {
+            target: controller.device_target_for_test(),
+        },
     )))
     .expect("keep-both works straight from the card sheet");
     let summaries = store.list().unwrap();
@@ -755,7 +769,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
     controller.attach_library(host.clone());
     drive(controller.settle_library());
-    drive(controller.refresh_device_sync());
+    drive(controller.refresh_device_sync_for_test());
 
     let deploy_action = |op: DeployOp| UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op);
 
@@ -763,7 +777,9 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     // name sheet is the stamping surface; there is no dialog — this
     // test runs with a project open, so the card mapping itself is
     // pinned by the roster tests and the link e2e)
-    let sync = controller.device_sync().expect("connect-as-pull landed");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
     assert_eq!(sync.identity, None, "unstamped");
     assert_eq!(sync.content, DeviceContent::Empty, "empty");
 
@@ -772,6 +788,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     drive(controller.dispatch(UiAction::from_op(
         ControllerId::new(crate::app::home::HOME_NODE_ID),
         crate::HomeOp::NameDevice {
+            target: controller.device_target_for_test(),
             name: "Luna's porch sign".to_string(),
         },
     )))
@@ -799,6 +816,7 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     // history + association recorded; device now AtHead
     let outcome = drive(controller.dispatch(deploy_action(DeployOp::PushProject {
         key: summary.uid.to_string(),
+        target: controller.device_target_for_test(),
     })))
     .unwrap();
     assert!(
@@ -860,7 +878,9 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
         .expect("association recorded");
     assert_eq!(association.project, summary.uid);
 
-    let sync = controller.device_sync().expect("re-pulled after push");
+    let sync = controller
+        .device_sync_for_test()
+        .expect("re-pulled after push");
     assert!(
         matches!(
             &sync.content,
@@ -2115,7 +2135,7 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
     // P5, over the real wire: `OutputDef.test_pattern` is `SlotRole::Debug`,
     // and NOTHING output-specific exists in the UI layer — the same
     // role-keyed partition that gives the Clock its Debug section (P3) gives
-    // the output card one, with the toggle in it. `endpoint` stays a Setting.
+    // the output card one, with the toggle in it. Channel endpoints stay Settings.
     let server = Rc::new(RefCell::new(asset_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -2159,10 +2179,10 @@ fn the_output_card_gets_a_debug_section_for_test_pattern() {
         "a Debug slot is writable — that is the whole point of the toggle"
     );
     assert_eq!(test_pattern.state.dirty, UiNodeDirtyState::Clean);
-    let endpoint = find_slot(&snapshot, "endpoint");
+    let endpoint = find_slot(&snapshot, "channels[0].endpoint");
     assert!(
         !endpoint.state.debug,
-        "the endpoint is authored config, not debug"
+        "a channel endpoint is authored config, not debug"
     );
 }
 
@@ -2362,12 +2382,16 @@ pub(crate) fn asset_e2e_server() -> LpServer {
     // provider accepts any authored endpoint.
     let output_json = r#"{
   "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
+  "channels": {
+    "0": {
+      "endpoint": "ws281x:local:D10"
+    }
+  },
   "bindings": {
     "input": { "source": "bus:control.out" }
   }
 }"#;
-    let project_json = "{\n  \"format\": 3\n}\n";
+    let project_json = "{\n  \"format\": 4\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2446,7 +2470,7 @@ pub(crate) fn edit_e2e_server() -> LpServer {
 
 pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
-        ("project.json", "{\n  \"format\": 3\n}\n"),
+        ("project.json", "{\n  \"format\": 4\n}\n"),
         (
             "module.json",
             r#"{
