@@ -727,6 +727,12 @@ clippy-fw-esp32v3:
     # mismatch — precisely the moment a rotted diagnostic costs the most.
     echo "clippy: --features frame-dump"
     cargo clippy --profile release-esp32v3 --features frame-dump -- --no-deps -D warnings
+    # `net-eth` is additive too (ethernet control plane, networking M2) and is
+    # what every later networking milestone builds on; it is OFF in shipped
+    # builds until M2-P5 prices it, which is exactly the condition under which
+    # an unlinted feature rots.
+    echo "clippy: --features net-eth"
+    cargo clippy --profile release-esp32v3 --features net-eth -- --no-deps -D warnings
 
 
 # `features` is a comma-separated list added to the defaults — for the app path

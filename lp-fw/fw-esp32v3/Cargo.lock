@@ -1407,6 +1407,7 @@ dependencies = [
  "embedded-io-async 0.6.1",
  "fw-core",
  "hashbrown 0.15.5",
+ "heapless 0.9.3",
  "littlefs-rust",
  "log",
  "lp-collection",
