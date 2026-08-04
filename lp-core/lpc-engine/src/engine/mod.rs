@@ -23,11 +23,24 @@ mod project_read_stream;
 mod project_runtime_index;
 #[cfg(test)]
 mod resolution_persistence_tests;
+// Compute-shader nodes reading a clock's timebase through `bus:time`.
 #[cfg(test)]
 mod scoped_resolution_tests;
+#[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
+mod shader_timebase_tests;
 mod srgb8_lut;
 #[cfg(test)]
 pub(crate) mod test_support;
+// Every project here drives a clock through an output → fixture → shader →
+// `bus:time` demand chain, so the module needs the clock, fixture and shader
+// node kinds.
+#[cfg(all(
+    test,
+    feature = "node-clock",
+    feature = "node-fixture",
+    feature = "node-shader"
+))]
+mod timebase_tests;
 
 pub use engine::Engine;
 // Consumed by fixture node tests directly and by `output_flush_tests`; both

@@ -15,6 +15,5 @@
   "solver_iterations": 3,
   "step_hz": 25,
   "fade_speed": 0.08,
-  "viscosity": 0.00003,
-  "time": 0
+  "viscosity": 0.00003
 }

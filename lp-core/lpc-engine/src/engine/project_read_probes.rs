@@ -10,8 +10,9 @@ use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
     ControlProductProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
-    WireBindingDirection, WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel,
-    WireBusChannelValue, WireChannelSampleFormat, WireEffectiveBinding,
+    TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
+    WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireChannelSampleFormat, WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -346,6 +347,65 @@ impl Engine {
                 product,
                 message: format!("{error}"),
             },
+        }
+    }
+
+    /// List the live phasors riding one clock's timebase (parent D10).
+    ///
+    /// A pure read of the timebase side store: the rows already exist
+    /// because consumers queried them, and this walk neither materializes a
+    /// phasor nor refreshes any despawn clock — a Studio card watching the
+    /// listing cannot keep a dead integrator alive, and closing the card
+    /// cannot kill a live one.
+    ///
+    /// `Unknown` (not an error) when the product names a clock with no
+    /// published timebase: a card asking about a node that just left the
+    /// tree, or one that has not produced yet, is not a fault.
+    pub fn read_project_timebase_probe(
+        &mut self,
+        request: TimebaseProbeRequest,
+    ) -> TimebaseProbeResult {
+        let product = request.product;
+        let revision = self.revision();
+        let Some(entry) = self.timebases().entry(product.node()) else {
+            return TimebaseProbeResult::Unknown { product };
+        };
+        let phasors = entry
+            .phasors()
+            .map(|(key, state)| WirePhasorRow {
+                origin: wire_phasor_origin(key),
+                phase: state.phase,
+                cycle: state.cycle,
+                period_seconds: state.period_seconds,
+            })
+            .collect();
+        TimebaseProbeResult::Timebase {
+            product,
+            revision,
+            seconds: entry.effective_seconds,
+            delta_seconds: entry.delta_seconds,
+            phasors,
+        }
+    }
+}
+
+/// Project a phasor integrator's identity onto the wire.
+///
+/// The vocabulary shift is deliberate: the store's `Private`/`Shared` names
+/// the *sharing* consequence, while the row names the *source* a reader can
+/// go look at — a node's slot, or a channel. The consequence follows from
+/// the source and does not need saying twice.
+fn wire_phasor_origin(key: &crate::dataflow::timebase::PhasorKey) -> WirePhasorOrigin {
+    match key {
+        crate::dataflow::timebase::PhasorKey::Private { node, slot } => WirePhasorOrigin::Node {
+            node: node.0,
+            slot: alloc::string::ToString::to_string(slot),
+        },
+        crate::dataflow::timebase::PhasorKey::Shared { scope, channel } => {
+            WirePhasorOrigin::Channel {
+                scope: wire_scope_ref(*scope),
+                channel: alloc::string::ToString::to_string(&channel.0),
+            }
         }
     }
 }

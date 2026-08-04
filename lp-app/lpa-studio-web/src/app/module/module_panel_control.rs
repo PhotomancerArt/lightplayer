@@ -216,16 +216,28 @@ fn ModulePanelControlBody(
     let engaged = state.engaged();
     let following = matches!(state, UiPanelControlState::ReadFollowing);
 
+    // A phasor speed knob presents its stored period as a reciprocal and
+    // drags on an inverted axis (up = faster) — same treatment as the
+    // node-face control (G2 feedback; provisional pending the UX spike).
+    let phasor = matches!(
+        control.emit,
+        lpa_studio_core::UiPanelEmit::PhasorPeriod { .. }
+    );
+    let shown_value = if phasor {
+        crate::app::node::phasor_speed_display(control.shown_display())
+    } else {
+        control.shown_display().to_string()
+    };
     let readout = rsx! {
         span { class: "{READOUT_CLASS} {readout_class}",
-            span { "{control.shown_display()}" }
+            span { "{shown_value}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
         }
     };
 
     match control.widget.clone() {
         UiPanelWidget::Knob { min, max, step } => {
-            let Some((value, emit)) = PanelEmit::for_value(&control.value.kind) else {
+            let Some((value, emit)) = PanelEmit::for_control(&control) else {
                 return mismatch(&control.label, &control.value.display);
             };
             rsx! {
@@ -238,6 +250,7 @@ fn ModulePanelControlBody(
                     state: control.state.clone(),
                     bound: following,
                     engaged,
+                    invert: phasor,
                     address: control.address.clone(),
                     panel_target: control.panel_target.clone(),
                     emit,
@@ -248,7 +261,7 @@ fn ModulePanelControlBody(
             }
         }
         UiPanelWidget::Fader { min, max, step } => {
-            let Some((value, emit)) = PanelEmit::for_value(&control.value.kind) else {
+            let Some((value, emit)) = PanelEmit::for_control(&control) else {
                 return mismatch(&control.label, &control.value.display);
             };
             rsx! {
@@ -348,8 +361,8 @@ fn mismatch(label: &str, display: &str) -> Element {
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{
-        UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelWidget, UiSlotAspectKind,
-        UiSlotFieldState, UiSlotValue,
+        UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelWidget,
+        UiSlotAspectKind, UiSlotFieldState, UiSlotValue,
     };
 
     use super::{panel_state_label_class, panel_state_readout_class};
@@ -358,6 +371,7 @@ mod tests {
         UiPanelControlView::new(
             "speed",
             UiPanelControl {
+                emit: UiPanelEmit::Value,
                 label: "speed".to_string(),
                 address: None,
                 widget: UiPanelWidget::Knob {

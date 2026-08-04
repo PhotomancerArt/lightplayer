@@ -1,5 +1,5 @@
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float phase;
 
 vec3 rainbow(float t) {
     float r = 0.33333;
@@ -12,6 +12,6 @@ vec4 render(vec2 pos) {
     if (pos.x >= 1.0) {
         led = 1.0;
     }
-    float hue = fract(time * 0.12 + led * 0.5);
+    float hue = fract(phase + led * 0.5);
     return vec4(rainbow(hue), 1.0);
 }

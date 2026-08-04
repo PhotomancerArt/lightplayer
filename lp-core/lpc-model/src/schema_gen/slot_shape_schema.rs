@@ -567,6 +567,7 @@ pub(crate) fn product_ref_schema(kind: ProductKind) -> Value {
     let kind_name = match kind {
         ProductKind::Visual => "visual",
         ProductKind::Control => "control",
+        ProductKind::Time => "time",
     };
     json!({
         "type": "object",
@@ -955,6 +956,11 @@ mod tests {
                 r#"{"kind":"visual"}"#,
                 r#"{"preferred_extent":{"rows":-1,"samples_per_row":2}}"#,
             ],
+        );
+        check_value(
+            LpType::Product(ProductKind::Time),
+            &[r#"{"kind":"time","node":4,"output":0}"#, r#"{"node":4}"#],
+            &[r#"{"kind":"visual","node":4}"#, r#"{"bogus":1}"#],
         );
     }
 

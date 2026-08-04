@@ -8,7 +8,7 @@
 // visible as two dots moving together.
 
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float phase;
 
 vec3 bandColor(float band) {
     if (band < 0.5) {
@@ -30,8 +30,10 @@ vec4 render(vec2 pos) {
     vec2 uv = pos / outputSize;
     float band = floor(uv.y * 5.0);
 
-    float speed = 0.25 + band * 0.1;
-    float head = fract(time * speed + band * 0.2);
+    // `phase` is one 20 s cycle; each band rides a whole-number multiple of
+    // it (0.25 … 0.65 Hz originally), which keeps the band relation exact
+    // without carrying unbounded seconds into the shader.
+    float head = fract(phase * (5.0 + band * 2.0) + band * 0.2);
     float d = abs(uv.x - head);
     d = min(d, 1.0 - d);
     float dot_i = smoothstep(0.3, 0.0, d);

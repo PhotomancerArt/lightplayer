@@ -1,7 +1,14 @@
 layout(binding = 0) uniform vec2 outputSize;
+// Unbounded seconds: the psrdnoise field is scrolled, not wrapped.
 layout(binding = 1) uniform float time;
-layout(binding = 2) uniform float speed;
-layout(binding = 3) uniform float glow;
+layout(binding = 2) uniform float zoomPhase;
+layout(binding = 3) uniform float driftPhase;
+layout(binding = 4) uniform float bandPhase;
+layout(binding = 5) uniform float breathPhase;
+layout(binding = 6) uniform float paletteCycle;
+layout(binding = 7) uniform float glow;
+
+const float TAU = 6.2831853;
 
 vec3 paletteRainbow(float t) {
     float r = 0.33333;
@@ -49,23 +56,24 @@ vec2 movingNoise(vec2 coord, float t) {
 
 vec4 render(vec2 pos) {
     const vec2 REF_SIZE = vec2(32.0, 32.0);
-    // Front-panel knobs: `speed` scales the animation clock, `glow` scales
-    // the rainbow highlight (defaults 1.0 / 0.5 reproduce the original).
-    float t = time * speed;
+    // Front-panel knob: `glow` scales the rainbow highlight (default 0.5
+    // reproduces the original). The old `speed` multiplier is gone — the
+    // wrapped terms carry their own periods now, and the scrolled noise
+    // rides `time`.
     vec2 uv = pos / outputSize;
     vec2 virtCoord = pos * REF_SIZE / outputSize;
     vec2 center = REF_SIZE * 0.5;
     vec2 fromCenter = virtCoord - center;
 
-    float zoom = mix(0.040, 0.070, 0.5 + 0.5 * sin(t * 0.32));
-    float drift = sin(t * 0.18);
-    vec2 coord = center + fromCenter * zoom + vec2(drift * 0.60, t * 0.075);
+    float zoom = mix(0.040, 0.070, 0.5 + 0.5 * sin(TAU * zoomPhase));
+    float drift = sin(TAU * driftPhase);
+    vec2 coord = center + fromCenter * zoom + vec2(drift * 0.60, time * 0.075);
 
-    vec2 tv = movingNoise(coord, t);
-    float bands = 0.5 + 0.5 * sin((uv.x + uv.y) * 7.0 + t * 0.85 + tv.x * 6.2831853);
-    float breath = 0.72 + 0.18 * sin(t * 0.75);
+    vec2 tv = movingNoise(coord, time);
+    float bands = 0.5 + 0.5 * sin((uv.x + uv.y) * 7.0 + TAU * bandPhase + tv.x * 6.2831853);
+    float breath = 0.72 + 0.18 * sin(TAU * breathPhase);
 
-    float palettePhase = mod(t, 18.0) * 0.16666667;
+    float palettePhase = paletteCycle * 3.0;
     float palette = min(floor(palettePhase), 2.0);
     float nextPalette = palette + 1.0;
     if (nextPalette > 2.5) {
