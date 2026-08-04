@@ -54,10 +54,12 @@ pub struct HomeInputs {
 /// — plus the SIM session's evidence while that session lives.
 #[derive(Clone, Debug, Default)]
 pub struct HomePoolEvidence {
-    /// Per-DEVICE-session evidence (≤1 under the MVP capacity policy —
-    /// the Vec is the shape, capacity is policy). The connect flow's
-    /// transient evidence (a connect in flight before any session exists)
-    /// rides an entry of its own: evidence of work, not of a session.
+    /// Per-DEVICE-session evidence — one entry per attached board, in
+    /// install order, up to `DEVICE_SESSION_CAPACITY` (multi-device M3;
+    /// the Vec was always the shape, capacity is policy). The connect
+    /// flow's transient evidence (a connect in flight before any session
+    /// exists) rides an entry of its own: evidence of work, not of a
+    /// session.
     pub devices: Vec<HomeDeviceEvidence>,
     /// The live SIM session's evidence — present exactly while the
     /// session lives (D36: the sim card exists only while the session
@@ -83,6 +85,11 @@ pub struct HomeSimEvidence {
 /// Absence of every field is honest evidence of absence (no live card).
 #[derive(Clone, Debug, Default)]
 pub struct HomeDeviceEvidence {
+    /// The live session's pool identity (`RuntimeId` rendering), stable
+    /// for the session's life — the card's anonymous-key fallback (M1 of
+    /// the multi-board roadmap). `None` only for evidence that carries no
+    /// session (a connect in flight before any session exists).
+    pub session_key: Option<String>,
     /// Connect-as-pull result, once the pull landed.
     pub sync: Option<DeviceSyncState>,
     /// The hardware link's observable state, when a session exists.
@@ -124,6 +131,12 @@ pub struct HomeDeviceEvidence {
     /// else the passive boot banner) — the setup form's board picker leads
     /// with boards matching it (M5).
     pub detected_chip: Option<String>,
+    /// The port as the app can name it ("ESP32 Serial (0x303a:0x1001) ·
+    /// port-2"): the endpoint's human label captured at connect plus the
+    /// grant's short id. Everything Web Serial exposes — the OS path never
+    /// reaches the page. Rendered on the card's Technical tab (gate-1
+    /// sitting, 2026-08-03: an unflashed card identified nothing).
+    pub port_label: Option<String>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -307,6 +320,7 @@ fn assemble_roster(
                 connections.push((
                     chip.uid.clone(),
                     UiCardConnection {
+                        device_key: card.identity_key().to_string(),
                         device_name: card.name.clone(),
                         relation,
                     },
@@ -353,6 +367,8 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         RosterCardState::ConnectedEmpty
     };
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         uid: None,
         name: "Simulator".to_string(),
         transport: String::new(),
@@ -436,9 +452,16 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         _ => (None, None),
     };
     UiDeviceCard {
+        session_key: live.session_key.clone(),
         uid: identity.map(|identity| identity.uid.clone()),
+        // Pre-provision title: the detected chip is the one honest,
+        // discriminating name available before an identity is stamped
+        // ("ESP32-C6" beats "Connected device" with two boards attached).
+        // The title does NOT feed the render key — two same-chip boards
+        // still key distinctly by `session_key` — see `identity_key`.
         name: identity
             .map(|identity| identity.name.clone())
+            .or_else(|| live.detected_chip.as_deref().and_then(display_chip_name))
             .unwrap_or_else(|| "Connected device".to_string()),
         transport: live.transport.clone().unwrap_or_default(),
         state,
@@ -446,6 +469,7 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         fw,
         hardware,
         detected_chip: live.detected_chip.clone(),
+        port_label: live.port_label.clone(),
         // Only a LIVE link's report counts: a stale clamp on a card whose
         // session is gone would tell the user a replug is still needed
         // after they already did it.
@@ -460,6 +484,21 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         console_tail: live.console_tail.clone(),
         ui: CardUiState::default(),
     }
+}
+
+/// Human display form of a detected chip: resolve the reported spelling
+/// (ROM banner `esp32c6`, esptool-js `ESP32-C6 (QFN32) (revision v0.2)`)
+/// to its canonical id, then render it as Espressif writes it
+/// (`ESP32-C6`). `None` when the report names silicon this build does not
+/// know — the caller keeps its own fallback rather than showing a mangled
+/// string.
+fn display_chip_name(reported: &str) -> Option<String> {
+    let id = lpa_link::chip_id_from_reported(reported)?;
+    let rest = id.strip_prefix("esp32")?;
+    if rest.is_empty() {
+        return Some("ESP32".to_string());
+    }
+    Some(format!("ESP32-{}", rest.to_ascii_uppercase()))
 }
 
 /// Last-seen ordering key: live cards lead, sighted cards follow newest
@@ -569,6 +608,8 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         connect: ConnectEvidence::Idle,
     });
     UiDeviceCard {
+        port_label: None,
+        session_key: None,
         uid: Some(device.uid.clone()),
         name: device.name.clone(),
         safe_clamp: None,
@@ -645,6 +686,7 @@ mod tests {
                     radio: true,
                     button: true,
                     board_id: None,
+                    ..Default::default()
                 },
                 device_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
             },
@@ -652,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pinned_anonymous_card_takes_the_uid_less_op() {
+    fn the_pinned_anonymous_card_takes_its_own_sessions_op() {
         // The two halves of the recovery-write ending, together: the pin
         // keeps the anonymous card alive, AND the awaiting op rides it —
         // half a fix showed the user a bare "Not seen yet" with no
@@ -660,19 +702,28 @@ mod tests {
         let evidence = HomeDeviceEvidence {
             link: Some(DeviceState::Gone),
             op_in_flight: true,
+            session_key: Some("runtime-1".to_string()),
             ..HomeDeviceEvidence::default()
         };
         let card = live_device_card(&evidence).expect("pinned");
         assert!(
-            card.takes_card_op(None),
+            card.takes_card_op("runtime-1"),
             "the instruction must ride the pinned card"
         );
+        assert!(
+            !card.takes_card_op("runtime-2"),
+            "another board's op is not this card's business"
+        );
 
-        // A REGISTERED offline card (uid'd) must not adopt a stray
-        // anonymous op — that guard is what the old rule was for.
-        let mut registered = card.clone();
-        registered.uid = Some("dev_other".to_string());
-        assert!(!registered.takes_card_op(None));
+        // A REGISTERED offline card carries no session, so it cannot adopt
+        // a stray op — the guard the old uid-less rule needed a special
+        // case for is now structural.
+        let registered = UiDeviceCard {
+            session_key: None,
+            uid: Some("dev_other".to_string()),
+            ..card.clone()
+        };
+        assert!(!registered.takes_card_op("runtime-1"));
     }
 
     #[test]
@@ -888,6 +939,8 @@ mod tests {
         };
         let cards = vec![
             UiDeviceCard {
+                port_label: None,
+                session_key: None,
                 uid: Some("dev_a".to_string()),
                 name: "one".to_string(),
                 transport: "USB".to_string(),
@@ -902,6 +955,8 @@ mod tests {
                 detected_chip: None,
             },
             UiDeviceCard {
+                port_label: None,
+                session_key: None,
                 uid: Some("dev_a".to_string()),
                 name: "two".to_string(),
                 transport: "USB".to_string(),
@@ -1330,5 +1385,102 @@ mod tests {
         let sign_card = by_uid(&sign.uid.to_string());
         assert!(sign_card.running_in_sim);
         assert!(sign_card.connected_device.is_none());
+    }
+
+    /// Two anonymous live boards, distinct sessions. This was the
+    /// multi-board defect (2026-08-02): both cards fell back to the name
+    /// "Connected device" as their render key, `dedupe_by_key` dropped
+    /// the second, and one of two attached boards silently vanished.
+    /// (Reproduces the planning session's scratch test, made permanent.)
+    #[test]
+    fn two_anonymous_live_boards_both_survive_build_home_view() {
+        let anonymous = |session_key: &str, chip: &str| HomeDeviceEvidence {
+            session_key: Some(session_key.to_string()),
+            link: Some(DeviceState::Booting),
+            transport: Some("USB".to_string()),
+            detected_chip: Some(chip.to_string()),
+            ..HomeDeviceEvidence::default()
+        };
+        let pool = HomePoolEvidence {
+            devices: vec![anonymous("rt_1", "esp32c6"), anonymous("rt_2", "esp32s3")],
+            sim: None,
+        };
+
+        let view = build_home_view(None, None, None, &pool);
+
+        assert_eq!(view.devices.len(), 2, "the second board must not vanish");
+        assert_ne!(
+            view.devices[0].render_key(),
+            view.devices[1].render_key(),
+            "distinct sessions render under distinct keys"
+        );
+        // Q2: the pre-provision title names the chip, not "Connected device".
+        assert_eq!(view.devices[0].name, "ESP32-C6");
+        assert_eq!(view.devices[1].name, "ESP32-S3");
+    }
+
+    /// The title must never be relied on for the key: two boards of the
+    /// SAME chip still key distinctly by session. This is the test that
+    /// catches someone "fixing" the key via the name.
+    #[test]
+    fn two_anonymous_boards_of_the_same_chip_keep_distinct_keys() {
+        let anonymous = |session_key: &str| HomeDeviceEvidence {
+            session_key: Some(session_key.to_string()),
+            link: Some(DeviceState::Booting),
+            transport: Some("USB".to_string()),
+            detected_chip: Some("esp32c6".to_string()),
+            ..HomeDeviceEvidence::default()
+        };
+        let pool = HomePoolEvidence {
+            devices: vec![anonymous("rt_1"), anonymous("rt_2")],
+            sim: None,
+        };
+
+        let view = build_home_view(None, None, None, &pool);
+
+        assert_eq!(view.devices.len(), 2);
+        assert_eq!(
+            view.devices[0].name, view.devices[1].name,
+            "same chip, same title"
+        );
+        assert_ne!(
+            view.devices[0].render_key(),
+            view.devices[1].render_key(),
+            "the key comes from the session, never the title"
+        );
+    }
+
+    #[test]
+    fn a_stamped_card_keys_by_uid_even_with_a_session_key() {
+        // uid stays FIRST in the fallback chain: `CardUiState` survives
+        // session replaces only because a stamped board's key is stable
+        // across them.
+        let evidence = HomeDeviceEvidence {
+            session_key: Some("rt_7".to_string()),
+            ..live(DeviceSyncState {
+                identity: Some(DeviceIdentity {
+                    uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                    name: "TestBoard1".to_string(),
+                }),
+                content: DeviceContent::Empty,
+            })
+        };
+        let card = live_device_card(&evidence).expect("live card");
+        assert_eq!(card.identity_key(), "dev_aaaaaaaaaaaaaaaa");
+    }
+
+    #[test]
+    fn chip_display_names_resolve_reporter_spellings() {
+        assert_eq!(display_chip_name("esp32c6").as_deref(), Some("ESP32-C6"));
+        assert_eq!(
+            display_chip_name("ESP32-S3 (QFN56) (revision v0.2)").as_deref(),
+            Some("ESP32-S3")
+        );
+        assert_eq!(display_chip_name("esp32").as_deref(), Some("ESP32"));
+        assert_eq!(
+            display_chip_name("rp2040"),
+            None,
+            "unknown silicon keeps the caller's fallback"
+        );
     }
 }

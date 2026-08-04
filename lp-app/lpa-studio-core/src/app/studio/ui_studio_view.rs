@@ -158,9 +158,9 @@ impl UiStudioView {
     /// the controller's view build uses, so the mid-flight card and the
     /// snapshot that replaces it never disagree. The lens card is the
     /// same card grown into the editor (D43), so it takes the op too.
-    pub fn apply_card_op(&mut self, uid: Option<&str>, op: crate::CardOp) {
+    pub fn apply_card_op(&mut self, session_key: &str, op: crate::CardOp) {
         for card in self.device_cards_mut() {
-            if card.takes_card_op(uid) {
+            if card.takes_card_op(session_key) {
                 card.ui.op = Some(op.clone());
             }
         }
@@ -251,8 +251,17 @@ mod tests {
     use crate::app::roster::RosterCardState;
     use crate::{CardOp, UiLogEntry, UiLogLevel, UiLogOrigin};
 
+    /// A LIVE card: `session_key` is what a card-owned op addresses (M4),
+    /// so a fixture without one models a registry card, not a board. Two
+    /// cards never share a session, so the key derives from the uid.
     fn card(uid: Option<&str>, state: RosterCardState) -> UiDeviceCard {
+        live_card(&format!("runtime-{}", uid.unwrap_or("blank")), uid, state)
+    }
+
+    fn live_card(session_key: &str, uid: Option<&str>, state: RosterCardState) -> UiDeviceCard {
         UiDeviceCard {
+            port_label: None,
+            session_key: Some(session_key.to_string()),
             uid: uid.map(str::to_string),
             name: "Board".to_string(),
             transport: "USB".to_string(),
@@ -285,34 +294,57 @@ mod tests {
     }
 
     #[test]
-    fn a_stamped_op_lands_on_its_own_card_only() {
+    fn an_op_lands_on_its_own_session_card_only() {
         let mut view = view_with(vec![
-            card(Some("dev_a"), RosterCardState::RunningUpToDate),
-            card(Some("dev_b"), RosterCardState::RunningUpToDate),
+            live_card("runtime-1", Some("dev_a"), RosterCardState::RunningUpToDate),
+            live_card("runtime-2", Some("dev_b"), RosterCardState::RunningUpToDate),
         ]);
 
-        view.apply_card_op(Some("dev_a"), CardOp::new("Writing…", Some(42)));
+        view.apply_card_op("runtime-1", CardOp::new("Writing…", Some(42)));
 
         let devices = &view.home.as_ref().unwrap().devices;
         assert_eq!(devices[0].ui.op, Some(CardOp::new("Writing…", Some(42))));
         assert_eq!(devices[1].ui.op, None, "the op must not smear across cards");
     }
 
+    /// Two ANONYMOUS boards: the pre-M4 rule rode "any uid-less live
+    /// card", so one flash narrated on both. The session key is what
+    /// tells them apart.
     #[test]
-    fn an_unstamped_op_rides_the_live_card_never_a_remembered_one() {
+    fn an_op_on_one_blank_board_does_not_narrate_on_the_other() {
         let mut view = view_with(vec![
-            card(
-                Some("dev_offline"),
-                RosterCardState::Offline { last_seen_at: None },
-            ),
-            card(None, RosterCardState::ConnectedEmpty),
+            live_card("runtime-1", None, RosterCardState::ConnectedEmpty),
+            live_card("runtime-2", None, RosterCardState::ConnectedEmpty),
         ]);
 
-        view.apply_card_op(None, CardOp::new("Installing…", Some(10)));
+        view.apply_card_op("runtime-2", CardOp::new("Installing…", Some(10)));
 
         let devices = &view.home.as_ref().unwrap().devices;
-        assert_eq!(devices[0].ui.op, None, "a remembered card is not live");
-        assert!(devices[1].ui.op.is_some(), "the blank live board takes it");
+        assert_eq!(devices[0].ui.op, None, "the other blank board is not it");
+        assert!(
+            devices[1].ui.op.is_some(),
+            "the board being flashed takes it"
+        );
+    }
+
+    #[test]
+    fn a_remembered_card_never_adopts_an_op() {
+        let mut view = view_with(vec![
+            UiDeviceCard {
+                session_key: None,
+                ..card(
+                    Some("dev_offline"),
+                    RosterCardState::Offline { last_seen_at: None },
+                )
+            },
+            live_card("runtime-1", None, RosterCardState::ConnectedEmpty),
+        ]);
+
+        view.apply_card_op("runtime-1", CardOp::new("Installing…", Some(10)));
+
+        let devices = &view.home.as_ref().unwrap().devices;
+        assert_eq!(devices[0].ui.op, None, "a remembered card has no session");
+        assert!(devices[1].ui.op.is_some(), "the live board takes it");
     }
 
     #[test]
@@ -321,7 +353,7 @@ mod tests {
             card(Some("dev_a"), RosterCardState::RunningUpToDate),
             card(Some("dev_b"), RosterCardState::RunningUpToDate),
         ]);
-        view.apply_card_op(Some("dev_a"), CardOp::new("Writing…", None));
+        view.apply_card_op("runtime-dev_a", CardOp::new("Writing…", None));
 
         for index in 0..CONSOLE_TAIL_LEN + 5 {
             view.push_card_op_console(line(&format!("Writing at {index:#x}")));
@@ -349,7 +381,7 @@ mod tests {
         let mut view = view_with(Vec::new())
             .with_lens_card(Some(card(Some("dev_a"), RosterCardState::RunningUpToDate)));
 
-        view.apply_card_op(Some("dev_a"), CardOp::new("Writing…", Some(7)));
+        view.apply_card_op("runtime-dev_a", CardOp::new("Writing…", Some(7)));
         view.push_card_op_console(line("Writing at 0x0"));
 
         let lens = view.lens_card.as_ref().unwrap();

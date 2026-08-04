@@ -385,6 +385,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         )
         .with_device_uid(device_uid),
     );
+    // The chip's own permanent identity (efuse): the factory MAC, the
+    // silicon revision, and — the C6 has an 802.15.4 radio — its EUI-64.
+    // The server cannot derive any of it.
+    server.set_hardware_identity(chip_identity());
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless
@@ -548,5 +552,38 @@ async fn main(spawner: embassy_executor::Spawner) {
             move |now_ms| watchdog.feed(now_ms),
         )
         .await;
+    }
+}
+
+// Same gate as its only caller, `boot_firmware`: the hardware harnesses
+// replace `main` with their own entrypoint and never send a hello.
+#[cfg(not(fw_harness))]
+/// This chip's permanent identity, read from efuse.
+///
+/// Injected rather than derived: the server cannot read silicon, and the
+/// chip-generic firmware layer deliberately has no `esp_hal`
+/// (ADR 2026-07-29-per-chip-fw-toolchains). See
+/// `fw_esp32_common::chip_identity` for why this reports the BASE MAC
+/// rather than a per-interface list.
+fn chip_identity() -> lpc_wire::HardwareIdentity {
+    use esp_hal::efuse;
+    let revision = efuse::chip_revision();
+    lpc_wire::HardwareIdentity {
+        base_mac: Some(fw_esp32_common::chip_identity::hex_bytes(
+            efuse::base_mac_address().as_bytes(),
+        )),
+        chip_revision: Some(alloc::format!("{}.{}", revision.major, revision.minor)),
+        // The C6 has an 802.15.4 radio, so it carries a 64-bit EUI: the
+        // 48-bit base MAC followed by the chip's 16-bit `MAC_EXT` efuse
+        // field. Parts without that radio have no `MAC_EXT` at all.
+        eui64: Some({
+            let base = efuse::base_mac_address();
+            let base = base.as_bytes();
+            let ext: [u8; 2] = efuse::read_field_le(efuse::MAC_EXT);
+            let mut bytes = [0u8; 8];
+            bytes[..6].copy_from_slice(base);
+            bytes[6..].copy_from_slice(&ext);
+            fw_esp32_common::chip_identity::hex_bytes(&bytes)
+        }),
     }
 }
