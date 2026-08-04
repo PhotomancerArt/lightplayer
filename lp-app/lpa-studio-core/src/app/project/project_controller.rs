@@ -397,6 +397,9 @@ impl ProjectController {
     /// state).
     pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
+        // Hoisted out of the per-channel pass: the always-live set is a
+        // graph scan, and every value box asks the same question of it.
+        let always_live = self.always_live_products();
         // Sites carry their binding's priority out so the per-channel pass
         // below can mark shadowed writers and top-priority ties (E3).
         let site = |index: &u32| -> Option<(crate::UiBusSiteView, i32)> {
@@ -498,37 +501,26 @@ impl ProjectController {
                     }
                 }
 
-                // The value box shows the picture when the resolved value
-                // is a visual product in the tracked preview stream.
-                // Control products keep their formatted value only — their
-                // preview is the fixture face's lamp-layout business.
-                let preview = channel
-                    .value
-                    .as_ref()
-                    .and_then(|value| value.value.as_ref())
-                    .and_then(|value| match value {
-                        lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
-                            let product = UiProductRef::from_product_ref(*product);
-                            let bytes = self
-                                .sync
-                                .as_ref()
-                                .and_then(|sync| sync.product_preview(&product))?
-                                .clone();
-                            let tracking =
-                                if self.primary_visual_product().as_ref() == Some(&product) {
-                                    crate::UiProductTrackingState::Tracking
-                                } else {
-                                    crate::UiProductTrackingState::Paused
-                                };
-                            Some(crate::UiBusChannelPreview {
-                                kind: crate::UiProductKind::Visual,
-                                preview: bytes,
-                                tracking,
-                                frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
-                            })
-                        }
-                        _ => None,
-                    });
+                // The value box shows the picture whenever the resolved
+                // value is a product in the tracked preview stream —
+                // visual pixels or a control product's lamp layout, both
+                // drawn by the one shared preview component (a control
+                // channel showing `control product #7:0` said nothing the
+                // lamps do not say better).
+                let preview = channel_product(channel).and_then(|product| {
+                    let product = UiProductRef::from_product_ref(product);
+                    let bytes = self
+                        .sync
+                        .as_ref()
+                        .and_then(|sync| sync.product_preview(&product))?
+                        .clone();
+                    Some(crate::UiBusChannelPreview {
+                        kind: ui_product_kind(product),
+                        preview: bytes,
+                        tracking: borrowed_tracking(&always_live, product),
+                        frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
+                    })
+                });
 
                 crate::UiBusChannelView {
                     scope: channel.scope,
@@ -627,12 +619,78 @@ impl ProjectController {
             .channels
             .iter()
             .find(|channel| channel.primary_visual)?;
-        let value = channel.value.as_ref()?.value.as_ref()?;
-        let lpc_model::LpValue::Product(product) = value else {
-            return None;
-        };
-        matches!(product, lpc_model::ProductRef::Visual(_))
-            .then(|| UiProductRef::from_product_ref(*product))
+        match channel_product(channel)? {
+            product @ lpc_model::ProductRef::Visual(_) => {
+                Some(UiProductRef::from_product_ref(product))
+            }
+            lpc_model::ProductRef::Control(_) => None,
+        }
+    }
+
+    /// The project's **primary control product**: the resolved value of the
+    /// root scope's `bus:control.out` — the rendered lamps hardware outputs
+    /// drive from (the symmetric convention the same ADR declared, now that
+    /// a preview surface consumes it: the root module's hero and the wiring
+    /// drawer's value box).
+    ///
+    /// Read exactly like [`Self::primary_visual_product`] — off the cached
+    /// graph, never re-deriving precedence — except that the root-scope test
+    /// is client-side. The probe flags only the visual channel, and a second
+    /// wire flag would cost the device's serde surface for a name comparison
+    /// Studio can make itself.
+    pub fn primary_control_product(&self) -> Option<UiProductRef> {
+        let graph = self.binding_graph()?;
+        let root = self.root_module_scope();
+        let channel = graph.channels.iter().find(|channel| {
+            channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL
+                // Pre-scope snapshots list one unscoped set of channels;
+                // that set IS the root scope (the engine's own rule for
+                // flagging the primary visual).
+                && (channel.scope == root || channel.scope.is_none())
+        })?;
+        match channel_product(channel)? {
+            product @ lpc_model::ProductRef::Control(_) => {
+                Some(UiProductRef::from_product_ref(product))
+            }
+            lpc_model::ProductRef::Visual(_) => None,
+        }
+    }
+
+    /// The products Studio streams no matter what has focus: the project's
+    /// primary visual and primary control outputs.
+    ///
+    /// These are the project's face and its rendered lamps — the two things
+    /// permanent surfaces (the root module's hero, every wiring drawer's
+    /// value box) show without anyone asking, so they ride every pull
+    /// regardless of the focus/lens gate that governs ordinary node
+    /// products (M6 P3, generalized).
+    pub fn always_live_products(&self) -> Vec<UiProductRef> {
+        self.primary_visual_product()
+            .into_iter()
+            .chain(self.primary_control_product())
+            .collect()
+    }
+
+    /// The root module's scope, when the project has a root node.
+    fn root_module_scope(&self) -> Option<lpc_wire::WireScopeRef> {
+        let owner = self.root_nodes.first()?.target().node_id;
+        Some(lpc_wire::WireScopeRef::Module { owner })
+    }
+
+    /// The product a scope's named channel resolved to, when it resolved to
+    /// one at all. Strictly scoped — a channel of the same name one scope
+    /// out is a different channel.
+    fn scope_channel_product(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        scope: lpc_wire::WireScopeRef,
+        name: &str,
+    ) -> Option<UiProductRef> {
+        let channel = graph
+            .channels
+            .iter()
+            .find(|channel| channel.scope == Some(scope) && channel.name == name)?;
+        channel_product(channel).map(UiProductRef::from_product_ref)
     }
 
     /// Channels the binding picker offers: every channel observed in the
@@ -730,7 +788,7 @@ impl ProjectController {
 
     /// Project root node controllers into node-pane DTOs in project tree order.
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
-        let primary_visual = self.primary_visual_product();
+        let always_live = self.always_live_products();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
@@ -748,7 +806,7 @@ impl ProjectController {
                     &extra_config,
                     &asset_editor,
                     &remove_action,
-                    primary_visual.as_ref(),
+                    &always_live,
                     &subscribes,
                 )
             })
@@ -1845,7 +1903,7 @@ impl ProjectController {
         inventory: &ProjectInventorySummary,
     ) -> ProjectEditorView {
         let summary = self.sync_summary().unwrap_or_default();
-        let primary_visual = self.primary_visual_product();
+        let always_live = self.always_live_products();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
@@ -1864,7 +1922,7 @@ impl ProjectController {
                     &extra_config,
                     &asset_editor,
                     &remove_action,
-                    primary_visual.as_ref(),
+                    &always_live,
                     &subscribes,
                 )
             })
@@ -2542,44 +2600,51 @@ impl ProjectController {
         // not the playlist's: its reset clears the entry's writers.
         self.collect_playlist_entry_groups(graph, children, &mut groups);
 
-        // The module's own visual mirror (R7); a module with no visual
+        // The module's own visual mirror (R7); a module with no output
         // simply has no hero (E6). The mirror ROW supplies identity and
         // meta, but its bytes ride the scope's resolved `visual.out`
         // product: the mirror's own product ref is outside the preview
-        // stream (only the primary visual and the focused node's products
-        // are tracked), so without this rehoming the root hero renders
+        // stream (only always-live products and the focused node's are
+        // tracked), so without this rehoming the root hero renders
         // black while the shader card below it is live.
         let mut preview =
             super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
-        if let Some(hero) = preview.as_mut()
-            && let Some(product) = graph
-                .channels
-                .iter()
-                .find(|channel| {
-                    channel.scope == Some(scope)
-                        && channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL
-                })
-                .and_then(|channel| channel.value.as_ref())
-                .and_then(|value| value.value.as_ref())
-                .and_then(|value| match value {
-                    lpc_model::LpValue::Product(product @ lpc_model::ProductRef::Visual(_)) => {
-                        Some(UiProductRef::from_product_ref(*product))
-                    }
-                    _ => None,
-                })
-            && let Some(bytes) = self
-                .sync
-                .as_ref()
-                .and_then(|sync| sync.product_preview(&product))
-        {
-            hero.preview = bytes.clone();
-            let primary = self.primary_visual_product();
-            hero.tracking = if primary.as_ref() == Some(&product) {
-                crate::UiProductTrackingState::Tracking
-            } else {
-                crate::UiProductTrackingState::Paused
-            };
-            hero.product = Some(product);
+        let scope_visual = self
+            .scope_channel_product(graph, scope, lpc_model::PRIMARY_VISUAL_CHANNEL)
+            .filter(|product| matches!(product, UiProductRef::Visual { .. }));
+        if let Some(hero) = preview.as_mut() {
+            if let Some(product) = scope_visual {
+                if let Some(bytes) = self
+                    .sync
+                    .as_ref()
+                    .and_then(|sync| sync.product_preview(&product))
+                {
+                    hero.preview = bytes.clone();
+                    hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                    hero.product = Some(product);
+                }
+            } else if let Some(product) = self
+                .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
+                .filter(|product| matches!(product, UiProductRef::Control { .. }))
+            {
+                // A control-first module: nothing writes the scope's
+                // visual, so the mirror node renders CLEARED — a black
+                // square is not this module's output, its fixtures' lamps
+                // are. The hero becomes the control product outright
+                // (kind included, so the shared preview draws the lamp
+                // layout), and says "not tracked" honestly when the bytes
+                // are not in the stream instead of showing the cleared
+                // mirror.
+                hero.kind = ui_product_kind(product);
+                hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                hero.product = Some(product);
+                hero.preview = self
+                    .sync
+                    .as_ref()
+                    .and_then(|sync| sync.product_preview(&product))
+                    .cloned()
+                    .unwrap_or_else(|| crate::UiProductPreview::for_kind(hero.kind));
+            }
         }
 
         Some(crate::UiModuleFace {
@@ -2928,10 +2993,13 @@ impl ProjectController {
         for node in &self.root_nodes {
             self.collect_subscribed_products(node, &mut product_refs);
         }
-        // The primary visual streams whenever a project is open — the
-        // project's face is always live regardless of node focus (ADR
-        // 2026-07-16-primary-visual-product; M6 P3).
-        product_refs.extend(self.primary_visual_product());
+        // The primary visual and primary control stream whenever a project
+        // is open — the project's face and its rendered lamps are always
+        // live regardless of node focus (ADR 2026-07-16-primary-visual-product;
+        // M6 P3). Without the control half, a device lens has no bytes for
+        // the `control.out` value box or a control module's hero unless the
+        // producing fixture happens to be the focused node.
+        product_refs.extend(self.always_live_products());
         product_refs.into_iter().collect()
     }
 
@@ -5478,6 +5546,38 @@ fn subtree_panel_controls(children: &[crate::UiNodeChild]) -> Vec<&crate::UiPane
     out
 }
 
+/// The product a channel's resolved value carries, when it carries one.
+fn channel_product(channel: &lpc_wire::WireBusChannel) -> Option<lpc_model::ProductRef> {
+    match channel.value.as_ref()?.value.as_ref()? {
+        lpc_model::LpValue::Product(product) => Some(*product),
+        _ => None,
+    }
+}
+
+/// The product family a UI product ref belongs to — the preview component
+/// picks its treatment (pixel canvas vs lamp layout) from this.
+fn ui_product_kind(product: UiProductRef) -> crate::UiProductKind {
+    match product {
+        UiProductRef::Visual { .. } => crate::UiProductKind::Visual,
+        UiProductRef::Control { .. } => crate::UiProductKind::Control,
+    }
+}
+
+/// How a product presents on a surface that BORROWS it (a channel's value
+/// box, a module's output hero) rather than owning it: always-live products
+/// read as tracking, anything else as paused — Studio has bytes for it, but
+/// this surface is not what keeps them coming.
+fn borrowed_tracking(
+    always_live: &[UiProductRef],
+    product: UiProductRef,
+) -> crate::UiProductTrackingState {
+    if always_live.contains(&product) {
+        crate::UiProductTrackingState::Tracking
+    } else {
+        crate::UiProductTrackingState::Paused
+    }
+}
+
 /// The live reading for a consumed bus channel, prepared for display on a
 /// bound panel control (P6 item 1). `None` — no live display — for:
 ///
@@ -7716,6 +7816,185 @@ mod tests {
                 output: 0
             }]
         );
+    }
+
+    /// The fixture-shaped control product a `control.out` channel resolves
+    /// to: node 3's second output, two rows of 16 samples.
+    fn fixture_control_product() -> lpc_model::ControlProduct {
+        lpc_model::ControlProduct::new(
+            lpc_model::NodeId::new(3),
+            1,
+            lpc_model::ControlExtent::new(2, 16),
+        )
+    }
+
+    /// A scope's `control.out` carrying a resolved control product, with the
+    /// scope's `visual.out` optionally present (a control-first module has
+    /// no visual writer at all).
+    fn control_out_graph(
+        scope: lpc_wire::WireScopeRef,
+        visual: Option<lpc_model::ProductRef>,
+    ) -> lpc_wire::WireBindingGraph {
+        let channel = |name: &str, value: lpc_model::ProductRef, primary_visual: bool| {
+            lpc_wire::WireBusChannel {
+                scope: Some(scope),
+                name: name.to_string(),
+                kind: Some(lpc_model::Kind::Color),
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::Product(value)),
+                    error: None,
+                }),
+                primary_visual,
+            }
+        };
+        let mut channels = vec![channel(
+            lpc_model::PRIMARY_CONTROL_CHANNEL,
+            lpc_model::ProductRef::control(fixture_control_product()),
+            false,
+        )];
+        if let Some(visual) = visual {
+            channels.insert(0, channel(lpc_model::PRIMARY_VISUAL_CHANNEL, visual, true));
+        }
+        lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: Vec::new(),
+            channels,
+        }
+    }
+
+    #[test]
+    fn the_value_box_shows_control_products_not_only_visuals() {
+        // A control channel's value box is the fixture's lamps, not
+        // "control product #3:1" — the same shared preview payload the
+        // visual rows carry, with the control family on it.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+        // The product enters the tracked stream (Pending until the first
+        // probe answers) exactly as a subscribed node's product would.
+        let product = UiProductRef::from_control_product(fixture_control_product());
+        let _ = project
+            .sync_mut()
+            .unwrap()
+            .refresh_project_read_request(vec![product]);
+
+        let bus = project
+            .ui_bus_view_for_scope(scope)
+            .expect("wiring view for the root scope");
+        let channel = bus
+            .channels
+            .iter()
+            .find(|channel| channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL)
+            .expect("the control channel lists");
+        let preview = channel
+            .preview
+            .as_ref()
+            .expect("a control product in the stream shows its picture");
+        assert_eq!(preview.kind, crate::UiProductKind::Control);
+        assert_eq!(preview.preview, UiProductPreview::Pending);
+        assert_eq!(
+            preview.tracking,
+            UiProductTrackingState::Tracking,
+            "the root scope's control.out is the always-live primary control"
+        );
+    }
+
+    #[test]
+    fn the_primary_control_product_is_always_subscribed() {
+        // Nothing focused, device lens: the project's rendered lamps still
+        // stream, or no surface outside the focused fixture card could ever
+        // show them.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+
+        assert_eq!(
+            project.subscribed_products(),
+            vec![UiProductRef::from_control_product(fixture_control_product())]
+        );
+    }
+
+    #[test]
+    fn a_control_first_module_heroes_its_control_output() {
+        // No visual writer anywhere in the scope: the module's own mirror
+        // renders CLEARED, so the hero is the scope's control product —
+        // family included, since that is what picks the lamp layout.
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
+            panic!("the root module card wears a module face");
+        };
+        let hero = face.preview.expect("the module's output hero");
+        assert_eq!(hero.kind, crate::UiProductKind::Control);
+        assert_eq!(
+            hero.product,
+            Some(UiProductRef::from_control_product(fixture_control_product()))
+        );
+        assert_eq!(hero.tracking, UiProductTrackingState::Tracking);
+    }
+
+    #[test]
+    fn a_module_with_a_visual_keeps_its_visual_hero() {
+        // The control fallback is exactly that: a scope that resolves a
+        // visual still heroes the visual, control channel or not.
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        let visual = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(2),
+            0,
+        ));
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, Some(visual)));
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
+            panic!("the root module card wears a module face");
+        };
+        let hero = face.preview.expect("the module's output hero");
+        assert_eq!(hero.kind, crate::UiProductKind::Visual);
     }
 
     #[test]
