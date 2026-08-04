@@ -33,8 +33,12 @@
 //!
 //! Absent on purpose:
 //!
-//! - **Radio.** Linked only behind `radio_ram_probe`, which replaces the
-//!   entrypoint entirely (M2-P3's RAM ledger).
+//! - **Radio.** Retired with the standalone-workspace split (networking
+//!   M2-P2): crates.io `esp-radio` and the git-pinned `esp-hal` cohort both
+//!   claim the `xtensa-lx-rt` links slot, and on the DOM-WLE-LAN the EMAC's
+//!   APLL clock excludes the radio anyway. The M2-P3 RAM probe's numbers
+//!   live in `docs/adr/2026-08-01-esp32v3-flash-budget.md`; its code is in
+//!   git history if a wifi-capable classic board ever needs it back.
 //!
 //! ## Panic posture
 //!
@@ -49,7 +53,7 @@
 // than as a generic panic with no heap numbers. Same reason fw-esp32c6 takes
 // the feature; the esp toolchain is nightly-based, so it is available here too.
 #![cfg_attr(
-    all(feature = "server", not(feature = "radio_ram_probe")),
+    feature = "server",
     feature(alloc_error_handler)
 )]
 #![allow(
@@ -60,7 +64,7 @@
 // The server path is the whole LightPlayer stack. The hello and probe
 // entrypoints install the allocator but never name `alloc` themselves, and
 // `unused_extern_crates` is deny-by-default in this workspace's lint table.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 extern crate alloc;
 
 // The build's self-description, embedded as a scannable blob (extracted by
@@ -85,21 +89,21 @@ lpc_model::lp_embed_manifest_core! {
 }
 
 // `board::esp32v3::init` is the server path's sole `esp_hal::init` call site.
-// The hello/probe entrypoint at the bottom of this file keeps its own inline
-// init on purpose: it needs the `WIFI` peripheral that `init_board` does not
-// hand back, and it is M2-P3's measured code, worth preserving byte for byte.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+// The bare hello entrypoint at the bottom of this file keeps its own inline
+// init so the minimal bring-up image stays self-contained (the radio probe
+// that once shared it is retired; see the module docs' "Radio" note).
+#[cfg(feature = "server")]
 mod board;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod flash_storage;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod output;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod recovery;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 mod serial;
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32v3::init::{init_board, start_runtime},
@@ -155,20 +159,13 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// competition with `.stack`; the second region costs `.stack` nothing,
 /// which is exactly why it was worth reclaiming. Total heap is
 /// `HEAP_SIZE + 65,536`.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 const HEAP_SIZE: usize = 110 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
 /// skeleton, kept buildable as the minimal bring-up image.
-#[cfg(all(not(feature = "server"), not(feature = "radio_ram_probe")))]
+#[cfg(not(feature = "server"))]
 const HEAP_SIZE: usize = 100 * 1024;
-
-/// Probe heap: the radio stack's own DRAM statics come out of the same 192 KB
-/// `dram_seg` the arena does, so the arena must shrink for the image to link
-/// at all. 72 KB is the experiment repo's proven radio-coexistent size on this
-/// chip (led-lab-esp32 `test_stress`).
-#[cfg(feature = "radio_ram_probe")]
-const HEAP_SIZE: usize = 72 * 1024;
 
 /// Abort-tier panic handler for the **app** image: stage a breadcrumb into the
 /// RTC ledger, commit it, then print and reset.
@@ -179,7 +176,7 @@ const HEAP_SIZE: usize = 72 * 1024;
 /// handler controls, and once the record is already committed to RTC RAM,
 /// spending 40 ms per line to protect the *serial copy* of information the next
 /// boot will print anyway buys nothing.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     recovery::panic_path::stage_and_reset(info)
@@ -191,7 +188,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// then the request size is only a formatted string and the free/used numbers
 /// are gone. On a chip whose whole difficulty is a 110 KB arena, "how much was
 /// left" is the question, so it gets its own path.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[alloc_error_handler]
 fn on_alloc_error(layout: core::alloc::Layout) -> ! {
     recovery::panic_path::stage_oom_and_reset(layout)
@@ -215,7 +212,7 @@ fn on_alloc_error(layout: core::alloc::Layout) -> ! {
 /// state is exactly what may have just gone wrong. 240 MHz × ~40 ms is far
 /// more than the ~1.4 ms a full 128-byte FIFO needs at 921600 baud, and the
 /// cost is paid only on a boot that is already dead.
-#[cfg(not(all(feature = "server", not(feature = "radio_ram_probe"))))]
+#[cfg(not(feature = "server"))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     /// Give the TX FIFO time to clock out before the next print or the reset.
@@ -279,7 +276,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 ///
 /// The probe is ~17 first-fit walks, once per heartbeat (5 s) — invisible next
 /// to a frame.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
@@ -340,7 +337,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// The span is `'static` (a fixed hardware address), exclusively the
 /// allocator's (the code region is the only other claimant on SRAM1, and the
 /// const-asserts prove they abut without overlap), and non-empty.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 fn add_sram1_heap_region() -> usize {
     let (base, len) = lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
     unsafe {
@@ -353,14 +350,14 @@ fn add_sram1_heap_region() -> usize {
     len as usize
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 struct FirmwareApp {
     server: LpServer,
     transport: transport::StreamingMessageRouterTransport,
     time_provider: Esp32TimeProvider,
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[inline(never)]
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
@@ -569,7 +566,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
 /// Mount the `lpfs` partition, falling back to RAM so an unformattable or
 /// mis-flashed board still comes up reachable and can say so over the wire.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs::LpFs> {
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
@@ -595,7 +592,7 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
     }
 }
 
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe")))]
+#[cfg(feature = "server")]
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
     let app = boot_firmware(spawner);
@@ -623,12 +620,10 @@ async fn main(spawner: embassy_executor::Spawner) {
     .await;
 }
 
-/// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build) and the M2-P3
-/// radio RAM probe. Both replace the server app rather than extending it.
-#[cfg(any(
-    feature = "radio_ram_probe",
-    all(not(feature = "server"), not(feature = "radio_ram_probe"))
-))]
+/// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build), kept buildable
+/// as the minimal bring-up image. Replaces the server app rather than
+/// extending it.
+#[cfg(not(feature = "server"))]
 #[esp_hal::main]
 fn main() -> ! {
     // `esp_hal::init` disables the RTC super watchdog (where present), the RTC
@@ -657,48 +652,6 @@ fn main() -> ! {
         esp_alloc::HEAP.free()
     );
 
-    // M2-P3 RAM probe: bring the radio stack all the way up to an initialised
-    // STA controller — the deployment-shaped memory layout — printing the heap
-    // ledger at each stage. `[PROBE]` lines are the phase deliverable; the
-    // stage traces make a wedged boot attributable.
-    #[cfg(feature = "radio_ram_probe")]
-    {
-        esp_println::println!(
-            "[PROBE] stage=pre_rtos heap_size={HEAP_SIZE} heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
-        let sw_int =
-            esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-        esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
-        esp_println::println!(
-            "[PROBE] stage=rtos_started heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        let (mut controller, _interfaces) =
-            esp_radio::wifi::new(peripherals.WIFI, Default::default())
-                .expect("radio probe: wifi init");
-        esp_println::println!(
-            "[PROBE] stage=wifi_new heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        let station_config = esp_radio::wifi::sta::StationConfig::default();
-        controller
-            .set_config(&esp_radio::wifi::Config::Station(station_config))
-            .expect("radio probe: sta config");
-        esp_println::println!(
-            "[PROBE] stage=sta_started heap_free={} heap_used={}",
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used()
-        );
-        // Keep the controller alive so the heartbeat below reports the
-        // steady-state radio-on ledger, not a post-drop one.
-        core::mem::forget(controller);
-        esp_println::println!("[PROBE] done — heartbeat shows steady-state radio-on heap");
-    }
 
     esp_println::println!("[INIT] ready");
 

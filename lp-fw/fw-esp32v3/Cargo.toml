@@ -1,23 +1,29 @@
-# Repo-root workspace member, excluded from `default-members` — exactly the
-# shape fw-esp32c6 and fw-esp32s3 take.
+# A STANDALONE workspace again (root Cargo.toml `exclude`s it) — the crate's
+# third workspace posture, and this time for a different reason than the
+# classic-bring-up history below. Networking M2-P2 pins the whole esp-*
+# family to a git rev for the unreleased classic-ESP32 EMAC driver, and
+# `[patch]` is workspace-global; quarantining the pin means quarantining the
+# workspace, extending the per-chip toolchain quarantine
+# (docs/adr/2026-07-29-per-chip-fw-toolchains.md).
 #
-# M2-P1 stood this crate up as its OWN workspace because it then had zero
-# lp2025-internal path dependencies, so nothing needed the root's
-# `workspace.dependencies` or its `[patch.crates-io]` forks. M3-P1 makes it a
-# real `fw-esp32-common` / `lpa-server` / `lpc-hardware` consumer, which is
-# precisely the condition that comment named for revisiting the decision:
-# path deps into the root workspace from outside it would resolve their own
-# copies of every shared crate and silently ignore the root `[patch]` table.
-# The cost is the one P1 wanted to defer — a `--exclude fw-esp32v3` entry in
-# the justfile's `clippy-host` — and it is now paid (see `justfile`).
+# History, kept because the trade-offs are real and will recur at unpin time:
+# classic-bring-up M2-P1 stood this crate up standalone (zero internal path
+# deps then); its M3-P1 folded it INTO the root workspace when it became a
+# real `fw-esp32-common` / `lpa-server` consumer, because path deps from
+# outside would ignore the root `[patch]` table. That hazard is now handled
+# explicitly: the `[patch.crates-io]` table at the bottom of this file
+# MIRRORS the root's entries for everything in this crate's graph (naga,
+# pp-rs, ser-write-json), diverging only on esp-storage (git cohort, see the
+# note there). When the esp-hal pin is retired, either fold this crate back
+# into the root workspace or keep the mirror in sync.
 #
 # The build still runs from this directory (`cd lp-fw/fw-esp32v3 && cargo
 # build --profile release-esp32v3`), because `.cargo/config.toml` here is what
-# selects the Xtensa target, the linker flags and the espflash runner; cargo
-# reads `.cargo/config.toml` from the CWD upward, so invoking from the repo
-# root would build for the host. The `[profile.release-esp32v3]` definition
-# lives in the ROOT Cargo.toml next to `release-esp32s3` — profiles are only
-# honoured on the workspace root manifest.
+# selects the Xtensa target, the linker flags and the espflash runner. The
+# profile tables live in the [workspace] section at the bottom of this file
+# (copied from root; profiles are only honoured on a workspace root, which
+# this file now is). The ELF lands in this crate's OWN `target/` dir — the
+# justfile's `fw_esp32v3_elf` points there.
 
 [package]
 name = "fw-esp32v3"
@@ -118,28 +124,21 @@ ws281x_telemetry = []
 #   cargo build --profile release-esp32v3 --features frame-dump
 frame-dump = []
 
-# M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
-# heap deltas at each stage. Build:
-#   cargo build --profile release-esp32v3 --no-default-features \
-#       --features esp32,radio_ram_probe
-# (touch src/main.rs first if flipping features — cargo does not always
-# track feature-driven cfg reliably here; roadmap stale-binary lesson.)
-#
-# The probe REPLACES the entrypoint (`main.rs` gates the server boot on
-# `not(feature = "radio_ram_probe")`), so `--no-default-features` is what keeps
-# the probe image from also linking the whole server stack for code it never
-# reaches. Enabling both still compiles — that is the anti-rot property the
-# clippy recipe leans on — it is just a pointlessly large image.
-radio_ram_probe = ["dep:esp-radio", "dep:esp-rtos", "esp-rtos/esp-radio", "esp-rtos/esp-alloc"]
+# The M2-P3 radio RAM probe (`radio_ram_probe`) was retired by the
+# standalone-workspace split: crates.io esp-radio and the git-pinned esp-hal
+# cohort both claim the `xtensa-lx-rt` links slot, and the DOM-WLE-LAN's
+# APLL-clocked EMAC excludes the radio regardless. Its measured numbers are
+# in docs/adr/2026-08-01-esp32v3-flash-budget.md; code is in git history.
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
 # (proven on classic ESP32 silicon 2026-07-28, FINDINGS.md C1 PASS) — the
 # working classic-ESP32 dependency cohort under the `esp` toolchain, not a
-# guess. `esp-hal` 1.1.1 (not fw-esp32s3's 1.1.0): fw-esp32s3 pins `"1.1.0"`
-# with a caret range, and 1.1.1 is what actually resolves and is cached
-# locally, so pin the version that is known to work with the `esp32` feature.
-esp-hal = { version = "1.1.1", features = ["esp32", "log-04", "unstable"] }
+# guess. `esp-hal` req is `"1.1"` (was `"1.1.1"`): the [patch.crates-io]
+# below replaces it with git rev 39abaae0 (self-version 1.1.0, so a ^1.1.1
+# req would refuse the patch) for the unreleased classic-ESP32 EMAC driver.
+# Revert to a plain crates.io `"1.1.x"` pin at the next esp-hal minor.
+esp-hal = { version = "1.1", features = ["esp32", "log-04", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 
@@ -217,7 +216,7 @@ embedded-storage = { version = "0.3", optional = true }
 # deliberately: it wraps every flash operation so an interrupt cannot run from
 # a disabled cache mid-write. `default-features = false` without it compiles
 # fine and corrupts silently — exactly the trap the S3 hit twice.
-esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32", "panic-unaligned-buffer"], optional = true }
+esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32", "embedded-storage"], optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
 # The boot-time `ServerHello` plus the wire types `io_task` hands to
@@ -289,10 +288,86 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true 
 # versions from the experiment repo's led-lab-esp32 `test_stress`, the set
 # proven to boot the radio on classic silicon under the esp toolchain
 # (esp-rtos 0.2 does NOT work — conflicting esp-sync; findings.md §3).
-# Optional so the app build stays radio-free: the radio blob costs ~390 KB of
-# flash and ~44 KB of heap on this chip (measured, M2-P3), and that phase
-# existed to MEASURE it, not to ship it.
-[dependencies.esp-radio]
-version = "0.18.0"
-optional = true
-features = ["esp32", "wifi", "esp-now", "esp-alloc", "unstable"]
+
+# ── Standalone workspace ─────────────────────────────────────────────────────
+# This crate is its OWN cargo workspace (root Cargo.toml `exclude`s it), so
+# the [patch] below stays quarantined to the classic-ESP32 build the same way
+# its `esp` toolchain already is (per-chip toolchain ADR). Consequences: own
+# Cargo.lock, own target/ dir (the justfile's `fw_esp32v3_elf` points there),
+# and the [profile] tables root used to provide are duplicated here.
+[workspace]
+
+# Copied from the root workspace's [workspace.package] / lints / the one
+# `workspace = true` dependency this crate uses; keep in sync with root.
+[workspace.package]
+version = "40.0.0"
+authors = ["Photomancer"]
+edition = "2024"
+license = "AGPL-3.0-or-later"
+rust-version = "1.90.0"
+
+[workspace.dependencies]
+log = { version = "0.4", default-features = false }
+
+[workspace.lints.rust]
+unused_extern_crates = 'warn'
+trivial_numeric_casts = 'warn'
+unstable_features = 'warn'
+unused_import_braces = 'warn'
+unused-lifetimes = 'warn'
+unused-macro-rules = 'warn'
+
+[workspace.lints.clippy]
+all = { level = 'allow', priority = -1 }
+clone_on_copy = 'warn'
+map_clone = 'warn'
+uninlined_format_args = 'warn'
+unnecessary_to_owned = 'warn'
+manual_strip = 'warn'
+useless_conversion = 'warn'
+unnecessary_mut_passed = 'warn'
+unnecessary_fallible_conversions = 'warn'
+unnecessary_cast = 'warn'
+allow_attributes_without_reason = 'warn'
+from_over_into = 'warn'
+redundant_field_names = 'warn'
+multiple_bound_locations = 'warn'
+extra_unused_type_parameters = 'warn'
+
+# Copied from the root workspace's [profile.release]; keep in sync.
+[profile.release]
+lto = true
+opt-level = "z"
+codegen-units = 1
+# Overridden on bare metal by `-C panic=abort` in .cargo/config.toml rustflags
+# (the setting that actually takes effect; see the root profile's note).
+panic = "unwind"
+
+[profile.release-esp32v3]
+inherits = "release"
+opt-level = "s"
+
+# Mirrors the root workspace's [patch.crates-io] entries that occur in this
+# crate's graph (paths gain a ../../), plus the esp-* git pin.
+[patch.crates-io]
+# esp-storage comes from the GIT cohort here, NOT the third_party fork the
+# root workspace patches in: git esp-bootloader-esp-idf's partition API takes
+# the concrete `esp_storage::common::FlashStorage` from its own tree, and two
+# 0.9.0 esp-storage instances would type-clash. Cost: the fork's
+# `panic-unaligned-buffer` guard is absent from this build — re-add when the
+# fork rebases onto the esp-hal-repo esp-storage (or upstream the guard).
+esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+naga = { path = "../../third_party/naga" }
+pp-rs = { path = "../../third_party/pp-rs" }
+ser-write-json = { path = "../../third_party/ser-write-json" }
+# Networking M2-P2 (Q-M2): the classic-ESP32 EMAC driver merged 2026-05-17
+# and is in no crates.io release. Pin the whole esp-* family to the one
+# spike-tested rev (spikes/net-bringup-classic) so the cohort stays coherent.
+# REVERT to crates.io at the next esp-hal minor.
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
+esp-rom-sys = { git = "https://github.com/esp-rs/esp-hal", rev = "39abaae0cca19da67ef1ac9f474bc194a69a29ec" }
