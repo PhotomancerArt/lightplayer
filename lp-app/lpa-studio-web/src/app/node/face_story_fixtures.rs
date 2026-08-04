@@ -66,10 +66,14 @@ pub(crate) fn knob_control_stepped(
     let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
         .with_state(state.clone())
         .with_source(source);
+    // Labels are display text ("Phase speed"); the story address is a slot
+    // PATH, which rejects spaces — slug it. Capture found this the hard way:
+    // a spaced label panicked the whole story page.
+    let slug = label.replace(' ', "_");
     UiPanelControl {
         emit: UiPanelEmit::Value,
         label: label.to_string(),
-        address: Some(story_slot_address(&format!("controls.{label}"))),
+        address: Some(story_slot_address(&format!("controls.{slug}"))),
         widget: UiPanelWidget::Knob { min, max, step },
         value: slot_value,
         live_value: None,
@@ -218,7 +222,9 @@ pub(crate) fn period_knob(label: &str, seconds: f32, shared: bool) -> UiPanelCon
         waveform: lpa_studio_core::Waveform::Ramp,
         phase_offset: 0.0,
     };
-    control.unit = Some(UiSlotUnit::seconds());
+    // Production carries no unit suffix on speed knobs — the auto-
+    // denominated readout ("3/min") brings its own unit.
+    control.unit = None;
     control.value = control.value.clone().with_unit(UiSlotUnit::seconds());
     if shared {
         control.panel_target = Some(lpa_studio_core::UiPanelTarget {

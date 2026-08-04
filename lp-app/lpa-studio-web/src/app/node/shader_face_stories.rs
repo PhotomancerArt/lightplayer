@@ -49,22 +49,22 @@ fn bound_knob() -> Element {
     }
 }
 
-/// P7 item 5, the two states a period knob has. The number is
-/// seconds-per-cycle — a **units inversion** against the speed knobs the
-/// migration retired (bigger is now SLOWER) — and the gesture writes a
-/// whole `PhasorConfig`, never a bare float.
+/// The two states a speed knob has (P7 item 5, re-voiced at G2): the
+/// readout is the auto-denominated rate ("3/min" — bigger IS faster, the
+/// drag axis inverts to match), and the gesture still writes a whole
+/// `PhasorConfig`, never a bare float.
 #[story(
-    description = "Period knobs. Left: slot-local — the knob edits consumed[phase].phasor.some and belongs to this card alone. Right: channel-driven — an authored config channel makes it violet, puts it on the module panel, and every reader of that channel rides the one integrator it retunes."
+    description = "Speed knobs. Left: slot-local — the knob edits consumed[phase].phasor.some and belongs to this card alone. Right: channel-driven — an authored config channel makes it violet, puts it on the module panel, and every reader of that channel rides the one integrator it retunes."
 )]
 fn phasor_period() -> Element {
     rsx! {
         div { class: "tw:flex tw:items-start tw:gap-8 tw:p-4",
             PanelControl {
-                control: period_knob("phase period", 20.0, false),
+                control: period_knob("Speed", 20.0, false),
                 on_action: move |_| {},
             }
             PanelControl {
-                control: period_knob("phase period", 100.0, true),
+                control: period_knob("Speed", 100.0, true),
                 on_action: move |_| {},
             }
         }
