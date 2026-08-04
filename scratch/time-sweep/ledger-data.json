@@ -1,0 +1,267 @@
+[
+ {
+  "key": "fast",
+  "cls": "periodic",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "phase=1s",
+  "worst": "fast: 1.53e-06",
+  "note": "`mod(time, 1.0)` IS the phasor: one 1 s ramp, read straight out.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 409.75,
+   "ok": true,
+   "project": "examples/fast"
+  }
+ },
+ {
+  "key": "fiber-headband",
+  "cls": "periodic",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "phase=8.3333s",
+  "worst": "fiber-headband: 3.7e-06",
+  "note": "`fract(time*0.12 + led*0.5)` -> `fract(phase + led*0.5)`.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 29756.484375,
+   "ok": true,
+   "project": "examples/fiber-headband"
+  }
+ },
+ {
+  "key": "rocaille",
+  "cls": "periodic",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "cycle=20s",
+  "worst": "rocaille: 5.96e-08",
+  "note": "`mod(time*0.05*TAU, TAU)` == `TAU*fract(time*0.05)`; exact for ANY TAU literal because the shader's own constant is both the scale and the modulus.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 2771.744140625,
+   "ok": true,
+   "project": "examples/rocaille"
+  }
+ },
+ {
+  "key": "quad-strips",
+  "cls": "periodic",
+  "defs": 7,
+  "targets": 7,
+  "uniforms": "phase=20s",
+  "worst": "quad-strips: 1.01e-05",
+  "note": "Per-band rates 0.25/0.35/0.45/0.55 Hz are whole multiples of 0.05 Hz: one 20 s phasor, `phase*(5+2*band)`.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 3174.828125,
+   "ok": true,
+   "project": "projects/test/quad-strips"
+  }
+ },
+ {
+  "key": "penta-strands",
+  "cls": "periodic",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "phase=20s",
+  "worst": "penta-strands: 7.75e-06",
+  "note": "Same family as quad-*, five bands (0.25..0.65 Hz over 0.05 Hz).",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 5968.7490234375,
+   "ok": true,
+   "project": "projects/test/penta-strands-v3"
+  }
+ },
+ {
+  "key": "plasma",
+  "cls": "periodic (driven)",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "phase=100s",
+  "worst": "plasma: 4.92e-06",
+  "note": "All five rates (0.13/0.09/0.11/0.15/0.05) are whole multiples of 0.01 Hz -> one base phasor. `speed` uniform retired; the phasor's period is driven by the retyped `bus:speed` config channel.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 21365.453125,
+   "ok": true,
+   "project": "examples/plasma"
+  }
+ },
+ {
+  "key": "smoke-project",
+  "cls": "periodic",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "wavePhaseA=2.992s, wavePhaseB=3.696s, crossPhase=4.8332s, huePhase=12.5s",
+  "worst": "smoke-project: 2.62e-05",
+  "note": "Four incommensurate rates -> four phasors. TAU literal tightened from 6.28318 to 6.2831853 so the skipped cycles really are whole (6.28318 drifts 5e-6 rad/cycle, and this body runs 33 cycles by t=100 s).",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 18861.236328125,
+   "ok": true,
+   "project": "lp-fw/fw-browser/www/smoke-project"
+  }
+ },
+ {
+  "key": "basic2",
+  "cls": "periodic",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "panPhase=20.944s, scalePhase=8.976s, huePhase=6.2832s",
+  "worst": "basic2: 5.25e-06",
+  "note": "Worley is sampled at a time-independent coordinate, so nothing here is unbounded: three phasors and no seconds. `worley_demo` moved above `render` \u2014 the committed order is call-before-declaration, which the naga front end rejects outright (the oracle baseline carries the same reorder so the A/B stays like-for-like).",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 16407.31640625,
+   "ok": true,
+   "project": "examples/basic2"
+  }
+ },
+ {
+  "key": "basic",
+  "cls": "both",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "time=seconds, palettePhase01=25s, panPhase=20.944s, scalePhase=8.976s",
+  "worst": "basic: 0",
+  "note": "Split: palette/pan/zoom -> phasors; `prsd_demo` keeps raw seconds (psrdnoise alpha + a mod-1 hue walk are tangled in one argument).",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 13411.9248046875,
+   "ok": true,
+   "project": "examples/basic"
+  }
+ },
+ {
+  "key": "perf",
+  "cls": "both",
+  "defs": 2,
+  "targets": 2,
+  "uniforms": "time=seconds, palettePhase01=25s, panPhase=20.944s, scalePhase=8.976s",
+  "worst": "perf: 0",
+  "note": "Same split as basic. `mod(time,5)` and `mod(time*0.2,5)` both fold onto the one 25 s phasor (5 and 25 are whole multiples of it).",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 13843.7705078125,
+   "ok": true,
+   "project": "examples/perf/baseline"
+  }
+ },
+ {
+  "key": "button-idle",
+  "cls": "both",
+  "defs": 2,
+  "targets": 2,
+  "uniforms": "time=seconds, wavePhase=17.952s, palettePhase=25s",
+  "worst": "button-idle: 8.79e-07",
+  "note": "fbm coordinate scroll stays seconds; the wave and the palette walk become phasors.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 6683.5576171875,
+   "ok": true,
+   "project": "examples/button-playlist"
+  }
+ },
+ {
+  "key": "fyeah-attract",
+  "cls": "periodic (driven)",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "wheelPhase=4.3478s, paletteCycle=27.273s",
+  "worst": "fyeah-attract: 1.53e-05",
+  "note": "`speed` was a LOCAL knob here (no bus binding), so its default 2.0 is baked into the two periods and the uniform is retired. The two rates share no useful base (69:11), so they get one phasor each.",
+  "render": {
+   "lit_fraction": 0.50390625,
+   "motion_1s_to_5s": 9225.94921875,
+   "ok": true,
+   "project": "examples/fyeah-button"
+  }
+ },
+ {
+  "key": "fyeah-idle",
+  "cls": "both (driven)",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "time=seconds, zoomPhase=19.635s, driftPhase=34.907s, bandPhase=7.392s, breathPhase=8.3776s, paletteCycle=18s",
+  "worst": "fyeah-idle: 5.04e-06",
+  "note": "Five wrapped terms -> five phasors; the psrdnoise scroll keeps seconds. `speed` multiplied ALL of them, and a period channel drives one rate only, so the knob is retired at its default 1.0 (see the deviations section).",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 4596.3427734375,
+   "ok": true,
+   "project": "examples/fyeah-sign"
+  }
+ },
+ {
+  "key": "fyeah-idle-plain",
+  "cls": "both",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "time=seconds, zoomPhase=19.635s, driftPhase=34.907s, bandPhase=7.392s, breathPhase=8.3776s, paletteCycle=18s",
+  "worst": "fyeah-idle-plain: 5.04e-06",
+  "note": "The knob-free sibling of fyeah-idle; same split.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 4596.3427734375,
+   "ok": true,
+   "project": "projects/test/fyeah-sign"
+  }
+ },
+ {
+  "key": "fluid-compute",
+  "cls": "periodic",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "wave_a=20.268s, wave_a2=27.765s, wave_b2=33.726s, wave_b=27.318s, wave_c=33.069s, wave_c2=49.357s, wave_breathe=34.907s",
+  "worst": "fluid-a: 1.97e-06; fluid-b: 4.77e-07",
+  "note": "Seven standalone `sin(time*k + c)` terms -> seven phasors, each constant folded into `phase_offset`. Compute body: oracled through two render() shims.",
+  "render": {
+   "lit_fraction": 0.98828125,
+   "motion_1s_to_5s": 7500.2978515625,
+   "ok": true,
+   "project": "examples/fluid"
+  }
+ },
+ {
+  "key": "meteor-sim",
+  "cls": "unbounded",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "time=seconds",
+  "worst": "n/a",
+  "note": "Sanctioned integrator: `dt = time - prev_time`. Slot retyped to `seconds`, GLSL untouched, `speed` stays a plain f32 that scales dt.",
+  "render": {
+   "lit_fraction": 0.3359375,
+   "motion_1s_to_5s": 2453.0859375,
+   "ok": true,
+   "project": "examples/meteor"
+  }
+ },
+ {
+  "key": "events-a",
+  "cls": "unbounded",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "time=seconds",
+  "worst": "n/a",
+  "note": "Monotone counter `uint(time*2)` feeds an event sequence number; a wrapped phase would replay ids. Slot retyped, GLSL untouched.",
+  "render": {
+   "lit_fraction": 1.0,
+   "motion_1s_to_5s": 306.80859375,
+   "ok": true,
+   "project": "examples/events"
+  }
+ },
+ {
+  "key": "events-b",
+  "cls": "unbounded",
+  "defs": 1,
+  "targets": 1,
+  "uniforms": "time=seconds",
+  "worst": "n/a",
+  "note": "Same as event_a with different moduli.",
+  "render": {}
+ }
+]
