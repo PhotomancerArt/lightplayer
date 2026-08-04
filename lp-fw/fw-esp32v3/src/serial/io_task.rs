@@ -7,46 +7,44 @@
 //! - Read available bytes, split on newlines, push `M!` lines to the incoming
 //!   queue.
 //!
-//! ## Two divergences from `fw-esp32s3/src/serial/io_task.rs`
+//! The JSON-serialization half — the stack JSON writer, the framed
+//! server-message write, and the chunked-with-timeout byte writer under both —
+//! is chip-agnostic and lives in `fw_esp32_common::serial`, shared with
+//! fw-esp32c6 and fw-esp32s3. What stays here is the transport: the UART0
+//! peripheral, the RX-drain-between-chunks hook, and the channels.
 //!
-//! **1. No connection monitor.** The S3 polls the USB-Serial-JTAG SOF bit to
+//! ## One divergence from `fw-esp32s3/src/serial/io_task.rs`
+//!
+//! **No connection monitor.** The S3 polls the USB-Serial-JTAG SOF bit to
 //! tell "cable plugged" from "host application draining", because on that chip
 //! a host that stops reading makes every write time out, which stalls the task
 //! and starves the watchdog. A UART has neither signal and neither problem:
 //! the CH340K clocks bytes onto the wire at line rate whether or not anything
 //! is listening, so a write always completes and there is nothing to latch.
 //! `UsbConnectionMonitor` and the probe-write self-healing path have no
-//! counterpart here; the write timeout below survives only as a backstop
-//! against a wedged peripheral.
+//! counterpart here; the write timeout in [`WritePolicy::UART0`] survives only
+//! as a backstop against a wedged peripheral.
 //!
-//! **2. RX is drained *between* TX chunks** ([`UartLink::write_chunked`]).
+//! ## RX drained between TX chunks
+//!
 //! On USB-Serial-JTAG a 16 KiB `ProjectRead` frame leaves in a few
-//! milliseconds; at 115200 baud it takes ~1.4 s, and UART0's RX FIFO is 128
-//! bytes — about 11 ms of line time. Draining RX only at the top of the loop
-//! would overflow the FIFO and silently lose whatever the host sent during a
-//! long write. Hence [`WRITE_CHUNK_SIZE`] is sized in *line time*, not in
-//! syscall overhead.
-//!
-//! ## Known duplication
-//!
-//! The JSON-serialization half below (`StackJsonWriter`,
-//! `timed_write_server_msg`, `server_message_detail`) is a third copy of code
-//! that is already duplicated between fw-esp32c6 and fw-esp32s3. It is
-//! chip-agnostic and belongs in `fw-esp32-common`; lifting it would change
-//! two shipping firmwares, which is not this phase's job. Kept diffable
-//! against the S3's copy on purpose.
+//! milliseconds; at 921600 baud it still takes real wall time, and UART0's RX
+//! FIFO is 128 bytes — about 1.4 ms of line time. Draining RX only at the top
+//! of the loop would overflow the FIFO and silently lose whatever the host
+//! sent during a long write. [`ChunkedWriter`]'s `on_chunk` hook is exactly
+//! the seam this needs: [`link_writer`] below feeds it a closure that polls
+//! the UART RX FIFO before every chunk (see that fn's docs).
 
 extern crate alloc;
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
-use embedded_io_async::Write;
 use esp_hal::Async;
 use esp_hal::uart::{Uart, UartRx, UartTx};
 use fw_core::message_router::MessageRouter;
-use ser_write_json::SerWrite;
+use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 
 /// Static message channels for MessageRouter
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
@@ -72,22 +70,6 @@ static SERVER_WRITE_RESULT: Channel<
     (u32, Result<(), lpc_wire::TransportError>),
     1,
 > = Channel::new();
-
-/// Write timeout per chunk. A UART TX FIFO drains at line rate unconditionally,
-/// so this is not a host-liveness signal the way the S3's is — it is a
-/// backstop against a wedged peripheral, sized to be far above the ~5.6 ms a
-/// full chunk costs at 921600 baud.
-const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
-
-/// Chunk size for large writes, in *line time* rather than syscall overhead:
-/// the invariant is "drain RX at least twice per RX-FIFO fill time". At
-/// 921600 baud (the link rate `board::esp32v3::init` programs) UART0's
-/// 128-byte RX FIFO holds ~1.4 ms of incoming line, and a 64-byte chunk
-/// costs ~0.7 ms to clock out — the same 2x overflow margin the original
-/// 115200 sizing had, it just drains 8x as often in wall time. The chunk
-/// deliberately does NOT grow with the baud: line time is what protects the
-/// FIFO, not bytes.
-const WRITE_CHUNK_SIZE: usize = 64;
 
 /// RX drain buffer. One FIFO's worth, so a single `read_buffered` empties a
 /// full FIFO.
@@ -122,29 +104,7 @@ impl UartLink {
     /// erratum in `read_exact_async`), and polling sidesteps the question
     /// entirely at 1 ms granularity.
     fn poll_rx(&mut self, router: &MessageRouter) {
-        let mut temp = [0u8; READ_CHUNK_SIZE];
-        loop {
-            match self.rx.read_buffered(&mut temp) {
-                Ok(0) => break,
-                Ok(n) => {
-                    self.read_buffer.extend_from_slice(&temp[..n]);
-                    // A short read means the FIFO is empty; anything else and
-                    // there may be more waiting.
-                    if n < temp.len() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    // Overflow/parity/framing. The FIFO is reset by esp-hal on
-                    // overflow; drop the partial line rather than splice two
-                    // halves of different messages together.
-                    log::warn!("[io_task] UART RX error: {error:?}; dropping partial line");
-                    self.read_buffer.clear();
-                    break;
-                }
-            }
-        }
-        process_read_buffer(&mut self.read_buffer, router);
+        poll_rx(&mut self.rx, &mut self.read_buffer, router);
     }
 
     /// Write everything in `data`, draining RX between chunks.
@@ -152,72 +112,82 @@ impl UartLink {
     /// Returns false on a per-chunk timeout, which for a UART means the
     /// peripheral is wedged rather than that a host went away.
     async fn write_chunked(&mut self, data: &[u8], router: &MessageRouter) -> bool {
-        use embassy_futures::select::{Either, select};
-        let mut offset = 0;
-        while offset < data.len() {
-            let chunk_end = (offset + WRITE_CHUNK_SIZE).min(data.len());
-            match select(
-                Timer::after(WRITE_TIMEOUT),
-                self.tx.write_all(&data[offset..chunk_end]),
-            )
-            .await
-            {
-                Either::First(_) => {
-                    log::warn!(
-                        "[io_task] UART TX timed out after {offset} of {} B",
-                        data.len()
-                    );
-                    return false;
+        let UartLink {
+            tx,
+            rx,
+            read_buffer,
+        } = self;
+        let ok = link_writer(tx, rx, read_buffer, router)
+            .write_all(data)
+            .await;
+        // The shared writer's `on_chunk` hook drains RX *before* each chunk
+        // (including the first); this trailing drain restores the "and after
+        // the last one too" half of the original behaviour.
+        poll_rx(rx, read_buffer, router);
+        ok
+    }
+}
+
+/// Move whatever the RX FIFO already holds into the line buffer and push any
+/// complete `M!` lines to the incoming queue.
+///
+/// A free function rather than a method so [`link_writer`]'s `on_chunk` hook
+/// can call it while [`ChunkedWriter`] separately holds the TX half — `rx`
+/// and `read_buffer` are disjoint fields of [`UartLink`], borrowed apart from
+/// `tx` at each call site.
+///
+/// Non-blocking by construction: `read_buffered` returns what is there and
+/// never waits, which is the read semantic the C6 and S3 adapters also
+/// present. It is deliberately not the async `read()` — that one is
+/// cancellation-safe but parks on an RX-timeout interrupt that the classic
+/// ESP32 cannot clear while the FIFO is non-empty (esp-hal notes the erratum
+/// in `read_exact_async`), and polling sidesteps the question entirely at
+/// 1 ms granularity.
+fn poll_rx(rx: &mut UartRx<'static, Async>, read_buffer: &mut Vec<u8>, router: &MessageRouter) {
+    let mut temp = [0u8; READ_CHUNK_SIZE];
+    loop {
+        match rx.read_buffered(&mut temp) {
+            Ok(0) => break,
+            Ok(n) => {
+                read_buffer.extend_from_slice(&temp[..n]);
+                // A short read means the FIFO is empty; anything else and
+                // there may be more waiting.
+                if n < temp.len() {
+                    break;
                 }
-                Either::Second(Err(error)) => {
-                    log::warn!("[io_task] UART TX error: {error:?}");
-                    return false;
-                }
-                Either::Second(Ok(())) => {}
             }
-            offset = chunk_end;
-            self.poll_rx(router);
+            Err(error) => {
+                // Overflow/parity/framing. The FIFO is reset by esp-hal on
+                // overflow; drop the partial line rather than splice two
+                // halves of different messages together.
+                log::warn!("[io_task] UART RX error: {error:?}; dropping partial line");
+                read_buffer.clear();
+                break;
+            }
         }
-        true
     }
+    process_read_buffer(read_buffer, router);
 }
 
-struct StackJsonWriter<'a> {
-    buf: &'a mut [u8],
-    len: usize,
-}
-
-#[derive(Debug)]
-struct StackJsonError;
-
-impl core::fmt::Display for StackJsonError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("stack JSON buffer full")
-    }
-}
-
-impl<'a> StackJsonWriter<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, len: 0 }
-    }
-
-    fn bytes(&self) -> &[u8] {
-        &self.buf[..self.len]
-    }
-}
-
-impl ser_write_json::SerWrite for StackJsonWriter<'_> {
-    type Error = StackJsonError;
-
-    fn write(&mut self, buf: &[u8]) -> Result<(), StackJsonError> {
-        let end = self.len.checked_add(buf.len()).ok_or(StackJsonError)?;
-        if end > self.buf.len() {
-            return Err(StackJsonError);
-        }
-        self.buf[self.len..end].copy_from_slice(buf);
-        self.len = end;
-        Ok(())
-    }
+/// Wrap the UART TX half in the shared chunked writer, with RX-drain as the
+/// per-chunk hook.
+///
+/// The per-chunk hook is the one crate-specific seam `ChunkedWriter` exposes
+/// (see its docs). fw-esp32c6 / fw-esp32s3 tick the watchdog feeder there;
+/// this chip instead drains UART0's RX FIFO, which holds only ~1.4 ms of
+/// incoming line and would overflow during a multi-chunk write otherwise (see
+/// the module docs). `rx` and `read_buffer` are threaded in separately from
+/// `tx` because the closure needs mutable access to both while `ChunkedWriter`
+/// separately borrows `tx`.
+fn link_writer<'a>(
+    tx: &'a mut UartTx<'static, Async>,
+    rx: &'a mut UartRx<'static, Async>,
+    read_buffer: &'a mut Vec<u8>,
+    router: &'a MessageRouter,
+) -> ChunkedWriter<'a, UartTx<'static, Async>, impl FnMut() + 'a> {
+    ChunkedWriter::new(tx, WritePolicy::UART0, move || {
+        poll_rx(rx, read_buffer, router);
+    })
 }
 
 /// I/O task for the UART0 host link.
@@ -266,126 +236,25 @@ async fn drain_server_write_request(link: &mut UartLink, router: &MessageRouter)
         return;
     };
 
-    let result = timed_write_server_msg(link, msg, router).await;
+    let UartLink {
+        tx,
+        rx,
+        read_buffer,
+    } = link;
+    // No connection monitor on this chip (see module docs), so the link is
+    // always "connected" from `write_server_msg`'s point of view.
+    let result = link_writer(tx, rx, read_buffer, router)
+        .write_server_msg(msg, true)
+        .await;
+    // See `write_chunked`: the shared writer's `on_chunk` hook drains RX
+    // before each chunk, not after the last one.
+    poll_rx(rx, read_buffer, router);
     // Echo the request generation so `transport.send()` can discard any stale
     // result left over from a cancelled send.
     SERVER_WRITE_RESULT
         .sender()
         .send((generation, result))
         .await;
-}
-
-async fn timed_write_server_msg(
-    link: &mut UartLink,
-    msg: lpc_wire::WireServerMessage,
-    router: &MessageRouter,
-) -> Result<(), lpc_wire::TransportError> {
-    let result = timed_write_full_server_msg(link, msg, router).await;
-    if result.is_err() {
-        // If a write failed part-way through a JSON frame, separate the next
-        // frame so host parsers can recover instead of concatenating two `M!`
-        // messages.
-        let _ = link.write_chunked(b"\n", router).await;
-    }
-    result
-}
-
-async fn timed_write_full_server_msg(
-    link: &mut UartLink,
-    msg: lpc_wire::WireServerMessage,
-    router: &MessageRouter,
-) -> Result<(), lpc_wire::TransportError> {
-    // Same ~16.7 KiB stack buffer as fw-esp32s3, and the same TODO: it lives
-    // as async-fn state and is paid even for tiny acks. On this chip that is a
-    // materially larger share of a 192 KB DRAM budget than it is on the S3's
-    // ~342 KB, so it is the first place to look if `.bss` needs to shrink.
-    const SERVER_MSG_FRAMING_BYTES: usize = 16;
-    const SERVER_MSG_JSON_BUFFER_SIZE: usize =
-        lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
-    let mut buf = [0u8; SERVER_MSG_JSON_BUFFER_SIZE];
-    let mut writer = StackJsonWriter::new(&mut buf);
-    if writer.write(b"\nM!").is_err() {
-        log::warn!("[io_task] server message prefix exceeded JSON buffer");
-        return Err(lpc_wire::TransportError::Serialization(
-            "server message prefix exceeded JSON buffer".into(),
-        ));
-    }
-    // Erased writer: shares one serializer instantiation per wire type with the
-    // frame-budget measurement path (lpc_wire::ser_write_json_len), instead of
-    // emitting a second copy of every type's serializer for this sink.
-    if lpc_wire::ser_write_json_to(&mut writer, &msg).is_err() {
-        let detail = server_message_detail(&msg);
-        log::warn!(
-            "[io_task] server message id={} {} exceeded JSON buffer size={} frame_budget={}; write failed",
-            msg.id,
-            detail,
-            SERVER_MSG_JSON_BUFFER_SIZE,
-            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} exceeded JSON buffer",
-            msg.id, detail
-        )));
-    }
-    if writer.write(b"\n").is_err() {
-        let detail = server_message_detail(&msg);
-        log::warn!(
-            "[io_task] server message id={} {} suffix exceeded JSON buffer size={}; write failed",
-            msg.id,
-            detail,
-            SERVER_MSG_JSON_BUFFER_SIZE
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} suffix exceeded JSON buffer",
-            msg.id, detail
-        )));
-    }
-    let id = msg.id;
-    if link.write_chunked(writer.bytes(), router).await {
-        Ok(())
-    } else {
-        Err(lpc_wire::TransportError::Other(format!(
-            "server message id={id} UART write timed out or failed"
-        )))
-    }
-}
-
-fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
-    match &msg.msg {
-        lpc_wire::server::ServerMsgBody::Hello(hello) => {
-            format!("Hello proto={}", hello.proto)
-        }
-        lpc_wire::server::ServerMsgBody::Filesystem(_) => "Filesystem".into(),
-        lpc_wire::server::ServerMsgBody::LoadProject { .. } => "LoadProject".into(),
-        lpc_wire::server::ServerMsgBody::UnloadProject => "UnloadProject".into(),
-        lpc_wire::server::ServerMsgBody::ProjectRead { events } => format!(
-            "ProjectRead seq={} fin={} events={}",
-            msg.seq,
-            msg.fin,
-            events.len()
-        ),
-        lpc_wire::server::ServerMsgBody::ProjectCommand { .. } => "ProjectCommand".into(),
-        lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects } => {
-            format!("ListAvailableProjects projects={}", projects.len())
-        }
-        lpc_wire::server::ServerMsgBody::ListLoadedProjects { projects } => {
-            format!("ListLoadedProjects projects={}", projects.len())
-        }
-        lpc_wire::server::ServerMsgBody::StopAllProjects => "StopAllProjects".into(),
-        lpc_wire::server::ServerMsgBody::SetLogLevel => "SetLogLevel".into(),
-        lpc_wire::server::ServerMsgBody::Log { level, .. } => {
-            format!("Log level={level:?}")
-        }
-        lpc_wire::server::ServerMsgBody::Heartbeat {
-            frame_count,
-            loaded_projects,
-            ..
-        } => format!(
-            "Heartbeat frame_count={frame_count} loaded_projects={}",
-            loaded_projects.len()
-        ),
-        lpc_wire::server::ServerMsgBody::Error { .. } => "Error".into(),
-    }
 }
 
 /// Process the read buffer and extract complete lines.

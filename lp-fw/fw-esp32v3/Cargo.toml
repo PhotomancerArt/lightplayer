@@ -74,7 +74,6 @@ server = [
     "dep:lpfs",
     "dep:lp-ws281x",
     "dep:fw-core",
-    "dep:ser-write-json",
 ]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
@@ -221,10 +220,13 @@ embedded-storage = { version = "0.3", optional = true }
 esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32", "panic-unaligned-buffer"], optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
-# io_task's wire-serialization path plus the boot-time `ServerHello`.
+# The boot-time `ServerHello` plus the wire types `io_task` hands to
+# `fw_esp32_common::serial::server_msg`. The `ser-write-json` sink itself moved
+# down with that module (the #245 tail: `io_task`'s duplicated JSON half
+# lifted into `fw-esp32-common`), so this crate no longer names the
+# serializer directly — mirrors fw-esp32s3's line and comment.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
-ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 # ⚠️ Two of eight node gates, the same pair fw-esp32s3 lists. `node-fixture` is
 # not optional alongside `node-shader`: `OutputNode::consume` requires a

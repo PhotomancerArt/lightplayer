@@ -42,6 +42,25 @@ impl WritePolicy {
         chunk_size: 256,
         link_name: "USB",
     };
+
+    /// The UART0 policy used by `fw-esp32v3`.
+    ///
+    /// Timeout: not a host-liveness signal the way the USB policy's is — a
+    /// UART TX FIFO drains at line rate unconditionally, so this is a
+    /// backstop against a wedged peripheral, sized far above the ~5.6 ms a
+    /// full chunk costs at 921600 baud.
+    ///
+    /// Chunk size: sized in *line time*, not syscall overhead. The invariant
+    /// is "drain RX at least twice per RX-FIFO fill time": at 921600 baud
+    /// (the rate `board::esp32v3::init` programs) UART0's 128-byte RX FIFO
+    /// holds ~1.4 ms of incoming line, and a 64-byte chunk costs ~0.7 ms to
+    /// clock out. The chunk deliberately does NOT grow with the baud — line
+    /// time is what protects the FIFO, not bytes.
+    pub const UART0: Self = Self {
+        timeout: Duration::from_millis(250),
+        chunk_size: 64,
+        link_name: "UART",
+    };
 }
 
 /// A link's TX half plus the policy and per-chunk hook that make writing to it
