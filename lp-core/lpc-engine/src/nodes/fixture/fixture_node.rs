@@ -207,19 +207,21 @@ impl FixtureNode {
         }
     }
 
-    /// Pull def-synced mapping parameters, invalidating the derived caches
-    /// only when the mapping actually changed.
+    /// Pull the def-synced mapping parameter, invalidating the derived
+    /// caches only when it actually changed.
     ///
-    /// `MappingConfig`'s `PartialEq` compares slot revisions as well as slot
-    /// values, so `sync_mapping_config_from_def` must not write a slot it is
-    /// not changing: a revision-only difference reads as a changed mapping and
-    /// rebuilds the precomputed pixel table (a full `width * height` entry
-    /// allocation) on every frame.
+    /// This reads and writes the single def-synced leaf
+    /// (`PathPoints::sample_diameter`) in place — no clone of the resolved
+    /// `MappingConfig`, no whole-struct compare. `ValueSlot::set` stamps
+    /// `current_revision()` unconditionally, so a write that isn't gated on
+    /// the *value* moving would still look like a change to anything
+    /// comparing slot revisions (the hazard `sync_mapping_config_from_def`
+    /// used to guard against via its caller's clone-and-compare). Gating the
+    /// write itself on the value makes that structurally impossible now:
+    /// nothing writes a slot on the no-change path, so there is nothing to
+    /// compare and nothing to rebuild.
     fn sync_mapping_from_def(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let mut next = self.mapping.clone();
-        sync_mapping_config_from_def(&mut next, ctx)?;
-        if next != self.mapping {
-            self.mapping = next;
+        if sync_mapping_config_from_def(&mut self.mapping, ctx)? {
             self.mapping_version = ctx.revision();
             self.precomputed = None;
             self.direct_channels = None;
@@ -501,37 +503,50 @@ impl NodeRuntime for FixtureNode {
 /// snake_case — see `SlotEnumAccess::variant` and the shape variant names.
 const MAPPING_SAMPLE_DIAMETER_DEF_PATH: &str = "mapping.PathPoints.sample_diameter";
 
+/// Read the def's `sample_diameter` and write it into `mapping` in place
+/// when (and only when) the value moved. Returns whether it did, so the
+/// caller can gate its own cache invalidation on the same condition — no
+/// intermediate clone of `mapping` is built here or by the caller.
+///
+/// `mapping`'s de-facto single caller is `sync_mapping_from_def`; this stays
+/// a separate function because it is also the def-path vocabulary's one
+/// authority (`MAPPING_SAMPLE_DIAMETER_DEF_PATH`) and its own unit tests
+/// exercise it directly.
 fn sync_mapping_config_from_def(
     mapping: &mut MappingConfig,
     ctx: &mut TickContext<'_>,
-) -> Result<(), NodeError> {
+) -> Result<bool, NodeError> {
     match mapping {
-        MappingConfig::Unset => {}
-        MappingConfig::Map2d { .. } => {}
+        MappingConfig::Unset => Ok(false),
+        // A map2d-sourced fixture's def has no `PathPoints` subtree, so
+        // `try_read_def_value` would resolve to `Ok(None)` anyway; skipping
+        // the read entirely means this arm makes no resolver call at all.
+        MappingConfig::Map2d { .. } => Ok(false),
+        // PointList paths carry no def-synced parameters (positions are
+        // resolved data); only the sample diameter tracks the def.
         MappingConfig::PathPoints {
-            paths,
+            paths: _,
             sample_diameter,
             ..
         } => {
             let Some(next_sample_diameter) =
                 try_read_def_value(ctx, MAPPING_SAMPLE_DIAMETER_DEF_PATH)?
             else {
-                return Ok(());
+                return Ok(false);
             };
-            // Only stamp a slot revision when the value actually moved.
-            // `ValueSlot::set` records `current_revision()` unconditionally and
-            // slot equality includes that revision, so an unconditional set
-            // makes the rebuilt config compare unequal to the identical stored
-            // one on every frame — see `sync_mapping_from_def`.
+            // Only write (and report a change) when the value actually
+            // moved. `ValueSlot::set` records `current_revision()`
+            // unconditionally, so an unconditional set would still leave a
+            // fresh slot revision behind for a value that never moved —
+            // see `sync_mapping_from_def`.
             if sample_diameter.value() != &next_sample_diameter {
                 sample_diameter.set(next_sample_diameter);
+                Ok(true)
+            } else {
+                Ok(false)
             }
-            // PointList paths carry no def-synced parameters (positions are
-            // resolved data); only the sample diameter tracks the def.
-            let _ = paths;
         }
     }
-    Ok(())
 }
 
 fn try_read_def_value<T: lpc_model::FromLpValue>(
@@ -1586,9 +1601,12 @@ mod tests {
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::nodes::fixture::PathSpec;
-    use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
+    use lpc_model::{Dim2u, Kind, LpValue, PositiveF32, ToLpValue, TreePath, WithRevision};
     use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
+
+    use crate::dataflow::resolver::{Production, ProductionSource, QueryKey, ResolveError, TickResolver};
+    use crate::resource::{RuntimeBuffer, RuntimeBufferId};
     // Read-probe types exercised only by
     // `fixture_project_read_control_probe_returns_native_samples_and_cached_layout`.
     #[cfg(feature = "node-shader")]
@@ -2950,13 +2968,15 @@ mod tests {
     /// caches derived from it.
     ///
     /// `sync_mapping_config_from_def` re-reads the def-synced sample diameter
-    /// every frame. When that read writes the slot unconditionally it stamps a
-    /// fresh slot revision, the rebuilt `MappingConfig` compares unequal to the
-    /// stored one (slot equality includes the revision), and `mapping_version`
-    /// advances — throwing away the precomputed pixel table and reallocating a
-    /// full `width * height` entry mapping on the render hot path, every frame.
+    /// every frame. Writing it unconditionally would stamp a fresh slot
+    /// revision even when the value didn't move, which used to make the
+    /// caller's whole-`MappingConfig` compare read as "changed" (slot
+    /// equality includes the revision) and bump `mapping_version` —
+    /// throwing away the precomputed pixel table and reallocating a full
+    /// `width * height` entry mapping on the render hot path, every frame.
     /// The display-layout revision keys on the same `mapping_version`, so an
-    /// advance here is that churn.
+    /// advance here is that churn. This is the engine-level face of it; see
+    /// `sync_mapping_from_def_*` below for the direct unit-level pin.
     #[test]
     #[cfg(feature = "node-shader")]
     fn steady_state_ticks_do_not_invalidate_the_fixture_mapping_caches() {
@@ -2972,6 +2992,317 @@ mod tests {
         assert_eq!(
             first, after_ticks,
             "an unchanged mapping bumped its version across steady-state ticks"
+        );
+    }
+
+    /// Minimal [`TickResolver`] for `sync_mapping_from_def` unit tests: it
+    /// answers `resolve_static_consumed` for the mapping's def-synced sample
+    /// diameter and errors on everything else, since that is all the method
+    /// under test ever touches. It also counts calls, so a test can assert
+    /// the def is still read every tick — the clone-kill removes the
+    /// per-tick ALLOCATION, not the read.
+    struct FakeDefResolver {
+        /// `None` simulates an absent def path (a fresh/unbound node): the
+        /// resolve errors, which `try_read_def_value` treats as "no value"
+        /// rather than propagating.
+        sample_diameter: Option<f32>,
+        /// The `Production`'s own provenance revision — distinct from the
+        /// fixture's `sample_diameter` slot revision. Varying this alone
+        /// (value held constant) is what "a revision-only def write" means
+        /// in `revision_only_def_write_does_not_bump_the_stored_slot_revision`.
+        production_revision: Revision,
+        resolve_calls: u32,
+    }
+
+    impl FakeDefResolver {
+        fn returning(sample_diameter: f32) -> Self {
+            Self {
+                sample_diameter: Some(sample_diameter),
+                production_revision: Revision::new(1),
+                resolve_calls: 0,
+            }
+        }
+    }
+
+    impl TickResolver for FakeDefResolver {
+        fn resolve(&mut self, _query: &QueryKey) -> Result<Production, ResolveError> {
+            Err(ResolveError::new(
+                "FakeDefResolver: resolve() is unused by sync_mapping_from_def",
+            ))
+        }
+
+        fn resolve_static_consumed(
+            &mut self,
+            _node: lpc_model::NodeId,
+            path: &'static str,
+        ) -> Result<Production, ResolveError> {
+            self.resolve_calls += 1;
+            assert_eq!(
+                path, MAPPING_SAMPLE_DIAMETER_DEF_PATH,
+                "sync_mapping_from_def must only read the sample-diameter def path"
+            );
+            match self.sample_diameter {
+                Some(value) => Ok(Production::leaf(
+                    WithRevision::new(self.production_revision, LpValue::F32(value)),
+                    ProductionSource::Literal,
+                )),
+                None => Err(ResolveError::new("FakeDefResolver: no def value bound")),
+            }
+        }
+
+        fn publish_produced_slot(
+            &mut self,
+            _node: lpc_model::NodeId,
+            _slot: SlotPath,
+            _production: Production,
+        ) -> Result<(), ResolveError> {
+            Err(ResolveError::new(
+                "FakeDefResolver: publish_produced_slot is unused",
+            ))
+        }
+
+        fn render_texture(
+            &mut self,
+            _product: VisualProduct,
+            _request: &RenderTextureRequest,
+        ) -> Result<TextureRenderProduct, ResolveError> {
+            Err(ResolveError::new("FakeDefResolver: render_texture is unused"))
+        }
+
+        fn render_control(
+            &mut self,
+            _product: ControlProduct,
+            _request: &ControlRenderRequest,
+            _target: ControlRenderTarget<'_>,
+        ) -> Result<ControlLayout, ResolveError> {
+            Err(ResolveError::new("FakeDefResolver: render_control is unused"))
+        }
+
+        fn runtime_buffer_mut(
+            &mut self,
+            _id: RuntimeBufferId,
+            _frame: Revision,
+        ) -> Result<&mut RuntimeBuffer, ResolveError> {
+            Err(ResolveError::new(
+                "FakeDefResolver: runtime_buffer_mut is unused",
+            ))
+        }
+    }
+
+    /// A one-lamp `PathPoints` fixture node, built directly (no engine, no
+    /// graphics) so `sync_mapping_from_def` can be called and its private
+    /// fields inspected straight from this sibling test module.
+    fn path_points_fixture_node(sample_diameter: f32) -> FixtureNode {
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::point_list(0, [[0.5, 0.5]])],
+            sample_diameter,
+        );
+        FixtureNode::new(
+            lpc_model::NodeId::new(1),
+            mapping,
+            FixtureSamplingConfig::default(),
+            Revision::new(1),
+        )
+    }
+
+    /// Sentinel values for the three derived caches, distinguishable from a
+    /// freshly-cleared `None` — so a test can tell "cleared" apart from
+    /// "coincidentally still `None`".
+    fn seed_derived_caches(node: &mut FixtureNode, mapping_version: Revision) {
+        node.precomputed = Some((
+            4,
+            4,
+            mapping_version,
+            vec![PixelMappingEntry::new(0, Q32::ONE, false)],
+        ));
+        node.direct_channels = Some((mapping_version, vec![0u32]));
+        node.display_layout_revision = Some((
+            FixtureDisplayLayoutKey {
+                mapping_version,
+                width: 4,
+                height: 4,
+            },
+            Revision::new(99),
+        ));
+    }
+
+    /// Case 1 (pinned): the def's sample diameter moves → the mapping
+    /// updates in place, `mapping_version` bumps to the tick revision, and
+    /// all three derived caches invalidate.
+    #[test]
+    fn sample_diameter_change_in_the_def_updates_mapping_and_invalidates_caches() {
+        use lpc_model::set_current_revision;
+
+        set_current_revision(Revision::new(41));
+        let mut node = path_points_fixture_node(2.0);
+        node.mapping_version = Revision::new(1);
+        seed_derived_caches(&mut node, Revision::new(1));
+
+        let mut resolver = FakeDefResolver::returning(3.5);
+        let shapes = SlotShapeRegistry::default();
+        let mut ctx = TickContext::new(
+            lpc_model::NodeId::new(1),
+            Revision::new(2),
+            &mut resolver,
+            &shapes,
+        );
+        set_current_revision(Revision::new(42));
+
+        node.sync_mapping_from_def(&mut ctx).expect("sync");
+
+        let MappingConfig::PathPoints {
+            sample_diameter, ..
+        } = &node.mapping
+        else {
+            panic!("expected a PathPoints mapping");
+        };
+        assert_eq!(sample_diameter.value(), &PositiveF32(3.5));
+        assert_eq!(
+            sample_diameter.revision(),
+            Revision::new(42),
+            "a moved value must stamp the slot's own revision"
+        );
+        assert_eq!(
+            node.mapping_version,
+            Revision::new(2),
+            "mapping_version must bump to the tick revision"
+        );
+        assert!(node.precomputed.is_none(), "precomputed must invalidate");
+        assert!(
+            node.direct_channels.is_none(),
+            "direct_channels must invalidate"
+        );
+        assert!(
+            node.display_layout_revision.is_none(),
+            "display_layout_revision must invalidate"
+        );
+    }
+
+    /// Case 2 (pinned + sabotage-verified): repeated ticks with NO def
+    /// change must touch nothing — not `mapping_version`, not the three
+    /// derived caches (proven by sentinel identity, not mere `None`-ness),
+    /// and not even the `sample_diameter` slot's own revision, which proves
+    /// `ValueSlot::set` is never called on the no-change path (the
+    /// structural elimination the clone-kill relies on). Comment out the
+    /// `if sample_diameter.value() != &next_sample_diameter` gate in
+    /// `sync_mapping_config_from_def` and this test fails on the very first
+    /// tick.
+    #[test]
+    fn steady_state_with_no_def_change_touches_nothing() {
+        use lpc_model::set_current_revision;
+
+        set_current_revision(Revision::new(100));
+        let mut node = path_points_fixture_node(2.0);
+        node.mapping_version = Revision::new(5);
+        seed_derived_caches(&mut node, Revision::new(5));
+        let precomputed_before = node.precomputed.clone();
+        let direct_channels_before = node.direct_channels.clone();
+        let display_layout_before = node.display_layout_revision;
+        let slot_revision_before = {
+            let MappingConfig::PathPoints {
+                sample_diameter, ..
+            } = &node.mapping
+            else {
+                panic!("expected a PathPoints mapping");
+            };
+            sample_diameter.revision()
+        };
+
+        let shapes = SlotShapeRegistry::default();
+        for tick in 6..9 {
+            // Advance the ambient revision between ticks so a stray
+            // unconditional `.set()` would be caught: it would stamp a
+            // fresh slot revision even though the resolved value never
+            // moves.
+            set_current_revision(Revision::new(100 + tick));
+            let mut resolver = FakeDefResolver::returning(2.0);
+            let mut ctx = TickContext::new(
+                lpc_model::NodeId::new(1),
+                Revision::new(tick),
+                &mut resolver,
+                &shapes,
+            );
+            node.sync_mapping_from_def(&mut ctx).expect("sync");
+            assert_eq!(
+                resolver.resolve_calls, 1,
+                "the def must still be read every tick"
+            );
+        }
+
+        assert_eq!(
+            node.mapping_version,
+            Revision::new(5),
+            "an unchanged value must not bump mapping_version"
+        );
+        assert_eq!(
+            node.precomputed, precomputed_before,
+            "precomputed must be untouched, not merely re-equal"
+        );
+        assert_eq!(
+            node.direct_channels, direct_channels_before,
+            "direct_channels must be untouched"
+        );
+        assert_eq!(
+            node.display_layout_revision, display_layout_before,
+            "display_layout_revision must be untouched"
+        );
+        let MappingConfig::PathPoints {
+            sample_diameter, ..
+        } = &node.mapping
+        else {
+            panic!("expected a PathPoints mapping");
+        };
+        assert_eq!(
+            sample_diameter.revision(),
+            slot_revision_before,
+            "an unchanged value must never re-stamp the slot's own revision"
+        );
+    }
+
+    /// Case 3 (the documented hazard, pinned): a "revision-only def write" —
+    /// the resolved `Production`'s own provenance revision advances while
+    /// the payload value stays byte-identical — must not invalidate
+    /// anything. This is exactly the failure mode the doc comment on
+    /// `sync_mapping_from_def` describes: gating the write on the *value*
+    /// (not the read's revision) makes it structurally impossible.
+    #[test]
+    fn revision_only_def_write_does_not_invalidate() {
+        use lpc_model::set_current_revision;
+
+        set_current_revision(Revision::new(200));
+        let mut node = path_points_fixture_node(2.0);
+        node.mapping_version = Revision::new(3);
+        seed_derived_caches(&mut node, Revision::new(3));
+
+        let shapes = SlotShapeRegistry::default();
+        for production_rev in 1..4 {
+            let mut resolver = FakeDefResolver::returning(2.0);
+            resolver.production_revision = Revision::new(production_rev);
+            let mut ctx = TickContext::new(
+                lpc_model::NodeId::new(1),
+                Revision::new(3),
+                &mut resolver,
+                &shapes,
+            );
+            node.sync_mapping_from_def(&mut ctx).expect("sync");
+        }
+
+        assert_eq!(
+            node.mapping_version,
+            Revision::new(3),
+            "a revision-only def write must not bump mapping_version"
+        );
+        assert!(
+            node.precomputed.is_some(),
+            "a revision-only def write must not invalidate precomputed"
+        );
+        assert!(
+            node.direct_channels.is_some(),
+            "a revision-only def write must not invalidate direct_channels"
+        );
+        assert!(
+            node.display_layout_revision.is_some(),
+            "a revision-only def write must not invalidate display_layout_revision"
         );
     }
 
