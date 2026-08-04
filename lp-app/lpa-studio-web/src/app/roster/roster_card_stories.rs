@@ -1016,6 +1016,7 @@ fn device_card_with_capabilities(
             radio,
             button: true,
             board_id: None,
+            ..Default::default()
         }),
         ..device_card(state, with_project)
     }

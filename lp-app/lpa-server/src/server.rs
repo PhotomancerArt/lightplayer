@@ -189,6 +189,11 @@ impl LpServer {
             // becomes populatable when provisioning writes `/hardware.json`
             // (board-selection roadmap M5).
             board_id: None,
+            // Efuse facts: only the embedder can read them, so they land
+            // through `set_hardware_identity` (like build provenance).
+            base_mac: None,
+            chip_revision: None,
+            eui64: None,
         };
         let features = server_features(&hardware, graphics.backend_name());
         Self {
@@ -248,6 +253,28 @@ impl LpServer {
         self.hello.build.dirty = dirty;
         self.hello.build.profile = profile;
         self.hello.device_uid = device_uid;
+    }
+
+    /// Inject the chip-level identity the server cannot derive: the
+    /// factory MAC, the silicon revision, and the 802.15.4 EUI-64 where
+    /// the chip has one.
+    ///
+    /// These live in efuse, so only the embedder can read them — the same
+    /// reason build provenance arrives through
+    /// [`Self::set_hello_identity`] rather than being derived. Embedders
+    /// with no efuse (the host server, the browser worker, `lp-cli`)
+    /// never call this and honestly report `None`.
+    ///
+    /// Call at construction, beside [`Self::set_hello_identity`].
+    pub fn set_hardware_identity(&mut self, identity: lpc_wire::HardwareIdentity) {
+        let lpc_wire::HardwareIdentity {
+            base_mac,
+            chip_revision,
+            eui64,
+        } = identity;
+        self.hello.hardware.base_mac = base_mac;
+        self.hello.hardware.chip_revision = chip_revision;
+        self.hello.hardware.eui64 = eui64;
     }
 
     /// Declare embedder-owned features the server cannot derive from
@@ -829,6 +856,7 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         };
         let features = server_features(&both, "lpvm-native::rt_jit");
         assert!(features.contains(&LpFeature::SvcButton));
@@ -839,6 +867,7 @@ mod tests {
             radio: false,
             button: false,
             board_id: None,
+            ..Default::default()
         };
         let features = server_features(&neither, "lpvm-native::rt_jit");
         assert!(!features.contains(&LpFeature::SvcButton));
@@ -853,6 +882,7 @@ mod tests {
             radio: true,
             button: true,
             board_id: None,
+            ..Default::default()
         };
         let features = server_features(&hardware, "lpvm-native::rt_jit");
         let mut ordered = features.clone();
