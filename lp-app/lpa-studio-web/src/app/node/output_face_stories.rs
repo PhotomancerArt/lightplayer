@@ -108,7 +108,7 @@ fn no_board() -> Element {
 }
 
 #[story(
-    description = "Spread, BEFORE: the state someone lands in after wiring five strips by hand — 900 lamps on ch0 and 100 on the next three, with the last wire absorbing whatever is left. The gesture in the summary line reads 'spread to paths' because the upstream fixture published per-path spans; without them it would read 'spread evenly'."
+    description = "Spread, BEFORE: the state someone lands in after wiring five strips by hand — 900 lamps on ch0 and 100 on the next three, with the last wire absorbing whatever is left. The gesture in the summary line reads 'fit counts to strips' because the upstream fixture published per-path spans; without them it reads 'divide lamps evenly', and its tooltip previews the exact resulting counts."
 )]
 fn spread_before() -> Element {
     rsx! {
