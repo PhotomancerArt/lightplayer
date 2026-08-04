@@ -3,6 +3,25 @@
     "fields": [
       {
         "default_bind": "bus:time",
+        "name": "product",
+        "role": "state",
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2685686043,
+              "meta": {},
+              "ty": {
+                "product": "time"
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "seconds",
         "role": "state",
         "semantics": {

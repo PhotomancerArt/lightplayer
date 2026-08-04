@@ -37,7 +37,7 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
     WellKnownChannel {
         name: "time",
         kind: Kind::Instant,
-        doc: "Project clock in seconds; the clock publishes it by default.",
+        doc: "Project time product; query it for seconds, delta, and phasors.",
     },
     WellKnownChannel {
         name: "trigger",

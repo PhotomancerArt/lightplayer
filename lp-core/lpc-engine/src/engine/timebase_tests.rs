@@ -174,7 +174,7 @@ fn write_pipeline(fs: &LpFsMemory, prefix: &str, clock_controls: &str, endpoint:
 }
 
 fn write_shared_assets(fs: &LpFsMemory) {
-    write(fs, "/project.json", "{ \"format\": 4 }\n");
+    write(fs, "/project.json", "{ \"format\": 5 }\n");
     write(
         fs,
         "/shader.glsl",

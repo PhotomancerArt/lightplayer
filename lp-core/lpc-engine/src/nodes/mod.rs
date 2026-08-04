@@ -23,7 +23,7 @@ pub mod texture;
 #[cfg(feature = "node-button")]
 pub use button::{ButtonNode, button_down_path, button_held_path, button_up_path};
 #[cfg(feature = "node-clock")]
-pub use clock::{ClockNode, clock_seconds_path};
+pub use clock::{ClockNode, clock_product_path, clock_seconds_path};
 #[cfg(feature = "node-fixture")]
 pub use fixture::fixture_node::{FixtureMap2dSource, FixtureNode, fixture_input_path};
 #[cfg(feature = "node-fluid")]

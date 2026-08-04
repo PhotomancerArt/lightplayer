@@ -261,14 +261,22 @@ fn load(fs: LpFsMemory) -> Project {
 /// One compute node plus a real clock, wired so the clock is demanded
 /// through an ordinary f32 uniform while `bus:time` stays free for the
 /// hand-registered product binding.
+///
+/// The clock's own `product` output is default-bound to `bus:time` (P4), so
+/// these fixtures author it onto a dead channel: the tests below are about
+/// what the evaluator does with a given product handle, and a second
+/// fallback producer on `time` would make that a statement about binding
+/// priority instead.
 fn clocked_fs(phasor: &str) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 4 }\n");
+    write(&fs, "/project.json", "{ \"format\": 5 }\n");
     write(&fs, "/clocked.glsl", CLOCKED_GLSL);
     write(
         &fs,
         "/clock.json",
-        r#"{ "kind": "Clock", "bindings": { "seconds": { "target": "bus:clock_seconds" } } }"#,
+        r#"{ "kind": "Clock", "bindings": {
+             "seconds": { "target": "bus:clock_seconds" },
+             "product": { "target": "bus:clock_product" } } }"#,
     );
     write(&fs, "/compute.json", &clocked_compute_json(phasor));
     write(
@@ -292,7 +300,7 @@ fn clocked_fs(phasor: &str) -> LpFsMemory {
 /// statement about provenance, not about their authoring happening to agree.
 fn paired_fs(a_phasor: &str, b_phasor: &str, bind_config: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 4 }\n");
+    write(&fs, "/project.json", "{ \"format\": 5 }\n");
     write(&fs, "/plain.glsl", PLAIN_GLSL);
     let bindings = if bind_config {
         r#"{ "wave": { "source": "bus:wave_config" } }"#
@@ -708,7 +716,7 @@ fn timebase_uniforms_without_a_product_run_at_their_shaped_default_and_warn() {
 #[test]
 fn an_f32_uniform_on_a_product_channel_warns_instead_of_freezing_silently() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 4 }\n");
+    write(&fs, "/project.json", "{ \"format\": 5 }\n");
     write(&fs, "/plain.glsl", "void tick() { out_time = time; }");
     write(
         &fs,
@@ -771,7 +779,7 @@ fn an_f32_uniform_on_a_product_channel_warns_instead_of_freezing_silently() {
 #[test]
 fn an_unbound_uniform_warns_today_even_though_it_runs_on_its_authored_default() {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 4 }\n");
+    write(&fs, "/project.json", "{ \"format\": 5 }\n");
     write(&fs, "/plain.glsl", "void tick() { out_t = t; }");
     write(
         &fs,

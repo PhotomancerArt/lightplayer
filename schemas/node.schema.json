@@ -705,7 +705,39 @@
           "type": "number"
         },
         "time": {
-          "type": "number"
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "time"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "viscosity": {
           "description": "Intended non-negative float (not enforced on read).",
@@ -748,7 +780,39 @@
           "const": "Playlist"
         },
         "time": {
-          "type": "number"
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "time"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "trigger": {
           "additionalProperties": {
