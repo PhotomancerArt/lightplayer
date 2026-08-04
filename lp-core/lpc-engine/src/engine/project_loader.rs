@@ -1539,19 +1539,31 @@ fn register_node_bindings(
             register_target_binding(runtime, projected_nodes, node, name, bindings, frame)?;
             continue;
         }
-        let slot = resolve_declared_binding_path(node.kind, name).map_err(|reason| {
-            let reason = if dynamic_consumed.contains(&name) {
-                format!("binding `{name}` names a consumed slot: it takes `source` or `value`, not `target`")
-            } else if dynamic_produced.contains(&name) {
-                format!("binding `{name}` names a produced slot: it takes `target`")
-            } else {
-                reason
-            };
-            ProjectLoadError::InvalidProjectReference {
-                path: node_label(node),
-                reason,
+        let slot = match resolve_declared_binding_path(node.kind, name) {
+            Ok(slot) => slot,
+            // A shader/compute slot namespace is OPEN — its consumed/produced
+            // records are authored and tooling repairs a binding that arrives
+            // before its record (the agent's declared-orphan → `upsert_param`
+            // flow). An unresolved key there is that legal orphan state, and
+            // the studio's uniform surface owns the feedback; registering
+            // nothing preserves it. Every other kind's slot set is closed, so
+            // an unresolved key can only be a mistake — fail the load with
+            // the slot's name.
+            Err(_)
+                if matches!(
+                    node.kind,
+                    NodeKind::Shader | NodeKind::ComputeShader
+                ) =>
+            {
+                continue;
             }
-        })?;
+            Err(reason) => {
+                return Err(ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason,
+                });
+            }
+        };
         if has_target {
             register_target_binding_at_path(
                 runtime,
@@ -1610,7 +1622,9 @@ fn resolve_declared_binding_path(kind: NodeKind, name: &str) -> Result<SlotPath,
         SlotPath::parse(name).map_err(|e| format!("invalid binding slot `{name}`: {e:?}"))?;
     let mut segments = path.segments().iter();
     let Some(SlotPathSegment::Field(first)) = segments.next() else {
-        return Err(format!("binding slot `{name}` must start with a field name"));
+        return Err(format!(
+            "binding slot `{name}` must start with a field name"
+        ));
     };
     let (def_shape, state_shape) = kind_shapes(kind);
     let field = [def_shape, state_shape]
