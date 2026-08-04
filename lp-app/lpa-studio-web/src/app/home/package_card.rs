@@ -404,6 +404,7 @@ mod tests {
             on_device: None,
             open_elsewhere: false,
             connected_device: connected.map(|relation| UiCardConnection {
+                device_key: "runtime-1".to_string(),
                 device_name: "Porch sign".to_string(),
                 relation,
             }),

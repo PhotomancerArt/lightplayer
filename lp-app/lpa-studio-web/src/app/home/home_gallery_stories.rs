@@ -194,6 +194,7 @@ fn connected_device_and_project_chip() -> Element {
 
     let mut projects = packages();
     projects[0].connected_device = Some(UiCardConnection {
+        device_key: "runtime-1".to_string(),
         device_name: "Workbench ESP32".to_string(),
         relation: lpa_studio_core::SyncRelation::Behind,
     });
@@ -374,6 +375,7 @@ fn sim_and_live_device_home() -> UiHomeView {
     let mut projects = packages();
     projects[0].running_in_sim = true;
     projects[1].connected_device = Some(lpa_studio_core::UiCardConnection {
+        device_key: "runtime-1".to_string(),
         device_name: "Workbench ESP32".to_string(),
         relation: lpa_studio_core::SyncRelation::AtHead,
     });
@@ -463,6 +465,7 @@ fn project_live_in_two_places() -> Element {
     let mut projects = packages();
     projects[0].running_in_sim = true;
     projects[0].connected_device = Some(lpa_studio_core::UiCardConnection {
+        device_key: "runtime-1".to_string(),
         device_name: "Workbench ESP32".to_string(),
         relation: lpa_studio_core::SyncRelation::Behind,
     });
