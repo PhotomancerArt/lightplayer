@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ActionConfirmation, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceTarget, HOME_NODE_ID, HomeOp,
     PreviewSource, SyncRelation, UiAction, UiPackageCard,
@@ -43,16 +44,33 @@ pub(crate) fn PackageCard(
 ) -> Element {
     let now = now_secs.unwrap_or_else(platform_now_secs);
     let edited_line = card.last_saved_at.map(|at| time_ago(now, at));
+    // A project this Studio cannot open is still ON SCREEN — that is the
+    // point (P3). It just says what is wrong instead of pretending to be
+    // openable: no open link, no push, no drag, and a menu cut down to the
+    // two remedies that work on raw files (export, delete).
+    let blocked = card
+        .health
+        .blocked()
+        .map(|(headline, remedy)| (headline.to_string(), remedy.to_string()));
+    let upgrades_from = match card.health {
+        PackageHealth::UpgradesOnOpen { found } => Some(found),
+        _ => None,
+    };
     // the slug IS the title; the thumbnail initial skips its date stamp
 
     rsx! {
         article {
-            class: package_card_class(opening),
+            class: package_card_class(opening, blocked.is_some()),
             // drag a project onto a device card = the push-confirm sheet
-            draggable: true,
+            draggable: blocked.is_none(),
             ondragstart: {
                 let uid = card.uid.clone();
-                move |_| set_dragged_project(uid.clone())
+                let draggable = blocked.is_none();
+                move |_| {
+                    if draggable {
+                        set_dragged_project(uid.clone());
+                    }
+                }
             },
             // Opening a card is NAVIGATION, so it is a real <a> to the
             // sim route (D37: the URL points at a runtime — a project
@@ -62,29 +80,53 @@ pub(crate) fn PackageCard(
             // the card (absolute overlay) instead of wrapping it, so the
             // card menu isn't interactive-inside-interactive markup; the
             // menu floats above it (z-order).
-            a {
-                class: "tw:absolute tw:inset-0 tw:z-[1]",
-                href: "#/sim/{card.slug}",
-                aria_label: "Open {card.slug}",
-                onclick: move |event| {
-                    if busy || opening {
-                        event.prevent_default();
-                    }
-                },
+            if blocked.is_none() {
+                a {
+                    class: "tw:absolute tw:inset-0 tw:z-[1]",
+                    href: "#/sim/{card.slug}",
+                    aria_label: "Open {card.slug}",
+                    onclick: move |event| {
+                        if busy || opening {
+                            event.prevent_default();
+                        }
+                    },
+                }
             }
             CardThumb {
                 seed: card.uid.clone(),
                 label: card.slug.clone(),
-                source: Some(PreviewSource::ProjectUid(card.uid.clone())),
+                // A live preview leases a runtime and LOADS the project.
+                // On a package this Studio cannot read that is a guaranteed
+                // failure, so the blocked card keeps its seeded placeholder.
+                source: blocked
+                    .is_none()
+                    .then(|| PreviewSource::ProjectUid(card.uid.clone())),
             }
             div { class: "tw:flex tw:items-start tw:justify-between tw:gap-2 tw:p-3",
                 div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
                     p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",
                         "{card.slug}"
                     }
-                    if opening {
+                    if let Some((headline, remedy)) = blocked.clone() {
+                        // amber = honest bad content (the roster precedent);
+                        // never violet, which means "bound" in this Studio
+                        p { class: "tw:m-0 tw:text-xs tw:font-semibold tw:text-status-attention-foreground",
+                            "{headline}"
+                        }
+                        p { class: "tw:m-0 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                            "{remedy}"
+                        }
+                    } else if opening {
                         p { class: "tw:m-0 tw:text-xs tw:text-status-working-foreground", "Opening…" }
                     } else {
+                        if let Some(found) = upgrades_from {
+                            // a fact, not a warning: it opens, and opening
+                            // it is what upgrades it
+                            p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground",
+                                title: "Opening this project upgrades it to the current format and saves a version you can go back to.",
+                                "Format {found} — upgrades when you open it"
+                            }
+                        }
                         if let Some(edited) = edited_line {
                             p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Edited {edited}" }
                         }
@@ -137,21 +179,40 @@ pub(crate) fn PackageCard(
                 // (2026-07-26 walk: the anchor's UA underline read as a
                 // link, the push button's accent tint didn't match — a
                 // matched pair now; the <a> stays an <a> for D37 nav).
-                a {
-                    class: "{quiet_action_class()} tw:relative tw:z-[2] tw:no-underline",
-                    href: "#/sim/{card.slug}",
-                    title: "Open this project in the simulator.",
-                    onclick: move |event| {
-                        if busy || opening {
-                            event.prevent_default();
+                if blocked.is_none() {
+                    a {
+                        class: "{quiet_action_class()} tw:relative tw:z-[2] tw:no-underline",
+                        href: "#/sim/{card.slug}",
+                        title: "Open this project in the simulator.",
+                        onclick: move |event| {
+                            if busy || opening {
+                                event.prevent_default();
+                            }
+                        },
+                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                            StudioIcon { name: StudioIconName::Play, size: 14 }
                         }
-                    },
-                    span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                        StudioIcon { name: StudioIconName::Play, size: 14 }
+                        span { "Open in sim" }
                     }
-                    span { "Open in sim" }
+                } else {
+                    // The remedies, spelled out on the card itself: export
+                    // reads raw files, so it works on exactly the packages
+                    // that need rescuing.
+                    button {
+                        class: "{quiet_action_class()} tw:relative tw:z-[2]",
+                        r#type: "button",
+                        title: "Download this project as a zip archive — the files are exported as they are.",
+                        onclick: {
+                            let export_card = card.clone();
+                            move |_| export_package_to_download(&export_card)
+                        },
+                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                            StudioIcon { name: StudioIconName::Download, size: 14 }
+                        }
+                        span { "Export zip" }
+                    }
                 }
-                for (device_key, device_name) in empty_devices.iter() {
+                for (device_key, device_name) in empty_devices.iter().filter(|_| blocked.is_none()) {
                     button {
                         class: "{quiet_action_class()} tw:relative tw:z-[2]",
                         r#type: "button",
@@ -194,6 +255,11 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
     let mut rename_value = use_signal(|| card.slug.clone());
     let rename_uid = card.uid.clone();
     let export_card = card.clone();
+    // Rename and duplicate both round-trip the manifest through the strict
+    // reader, so on a package this Studio cannot read they would fail with
+    // a parser complaint. A blocked card offers only what works on raw
+    // bytes: export the files, or delete the package.
+    let blocked = !card.health.is_openable();
     let duplicate = home_action(HomeOp::DuplicatePackage {
         uid: card.uid.clone(),
     });
@@ -230,42 +296,46 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
             icon: StudioIconName::More,
             label: "Project actions".to_string(),
             placement: PopoverPlacement::BottomEnd,
-            DetailSection { title: Some("Rename".to_string()),
-                form {
-                    class: "tw:flex tw:gap-2",
-                    onsubmit: move |event| {
-                        event.prevent_default();
-                        let name = rename_value.read().trim().to_string();
-                        if !name.is_empty() {
-                            on_action.call(home_action(HomeOp::RenamePackage {
-                                uid: rename_uid.clone(),
-                                name,
-                            }));
+            if !blocked {
+                DetailSection { title: Some("Rename".to_string()),
+                    form {
+                        class: "tw:flex tw:gap-2",
+                        onsubmit: move |event| {
+                            event.prevent_default();
+                            let name = rename_value.read().trim().to_string();
+                            if !name.is_empty() {
+                                on_action.call(home_action(HomeOp::RenamePackage {
+                                    uid: rename_uid.clone(),
+                                    name,
+                                }));
+                            }
+                        },
+                        input {
+                            class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground",
+                            value: "{rename_value}",
+                            oninput: move |event| rename_value.set(event.value()),
                         }
-                    },
-                    input {
-                        class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground",
-                        value: "{rename_value}",
-                        oninput: move |event| rename_value.set(event.value()),
+                        button { class: quiet_action_class(), r#type: "submit", "Rename" }
                     }
-                    button { class: quiet_action_class(), r#type: "submit", "Rename" }
                 }
             }
             DetailSection {
                 div { class: "tw:grid tw:gap-0.5",
-                    if let Some(push) = push_to_device {
+                    if !blocked {
+                        if let Some(push) = push_to_device {
+                            ActionButton {
+                                action: push,
+                                running: false,
+                                variant: ActionButtonVariant::MenuItem,
+                                on_action,
+                            }
+                        }
                         ActionButton {
-                            action: push,
+                            action: duplicate,
                             running: false,
                             variant: ActionButtonVariant::MenuItem,
                             on_action,
                         }
-                    }
-                    ActionButton {
-                        action: duplicate,
-                        running: false,
-                        variant: ActionButtonVariant::MenuItem,
-                        on_action,
                     }
                     button {
                         class: menu_item_action_class(),
@@ -293,9 +363,12 @@ pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
 
-fn package_card_class(opening: bool) -> &'static str {
+fn package_card_class(opening: bool, blocked: bool) -> &'static str {
     // tw:relative anchors the stretched open link (see the card markup)
-    if opening {
+    if blocked {
+        // amber edge, default cursor: the card is a statement, not a door
+        "tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
+    } else if opening {
         "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
     } else {
         "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
@@ -409,7 +482,34 @@ mod tests {
                 relation,
             }),
             running_in_sim,
+            health: PackageHealth::Ready,
         }
+    }
+
+    #[test]
+    fn a_blocked_card_offers_only_the_remedies_that_work_on_raw_files() {
+        // The gallery's contract after P3: an unopenable project is still
+        // here, still named, still exportable and deletable.
+        let mut blocked = card(None, false);
+        blocked.health = PackageHealth::Blocked {
+            headline: "Format 3 — too old for this Studio".to_string(),
+            remedy: "Export a copy or delete it.".to_string(),
+        };
+        assert!(!blocked.health.is_openable());
+        assert_eq!(
+            blocked.health.blocked().map(|(headline, _)| headline),
+            Some("Format 3 — too old for this Studio")
+        );
+        assert!(package_card_class(false, true).contains("status-attention-border"));
+    }
+
+    #[test]
+    fn an_upgradable_card_stays_a_normal_card() {
+        let mut upgradable = card(None, false);
+        upgradable.health = PackageHealth::UpgradesOnOpen { found: 4 };
+        assert!(upgradable.health.is_openable());
+        assert_eq!(upgradable.health.blocked(), None);
+        assert!(!package_card_class(false, false).contains("status-attention-border"));
     }
 
     #[test]

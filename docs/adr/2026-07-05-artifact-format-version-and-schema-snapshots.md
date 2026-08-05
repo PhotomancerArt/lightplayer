@@ -1,13 +1,16 @@
 # ADR: Artifact Format Version and Generated Schema Snapshots
 
-- **Status:** Accepted (amended 2026-08-03 — see the format-4 note below)
+- **Status:** Accepted (amended 2026-08-03 — see the format-4 note below;
+  amended 2026-08-04 — see the migration-implemented note below)
 - **Date:** 2026-07-05
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
 - **Relates to:** `2026-07-04-json-only-artifacts.md` (JSON-only, one node
   per file — the artifact form these schemas describe),
-  `2026-08-03-multi-endpoint-output-node.md` (format 4, the third bump)
+  `2026-08-03-multi-endpoint-output-node.md` (format 4, the third bump),
+  `2026-08-04-project-format-migration-architecture.md` (the offline
+  upgrader this ADR deferred, now built)
 
 > **Format-4 amendment (2026-08-03).** The bump ritual has now run three
 > times: `2` (shader `float_mode`), `3` (project/module mitosis —
@@ -24,6 +27,23 @@
 > ritual itself needed no rework across three real bumps, which is the
 > amendment's finding: name the constant's current home rather than repeat
 > its value or bump count here, since both keep moving.
+
+> **Migration-implemented amendment (2026-08-04,
+> `2026-08-04-project-format-migration-architecture.md`).** Decision 5's
+> "the upgrader itself is future work" and the Follow-ups' two open items
+> are both closed: the offline upgrader is `lp-app/lpa-upgrade`
+> (host+wasm, sans-IO, firmware-excluded by lint), consuming exactly the
+> `schemas/history/` shape dumps and fixtures this ADR anticipated.
+> Decision 5's "the device only ever performs an integer compare" stands
+> unchanged — nothing about *what the device does* moved, only that
+> Studio now has the tool it was always meant to gain. The
+> bump-implies-snapshot follow-up is also closed, not by workflow YAML but
+> by a test: `lpa-upgrade`'s `the_current_format_has_a_history_snapshot`
+> fails `cargo test -p lpa-upgrade` (and so CI) if `schemas/history/v<N-1>/`
+> is missing for the current `N`, alongside a sibling test that fails if a
+> bump lands with no migration step. See the new ADR for the full
+> architecture and for what is still explicitly out of scope (v1–v3
+> support, bare-node migration).
 
 ## Context
 
@@ -143,10 +163,13 @@ would be dead bytes on device-shipped files).
 
 ## Follow-ups
 
-- The offline upgrader (Studio/desktop) consuming `schemas/history/`
-  shape dumps + fixtures — future work, not scheduled.
-- CI check that a `PROJECT_FORMAT_VERSION` bump lands together with a
+- ~~The offline upgrader (Studio/desktop) consuming `schemas/history/`
+  shape dumps + fixtures — future work, not scheduled.~~ — **closed
+  2026-08-04**: `lp-app/lpa-upgrade`
+  (`2026-08-04-project-format-migration-architecture.md`).
+- ~~CI check that a `PROJECT_FORMAT_VERSION` bump lands together with a
   `schemas/history/v<N-1>/` snapshot — still not automated after three
-  bumps (2, 3, 4); each relied on the author following §6 by hand. Worth
-  revisiting if a fourth bump ever skips the snapshot.
+  bumps (2, 3, 4); each relied on the author following §6 by hand.~~ —
+  **closed 2026-08-04**: test-enforced, not workflow-enforced — see the
+  migration-implemented amendment above.
 - Wire-protocol (`lpc-wire`) schema generation — out of scope here.
