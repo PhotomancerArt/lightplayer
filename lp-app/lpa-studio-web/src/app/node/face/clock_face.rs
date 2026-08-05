@@ -43,6 +43,7 @@ use lpa_studio_core::{UiAction, UiClockFace as UiClockFaceData, UiPhasorReading,
 use crate::app::node::{NodeCardSection, ProducedProductView};
 
 use super::phasor_trace::PhasorTraceDriver;
+use super::tape_transport::TapeTransport;
 
 /// Monotonic per-face id base for trace canvases (one driver per face; one
 /// canvas per card, addressed `{base}-{index}`).
@@ -74,14 +75,16 @@ pub fn ClockFace(
 
     rsx! {
         NodeCardSection { label: "output", first: true,
-            div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-2 tw:p-2",
-                // Interim: the product row alone (caption band). The tape
-                // transport instrument replaces the seconds-counter hero in
-                // P3 of plan 2026-08-04-2355-clock-tape-hero; the counter's
-                // string plumbing died with the DTO's transport block (P2).
+            div { class: "tw:grid tw:min-w-0 tw:justify-items-stretch tw:gap-2 tw:p-2",
+                // The product row keeps the bus:time handle + binding chip;
+                // the tape transport instrument below it is the hero (plan
+                // 2026-08-04-2355-clock-tape-hero, P3).
                 ProducedProductView {
                     product: face.product.clone(),
                     on_action,
+                }
+                if let Some(transport) = face.transport.clone() {
+                    TapeTransport { transport }
                 }
             }
         }
