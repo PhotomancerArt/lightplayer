@@ -22,6 +22,8 @@ mod output_face;
 mod phasor_trace;
 mod playlist_face;
 mod shader_face;
+mod tape_driver;
+mod tape_transport;
 
 pub use clock_face::ClockFace;
 pub use fixture_face::FixtureFace;

@@ -13,8 +13,8 @@ use lpa_studio_core::{
     UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
     UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts,
     UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit, UiPanelWidget,
-    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProducedValue,
-    UiProductPreview, UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
+    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview,
+    UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
     UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
 };
 
@@ -268,22 +268,41 @@ pub(crate) fn phasor_reading(
     }
 }
 
-/// A clock face in one of the listing's three states.
-pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorReading>) -> UiClockFace {
-    let mut face =
-        UiClockFace::new(UiProducedProduct::time("product").with_detail("node 2 output 0"));
-    // Deterministic transport block: the P3 tape anchors on these values
-    // (447 s = the spike's 7:27), and story capture needs a frame-zero
-    // paint that never depends on wall time.
-    face.transport = Some(lpa_studio_core::UiClockTransport {
-        seconds: 447.0,
-        running: true,
-        rate: 1.0,
-        scrub_offset_seconds: 0.0,
+/// A deterministic transport block: the tape anchors on these values and
+/// story capture needs a frame-zero paint that never depends on wall time.
+pub(crate) fn clock_transport(
+    seconds: f32,
+    running: bool,
+    rate: f32,
+    scrub_offset_seconds: f32,
+) -> lpa_studio_core::UiClockTransport {
+    lpa_studio_core::UiClockTransport {
+        seconds,
+        running,
+        rate,
+        scrub_offset_seconds,
         running_address: Some(story_slot_address("transport.running")),
         rate_address: Some(story_slot_address("transport.rate")),
         scrub_address: Some(story_slot_address("transport.scrub_offset_seconds")),
-    });
+    }
+}
+
+/// A clock face in one of the listing's three states, transport running at
+/// ×1 from the spike's 7:27 (447 s).
+pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorReading>) -> UiClockFace {
+    clock_face_with_transport(timebase, phasors, clock_transport(447.0, true, 1.0, 0.0))
+}
+
+/// [`clock_face`] with the transport block a story chooses (paused,
+/// scrubbed, fast, long-running).
+pub(crate) fn clock_face_with_transport(
+    timebase: UiTimebaseState,
+    phasors: Vec<UiPhasorReading>,
+    transport: lpa_studio_core::UiClockTransport,
+) -> UiClockFace {
+    let mut face =
+        UiClockFace::new(UiProducedProduct::time("product").with_detail("node 2 output 0"));
+    face.transport = Some(transport);
     face.timebase = timebase;
     face.phasors = phasors;
     face

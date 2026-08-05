@@ -1,11 +1,16 @@
-//! Stories for the clock card face: the published time product plus the
-//! per-reading phasor trace cards (clock-face v2).
+//! Stories for the clock card face: the tape transport hero, the published
+//! time product, and the per-reading phasor trace cards (clock-face v2 +
+//! the tape instrument, plan 2026-08-04-2355-clock-tape-hero P3).
 //!
 //! Coverage is the states the face has to be right in:
 //!
 //! - **live** — a few mixed cards: private and shared, different waveforms
 //!   and rates, since the violet shared border is the face's one
 //!   load-bearing distinction;
+//! - **transport states** — paused (frozen strip, ▶), scrubbed-back
+//!   (amber border + off-live chip, negative digits offset), ×8 (the
+//!   speed-linked zoom's coarser tick ladder, readout seated on a
+//!   detent), and a 3 h 47 m runtime (h:mm:ss digits and labels);
 //! - **shared** — every card on one shared channel, the violet treatment
 //!   alone;
 //! - **crowd** — a full house (8+ cards, a frozen 0/s, a long reader name)
@@ -25,7 +30,9 @@ use lpa_studio_core::{UiTimebaseState, Waveform};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
-use crate::app::node::face_story_fixtures::{clock_face, clock_node_view, phasor_reading};
+use crate::app::node::face_story_fixtures::{
+    clock_face, clock_face_with_transport, clock_node_view, clock_transport, phasor_reading,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -36,7 +43,7 @@ fn ClockCardCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "Live face: three trace cards, one per downstream reading. `plasma · phase` rides its own private integrator (ramp), the two `bus:speed` readers share ONE integrator — violet border and id — while each shapes the cycle its own way (sine vs square). Rates auto-denominate (2/s → 3/min → 15/hr); tiny muted seconds sit in the section header; the Delta row is gone."
+    description = "Live face: the tape transport hero (running at ×1, 7:27 — one-second minor ticks streaming under the fixed playhead, run button lit, readout seated on the ×1 detent) above three trace cards, one per downstream reading. `plasma · phase` rides its own private integrator (ramp), the two `bus:speed` readers share ONE integrator — violet border and id — while each shapes the cycle its own way (sine vs square). Rates auto-denominate (2/s → 3/min → 15/hr)."
 )]
 fn default() -> Element {
     rsx! {
@@ -76,6 +83,114 @@ fn default() -> Element {
                             0.5,
                         ),
                     ],
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Paused: the strip and digits hold still (the driver freezes extrapolation, not the paint), the run button shows ▶ unlit. Everything else keeps its place — pausing is calm, not a mode change."
+)]
+fn paused() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(447.0, false, 1.0, 0.0),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Scrubbed off-live: −12.4 s behind the live edge. The tape box border goes amber (status-attention family), and the amber chip states the offset with its tap-to-return affordance. Alarming is wrong — this is a deliberate state the user chose."
+)]
+fn scrubbed() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(434.6, true, 1.0, -12.4),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Running ×8: the speed-linked zoom packs 8× the time into the same pixels, so the ruler climbs the tick ladder (5 s minors, 30 s majors) — 'fast' reads as tick density. The thumb sits at the top of the log track; the readout seats on the ×8 detent in accent."
+)]
+fn fast() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(447.0, true, 8.0, 0.0),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A 3 h 47 m runtime: the digits and ruler labels switch to h:mm:ss and stay calm — no tenths churn at rest, and quantized ticks keep a long runtime free of float drift across the strip."
+)]
+fn long_runtime() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(3.0 * 3600.0 + 47.0 * 60.0, true, 1.0, 0.0),
                 )),
                 on_action: move |_| {},
             }
