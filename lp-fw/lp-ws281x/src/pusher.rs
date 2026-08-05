@@ -352,8 +352,7 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
         // Copy the `'d` reference out of `self` so the mailbox borrows do
         // not pin `self` across the `&mut self` calls below.
         let mailboxes = self.mailboxes;
-        for wire in 0..W {
-            let mailbox = &mailboxes[wire];
+        for (wire, mailbox) in mailboxes.iter().enumerate() {
 
             let close_req = mailbox.close_req_seq.load(Acquire);
             if seq_after(close_req, mailbox.close_ack_seq.load(Relaxed)) {
