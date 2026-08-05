@@ -51,12 +51,37 @@ platform).
 
 ## Schema evolution
 
-`format` gates parsing (documents newer than `MAP2D_FORMAT` are rejected;
-unknown fields are ignored, so additive changes need no bump). Dense geometry
-is plain JSON arrays today; a packed base64 alternative (e.g. `points_packed`
-beside `PathShape::points`) is deliberately left room for as an additive
-field — mapping documents ride Studio's whole-body asset pipeline with a
-10 KiB body budget, and the corpus enforces headroom in tests.
+**Additive fields need no bump.** Unknown fields are ignored, so a new
+optional field stays readable by older parsers. Dense geometry is plain JSON
+arrays today; a packed base64 alternative (e.g. `points_packed` beside
+`PathShape::points`) is deliberately left room for as an additive field —
+mapping documents ride Studio's whole-body asset pipeline with a 10 KiB body
+budget, and the corpus enforces headroom in tests.
+
+**New variants bump `format`, and old parsers hard-fail — by design.** An
+unknown shape variant cannot be ignored the way an unknown field can: doing so
+would silently drop lamps from someone's fixture. So a document using a newer
+construct declares a higher `format`, and a build that reads up to a lower one
+refuses the whole document. Loud refusal is the chosen posture: a build meeting
+data it does not understand should stop, not guess.
+
+**`format` is peeked before the document is parsed.** `Map2dDoc::from_json`
+deserializes the `format` field alone first, so a newer document fails as
+`UnsupportedFormat { found, supported }` — "this build reads up to N" — rather
+than as serde's opaque "unknown variant" parse error. Hosts word that as *this
+document needs a newer LightPlayer*.
+
+**Writers stamp the minimal required format.** `Map2dDoc::required_format`
+reports the lowest format able to represent a document's actual content, and
+`normalize_format` stamps it; the editor session runs it on every commit. A
+document therefore declares what it *needs*, not what wrote it — strip the last
+newer construct out and it drops back to the older format, readable by older
+firmware again.
+
+**Editors refuse to edit what they cannot parse, and never rewrite it.** Both
+Studio hosts (the fixture face and the standalone `#/mapping` page) render the
+refusal in place of the editor: nothing mounts, no body is emitted, no autosave
+is overwritten, and the stored document survives open → close byte-identical.
 
 ## Corpus
 

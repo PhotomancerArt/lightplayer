@@ -15,6 +15,7 @@ pub mod editor_core;
 pub mod view;
 
 pub use editor_core::camera::Camera;
+pub use editor_core::doc_refusal::{DocOpen, DocRefusal};
 pub use editor_core::editor_session::MapEditorSession;
 pub use editor_core::map_selection::MapSelection;
 pub use editor_core::map_tool::MapTool;
