@@ -101,11 +101,70 @@ fn app_core_main() {
         InterruptHandler::new(rmt_isr, Priority::max()),
     );
     ISR_ON_APP_CORE.store(true, Ordering::Release);
+    idle_forever();
+}
+
+/// The APP core's forever-idle loop, in IRAM.
+///
+/// IRAM placement matters here just as it does for the service path
+/// (lp-ws281x's `isr-in-ram`): flash reads and writes on the PRO core open
+/// cache-disabled windows, and a core fetching flash-resident code inside one
+/// stalls (measured: a service ~110 words late during project-load reads) or
+/// faults. The loop and the ISR path being IRAM-resident is what makes the
+/// APP core independent of the PRO core's flash traffic; flash *writes* still
+/// hardware-stall the core outright — see [`with_app_core_stalled`].
+#[esp_hal::ram]
+fn idle_forever() -> ! {
     loop {
         // SAFETY (asm): `waiti 0` only waits for an interrupt with the
         // threshold at level 0; no registers or memory are touched.
         unsafe { core::arch::asm!("waiti 0") };
     }
+}
+
+/// Run `f` with the APP core hardware-stalled. **Required around every flash
+/// write/erase** (littlefs's storage adapter wraps its write paths in this).
+///
+/// Why: programming SPI flash disables the flash cache for the duration
+/// (esp-storage's ROM-function window), and the classic ESP32 gives that
+/// window no protection from the *other* core — a second core touching flash
+/// mid-window reads garbage or faults, and the write itself can fail. That is
+/// exactly how the first upload attempted under the dual-core deployment
+/// crashed the board (2026-08-05: littlefs writes returned `I/O error` on a
+/// healthy filesystem; the render-loaded variant crashed hard enough to wedge
+/// the CH340K). The stall is the same mechanism esp-hal parks cores with — a
+/// hardware clock-gate, resumed exactly where it stopped.
+///
+/// Register values mirror esp-hal 1.1.1 `soc/esp32/cpu_control.rs::
+/// internal_park_core` (MIT/Apache-2.0): `SW_CPU_STALL.sw_stall_appcpu_c1 =
+/// 0x21` + `OPTIONS0.sw_stall_appcpu_c0 = 0x02` stalls; zeros resume.
+///
+/// Consequences while stalled: RMT refills pend unserviced, so a frame in
+/// flight during a flash write ends on its guard word — one torn frame per
+/// write burst, the exact degradation the guard exists to provide. No
+/// deadlock: the write path runs on the PRO core, which is the caller.
+///
+/// A no-op in the single-core fallback (nothing to stall; writes were always
+/// safe there).
+pub fn with_app_core_stalled<R>(f: impl FnOnce() -> R) -> R {
+    use esp_hal::peripherals::LPWR;
+    if !isr_on_app_core() {
+        return f();
+    }
+    LPWR::regs()
+        .sw_cpu_stall()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c1().bits(0x21) });
+    LPWR::regs()
+        .options0()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c0().bits(0x02) });
+    let result = f();
+    LPWR::regs()
+        .sw_cpu_stall()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c1().bits(0) });
+    LPWR::regs()
+        .options0()
+        .modify(|_, w| unsafe { w.sw_stall_appcpu_c0().bits(0) });
+    result
 }
 
 /// Start the APP core with [`app_core_main`] and wait (briefly) for its bind.
