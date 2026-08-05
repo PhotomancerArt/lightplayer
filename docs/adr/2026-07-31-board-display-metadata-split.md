@@ -73,9 +73,51 @@ surface are untouched.
   needs pins the runtime manifest deliberately omits (power/ground/NC,
   reserved, in-package), plus geometry and roles it will never carry.
 
+## Amendment — 2026-08-05: `default_led_wires` joins the sidecar
+
+The setup flow generates a first project for a board, which needs one fact
+this ADR's split had no home for: **where the pixels plug in**. It landed
+as `default_led_wires` on the sidecar — an ordered list of this board's own
+silkscreen labels, best first — and not on the runtime manifest, for the
+reasons this ADR already decided:
+
+- It is **app-side only**. Generation, the provisioning picker, and the
+  output face read it; firmware never does, and the runtime manifest is
+  `include_str!`'d into flash where every serde byte is paid for.
+- It is a **choice among facts**, not a claimable resource. The runtime
+  manifest stays the authority on which GPIOs exist and which are reserved;
+  the sidecar says which of them a first project should take. Two consumers
+  of pin facts already work this way — `output_face_decoration` resolves an
+  endpoint's wire through `lpa_boards::board_by_id`, and the board editor's
+  lint reads sidecar roles.
+- Its vocabulary is **the silkscreen label**, which only the sidecar has:
+  the runtime manifest records `board_label` entries for calibrated pins,
+  but the drawing tables name every pin the reader can see.
+
+Guarded on both sides: `BoardDisplayFile::validate` refuses a wire that is
+not an output-eligible pin or terminal with a gpio, and the drift gate
+(`lpa-boards/tests/manifest_drift.rs`) requires every catalog board to
+declare one and cross-checks it against the runtime manifest — a wire whose
+GPIO the runtime manifest reserves, or does not offer at all, fails the
+build. Wrong wire = short circuit is the same stake the rest of this ADR is
+written around.
+
+Order carries a board fact where the board has one: the DOM-Z-102 lists its
+four fused DATA terminals and deliberately omits the un-level-shifted spare
+(IO13). Single-wire generation takes the head of the list; generating onto
+several wires at once is future work.
+
 ## Follow-ups
 
 - M2 (row-engine renderer) consumes the drawing block and moves the design
   language into `docs/design/board-diagrams.md`.
 - The display-only allowlist shrinks as firmware targets land (classic ESP32
   first).
+- **Endpoint-name vocabulary drift** (surfaced writing the amendment above,
+  not caused by it): on the two Espressif devkits the sidecar's silkscreen
+  label is a bare number (`18`) while the runtime manifest's `display_label`
+  is `GPIO18`, and the ESP32 WS281x drivers only offer wires whose runtime
+  display label differs from `GPIO<n>` — so those boards offer no LED
+  endpoint on device today regardless of what a project authors. The fix is
+  a runtime-manifest calibration question (board labels for the header
+  pins), not a display one.

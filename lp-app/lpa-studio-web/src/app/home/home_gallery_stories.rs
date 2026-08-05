@@ -36,6 +36,7 @@ fn packages() -> Vec<UiPackageCard> {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
             health: PackageHealth::Ready,
         },
         UiPackageCard {
@@ -48,6 +49,7 @@ fn packages() -> Vec<UiPackageCard> {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
             health: PackageHealth::Ready,
         },
         UiPackageCard {
@@ -60,6 +62,7 @@ fn packages() -> Vec<UiPackageCard> {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
             health: PackageHealth::Ready,
         },
     ]
@@ -195,6 +198,7 @@ fn project_format_states() -> Element {
         open_elsewhere: false,
         connected_device: None,
         running_in_sim: false,
+        target: None,
         health: PackageHealth::Blocked {
             headline: "project.json could not be read".to_string(),
             remedy: "project.json could not be read as a project manifest (expected value at \

@@ -70,6 +70,13 @@ pub enum CatalogOp {
     EnsureExampleSeeded {
         id: String,
     },
+    /// Generate a first project for a catalog board (the setup flow's
+    /// provision step, P03/P06) and install it. Creation-shaped: it touches
+    /// no existing project, and unlike `EnsureExampleSeeded` it is NOT
+    /// seed-once — every provision makes its own package.
+    GenerateForBoard {
+        board_id: String,
+    },
     UpsertRegisteredDevice(RegisteredDevice),
     /// Rename a registered device (D34). Registry-only — the identity
     /// write-back to a live device is the studio controller's.
@@ -316,6 +323,9 @@ pub fn apply_catalog_op(
             Some(outcome.summary)
         }
         CatalogOp::EnsureExampleSeeded { id } => Some(ensure_example_seeded(store, &id, now)?),
+        CatalogOp::GenerateForBoard { board_id } => {
+            Some(generate_for_board(store, &board_id, now)?)
+        }
         CatalogOp::UpsertRegisteredDevice(device) => {
             // merge semantics: sight-only upserts (association None) must
             // not erase what was last pushed
@@ -455,6 +465,26 @@ fn ensure_example_seeded(
         PackageProvenance::SeededFrom {
             source: id.to_string(),
         },
+        now,
+    )?)
+}
+
+/// Install a freshly generated first project for `board_id`.
+///
+/// Provenance is [`PackageProvenance::Created`]: the package is authored
+/// here and now, not seeded from a bundled package (its meteor effect is a
+/// vendored copy, which the effect module's own provenance records).
+fn generate_for_board(
+    store: &LibraryStore,
+    board_id: &str,
+    now: f64,
+) -> Result<PackageSummary, LibraryHostError> {
+    let generated = crate::app::home::generate_board_project(board_id)
+        .map_err(|error| LibraryHostError::Host(error.to_string()))?;
+    Ok(store.install_package(
+        &generated.name,
+        &generated.files,
+        PackageProvenance::Created,
         now,
     )?)
 }

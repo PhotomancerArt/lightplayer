@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Device setup flow — deep spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via spikes/gallery-rework) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --gold: #e4c065;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text); font: 14px/1.45 var(--sans); }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 840px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 840px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button { font-family: var(--sans); }
+
+  .controls { position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong); border-radius: 8px;
+    color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent); backdrop-filter: blur(6px); }
+  .controls .group { display: inline-flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip { appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+  .chip.warnc[aria-pressed=true] { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+
+  .caprow { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .leannote { font-size: 11.5px; color: var(--dim); max-width: 1400px; margin: 12px 0 0;
+    padding: 9px 12px; border: 1px solid var(--border-muted); border-radius: 8px;
+    background: var(--surface-muted); line-height: 1.55; }
+  .leannote b { color: var(--subtle); }
+
+  /* ---- mini gallery frames (§1) ---- */
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 16px; max-width: 1400px; }
+  .pframe { border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 120px), var(--bg);
+    display: flex; flex-direction: column; min-height: 300px; }
+  .pframe .plabel { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); padding: 10px 14px 0; display: flex; gap: 8px; align-items: baseline; }
+  .pframe .plabel .sel { color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 700; cursor: pointer; }
+  .pframe .pbody { padding: 12px 14px 16px; flex: 1; position: relative; }
+  .sech { font-size: 9.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin: 0 0 7px; }
+  .minirow { display: flex; gap: 9px; }
+  .minicard { flex: 1; border: 1px solid var(--border); border-left: 3px solid var(--good-text);
+    border-radius: 8px; background: var(--surface); overflow: hidden; min-height: 92px; }
+  .minicard.sim { border-left-color: var(--bound-text); }
+  .minicard .mh { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); font-size: 11px; font-weight: 700; color: var(--gold); }
+  .minicard .mh .tp { margin-left: auto; font: 700 8.5px/1 var(--mono); color: var(--dim); }
+  .minicard .mb { padding: 7px 9px; font-size: 10.5px; color: var(--subtle); }
+  .minicard .mb .run { color: var(--good-text); font-weight: 600; font-size: 10px; }
+  .minicard.dimmed { opacity: .45; }
+  .dashcard { flex: 1; border: 1px dashed var(--border-strong); border-radius: 8px; min-height: 92px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    color: var(--subtle); font-size: 11px; font-weight: 700; cursor: pointer; text-align: center; padding: 8px; }
+  .dashcard small { font-weight: 500; color: var(--dim); font-size: 9.5px; }
+  .dashcard:hover { border-color: var(--accent-border); color: var(--text); }
+  .miniwiz { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-subtle);
+    box-shadow: 0 12px 30px rgba(0,0,0,.45); padding: 10px 12px; font-size: 11px; color: var(--muted); }
+  .miniwiz .wh { display: flex; gap: 8px; align-items: center; font-size: 11.5px; font-weight: 700;
+    color: var(--strong); margin-bottom: 7px; }
+  .miniwiz .steps { color: var(--dim); font-size: 9.5px; font-weight: 700; letter-spacing: .04em; margin-bottom: 8px; }
+  .miniwiz .steps b { color: var(--accent); }
+  .ghost { border: 1px dashed var(--border-muted); border-radius: 6px; padding: 7px 9px; color: var(--dim);
+    font-size: 10px; margin-top: 6px; }
+  .backlink { color: var(--heading); font-size: 10.5px; font-weight: 700; cursor: pointer; }
+  .dimmedbg { position: absolute; inset: 0; background: rgba(8,10,13,.6); backdrop-filter: blur(1.5px);
+    display: grid; place-items: center; padding: 18px; border-radius: 0 0 10px 10px; }
+
+  /* ---- §2 naming ---- */
+  .namingcard { max-width: 720px; border: 1px solid var(--accent-border); border-radius: 10px;
+    background: var(--surface); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .namingcard h4 { margin: 0; font-size: 12.5px; color: var(--strong); }
+  .ntable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .ntable th { text-align: left; color: var(--dim); font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: .07em; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border-muted); }
+  .ntable td { padding: 6px 10px 6px 0; color: var(--muted); border-bottom: 1px solid var(--border-muted); }
+  .ntable td b { color: var(--strong); }
+  .ntable td .mono { font-family: var(--mono); font-size: 10.5px; color: var(--subtle); }
+  .fieldlbl { font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+  input[type=text] { width: 100%; background: var(--terminal); border: 1px solid var(--border-strong);
+    border-radius: 7px; color: var(--text); font-size: 12.5px; padding: 7px 9px; outline: none; font-family: var(--sans); }
+  input[type=text]:focus { border-color: var(--accent-border); }
+
+  /* ---- wizard chrome: THE WIZARD IS A CARD (fixed card width, in the grid) ---- */
+  .wizwrap { max-width: 1400px; display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+    position: relative; }
+  .ctxcard { width: 280px; flex: none; }
+  .wizard { width: 316px; flex: none; border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--warn-text); border-radius: 10px; overflow: hidden;
+    background: var(--surface); box-shadow: 0 16px 44px rgba(0,0,0,.45); position: relative; }
+  .wizard.simpath { border-color: var(--bound-border); border-left-color: var(--bound-text); }
+  .wizhead { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); min-height: 36px; }
+  .wizhead .wt { font-size: 12.5px; font-weight: 700; color: var(--gold);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .wk { font: 700 9.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase;
+    border-radius: 999px; padding: 3px 9px; }
+  .wk.hw { color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border); }
+  .wk.sim { color: var(--bound-text); background: var(--bound-bg); border: 1px solid var(--bound-border); }
+  .wizhead .close { margin-left: auto; appearance: none; border: 0; background: transparent;
+    color: var(--dim); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 5px; }
+  .wizhead .close:hover { color: var(--text); background: var(--bg-wash); }
+  .steps2 { display: flex; gap: 3px; align-items: center; padding: 7px 10px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .step { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700;
+    color: var(--dim); padding: 3px 7px 3px 4px; border-radius: 999px; }
+  .step .dotn { width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center;
+    justify-content: center; font-size: 8.5px; border: 1px solid var(--border-strong); color: var(--subtle); flex: none; }
+  .step.now { color: var(--text); background: var(--surface-raised); }
+  .step.now .dotn { border-color: var(--accent-border); color: var(--accent); }
+  .step.done { color: var(--heading); }
+  .step.done .dotn { border-color: var(--accent-border); background: var(--good-bg); color: var(--accent); }
+  .steparrow { color: var(--dim); font-size: 10px; }
+  .wizbody { padding: 11px 12px 12px; min-height: 200px; }
+  .wizfoot { display: flex; gap: 8px; align-items: center; padding: 0 12px 12px; flex-wrap: wrap; }
+  .wizfoot .spacer { flex: 1; }
+  .abtn { appearance: none; cursor: pointer; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--text); font-size: 12px; font-weight: 600; border-radius: 7px; padding: 6px 12px; }
+  .abtn:hover { border-color: var(--accent-border); color: var(--strong); }
+  .abtn.primary { border-color: var(--accent-border); color: var(--accent); }
+  .abtn.primary:hover { background: rgba(123,224,178,.08); }
+  .abtn.warn { border-color: var(--warn-border); color: var(--warn-text); }
+  .abtn.danger { border-color: var(--err-border); color: var(--err-text); }
+  .abtn.ghost { border-color: transparent; color: var(--subtle); }
+  .abtn.ghost:hover { color: var(--text); border-color: var(--border-strong); }
+  .abtn[disabled] { opacity: .4; pointer-events: none; }
+  .abtn.big { font-size: 13px; padding: 9px 18px; }
+
+  /* connect intro */
+  .introwrap { display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
+  .introwrap .big-t { font-size: 15px; font-weight: 700; color: var(--strong); }
+  .introwrap .big-d { font-size: 12.5px; color: var(--subtle); line-height: 1.55; }
+  .hintline { font-size: 11px; color: var(--dim); }
+  .hintline .lnk { color: var(--heading); font-weight: 700; cursor: pointer; }
+  .hintline.warned { color: var(--warn-text); }
+  .cablewait { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px dashed var(--border-strong);
+    border-radius: 10px; color: var(--dim); font-size: 12px; }
+  .cablewait svg { color: var(--subtle); flex: none; }
+
+  /* fake browser port picker */
+  .portpick { position: absolute; z-index: 9; left: 50%; top: 8px; transform: translateX(-50%);
+    width: 360px; background: #202124; border: 1px solid #3c4043; border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(0,0,0,.6); font-family: var(--sans); color: #e8eaed; }
+  .portpick .pt { font-size: 12.5px; padding: 12px 14px 6px; }
+  .portpick .plist { margin: 4px 8px; border: 1px solid #3c4043; border-radius: 6px; min-height: 74px; }
+  .portpick .prowp { padding: 8px 10px; font-size: 12px; cursor: pointer; border-radius: 5px; }
+  .portpick .prowp:hover, .portpick .prowp.selp { background: #3c4043; }
+  .portpick .pempty { padding: 24px 10px; font-size: 11.5px; color: #9aa0a6; text-align: center; }
+  .portpick .pbtns { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px 12px; }
+  .portpick .pbtn { appearance: none; border: 1px solid #5f6368; background: transparent; color: #8ab4f8;
+    font-size: 12px; font-weight: 600; border-radius: 6px; padding: 5px 14px; cursor: pointer; }
+  .portpick .pbtn.pri { background: #8ab4f8; color: #202124; border-color: #8ab4f8; }
+  .portpick .pbtn[disabled] { opacity: .4; pointer-events: none; }
+
+  /* probing / verdicts */
+  .spinrow { display: flex; align-items: center; gap: 12px; color: var(--subtle); font-size: 12.5px; padding: 20px 0; }
+  .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-strong);
+    border-top-color: var(--accent); animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .verdictcard { display: flex; gap: 12px; align-items: center; background: var(--surface);
+    border: 1px solid var(--border); border-left: 3px solid var(--good-text); border-radius: 9px;
+    padding: 11px 13px; max-width: 560px; }
+  .verdictcard.wledv { border-left-color: var(--warn-text); }
+  .verdictcard .sw { width: 44px; height: 30px; border-radius: 5px; flex: none;
+    background: linear-gradient(90deg, #3f2114, #a34b1e, #f0b97a, #a34b1e, #3f2114); background-size: 300% 100%; }
+  .verdictcard .sw.wsw { background: linear-gradient(90deg, #1a2a4a, #2d5f8a, #e8eaed, #2d5f8a, #1a2a4a); }
+  .verdictcard .at { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .verdictcard .ad { font-size: 11px; color: var(--subtle); }
+
+  /* board picker — the EXISTING setup-form UX: thumbnail tiles, name below
+     (story: studio__roster__roster-card__setup-board-picker-*) */
+  .pickerlbl { font-size: 12.5px; font-weight: 700; color: var(--strong); margin-bottom: 8px; }
+  .boardrow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bcard { background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+    padding: 9px 5px 7px; display: flex; flex-direction: column; gap: 6px; align-items: center;
+    text-align: center; width: 90px; }
+  .bcard:hover { border-color: var(--border-strong); }
+  .bcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .bcard svg { width: 54px; height: 34px; }
+  .bcard .bn { font-size: 9.5px; font-weight: 600; color: var(--muted); line-height: 1.25; }
+  .bcard[aria-pressed=true] .bn { color: var(--strong); }
+  .bcard.generic svg { opacity: .45; }
+  .pickedbio { font: 500 10px/1.4 var(--mono); color: var(--dim); margin-top: 7px; }
+  .pickedbio b { color: var(--subtle); font-family: var(--sans); }
+  .fullbtn { width: 100%; text-align: center; justify-content: center; display: flex; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 8.5px; font-weight: 800;
+    letter-spacing: .08em; text-transform: uppercase; border-radius: 999px; padding: 1.5px 7px; }
+  .badge.detected { color: var(--live-text); background: var(--live-bg); border: 1px solid var(--live-border); }
+  .badge.warnb { color: var(--warn-text); background: var(--warn-bg); border: 1px solid var(--warn-border);
+    text-transform: none; letter-spacing: .02em; }
+  .badge.forboard { color: var(--subtle); background: var(--neutral-bg); border: 1px solid var(--neutral-border);
+    text-transform: none; letter-spacing: .02em; }
+
+  .contentsplit { display: grid; grid-template-columns: 1fr; gap: 9px; }
+  .choicebox { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 9px;
+    padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .choicebox.picked { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .choicebox h4 { margin: 0; font-size: 12.5px; color: var(--strong); }
+  .choicebox h4 small { color: var(--dim); font-weight: 500; font-size: 11px; margin-left: 6px; }
+  .compactgen { display: flex; align-items: center; gap: 8px; background: var(--terminal);
+    border: 1px solid var(--border-muted); border-radius: 8px; padding: 9px 11px;
+    font: 600 11px/1.4 var(--mono); color: var(--muted); flex-wrap: wrap; }
+  .compactgen .arr { color: var(--bound-text); }
+  .compactgen .inf { color: var(--dim); cursor: help; border-bottom: 1px dotted var(--dim); font-family: var(--sans); }
+  .projlist { display: flex; flex-direction: column; gap: 5px; max-height: 150px; overflow-y: auto; }
+  .prow { display: flex; align-items: center; gap: 9px; appearance: none; border: 1px solid transparent;
+    background: transparent; border-radius: 7px; padding: 6px 8px; cursor: pointer; text-align: left; }
+  .prow:hover { background: var(--bg-wash); }
+  .prow[aria-pressed=true] { border-color: var(--accent-border); background: rgba(123,224,178,.05); }
+  .prow .sw { width: 22px; height: 15px; border-radius: 3px; flex: none; }
+  .prow .pn { font-size: 11.5px; font-weight: 600; color: var(--text); flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .emptybox { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 12px;
+    color: var(--dim); font-size: 11.5px; text-align: center; line-height: 1.5; }
+  .namefield { max-width: 420px; display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+  .namefield .der { font-size: 10px; color: var(--dim); }
+  .namefield .der b { color: var(--subtle); }
+
+  /* flash — faithful to core activity-view */
+  .flashmain { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+  .flashtitle { font-size: 13px; font-weight: 700; color: var(--strong); }
+  .flashsub { font-size: 11.5px; color: var(--subtle); }
+  .pctrow { display: flex; justify-content: space-between; align-items: baseline; }
+  .pctrow .plabel2 { font-size: 12px; font-weight: 700; color: var(--warn-text); }
+  .pctrow .pct { font-size: 13px; font-weight: 800; color: var(--strong); }
+  .pbar { height: 7px; border-radius: 999px; background: var(--terminal); border: 1px solid var(--border-muted); overflow: hidden; }
+  .pbar .fill { height: 100%; width: 0%; background: var(--accent); transition: width .3s; }
+  .pbar .fill.err { background: var(--err-text); }
+  .steplist { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+  .fstep { display: flex; gap: 9px; align-items: baseline; color: var(--dim); }
+  .fstep .ic { width: 16px; height: 16px; border-radius: 50%; border: 1.4px solid var(--border-strong);
+    flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; transform: translateY(2px); }
+  .fstep.done { color: var(--good-text); } .fstep.done .ic { border-color: var(--good-border); color: var(--good-text); }
+  .fstep.now { color: var(--warn-text); font-weight: 700; } .fstep.now .ic { border-color: var(--warn-border); color: var(--warn-text); }
+  .fstep.fail { color: var(--err-text); font-weight: 700; } .fstep.fail .ic { border-color: var(--err-border); color: var(--err-text); }
+  .fstep small { display: block; color: var(--dim); font-weight: 500; font-size: 10.5px; }
+  .flashlog { font: 500 10.5px/1.65 var(--mono); color: var(--subtle); background: var(--terminal);
+    border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 10px; min-height: 70px; max-height: 120px; overflow-y: auto; }
+  .flashlog .err { color: var(--err-text); }
+
+  .errbox { border: 1px solid var(--err-border); background: var(--err-bg); border-radius: 9px;
+    padding: 11px 13px; font-size: 12px; color: var(--err-text); line-height: 1.5; max-width: 640px; }
+  .errbox b { color: var(--strong); }
+  .errbox .eactions { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+  .errbox .ehint { color: var(--dim); font-size: 10.5px; margin-top: 7px; }
+  .warnbox { border: 1px solid var(--warn-border); background: var(--warn-bg); border-radius: 9px;
+    padding: 11px 13px; font-size: 12px; color: var(--warn-text); line-height: 1.5; }
+  .warnbox b { color: var(--strong); }
+  .warnbox .eactions { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+
+  .sheet { position: absolute; inset: 0; z-index: 8; background: rgba(8,10,13,.72); backdrop-filter: blur(2px);
+    display: grid; place-items: center; padding: 20px; }
+  .sheetpanel { width: 100%; max-width: 280px; background: var(--surface); border: 1px solid var(--neutral-border);
+    border-radius: 10px; padding: 13px; box-shadow: 0 12px 34px rgba(0,0,0,.55); }
+  .sheetpanel h3 { margin: 0 0 7px; font-size: 13px; color: var(--strong); }
+  .sheetpanel p { margin: 0 0 12px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .sheetrow { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .glowrow { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .glowstrip { height: 26px; width: 320px; border-radius: 6px; border: 1px solid var(--border-muted);
+    background: linear-gradient(90deg, #14323f, #1d5c50, #7be0b2, #1d5c50, #14323f); background-size: 300% 100%;
+    animation: slide 4s linear infinite; }
+  @keyframes slide { to { background-position: 300% 0; } }
+
+  /* driver help */
+  .drvgrid { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+  .drvsteps { display: flex; flex-direction: column; gap: 7px; font-size: 12px; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 12px; }
+  .drvsteps b { color: var(--strong); }
+  .drvsteps .mono { font-family: var(--mono); font-size: 11px; color: var(--subtle); }
+
+  /* ---- §4 density ---- */
+  .dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; max-width: 1400px; }
+  .genflow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    background: var(--terminal); border: 1px solid var(--border-muted); border-radius: 8px; padding: 10px; }
+  .gnode { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px;
+    padding: 5px 8px; display: flex; flex-direction: column; gap: 2px; min-width: 64px; }
+  .gnode .gh { font-size: 9.5px; font-weight: 800; color: var(--muted); letter-spacing: .04em; }
+  .gnode .gv { font: 600 9.5px/1.2 var(--mono); color: var(--dim); }
+  .gnode.hot .gv { color: var(--accent); }
+  .garr { color: var(--bound-text); font-size: 12px; flex: none; }
+  .genline { font-size: 11px; color: var(--dim); line-height: 1.5; }
+  .genline b { color: var(--muted); }
+
+  /* ---- §5 editor mock ---- */
+  .edmock { max-width: 1400px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: var(--bg); position: relative; display: flex; gap: 10px; padding: 10px; min-height: 400px; }
+  .edtree { width: 218px; flex: none; background: var(--surface-muted); border: 1px solid var(--border-muted);
+    border-radius: 9px; padding: 10px; align-self: flex-start; }
+  .edtree .ph { display: flex; gap: 7px; align-items: baseline; font-size: 13px; font-weight: 800;
+    color: var(--strong); margin-bottom: 9px; }
+  .edtree .ph small { color: var(--dim); font-weight: 600; font-size: 10px; }
+  .edtree .ti { display: flex; gap: 8px; align-items: center; font-size: 12px; font-weight: 600;
+    color: var(--muted); padding: 5px 8px; border-radius: 7px; cursor: pointer; }
+  .edtree .ti:hover { background: var(--bg-wash); }
+  .edtree .ti.sel { border: 1px solid var(--border-strong); background: var(--surface); color: var(--strong); }
+  .edtree .ti .g { color: var(--dim); font-size: 11px; width: 13px; text-align: center; }
+  .edtree .ti.ind1 { margin-left: 12px; } .edtree .ti.ind2 { margin-left: 24px; }
+  .ednode { flex: 1; background: var(--surface-subtle); border: 1px solid var(--border-muted);
+    border-radius: 9px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+  .ednode .nh { display: flex; gap: 9px; align-items: center; padding: 8px 12px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); }
+  .ednode .nh .nn { font-size: 13.5px; font-weight: 800; color: var(--strong); }
+  .ednode .nh .nk { margin-left: auto; font-size: 10px; color: var(--dim); font-weight: 600; }
+  .edsection { display: flex; border-bottom: 1px solid var(--border-muted); }
+  .edsection .slabel { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 8.5px; font-weight: 800;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--dim); padding: 8px 3px; flex: none;
+    border-right: 1px solid var(--border-muted); display: flex; align-items: center; justify-content: center; }
+  .edsection .scontent { flex: 1; padding: 10px 12px; min-width: 0; }
+  .edout { height: 96px; border-radius: 6px; background: linear-gradient(115deg, #1d5c50, #2b8064, #7be0b2, #3c5c78, #142330);
+    background-size: 280% 280%; animation: drift 7s ease-in-out infinite alternate; }
+  @keyframes drift { to { background-position: 100% 100%; } }
+  .knobrow { display: flex; gap: 20px; align-items: center; }
+  .knob { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .knob .kc { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--bound-border); position: relative; }
+  .knob .kc::after { content: ""; position: absolute; left: 50%; top: 3px; width: 2px; height: 9px;
+    background: var(--bound-text); transform-origin: bottom; transform: translateX(-50%) rotate(40deg); border-radius: 2px; }
+  .knob .kl { font-size: 8.5px; font-weight: 800; letter-spacing: .07em; color: var(--muted); text-transform: uppercase; }
+  .knob .kv { font: 600 10px/1 var(--mono); color: var(--subtle); }
+  .edcollapsed { display: flex; gap: 9px; align-items: center; padding: 8px 12px; font-size: 10px;
+    font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
+    border-bottom: 1px solid var(--border-muted); }
+  .edcollapsed span { color: var(--subtle); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  .edpane { width: 300px; flex: none; background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--good-text); border-radius: 9px; overflow: hidden; align-self: stretch;
+    display: flex; flex-direction: column; }
+  .edpane.simp { border-left-color: var(--bound-text); }
+  .edpane .dh { display: flex; gap: 7px; align-items: center; padding: 7px 10px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); font-size: 12px; font-weight: 700; color: var(--gold); }
+  .edpane .dh .tp { margin-left: auto; font: 700 9px/1 var(--mono); color: var(--dim); }
+  .edpane .tabsrow { display: flex; gap: 2px; padding: 4px 8px; background: var(--terminal);
+    border-bottom: 1px solid var(--border-muted); }
+  .edpane .tb { flex: 1; height: 24px; border-radius: 6px; border: 0; background: transparent; color: var(--dim);
+    cursor: pointer; font-size: 11px; }
+  .edpane .tb.on { color: var(--good-text); background: var(--good-bg); }
+  .edpane .pb { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .edpane .run { color: var(--good-text); font-size: 12px; font-weight: 700; }
+  .projchip { display: inline-flex; align-items: center; gap: 7px; }
+  .projchip .sw { width: 13px; height: 13px; border-radius: 3px;
+    background: linear-gradient(135deg, #1d5c50, #3c5c78); flex: none; }
+  .projchip .pn { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+  .edpane .console { margin-top: auto; border-top: 1px solid var(--border-muted); background: var(--terminal);
+    padding: 7px 10px; font: 500 9.5px/1.6 var(--mono); color: var(--dim); }
+  .edtoast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 5;
+    background: var(--good-bg); border: 1px solid var(--good-border); color: var(--good-text);
+    font-size: 12px; font-weight: 700; border-radius: 999px; padding: 6px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-usb" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
+    <path d="M12 3v14M12 21v-4M8 8l4-5 4 5M7 14l5 3 5-3"/></g></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round">
+    <path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></g></symbol>
+  <symbol id="b-generic" viewBox="0 0 64 40">
+    <rect x="2" y="2" width="60" height="36" rx="4" fill="#101418" stroke="#2c3440" stroke-width="1.4"/>
+    <rect x="20" y="7" width="24" height="16" rx="2" fill="#1a2027" stroke="#3e4852"/>
+    <g fill="#8b93a0"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="32" r="2"/>
+      <circle cx="56" cy="8" r="2"/><circle cx="56" cy="32" r="2"/></g>
+    <rect x="26" y="27" width="12" height="7" rx="1.5" fill="#26313a"/>
+  </symbol>
+  <symbol id="b-q" viewBox="0 0 64 40">
+    <rect x="2" y="2" width="60" height="36" rx="4" fill="none" stroke="#3e4852" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="32" y="26" text-anchor="middle" fill="#9ba4ad" font-size="14" font-family="Inter, sans-serif">?</text>
+  </symbol>
+</defs></svg>
+
+<h1>Device setup flow — deep spike · round 2</h1>
+<p class="hint">
+  Reworked to the G1-ratified steps: <b>Connect → Flash → Provision → Device home</b>
+  (hardware) and <b>Board → Provision → Device home</b> (sim). Flash begins with
+  <b>board-state detection</b> — blank, WLED, already-LightPlayer, unresponsive — and naming is
+  now <b>derived at provision time</b> (§2), mostly untyped. The full state machine, every
+  transition testable, is in the plan dir's <b>flow-spec.md</b>; this page walks it. Use
+  <b>Inject</b> to route the live wizard (§3) down every path — including the fake Chrome port
+  picker. Round 2b: <b>the wizard is a card</b> at the UI's fixed card width — §1 and §4 settled
+  by that.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Path</b>
+    <button class="chip" data-path="hw" aria-pressed="true">hardware</button>
+    <button class="chip" data-path="sim">simulator</button>
+  </span>
+  <span class="group"><b>Inject</b>
+    <button class="chip warnc" data-inj="none" aria-pressed="true">clean (blank board)</button>
+    <button class="chip warnc" data-inj="cancelpick">picker cancelled</button>
+    <button class="chip warnc" data-inj="noport">nothing in picker</button>
+    <button class="chip warnc" data-inj="wled">runs WLED</button>
+    <button class="chip warnc" data-inj="alreadylp">runs LightPlayer</button>
+    <button class="chip warnc" data-inj="unresponsive">unresponsive</button>
+    <button class="chip warnc" data-inj="flashfail">flash fails @42%</button>
+  </span>
+</div>
+
+<!-- ================== 1 · placement (still open) ================== -->
+<h2 id="s1"><span class="n">1</span> Where the wizard lives — settled: it's a card</h2>
+<p class="sub"><b>Settled by the system (Yona, G1r2): devices are cards with a fixed width set in
+  the UI.</b> The wizard renders at card width in the grid — exactly where today's setup form
+  lives — and becomes the device card at Done. Round 1's takeover/overlay/expansion concepts were
+  drawn at page width and are retired; see §3 for the real thing. The roster simply stays: the
+  wizard is one card among the others.</p>
+
+<!-- ================== 2 · naming — settled ================== -->
+<h2 id="s2"><span class="n">2</span> Naming — settled: derived at provision</h2>
+<p class="sub">G1 ruling: no naming during flash. One editable field on the <b>Provision</b> step,
+  prefilled from what's already known — date, board, project — "so most of the time you don't
+  have to name it." Sim never shows the field (the single sim stays "Simulator"). Live in §3.</p>
+
+<div class="namingcard">
+  <h4>Derivation (flow-spec F3 — proposal to ratify)</h4>
+  <table class="ntable">
+    <tr><th>Situation</th><th>Default device name</th></tr>
+    <tr><td>New generated project (the only provision path for now)</td>
+      <td><b>&lt;board short&gt; · &lt;Mon D&gt;</b> — <b>C6 DevKit · Aug 4</b></td></tr>
+    <tr><td>Name collision</td><td>numeric suffix — <b>C6 DevKit · Aug 4 2</b></td></tr>
+    <tr><td><i>(future, with load-existing)</i></td>
+      <td><i>project's human name, titlecased — <span class="mono">porch-sign</span> → Porch sign</i></td></tr>
+  </table>
+  <span class="fieldlbl">Device name</span>
+  <input type="text" value="Porch sign">
+  <span style="font-size:10px; color:var(--dim)">The generated <b>project</b> keeps the library
+    convention (<span style="font-family:var(--mono)">2026-08-04-1347-esp32-c6</span>); the stamp
+    lands at hello after flash — Provision is after flash, so no re-stamp dance.</span>
+</div>
+
+<!-- ================== 3 · the flow, live ================== -->
+<h2 id="s3"><span class="n">3</span> The ratified flow, live — at real card width</h2>
+<p class="sub"><b>The wizard IS the nascent device card</b> — it renders at the UI's fixed card
+  width, in the grid, exactly where today's setup form lives; the steps are card states and it
+  <i>becomes</i> the device card at Done. <b>Connect</b> (port picker + driver help) →
+  <b>Flash</b> (state detection: blank / WLED / LightPlayer / unresponsive) → <b>Provision</b>
+  (project + derived name) → <b>Device home</b>. Sim: Board → Provision → Device home. Every
+  transition = a flow-spec F2 row = a P11 unit test. The port picker overlays page-level, as the
+  browser's own dialog does.</p>
+
+<div class="wizwrap">
+  <div class="ctxcard minicard sim"><div class="mh">Simulator<span class="tp">SIM</span></div>
+    <div class="mb"><span class="run">Running</span><br>evening-glow</div></div>
+  <div class="ctxcard minicard"><div class="mh">Workbench ESP32<span class="tp">USB</span></div>
+    <div class="mb"><span class="run">Running</span><br>porch-sign</div></div>
+  <div class="wizard" id="wizard">
+    <div class="wizhead">
+      <span class="wt" id="wiztitle">Connect a device</span>
+      <span class="wk hw" id="wizkind">HW</span>
+      <button class="close" id="wizclose" title="Close">✕</button>
+    </div>
+    <div class="steps2" id="wizsteps"></div>
+    <div class="wizbody" id="wizbody"></div>
+    <div class="wizfoot" id="wizfoot"></div>
+  </div>
+</div>
+
+<p class="leannote"><b>What to feel for:</b> the port picker is the browser's own (mocked here) —
+  cancel it and the intro stays put with a gentle hint that escalates to driver help.
+  <b>Runs WLED</b> → wipe offer (migrate is future, the copy says so). <b>Runs LightPlayer</b> →
+  adopt-as-is is one click and writes nothing. <b>Unresponsive</b> → retry/replug/driver-help,
+  never a dead end. Flash failure retries from erase; the second failure adds replug guidance;
+  ✕ mid-flash hits the abandon guard and an abandoned board's card reads "incomplete flash".</p>
+
+<!-- ================== 4 · density (still open) ================== -->
+<h2 id="s4"><span class="n">4</span> Provision density — settled by width: compact</h2>
+<p class="sub">Card width decides it: the full node flow doesn't fit and never needed to. The
+  compact line + ⓘ (right) is what §3 uses; the left box stays only as the record of what was
+  rejected.</p>
+
+<div class="dgrid">
+  <div class="choicebox">
+    <h4>Full node flow<small>broad-spike treatment</small></h4>
+    <div class="genflow">
+      <span class="gnode hot"><span class="gh">clock</span><span class="gv">time.s</span></span>
+      <span class="garr">⟶</span>
+      <span class="gnode"><span class="gh">playlist</span><span class="gv">1 entry · meteor</span></span>
+      <span class="garr">⟶</span>
+      <span class="gnode"><span class="gh">fixture</span><span class="gv">strip · 256 px</span></span>
+      <span class="garr">⟶</span>
+      <span class="gnode hot"><span class="gh">output</span><span class="gv">ws281x local:IO8</span></span>
+    </div>
+  </div>
+  <div class="choicebox picked">
+    <h4>Compact<small>lean · live in §3</small></h4>
+    <div class="compactgen">meteor <span class="arr">→</span> 256-px strip <span class="arr">→</span> IO8
+      <span class="inf" title="Also: a clock, a one-entry playlist, and target: espressif/esp32-c6-devkitc-1 recorded on the project (advisory — the engine never reads it).">ⓘ what's inside</span></div>
+    <span class="genline">The clock/playlist plumbing and the target line live behind ⓘ.</span>
+  </div>
+</div>
+
+<!-- ================== 5 · device home ================== -->
+<h2 id="s5"><span class="n">5</span> Device home — interpretation to confirm</h2>
+<p class="sub">Step 4 in your flow is "Device home". Spiked here as: <b>the editor, lensed to the
+  device</b> — tree, node, device pane, LEDs animating (the vision north star). Adopt ("Done" on
+  an already-LightPlayer board) lands in the same place with the device's existing project.
+  <b>Gate question: is that what "device home" means</b>, or a distinct device-centric surface?</p>
+
+<div class="edmock" id="edmock">
+  <div class="edtoast" id="edtoast" hidden>Running on <b id="toastname">Porch sign</b></div>
+  <div class="edtree">
+    <div class="ph" id="edprojname">2026-08-04-1347-esp32-c6 <small>Project</small></div>
+    <div class="ti"><span class="g">◈</span> <span id="edprojtree">2026-08-04-1347-esp32-c6</span></div>
+    <div class="ti ind1"><span class="g">≣</span> First set</div>
+    <div class="ti ind2 sel"><span class="g">✦</span> Meteor</div>
+    <div class="ti ind1"><span class="g">▤</span> Strip 256</div>
+  </div>
+  <div class="ednode">
+    <div class="nh"><span class="nn">Meteor</span><span class="nk">shader ⓘ</span></div>
+    <div class="edsection"><span class="slabel">output</span>
+      <div class="scontent"><div class="edout"></div></div></div>
+    <div class="edsection"><span class="slabel">controls</span>
+      <div class="scontent"><div class="knobrow">
+        <span class="knob"><span class="kc"></span><span class="kl">speed</span><span class="kv">1.40</span></span>
+        <span class="knob"><span class="kc"></span><span class="kl">tail</span><span class="kv">0.62</span></span>
+        <span class="knob"><span class="kc"></span><span class="kl">hue</span><span class="kv">0.31</span></span>
+      </div></div></div>
+    <div class="edcollapsed">› code <span>meteor.glsl</span></div>
+    <div class="edcollapsed">› advanced <span>slots · bindings</span></div>
+  </div>
+  <div class="edpane" id="edpane">
+    <div class="dh" id="edpanename">Porch sign<span class="tp">USB</span></div>
+    <div class="tabsrow"><button class="tb on">▷</button><button class="tb">⚙</button><button class="tb">▣</button><button class="tb">⚠</button></div>
+    <div class="pb">
+      <span class="run">Running</span>
+      <span class="projchip"><span class="sw"></span><span class="pn" id="edpaneproj">2026-08-04-1347-esp32-c6</span></span>
+      <div class="glowstrip" style="width:100%; height:18px"></div>
+    </div>
+    <div class="console">engine: project loaded · 256 points<br>engine: frame 112 · 60fps<br>ws281x: IO8 · first light</div>
+  </div>
+</div>
+
+<script>
+/* ===================== data ===================== */
+const BOARDS = [
+  { id: "generic", name: "Generic",             chip: null,       pin: "IO2",  wires: 1, q: true },
+  { id: "c6",      name: "ESP32-C6 DevKitC-1",  chip: "ESP32-C6", pin: "IO8",  wires: 2, short: "C6 DevKit" },
+  { id: "xc6",     name: "XIAO ESP32-C6",       chip: "ESP32-C6", pin: "D0",   wires: 1, short: "XIAO C6" },
+  { id: "s3",      name: "ESP32-S3 DevKitC-1",  chip: "ESP32-S3", pin: "IO18", wires: 4, short: "S3 DevKit" },
+  { id: "v4",      name: "ESP32 DevKitC v4",    chip: "ESP32",    pin: "IO18", wires: 3, short: "ESP32 v4" },
+  { id: "uno",     name: "QuinLED Dig-Uno",     chip: "ESP32",    pin: "IO16", wires: 2, short: "Dig-Uno" },
+];
+const boardById = id => BOARDS.find(b => b.id === id);
+const DETECTED_CHIP = "ESP32-C6";
+const state = { path: "hw", inject: "none" };
+
+/* ===================== the state machine (flow-spec F2) ===================== */
+const wiz = {
+  open: true, path: "hw",
+  st: "intro",            // intro|picking|boardfirst|probing|probefail|boardpick|wled|alreadylp|
+                          // flashing|provision|done  ·  sim: simboard|provision|done
+  cancelCount: 0, board: null,
+  flashPct: 0, flashFailed: false, failCount: 0, flashTimer: null, probeTimer: null,
+  name: "", nameTouched: false, adopted: false, abandoned: false,
+};
+
+function resetWizard() {
+  clearInterval(wiz.flashTimer); clearTimeout(wiz.probeTimer);
+  Object.assign(wiz, { open: true, path: state.path, st: state.path === "hw" ? "intro" : "simboard",
+    cancelCount: 0, board: null,
+    flashPct: 0, flashFailed: false, failCount: 0,
+    name: "", nameTouched: false, adopted: false, abandoned: false });
+  renderWizard();
+}
+
+/* steps rail: which big step is a state in? */
+const RAIL_HW = [["Connect", ["intro","picking","boardfirst"]],
+                 ["Flash", ["probing","probefail","boardpick","wled","alreadylp","flashing"]],
+                 ["Project", ["provision"]],
+                 ["Done", ["done"]]];
+const RAIL_SIM = [["Board", ["simboard"]], ["Project", ["provision"]], ["Done", ["done"]]];
+
+function derivedName() {
+  if (wiz.nameTouched) return wiz.name;
+  const b = boardById(wiz.board || "c6");
+  return (b.short || b.name) + " · Aug 4";
+}
+
+function renderWizard() {
+  const w = document.getElementById("wizard");
+  w.classList.toggle("simpath", wiz.path === "sim");
+  document.getElementById("wiztitle").textContent =
+    wiz.path === "hw" ? "Connect a device" : "Simulate a device";
+  const wk = document.getElementById("wizkind");
+  wk.textContent = wiz.path === "hw" ? "HW" : "SIM";
+  wk.className = "wk " + (wiz.path === "hw" ? "hw" : "sim");
+
+  const rail = wiz.path === "hw" ? RAIL_HW : RAIL_SIM;
+  const bigIdx = rail.findIndex(([, states]) => states.includes(wiz.st));
+  document.getElementById("wizsteps").innerHTML = rail.map(([label], i) =>
+    (i ? '<span class="steparrow">›</span>' : "") +
+    `<span class="step ${i < bigIdx ? "done" : i === bigIdx ? "now" : ""}">
+       <span class="dotn">${i < bigIdx ? "✓" : i + 1}</span>${label}</span>`).join("");
+
+  const body = document.getElementById("wizbody");
+  const foot = document.getElementById("wizfoot");
+  foot.innerHTML = "";
+  document.getElementById("portpickmock")?.remove();
+
+  if (!wiz.open) {
+    body.innerHTML = wiz.abandoned
+      ? `<div class="warnbox"><b>Flash abandoned at ${wiz.flashPct}%.</b> The board's card now reads
+         "incomplete flash — needs re-flash"; an interrupted image is never trusted.
+         <div class="eactions"><button class="abtn primary" id="reopen">Re-open the wizard</button></div></div>`
+      : `<span style="color:var(--dim); font-size:12px">Closed — reopen
+         <button class="abtn ghost" id="reopen" style="padding:2px 8px">here</button> or from the controls.</span>`;
+    const r = document.getElementById("reopen");
+    if (r) r.onclick = resetWizard;
+    return;
+  }
+
+  /* ---------- CONNECT: intro ---------- */
+  if (wiz.st === "intro") {
+    body.innerHTML = `
+      <div class="introwrap">
+        <span class="big-t">Connect your device now</span>
+        <span class="big-d">Plug the board into this computer over USB, then pick its port.</span>
+        ${wiz.cancelCount === 1 ? `<span class="hintline">Picker closed without a pick — no rush,
+          press it again when the board's plugged in.</span>` : ""}
+        ${wiz.cancelCount >= 2 || (state.inject === "noport" && wiz.cancelCount >= 1) ? `
+          <span class="hintline warned">Don't see your board in the list? Some boards need a
+          driver before the port shows up — start from the board instead.</span>` : ""}
+        <button class="abtn primary big fullbtn" id="connectbtn">It's connected →</button>
+        <button class="abtn fullbtn" id="boardfirstbtn">Pick my board first</button>
+        <span class="hintline">Know the board already? Start there — drivers, setup help, and
+          (soon) networked boards.</span>
+      </div>`;
+    document.getElementById("connectbtn").onclick = () => { wiz.st = "picking"; renderWizard(); };
+    document.getElementById("boardfirstbtn").onclick = () => { wiz.st = "boardfirst"; renderWizard(); };
+  }
+
+  /* ---------- CONNECT: browser port picker (mock) ---------- */
+  if (wiz.st === "picking") {
+    body.innerHTML = `<div class="introwrap"><span class="big-d" style="opacity:.5">
+      The browser is asking which port…</span></div>`;
+    const empty = state.inject === "noport";
+    const pick = document.createElement("div");
+    pick.className = "portpick"; pick.id = "portpickmock";
+    pick.innerHTML = `
+      <div class="pt">studio.lightplayer.io wants to connect to a serial port</div>
+      <div class="plist">${empty
+        ? `<div class="pempty">No compatible devices found</div>`
+        : `<div class="prowp" id="prow1">USB JTAG/serial debug unit (cu.usbmodem2101)</div>`}</div>
+      <div class="pbtns">
+        <button class="pbtn" id="pcancel">Cancel</button>
+        <button class="pbtn pri" id="pconnect" disabled>Connect</button>
+      </div>`;
+    document.querySelector(".wizwrap").appendChild(pick);
+    const row = document.getElementById("prow1");
+    if (row) row.onclick = () => { row.classList.add("selp");
+      document.getElementById("pconnect").removeAttribute("disabled"); };
+    document.getElementById("pcancel").onclick = () => {
+      wiz.cancelCount++; wiz.st = "intro"; renderWizard(); };
+    document.getElementById("pconnect").onclick = () => {
+      if (state.inject === "cancelpick") { wiz.cancelCount++; wiz.st = "intro"; renderWizard(); return; }
+      wiz.st = "probing"; renderWizard();
+      wiz.probeTimer = setTimeout(() => {
+        wiz.st = { wled: "wled", alreadylp: "alreadylp", unresponsive: "probefail" }[state.inject] || "boardpick";
+        if (wiz.st === "boardpick") wiz.board = "c6";
+        renderWizard();
+      }, 900);
+    };
+  }
+
+  /* ---------- CONNECT: board-first (absorbs driver help; later: networked boards) ---------- */
+  if (wiz.st === "boardfirst") {
+    body.innerHTML = `
+      <div class="drvgrid">
+        <div>
+          <div class="pickerlbl">Select your board</div>
+          <div class="boardrow">${BOARDS.filter(b => !b.q).map(b => `
+            <button class="bcard" data-drvboard="${b.id}" aria-pressed="${wiz.board === b.id}">
+              <svg viewBox="0 0 64 40"><use href="#b-generic"/></svg>
+              <span class="bn">${b.name}</span></button>`).join("")}
+          </div>
+        </div>
+        ${wiz.board ? `<div class="drvsteps">
+          <b>${boardById(wiz.board).name} on macOS</b>
+          ${wiz.board === "uno" || wiz.board === "v4" ? `
+            <span>This board uses a <b>CH340</b> USB chip — it looks completely dead on macOS
+              without the WCH driver.</span>
+            <span>1 · Download the WCH CH34x driver &nbsp;<span class="mono">wch-ic.com/downloads</span></span>
+            <span>2 · Install, then approve it in System Settings › Privacy &amp; Security</span>
+            <span>3 · Replug the board, then pick the port below</span>`
+          : `<span>USB-serial is native on this board — no driver needed. Not showing up? Try
+              another cable (charge-only cables are silent killers) or another port.</span>`}
+        </div>` : ""}
+        ${wiz.board ? `<button class="abtn primary big fullbtn" id="retryport">It's plugged in — pick the port →</button>` : ""}
+      </div>`;
+    body.querySelectorAll("[data-drvboard]").forEach(el =>
+      el.onclick = () => { wiz.board = el.dataset.drvboard; renderWizard(); });
+    foot.innerHTML = `<button class="abtn ghost" id="wback">← Back</button>`;
+    document.getElementById("wback").onclick = () => { wiz.st = "intro"; renderWizard(); };
+    const rp = document.getElementById("retryport");
+    if (rp) rp.onclick = () => { wiz.st = "picking"; renderWizard(); };
+  }
+
+  /* ---------- FLASH: probing ---------- */
+  if (wiz.st === "probing") {
+    body.innerHTML = `<div class="spinrow"><span class="spinner"></span>
+      Talking to the board — chip, and what's already on it…</div>`;
+  }
+
+  /* ---------- FLASH: probe failed ---------- */
+  if (wiz.st === "probefail") {
+    body.innerHTML = `
+      <div class="errbox"><b>The port opened, but nothing intelligible answered.</b>
+        <div class="eactions">
+          <button class="abtn primary" id="probeagain">Probe again</button>
+          <button class="abtn ghost" id="todrv">Driver help</button>
+        </div>
+        <div class="ehint">Try: hold BOOT while plugging in (puts the chip in download mode) ·
+          another cable · another port. If it keeps happening, the board-first path knows
+          board-specific tricks.</div></div>`;
+    document.getElementById("probeagain").onclick = () => {
+      wiz.st = "probing"; renderWizard();
+      wiz.probeTimer = setTimeout(() => {
+        if (state.inject === "unresponsive") { wiz.st = "probefail"; }
+        else { wiz.st = "boardpick"; wiz.board = "c6"; }
+        renderWizard();
+      }, 900);
+    };
+    document.getElementById("todrv").onclick = () => { wiz.st = "boardfirst"; renderWizard(); };
+  }
+
+  /* ---------- FLASH: WLED found ---------- */
+  if (wiz.st === "wled") {
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:10px; max-width:560px">
+        <span style="font-size:12.5px; color:var(--muted)">This board is running something already:</span>
+        <div class="verdictcard wledv"><span class="sw wsw"></span>
+          <span><span class="at">WLED</span><br>
+          <span class="ad">0.15.x · "WLED-porch" · ESP32-C6</span></span></div>
+        <div class="warnbox">Setting it up for LightPlayer <b>replaces WLED on the board</b> —
+          its presets stay in your WLED backups, not here. Importing WLED settings is on the
+          roadmap; today is wipe-and-set-up.
+          <div class="eactions">
+            <button class="abtn warn" id="wipego">Wipe and set up →</button>
+            <button class="abtn ghost" id="wipecancel">Keep WLED (cancel)</button>
+          </div></div>
+      </div>`;
+    document.getElementById("wipego").onclick = () => { wiz.st = "boardpick"; wiz.board = "c6"; renderWizard(); };
+    document.getElementById("wipecancel").onclick = () => { wiz.st = "intro"; wiz.cancelCount = 0; renderWizard(); };
+  }
+
+  /* ---------- FLASH: already LightPlayer ---------- */
+  if (wiz.st === "alreadylp") {
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:10px; max-width:560px">
+        <span style="font-size:13px; color:var(--strong); font-weight:700">
+          This device is already running LightPlayer!</span>
+        <div class="verdictcard"><span class="sw"></span>
+          <span><span class="at">Luna's porch sign</span><br>
+          <span class="ad">running <b>2026-07-02-0930-porch-sign</b> · fw adef46b1 · ESP32-C6 DevKitC-1</span></span></div>
+        <span style="color:var(--dim); font-size:11px">Done = it joins your roster as-is, nothing
+          is written. Re-flash, wipe, and rename live on its device card afterwards.</span>
+      </div>`;
+    foot.innerHTML = `
+      <button class="abtn ghost" id="freshsetup">Set it up fresh…</button><span class="spacer"></span>
+      <button class="abtn primary big" id="adoptdone">Done →</button>`;
+    document.getElementById("adoptdone").onclick = () => { wiz.adopted = true; wiz.st = "done"; renderWizard(); };
+    document.getElementById("freshsetup").onclick = () => { wiz.st = "boardpick"; wiz.board = "c6"; renderWizard(); };
+  }
+
+  /* ---------- FLASH: board pick (existing setup-form UX) + flash CTA ---------- */
+  if (wiz.st === "boardpick") {
+    const list = BOARDS.filter(b => b.q || b.chip === DETECTED_CHIP);
+    const sel = wiz.board ? boardById(wiz.board) : null;
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:4px">
+        <div class="pickerlbl">Select your board</div>
+        <span style="font-size:10.5px; color:var(--dim); margin:-6px 0 8px">blank board · chip
+          <b style="color:var(--subtle)">${DETECTED_CHIP}</b> detected — showing matches</span>
+        <div class="boardrow">${list.map(b => `
+          <button class="bcard ${b.q ? "generic" : ""}" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
+            <svg viewBox="0 0 64 40"><use href="${b.q ? "#b-q" : "#b-generic"}"/></svg>
+            <span class="bn">${b.name}</span>
+          </button>`).join("")}
+        </div>
+        ${sel && !sel.q ? `<div class="pickedbio"><b>${sel.name}</b> — ${sel.chip} ·
+          ${sel.wires} LED wire${sel.wires > 1 ? "s" : ""} · default ${sel.pin}</div>` : ""}
+      </div>`;
+    body.querySelectorAll("[data-board]").forEach(el =>
+      el.onclick = () => { wiz.board = el.dataset.board; renderWizard(); });
+    foot.innerHTML = `
+      <button class="abtn primary big fullbtn" id="flashgo" ${wiz.board ? "" : "disabled"}>⚡ Flash LightPlayer →</button>`;
+    document.getElementById("flashgo").onclick = () => {
+      wiz.st = "flashing"; wiz.flashPct = 0; wiz.flashFailed = false; runFlash(); renderWizard(); };
+  }
+
+  /* ---------- FLASH: flashing (activity-view treatment) ---------- */
+  if (wiz.st === "flashing") {
+    const failed = wiz.flashFailed;
+    const steps = [["Connect bootloader", 10], ["Erase flash", 25],
+      ["Write firmware", 90, "app image at 0x10000"], ["Verify image", 100]];
+    body.innerHTML = `
+      <div class="flashmain">
+        <span class="flashtitle">Flashing firmware</span>
+        <span class="flashsub">Keep the device connected while Studio writes the image.</span>
+        <div class="pctrow"><span class="plabel2">${failed ? "Write failed" : "Writing firmware"}</span>
+          <span class="pct" id="fl-pct">${wiz.flashPct}%</span></div>
+        <div class="pbar"><div class="fill ${failed ? "err" : ""}" id="fl-fill" style="width:${wiz.flashPct}%"></div></div>
+        <div class="steplist">${steps.map(([label, at, sub], i) => {
+          let cls = "", ic = "○";
+          if (wiz.flashPct >= at) { cls = "done"; ic = "✓"; }
+          else if (failed && label === "Write firmware") { cls = "fail"; ic = "✗"; }
+          else if (!failed && wiz.flashPct >= (i === 0 ? 0 : steps[i - 1][1])) { cls = "now"; ic = "✳"; }
+          return `<span class="fstep ${cls}"><span class="ic">${ic}</span>
+            <span>${label}${sub && cls === "now" ? `<small>${sub}</small>` : ""}</span></span>`;
+        }).join("")}</div>
+        <div class="flashlog" id="fl-log"></div>
+        ${failed ? `
+          <div class="errbox"><b>Write failed at 0x6a000</b> — the device reset mid-write. An
+            incomplete image is never kept; retry re-runs from erase.
+            <div class="eactions">
+              <button class="abtn primary" id="fl-retry">Retry flash</button>
+              <button class="abtn ghost" id="fl-abandon">Abandon</button>
+            </div>
+            ${wiz.failCount > 1 ? `<div class="ehint"><b>Still failing:</b> unplug the board, plug
+              it back in, retry — a wedged serial state survives soft resets. Third strike: another
+              cable or port.</div>` : ""}
+          </div>` : ""}
+      </div>`;
+    if (failed) {
+      document.getElementById("fl-retry").onclick = () => {
+        wiz.flashFailed = false; wiz.flashPct = 0;
+        if (state.inject === "flashfail" && wiz.failCount >= 2) state.inject = "none";
+        runFlash(); renderWizard();
+      };
+      document.getElementById("fl-abandon").onclick = () => { wiz.open = false; wiz.abandoned = true; renderWizard(); };
+    }
+    fillFlashLog();
+  }
+
+  /* ---------- SIM: board pick (existing setup-form UX) ---------- */
+  if (wiz.st === "simboard") {
+    const sel = wiz.board ? boardById(wiz.board) : null;
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:4px">
+        <div class="pickerlbl">Select your board</div>
+        <span style="font-size:10.5px; color:var(--dim); margin:-6px 0 8px">the sim takes on the
+          board — pins, wires, and limits follow it</span>
+        <div class="boardrow">${BOARDS.filter(b => !b.q).map(b => `
+          <button class="bcard" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
+            <svg viewBox="0 0 64 40"><use href="#b-generic"/></svg>
+            <span class="bn">${b.name}</span>
+          </button>`).join("")}
+        </div>
+        ${sel ? `<div class="pickedbio"><b>${sel.name}</b> — ${sel.chip} ·
+          ${sel.wires} LED wire${sel.wires > 1 ? "s" : ""} · default ${sel.pin}</div>` : ""}
+      </div>`;
+    body.querySelectorAll("[data-board]").forEach(el =>
+      el.onclick = () => { wiz.board = el.dataset.board; renderWizard(); });
+    foot.innerHTML = `
+      <button class="abtn primary big fullbtn" id="wnext" ${wiz.board ? "" : "disabled"}>Continue →</button>`;
+    document.getElementById("wnext").onclick = () => { wiz.st = "provision"; renderWizard(); };
+  }
+
+  /* ---------- PROVISION: new project only (load-existing = future work) ---------- */
+  if (wiz.st === "provision") {
+    const b = boardById(wiz.board || "c6");
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:10px">
+        <div class="choicebox picked">
+          <h4>Your first project<small>made for the ${b.name}</small></h4>
+          <div class="compactgen">meteor <span class="arr">→</span> 256-px strip <span class="arr">→</span> ${b.pin}
+            <span class="inf" title="Also: a clock, a one-entry playlist, and target: recorded on the project (advisory — the engine never reads it).">ⓘ what's inside</span></div>
+          <span style="font-size:10.5px; color:var(--dim)">Add, swap, and remix effects in the
+            editor — this just gets pixels moving.</span>
+        </div>
+        ${wiz.path === "hw" ? `
+          <div class="namefield">
+            <span class="fieldlbl">Device name</span>
+            <input type="text" id="devname" value="${derivedName()}">
+            <span class="der">derived from board + date — <b>edit only if you feel like it</b></span>
+          </div>` : ""}
+      </div>`;
+    const nameEl = document.getElementById("devname");
+    if (nameEl) nameEl.oninput = () => { wiz.name = nameEl.value; wiz.nameTouched = true; };
+    foot.innerHTML = `
+      ${wiz.path === "sim" ? `<button class="abtn ghost" id="wback">← Board</button>` : ""}
+      <span class="spacer"></span>
+      <button class="abtn primary big" id="wnext">
+        ${wiz.path === "hw" ? "Run it →" : "Start the simulator →"}</button>`;
+    const back = document.getElementById("wback");
+    if (back) back.onclick = () => { wiz.st = "simboard"; renderWizard(); };
+    document.getElementById("wnext").onclick = () => { wiz.st = "done"; renderWizard(); };
+  }
+
+  /* ---------- DONE → device home ---------- */
+  if (wiz.st === "done") {
+    const b = boardById(wiz.board || "c6");
+    body.innerHTML = `
+      <div class="glowrow">
+        <span style="font-size:13px; color:var(--strong); font-weight:700">
+          ${wiz.adopted ? "Adopted — it never stopped glowing." :
+            wiz.path === "hw" ? "It's glowing." : "The simulator is running."}</span>
+        <span style="font-size:12px; color:var(--muted)">
+          ${wiz.adopted ? "Luna's porch sign · 2026-07-02-0930-porch-sign"
+            : "2026-08-04-1347-esp32-c6 · " +
+              (wiz.path === "hw" ? `<b>${derivedName()}</b>` : `Simulator (as ${b.name})`) +
+              ` · ws281x local:${b.pin}`}</span>
+        <div class="glowstrip"></div>
+      </div>`;
+    foot.innerHTML = `<span class="spacer"></span>
+      <button class="abtn primary big" id="tohome">Take me to it →</button>`;
+    document.getElementById("tohome").onclick = finishToHome;
+  }
+}
+
+const FLASH_LOG_LINES = [
+  [5,  "[lpa-link] Connected to ESP32-C6 bootloader"],
+  [12, "[lpa-link] Erasing flash"],
+  [28, "[lpa-link] Writing app image at 0x10000"],
+  [55, "[lpa-link] Progress 55%"],
+  [92, "[lpa-link] Verifying image"],
+  [100,"[lpa-link] Verified · rebooting"],
+];
+function fillFlashLog() {
+  const log = document.getElementById("fl-log");
+  if (!log) return;
+  log.innerHTML = FLASH_LOG_LINES.filter(([at]) => at <= wiz.flashPct)
+    .map(([, l]) => `<div>${l}</div>`).join("") +
+    (wiz.flashFailed ? `<div class="err">[lpa-link] write failed at 0x6a000 — device reset</div>` : "");
+  log.scrollTop = log.scrollHeight;
+}
+function runFlash() {
+  clearInterval(wiz.flashTimer);
+  wiz.flashTimer = setInterval(() => {
+    if (wiz.st !== "flashing" || wiz.flashFailed) { clearInterval(wiz.flashTimer); return; }
+    wiz.flashPct = Math.min(100, wiz.flashPct + 7);
+    if (state.inject === "flashfail" && wiz.flashPct >= 42) {
+      wiz.flashPct = 42; wiz.flashFailed = true; wiz.failCount++;
+      clearInterval(wiz.flashTimer); renderWizard(); return;
+    }
+    if (wiz.flashPct >= 100) {
+      clearInterval(wiz.flashTimer);
+      setTimeout(() => { wiz.st = "provision"; renderWizard(); }, 500);
+    }
+    const fill = document.getElementById("fl-fill"), pct = document.getElementById("fl-pct");
+    if (fill) fill.style.width = wiz.flashPct + "%";
+    if (pct) pct.textContent = wiz.flashPct + "%";
+    if ([28, 56, 91].includes(wiz.flashPct) || wiz.flashPct >= 100) renderWizard();
+    else fillFlashLog();
+  }, 380);
+}
+
+document.getElementById("wizclose").onclick = () => {
+  if (wiz.st === "flashing" && !wiz.flashFailed && wiz.flashPct < 100) {
+    const w = document.getElementById("wizard");
+    const sheet = document.createElement("div");
+    sheet.className = "sheet";
+    sheet.innerHTML = `<div class="sheetpanel">
+      <h3>Flash in progress — ${wiz.flashPct}%</h3>
+      <p>Leaving now abandons the write. The board keeps its bootloader (nothing bricks), but it
+        won't run until a flash completes.</p>
+      <div class="sheetrow">
+        <button class="abtn primary" data-keep>Keep flashing</button>
+        <button class="abtn danger" data-go>Abandon</button>
+      </div></div>`;
+    sheet.querySelector("[data-keep]").onclick = () => sheet.remove();
+    sheet.querySelector("[data-go]").onclick = () => {
+      sheet.remove(); clearInterval(wiz.flashTimer);
+      wiz.open = false; wiz.abandoned = true; renderWizard();
+    };
+    w.appendChild(sheet);
+    return;
+  }
+  wiz.open = false; renderWizard();
+};
+
+function finishToHome() {
+  const name = wiz.adopted ? "Luna's porch sign" : wiz.path === "hw" ? derivedName() : "Simulator";
+  const proj = wiz.adopted ? "2026-07-02-0930-porch-sign"
+    : "2026-08-04-1347-esp32-c6";
+  document.getElementById("edpanename").innerHTML =
+    `${name}<span class="tp">${wiz.path === "hw" ? "USB" : "SIM"}</span>`;
+  document.getElementById("edpane").classList.toggle("simp", wiz.path === "sim");
+  document.getElementById("edpaneproj").textContent = proj;
+  document.getElementById("edprojname").innerHTML = `${proj} <small>Project</small>`;
+  document.getElementById("edprojtree").textContent = proj;
+  document.getElementById("toastname").textContent = name;
+  const toast = document.getElementById("edtoast");
+  toast.hidden = false; setTimeout(() => toast.hidden = true, 3000);
+  document.getElementById("s5").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ===================== controls ===================== */
+document.querySelectorAll("[data-path]").forEach(el => el.onclick = () => {
+  state.path = el.dataset.path;
+  document.querySelectorAll("[data-path]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  resetWizard();
+});
+document.querySelectorAll("[data-inj]").forEach(el => el.onclick = () => {
+  state.inject = el.dataset.inj;
+  document.querySelectorAll("[data-inj]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  resetWizard();
+  document.getElementById("s3").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+/* ===================== boot + hash capture ===================== */
+resetWizard();
+(function bootFromHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("path")) state.path = h.get("path");
+  if (h.get("inj")) state.inject = h.get("inj");
+  if (h.get("path") || h.get("inj")) resetWizard();
+  if (h.get("st")) {
+    wiz.st = h.get("st");
+    if (!wiz.board) wiz.board = h.get("board") || "c6";
+    if (wiz.st === "flashing") {
+      wiz.flashPct = parseInt(h.get("pct") || "42");
+      wiz.flashFailed = h.get("inj") === "flashfail";
+      if (wiz.flashFailed) wiz.failCount = parseInt(h.get("fails") || "1");
+    }
+    if (wiz.st === "intro" && h.get("cancels")) wiz.cancelCount = parseInt(h.get("cancels"));
+    renderWizard();
+  }
+  if (h.has("solo")) {
+    document.querySelectorAll("body > *").forEach(el => {
+      if (!el.matches(".wizwrap, svg[aria-hidden], #s3")) el.style.display = "none";
+    });
+    document.body.style.padding = "16px";
+  }
+  if (h.has("soloed")) {
+    document.querySelectorAll("body > *").forEach(el => {
+      if (!el.matches(".edmock, svg[aria-hidden]")) el.style.display = "none";
+    });
+    document.body.style.padding = "16px";
+    finishToHome();
+  }
+})();
+</script>
+</body>
+</html>
