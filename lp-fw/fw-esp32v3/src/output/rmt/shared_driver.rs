@@ -38,7 +38,11 @@ pub const RMT_CLOCK: Rate = Rate::from_mhz(80);
 
 /// A frame that has not completed within this long has hung; abort it and
 /// report rather than spinning forever. The longest frame the output provider
-/// can ask for (256 LEDs) is ~7.7 ms on the wire.
+/// can ask for (`WS281X_MAX_LEDS_PER_CHANNEL` = 1024 LEDs) is ~31 ms on the
+/// wire, so a healthy frame always finishes inside this deadline — which
+/// matters more now that the wait is deferred to the next frame's write: the
+/// deadline still runs from `start`, and by wait time most of it has already
+/// elapsed in wall-clock terms.
 pub const FRAME_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// The driver, shared between thread context and the interrupt handler.

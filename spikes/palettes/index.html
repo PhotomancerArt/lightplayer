@@ -1,0 +1,2145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Palettes — chooser, cycle configs, editor — design spike (round 3)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio-ish palette (borrowed from spikes/device-card-panel) ---- */
+  :root {
+    --bg: #0b0c0e;
+    --card: #14161a;
+    --terminal: #0e1013;
+    --border: #262a31;
+    --border-strong: #3a3f48;
+    --text: #e8e6e1;
+    --strong: #f4f2ec;
+    --muted: #9a978f;
+    --dim: #6f6d66;
+    --name: #e4c065;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+    --good: #3fd68e;       --good-bg: rgba(63,214,142,.08);
+    --attn: #f0913b;       --attn-bg: rgba(240,145,59,.09);
+    --error: #ef5350;      --error-bg: rgba(239,83,80,.09);
+    --neutral: #8a8f98;    --neutral-bg: rgba(138,143,152,.06);
+
+    /* studio convention: bound/bus = violet, never green */
+    --bound: #a78bfa;      --bound-bg: rgba(167,139,250,.10);
+    /* candidate ENGAGED (captured) family — deliberately NOT violet (P6/P-Q2).
+       gold = "held in hand"; the spike explores this treatment */
+    --held: #e4c065;       --held-bg: rgba(228,192,101,.10);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 140px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 720px; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 34px 0 4px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 720px; }
+  .lean { color: var(--muted); }
+  .lean b { color: var(--text); }
+
+  /* ---- exploration controls ---- */
+  .controls {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px;
+    position: sticky; top: 0; background: var(--bg); z-index: 40;
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .controls button, .seg button {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--card);
+    color: var(--muted); font: 600 11px/1 -apple-system, sans-serif;
+    padding: 5px 9px; border-radius: 6px; cursor: pointer;
+  }
+  .controls button:hover { color: var(--text); }
+  .controls button.on { color: var(--strong); border-color: var(--dim); background: #1b1e24; }
+  .controls label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+
+  /* ---- concept gallery ---- */
+  .gallery { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .concept {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0; overflow: hidden; width: 320px;
+  }
+  .concept.wide { width: 480px; }
+  .concept > header {
+    padding: 8px 12px; background: var(--terminal); border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .concept > header .tag {
+    font: 700 10px/1 var(--mono); color: var(--bg); background: var(--muted);
+    padding: 3px 6px; border-radius: 4px; letter-spacing: .06em;
+  }
+  .concept > header .title { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .concept > header .note { font-size: 11px; color: var(--dim); margin-left: auto; text-align: right; }
+  .concept .bodyp { padding: 12px; }
+
+  /* ---- shared panel-row chrome (echoes studio panel controls) ---- */
+  .panelrow {
+    display: grid; grid-template-columns: 92px 1fr auto; gap: 10px; align-items: center;
+    padding: 7px 4px; border-radius: 6px;
+  }
+  .panelrow + .panelrow { border-top: 1px solid rgba(255,255,255,.03); }
+  .panelrow .lbl {
+    font-size: 12px; color: var(--muted); font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .panelrow .lbl.bound { color: var(--bound); }
+  .panelrow .readout { font: 11px var(--mono); color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .panelrow .readout .live { color: var(--bound); }
+  .panelrow .readout .authored { color: var(--dim); }
+  .clearbtn {
+    appearance: none; border: 0; background: transparent; color: var(--held);
+    cursor: pointer; font-size: 12px; line-height: 1; padding: 2px; opacity: .8;
+  }
+  .clearbtn:hover { opacity: 1; }
+
+  /* fake knob + fader neighbors, to seat the palette control in real context */
+  .knob { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--border-strong);
+          position: relative; background: var(--terminal); justify-self: start; }
+  .knob i { position: absolute; left: 50%; top: 50%; width: 2px; height: 11px;
+            background: var(--text); transform-origin: 50% 0;
+            transform: translate(-50%,0) rotate(150deg); border-radius: 2px; }
+  .fader { height: 6px; border-radius: 3px; background: var(--terminal);
+           border: 1px solid var(--border); position: relative; align-self: center; }
+  .fader i { position: absolute; top: 50%; left: 62%; width: 12px; height: 16px;
+             transform: translate(-50%,-50%); background: #2a2e36;
+             border: 1px solid var(--border-strong); border-radius: 3px; }
+
+  /* ---- swatch strips ---- */
+  canvas.strip { display: block; width: 100%; height: 100%; border-radius: 4px; }
+  .swatchwrap { position: relative; height: 22px; border-radius: 5px; overflow: hidden;
+                border: 1px solid var(--border-strong); cursor: pointer; background: #000; }
+  .swatchwrap:hover { border-color: var(--dim); }
+  .swatchwrap .pname {
+    position: absolute; left: 7px; top: 50%; transform: translateY(-50%);
+    font: 700 10.5px var(--mono); color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 8px rgba(0,0,0,.6);
+    letter-spacing: .03em; max-width: 85%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .swatchwrap .chev { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+                      color: rgba(255,255,255,.85); font-size: 10px; text-shadow: 0 1px 2px #000; }
+
+  /* state treatments on the swatch control */
+  .pal-state-engaged .swatchwrap { border-color: var(--held); box-shadow: 0 0 0 1px var(--held-bg), 0 0 10px rgba(228,192,101,.15); }
+  .pal-state-automated canvas.strip { animation: palcycle 6s linear infinite; }
+  @keyframes palcycle { 0% { filter: hue-rotate(0deg); } 100% { filter: hue-rotate(360deg); } }
+  .statechip {
+    font: 600 9.5px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase;
+    padding: 3px 6px; border-radius: 4px; white-space: nowrap;
+  }
+  .statechip.inherit { color: var(--muted); background: var(--neutral-bg); }
+  .statechip.default { color: var(--dim); background: rgba(255,255,255,.03); }
+  .statechip.auto { color: var(--bound); background: var(--bound-bg); }
+  .statechip.held { color: var(--held); background: var(--held-bg); }
+
+  /* B: compact chip variant */
+  .chiprow { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .chiprow .chipname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panelrow > * { min-width: 0; }
+  .palchip { width: 64px; height: 18px; border-radius: 4px; overflow: hidden;
+             border: 1px solid var(--border-strong); cursor: pointer; position: relative; background:#000; }
+  .palchip:hover { border-color: var(--dim); }
+  .pal-state-engaged .palchip { border-color: var(--held); box-shadow: 0 0 8px rgba(228,192,101,.18); }
+  .chipname { font: 600 11px var(--mono); color: var(--text); }
+
+  /* C: stepper variant */
+  .stepper { display: grid; grid-template-columns: 22px 1fr 22px; gap: 6px; align-items: stretch; }
+  .stepper .arrow {
+    appearance: none; border: 1px solid var(--border-strong); background: var(--terminal);
+    color: var(--muted); border-radius: 5px; cursor: pointer; font-size: 11px; line-height: 1;
+  }
+  .stepper .arrow:hover { color: var(--strong); border-color: var(--dim); }
+
+  /* ---- picker ---- */
+  .picker {
+    background: var(--terminal); border: 1px solid var(--border-strong); border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+  }
+  .picker .searchbar, .ddpop2 .searchbar { display: flex; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--border); align-items:center; }
+  .picker input[type=search], .ddpop2 input[type=search] {
+    flex: 1; background: var(--card); border: 1px solid var(--border-strong); border-radius: 6px;
+    color: var(--text); font: 12px var(--mono); padding: 6px 9px; outline: none;
+  }
+  .picker input[type=search]:focus, .ddpop2 input[type=search]:focus { border-color: var(--dim); }
+  .picker .imp, .ddpop2 .imp { font: 600 10px/1 -apple-system,sans-serif; color: var(--muted); border:1px solid var(--border-strong);
+                 background: var(--card); border-radius: 6px; padding: 6px 8px; cursor: pointer; white-space: nowrap; }
+  .picker .imp:hover, .ddpop2 .imp:hover { color: var(--text); }
+  .plist { max-height: 320px; overflow: auto; }
+  .pcat { position: sticky; top: 0; background: var(--terminal); padding: 6px 12px 4px;
+          font: 700 9.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+          border-bottom: 1px solid rgba(255,255,255,.04); z-index: 2; }
+  .prow { display: grid; grid-template-columns: 1fr 108px; gap: 10px; align-items: center;
+          padding: 5px 12px; cursor: pointer; }
+  .prow:hover { background: rgba(255,255,255,.04); }
+  .prow.sel { background: var(--bound-bg); }
+  .prow.sel .pn { color: var(--bound); }
+  .prow .pn { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prow .pn small { color: var(--dim); font-size: 10.5px; margin-left: 6px; }
+  .prow .mini { height: 14px; border-radius: 3px; overflow: hidden; border: 1px solid rgba(255,255,255,.12); background:#000; }
+
+  /* B: grid picker */
+  .pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; max-height: 320px; overflow: auto; }
+  .ptile { cursor: pointer; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-strong); background:#000; position: relative; }
+  .ptile:hover { border-color: var(--dim); }
+  .ptile.sel { border-color: var(--bound); box-shadow: 0 0 0 1px var(--bound); }
+  .ptile .tstrip { height: 26px; }
+  .ptile .tname { font: 600 9.5px var(--mono); color: var(--muted); padding: 3px 6px 4px;
+                  background: var(--terminal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ptile.sel .tname { color: var(--bound); }
+
+  /* C: hero preview picker */
+  .hero { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card); }
+  .hero .ledstrip { display: flex; gap: 3px; margin-top: 8px; }
+  .hero .led { width: 11px; height: 11px; border-radius: 50%; background: #111; }
+  .hero .heroname { font: 700 12px var(--mono); color: var(--strong); }
+  .hero .herometa { font: 10.5px var(--mono); color: var(--dim); margin-top: 2px; }
+
+  /* ---- editor ---- */
+  .editor { padding: 12px; }
+  .gradbar { position: relative; height: 44px; border-radius: 6px; overflow: visible;
+             border: 1px solid var(--border-strong); background: #000; }
+  .gradbar canvas { border-radius: 5px; }
+  .stop {
+    position: absolute; top: 100%; transform: translate(-50%, 2px); cursor: grab;
+    width: 16px; height: 20px; z-index: 3; touch-action: none;
+  }
+  .stop::before { content: ""; position: absolute; left: 50%; top: -46px; width: 1px; height: 44px;
+                  background: rgba(255,255,255,.35); }
+  .stop .dot { position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+               width: 14px; height: 14px; border-radius: 4px; border: 2px solid #fff;
+               box-shadow: 0 1px 4px rgba(0,0,0,.7); }
+  .stop.sel .dot { border-color: var(--bound); box-shadow: 0 0 0 2px var(--bound-bg), 0 1px 4px rgba(0,0,0,.7); }
+  .editrow { display: flex; gap: 10px; margin-top: 34px; align-items: center; flex-wrap: wrap; }
+  .editrow label { font-size: 11px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .editrow input[type=color] { width: 34px; height: 24px; border: 1px solid var(--border-strong);
+                               border-radius: 5px; background: var(--terminal); padding: 1px; cursor: pointer; }
+  .editrow input[type=number] { width: 58px; background: var(--terminal); color: var(--text);
+                                border: 1px solid var(--border-strong); border-radius: 5px;
+                                font: 11px var(--mono); padding: 4px 6px; }
+  .editrow button { appearance: none; border: 1px solid var(--border-strong); background: var(--card);
+                    color: var(--muted); font: 600 11px/1 -apple-system,sans-serif; padding: 5px 8px;
+                    border-radius: 6px; cursor: pointer; }
+  .editrow button:hover { color: var(--text); }
+  .seg { display: inline-flex; gap: 0; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--terminal); }
+  .seg button + button { border-left: 1px solid var(--border-strong); }
+  .seg button.on { color: var(--strong); background: #23272f; }
+
+  /* stop list (concept B) */
+  .stoplist { display: grid; gap: 4px; }
+  .stoplist .srow { display: grid; grid-template-columns: 40px 58px 1fr 22px; gap: 8px; align-items: center;
+                    padding: 4px 6px; border-radius: 5px; background: var(--terminal);
+                    border: 1px solid var(--border); font: 11px var(--mono); color: var(--muted); }
+  .stoplist .srow .pos { color: var(--text); }
+  .stoplist .del { appearance:none; border:0; background:transparent; color: var(--dim); cursor:pointer; }
+  .stoplist .del:hover { color: var(--error); }
+  .srow .chip { height: 16px; border-radius: 3px; border: 1px solid rgba(255,255,255,.15); }
+
+  /* interp comparison grid */
+  .cmp { display: grid; grid-template-columns: 74px 1fr 1fr 1fr; gap: 6px 8px; align-items: center; }
+  .cmp .cl { font: 600 10px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  .cmp .ch { font: 700 10px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; text-align: center; }
+  .cmp .cell { height: 20px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); background:#000; }
+
+  /* ---- section 6: discrete set blocks (stepped-control language: squared) ---- */
+  .setblocks { display: flex; gap: 4px; }
+  .setblocks .blk { width: 34px; height: 16px; border-radius: 3px; overflow: hidden;
+                    border: 1px solid var(--border-strong); cursor: pointer; position: relative; background:#000; }
+  .setblocks .blk:hover { border-color: var(--dim); }
+  .setblocks .blk.on { border-color: var(--held); box-shadow: 0 0 0 1px var(--held); }
+  .cycsetblk { width: 30px; height: 13px; border-radius: 3px; overflow: hidden;
+               border: 1px solid var(--border-strong); position: relative; background:#000; }
+  .cycsetblk.on { border-color: var(--bound); box-shadow: 0 0 0 1px var(--bound); }
+  .slewtgt { width: 56px; height: 20px; border-radius: 4px; overflow: hidden;
+             border: 1px solid var(--border-strong); cursor: pointer; position: relative; background:#000; }
+  .slewtgt:hover { border-color: var(--dim); }
+
+  /* ---- round 3: cycle-config vocabulary (landed TimeProduct language) ---- */
+  /* private phasor = green, shared = violet — the clock face's own treatment */
+  .statechip.cyc  { color: var(--good);  background: var(--good-bg); }
+  .statechip.cycsh{ color: var(--bound); background: var(--bound-bg); }
+  .shchip { font: 700 8.5px/1 var(--mono); letter-spacing: .08em; color: var(--bound);
+            background: var(--bound-bg); border: 1px solid rgba(167,139,250,.35);
+            padding: 2px 4px; border-radius: 3px; }
+
+  /* picker mode tabs (concept 6B) */
+  .ptabs { display: flex; border-bottom: 1px solid var(--border); background: var(--terminal); }
+  .ptab { flex: 1; appearance: none; border: 0; background: transparent; cursor: pointer;
+          font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+          color: var(--dim); padding: 8px 0 7px; border-bottom: 2px solid transparent; }
+  .ptab:hover { color: var(--muted); }
+  .ptab.on { color: var(--strong); border-bottom-color: var(--bound); }
+
+  /* cycle set tray + member chips */
+  .cyctray { padding: 8px 10px; border-top: 1px solid var(--border); background: var(--card);
+             display: grid; gap: 7px; }
+  .cyctray .traylbl { font: 700 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase;
+                      color: var(--dim); display: flex; align-items: center; gap: 8px; }
+  .cychips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  .cychip { position: relative; width: 52px; height: 16px; border-radius: 3px; overflow: hidden;
+            border: 1px solid var(--border-strong); background: #000; }
+  .cychip .rm { position: absolute; inset: 0; display: grid; place-items: center; cursor: pointer;
+                background: rgba(0,0,0,.55); color: #fff; font-size: 10px; opacity: 0; transition: opacity .12s; }
+  .cychip:hover .rm { opacity: 1; }
+  .cychip.ondeck { border-color: var(--good); box-shadow: 0 0 0 1px rgba(63,214,142,.4); }
+  .trayrow { display: flex; gap: 10px; align-items: center; font: 11px var(--mono); color: var(--muted); }
+  .trayrow .speedlbl { font: 600 10px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .trayrow .speedval { color: var(--good); min-width: 48px; }
+  .trayrow input[type=range] { flex: 1; accent-color: var(--good); height: 4px; }
+
+  /* clock-face phasor registry row (mimics studio__node__clock-face) */
+  .phreg { border: 1px solid var(--border-strong); border-radius: 7px; background: var(--terminal);
+           padding: 7px 9px; display: grid; gap: 4px; }
+  .phrow { display: flex; gap: 8px; align-items: baseline; font: 10.5px var(--mono); }
+  .phrow .orig { color: var(--text); font-weight: 700; }
+  .phrow .kindk { color: var(--dim); }
+  .phrow .per { margin-left: auto; color: var(--muted); }
+  .phbarwrap { display: flex; gap: 8px; align-items: center; }
+  .phbar { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.06); overflow: hidden; }
+  .phbar i { display: block; height: 100%; width: 0%; background: var(--good); border-radius: 2px; }
+  .phbar.shared i { background: var(--bound); }
+  .phphi { font: 10px var(--mono); color: var(--dim); white-space: nowrap; }
+
+  /* 6C: add-to-cycle affordance on picker rows */
+  .prow .addcyc { position: absolute; right: 118px; appearance: none; border: 1px solid var(--border-strong);
+                  background: var(--card); color: var(--good); border-radius: 4px; font: 700 10px var(--mono);
+                  padding: 2px 5px; cursor: pointer; opacity: 0; transition: opacity .1s; }
+  .prow { position: relative; }
+  .prow:hover .addcyc { opacity: 1; }
+  .prow .addcyc:hover { border-color: var(--good); }
+  .prow.inset .addcyc { opacity: 1; color: var(--bg); background: var(--good); border-color: var(--good); }
+
+  /* 6D: cycle-as-a-row badge */
+  .cycbadge { font: 700 9px var(--mono); color: var(--good); background: var(--good-bg);
+              border-radius: 3px; padding: 2px 5px; margin-left: 6px; white-space: nowrap; }
+
+  /* 6E: consumer mini-cards for the provenance demo */
+  .provgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .provcard { border: 1px solid var(--border-strong); border-radius: 7px; background: var(--terminal);
+              padding: 8px 10px; display: grid; gap: 6px; }
+  .provcard .pnm { font: 700 11px var(--mono); color: var(--name); display: flex; align-items: center; gap: 7px; }
+
+  /* §9: the panel dropdown (converged control) */
+  .memchips { display: inline-flex; gap: 3px; align-items: center; cursor: pointer; }
+  .memchips .mc { width: 34px; height: 16px; border-radius: 3px; overflow: hidden;
+                  border: 1px solid var(--border-strong); background: #000; position: relative; }
+  .memchips .mc.live { border-color: var(--good); box-shadow: 0 0 0 1px rgba(63,214,142,.45); }
+  .ratechip { font: 700 9px var(--mono); color: var(--good); background: var(--good-bg);
+              border-radius: 3px; padding: 2px 5px; white-space: nowrap; }
+  .ddrow-open .swatchwrap, .ddrow-open .memchips .mc.live { border-color: var(--held); }
+  .ddrow-open { background: var(--held-bg); }
+  .ddsetstrip { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px;
+                border-bottom: 1px solid var(--border); background: var(--card); }
+  .ddchip { display: inline-block; width: 92px; border: 1px solid var(--border-strong);
+            border-radius: 5px; overflow: hidden; background: #000; }
+  .ddchip .cv { display: block; height: 18px; position: relative; }
+  .ddchip .nm { font: 600 9px var(--mono); color: var(--muted); padding: 2px 4px;
+                background: var(--terminal); white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; display: block; }
+  .ddchip .acts { display: flex; border-top: 1px solid var(--border); background: var(--terminal); }
+  .ddchip .acts button { flex: 1; appearance: none; border: 0; background: transparent;
+                         color: var(--dim); font-size: 10px; padding: 2px 0; cursor: pointer; }
+  .ddchip .acts button:hover { color: var(--text); background: rgba(255,255,255,.05); }
+  .ddchip .acts button.tr:hover { color: var(--error); }
+  .ddchip .acts button + button { border-left: 1px solid var(--border); }
+  .ddcyclebar { padding: 9px 10px; border-top: 1px solid var(--border); background: var(--card);
+                display: grid; gap: 7px; }
+  .ddhint { font: 10.5px var(--mono); color: var(--dim); }
+  .ddedit-title { display: flex; gap: 8px; align-items: center; padding: 9px 10px;
+                  border-bottom: 1px solid var(--border); background: var(--card); }
+  .ddedit-title .t { font: 700 11px var(--mono); color: var(--strong); }
+  .ddedit-title .prov { font: 10px var(--mono); color: var(--dim); }
+  .ddedit-title input { background: var(--terminal); border: 1px solid var(--border-strong);
+                        border-radius: 5px; color: var(--text); font: 11px var(--mono);
+                        padding: 4px 7px; width: 130px; }
+  .ddedit-title .done { margin-left: auto; }
+  /* anchored dropdown (round 3c): popup grows out of the row, contiguous-outline approximation.
+     The REAL join (SVG merged outline per spikes/contiguous-popup) belongs to the story system. */
+  .ddanchor { position: relative; border: 1px solid transparent; border-radius: 8px; }
+  .ddanchor.open { border-color: var(--held); background: var(--held-bg);
+                   border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .ddpop2 { position: absolute; left: -1px; right: -1px; top: 100%; z-index: 30;
+            background: var(--terminal); border: 1px solid var(--held); border-top: 0;
+            border-radius: 0 0 10px 10px; box-shadow: 0 16px 44px rgba(0,0,0,.55); overflow: hidden; }
+
+  /* §8: node-question cards */
+  .qcard { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--terminal);
+           padding: 9px 11px; display: grid; gap: 7px; }
+  .qcard .qh { display: flex; gap: 8px; align-items: baseline; }
+  .qcard .qh .nm { font-weight: 700; color: var(--name); font-size: 12.5px; }
+  .qcard .qh .k { font: 600 9px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+
+  /* ---- section 4: module panel inheritance ---- */
+  .modpanel { width: 380px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .modpanel > header { padding: 8px 12px; background: var(--terminal); border-bottom: 1px solid var(--border);
+                       display: flex; align-items: center; gap: 8px; }
+  .modpanel > header .nm { font-weight: 700; color: var(--name); font-size: 13.5px; }
+  .modpanel > header .k { font: 600 9.5px var(--mono); color: var(--dim); text-transform: uppercase;
+                          letter-spacing: .08em; margin-left: auto; }
+  .modgroup { border-top: 1px solid var(--border); }
+  .modgroup > .gh { display: flex; align-items: center; gap: 8px; padding: 7px 12px 2px; }
+  .modgroup > .gh .gn { font: 700 11px var(--mono); color: var(--muted); }
+  .modgroup > .gh .reset { margin-left: auto; }
+  .modgroup .bodyp { padding: 4px 12px 10px; }
+  .flow { font: 10.5px var(--mono); color: var(--dim); padding: 2px 12px 10px; }
+  .flow .via { color: var(--muted); }
+  .flow .heldtxt { color: var(--held); }
+</style>
+</head>
+<body>
+
+<h1>Palettes — chooser · cycle configs · editor · inheritance</h1>
+<p class="hint">
+  Companion to the palette exploration spike (planning:
+  <span style="font-family:var(--mono)">2026-08-03-1803-palette-exploration-spike</span>).
+  Thesis, revised by D17 + the <b>landed</b> TimeProduct M2 (PR #328): the chooser writes a
+  <span style="font-family:var(--mono)">GradientConfig = static(Gradient) | cycle{set, step, fade}</span> —
+  a plain held value, P3-pure — and the shader's fill path resolves it, making a <b>phasor query</b>
+  for cycle configs exactly the way <span style="font-family:var(--mono)">kind:"phasor"</span> slots
+  already do. No cycler node, no stateful control; the clock owns all integration. Round 3 reworks
+  §6 around that (the round-2 cycler-node card is dead) and speaks the landed vocabulary: the phasor
+  <b>Speed</b> knob with unit-aware readouts (<span style="font-family:var(--mono)">2/s · 3/min · 15/hr</span>),
+  the clock-face phasor registry (green = private, violet = <b>SHARED</b>, φ + cycle count), and
+  <span style="font-family:var(--mono)">panel:"show"</span> for default-bound publicity (PR #317).
+  Engaged/captured treatment is candidate <b>gold</b> — deliberately not the bound-violet family (P6, P-Q2).
+</p>
+
+<div class="controls">
+  <span class="group"><b>§1 control state</b>
+    <button data-st="default">Read · default</button>
+    <button data-st="inherit" class="on">Read · inherited</button>
+    <button data-st="cycling">Read · cycling</button>
+    <button data-st="automated">Read · automated</button>
+    <button data-st="engaged">Engaged</button>
+  </span>
+  <span class="group"><b>names</b>
+    <label><input type="checkbox" id="longnames"> awkward-long</label>
+  </span>
+  <span class="group"><b>§2 picker sets</b>
+    <label><input type="checkbox" id="emptyproj" checked> project has customs</label>
+  </span>
+</div>
+
+<!-- ================= SECTION 1 ================= -->
+<h2>1 · The panel swatch control</h2>
+<p class="sub">
+  Where the current palette lives on a panel, seated between a real knob and fader for scale.
+  Cycle the state strip above: <b>Read·default</b> (no writer anywhere, authored static config),
+  <b>Read·inherited</b> (host scope writes it — violet live readout), <b>Read·cycling</b> (the slot's
+  own <span style="font-family:var(--mono)">cycle{…}</span> config — private phasor, green ↻ with the
+  unit-aware rate), <b>Read·automated</b> (a generator node animates it — grabbable, P5),
+  <b>Engaged</b> (panel writer holds it — gold + ↺).
+  <span class="lean">Lean: <b>A</b> — the strip is the value; a palette control that doesn't show the
+  gradient at readable width isn't a palette control. C's stepper is a play-mode overlay on A, not a rival.</span>
+</p>
+<div class="gallery">
+
+  <div class="concept" id="c1a">
+    <header><span class="tag">A</span><span class="title">Full-width strip row</span>
+      <span class="note">fader-grade footprint<br>name on the strip</span></header>
+    <div class="bodyp">
+      <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+        <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+      <div class="panelrow pal" data-c="a">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip" data-pal="cur"></canvas>
+          <span class="pname"></span><span class="chev">▾</span></div>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+        <span class="readout">0.62</span></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c1b">
+    <header><span class="tag">B</span><span class="title">Compact chip + name</span>
+      <span class="note">knob-grade footprint<br>name beside chip</span></header>
+    <div class="bodyp">
+      <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+        <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+      <div class="panelrow pal" data-c="b">
+        <span class="lbl bound">palette</span>
+        <span class="chiprow"><span class="palchip"><canvas class="strip" data-pal="cur"></canvas></span>
+          <span class="chipname"></span></span>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+        <span class="readout">0.62</span></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c1c">
+    <header><span class="tag">C</span><span class="title">Stepper strip (play mode)</span>
+      <span class="note">WLED muscle memory:<br>next/prev cycles catalog</span></header>
+    <div class="bodyp">
+      <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+        <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+      <div class="panelrow pal" data-c="c">
+        <span class="lbl bound">palette</span>
+        <div class="stepper">
+          <button class="arrow" id="palprev">‹</button>
+          <div class="swatchwrap"><canvas class="strip" data-pal="cur"></canvas>
+            <span class="pname"></span></div>
+          <button class="arrow" id="palnext">›</button>
+        </div>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+        <span class="readout">0.62</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 2 ================= -->
+<h2>2 · The picker</h2>
+<p class="sub">
+  Opens from the §1 control. All three share the same catalog model: <b>Project</b> (customs, saved
+  in the project), <b>Stock</b> (FastLED-lineage), <b>Classic</b> (cpt-city-lineage), plus a WLED-JSON
+  import affordance. Search filters live in A and C. Click any row/tile — the §1 control follows
+  (in production that's a panel write of <span style="font-family:var(--mono)">static(Gradient)</span> —
+  the chooser always writes a config, never touches time; cycles are §6).
+  <span class="lean">Lean: <b>A</b> — WLED users know exactly what this is; strips at list width stay
+  legible at 60+ entries. C's live LED preview is the demo-magic add-on if the budget allows; B's grid
+  goes illegible with subtle palettes.</span>
+</p>
+<div class="gallery">
+
+  <div class="concept" id="c2a">
+    <header><span class="tag">A</span><span class="title">Searchable list, preview strips</span>
+      <span class="note">WLED-parity, restyled</span></header>
+    <div class="picker">
+      <div class="searchbar"><input type="search" placeholder="search palettes…" id="searchA">
+        <button class="imp" title="Paste WLED palette JSON">⇪ import</button></div>
+      <div class="plist" id="plistA"></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c2b">
+    <header><span class="tag">B</span><span class="title">Swatch grid</span>
+      <span class="note">denser, more visual</span></header>
+    <div class="picker">
+      <div class="searchbar"><input type="search" placeholder="search palettes…" id="searchB">
+        <button class="imp">⇪ import</button></div>
+      <div class="pgrid" id="pgridB"></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c2c">
+    <header><span class="tag">C</span><span class="title">List + live output preview</span>
+      <span class="note">hover = try it on the strip</span></header>
+    <div class="picker">
+      <div class="hero">
+        <div class="heroname" id="heroname">Aurora</div>
+        <div class="herometa" id="herometa">classic · 5 stops · srgb / linear</div>
+        <div class="ledstrip" id="ledstrip"></div>
+      </div>
+      <div class="searchbar"><input type="search" placeholder="search palettes…" id="searchC">
+        <button class="imp">⇪ import</button></div>
+      <div class="plist" id="plistC"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 3 ================= -->
+<h2>3 · The gradient editor + interpolation space</h2>
+<p class="sub">
+  Authoring-grade (face/drawer), not panel-grade. A: direct manipulation — drag stops, double-click the
+  bar to add, color-well edits the selected stop. B: stop list — precise, boring, phone-friendly.
+  The comparison grid renders the SAME stops through every space × method pair (real Oklab math,
+  live): this is decision D8 made visible.
+  <span class="lean">Lean: <b>A over B as the primary</b>, with B's rows available as a disclosure
+  ("exact values"). D8 leans: imports = srgb/linear for WLED fidelity; new palettes = oklab/smooth.</span>
+</p>
+<div class="gallery">
+
+  <div class="concept wide" id="c3a">
+    <header><span class="tag">A</span><span class="title">Direct-manipulation bar</span>
+      <span class="note">drag stops · dbl-click adds · del removes</span></header>
+    <div class="editor">
+      <div class="gradbar" id="gradbar"><canvas class="strip" id="editcanvas"></canvas></div>
+      <div class="editrow">
+        <label>stop <input type="color" id="stopcolor"></label>
+        <label>at <input type="number" id="stoppos" min="0" max="1" step="0.01"></label>
+        <button id="delstop">delete stop</button>
+        <span style="flex:1"></span>
+        <span class="seg" id="segspace">
+          <button data-v="srgb" class="on">sRGB</button><button data-v="oklab">Oklab</button>
+        </span>
+        <span class="seg" id="segmethod">
+          <button data-v="step">Step</button><button data-v="linear" class="on">Linear</button><button data-v="smooth">Smooth</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="concept" id="c3b">
+    <header><span class="tag">B</span><span class="title">Stop list</span>
+      <span class="note">precise · same value, same edits</span></header>
+    <div class="editor">
+      <div class="stoplist" id="stoplist"></div>
+      <div class="editrow"><button id="addstop">+ add stop</button></div>
+    </div>
+  </div>
+
+  <div class="concept wide" id="c3cmp">
+    <header><span class="tag">D8</span><span class="title">Space × method, live</span>
+      <span class="note">same stops, six bakes</span></header>
+    <div class="editor">
+      <div class="cmp" id="cmpgrid">
+        <span></span><span class="ch">Step</span><span class="ch">Linear</span><span class="ch">Smooth</span>
+      </div>
+      <p class="sub" style="margin-top:10px">sRGB rides through gray dead zones (watch blue→gold);
+        Oklab holds chroma through the middle. Step is the C9/christmas-lights mode.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 4 ================= -->
+<h2>4 · Drop-in inheritance — the thing WLED can't do</h2>
+<p class="sub">
+  A host module and two embedded plasma effects, all consuming <span style="font-family:var(--mono)">bus:palette</span>.
+  Untouched children inherit the host palette (R5). <b>Click a child's swatch</b> to engage its own
+  panel writer — gold ring, that subtree detaches (R11), the sibling still follows the host.
+  <b>↺</b> clears back to inheritance. Change the host palette (click its strip) and watch who follows.
+  <span class="lean">This interaction demo is one concept, not a matrix — it's the acceptance
+  scenario for M4, and the flow lines under each group are the candidate "whose value is this"
+  affordance. D5 is now mechanized: PR #317 landed <span style="font-family:var(--mono)">panel:"show"</span>,
+  so palette slots carry <span style="font-family:var(--mono)">default_bind: bus:palette + panel:"show"</span>
+  — the picker surfaces by default with inheritance intact, no ADR exception. (Applied lean, still
+  needs Yona's confirm.)</span>
+</p>
+<div class="gallery">
+  <div class="modpanel" id="modpanel">
+    <header><span class="nm">aurora-dome</span><span class="k">root module · panel</span></header>
+    <div class="bodyp" style="padding: 4px 12px 8px;">
+      <div class="panelrow pal" id="hostpal">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip"></canvas><span class="pname"></span><span class="chev">▾</span></div>
+        <span class="readout state-slot"></span>
+      </div>
+      <div class="panelrow"><span class="lbl bound">energy</span><div class="fader"><i></i></div>
+        <span class="readout"><span class="live">0.71</span></span></div>
+    </div>
+    <div class="modgroup" id="grp1">
+      <div class="gh"><span class="gn">plasma₁</span><button class="clearbtn reset" title="clear group">↺</button></div>
+      <div class="bodyp">
+        <div class="panelrow pal">
+          <span class="lbl bound">palette</span>
+          <div class="swatchwrap"><canvas class="strip"></canvas><span class="pname"></span><span class="chev">▾</span></div>
+          <span class="readout state-slot"></span>
+        </div>
+      </div>
+      <div class="flow"></div>
+    </div>
+    <div class="modgroup" id="grp2">
+      <div class="gh"><span class="gn">plasma₂</span><button class="clearbtn reset" title="clear group">↺</button></div>
+      <div class="bodyp">
+        <div class="panelrow pal">
+          <span class="lbl bound">palette</span>
+          <div class="swatchwrap"><canvas class="strip"></canvas><span class="pname"></span><span class="chev">▾</span></div>
+          <span class="readout state-slot"></span>
+        </div>
+      </div>
+      <div class="flow"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 5 ================= -->
+<h2>5 · Where palettes live (D11)</h2>
+<p class="sub">
+  Both concepts agree on the top and bottom tiers: <b>built-ins are copy-on-use</b> (picking "Party"
+  embeds its stops + provenance into the slot — no catalog ids to drift, share envelopes stay
+  self-contained) and <b>the palette in use is just the slot's value / panel state</b>. They differ on
+  user-saved palettes. In A, <b>click a built-in</b> — watch it appear under "This project" with its
+  usage row: saving IS using.
+  <span class="lean">Lean: <b>A</b> for v1 — zero new storage, the project's palettes are the
+  palettes in its slots; B's <span style="font-family:var(--mono)">palettes/</span> dir waits for
+  save-without-using demand (it needs a blessed-folder enumeration exception the registry
+  deliberately avoids).</span>
+</p>
+<div class="gallery">
+  <div class="concept" id="c5a">
+    <header><span class="tag">A</span><span class="title">Derived project library</span>
+      <span class="note">no new files — "This project"<br>= values authored in slots</span></header>
+    <div class="picker">
+      <div class="plist" style="max-height:340px" id="plist5A"></div>
+    </div>
+  </div>
+  <div class="concept" id="c5b">
+    <header><span class="tag">B</span><span class="title">Explicit palettes/ dir</span>
+      <span class="note">saved files, copy-to-own,<br>vendorable — can sit unused</span></header>
+    <div class="picker">
+      <div class="plist" style="max-height:280px" id="plist5B"></div>
+    </div>
+    <div class="bodyp" style="border-top:1px solid var(--border)">
+      <div class="editrow" style="margin-top:0">
+        <button>💾 save to project as…</button>
+        <span style="font:10.5px var(--mono);color:var(--dim)">→ palettes/dusk-ember.palette.json</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 6 ================= -->
+<h2>6 · Choosing a cycle — GradientConfig (D17, post-TimeProduct)</h2>
+<p class="sub">
+  <b>Round 3 rework.</b> The round-2 cycler-node card is dead — D17 killed it the same way the phasor
+  node died. What ships instead: the chooser writes a
+  <span style="font-family:var(--mono)">GradientConfig = static(Gradient) | cycle{set, step, fade}</span>,
+  and the shader's fill path resolves it — a cycle config makes a <b>phasor query</b> (one full-cycle
+  phasor, period = set×step, so index + blend are pure in φ and scrubbing replays exactly). The rate
+  control below is the <b>landed phasor Speed knob idiom verbatim</b>: label "Speed", unit-aware
+  readout, right = faster. Every live card also renders the <b>clock-face registry row</b> its phasor
+  would produce (green = private, violet = shared). B/C/D are three rival chooser shapes for building
+  a cycle; E is the sharing-semantics demo. <b>Grab any cycling swatch</b> (P5): the writer takes a
+  static snapshot — reins in hand — and <b>↺</b> releases back into the cycle.
+  <span class="lean">Lean: <b>C</b> — no mode switch; a cycle is what you get by adding a second
+  palette, and the tray IS the config. Language question for the gate: the chooser says
+  <i>step</i> ("every 4 s") but the landed knob says <i>Speed</i> ("15/min") — both shown live; the
+  knob's language is marked PROVISIONAL in the code, so this spike gets to decide.</span>
+</p>
+<div class="gallery">
+  <div class="concept" id="c6a">
+    <header><span class="tag">A</span><span class="title">Selector over a set</span>
+      <span class="note">discrete control language:<br>each block = static write</span></header>
+    <div class="bodyp">
+      <div class="panelrow pal">
+        <span class="lbl bound">palette</span>
+        <div>
+          <div class="swatchwrap" style="margin-bottom:6px"><canvas class="strip" id="selstrip"></canvas>
+            <span class="pname" id="selname"></span></div>
+          <div class="setblocks" id="setblocks"></div>
+        </div>
+        <span class="readout"><span class="statechip held">held</span><button class="clearbtn">↺</button></span>
+      </div>
+      <p class="sub" style="margin:8px 0 0">manual next/prev over an authored set — every tap writes
+        <span style="font-family:var(--mono)">static(member)</span>; latch semantics, no time anywhere.</p>
+    </div>
+  </div>
+
+  <div class="concept" id="c6b">
+    <header><span class="tag">B</span><span class="title">Mode tabs: Palette | Cycle</span>
+      <span class="note" style="color:var(--good)">★ CHOSEN at the 3b gate —<br>see §9 for it on the panel</span></header>
+    <div class="picker">
+      <div class="ptabs">
+        <button class="ptab" id="tab6Bstatic">Palette</button>
+        <button class="ptab on" id="tab6Bcycle">↻ Cycle</button>
+      </div>
+      <div id="tab6Bbody1" hidden><div class="plist" id="plist6Bstatic" style="max-height:230px"></div></div>
+      <div id="tab6Bbody2">
+        <div class="plist" id="plist6Bcyc" style="max-height:150px"></div>
+        <div class="cyctray">
+          <div class="traylbl">cycle set · click the list to add</div>
+          <div class="cychips" id="chips6B"></div>
+          <div class="trayrow"><span class="speedlbl">speed</span>
+            <input type="range" id="speed6B" min="0" max="100" value="50">
+            <span class="speedval" id="speedval6B"></span></div>
+          <div class="trayrow"><span class="speedlbl">fade</span>
+            <span class="seg" id="fade6B">
+              <button data-v="0">cut</button><button data-v="300">0.3 s</button><button data-v="900" class="on">0.9 s</button>
+            </span></div>
+        </div>
+      </div>
+    </div>
+    <div class="bodyp">
+      <div class="panelrow pal" id="prow6B" style="padding-top:0">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip" id="prevstrip6B"></canvas><span class="pname" id="prevname6B"></span></div>
+        <span class="readout state-slot" id="prevstate6B"></span>
+      </div>
+      <div style="font:10px var(--mono);color:var(--dim);margin:2px 0 6px" id="cfg6B"></div>
+      <div class="phreg" id="reg6B"></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c6c">
+    <header><span class="tag">C</span><span class="title">Build-in-place: ＋↻ on rows</span>
+      <span class="note">not chosen — B's explicit<br>tabs picked at the 3b gate</span></header>
+    <div class="picker">
+      <div class="plist" id="plist6C" style="max-height:210px"></div>
+      <div class="cyctray" id="tray6C" hidden>
+        <div class="traylbl">↻ cycling <span id="traycount6C"></span>
+          <button class="clearbtn" id="uncycle6C" style="margin-left:auto;font-size:10px" title="back to a static pick">✕ make static</button></div>
+        <div class="cychips" id="chips6C"></div>
+        <div class="trayrow"><span class="speedlbl">speed</span>
+          <input type="range" id="speed6C" min="0" max="100" value="50">
+          <span class="speedval" id="speedval6C"></span></div>
+      </div>
+    </div>
+    <div class="bodyp">
+      <div class="panelrow pal" id="prow6C" style="padding-top:0">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip" id="prevstrip6C"></canvas><span class="pname" id="prevname6C"></span></div>
+        <span class="readout state-slot" id="prevstate6C"></span>
+      </div>
+      <div style="font:10px var(--mono);color:var(--dim);margin:2px 0 6px" id="cfg6C"></div>
+      <div class="phreg" id="reg6C"></div>
+    </div>
+  </div>
+
+  <div class="concept" id="c6d">
+    <header><span class="tag">D</span><span class="title">Cycles are picker rows</span>
+      <span class="note">not chosen at 3b — may return<br>as "saved cycles" in B's list</span></header>
+    <div class="picker">
+      <div class="plist" id="plist6D" style="max-height:265px"></div>
+    </div>
+    <div class="bodyp">
+      <div class="panelrow pal" id="prow6D" style="padding-top:0">
+        <span class="lbl bound">palette</span>
+        <div class="swatchwrap"><canvas class="strip" id="prevstrip6D"></canvas><span class="pname" id="prevname6D"></span></div>
+        <span class="readout state-slot" id="prevstate6D"></span>
+      </div>
+      <div style="font:10px var(--mono);color:var(--dim);margin:2px 0 0" id="cfg6D"></div>
+    </div>
+  </div>
+
+  <div class="concept wide" id="c6e">
+    <header><span class="tag">E</span><span class="title">Same config ≠ same phase (live)</span>
+      <span class="note">identity is the binding, not the value —<br>PhasorKey::Private vs Shared</span></header>
+    <div class="bodyp">
+      <div class="editrow" style="margin:0 0 10px">
+        <span class="seg" id="seg6E">
+          <button data-v="local" class="on">local configs</button><button data-v="shared">bound to bus:palette</button>
+        </span>
+      </div>
+      <div class="provgrid">
+        <div class="provcard" id="prov1">
+          <span class="pnm">plasma₁ <span class="state-slot"></span></span>
+          <div class="swatchwrap" style="cursor:default"><canvas class="strip"></canvas></div>
+          <div class="phbarwrap"><div class="phbar"><i></i></div><span class="phphi"></span></div>
+        </div>
+        <div class="provcard" id="prov2">
+          <span class="pnm">plasma₂ <span class="state-slot"></span></span>
+          <div class="swatchwrap" style="cursor:default"><canvas class="strip"></canvas></div>
+          <div class="phbarwrap"><div class="phbar"><i></i></div><span class="phphi"></span></div>
+        </div>
+      </div>
+      <p class="sub" style="margin:10px 0 0" id="prov6Etxt"></p>
+    </div>
+  </div>
+
+  <div class="concept" id="c6f">
+    <header><span class="tag">F</span><span class="title">Crossfade = slew (P-Q1)</span>
+      <span class="note">static→static changes;<br>LUT-lerp at the bake</span></header>
+    <div class="bodyp">
+      <div class="swatchwrap" style="height:26px;margin-bottom:8px"><canvas class="strip" id="slewstrip"></canvas>
+        <span class="pname" id="slewname"></span></div>
+      <div class="editrow" style="margin-top:0;margin-bottom:8px">
+        <span style="font-size:11px;color:var(--muted)">slew</span>
+        <span class="seg" id="segslew">
+          <button data-v="0">0 ms</button><button data-v="300" class="on">300 ms</button><button data-v="1200">1200 ms</button>
+        </span>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap" id="slewtargets"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 7 ================= -->
+<h2>7 · Dynamic palettes (D14) — generators are content</h2>
+<p class="sub">
+  A dynamic palette is a <b>normal compute shader producing a Gradient value</b> — the same
+  produced-slot contract FluidEmitter sets use today; no special engine feature. Below, a mock
+  "aurora-breather" mutates its stops every tick; the panel control follows in Read (◈), the stops
+  inspector shows it's just a value changing, and <b>grabbing the swatch</b> freezes the moment you
+  captured (P5) — the generator keeps running underneath, shadowed in this scope (P4).
+  <span class="lean">WLED's <i>* Random Cycle</i>, <i>* Color 1</i>, audio-morph — all this one
+  pattern. The only later nicety: a blessed gallery module so it's discoverable without GLSL.
+  Unchanged by D17: plain time-driven cycling moved into the config (§6), but a generator that
+  <i>derives</i> stops from other channels is still a normal compute producer.</span>
+</p>
+<div class="gallery">
+  <div class="concept wide" id="c7">
+    <header><span class="tag">D14</span><span class="title">Compute generator → bus:palette (live)</span>
+      <span class="note">produced: { palette: Gradient } · control-rate · bake re-keys on value hash</span></header>
+    <div class="bodyp" style="display:grid;grid-template-columns:1fr 190px;gap:14px">
+      <div>
+        <div style="border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;background:var(--terminal);margin-bottom:10px">
+          <div style="display:flex;gap:8px;align-items:baseline">
+            <span style="font-weight:700;color:var(--name);font-size:12.5px">aurora-breather</span>
+            <span style="font:600 9px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em">shader/compute · f32</span>
+          </div>
+          <div style="font:10.5px var(--mono);color:var(--dim);margin-top:4px">
+            produced: <span style="color:var(--muted)">palette</span> → <span style="color:var(--bound)">bus:palette</span>
+            &nbsp;·&nbsp; consumed: <span style="color:var(--muted)">time, energy</span>
+          </div>
+        </div>
+        <div class="panelrow pal" id="dynrow" style="grid-template-columns:64px 1fr auto">
+          <span class="lbl bound">palette</span>
+          <div class="swatchwrap"><canvas class="strip" id="dynstrip"></canvas><span class="pname" id="dynname"></span></div>
+          <span class="readout state-slot" id="dynstate"></span>
+        </div>
+      </div>
+      <div>
+        <div style="font:700 9.5px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">live Gradient value</div>
+        <div id="dyninspect" style="font:10px var(--mono);color:var(--muted);display:grid;gap:3px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 8 ================= -->
+<h2>8 · Who ships a shared cycle? (open — needs Yona)</h2>
+<p class="sub">
+  D17's one open remainder. Panel state is performance-only — it stays on the device and never ships
+  with the project. So when "these four palettes, every 4 s" is part of the <i>art</i>, who is the
+  authored writer of <span style="font-family:var(--mono)">bus:palette</span>? Two candidates, not
+  live — this is an information-architecture question, not an interaction one.
+  <span class="lean">Lean: <b>A</b> — keep the Palette node, shrunk to a config source with a
+  set-editor face and <b>zero time logic</b> (it writes the config; the <i>consumers'</i> fill paths
+  query the phasor). It preserves the "standard set of built-in nodes" direction and gives the shared
+  cycle a face, probe row, and add-menu discoverability. B is the honest v1 cut if the node feels
+  premature.</span>
+</p>
+<div class="gallery">
+  <div class="concept" id="c8a">
+    <header><span class="tag">A</span><span class="title">Palette node = config source</span>
+      <span class="note">ships with the project;<br>zero time logic inside</span></header>
+    <div class="bodyp">
+      <div class="qcard">
+        <div class="qh"><span class="nm">palette</span>
+          <span class="k">node · produces bus:palette</span></div>
+        <div class="cychips" id="chips8A"></div>
+        <div class="trayrow"><span class="speedlbl">speed</span>
+          <div class="fader" style="flex:1"><i style="left:34%"></i></div>
+          <span class="speedval" id="speedval8A"></span></div>
+        <div class="trayrow"><span class="speedlbl">fade</span>
+          <div class="fader" style="flex:1"><i style="left:22%"></i></div>
+          <span style="color:var(--muted)">0.9 s</span></div>
+        <div style="font:10px var(--mono);color:var(--dim)">writes
+          <span style="color:var(--muted)">cycle{set:4, step:4s, fade:0.9s}</span> — a value, not a clock;
+          consumers' phasor queries share phase via the channel (E)</div>
+      </div>
+      <p class="sub" style="margin:8px 0 0">the face IS the set editor (§6's tray, node-grade);
+        deletes nothing from the chooser — panel picks still shadow it per scope (R11).</p>
+    </div>
+  </div>
+  <div class="concept" id="c8b">
+    <header><span class="tag">B</span><span class="title">Panel-state only (defer the node)</span>
+      <span class="note">v1 cut: shared cycles are<br>performance, not art</span></header>
+    <div class="bodyp">
+      <div class="qcard">
+        <div class="qh"><span class="nm">aurora-dome</span><span class="k">module panel</span></div>
+        <div class="panelrow pal" style="padding:4px 0">
+          <span class="lbl bound">palette</span>
+          <div class="swatchwrap" style="cursor:default"><canvas class="strip" id="strip8B"></canvas>
+            <span class="pname">↻ 4 palettes</span></div>
+          <span class="readout"><span class="statechip held">held</span></span>
+        </div>
+        <div style="font:10px var(--mono);color:var(--dim)">the cycle config lives in
+          <span style="color:var(--muted)">.lp/panel.json</span> — restores on boot (P10), but does
+          NOT ship in a share envelope</div>
+      </div>
+      <p class="sub" style="margin:8px 0 0">art-tier sharing falls back to per-slot authored configs
+        (each effect carries its own cycle — no phase lock across effects without a channel writer).</p>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SECTION 9 ================= -->
+<h2>9 · The panel dropdown — B's tabs, anchored on the panel (round 3c, live)</h2>
+<p class="sub">
+  <b>B chosen at the 3b gate</b>, so the popup now carries B's structure — <b>Palette | ↻ Cycle
+  tabs</b> — and the whole thing is <b>anchored under the panel row</b>, dropdown-style, overlaying
+  the controls below it (gold join = the engaged writer). The tabs map 1:1 onto
+  <span style="font-family:var(--mono)">GradientConfig = static | cycle</span>, and they dissolve
+  round 3b's ambiguous list-click rule: in the Palette tab a click <b>selects</b>, in the Cycle tab
+  a click <b>adds</b>. The closed row is <b>mode-adaptive</b> — static shows a plain strip + name
+  (any palette control), cycle shows member chips + rate — which retires the a-vs-b variant
+  question. ✎ (cycle chips, project rows) still flips the popup into the editor.
+  <span class="lean">The anchoring here is a spike-grade approximation: popup joined to the row with
+  a shared gold outline. The REAL join is the contiguous merged-outline system
+  (<span style="font-family:var(--mono)">spikes/contiguous-popup</span>) which lives with the story
+  world — composition, dismissal, layering, and phone presentation are <b>story questions for M4</b>,
+  not spike questions. This card is the design intent those stories rebuild.</span>
+</p>
+<div class="gallery">
+  <div class="concept wide" id="c9" style="width:860px;max-width:100%;overflow:visible">
+    <header><span class="tag">DD</span><span class="title">Panel row + anchored dropdown (live)</span>
+      <span class="note">click the palette row to open/close · tabs switch the config kind · ✎ = editor takes over</span></header>
+    <div class="bodyp" style="display:grid;grid-template-columns:400px 1fr;gap:18px;align-items:start;min-height:600px">
+      <div>
+        <div class="modpanel" style="width:100%;overflow:visible">
+          <header><span class="nm">aurora-dome</span><span class="k">root module · panel</span></header>
+          <div class="bodyp" style="padding:4px 12px 8px;overflow:visible">
+            <div class="panelrow"><span class="lbl bound">speed</span><div class="knob"><i></i></div>
+              <span class="readout"><span class="live">1.4</span><span class="authored">(1.0)</span></span></div>
+            <div class="ddanchor" id="ddanchor">
+              <div class="panelrow pal" id="ddrow" style="grid-template-columns:64px 1fr auto">
+                <span class="lbl bound">palette</span>
+                <span id="ddface"></span>
+                <span class="readout state-slot" id="ddstate"></span>
+              </div>
+              <div class="ddpop2" id="ddpop" hidden>
+                <div id="ddview-list">
+                  <div class="ptabs">
+                    <button class="ptab" id="ddtabstatic">Palette</button>
+                    <button class="ptab on" id="ddtabcycle">↻ Cycle</button>
+                  </div>
+                  <div id="ddstaticbody" hidden>
+                    <div class="searchbar"><input type="search" placeholder="search palettes…" id="ddsearchS">
+                      <button class="imp" title="Paste WLED palette JSON">⇪ import</button></div>
+                    <div class="plist" id="ddplistS" style="max-height:236px"></div>
+                  </div>
+                  <div id="ddcyclebody">
+                    <div class="ddsetstrip" id="ddsetstrip"></div>
+                    <div class="searchbar"><input type="search" placeholder="add palettes…" id="ddsearchC"></div>
+                    <div class="plist" id="ddplistC" style="max-height:140px"></div>
+                    <div class="ddcyclebar" id="ddcyclebar">
+                      <div class="trayrow" id="ddspeedrow"><span class="speedlbl">speed</span>
+                        <input type="range" id="ddspeed" min="0" max="100">
+                        <span class="speedval" id="ddspeedval"></span></div>
+                      <div class="trayrow" id="ddfaderow"><span class="speedlbl">fade</span>
+                        <span class="seg" id="ddfade">
+                          <button data-v="0">cut</button><button data-v="300">0.3 s</button><button data-v="900" class="on">0.9 s</button>
+                        </span></div>
+                      <div class="ddhint" id="ddhint"></div>
+                    </div>
+                  </div>
+                </div>
+                <div id="ddview-edit" hidden>
+          <div class="ddedit-title">
+            <span class="t">✎</span><input id="ddename" value="">
+            <span class="prov" id="ddeprov"></span>
+            <button class="imp done" id="ddedone">done</button>
+            <button class="imp" id="ddecancel" title="discard">✕</button>
+          </div>
+          <div class="editor">
+            <div class="gradbar" id="ddgradbar"><canvas class="strip" id="ddeditcanvas"></canvas></div>
+            <div class="editrow">
+              <label>stop <input type="color" id="ddstopcolor"></label>
+              <label>at <input type="number" id="ddstoppos" min="0" max="1" step="0.01"></label>
+              <button id="dddelstop">delete stop</button>
+              <span style="flex:1"></span>
+              <span class="seg" id="ddsegspace">
+                <button data-v="srgb">sRGB</button><button data-v="oklab" class="on">Oklab</button>
+              </span>
+              <span class="seg" id="ddsegmethod">
+                <button data-v="step">Step</button><button data-v="linear">Linear</button><button data-v="smooth" class="on">Smooth</button>
+              </span>
+            </div>
+            <p class="sub" style="margin:10px 0 0">dbl-click the bar to add a stop · drag handles ·
+              the edit lands as a <b>project custom</b> and replaces the chip in the set; the
+              built-in stays untouched in the catalog.</p>
+          </div>
+                </div>
+              </div>
+            </div>
+            <div class="panelrow"><span class="lbl">glow</span><div class="fader"><i></i></div>
+              <span class="readout">0.62</span></div>
+            <div class="panelrow"><span class="lbl bound">energy</span><div class="fader"><i style="left:71%"></i></div>
+              <span class="readout"><span class="live">0.71</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="sub" style="margin:0 0 12px">The dropdown grows out of the row and overlays the
+          controls beneath it (glow and energy are still there, under the popup). The gold join is
+          the engaged treatment — this row's writer holds the config while the popup is open.
+          Switch tabs and watch the closed face swap: <b>Palette</b> → plain strip + name,
+          <b>↻ Cycle</b> → member chips + rate.</p>
+        <div style="font:700 9.5px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px">answered here (spike-grade)</div>
+        <p class="sub" style="margin:0 0 12px">the closed-row face per mode · B's tab structure and
+          what lives in each tab · the editor-takeover flow · engaged treatment while open · exactly
+          which GradientConfig each gesture writes</p>
+        <div style="font:700 9.5px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px">waits for the story system (M4)</div>
+        <p class="sub" style="margin:0">the real contiguous merged outline
+          (<span style="font-family:var(--mono)">spikes/contiguous-popup</span>'s SVG union) ·
+          dismissal / click-away · layering over neighboring cards · phone presentation (anchored
+          vs bottom sheet) · scroll containment at 30+ entries · open/close motion</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============ color math (real: sRGB <-> linear <-> Oklab) ============ */
+const s2l = c => c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+const l2s = c => c <= 0.0031308 ? 12.92*c : 1.055*Math.pow(c, 1/2.4) - 0.055;
+function linToOklab([r,g,b]) {
+  const l = 0.4122214708*r + 0.5363325363*g + 0.0514459929*b;
+  const m = 0.2119034982*r + 0.6806995451*g + 0.1073969566*b;
+  const s = 0.0883024619*r + 0.2817188376*g + 0.6299787005*b;
+  const l_=Math.cbrt(l), m_=Math.cbrt(m), s_=Math.cbrt(s);
+  return [0.2104542553*l_+0.7936177850*m_-0.0040720468*s_,
+          1.9779984951*l_-2.4285922050*m_+0.4505937099*s_,
+          0.0259040371*l_+0.7827717662*m_-0.8086757660*s_];
+}
+function oklabToLin([L,a,b]) {
+  const l_=L+0.3963377774*a+0.2158037573*b;
+  const m_=L-0.1055613458*a-0.0638541728*b;
+  const s_=L-0.0894841775*a-1.2914855480*b;
+  const l=l_**3, m=m_**3, s=s_**3;
+  return [ 4.0767416621*l-3.3077115913*m+0.2309699292*s,
+          -1.2684380046*l+2.6097574011*m-0.3413193965*s,
+          -0.0041960863*l-0.7034186147*m+1.7076147010*s];
+}
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const smoothstep = t => t*t*(3-2*t);
+
+/* sample palette at t in [0,1); stops = [{at, c:[srgb 0-1 ×3]}] sorted */
+function samplePal(pal, t, space, method) {
+  const st = pal.stops;
+  t = clamp01(t);
+  let i = 0;
+  while (i < st.length-1 && st[i+1].at <= t) i++;
+  if (method === 'step' || i === st.length-1) return st[i].c;
+  const a = st[i], b = st[i+1];
+  let f = (t - a.at) / Math.max(1e-6, b.at - a.at);
+  if (method === 'smooth') f = smoothstep(f);
+  if (space === 'srgb') return a.c.map((v,k) => v + (b.c[k]-v)*f);
+  const la = linToOklab(a.c.map(s2l)), lb = linToOklab(b.c.map(s2l));
+  const lm = la.map((v,k) => v + (lb[k]-v)*f);
+  return oklabToLin(lm).map(v => clamp01(l2s(clamp01(v))));
+}
+function renderStrip(canvas, pal, space, method) {
+  const W = 256, H = 1;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  for (let x = 0; x < W; x++) {
+    const c = samplePal(pal, x/(W-1), space ?? pal.space, method ?? pal.method);
+    img.data[x*4]   = Math.round(clamp01(c[0])*255);
+    img.data[x*4+1] = Math.round(clamp01(c[1])*255);
+    img.data[x*4+2] = Math.round(clamp01(c[2])*255);
+    img.data[x*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  canvas.style.imageRendering = (method ?? pal.method) === 'step' ? 'pixelated' : 'auto';
+}
+
+/* ============ catalog (hand-authored approximations of the classics) ============ */
+const P = (name, cat, stops, space='srgb', method='linear', meta) =>
+  ({ name, cat, space, method, meta,
+     stops: stops.map(([at, hex]) => ({ at, c: [(hex>>16&255)/255,(hex>>8&255)/255,(hex&255)/255] })) });
+
+const CATALOG = [
+  /* Stock (FastLED-lineage) */
+  P('Rainbow','stock',[[0,0xff0000],[.17,0xffa500],[.33,0xffff00],[.5,0x00ff00],[.67,0x0000ff],[.83,0x4b0082],[1,0xff00ee]]),
+  P('Party','stock',[[0,0x5500ab],[.16,0x84007c],[.33,0xb5004b],[.5,0xe5001b],[.66,0xe81700],[.83,0xb84700],[1,0xab7700]]),
+  P('Lava','stock',[[0,0x000000],[.4,0x8b0000],[.75,0xff4500],[.92,0xffa500],[1,0xffffff]]),
+  P('Ocean','stock',[[0,0x191970],[.35,0x0000cd],[.65,0x00bfff],[.85,0x7fffd4],[1,0xf0ffff]]),
+  P('Forest','stock',[[0,0x013220],[.4,0x228b22],[.75,0x32cd32],[1,0xbfff9f]]),
+  P('Cloud','stock',[[0,0x4682b4],[.4,0x87ceeb],[.75,0xf8f8ff],[1,0xb0c4de]]),
+  P('Heat','stock',[[0,0x000000],[.33,0xcc0000],[.66,0xffff00],[1,0xffffcc]]),
+  /* Classic (cpt-city-lineage) */
+  P('Sunset','classic',[[0,0x120d5e],[.25,0x8b1e6b],[.55,0xe3342f],[.8,0xff8c2f],[1,0xffd166]],'srgb','linear','es/atmospheric/es_sunset_02'),
+  P('Aurora','classic',[[0,0x011a2e],[.3,0x00c48f],[.55,0x27e0b0],[.78,0x7a3ff2],[1,0x2d0a54]],'srgb','linear','es/aurora/es_aurora_04'),
+  P('Fire','classic',[[0,0x000000],[.45,0xb00000],[.8,0xffc02f],[1,0xfff4c9]]),
+  P('Icefire','classic',[[0,0x000000],[.35,0x001f9e],[.7,0x00c8e0],[1,0xeaffff]]),
+  P('Sakura','classic',[[0,0xc4245c],[.4,0xff77a8],[.75,0xffc2d1],[1,0xfff0f3]],'srgb','linear','rc/sakura/sakura_01'),
+  P('Tiamat','classic',[[0,0x02163a],[.3,0x0aa4b8],[.55,0xe23bd9],[.8,0xff9c68],[1,0xfff0b0]]),
+  P('April Night','classic',[[0,0x011963],[.25,0x059926],[.5,0x011963],[.75,0xe60611],[1,0x011963]]),
+  P('Departure','classic',[[0,0x2a1400],[.35,0xb87333],[.55,0xffffff],[.75,0x2eb82e],[1,0x0a3d0a]],'srgb','linear','mjf/departure'),
+  P('Landscape','classic',[[0,0x073b00],[.42,0x8ecf3c],[.52,0xf7f7c8],[.62,0x4ba7d6],[1,0x02264c]]),
+  P('Beach','classic',[[0,0xffe9b8],[.4,0x66d1c1],[.75,0x1a8fb0],[1,0x0a3d62]],'srgb','linear','rc/beach/holiday_05'),
+  P('Vintage','classic',[[0,0x4a1e10],[.35,0xb0603a],[.7,0xe8c07a],[1,0xf4ead0]],'srgb','linear','es/vintage/es_vintage_57'),
+  P('Candy','classic',[[0,0xff2e7e],[.35,0xfff4f8],[.65,0x35c4f0],[1,0x7a2ef0]]),
+  P('Pastel','classic',[[0,0xa8e6cf],[.33,0xdcedc1],[.66,0xffd3b6],[1,0xffaaa5]]),
+  P('C9','classic',[[0,0xb80000],[.25,0xb80000],[.2501,0x006b1f],[.5,0x006b1f],[.5001,0x0033a8],[.75,0x0033a8],[.7501,0xd94f00],[1,0xd94f00]],'srgb','step','christmas lights'),
+  P('Analogous','classic',[[0,0x0f52ba],[.5,0x7a2ef0],[1,0xff2e5b]]),
+  P('Breeze','classic',[[0,0x0e3d4d],[.5,0x2ba2a8],[1,0xbfeff2]]),
+  /* Project customs */
+  P('fyeah warm','project',[[0,0x241102],[.4,0xd96b0c],[.8,0xffd28a],[1,0xfff7e0]],'oklab','smooth','ported from idle.glsl'),
+  P('fyeah cool','project',[[0,0x02102e],[.5,0x1e78c8],[1,0xb8f0ff]],'oklab','smooth','ported from idle.glsl'),
+  P('gala teal→rose','project',[[0,0x0b4f5c],[.55,0x4fb8a8],[1,0xe86a8a]],'oklab','smooth'),
+];
+const LONGNAME = {
+  'Sunset':'Sunset 2 — es_atmospheric es_sunset_02 (cpt-city, J. Cook CC-BY-SA)',
+  'Aurora':'Aurora Borealis Green/Violet — es_aurora_04_gp (cpt-city import)',
+  'fyeah warm':'fyeah-sign idle · warm cosine port (was applyPalette p=2)',
+};
+const CATLABEL = { project: 'Project', stock: 'Stock', classic: 'Classic (cpt-city)' };
+
+/* ============ shared state ============ */
+const state = {
+  current: CATALOG.findIndex(p => p.name === 'Aurora'),
+  s1state: 'inherit',
+  long: false,
+};
+const cur = () => CATALOG[state.current];
+const dispName = p => (state.long && LONGNAME[p.name]) ? LONGNAME[p.name] : p.name;
+
+/* ============ section 1 ============ */
+function renderS1() {
+  document.querySelectorAll('#c1a .pal, #c1b .pal, #c1c .pal').forEach(row => {
+    row.classList.remove('pal-state-engaged','pal-state-automated');
+    if (state.s1state === 'engaged') row.classList.add('pal-state-engaged');
+    if (state.s1state === 'automated') row.classList.add('pal-state-automated');
+    row.querySelectorAll('canvas.strip').forEach(cv => renderStrip(cv, cur()));
+    const nm = row.querySelector('.pname'); if (nm) nm.textContent = dispName(cur());
+    const chip = row.querySelector('.chipname'); if (chip) chip.textContent = dispName(cur());
+    const slot = row.querySelector('.state-slot');
+    slot.innerHTML = {
+      default:   '<span class="statechip default">default</span>',
+      inherit:   '<span class="statechip inherit">↑ aurora-dome</span>',
+      cycling:   `<span class="statechip cyc">↻ ${speedDisp(S1CYC.stepMs/1000)}</span>`,
+      automated: '<span class="statechip auto">◈ breather</span>',
+      engaged:   '<span class="statechip held">held</span><button class="clearbtn" title="release">↺</button>',
+    }[state.s1state];
+  });
+}
+document.querySelectorAll('.controls [data-st]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.controls [data-st]').forEach(x => x.classList.toggle('on', x === b));
+  state.s1state = b.dataset.st; renderS1();
+});
+document.getElementById('longnames').onchange = e => { state.long = e.target.checked; renderAll(); };
+document.getElementById('palprev').onclick = () => { state.current = (state.current+CATALOG.length-1)%CATALOG.length; renderAll(); };
+document.getElementById('palnext').onclick = () => { state.current = (state.current+1)%CATALOG.length; renderAll(); };
+
+/* ============ section 2 ============ */
+const CATORDER = { project: 0, stock: 1, classic: 2 };
+function catalogFiltered(q, includeProject) {
+  return CATALOG.map((p,i)=>({p,i}))
+    .filter(({p}) => includeProject || p.cat !== 'project')
+    .filter(({p}) => !q || dispName(p).toLowerCase().includes(q) || p.cat.includes(q))
+    .sort((a,b) => CATORDER[a.p.cat] - CATORDER[b.p.cat]);
+}
+function pickPalette(i) { state.current = i; renderAll(); }
+
+function renderListPicker(rootId, q) {
+  const root = document.getElementById(rootId);
+  const inc = document.getElementById('emptyproj').checked;
+  root.innerHTML = '';
+  let lastCat = null;
+  for (const {p,i} of catalogFiltered(q, inc)) {
+    if (p.cat !== lastCat) {
+      lastCat = p.cat;
+      const h = document.createElement('div'); h.className = 'pcat'; h.textContent = CATLABEL[p.cat];
+      root.appendChild(h);
+    }
+    const row = document.createElement('div');
+    row.className = 'prow' + (i === state.current ? ' sel' : '');
+    row.innerHTML = `<span class="pn">${dispName(p)}${p.meta ? `<small>${p.meta}</small>` : ''}</span>
+                     <span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => pickPalette(i);
+    if (rootId === 'plistC') {
+      row.onmouseenter = () => heroPreview(i);
+      row.onmouseleave = () => heroPreview(state.current);
+    }
+    root.appendChild(row);
+    renderStrip(row.querySelector('canvas'), p);
+  }
+  if (!root.children.length) {
+    const e = document.createElement('div'); e.className='pcat'; e.textContent = 'no palettes match'; root.appendChild(e);
+  }
+}
+function renderGridPicker(q) {
+  const root = document.getElementById('pgridB');
+  const inc = document.getElementById('emptyproj').checked;
+  root.innerHTML = '';
+  for (const {p,i} of catalogFiltered(q, inc)) {
+    const t = document.createElement('div');
+    t.className = 'ptile' + (i === state.current ? ' sel' : '');
+    t.innerHTML = `<div class="tstrip"><canvas class="strip"></canvas></div><div class="tname">${dispName(p)}</div>`;
+    t.onclick = () => pickPalette(i);
+    root.appendChild(t);
+    renderStrip(t.querySelector('canvas'), p);
+  }
+}
+['searchA','searchB','searchC'].forEach(id =>
+  document.getElementById(id).addEventListener('input', renderPickers));
+document.getElementById('emptyproj').onchange = renderPickers;
+function renderPickers() {
+  renderListPicker('plistA', document.getElementById('searchA').value.trim().toLowerCase());
+  renderGridPicker(document.getElementById('searchB').value.trim().toLowerCase());
+  renderListPicker('plistC', document.getElementById('searchC').value.trim().toLowerCase());
+}
+
+/* hero LED preview (concept C) */
+const LEDN = 26;
+const ledstrip = document.getElementById('ledstrip');
+for (let i = 0; i < LEDN; i++) { const d = document.createElement('div'); d.className='led'; ledstrip.appendChild(d); }
+let heroIdx = null, heroT = 0;
+function heroPreview(i) {
+  heroIdx = i;
+  const p = CATALOG[i];
+  document.getElementById('heroname').textContent = dispName(p);
+  document.getElementById('herometa').textContent =
+    `${p.cat} · ${p.stops.length} stops · ${p.space} / ${p.method}${p.meta ? ' · ' + p.meta : ''}`;
+}
+function heroTick() {
+  heroT += 0.004;
+  if (heroIdx !== null) {
+    const p = CATALOG[heroIdx];
+    [...ledstrip.children].forEach((led, i) => {
+      const c = samplePal(p, (i/LEDN + heroT) % 1, p.space, p.method);
+      led.style.background = `rgb(${c.map(v=>Math.round(clamp01(v)*255)).join(',')})`;
+      led.style.boxShadow = `0 0 6px rgba(${c.map(v=>Math.round(clamp01(v)*255)).join(',')},.55)`;
+    });
+  }
+  requestAnimationFrame(heroTick);
+}
+
+/* ============ section 3 ============ */
+const edit = {
+  stops: [ {at:0, c:[0.05,0.02,0.30]}, {at:0.45, c:[0.02,0.65,0.55]}, {at:1, c:[1.0,0.82,0.25]} ],
+  space: 'srgb', method: 'linear', sel: 1,
+};
+const editPal = () => ({ stops: edit.stops, space: edit.space, method: edit.method });
+const hex = c => '#' + c.map(v => Math.round(clamp01(v)*255).toString(16).padStart(2,'0')).join('');
+const unhex = h => [1,3,5].map(i => parseInt(h.slice(i,i+2),16)/255);
+
+const gradbar = document.getElementById('gradbar');
+function renderEditor() {
+  edit.stops.sort((a,b) => a.at - b.at);
+  renderStrip(document.getElementById('editcanvas'), editPal());
+  gradbar.querySelectorAll('.stop').forEach(n => n.remove());
+  edit.stops.forEach((s, i) => {
+    const h = document.createElement('div');
+    h.className = 'stop' + (i === edit.sel ? ' sel' : '');
+    h.style.left = (s.at*100) + '%';
+    h.innerHTML = `<span class="dot" style="background:${hex(s.c)}"></span>`;
+    h.onpointerdown = ev => {
+      edit.sel = i; renderEditor();
+      const rect = gradbar.getBoundingClientRect();
+      const move = e => {
+        s.at = clamp01((e.clientX - rect.left) / rect.width);
+        renderEditor(); renderCmp();
+      };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+      ev.preventDefault();
+    };
+    gradbar.appendChild(h);
+  });
+  const s = edit.stops[edit.sel] ?? edit.stops[0];
+  document.getElementById('stopcolor').value = hex(s.c);
+  document.getElementById('stoppos').value = s.at.toFixed(2);
+  /* stop list (B) mirrors the same value */
+  const sl = document.getElementById('stoplist');
+  sl.innerHTML = '';
+  edit.stops.forEach((st, i) => {
+    const r = document.createElement('div'); r.className = 'srow';
+    r.innerHTML = `<span class="pos">${st.at.toFixed(2)}</span>
+      <input type="color" value="${hex(st.c)}" style="width:100%;height:20px;border:1px solid var(--border-strong);border-radius:4px;background:var(--terminal);padding:1px">
+      <span class="chip" style="background:${hex(st.c)}"></span>
+      <button class="del" title="remove">✕</button>`;
+    r.querySelector('input').oninput = e => { st.c = unhex(e.target.value); renderEditor(); renderCmp(); };
+    r.querySelector('.del').onclick = () => {
+      if (edit.stops.length > 2) { edit.stops.splice(i,1); edit.sel = 0; renderEditor(); renderCmp(); }
+    };
+    sl.appendChild(r);
+  });
+}
+gradbar.ondblclick = e => {
+  const rect = gradbar.getBoundingClientRect();
+  const at = clamp01((e.clientX - rect.left) / rect.width);
+  const c = samplePal(editPal(), at, edit.space, edit.method);
+  edit.stops.push({at, c: c.slice()});
+  edit.sel = edit.stops.length - 1;
+  renderEditor(); renderCmp();
+};
+document.getElementById('stopcolor').oninput = e => { edit.stops[edit.sel].c = unhex(e.target.value); renderEditor(); renderCmp(); };
+document.getElementById('stoppos').oninput = e => { edit.stops[edit.sel].at = clamp01(+e.target.value || 0); renderEditor(); renderCmp(); };
+document.getElementById('delstop').onclick = () => {
+  if (edit.stops.length > 2) { edit.stops.splice(edit.sel,1); edit.sel = 0; renderEditor(); renderCmp(); }
+};
+document.getElementById('addstop').onclick = () => {
+  edit.stops.push({at: 0.5, c: [0.9,0.4,0.7]}); edit.sel = edit.stops.length-1; renderEditor(); renderCmp();
+};
+document.getElementById('segspace').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('segspace').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+  edit.space = b.dataset.v; renderEditor();
+});
+document.getElementById('segmethod').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('segmethod').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+  edit.method = b.dataset.v; renderEditor();
+});
+
+/* comparison grid */
+function renderCmp() {
+  const grid = document.getElementById('cmpgrid');
+  grid.querySelectorAll('.cl,.cell').forEach(n => n.remove());
+  for (const space of ['srgb','oklab']) {
+    const lab = document.createElement('span'); lab.className = 'cl'; lab.textContent = space; grid.appendChild(lab);
+    for (const method of ['step','linear','smooth']) {
+      const cell = document.createElement('div'); cell.className = 'cell';
+      const cv = document.createElement('canvas'); cv.className = 'strip'; cell.appendChild(cv);
+      grid.appendChild(cell);
+      renderStrip(cv, { stops: edit.stops }, space, method);
+    }
+  }
+}
+
+/* ============ section 4 ============ */
+const inh = {
+  host: CATALOG.findIndex(p => p.name === 'Aurora'),
+  g1: { engaged: false, pal: CATALOG.findIndex(p => p.name === 'Lava') },
+  g2: { engaged: false, pal: CATALOG.findIndex(p => p.name === 'Icefire') },
+};
+function renderInherit() {
+  const host = document.getElementById('hostpal');
+  renderStrip(host.querySelector('canvas'), CATALOG[inh.host]);
+  host.querySelector('.pname').textContent = dispName(CATALOG[inh.host]);
+  host.querySelector('.state-slot').innerHTML = '<span class="statechip held">held</span><button class="clearbtn" title="release">↺</button>';
+  [['grp1','g1'],['grp2','g2']].forEach(([gid, key]) => {
+    const g = document.getElementById(gid), s = inh[key];
+    const row = g.querySelector('.pal');
+    row.classList.toggle('pal-state-engaged', s.engaged);
+    const shown = s.engaged ? CATALOG[s.pal] : CATALOG[inh.host];
+    renderStrip(row.querySelector('canvas'), shown);
+    row.querySelector('.pname').textContent = dispName(shown);
+    row.querySelector('.state-slot').innerHTML = s.engaged
+      ? '<span class="statechip held">held</span><button class="clearbtn" title="release">↺</button>'
+      : '<span class="statechip inherit">↑ aurora-dome</span>';
+    g.querySelector('.flow').innerHTML = s.engaged
+      ? `<span class="heldtxt">● own writer in Scope(${gid === 'grp1' ? 'plasma₁' : 'plasma₂'})</span> — detached from host (R11); ↺ re-attaches`
+      : `○ no local writer — resolves <span class="via">outward</span> to aurora-dome's palette (R5)`;
+    row.querySelector('.swatchwrap').onclick = () => {
+      if (!s.engaged) { s.engaged = true; }
+      else { s.pal = (s.pal + 1) % CATALOG.length; }
+      renderInherit();
+    };
+    const clr = () => { s.engaged = false; renderInherit(); };
+    g.querySelector('.reset').onclick = clr;
+    row.querySelector('.state-slot').onclick = e => { if (e.target.closest('.clearbtn')) clr(); };
+  });
+  host.querySelector('.swatchwrap').onclick = () => {
+    inh.host = (inh.host + 1) % CATALOG.length;
+    renderInherit();
+  };
+}
+
+/* ============ section 5: storage concepts ============ */
+const byName = n => CATALOG.find(p => p.name === n);
+const s5 = { adopted: [] }; /* built-ins copied into "This project" by clicking (concept A) */
+const S5_USAGE = { 'fyeah warm': 'idle.palette', 'fyeah cool': 'idle.palette (entry b)', 'gala teal→rose': 'blast.tint' };
+function rowFor(p, extraHtml, onclick) {
+  const row = document.createElement('div');
+  row.className = 'prow';
+  row.innerHTML = `<span class="pn">${p.name}${extraHtml ?? ''}</span>
+                   <span class="mini"><canvas class="strip"></canvas></span>`;
+  renderStrip(row.querySelector('canvas'), p);
+  if (onclick) row.onclick = onclick;
+  return row;
+}
+const DUSK_EMBER = P('dusk ember','project',[[0,0x1a0505],[.5,0xb0342a],[1,0xf0a35e]]);
+function renderS5() {
+  const A = document.getElementById('plist5A');
+  A.innerHTML = '';
+  let h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'This project · derived from slots in use'; A.appendChild(h);
+  for (const p of CATALOG.filter(p => p.cat === 'project'))
+    A.appendChild(rowFor(p, `<small>${S5_USAGE[p.name] ?? ''}</small>`));
+  for (const name of s5.adopted)
+    A.appendChild(rowFor(byName(name), `<small>just embedded → idle.palette · provenance: built-in</small>`));
+  h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'Built-in · copy-on-use (click one)'; A.appendChild(h);
+  for (const p of CATALOG.filter(p => p.cat === 'stock').slice(0, 6))
+    A.appendChild(rowFor(p, null, () => {
+      if (!s5.adopted.includes(p.name)) s5.adopted.push(p.name);
+      renderS5();
+    }));
+
+  const B = document.getElementById('plist5B');
+  B.innerHTML = '';
+  h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'Saved · palettes/ (committed files)'; B.appendChild(h);
+  const saved = [[byName('fyeah warm'),'fyeah-warm.palette.json · in use'],
+                 [DUSK_EMBER,'dusk-ember.palette.json · unused'],
+                 [byName('gala teal→rose'),'gala-teal-rose.palette.json · in use']];
+  for (const [p, meta] of saved) B.appendChild(rowFor(p, `<small>${meta}</small>`));
+}
+
+/* blended strip render (crossfade/slew demos) */
+function renderStripBlend(canvas, palA, palB, mix) {
+  const W = 256; canvas.width = W; canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, 1);
+  for (let x = 0; x < W; x++) {
+    const t = x/(W-1);
+    const a = samplePal(palA, t, palA.space, palA.method);
+    const b = samplePal(palB, t, palB.space, palB.method);
+    for (let k = 0; k < 3; k++) img.data[x*4+k] = Math.round(clamp01(a[k]+(b[k]-a[k])*mix)*255);
+    img.data[x*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/* ============ section 6 ============ */
+/* A: selector over a set */
+const SET6 = ['Aurora','Lava','Icefire','Party'];
+let sel6 = 0;
+function renderSel6() {
+  renderStrip(document.getElementById('selstrip'), byName(SET6[sel6]));
+  document.getElementById('selname').textContent = SET6[sel6];
+  const root = document.getElementById('setblocks');
+  root.innerHTML = '';
+  SET6.forEach((n, i) => {
+    const b = document.createElement('div');
+    b.className = 'blk' + (i === sel6 ? ' on' : '');
+    b.title = n;
+    const cv = document.createElement('canvas'); cv.className = 'strip'; b.appendChild(cv);
+    b.onclick = () => { sel6 = i; renderSel6(); };
+    root.appendChild(b);
+    renderStrip(cv, byName(n));
+  });
+}
+
+/* ===== round 3: GradientConfig machinery (landed TimeProduct vocabulary) ===== */
+
+/* the landed unit-aware speed readout — port of phasor_speed_display (panel_control.rs:274).
+   smallest unit keeping count >= 1; /hr is the floor; >= 9.95 rounds to integer; frozen = 0/s */
+function speedDisp(periodSec) {
+  if (!(periodSec > 0)) return '0/s';
+  for (const [sec, unit] of [[1,'s'],[60,'min'],[3600,'hr']]) {
+    const n = sec / periodSec;
+    if (n >= 1 || unit === 'hr') {
+      const num = n >= 9.95 ? String(Math.round(n)) : (Math.round(n*10)/10).toFixed(1).replace(/\.0$/,'');
+      return `${num}/${unit}`;
+    }
+  }
+}
+/* the clock face still speaks period ("4s" / "frozen") — both languages shown deliberately */
+const fmtPeriod = p => p > 0 ? (p >= 10 ? Math.round(p)+'s' : (Math.round(p*100)/100)+'s') : 'frozen';
+const fmtStep = ms => ms >= 10000 ? Math.round(ms/1000)+'s' : (Math.round(ms/100)/10)+'s';
+
+/* speed slider (0..100, right = faster — the landed knob inverts) <-> step period, log scale */
+const SLID_PMAX = 60, SLID_PMIN = 0.5;
+const slid2period = v => Math.exp(Math.log(SLID_PMAX) + (Math.log(SLID_PMIN)-Math.log(SLID_PMAX)) * (v/100));
+const period2slid = p => Math.round(100 * (Math.log(p) - Math.log(SLID_PMAX)) / (Math.log(SLID_PMIN) - Math.log(SLID_PMAX)));
+
+let simMs = 0; /* the sim's bus:time — advanced by the master tick */
+
+/* pure cycle evaluation: ONE full-cycle phasor, period = set.len * step.
+   index = floor(φ·N), blend at each step's tail — pure in φ, scrub replays exactly */
+const cycFullMs = cfg => cfg.stepMs * cfg.set.length;
+const cycPhase = (cfg, offset=0) => cycFullMs(cfg) <= 0 ? 0 : ((simMs / cycFullMs(cfg)) + offset) % 1;
+function cycEval(cfg, phi) {
+  const N = cfg.set.length;
+  const x = (phi % 1) * N;
+  const idx = Math.floor(x) % N, f = x - Math.floor(x);
+  const fadeFrac = cfg.stepMs <= 0 ? 0 : Math.min(0.95, cfg.fadeMs / cfg.stepMs);
+  const start = 1 - fadeFrac;
+  const mix = (fadeFrac <= 0 || f <= start) ? 0 : smoothstep((f - start) / fadeFrac);
+  return { a: byName(cfg.set[idx]), b: byName(cfg.set[(idx+1)%N]), mix,
+           name: cfg.set[idx], next: cfg.set[(idx+1)%N], fading: mix > 0 };
+}
+function drawCycle(canvas, cfg, offset=0) {
+  const e = cycEval(cfg, cycPhase(cfg, offset));
+  renderStripBlend(canvas, e.a, e.b, e.mix);
+  return e;
+}
+/* a clock-face phasor registry row, exactly the landed treatment:
+   origin · period-language on the right · raw-ramp bar · φ + cycle count; violet when shared */
+function regRow(el, cfg, { origin, shared=false, offset=0, note=null }) {
+  if (cfg.set.length < 2) {
+    el.innerHTML = `<div class="phrow"><span class="kindk">${note ?? 'static config — no phasor query; the bake is direct'}</span></div>`;
+    return;
+  }
+  const phi = cycPhase(cfg, offset);
+  const cycles = cycFullMs(cfg) > 0 ? Math.floor(simMs / cycFullMs(cfg)) : 0;
+  el.innerHTML = `
+    <div class="phrow"><span class="orig">${origin}</span>${shared ? '<span class="shchip">SHARED</span>' : ''}
+      <span class="kindk">cycle</span><span class="per">${fmtPeriod(cycFullMs(cfg)/1000)}</span></div>
+    <div class="phbarwrap"><div class="phbar${shared ? ' shared' : ''}"><i style="width:${(phi*100).toFixed(1)}%"></i></div>
+      <span class="phphi">φ ${phi.toFixed(2)} ×${cycles}</span></div>`;
+}
+/* the §1 "Read · cycling" config */
+const S1CYC = { set: SET6, stepMs: 4000, fadeMs: 900 };
+
+/* shared preview-row painter for the chooser cards (6B/6C/6D).
+   cfg = the GradientConfig the chooser currently expresses; owner = stable state holding grabbed/frozen */
+function paintPreview({ stripId, nameId, stateId, rowId, cfgId, regId }, cfg, owner, regOpts) {
+  const strip = document.getElementById(stripId), nameEl = document.getElementById(nameId);
+  const stateEl = document.getElementById(stateId), row = document.getElementById(rowId);
+  const cfgEl = cfgId && document.getElementById(cfgId), regEl = regId && document.getElementById(regId);
+  const cycling = !owner.grabbed && cfg.set.length >= 2;
+  if (owner.grabbed) {
+    renderStripBlend(strip, owner.frozen.a, owner.frozen.b, owner.frozen.mix);
+    nameEl.textContent = 'held (snapshot)';
+    stateEl.innerHTML = '<span class="statechip held">held</span><button class="clearbtn" title="release into the cycle">↺</button>';
+    stateEl.querySelector('.clearbtn').onclick = e => { e.stopPropagation(); owner.grabbed = false; };
+  } else if (cycling) {
+    const e = drawCycle(strip, cfg);
+    nameEl.textContent = e.fading ? `${e.name} → ${e.next}` : e.name;
+    stateEl.innerHTML = `<span class="statechip cyc">↻ ${speedDisp(cfg.stepMs/1000)}</span>`;
+  } else {
+    const p = byName(cfg.set[0] ?? 'Aurora');
+    renderStrip(strip, p);
+    nameEl.textContent = p.name;
+    stateEl.innerHTML = '<span class="statechip held">held</span>';
+  }
+  row.classList.toggle('pal-state-engaged', owner.grabbed);
+  if (cfgEl) cfgEl.textContent = cfg.set.length >= 2
+    ? `cycle { set: ${cfg.set.length} · step ${fmtStep(cfg.stepMs)} · fade ${fmtStep(cfg.fadeMs)} }` + (owner.grabbed ? ' — shadowed by panel writer' : '')
+    : `static(${cfg.set[0] ?? 'Aurora'})`;
+  if (regEl) regRow(regEl, owner.grabbed ? { ...cfg, set: [] } : cfg,
+                    { ...regOpts, note: owner.grabbed ? 'grabbed — writer holds static(snapshot); phasor idles out (120 ticks)' : undefined });
+}
+/* P5 jump-takeover: clicking a cycling swatch grabs the channel AT the gesture's value */
+const grabOn = (stripId, owner, cfgGet) => {
+  document.getElementById(stripId).parentElement.onclick = () => {
+    const cfg = cfgGet();
+    if (!owner.grabbed && cfg.set.length >= 2) {
+      owner.grabbed = true;
+      owner.frozen = cycEval(cfg, cycPhase(cfg));
+    }
+  };
+};
+
+/* ---- 6B: mode tabs ---- */
+const b6 = { cfg: { set: ['Aurora','Lava','Icefire','Party'], stepMs: 4000, fadeMs: 900 },
+             mode: 'cycle', staticPick: 'Aurora', grabbed: false, frozen: null };
+function pickRows(rootId, opts, onpick) {
+  const root = document.getElementById(rootId);
+  root.innerHTML = '';
+  let lastCat = null;
+  for (const p of CATALOG.filter(p => opts.cats.includes(p.cat))) {
+    if (p.cat !== lastCat) {
+      lastCat = p.cat;
+      const h = document.createElement('div'); h.className = 'pcat'; h.textContent = CATLABEL[p.cat]; root.appendChild(h);
+    }
+    const row = document.createElement('div');
+    row.className = 'prow' + (opts.selected?.(p.name) ? ' sel' : '');
+    row.innerHTML = `<span class="pn">${p.name}</span><span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => onpick(p.name);
+    if (opts.addBtn) {
+      const b = document.createElement('button'); b.className = 'addcyc';
+      const inSet = opts.inSet?.(p.name);
+      b.textContent = inSet ? '✓' : '＋↻';
+      if (inSet) row.classList.add('inset');
+      b.onclick = e => { e.stopPropagation(); opts.addBtn(p.name); };
+      row.appendChild(b);
+    }
+    root.appendChild(row);
+    renderStrip(row.querySelector('canvas'), p);
+  }
+}
+function renderB6() {
+  document.getElementById('tab6Bstatic').classList.toggle('on', b6.mode === 'static');
+  document.getElementById('tab6Bcycle').classList.toggle('on', b6.mode === 'cycle');
+  document.getElementById('tab6Bbody1').hidden = b6.mode !== 'static';
+  document.getElementById('tab6Bbody2').hidden = b6.mode !== 'cycle';
+  pickRows('plist6Bstatic', { cats: ['project','stock'], selected: n => b6.mode === 'static' && b6.staticPick === n },
+    n => { b6.mode = 'static'; b6.staticPick = n; b6.grabbed = false; renderB6(); });
+  pickRows('plist6Bcyc', { cats: ['stock','classic'], selected: n => b6.cfg.set.includes(n) },
+    n => { if (!b6.cfg.set.includes(n)) b6.cfg.set.push(n); renderB6(); });
+  const chips = document.getElementById('chips6B');
+  chips.innerHTML = '';
+  b6.cfg.set.forEach((n, i) => {
+    const c = document.createElement('span'); c.className = 'cychip';
+    const cv = document.createElement('canvas'); cv.className = 'strip'; c.appendChild(cv);
+    const rm = document.createElement('span'); rm.className = 'rm'; rm.textContent = '✕';
+    rm.onclick = () => { b6.cfg.set.splice(i, 1); renderB6(); };
+    c.appendChild(rm); chips.appendChild(c);
+    renderStrip(cv, byName(n));
+  });
+  if (b6.cfg.set.length < 2) {
+    const w = document.createElement('span');
+    w.style.cssText = 'font:10px var(--mono);color:var(--dim)';
+    w.textContent = 'add at least 2 to cycle';
+    chips.appendChild(w);
+  }
+  document.getElementById('speedval6B').textContent =
+    `${speedDisp(b6.cfg.stepMs/1000)} · ${fmtStep(b6.cfg.stepMs)}`;
+}
+document.getElementById('tab6Bstatic').onclick = () => { b6.mode = 'static'; b6.grabbed = false; renderB6(); };
+document.getElementById('tab6Bcycle').onclick = () => { b6.mode = 'cycle'; renderB6(); };
+document.getElementById('speed6B').oninput = e => { b6.cfg.stepMs = slid2period(+e.target.value) * 1000; renderB6(); };
+document.getElementById('fade6B').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('fade6B').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  b6.cfg.fadeMs = +b.dataset.v;
+});
+const b6Cfg = () => b6.mode === 'cycle' ? b6.cfg
+  : { set: [b6.staticPick], stepMs: b6.cfg.stepMs, fadeMs: b6.cfg.fadeMs };
+
+/* ---- 6C: build-in-place ---- */
+const c6 = { cfg: { set: ['Sunset'], stepMs: 4000, fadeMs: 900 }, grabbed: false, frozen: null };
+function renderC6() {
+  const cycling = c6.cfg.set.length >= 2;
+  pickRows('plist6C', {
+    cats: ['stock','classic'],
+    selected: n => !cycling && c6.cfg.set[0] === n,
+    inSet: n => cycling && c6.cfg.set.includes(n),
+    addBtn: n => { /* the magic: adding a 2nd palette IS entering cycle */
+      if (!c6.cfg.set.includes(n)) c6.cfg.set.push(n);
+      renderC6();
+    },
+  }, n => { c6.cfg.set = [n]; c6.grabbed = false; renderC6(); }); /* plain click = static pick */
+  const tray = document.getElementById('tray6C');
+  tray.hidden = !cycling;
+  if (cycling) {
+    document.getElementById('traycount6C').textContent = `${c6.cfg.set.length} · every ${fmtStep(c6.cfg.stepMs)}`;
+    const chips = document.getElementById('chips6C');
+    chips.innerHTML = '';
+    c6.cfg.set.forEach((n, i) => {
+      const c = document.createElement('span'); c.className = 'cychip';
+      const cv = document.createElement('canvas'); cv.className = 'strip'; c.appendChild(cv);
+      const rm = document.createElement('span'); rm.className = 'rm'; rm.textContent = '✕';
+      rm.onclick = () => { c6.cfg.set.splice(i, 1); renderC6(); };
+      c.appendChild(rm); chips.appendChild(c);
+      renderStrip(cv, byName(n));
+    });
+    document.getElementById('speedval6C').textContent =
+      `${speedDisp(c6.cfg.stepMs/1000)} · ${fmtStep(c6.cfg.stepMs)}`;
+  }
+}
+document.getElementById('speed6C').oninput = e => { c6.cfg.stepMs = slid2period(+e.target.value) * 1000; renderC6(); };
+document.getElementById('uncycle6C').onclick = () => {
+  c6.cfg.set = [cycEval(c6.cfg, cycPhase(c6.cfg)).name]; /* keep what's showing */
+  c6.grabbed = false; renderC6();
+};
+
+/* ---- 6D: cycles are picker rows ---- */
+const SAVED_CYCLES = [
+  { name: 'dusk shift',  set: ['Sunset','Vintage','Beach'],          stepMs: 4000, fadeMs: 900 },
+  { name: 'party night', set: ['Party','Candy','Tiamat','Icefire'],  stepMs: 2000, fadeMs: 300 },
+];
+const d6 = { pick: { kind: 'cycle', i: 0 }, grabbed: false, frozen: null };
+const d6Strips = [];
+function renderD6() {
+  const root = document.getElementById('plist6D');
+  root.innerHTML = ''; d6Strips.length = 0;
+  let h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'Cycles · this project'; root.appendChild(h);
+  SAVED_CYCLES.forEach((cy, i) => {
+    const row = document.createElement('div');
+    row.className = 'prow' + (d6.pick.kind === 'cycle' && d6.pick.i === i ? ' sel' : '');
+    row.innerHTML = `<span class="pn">${cy.name}<span class="cycbadge">↻ ${cy.set.length} · ${speedDisp(cy.stepMs/1000)}</span></span>
+                     <span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => { d6.pick = { kind: 'cycle', i }; d6.grabbed = false; renderD6(); };
+    root.appendChild(row);
+    d6Strips.push([row.querySelector('canvas'), cy]); /* animated by the master tick */
+  });
+  const add = document.createElement('div');
+  add.className = 'prow'; add.style.color = 'var(--dim)';
+  add.innerHTML = `<span class="pn" style="color:var(--dim)">＋ new cycle…</span><span></span>`;
+  root.appendChild(add);
+  h = document.createElement('div'); h.className = 'pcat'; h.textContent = 'Stock'; root.appendChild(h);
+  for (const p of CATALOG.filter(p => p.cat === 'stock').slice(0, 4)) {
+    const row = document.createElement('div');
+    row.className = 'prow' + (d6.pick.kind === 'static' && d6.pick.name === p.name ? ' sel' : '');
+    row.innerHTML = `<span class="pn">${p.name}</span><span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => { d6.pick = { kind: 'static', name: p.name }; d6.grabbed = false; renderD6(); };
+    root.appendChild(row);
+    renderStrip(row.querySelector('canvas'), p);
+  }
+}
+const d6Cfg = () => d6.pick.kind === 'cycle' ? SAVED_CYCLES[d6.pick.i]
+  : { set: [d6.pick.name], stepMs: 4000, fadeMs: 900 };
+
+/* ---- 6E: provenance identity ---- */
+const e6 = { mode: 'local', cfg: { set: ['Aurora','Lava','Icefire','Party'], stepMs: 4000, fadeMs: 900 } };
+document.getElementById('seg6E').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('seg6E').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  e6.mode = b.dataset.v;
+});
+function tickE6() {
+  const shared = e6.mode === 'shared';
+  [['prov1', 0], ['prov2', shared ? 0 : 0.37]].forEach(([id, offset]) => {
+    const card = document.getElementById(id);
+    const phi = cycPhase(e6.cfg, offset);
+    drawCycle(card.querySelector('canvas'), e6.cfg, offset);
+    card.querySelector('.state-slot').innerHTML = shared
+      ? `<span class="statechip cycsh">↻ bus:palette</span><span class="shchip">SHARED</span>`
+      : `<span class="statechip cyc">↻ private</span>`;
+    const bar = card.querySelector('.phbar');
+    bar.classList.toggle('shared', shared);
+    bar.querySelector('i').style.width = (phi*100).toFixed(1) + '%';
+    card.querySelector('.phphi').textContent = `φ ${phi.toFixed(2)}`;
+  });
+  document.getElementById('prov6Etxt').innerHTML = shared
+    ? `one authored writer puts the config on <span style="font-family:var(--mono)">bus:palette</span> →
+       <span style="font-family:var(--mono)">PhasorKey::Shared{scope, channel}</span>: ONE integrator,
+       phase-locked across every consumer in the scope. Grab one card = your own reins (static snapshot);
+       release re-locks. Note the landed rule: only the <i>period</i> rides the channel — fade/space
+       stay per-consumer shaping, same as waveform on phasors.`
+    : `identical configs authored on two slots, no channel →
+       <span style="font-family:var(--mono)">PhasorKey::Private{node, slot}</span>: TWO integrators,
+       phases free-run (spawn time differs). Identity is the <b>binding</b>, not the config value —
+       and the private↔shared transition deliberately resets phase (landed rule).`;
+}
+
+/* C: slew targets */
+const slew = { cur: byName('Sunset'), from: byName('Sunset'), t: 1, ms: 300 };
+function renderSlewTargets() {
+  const root = document.getElementById('slewtargets');
+  root.innerHTML = '';
+  ['Aurora','Lava','Ocean','Party','Icefire','Candy'].forEach(n => {
+    const b = document.createElement('div'); b.className = 'slewtgt'; b.title = n;
+    const cv = document.createElement('canvas'); cv.className = 'strip'; b.appendChild(cv);
+    b.onclick = () => {
+      slew.from = currentSlewPal();
+      slew.cur = byName(n);
+      slew.t = slew.ms === 0 ? 1 : 0;
+      document.getElementById('slewname').textContent = n + (slew.ms ? ' (slewing)' : '');
+    };
+    root.appendChild(b);
+    renderStrip(cv, byName(n));
+  });
+}
+function currentSlewPal() { /* snapshot for chained fades: sample the blend into literal stops */
+  if (slew.t >= 1) return slew.cur;
+  const stops = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i/8;
+    const a = samplePal(slew.from, t, slew.from.space, slew.from.method);
+    const b = samplePal(slew.cur, t, slew.cur.space, slew.cur.method);
+    stops.push({ at: t, c: a.map((v,k) => v + (b[k]-v)*slew.t) });
+  }
+  return { stops, space: 'srgb', method: 'linear' };
+}
+document.getElementById('segslew').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('segslew').querySelectorAll('button').forEach(x => x.classList.toggle('on', x===b));
+  slew.ms = +b.dataset.v;
+});
+
+/* ---- §9: the panel dropdown — B's tabs, anchored under the row (round 3c) ---- */
+const dd = { mode: 'cycle', staticPick: 'Sunset', set: ['Aurora','Lava','Icefire','Party'],
+             stepMs: 4000, fadeMs: 900, open: true, view: 'list', edit: null };
+let ddEditApply = null; /* where the editor's result lands (static pick vs a set slot) */
+const ddCfg = () => dd.mode === 'cycle'
+  ? { set: dd.set, stepMs: dd.stepMs, fadeMs: dd.fadeMs }
+  : { set: [dd.staticPick], stepMs: dd.stepMs, fadeMs: dd.fadeMs };
+function ddToggle() { dd.open = !dd.open; dd.view = 'list'; dd.edit = null; renderDD(); }
+document.getElementById('ddrow').onclick = ddToggle;
+document.getElementById('ddtabstatic').onclick = () => { dd.mode = 'static'; renderDD(); };
+document.getElementById('ddtabcycle').onclick = () => { dd.mode = 'cycle'; renderDD(); };
+
+function renderDD() {
+  document.getElementById('ddpop').hidden = !dd.open;
+  document.getElementById('ddanchor').classList.toggle('open', dd.open);
+  document.getElementById('ddview-list').hidden = dd.view !== 'list';
+  document.getElementById('ddview-edit').hidden = dd.view !== 'edit';
+  document.getElementById('ddtabstatic').classList.toggle('on', dd.mode === 'static');
+  document.getElementById('ddtabcycle').classList.toggle('on', dd.mode === 'cycle');
+  document.getElementById('ddstaticbody').hidden = dd.mode !== 'static';
+  document.getElementById('ddcyclebody').hidden = dd.mode !== 'cycle';
+
+  /* the closed face is mode-adaptive: strip+name when static, member chips + rate when cycling */
+  const face = document.getElementById('ddface');
+  face.innerHTML = '';
+  if (dd.mode === 'cycle') {
+    const wrap = document.createElement('span'); wrap.className = 'memchips';
+    dd.set.forEach(n => {
+      const c = document.createElement('span'); c.className = 'mc'; c.dataset.n = n;
+      const cv = document.createElement('canvas'); cv.className = 'strip'; c.appendChild(cv);
+      wrap.appendChild(c);
+    });
+    const rate = document.createElement('span'); rate.className = 'ratechip';
+    rate.textContent = `↻ ${dd.set.length} · ${speedDisp(dd.stepMs/1000)}`;
+    wrap.appendChild(rate);
+    const chev = document.createElement('span');
+    chev.style.cssText = 'color:var(--dim);font-size:10px;margin-left:2px';
+    chev.textContent = '▾'; wrap.appendChild(chev);
+    face.appendChild(wrap);
+    wrap.querySelectorAll('canvas').forEach((cv, i) => renderStrip(cv, byName(dd.set[i])));
+  } else {
+    const p = byName(dd.staticPick);
+    face.innerHTML = `<div class="swatchwrap"><canvas class="strip"></canvas>
+      <span class="pname">${p.name}</span><span class="chev">▾</span></div>`;
+    renderStrip(face.querySelector('canvas'), p);
+  }
+
+  /* Palette tab: single-select — a click SELECTS; ✎ appears on project customs */
+  const qS = document.getElementById('ddsearchS').value.trim().toLowerCase();
+  const rootS = document.getElementById('ddplistS');
+  rootS.innerHTML = '';
+  let lastCat = null;
+  for (const p of CATALOG.filter(p => !qS || p.name.toLowerCase().includes(qS))
+                         .sort((a, b) => CATORDER[a.cat] - CATORDER[b.cat])) {
+    if (p.cat !== lastCat) {
+      lastCat = p.cat;
+      const h = document.createElement('div'); h.className = 'pcat'; h.textContent = CATLABEL[p.cat];
+      rootS.appendChild(h);
+    }
+    const row = document.createElement('div');
+    row.className = 'prow' + (dd.staticPick === p.name ? ' sel' : '');
+    row.innerHTML = `<span class="pn">${p.name}${p.meta ? `<small>${p.meta}</small>` : ''}</span>
+                     <span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => { dd.staticPick = p.name; renderDD(); };
+    if (p.cat === 'project') {
+      const b = document.createElement('button'); b.className = 'addcyc'; b.textContent = '✎';
+      b.title = 'edit this custom';
+      b.onclick = e => { e.stopPropagation(); ddEditOpenFor(p.name, nm => { dd.staticPick = nm; }); };
+      row.appendChild(b);
+    }
+    rootS.appendChild(row);
+    renderStrip(row.querySelector('canvas'), p);
+  }
+
+  /* Cycle tab: the set (chips wearing 🗑/✎) + add-list (a click ADDS) + speed/fade */
+  const strip = document.getElementById('ddsetstrip');
+  strip.innerHTML = '';
+  dd.set.forEach((n, i) => {
+    const ch = document.createElement('span'); ch.className = 'ddchip';
+    ch.innerHTML = `<span class="cv"><canvas class="strip"></canvas></span><span class="nm">${n}</span>
+      <span class="acts"><button title="edit (forks a project copy)">✎</button><button class="tr" title="remove from set">🗑</button></span>`;
+    const [ed, tr] = ch.querySelectorAll('button');
+    ed.onclick = () => ddEditOpenFor(n, nm => { dd.set[i] = nm; });
+    tr.onclick = () => { if (dd.set.length > 1) { dd.set.splice(i, 1); renderDD(); } };
+    strip.appendChild(ch);
+    renderStrip(ch.querySelector('canvas'), byName(n));
+  });
+  const qC = document.getElementById('ddsearchC').value.trim().toLowerCase();
+  const rootC = document.getElementById('ddplistC');
+  rootC.innerHTML = '';
+  lastCat = null;
+  for (const p of CATALOG.filter(p => !dd.set.includes(p.name))
+                         .filter(p => !qC || p.name.toLowerCase().includes(qC))
+                         .sort((a, b) => CATORDER[a.cat] - CATORDER[b.cat])) {
+    if (p.cat !== lastCat) {
+      lastCat = p.cat;
+      const h = document.createElement('div'); h.className = 'pcat'; h.textContent = CATLABEL[p.cat];
+      rootC.appendChild(h);
+    }
+    const row = document.createElement('div'); row.className = 'prow';
+    row.innerHTML = `<span class="pn">${p.name}</span><span class="mini"><canvas class="strip"></canvas></span>`;
+    row.onclick = () => { dd.set.push(p.name); renderDD(); };
+    rootC.appendChild(row);
+    renderStrip(row.querySelector('canvas'), p);
+  }
+  document.getElementById('ddspeed').value = period2slid(dd.stepMs/1000);
+  ddSyncReadouts();
+}
+function ddSyncReadouts() {
+  document.getElementById('ddspeedval').textContent = `${speedDisp(dd.stepMs/1000)} · ${fmtStep(dd.stepMs)}`;
+  document.getElementById('ddhint').textContent = dd.set.length >= 2
+    ? `cycle { set: ${dd.set.length} · step ${fmtStep(dd.stepMs)} · fade ${fmtStep(dd.fadeMs)} } — one full-cycle phasor, ${fmtPeriod(dd.stepMs*dd.set.length/1000)}`
+    : 'add at least 2 to cycle';
+}
+document.getElementById('ddsearchS').oninput = renderDD;
+document.getElementById('ddsearchC').oninput = renderDD;
+document.getElementById('ddspeed').oninput = e => {
+  dd.stepMs = slid2period(+e.target.value) * 1000;
+  const rc = document.querySelector('#ddface .ratechip');
+  if (rc) rc.textContent = `↻ ${dd.set.length} · ${speedDisp(dd.stepMs/1000)}`;
+  ddSyncReadouts();
+};
+document.getElementById('ddfade').querySelectorAll('button').forEach(b => b.onclick = () => {
+  document.getElementById('ddfade').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  dd.fadeMs = +b.dataset.v; ddSyncReadouts();
+});
+
+/* the editor takeover — reachable from both tabs; the result lands where it came from */
+function syncSeg(id, v) {
+  document.getElementById(id).querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
+}
+function ddEditOpenFor(name, onDone) {
+  const src = byName(name);
+  ddEditApply = onDone;
+  dd.edit = { fromBuiltin: src.cat !== 'project',
+              space: src.space === 'oklab' ? 'oklab' : 'srgb',
+              method: src.method, sel: 0,
+              stops: src.stops.map(s => ({ at: s.at, c: s.c.slice() })) };
+  dd.view = 'edit';
+  document.getElementById('ddename').value = src.name + (dd.edit.fromBuiltin ? ' *' : '');
+  document.getElementById('ddeprov').textContent = dd.edit.fromBuiltin
+    ? `copy of built-in "${src.name}" → This project` : 'project custom';
+  syncSeg('ddsegspace', dd.edit.space);
+  syncSeg('ddsegmethod', dd.edit.method);
+  renderDD(); renderDDEdit();
+}
+const ddEditPal = () => ({ stops: dd.edit.stops, space: dd.edit.space, method: dd.edit.method });
+const ddgradbar = document.getElementById('ddgradbar');
+function renderDDEdit() {
+  if (!dd.edit) return;
+  dd.edit.stops.sort((a, b) => a.at - b.at);
+  renderStrip(document.getElementById('ddeditcanvas'), ddEditPal());
+  ddgradbar.querySelectorAll('.stop').forEach(n => n.remove());
+  dd.edit.stops.forEach((s, i) => {
+    const h = document.createElement('div');
+    h.className = 'stop' + (i === dd.edit.sel ? ' sel' : '');
+    h.style.left = (s.at*100) + '%';
+    h.innerHTML = `<span class="dot" style="background:${hex(s.c)}"></span>`;
+    h.onpointerdown = ev => {
+      dd.edit.sel = i; renderDDEdit();
+      const rect = ddgradbar.getBoundingClientRect();
+      const move = e => { s.at = clamp01((e.clientX - rect.left) / rect.width); renderDDEdit(); };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+      ev.preventDefault();
+    };
+    ddgradbar.appendChild(h);
+  });
+  const s = dd.edit.stops[dd.edit.sel] ?? dd.edit.stops[0];
+  document.getElementById('ddstopcolor').value = hex(s.c);
+  document.getElementById('ddstoppos').value = s.at.toFixed(2);
+}
+ddgradbar.ondblclick = e => {
+  if (!dd.edit) return;
+  const rect = ddgradbar.getBoundingClientRect();
+  const at = clamp01((e.clientX - rect.left) / rect.width);
+  const c = samplePal(ddEditPal(), at, dd.edit.space, dd.edit.method);
+  dd.edit.stops.push({ at, c: c.slice() });
+  dd.edit.sel = dd.edit.stops.length - 1;
+  renderDDEdit();
+};
+document.getElementById('ddstopcolor').oninput = e => { dd.edit.stops[dd.edit.sel].c = unhex(e.target.value); renderDDEdit(); };
+document.getElementById('ddstoppos').oninput = e => { dd.edit.stops[dd.edit.sel].at = clamp01(+e.target.value || 0); renderDDEdit(); };
+document.getElementById('dddelstop').onclick = () => {
+  if (dd.edit.stops.length > 2) { dd.edit.stops.splice(dd.edit.sel, 1); dd.edit.sel = 0; renderDDEdit(); }
+};
+document.getElementById('ddsegspace').querySelectorAll('button').forEach(b => b.onclick = () => {
+  dd.edit.space = b.dataset.v; syncSeg('ddsegspace', b.dataset.v); renderDDEdit(); });
+document.getElementById('ddsegmethod').querySelectorAll('button').forEach(b => b.onclick = () => {
+  dd.edit.method = b.dataset.v; syncSeg('ddsegmethod', b.dataset.v); renderDDEdit(); });
+document.getElementById('ddedone').onclick = () => {
+  const name = document.getElementById('ddename').value.trim() || 'custom';
+  const pal = { name, cat: 'project', space: dd.edit.space, method: dd.edit.method,
+                stops: dd.edit.stops.map(s => ({ at: s.at, c: s.c.slice() })),
+                meta: dd.edit.fromBuiltin ? 'edited copy' : undefined };
+  const existing = CATALOG.findIndex(p => p.name === name);
+  if (existing >= 0) CATALOG[existing] = pal; else CATALOG.push(pal);
+  ddEditApply?.(name); ddEditApply = null;
+  dd.view = 'list'; dd.edit = null;
+  renderDD(); renderPickers(); /* the fresh custom shows up in §2's pickers too */
+};
+document.getElementById('ddecancel').onclick = () => { dd.view = 'list'; dd.edit = null; renderDD(); };
+
+/* ============ section 7: live compute generator ============ */
+const dyn = { grabbed: false, frozen: null, t: 0 };
+function breatherStops(t) {
+  /* the "compute shader": stops as a function of time — it's just a value */
+  const wob = (ph, amp) => amp * Math.sin(t*0.9 + ph);
+  return [
+    { at: 0,                        c: [0.00+0.02*Math.sin(t*.7), 0.10, 0.18+0.06*Math.sin(t*.5)] },
+    { at: clamp01(0.30 + wob(0, 0.08)), c: [0.00, 0.65+0.20*Math.sin(t*1.1), 0.55] },
+    { at: clamp01(0.62 + wob(2, 0.10)), c: [0.16+0.1*Math.sin(t*.8+1), 0.85, 0.66] },
+    { at: clamp01(0.85 + wob(4, 0.05)), c: [0.45+0.15*Math.sin(t*.6+2), 0.24, 0.85] },
+    { at: 1,                        c: [0.17, 0.04, 0.33] },
+  ];
+}
+function dynState() {
+  document.getElementById('dynstate').innerHTML = dyn.grabbed
+    ? '<span class="statechip held">held</span><button class="clearbtn" id="dynclear" title="release back to the generator">↺</button>'
+    : '<span class="statechip auto">◈ breather</span>';
+  document.getElementById('dynrow').classList.toggle('pal-state-engaged', dyn.grabbed);
+  document.getElementById('dynname').textContent = dyn.grabbed ? 'held (captured)' : 'live';
+  const clr = document.getElementById('dynclear');
+  if (clr) clr.onclick = e => { e.stopPropagation(); dyn.grabbed = false; dynState(); };
+}
+document.getElementById('dynrow').querySelector('.swatchwrap').onclick = () => {
+  if (!dyn.grabbed) { dyn.grabbed = true; dyn.frozen = breatherStops(dyn.t); dynState(); }
+};
+
+/* ============ master animation tick for §1/§6/§7/§8 ============ */
+let lastTs = null;
+function masterTick(ts) {
+  if (lastTs === null) lastTs = ts;
+  const dt = ts - lastTs; lastTs = ts;
+
+  if (!document.hidden) {
+    simMs += dt; /* the sim's bus:time — everything below is a pure function of it */
+
+    /* §1 Read·cycling state: the swatch is the live blend of the slot's own cycle config */
+    if (state.s1state === 'cycling') {
+      const e = cycEval(S1CYC, cycPhase(S1CYC));
+      document.querySelectorAll('#c1a .pal, #c1b .pal, #c1c .pal').forEach(row => {
+        row.querySelectorAll('canvas.strip').forEach(cv => renderStripBlend(cv, e.a, e.b, e.mix));
+        const nm = row.querySelector('.pname'); if (nm) nm.textContent = e.fading ? `${e.name} → ${e.next}` : e.name;
+        const chip = row.querySelector('.chipname'); if (chip) chip.textContent = e.fading ? `${e.name} → ${e.next}` : e.name;
+      });
+    }
+
+    /* §6 chooser previews — every card resolves its config the same way the fill path would */
+    paintPreview({ stripId: 'prevstrip6B', nameId: 'prevname6B', stateId: 'prevstate6B',
+                   rowId: 'prow6B', cfgId: 'cfg6B', regId: 'reg6B' },
+                 b6Cfg(), b6, { origin: 'idle.palette' });
+    paintPreview({ stripId: 'prevstrip6C', nameId: 'prevname6C', stateId: 'prevstate6C',
+                   rowId: 'prow6C', cfgId: 'cfg6C', regId: 'reg6C' },
+                 c6.cfg, c6, { origin: 'idle.palette' });
+    paintPreview({ stripId: 'prevstrip6D', nameId: 'prevname6D', stateId: 'prevstate6D',
+                   rowId: 'prow6D', cfgId: 'cfg6D' },
+                 d6Cfg(), d6, { origin: 'idle.palette' });
+    for (const [cv, cy] of d6Strips) drawCycle(cv, cy); /* the animated rows ARE the preview */
+    tickE6();
+    const s8 = document.getElementById('strip8B'); if (s8) drawCycle(s8, e6.cfg);
+
+    /* §9 closed row — mode-adaptive face */
+    {
+      const cfg = ddCfg();
+      if (dd.mode === 'cycle') {
+        const e = cycEval(cfg, cycPhase(cfg));
+        document.querySelectorAll('#ddface .mc').forEach(mc => mc.classList.toggle('live', mc.dataset.n === e.name));
+        document.getElementById('ddstate').innerHTML =
+          `<span class="statechip cyc">↻ ${speedDisp(cfg.stepMs/1000)}</span>`;
+      } else {
+        document.getElementById('ddstate').innerHTML = '<span class="statechip held">held</span>';
+      }
+    }
+
+    /* slew strip */
+    if (slew.t < 1) slew.t = Math.min(1, slew.t + dt / Math.max(1, slew.ms));
+    const scv = document.getElementById('slewstrip');
+    renderStripBlend(scv, slew.from, slew.cur, slew.t);
+    if (slew.t >= 1) document.getElementById('slewname').textContent = slew.cur.name ?? document.getElementById('slewname').textContent.replace(' (slewing)','');
+
+    /* breather (throttle inspector to ~10fps for readability) */
+    dyn.t += dt / 1000;
+    const pal = dyn.grabbed ? { stops: dyn.frozen } : { stops: breatherStops(dyn.t) };
+    renderStrip(document.getElementById('dynstrip'), { ...pal, space: 'oklab', method: 'smooth' });
+    if (!dyn.grabbed && (masterTick.acc = (masterTick.acc ?? 0) + dt) > 100) {
+      masterTick.acc = 0;
+      const insp = document.getElementById('dyninspect');
+      insp.innerHTML = pal.stops.map(s =>
+        `<div>at <span style="color:var(--text)">${s.at.toFixed(2)}</span> · rgb(${s.c.map(v=>clamp01(v).toFixed(2)).join(', ')})</div>`
+      ).join('') + `<div style="color:var(--dim);margin-top:4px">space: oklab · method: smooth · count: 5</div>`;
+    }
+  }
+  requestAnimationFrame(masterTick);
+}
+
+/* ============ boot ============ */
+function renderAll() { renderS1(); renderPickers(); renderInherit(); heroPreview(state.current); }
+renderAll();
+renderEditor();
+renderCmp();
+renderS5();
+renderSel6();
+/* round 3: chooser cards */
+document.getElementById('speed6B').value = period2slid(b6.cfg.stepMs/1000);
+document.getElementById('speed6C').value = period2slid(c6.cfg.stepMs/1000);
+renderB6();
+renderC6();
+renderD6();
+grabOn('prevstrip6B', b6, b6Cfg);
+grabOn('prevstrip6C', c6, () => c6.cfg);
+grabOn('prevstrip6D', d6, d6Cfg);
+renderDD();
+/* §8 mock content */
+{
+  const chips = document.getElementById('chips8A');
+  for (const n of ['Aurora','Lava','Icefire','Party']) {
+    const c = document.createElement('span'); c.className = 'cychip';
+    const cv = document.createElement('canvas'); cv.className = 'strip'; c.appendChild(cv);
+    chips.appendChild(c); renderStrip(cv, byName(n));
+  }
+  document.getElementById('speedval8A').textContent = `${speedDisp(4)} · every 4 s`;
+}
+renderSlewTargets();
+document.getElementById('slewname').textContent = 'Sunset';
+dynState();
+/* capture scenarios via URL hash, e.g. #sim=6200&s1=cycling&e6=shared&c6=cycle&grab6B=1
+   (used for headless screenshots; sim pre-advances the sim clock in ms) */
+{
+  const H = new URLSearchParams(location.hash.slice(1));
+  if (H.get('sim')) simMs = +H.get('sim');
+  if (H.get('s1')) {
+    state.s1state = H.get('s1');
+    document.querySelectorAll('.controls [data-st]').forEach(x => x.classList.toggle('on', x.dataset.st === state.s1state));
+    renderS1();
+  }
+  if (H.get('e6')) {
+    e6.mode = H.get('e6');
+    document.querySelectorAll('#seg6E button').forEach(x => x.classList.toggle('on', x.dataset.v === e6.mode));
+  }
+  if (H.get('c6') === 'cycle') { c6.cfg.set = ['Sunset','Aurora','Icefire']; renderC6(); }
+  if (H.get('grab6B')) { b6.grabbed = true; b6.frozen = cycEval(b6.cfg, cycPhase(b6.cfg)); }
+  if (H.get('dd') === 'closed') { dd.open = false; renderDD(); }
+  if (H.get('dd') === 'edit') ddEditOpenFor(dd.set[0], nm => { dd.set[0] = nm; });
+  if (H.get('dd') === 'static') { dd.mode = 'static'; renderDD(); }
+}
+heroTick();
+requestAnimationFrame(masterTick);
+</script>
+</body>
+</html>
