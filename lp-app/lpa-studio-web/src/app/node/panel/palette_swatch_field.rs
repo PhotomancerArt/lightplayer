@@ -123,6 +123,10 @@ pub fn PaletteSwatchField(
                 popup_class: detail_popover_card_class().to_string(),
                 placement: PopoverPlacement::BottomMiddle,
                 initially_open: chooser_initially_open,
+                // The chooser is the control's own body unfolding, so it
+                // wears exactly the control's width — a panel a few px
+                // narrower than its anchor reads as a mistake.
+                match_anchor_width: true,
                 anchor_id: Some(anchor_id.clone()),
                 // The top-layer copy of the control while open: the same
                 // band inside the frame's own padding, so nothing shifts.
