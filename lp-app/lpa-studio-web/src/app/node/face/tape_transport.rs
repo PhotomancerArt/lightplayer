@@ -290,7 +290,12 @@ pub fn TapeTransport(
         "+"
     };
     let chip_offset = transport.scrub_offset_seconds.abs();
-    let initial_digits = format_clock(f64::from(transport.seconds), false);
+    // Captured ONCE: the driver owns this span's text after mount, and a
+    // Dioxus patch racing the driver's imperative writes would flash the
+    // stale anchor value (the driver's change-cache would then skip the
+    // correction until the next whole-second flip). A constant initial
+    // render means the vdom never patches it again.
+    let initial_digits = use_hook(|| format_clock(f64::from(transport.seconds), false));
 
     let mounted_driver = driver.clone();
     let scrub_down_wired = scrub_wired.clone();
