@@ -1,0 +1,16 @@
+{
+  "kind": "Shader",
+  "source": "idle.glsl",
+  "render_order": 0,
+  "float_mode": "fixed",
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": "",
+      "default_bind": "bus:time"
+    }
+  }
+}

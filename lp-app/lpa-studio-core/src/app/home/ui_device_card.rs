@@ -9,8 +9,9 @@ use crate::app::roster::RosterCardState;
 /// A device card. Visually distinct from package cards by contract: the
 /// renderer gives it a hardware header (status circle + transport) so it
 /// never reads as "just another project". The card's health lives in
-/// [`RosterCardState`] (the 14-state vocabulary, derived from evidence by
-/// `derive_roster_card_state`); the project chip is identity, not status.
+/// [`RosterCardState`] (the roster card-state vocabulary, derived from
+/// evidence by `derive_roster_card_state`); the project chip is identity,
+/// not status.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceCard {
     /// `dev_…` uid when the device is registered; `None` for a live
@@ -72,21 +73,28 @@ pub struct UiDeviceCard {
 impl UiDeviceCard {
     /// The card's CANONICAL identity — the ONE key both the UI-state map
     /// and the scene-fork's `view-transition-name` consume (2026-07-25
-    /// alignment). Names are NOT unique (erase + re-provision mints a new
-    /// `dev_…` uid under the same name; a keyed list with duplicate keys
-    /// panics Dioxus — the 2026-07-15 crash). Registered/stamped cards
-    /// key by uid; the (≤1) sim card by a reserved token.
+    /// alignment). Names are NOT unique (two boards can wear one name; a
+    /// keyed list with duplicate keys panics Dioxus — the 2026-07-15
+    /// crash). Identified cards key by uid; the (≤1) sim card by a
+    /// reserved token.
     ///
     /// ORDER IS LOAD-BEARING: `uid` stays FIRST. `CardUiState` is keyed by
-    /// this and must survive session replaces — a stamped board keying by
-    /// its (per-session) `RuntimeId` would drop its tab/sheet state on
+    /// this and must survive session replaces — an identified board keying
+    /// by its (per-session) `RuntimeId` would drop its tab/sheet state on
     /// every replace. Only the anonymous case uses `session_key`: an
-    /// identity-less LIVE card (a board mid-provision, before its uid is
-    /// stamped) keys by the session's `RuntimeId` so two anonymous boards
-    /// never collide — the name fallback used to erase the second board
-    /// via `dedupe_by_key` (both were "Connected device"; the multi-board
-    /// defect, 2026-08-02). The name remains only for cards with neither
-    /// (registry cards, which always have a uid, never reach it).
+    /// identity-less LIVE card keys by the session's `RuntimeId` so two
+    /// anonymous boards never collide — the name fallback used to erase
+    /// the second board via `dedupe_by_key` (both were "Connected device";
+    /// the multi-board defect, 2026-08-02). The name remains only for
+    /// cards with neither (registry cards, which always have a uid, never
+    /// reach it).
+    ///
+    /// The uid now arrives at ATTACH resolution rather than at a
+    /// provisioning stamp (device identity design §6): a MAC-reporting
+    /// board is keyed by its own silicon seconds after it says hello, so
+    /// the anonymous window is short — but it still exists (rule A4, and
+    /// the moments before the first pull lands), which is why the cascade
+    /// keeps every rung.
     pub fn identity_key(&self) -> &str {
         if self.sim {
             return "runtime-sim";
@@ -108,9 +116,9 @@ impl UiDeviceCard {
     /// exact match (M4).
     ///
     /// WHY `session_key` AND NOT `identity_key()`: a blank board's card
-    /// key IS its session key, but the moment a flash stamps an identity
-    /// the same card's key becomes its `uid` — `identity_key` puts uid
-    /// first. An op keyed by the card key would lose its card at the exact
+    /// key IS its session key, but the moment its identity resolves the
+    /// same card's key becomes its `uid` — `identity_key` puts uid first.
+    /// An op keyed by the card key would lose its card at the exact
     /// instant the flash succeeded. `session_key` is set on every live
     /// card and does not move when the uid lands.
     ///

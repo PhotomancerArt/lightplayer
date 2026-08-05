@@ -1,12 +1,12 @@
 ---
-status: carried
+status: paying-down
 since: 2026-07-08      # first breaking format change with fielded library data
 logged: 2026-07-24
 area: lpa-studio-core/library + lpc-model formats + share envelopes
 related:
   [
-    "feature/schema-shape-gen branch (format:1 gate, checked-in schemas — the planned exit)",
-    "../adr/2026-07-14-wire-hello-versioning.md",
+    "../adr/2026-08-04-project-format-migration-architecture.md (the paydown — lp-app/lpa-upgrade)",
+    "../adr/2026-07-05-artifact-format-version-and-schema-snapshots.md",
     "../adr/2026-07-28-share-envelopes.md",
   ]
 ---
@@ -16,47 +16,78 @@ related:
 file formats outright, but that policy is written for peers deployed in
 lockstep. Several surfaces carry **durable authored data** that outlives
 the build that wrote it: the LIBRARY (projects created before a `feat!`
-format change keep their old bytes forever — the library never migrates,
-only history accumulates) and, since 2026-07-28, share envelopes pasted
-into someone's notes app or chat log. When the engine's parsers tighten,
-those projects fail node-by-node with parser errors that name the
-grammar, not the remedy ("binding ref must start with `bus:` or
-`node:`"), and nothing marks the project as old-format in the gallery.
+format change keep their old bytes) and share envelopes pasted into
+someone's notes app or chat log. Through 2026-08-04 there was no migration
+tool at all — a format bump silently invalidated whatever slice of a
+user's library predated it, and the failure surfaced later, per-node,
+looking like an engine bug rather than a version mismatch.
 
-**Carrying cost** — Every breaking format change silently invalidates
-some slice of the user's library; the failure surfaces later, in the
-editor, per-node, looking like an engine bug (2026-07-24: mistaken for
-an M4 regression at the gate walk). Diagnosis requires format
-archaeology (git -S on the parser string).
+**Paydown (2026-08-04, `2026-08-04-project-format-migration-architecture.md`,
+PR #344)** — `lp-app/lpa-upgrade` (studio-only, never firmware) classifies
+and migrates a project forward through chained per-version steps, and
+Studio now calls it at every seam durable project data crosses a format
+boundary. Resolved:
 
-**Workarounds** —
-- Diagnose: `git log -S "<parser error text>"` dates the format break;
-  compare the project's created/remixed date.
-- Fix a project in place: edit the offending file in the Studio asset
-  editor (e.g. prepend `bus:`/`node:` to binding refs) — the overlay/
-  save flow banks history; or re-remix from the current example (the
-  old project stays banked).
+- **Silent library skip.** `LibraryStore::list()` used to `log::warn!` and
+  drop a package whose manifest failed the strict parse — the gallery
+  simply lost the card. `list()`/`summarize()` now cannot fail: every
+  package gets a `PackageSummary` carrying a `PackageHealth` (`Ready` /
+  `UpgradesOnOpen { found }` / `Blocked { headline, remedy }`), and a
+  package with no readable `uid` gets a slug-derived stand-in identity
+  (`derived_uid`) so it still has a card, a delete affordance, and a name
+  — never disk-written, never confused with a real `uid`.
+- **Zip-import gate bypass.** `import_zip` used to read `uid`/`name` and
+  install with no format check at all; a stale archive landed in the
+  library and failed later, per node. Both `import_zip` and envelope
+  paste (`import_json`) now `gate_and_migrate` — classify, migrate if
+  this build can, refuse otherwise — strictly before `install_package`,
+  which stays byte-faithful by design.
+- **Node-format absence.** `lp.node` share envelopes now carry
+  `artifact_format: Option<u32>`, stamped with `PROJECT_FORMAT_VERSION`
+  on every export. A pasted node with a missing or mismatched stamp is
+  refused with a classified message (not migrated — see "Remaining"
+  below), rather than pasting cleanly and failing at load with no trace
+  of why.
+- **Device wipe-only affordance.** A board holding a readable project at
+  an old format used to classify as `HoldsUnreadableData`, whose only
+  affordance was Wipe. It is now `RosterCardState::HoldsOldFormatProject`,
+  which names the found/expected formats and — when the format is within
+  `lpa-upgrade`'s floor — carries a direct-dispatch `Upgrade project`
+  affordance: pull → migrate the associated library package → push. Wipe
+  remains for below-floor or corrupt boards.
+- **Migration existence, full stop.** There was no migration path for
+  durable project data at all before this. There is now one path,
+  reused by every consumer (`library/package_upgrade.rs::migrate_handle_to_
+  current`): the library-open pre-flight and the device Upgrade verb both
+  call it.
 
-**Surfaces needing format checking** — verified against the tree
-2026-07-28. "Today" is what actually happens now, not what should:
+**Remaining** — two round-two items, deliberately deferred by the plan
+that did the paydown above (`2026-08-04-project-format-migration-
+architecture.md`, decisions 4 and 8), not overlooked:
 
-| Surface | Version marker | Today |
-|---|---|---|
-| `project.json` root | `format` (`PROJECT_FORMAT_VERSION` = 1) | `ProjectRegistry::check_root_format` rejects a mismatch at load — but an **unreadable or unparseable** root passes the gate (`Ok(())` on every early return) |
-| Child node defs | none of their own; versioned transitively through the project root | no independent check — a node file moved between projects carries no version at all |
-| Zip import | the archive's `project.json` | **no format check before install**: `import_zip` reads `uid`/`name` and installs; a stale archive lands in the library and fails later, per-node |
-| `lp.package` envelope | `format: 1` | rejects a mismatch loudly, no migration (2026-07-28) |
-| `lp.node` envelope | `format: 1` | rejects a mismatch loudly, no migration (2026-07-28) — and, like child defs, carries no engine-format version of its own |
-| `/.lp/meta.json` | none | lenient parse; damage reads as absent (deliberate — it is a best-effort sidecar) |
-| History event log (`EventKind`) | none | additive-only by convention; an unknown variant fails the whole log parse |
-| Wire protocol | `WIRE_PROTO_VERSION` | hello handshake, lockstep peers — **not** part of this burden |
+- **Bare-node migration.** A pasted `lp.node` with a stale or missing
+  `artifact_format` stamp is *refused*, not migrated — migrating a bare
+  node needs the stamp to be reliably present first, which this round
+  could not guarantee (older envelopes predate the field entirely).
+  Trigger: a real user is stopped by pasting a stale node.
+- **v1–v3 support.** `lpa-upgrade`'s floor is v4 (pre-TimeProduct); v1–v3
+  predate project/module mitosis, their types are deleted, and their only
+  surviving trace is `schemas/history/`'s frozen snapshots. A project
+  below the floor is refused with an honest message, never guessed at.
+  Trigger: a real holder of pre-v4 project data appears (none known as of
+  2026-08-04).
 
-The pattern across the gaps: version markers exist at the **project
-root** and at the **envelope**, and nowhere in between. Anything that
-moves a single node or a single asset between projects — node copy/paste,
-and the shader sharing it exists for — travels with no engine-format
-version whatsoever, so a node authored against an older grammar pastes
-cleanly and fails at load.
+Both remaining items get an honest refusal today (never a silent drop or
+a wrong guess) — the paydown closed the *silent* failure mode everywhere,
+even where it did not close the *migration* gap.
+
+**Carrying cost (historical, through 2026-08-04)** — Every breaking
+format change silently invalidated some slice of the user's library; the
+failure surfaced later, in the editor, per-node, looking like an engine
+bug (2026-07-24: mistaken for an M4 regression at the gate walk).
+Diagnosis required format archaeology (`git log -S` on the parser
+string) — this workaround is now a fallback for the two remaining items
+above, not the everyday path.
 
 **Incident log**
 - 2026-07-08 — URI-style binding refs (`feat!` 7585e653e) break
@@ -66,19 +97,22 @@ cleanly and fails at load.
   pool regression; root-caused to the 07-08 break. First user-visible
   hit — enabled, ironically, by D29 finally showing device projects in
   an editor.
-
 - 2026-07-28 — share envelopes (`lp.package`, `lp.node`) add two more
   unmigrated durable formats, consciously: they carry `format: 1` and
   refuse a mismatch rather than migrating it
   (`../adr/2026-07-28-share-envelopes.md`). Yona, on being asked whether
   to build migration now: *"we're still officially in alpha state, and I
   think in the future we should try to maintain a format, but we're just
-  too heavy devving right now to worry about that."* The table above is
-  the enumeration that decision asked for.
+  too heavy devving right now to worry about that."*
+- 2026-08-04 — Yona hitting real silent failures on lightplayer.app, plus
+  first external users (Zook, Spencer) arriving the following week with a
+  format bump likely on their own critical path, tips the alpha ruling:
+  the paydown above lands as PR #344.
 
-**Exit criteria** — The `format:1` gate work (feature/schema-shape-gen,
-unmerged): projects carry a format version, Studio/desktop MIGRATE
-library data forward on open (devices never upgrade — Studio re-pushes
-migrated data), and pre-gate projects get a one-time adoption path. A
-project too old to migrate shows an honest card/pane state naming the
-remedy, not a parser error.
+**Exit criteria (original, met 2026-08-04)** — projects carry a format
+version (already true); Studio/desktop MIGRATE library data forward on
+open (device never upgrades — Studio re-pushes migrated data); a project
+too old to migrate shows an honest card/pane state naming the remedy, not
+a parser error. All three are now true; the entry stays open (`paying-
+down`, not `retired`) only for the two remaining items above, each with
+its own trigger.
