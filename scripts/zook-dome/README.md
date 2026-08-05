@@ -8,13 +8,15 @@ and filled arrowheads, none of which the importer's `path:N,count:N`
 contract covers.
 
 ```bash
-python3 scripts/zook-dome/convert.py
+python3 scripts/zook-dome/convert.py --repeat   # the shipped form
+python3 scripts/zook-dome/convert.py            # per-channel form, for comparison
 ```
 
-Regenerates the mapping document plus `validation.svg` (resolved lamp
-dots over the strut structure, colored per channel — compare it
-side-by-side with the sketch), and prints a per-channel table. Python 3
-stdlib only; deterministic.
+Either mode regenerates the mapping document plus `validation.svg`
+(resolved lamp dots over the strut structure, colored per physical
+channel — compare it side-by-side with the sketch). Python 3 stdlib
+only; deterministic. The committed `fixture.map2d.json` and
+`validation.svg` are the `--repeat` outputs.
 
 ## The dome
 
@@ -40,16 +42,41 @@ wire (no LEDs), arrowheads give the data direction.
    remainder) — fixed-pitch strip, cut at the hubs.
 
 Every channel resolves to 12 runs, 1 jumper, 2 stretches of ~2454 total
-units — the per-channel lengths agree within ±1 unit, which is strong
-evidence the five sectors are exact 72° rotations of one another.
+units — the per-channel lengths agree within ±1 unit.
+
+## The shipped repeat form
+
+The committed document is **one gapped sector × repeat 5** (map2d
+format 2): channel 1's whole trail as a single 13-point path with
+`gaps: [6]` (the jumper), wrapped in
+`repeat { center: apex, count: 5 }`. `--repeat`'s fidelity check proves
+this against the per-channel form:
+
+- The five hand-drawn sectors are true 72° rotations of sector 1 to
+  within **≤ 9 units** of drawing slop (vertex-by-vertex, after rotating
+  each back); the least-squares rotation center lands 3 units from the
+  authored apex.
+- Per-lamp positions agree to single-digit mean deviation. The only
+  outliers (one lamp each on ch2/ch3) are a knife edge in the OLD form's
+  largest-remainder split (raw share ~171.5 flips a boundary lamp across
+  the ~270-unit jumper). The gapped form's uniform pitch over active
+  length is the physically faithful model — fixed-pitch strip, cut at
+  the hubs and jumpered.
+
+**Wiring order**: the sketch's sectors run counterclockwise in channel
+order, while a map2d repeat turns clockwise, so repeat instance k is
+physical channel `(1, 5, 4, 3, 2)[k]`. `output.json` lists its pins in
+instance order — IO18, IO13, IO2, IO14, IO16 — so every physical sector
+keeps the pin the per-channel form assigned it (ch1..ch5 =
+IO18/IO16/IO14/IO2/IO13).
 
 ## Output topology note
 
 `examples/zook-dome/output.json` authors the true physical split: five
-wires of 300 (IO18/IO16/IO14/IO2 + IO13 as the count-less remainder).
-Since the pooled-slot RMT work (PR #350), the classic drives all five
-wires over its four RMT slots by re-binding pins per transmission — the
-whole dome is live on one board.
+wires of 300, listed in repeat-instance order (see above), the last as
+the count-less remainder. Since the pooled-slot RMT work (PR #350), the
+classic drives all five wires over its four RMT slots by re-binding pins
+per transmission — the whole dome is live on one board.
 
 ```bash
 lp-cli upload examples/zook-dome serial:auto

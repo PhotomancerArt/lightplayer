@@ -6,19 +6,19 @@
    "count": 300
   },
   "1": {
-   "endpoint": "ws281x:local:IO16",
+   "endpoint": "ws281x:local:IO13",
    "count": 300
   },
   "2": {
-   "endpoint": "ws281x:local:IO14",
-   "count": 300
-  },
-  "3": {
    "endpoint": "ws281x:local:IO2",
    "count": 300
   },
+  "3": {
+   "endpoint": "ws281x:local:IO14",
+   "count": 300
+  },
   "4": {
-   "endpoint": "ws281x:local:IO13"
+   "endpoint": "ws281x:local:IO16"
   }
  },
  "bindings": {
