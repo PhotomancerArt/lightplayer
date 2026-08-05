@@ -231,7 +231,10 @@ fn takeover_parks_the_displaced_pad_before_routing() {
 
     pusher.service();
     // Fresh slot: route only, no park (nothing was displaced).
-    assert_eq!(log.borrow().as_slice(), &[PadEvent::Route { slot: 0, gpio: 10 }]);
+    assert_eq!(
+        log.borrow().as_slice(),
+        &[PadEvent::Route { slot: 0, gpio: 10 }]
+    );
 
     for _ in 0..10_000 {
         if mailboxes[1].completed_outcome(seq_b).is_some() {
@@ -239,8 +242,14 @@ fn takeover_parks_the_displaced_pad_before_routing() {
         }
         tick(&driver, &mut pusher);
     }
-    assert_eq!(mailboxes[0].completed_outcome(seq_a), Some(WireOutcome::Transmitted));
-    assert_eq!(mailboxes[1].completed_outcome(seq_b), Some(WireOutcome::Transmitted));
+    assert_eq!(
+        mailboxes[0].completed_outcome(seq_a),
+        Some(WireOutcome::Transmitted)
+    );
+    assert_eq!(
+        mailboxes[1].completed_outcome(seq_b),
+        Some(WireOutcome::Transmitted)
+    );
     assert_eq!(
         log.borrow().as_slice(),
         &[
@@ -263,7 +272,10 @@ fn takeover_parks_the_displaced_pad_before_routing() {
         }
         tick(&driver, &mut pusher);
     }
-    assert_eq!(mailboxes[1].completed_outcome(seq_c), Some(WireOutcome::Transmitted));
+    assert_eq!(
+        mailboxes[1].completed_outcome(seq_c),
+        Some(WireOutcome::Transmitted)
+    );
     assert_eq!(
         log.borrow().len(),
         events_before,
@@ -279,13 +291,7 @@ fn close_aborts_in_flight_and_cancels_queued() {
     let driver = driver();
     let mailboxes: [WireMailbox; 2] = core::array::from_fn(|_| WireMailbox::new());
     // One slot: wire 0 will be in flight, wire 1 stuck queued behind it.
-    let mut pusher = Pusher::new(
-        &driver,
-        &mailboxes,
-        RecorderPads::default(),
-        &SLOTS[..1],
-        1,
-    );
+    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS[..1], 1);
 
     let frame_a: Box<[u8]> = ramp_frame(8).into_boxed_slice();
     let frame_b: Box<[u8]> = ramp_frame(8).into_boxed_slice();
@@ -300,14 +306,20 @@ fn close_aborts_in_flight_and_cancels_queued() {
     let close_b = mailboxes[1].request_close();
     pusher.service();
     assert!(mailboxes[1].close_acked(close_b));
-    assert_eq!(mailboxes[1].completed_outcome(seq_b), Some(WireOutcome::Cancelled));
+    assert_eq!(
+        mailboxes[1].completed_outcome(seq_b),
+        Some(WireOutcome::Cancelled)
+    );
     drop(frame_b); // Reclaimable the moment the ack lands.
 
     // In-flight wire closes: aborted off the wire.
     let close_a = mailboxes[0].request_close();
     pusher.service();
     assert!(mailboxes[0].close_acked(close_a));
-    assert_eq!(mailboxes[0].completed_outcome(seq_a), Some(WireOutcome::Aborted));
+    assert_eq!(
+        mailboxes[0].completed_outcome(seq_a),
+        Some(WireOutcome::Aborted)
+    );
     drop(frame_a);
     assert_eq!(pusher.transmitting(), 0, "the slot is free again");
 
@@ -321,7 +333,10 @@ fn close_aborts_in_flight_and_cancels_queued() {
         }
         tick(&driver, &mut pusher);
     }
-    assert_eq!(mailboxes[0].completed_outcome(seq_c), Some(WireOutcome::Transmitted));
+    assert_eq!(
+        mailboxes[0].completed_outcome(seq_c),
+        Some(WireOutcome::Transmitted)
+    );
     drop(frame_c);
 }
 
@@ -331,13 +346,7 @@ fn close_aborts_in_flight_and_cancels_queued() {
 fn abort_request_disposes_in_flight_and_queued_frames() {
     let driver = driver();
     let mailboxes: [WireMailbox; 2] = core::array::from_fn(|_| WireMailbox::new());
-    let mut pusher = Pusher::new(
-        &driver,
-        &mailboxes,
-        RecorderPads::default(),
-        &SLOTS[..1],
-        1,
-    );
+    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS[..1], 1);
 
     let frame_a: Box<[u8]> = ramp_frame(8).into_boxed_slice();
     let frame_b: Box<[u8]> = ramp_frame(8).into_boxed_slice();
@@ -349,8 +358,14 @@ fn abort_request_disposes_in_flight_and_queued_frames() {
     mailboxes[0].request_abort(seq_a);
     mailboxes[1].request_abort(seq_b);
     pusher.service();
-    assert_eq!(mailboxes[0].completed_outcome(seq_a), Some(WireOutcome::Aborted));
-    assert_eq!(mailboxes[1].completed_outcome(seq_b), Some(WireOutcome::Cancelled));
+    assert_eq!(
+        mailboxes[0].completed_outcome(seq_a),
+        Some(WireOutcome::Aborted)
+    );
+    assert_eq!(
+        mailboxes[1].completed_outcome(seq_b),
+        Some(WireOutcome::Cancelled)
+    );
     drop((frame_a, frame_b));
     assert_eq!(pusher.transmitting(), 0);
 }
@@ -374,7 +389,10 @@ fn takeover_after_close_never_parks_the_closed_wires_pad() {
     let close_a = mailboxes[0].request_close();
     pusher.service();
     assert!(mailboxes[0].close_acked(close_a));
-    assert_eq!(mailboxes[0].completed_outcome(seq_a), Some(WireOutcome::Aborted));
+    assert_eq!(
+        mailboxes[0].completed_outcome(seq_a),
+        Some(WireOutcome::Aborted)
+    );
     drop(frame_a);
 
     log.borrow_mut().clear();
@@ -387,7 +405,10 @@ fn takeover_after_close_never_parks_the_closed_wires_pad() {
         }
         tick(&driver, &mut pusher);
     }
-    assert_eq!(mailboxes[1].completed_outcome(seq_b), Some(WireOutcome::Transmitted));
+    assert_eq!(
+        mailboxes[1].completed_outcome(seq_b),
+        Some(WireOutcome::Transmitted)
+    );
     assert_eq!(
         log.borrow().as_slice(),
         &[PadEvent::Route { slot: 0, gpio: 11 }],
@@ -403,13 +424,7 @@ fn unconfigured_slot_reports_start_failed() {
     let driver: Ws281xDriver<MockRmt, 4> = Ws281xDriver::new(MockRmt::new(4, 48));
     // Deliberately no configure_default_clock.
     let mailboxes: [WireMailbox; 1] = core::array::from_fn(|_| WireMailbox::new());
-    let mut pusher = Pusher::new(
-        &driver,
-        &mailboxes,
-        RecorderPads::default(),
-        &SLOTS[..1],
-        1,
-    );
+    let mut pusher = Pusher::new(&driver, &mailboxes, RecorderPads::default(), &SLOTS[..1], 1);
 
     let frame: Box<[u8]> = ramp_frame(4).into_boxed_slice();
     // SAFETY: disposed of (StartFailed) before the drop.

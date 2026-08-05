@@ -138,8 +138,13 @@ pub(super) fn run() -> ! {
         *slot = ch.load(Relaxed);
     }
 
-    let mut pusher: Pusher<'static, _, _, TX_CHANNELS, TX_CHANNELS> =
-        Pusher::new(&DRIVER, &MAILBOXES, MatrixPads, &channels[..count], PUSHER_CAP);
+    let mut pusher: Pusher<'static, _, _, TX_CHANNELS, TX_CHANNELS> = Pusher::new(
+        &DRIVER,
+        &MAILBOXES,
+        MatrixPads,
+        &channels[..count],
+        PUSHER_CAP,
+    );
     loop {
         while pusher.service() {}
         idle_once();
