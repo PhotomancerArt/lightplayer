@@ -356,6 +356,47 @@ fn abort_request_disposes_in_flight_and_queued_frames() {
     assert_eq!(pusher.transmitting(), 0);
 }
 
+/// After a wire closes, its pad's lease is the poster's to release — a
+/// takeover by another wire must NOT park the closed wire's pad (the lease
+/// may already belong to someone else). The close forgets the binding; the
+/// next acquisition routes without parking anything.
+#[test]
+fn takeover_after_close_never_parks_the_closed_wires_pad() {
+    let driver = driver();
+    let mailboxes: [WireMailbox; 2] = core::array::from_fn(|_| WireMailbox::new());
+    let pads = RecorderPads::default();
+    let log = Rc::clone(&pads.0);
+    let mut pusher = Pusher::new(&driver, &mailboxes, pads, &SLOTS[..1], 1);
+
+    let frame_a: Box<[u8]> = ramp_frame(4).into_boxed_slice();
+    // SAFETY: quiesced by the acked close below.
+    let seq_a = unsafe { mailboxes[0].post(10, frame_a.as_ptr(), frame_a.len()) };
+    pusher.service();
+    let close_a = mailboxes[0].request_close();
+    pusher.service();
+    assert!(mailboxes[0].close_acked(close_a));
+    assert_eq!(mailboxes[0].completed_outcome(seq_a), Some(WireOutcome::Aborted));
+    drop(frame_a);
+
+    log.borrow_mut().clear();
+    let frame_b: Box<[u8]> = ramp_frame(4).into_boxed_slice();
+    // SAFETY: drained below.
+    let seq_b = unsafe { mailboxes[1].post(11, frame_b.as_ptr(), frame_b.len()) };
+    for _ in 0..10_000 {
+        if mailboxes[1].completed_outcome(seq_b).is_some() {
+            break;
+        }
+        tick(&driver, &mut pusher);
+    }
+    assert_eq!(mailboxes[1].completed_outcome(seq_b), Some(WireOutcome::Transmitted));
+    assert_eq!(
+        log.borrow().as_slice(),
+        &[PadEvent::Route { slot: 0, gpio: 11 }],
+        "no park of the closed wire's pad — its lease has moved on"
+    );
+    drop(frame_b);
+}
+
 /// A slot channel the driver never configured surfaces as `StartFailed`
 /// rather than a wedged wire — the defect is the poster's to report.
 #[test]
