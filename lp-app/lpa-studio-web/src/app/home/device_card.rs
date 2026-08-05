@@ -2088,6 +2088,23 @@ pub(super) fn device_affordance_action(
                      changes stay in your project history.",
         )
         .with_icon("download"),
+        // P5: the format verb dispatches from the face like the drift
+        // verbs, and for the same reason — it is non-destructive by
+        // construction (the pre-upgrade copy stays in project history), so
+        // a confirm gate would be theatre. The summary says where the old
+        // copy went, which is what makes one click feel safe.
+        RosterAffordance::UpgradeProject => UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::UpgradeDeviceProject {
+                target: DeviceTarget::card(card_key),
+            },
+        )
+        .with_summary(
+            "Upgrade this board's project to the format Studio uses and put \
+             it back on the board — the copy that's there now is already \
+             saved in your library.",
+        )
+        .with_icon("upload"),
         RosterAffordance::KeepBoth => UiAction::from_op(
             ControllerId::new(DEPLOY_NODE_ID),
             DeployOp::KeepBothFork {

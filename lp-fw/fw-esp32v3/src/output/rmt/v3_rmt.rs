@@ -96,7 +96,7 @@
 //! * `APB_CONF` is written once at [`init_tx`], before the APP core binds.
 
 use esp_hal::peripherals::RMT;
-use lp_ws281x::{BlockPlan, InterruptFlags, RmtHw, SharedBlockPlan};
+use lp_ws281x::{BlockPlan, InterruptFlags, RamWindow, RmtHw, SharedBlockPlan};
 
 /// RMT channels the classic ESP32 has, all of which can transmit.
 ///
@@ -150,16 +150,34 @@ pub static TX_PLAN: SharedBlockPlan<TX_CHANNELS> = SharedBlockPlan::new();
 /// A manifest that declares more channels than its strips need is therefore
 /// paying real margin for phantom outputs — the manifest is the tuning knob
 /// now, which is the point: it is the sole authority on channel count.
+///
+/// **Above four declared wires the plan stops growing**: silicon transmitters
+/// cap at [`POOLED_SLOT_CAP`] two-block slots and the extra wires share them
+/// by per-transmission pin muxing (the driver's slot pool — see
+/// `esp32v3_rmt_ws281x_driver`). The old behaviour — five-plus declared
+/// channels degrading everyone to one-block windows — put the whole board on
+/// 40 µs deadlines the ISR-throughput ceiling cannot honour (§12: truncation
+/// from channel 3 up); the pool keeps every transmitter on the measured-clean
+/// 80 µs geometry instead and pays with waves.
 pub fn plan_for_declared(declared: usize) -> Option<BlockPlan<TX_CHANNELS>> {
     if declared == 0 {
         return None;
     }
-    let channels = declared.min(TX_CHANNELS);
+    let channels = declared.min(POOLED_SLOT_CAP);
     let blocks_each = ((TX_CHANNELS / channels) as u8).min(MAX_BLOCKS_PER_CHANNEL);
     // Validated by the `for_channels` tests in `lp-ws281x`; cannot fail for
     // 1..=8 channels at a capped width.
     BlockPlan::for_channels(channels, blocks_each).ok()
 }
+
+/// The most silicon transmitters any plan configures, however many wires the
+/// manifest declares.
+///
+/// Four two-block slots is the measured-clean maximum concurrent shape on
+/// this chip (zero trips at cap 4 after the fill-path hoists; 2026-08-05).
+/// Wires beyond this count time-share the slots via pin muxing rather than
+/// shrinking everyone's refill deadline.
+pub const POOLED_SLOT_CAP: usize = 4;
 
 /// Total RMT RAM, in words — the bound every pointer here respects. All eight
 /// blocks belong to transmitters on this chip (there are no receive-only
@@ -261,6 +279,36 @@ impl RmtHw for V3Rmt {
         // reads this memory behind the compiler's back, so the store can be
         // neither elided nor reordered with the surrounding register writes.
         unsafe { ptr.write_volatile(value) };
+    }
+
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    //
+    // This is the hoisted form of [`ram_word`]'s per-word plan lookup: the
+    // same window derivation, performed once per fill (the boot probe
+    // measured the per-word form at ~4 CPU cycles/word — see
+    // `refill_floor_probe`). The bounds argument is identical: the base is
+    // `window_start` into the 512-word RMT RAM and the driver's stores stay
+    // below `words == window_words`, which the `index < TX_RAM_WORDS` check
+    // here bounds as a whole instead of per word.
+    #[inline(always)]
+    fn ram_window(&self, ch: u8) -> Option<RamWindow> {
+        let words = TX_PLAN.window_words(ch, BLOCK_WORDS);
+        if words == 0 {
+            return None;
+        }
+        let start = TX_PLAN.window_start(ch, BLOCK_WORDS);
+        if start + words > TX_RAM_WORDS {
+            return None;
+        }
+        // SAFETY: `RAM_BASE` is the RMT RAM window, `TX_RAM_WORDS` u32 words
+        // long; `start + words` was just bounded to it, so the base and every
+        // word the driver may store through it stay inside one MMIO object.
+        Some(RamWindow {
+            base: unsafe { (RAM_BASE as *mut u32).add(start) },
+            words,
+        })
     }
 
     // `always`: must land inside the IRAM-sectioned refill path (see the
@@ -509,4 +557,74 @@ pub fn clear_ram(ch: u8) {
             unsafe { ptr.write_volatile(0) };
         }
     }
+}
+
+/// The GPIO-matrix output signal RMT slot `slot` drives, or `None` past the
+/// slot range. Classic-ESP32 output signal indices 87..=94
+/// (`esp-metadata-generated` `_generated_esp32.rs`, `OutputSignal`).
+fn rmt_output_signal(slot: u8) -> Option<esp_hal::gpio::OutputSignal> {
+    use esp_hal::gpio::OutputSignal as S;
+    Some(match slot {
+        0 => S::RMT_SIG_0,
+        1 => S::RMT_SIG_1,
+        2 => S::RMT_SIG_2,
+        3 => S::RMT_SIG_3,
+        4 => S::RMT_SIG_4,
+        5 => S::RMT_SIG_5,
+        6 => S::RMT_SIG_6,
+        7 => S::RMT_SIG_7,
+        _ => return None,
+    })
+}
+
+/// Route RMT slot `slot`'s output through the GPIO matrix onto pad `gpio`.
+///
+/// This is the per-transmission half of the wire/slot decoupling: the pool
+/// binds a silicon transmitter to whichever wire's pad is about to carry a
+/// frame. The pad's *GPIO-function* level is parked low first, so the moment
+/// the matrix switches sources the worst the strip sees is a continuing low —
+/// the RMT signal itself idles low (`idle_output` in the channel config), so
+/// there is no glitch edge in either direction.
+///
+/// # Safety (caller contract)
+///
+/// The caller must hold the registry lease for `gpio` (every path here goes
+/// through an output's claimed lease), and `gpio` must be a valid, exposed
+/// pad — both are the same preconditions the old `with_pin` bind had. Two
+/// pads may briefly both point at one slot's signal mid-handover; that is
+/// harmless (the matrix fans out) and resolved by parking the old pad first.
+pub fn route_rmt_to_gpio(slot: u8, gpio: u8) {
+    let Some(signal) = rmt_output_signal(slot) else {
+        return;
+    };
+    use esp_hal::gpio::interconnect::PeripheralOutput;
+    // SAFETY: exclusivity for this pad is the registry's (caller holds the
+    // lease); the pad number was validated against the chip's pin table
+    // before any lease could be granted, so `steal` cannot panic.
+    let mut pin = esp_hal::gpio::Flex::new(unsafe { esp_hal::gpio::AnyPin::steal(gpio) });
+    pin.set_low();
+    pin.apply_output_config(&esp_hal::gpio::OutputConfig::default());
+    pin.set_output_enable(true);
+    pin.connect_peripheral_to_output(signal);
+}
+
+/// Park pad `gpio`: plain GPIO function, output enabled, driven **solid
+/// low**.
+///
+/// A WS281x strand whose pad is left floating or routed to a signal that
+/// later moves sees garbage edges; a parked pad holds the strand's latched
+/// frame indefinitely. Called when a wire's slot is handed to another wire,
+/// when an output opens (so the strand idles clean before its first frame),
+/// and when an output drops.
+///
+/// # Safety (caller contract)
+///
+/// Same as [`route_rmt_to_gpio`]: the caller holds the pad's lease.
+pub fn park_gpio(gpio: u8) {
+    use esp_hal::gpio::interconnect::PeripheralOutput;
+    // SAFETY: as in `route_rmt_to_gpio` — lease-held, table-validated pad.
+    let mut pin = esp_hal::gpio::Flex::new(unsafe { esp_hal::gpio::AnyPin::steal(gpio) });
+    pin.set_low();
+    pin.set_output_enable(true);
+    pin.disconnect_from_peripheral_output();
 }

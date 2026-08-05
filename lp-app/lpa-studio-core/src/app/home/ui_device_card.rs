@@ -9,8 +9,9 @@ use crate::app::roster::RosterCardState;
 /// A device card. Visually distinct from package cards by contract: the
 /// renderer gives it a hardware header (status circle + transport) so it
 /// never reads as "just another project". The card's health lives in
-/// [`RosterCardState`] (the 14-state vocabulary, derived from evidence by
-/// `derive_roster_card_state`); the project chip is identity, not status.
+/// [`RosterCardState`] (the roster card-state vocabulary, derived from
+/// evidence by `derive_roster_card_state`); the project chip is identity,
+/// not status.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceCard {
     /// `dev_…` uid when the device is registered; `None` for a live

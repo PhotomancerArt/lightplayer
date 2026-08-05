@@ -1,6 +1,10 @@
-//! The 14-state roster card vocabulary and its status-line copy.
+//! The roster card vocabulary and its status-line copy.
 //!
-//! One variant per direction.md "Card grammar" state-table row. The enum
+//! One variant per direction.md "Card grammar" state-table row, plus the
+//! rows later work has had to add (the 2026-07-31 recovery-mode split, the
+//! 2026-08-04 format card). This file's doc comments are the de-facto card
+//! spec: a variant explains what the state IS, why it exists as its own
+//! row, and what the card offers there. The enum
 //! is renderer-independent (no web/UI types): the same vocabulary may
 //! later drive on-device LEDs and richer displays. Status-line copy lives
 //! here so every renderer says the same thing.
@@ -57,13 +61,49 @@ pub enum RosterCardState {
     },
     /// Live link, nothing loaded. Green solid — an empty device is fine.
     ConnectedEmpty,
-    /// Holds project data Studio cannot read (old format, corruption).
-    /// Amber solid — honest about the content; replacing (choose a
-    /// project) or erasing are the ways out. Added 2026-07-17 after the
-    /// hardware walk: mapping this to Connected-empty hid the truth.
+    /// Holds project data Studio cannot read at all — corruption, a
+    /// missing manifest, a failed read. Amber solid — honest about the
+    /// content; wiping back to blank is the way out. Added 2026-07-17
+    /// after the hardware walk: mapping this to Connected-empty hid the
+    /// truth.
+    ///
+    /// A project that reads fine but states a format this build does not
+    /// use is NOT this state — it is
+    /// [`Self::HoldsOldFormatProject`], which can say what was found and,
+    /// where the migration chain reaches, offer one click that fixes it.
     HoldsUnreadableData {
         /// Why the content didn't parse (manifest error detail).
         detail: String,
+    },
+    /// Holds a readable project whose FORMAT is not this build's. Amber
+    /// solid.
+    ///
+    /// Added 2026-08-04 (project-format-upgrades P5). Before it, a board
+    /// holding a format-4 project classified as Running/Known — the pull
+    /// read the manifest's `uid` and never its `format` — so the card
+    /// claimed a board was running a project its firmware had refused to
+    /// load, and the only honest-looking way out was the wipe on
+    /// [`Self::HoldsUnreadableData`]. This state says which format was
+    /// found and which this Studio uses, and carries the one verb that
+    /// resolves it.
+    ///
+    /// Despite the name it covers BOTH directions of format drift — a
+    /// board left behind by a Studio update (the common case) and one
+    /// written by a NEWER LightPlayer. [`DeviceFormatStanding`] carries
+    /// which, because the two take different verbs: only an upgradable
+    /// format earns [`RosterAffordance::UpgradeProject`]; the rest keep
+    /// the wipe plus a note naming what to do instead.
+    ///
+    /// The board's bytes are already banked in the library when this card
+    /// appears (connect-is-a-pull, D8), which is what makes upgrading —
+    /// and wiping — survivable.
+    HoldsOldFormatProject {
+        /// What the manifest sniff found, and whether this build can
+        /// migrate it.
+        standing: DeviceFormatStanding,
+        /// The format this build writes (`PROJECT_FORMAT_VERSION`),
+        /// carried as evidence so the copy layer stays pure.
+        expected: u32,
     },
     /// Blank/erased flash: provisioning turns it into a Device. Amber
     /// solid.
@@ -108,6 +148,37 @@ pub enum RosterCardState {
     },
 }
 
+/// Where a board's project format stands relative to this build — the
+/// card's own vocabulary for [`lpa_upgrade::FormatClass`], carrying only
+/// the distinctions the card acts on.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeviceFormatStanding {
+    /// Old, and within the migration floor: one click fixes it.
+    Upgradable { found: u32 },
+    /// Older than the floor — the types those formats named are deleted,
+    /// so no automatic path exists. `found` is `None` for a pre-mitosis
+    /// project, which states no version at all.
+    TooOld { found: Option<u32> },
+    /// Written by a newer LightPlayer than this build. Not a defect in the
+    /// project: this Studio is the one that is behind.
+    FromNewerStudio { found: u32 },
+}
+
+impl DeviceFormatStanding {
+    /// The version the manifest stated, when it stated one.
+    pub fn found(&self) -> Option<u32> {
+        match self {
+            Self::Upgradable { found } | Self::FromNewerStudio { found } => Some(*found),
+            Self::TooOld { found } => *found,
+        }
+    }
+
+    /// Whether this build can migrate it — the gate on the Upgrade verb.
+    pub fn is_upgradable(&self) -> bool {
+        matches!(self, Self::Upgradable { .. })
+    }
+}
+
 /// Why a running device is degraded (no live source yet — Q7).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DegradedReason {
@@ -142,7 +213,8 @@ impl RosterCardState {
             | Self::OtherFirmware
             | Self::NeedsFirmwareUpdate
             | Self::NeedsAName
-            | Self::HoldsUnreadableData { .. } => {
+            | Self::HoldsUnreadableData { .. }
+            | Self::HoldsOldFormatProject { .. } => {
                 (RosterTreatment::Filled, UiStatusKind::Attention)
             }
             Self::ConnectingRetrying { .. } | Self::OperationInFlight { .. } => {
@@ -187,6 +259,14 @@ impl RosterCardState {
             } => format!("{label}…"),
             Self::ConnectedEmpty => "Connected — nothing loaded".to_string(),
             Self::HoldsUnreadableData { .. } => "Holds unreadable data".to_string(),
+            // §3a: the headline states the FACT (which format is on the
+            // board); the sub-line explains what that means and what to
+            // do. "Holds an incompatible project" would be a label the
+            // user cannot check.
+            Self::HoldsOldFormatProject { standing, .. } => match standing.found() {
+                Some(found) => format!("Holds a format-{found} project"),
+                None => "Holds a project with no stated format".to_string(),
+            },
             Self::ReadyToSetUp => "Ready to set up".to_string(),
             // "Bootloader" is our word, not the user's; the technical term
             // stays available on the rich object.
@@ -239,6 +319,32 @@ impl RosterCardState {
                 ))
             }
             Self::HoldsUnreadableData { detail } => Some(detail.clone()),
+            // Every arm names a remedy: a classification the user cannot
+            // act on is the silent-failure problem in a new costume
+            // (the rule `FormatClass::describe` follows, in card voice).
+            Self::HoldsOldFormatProject { standing, expected } => Some(match standing {
+                DeviceFormatStanding::Upgradable { .. } => format!(
+                    "Studio uses format {expected}, so this board isn't running it. \
+                     Upgrading rewrites the project in your library and puts it back \
+                     on the board — the copy that's there now is already saved."
+                ),
+                DeviceFormatStanding::TooOld { found: Some(found) } => format!(
+                    "Studio uses format {expected}, and format {found} is too old to \
+                     upgrade automatically. Open it in a LightPlayer that still reads \
+                     format {found} and re-save it, or wipe the board and push a \
+                     project from your library."
+                ),
+                DeviceFormatStanding::TooOld { found: None } => format!(
+                    "Studio uses format {expected}. This project predates the version \
+                     stamp, so there is no automatic path forward — rebuild it, or \
+                     wipe the board and push a project from your library."
+                ),
+                DeviceFormatStanding::FromNewerStudio { found } => format!(
+                    "Format {found} was made by a newer LightPlayer than this one \
+                     (it writes format {expected}). Update LightPlayer to work with \
+                     it, or wipe the board and push a project from your library."
+                ),
+            }),
             _ => None,
         }
     }
@@ -263,6 +369,16 @@ impl RosterCardState {
             // The way out is BLANK, never push-over (model rev 2026-07-26):
             // wipe the unreadable content, land on "nothing loaded".
             Self::HoldsUnreadableData { .. } => Some(RosterAffordance::WipeProject),
+            // The one verb that resolves the situation, where it exists:
+            // upgrade (pull → migrate in the library → push). Below the
+            // floor or ahead of this build there is no such verb, so the
+            // card offers the honest way out instead of a button that
+            // would only fail.
+            Self::HoldsOldFormatProject { standing, .. } => Some(if standing.is_upgradable() {
+                RosterAffordance::UpgradeProject
+            } else {
+                RosterAffordance::WipeProject
+            }),
             Self::ReadyToSetUp | Self::OtherFirmware => Some(RosterAffordance::SetUp),
             // Not SetUp: this is not a normal provisioning. The recovery
             // flash has a different ending (replug), and a device here may
@@ -428,6 +544,83 @@ mod tests {
             line.contains("Your copy was saved 4m ago."),
             "local save recency in plain words: {line}"
         );
+    }
+
+    /// P5's gate: the Upgrade button appears ONLY where the migration
+    /// chain actually reaches. A verb that would refuse the moment it was
+    /// pressed is worse than the honest way out.
+    #[test]
+    fn only_an_upgradable_format_offers_the_upgrade_verb() {
+        let card = |standing| RosterCardState::HoldsOldFormatProject {
+            standing,
+            expected: 5,
+        };
+        assert_eq!(
+            card(DeviceFormatStanding::Upgradable { found: 4 }).affordance(),
+            Some(RosterAffordance::UpgradeProject)
+        );
+        for refused in [
+            DeviceFormatStanding::TooOld { found: Some(2) },
+            DeviceFormatStanding::TooOld { found: None },
+            DeviceFormatStanding::FromNewerStudio { found: 99 },
+        ] {
+            assert_eq!(
+                card(refused.clone()).affordance(),
+                Some(RosterAffordance::WipeProject),
+                "{refused:?} has no upgrade path — the card must not pretend it does"
+            );
+        }
+    }
+
+    /// The card states the FACT (which format is on the board) and then
+    /// what to do about it — every arm, including the ones with no
+    /// upgrade path. A classification the user cannot act on is the
+    /// silent-failure problem in a new costume.
+    #[test]
+    fn the_format_card_names_what_it_found_and_a_remedy() {
+        let upgradable = RosterCardState::HoldsOldFormatProject {
+            standing: DeviceFormatStanding::Upgradable { found: 4 },
+            expected: 5,
+        };
+        assert_eq!(upgradable.status_line(0.0), "Holds a format-4 project");
+        let note = upgradable.sub_line(0.0).expect("a note");
+        assert!(note.contains("format 5"), "{note}");
+        assert!(note.contains("Upgrading"), "{note}");
+        assert!(
+            note.contains("already saved"),
+            "the board's copy is banked — say so, that is what makes one click safe: {note}"
+        );
+
+        let too_old = RosterCardState::HoldsOldFormatProject {
+            standing: DeviceFormatStanding::TooOld { found: Some(2) },
+            expected: 5,
+        };
+        assert_eq!(too_old.status_line(0.0), "Holds a format-2 project");
+        let note = too_old.sub_line(0.0).expect("a note");
+        assert!(note.contains("too old"), "{note}");
+        assert!(note.contains("wipe"), "the remedy is named: {note}");
+
+        let newer = RosterCardState::HoldsOldFormatProject {
+            standing: DeviceFormatStanding::FromNewerStudio { found: 9 },
+            expected: 5,
+        };
+        assert_eq!(newer.status_line(0.0), "Holds a format-9 project");
+        let note = newer.sub_line(0.0).expect("a note");
+        assert!(
+            note.contains("newer LightPlayer"),
+            "this Studio is the one that is behind — say that: {note}"
+        );
+
+        // No version stamp at all: the headline must not invent one.
+        let unstamped = RosterCardState::HoldsOldFormatProject {
+            standing: DeviceFormatStanding::TooOld { found: None },
+            expected: 5,
+        };
+        assert_eq!(
+            unstamped.status_line(0.0),
+            "Holds a project with no stated format"
+        );
+        assert!(unstamped.sub_line(0.0).is_some());
     }
 
     #[test]

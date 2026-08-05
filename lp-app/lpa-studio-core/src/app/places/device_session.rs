@@ -33,6 +33,7 @@
 //! observation is skipped with a log line (the classification still
 //! reaches the UI; the lock, not the badge, is the truth).
 
+use lpa_upgrade::{FormatClass, ProjectFiles};
 use lpc_history::{ContentHash, EventLog, PrefixedUid, SnapshotStore, SyncRelation};
 use lpfs::{AsLpPath, LpFs, LpFsMemory, LpPath};
 
@@ -84,9 +85,51 @@ pub enum DeviceContent {
     /// so its unknown content ADOPTS at connect. Old firmware with no
     /// MAC and no stamp is what still lands here.
     PendingIdentity { observed: ContentHash },
+    /// A readable project whose authored FORMAT is not this build's
+    /// ([`lpa_upgrade::classify`] on the pulled `project.json`).
+    ///
+    /// The firmware refuses to load it, so every "Running…" classification
+    /// would be a lie — this one preempts [`Self::Known`]/[`Self::Adopted`]
+    /// whatever the hash relation says. The banking those branches do still
+    /// happens first: the board's bytes are in the library either way (D8),
+    /// which is what makes the upgrade verb non-destructive.
+    ///
+    /// Usually an OLDER format (a board left behind by a Studio update),
+    /// but a board written by a NEWER LightPlayer lands here too — `class`
+    /// carries which, and only [`FormatClass::Upgradable`] earns the
+    /// Upgrade affordance.
+    OldFormat {
+        /// The library package holding this project's line — the migration
+        /// subject and the push source. `None` when the library has no copy
+        /// of it (adoption did not run for this board).
+        project_uid: Option<String>,
+        /// Library slug at pull time (display only).
+        slug: Option<String>,
+        observed: ContentHash,
+        /// What the manifest sniff found. Never `Current` — that is a
+        /// [`Self::Known`]/[`Self::Adopted`] board.
+        class: FormatClass,
+    },
     /// Files exist but the manifest is missing/unparseable. Not fatal:
     /// the link stays usable (flash/erase still work).
     Unreadable { detail: String },
+}
+
+/// The pulled device copy as the upgrader sees it: package-relative paths
+/// → bytes, with the device-scoped `/.lp/*` sidecars dropped (identity
+/// belongs to the board, never to the project).
+pub fn device_project_files(files: &[(String, Vec<u8>)]) -> ProjectFiles {
+    files
+        .iter()
+        .filter(|(path, _)| !path.trim_start_matches('/').starts_with(".lp/"))
+        .map(|(path, bytes)| (path.clone(), bytes.clone()))
+        .collect()
+}
+
+/// Sniff the format of a pulled device copy — lenient, never through the
+/// strict manifest parser (see [`lpa_upgrade::classify`]).
+pub fn classify_device_project(files: &[(String, Vec<u8>)]) -> FormatClass {
+    lpa_upgrade::classify(&device_project_files(files))
 }
 
 /// The raw pull: every file in the device's project storage, plus the
@@ -761,6 +804,58 @@ mod tests {
 
         let listed = DeviceRegistry::new(store.fs_handle()).list().unwrap();
         assert_eq!(listed.len(), 1);
+    }
+
+    /// The pull's format sniff (P5): what the board's `project.json`
+    /// states, read leniently and with the device's own `/.lp/*` sidecars
+    /// kept out of the project (they are the board's identity, not the
+    /// project's content — a stray `.lp/project.json` must never decide
+    /// the verdict).
+    #[test]
+    fn the_pulled_copy_is_classified_by_its_manifest_alone() {
+        let pulled = |manifest: &str| {
+            vec![
+                ("project.json".to_string(), manifest.as_bytes().to_vec()),
+                (".lp/device.json".to_string(), b"{}".to_vec()),
+                ("shader.glsl".to_string(), b"void main() {}".to_vec()),
+            ]
+        };
+        assert_eq!(
+            classify_device_project(&pulled(&format!(
+                r#"{{"format":{}}}"#,
+                lpc_model::PROJECT_FORMAT_VERSION
+            ))),
+            FormatClass::Current
+        );
+        assert_eq!(
+            classify_device_project(&pulled(r#"{"format":4}"#)),
+            FormatClass::Upgradable { found: 4 }
+        );
+        assert_eq!(
+            classify_device_project(&pulled(r#"{"format":3}"#)),
+            FormatClass::BelowFloor { found: Some(3) }
+        );
+        assert_eq!(
+            classify_device_project(&pulled(r#"{"format":99}"#)),
+            FormatClass::FutureFormat { found: 99 }
+        );
+        assert!(matches!(
+            classify_device_project(&pulled("{ not json")),
+            FormatClass::Unreadable { .. }
+        ));
+        // identity-only storage is not a project
+        assert_eq!(
+            classify_device_project(&[(".lp/device.json".to_string(), b"{}".to_vec())]),
+            FormatClass::NotAProject
+        );
+        // the device's own sidecar never plays the manifest
+        assert_eq!(
+            classify_device_project(&[(
+                ".lp/project.json".to_string(),
+                br#"{"format":4}"#.to_vec()
+            )]),
+            FormatClass::NotAProject
+        );
     }
 
     #[test]
