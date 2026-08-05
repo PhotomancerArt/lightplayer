@@ -44,13 +44,15 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::format_gradient_chip;
 use lpa_studio_core::{
     UiAction, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelWidget,
     UiSlotValueKind,
 };
 
 use crate::app::node::{
-    HFaderField, KnobField, PanelEmit, SlotDetailButton, SlotUnitSuffix, ToggleField,
+    HFaderField, KnobField, PaletteSwatchField, PanelEmit, SlotDetailButton, SlotUnitSuffix,
+    ToggleField,
 };
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -113,15 +115,21 @@ pub fn ModulePanelControl(
         format!("ux-module-control-{id}")
     });
 
-    let is_fader = matches!(control.widget, UiPanelWidget::Fader { .. });
-    let column_class = if is_fader {
+    // The WIDE controls: a fader and a palette swatch both want a fixed,
+    // roomy footprint with the label above, where a knob or a toggle is a
+    // narrow column.
+    let is_wide = matches!(
+        control.widget,
+        UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch
+    );
+    let column_class = if is_wide {
         FADER_CLASS
     } else if play {
         "tw:flex tw:min-w-[76px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5"
     } else {
         "tw:flex tw:min-w-[64px] tw:flex-none tw:flex-col tw:items-center tw:gap-1"
     };
-    let anchor_class = if is_fader {
+    let anchor_class = if is_wide {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1"
     } else {
         "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-1"
@@ -223,14 +231,29 @@ fn ModulePanelControlBody(
         control.emit,
         lpa_studio_core::UiPanelEmit::PhasorPeriod { .. }
     );
+    // A palette reads as its compact chip (`5 stops`, `↻ 4 · 3/min`) — the
+    // strips below say WHICH palette; the full summary stays on hover and
+    // in the label's detail popup.
+    let palette = control.swatch_palette();
     let shown_value = if phasor {
         crate::app::node::phasor_speed_display(control.shown_display())
+    } else if let Some(config) = &palette {
+        format_gradient_chip(config)
     } else {
         control.shown_display().to_string()
     };
+    // Hovering a palette keeps the full summary reachable — the chip
+    // deliberately drops the space, method, and fade the dense line states.
+    let readout_title = match &palette {
+        Some(_) => control
+            .live_value
+            .clone()
+            .unwrap_or_else(|| control.value.display.clone()),
+        None => String::new(),
+    };
     let readout = rsx! {
         span { class: "{READOUT_CLASS} {readout_class}",
-            span { "{shown_value}" }
+            span { title: readout_title, "{shown_value}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
         }
     };
@@ -282,6 +305,23 @@ fn ModulePanelControlBody(
                     panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
+                }
+            }
+        }
+        UiPanelWidget::PaletteSwatch => {
+            let Some(config) = palette else {
+                return mismatch(&control.label, &control.value.display);
+            };
+            rsx! {
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                    {label}
+                    {readout}
+                }
+                PaletteSwatchField {
+                    config,
+                    state: control.state.clone(),
+                    bound: following,
+                    engaged,
                 }
             }
         }

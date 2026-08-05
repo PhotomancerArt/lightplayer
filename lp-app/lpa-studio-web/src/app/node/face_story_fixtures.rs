@@ -138,6 +138,57 @@ pub(crate) fn toggle_control(
     }
 }
 
+/// One palette swatch control (M4 P3): the closed face of the chooser.
+///
+/// Its value is the WHOLE `GradientConfig` — built through the model's own
+/// storage, exactly as the projection builds one — and its emit family says
+/// a pick replaces the config outright. `shared` is the channel-driven
+/// case: an authored config channel puts the swatch on the module panel and
+/// every reader of that channel takes the config whole.
+pub(crate) fn palette_swatch_control(
+    label: &str,
+    config: &lpc_model::GradientConfig,
+    state: UiSlotFieldState,
+    shared: bool,
+) -> UiPanelControl {
+    let source = if shared {
+        UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:palette"))
+    } else {
+        UiSlotSourceState::Unset
+    };
+    let slot_value = crate::app::node::node_story_fixtures::gradient_slot_value(config);
+    let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
+        .with_state(state.clone())
+        .with_source(source);
+    // Same rule as the knob fixture: a label is display text, a story
+    // address is a slot PATH, and a path rejects spaces.
+    let slug = label.replace(' ', "_");
+    let mut control = UiPanelControl {
+        emit: UiPanelEmit::Gradient,
+        label: label.to_string(),
+        address: Some(story_slot_address(&format!(
+            "consumed[{slug}].gradient.some"
+        ))),
+        widget: UiPanelWidget::PaletteSwatch,
+        value: slot_value,
+        live_value: None,
+        panel_target: None,
+        unit: None,
+        state,
+        aspects: aspect_slot.visible_aspects(),
+    };
+    if shared {
+        control.panel_target = Some(lpa_studio_core::UiPanelTarget {
+            scope: lpc_wire::WireScopeRef::Module {
+                owner: lpa_studio_core::NodeId::new(1),
+            },
+            channel: "palette".to_string(),
+            engaged: false,
+        });
+    }
+    control
+}
+
 /// Bus binding used by every "bound" control state.
 pub(crate) fn bound_source() -> UiSlotSourceState {
     UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:master-tempo"))

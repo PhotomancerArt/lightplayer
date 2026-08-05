@@ -16,7 +16,8 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use super::module_fixtures::{
-    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, root_module_node_view, three_state_panel,
+    PLASMA_1_SCOPE, PanelWalk, ROOT_SCOPE, held_root_face, palette_panel, root_module_node_view,
+    three_state_panel,
 };
 use super::{ModulePanel, PanelGesture};
 
@@ -141,6 +142,21 @@ fn group_detail() -> Element {
                     on_panel: move |_| {},
                     on_action: move |_| {},
                 }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Palette swatches on a module panel, in the three panel states (M4 P3). The closed face is mode-adaptive: a HELD palette is one full-width strip reading `5 stops`; a CYCLE is its member set as equal segments of one band, reading `↻ 4 · 3/min` — the same auto-denominated rate every periodic reading in Studio wears. The chevron says a chooser lives behind the band (it arrives in P4; the band is deliberately inert here). Colors are the existing families — violet following, amber held with its reset glyph — and no live member ring, because a panel control has no phase reading in hand."
+)]
+fn palette_swatches() -> Element {
+    rsx! {
+        PanelCanvas {
+            ModulePanel {
+                panel: palette_panel(),
+                on_panel: move |_| {},
+                on_action: move |_| {},
             }
         }
     }

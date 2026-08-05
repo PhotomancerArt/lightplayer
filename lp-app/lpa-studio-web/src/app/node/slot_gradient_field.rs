@@ -59,21 +59,34 @@ pub fn GradientValueDisplay(
     #[props(default)] density: GradientDisplayDensity,
 ) -> Element {
     let summary = format_gradient_summary(&config);
-    let gradients: Vec<Gradient> = config.gradients().to_vec();
 
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:grow tw:flex-col tw:gap-1",
-            // A cycle's members share one band, split into equal segments:
-            // the set reads as a set at any width, and the row keeps the
-            // height of a single strip.
-            div { class: "tw:flex tw:min-w-0 tw:items-stretch tw:gap-0.5",
-                for gradient in gradients {
-                    div { class: "tw:min-w-0 tw:grow tw:basis-0",
-                        GradientStripCanvas { gradient }
-                    }
+            GradientStripBand { config }
+            span { class: gradient_summary_class(density), "{summary}" }
+        }
+    }
+}
+
+/// The palette's PICTURE, with no words under it: one strip for a held
+/// palette, and a cycle's members as equal segments of one band — the set
+/// reads as a set at any width, and the row keeps the height of a single
+/// strip.
+///
+/// Shared by the read surfaces' [`GradientValueDisplay`] and the panel's
+/// swatch control (M4 P3), which puts its own compact chip in the control's
+/// readout slot instead of a summary line.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn GradientStripBand(config: GradientConfig) -> Element {
+    let gradients: Vec<Gradient> = config.gradients().to_vec();
+    rsx! {
+        div { class: "tw:flex tw:min-w-0 tw:items-stretch tw:gap-0.5",
+            for gradient in gradients {
+                div { class: "tw:min-w-0 tw:grow tw:basis-0",
+                    GradientStripCanvas { gradient }
                 }
             }
-            span { class: gradient_summary_class(density), "{summary}" }
         }
     }
 }

@@ -344,6 +344,9 @@ fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
             // `seconds` is unbounded time. There is nothing to set: no
             // period, no range, no default. It gets no knob at all.
             Some(SECONDS_SLOT_KIND) => None,
+            // A palette has no `default` either — its value is the whole
+            // `GradientConfig` on the slot's `gradient` option (M4 P3).
+            Some(PALETTE_SLOT_KIND) => palette_swatch_control(entry, &rows),
             _ => shader_uniform_control(entry, &rows),
         })
         .collect()
@@ -374,6 +377,8 @@ fn uniform_kind(entry: &UiConfigSlot) -> Option<String> {
 const PHASOR_SLOT_KIND: &str = "phasor";
 /// `ShaderSlotKind::Seconds`'s wire tag.
 const SECONDS_SLOT_KIND: &str = "seconds";
+/// `ShaderSlotKind::Palette`'s wire tag.
+const PALETTE_SLOT_KIND: &str = "palette";
 
 /// Widest period a phasor knob reaches when the uniform authors no range:
 /// one hour. The knob sweeps LOG-period, so the slow decades cost no
@@ -481,6 +486,74 @@ fn phasor_period_control(
         .iter()
         .find(|row| row.key == name)
         .and_then(|row| bound_live_value(row));
+    Some(control)
+}
+
+/// One palette uniform → its **swatch** control (M4 P3).
+///
+/// The palette twin of [`phasor_period_control`], and the differences are
+/// the interesting part:
+///
+/// - the value is the WHOLE `GradientConfig` on the slot's `gradient`
+///   option, not one field of a record, so the emit family carries no
+///   shaping to preserve ([`crate::UiPanelEmit::Gradient`]);
+/// - there is no range, because a palette is not a number.
+///
+/// Everything else is the same rule: the control exists whether or not the
+/// wiring is public (a palette is the card's own affordance), and publicity
+/// only decides whether a pick becomes a PANEL WRITE on the config channel
+/// — where every reader of that channel takes the config whole
+/// (`resolve_gradient_config`) — or an ordinary slot edit at
+/// `consumed[<name>].gradient.some`.
+///
+/// An ABSENT `gradient` option gets no control: the engine runs the slot on
+/// `GradientConfig::default()`, and a swatch editing a config that is not
+/// there would need the option-on gesture the generic row already owns.
+fn palette_swatch_control(
+    entry: &UiConfigSlot,
+    top_rows: &[&UiConfigSlot],
+) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    let name = map_entry_name(entry);
+    let config_row = uniform_field(fields, "gradient")
+        .filter(|row| row.optionality.is_some_and(|opt| opt.included))?;
+    let UiConfigSlotBody::Value(config_value) = &config_row.body else {
+        return None;
+    };
+    // The value has to READ as a palette, or the swatch has nothing to
+    // sample and the web layer would fall back to a bare display anyway.
+    crate::app::project::gradient_config_value(&config_value.kind.to_lp_value())?;
+
+    let mut control = UiPanelControl {
+        label: string_field(fields, "label")
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| entry.label.clone()),
+        address: row_edit_address(config_row),
+        widget: UiPanelWidget::PaletteSwatch,
+        value: config_value.clone(),
+        emit: crate::UiPanelEmit::Gradient,
+        live_value: None,
+        panel_target: None,
+        // A palette carries its own vocabulary in the readout (`5 stops`,
+        // `↻ 4 · 3/min`); a unit suffix has nothing to add.
+        unit: None,
+        state: config_row.state.clone(),
+        aspects: config_row.visible_aspects(),
+    };
+    // The wiring facts live on the binding-derived row keyed by the bare
+    // uniform name, exactly as they do for a knob.
+    if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
+        replace_binding_aspect(&mut control.aspects, binding);
+    }
+    let top_row = top_rows.iter().find(|row| row.key == name);
+    control.panel_target = top_row.and_then(|row| public_panel_target(row));
+    // A driven palette reads back as the channel's config summary (the
+    // `format_live_panel_value` gradient branch) — text, not a config the
+    // swatch could sample, so the strips keep showing the authored one.
+    control.live_value = top_row.and_then(|row| bound_live_value(row));
     Some(control)
 }
 
@@ -1054,6 +1127,10 @@ fn panel_widget(slot: &UiConfigSlot) -> Option<UiPanelWidget> {
             max: *max,
             step: *step,
         }),
+        // The Gradient hint is what P1 declared on both palette storage
+        // forms, so any gradient-shaped row reads as a swatch here — the
+        // same hint the slot ROW dispatches its read-only strip on (P2).
+        UiSlotEditorHint::Gradient => Some(UiPanelWidget::PaletteSwatch),
         _ => matches!(value.kind, UiSlotValueKind::Bool(_)).then_some(UiPanelWidget::Toggle),
     }
 }
@@ -2066,6 +2143,170 @@ mod tests {
                 .controls
                 .is_empty()
         );
+    }
+
+    // -- palette swatch (M4 P3) --------------------------------------------
+
+    /// A palette uniform record: `kind = palette`, the authored config on a
+    /// present `gradient` option, and a label — the shape the shader
+    /// projection reads.
+    fn palette_uniform(name: &str, config: &lpc_model::GradientConfig) -> UiConfigSlot {
+        let prefix = format!("consumed[{name}]");
+        let fields = vec![
+            UiConfigSlot::value(
+                format!("{prefix}.kind"),
+                "Kind",
+                UiSlotValue::string("palette"),
+            ),
+            UiConfigSlot::value(
+                format!("{prefix}.gradient"),
+                "Gradient",
+                UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(config)),
+            )
+            .with_address(address(&format!("{prefix}.gradient")))
+            .with_optionality(UiSlotOptionality::included(true)),
+            UiConfigSlot::value(
+                format!("{prefix}.label"),
+                "Label",
+                UiSlotValue::string("Palette"),
+            ),
+        ];
+        UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
+    }
+
+    fn ramp(stops: usize) -> lpc_model::Gradient {
+        lpc_model::Gradient {
+            space: lpc_model::Colorspace::Oklab,
+            method: lpc_model::InterpMethod::Linear,
+            stops: (0..stops)
+                .map(|index| lpc_model::GradientStop {
+                    at: index as f32 / (stops - 1) as f32,
+                    c: [index as f32 / stops as f32, 0.1, -0.1],
+                })
+                .collect(),
+        }
+    }
+
+    /// A palette slot gets ONE swatch, whatever the wiring: like a phasor's
+    /// period, the palette is the card's own affordance. Slot-local means
+    /// the pick is an ordinary slot edit at `…gradient.some`, and the whole
+    /// config is what the control carries.
+    #[test]
+    fn a_palette_slot_gets_one_swatch_editing_its_config_slot() {
+        let config = lpc_model::GradientConfig::Static(ramp(3));
+        let face = phasor_face(&phasor_sections(palette_uniform("palette", &config), None));
+
+        assert_eq!(face.controls.len(), 1, "one control per palette slot");
+        let control = &face.controls[0];
+        assert_eq!(control.label, "Palette");
+        assert_eq!(control.widget, UiPanelWidget::PaletteSwatch);
+        assert_eq!(control.emit, crate::UiPanelEmit::Gradient);
+        assert_eq!(control.unit, None);
+        assert_eq!(
+            control.gradient_config(),
+            Some(config),
+            "the control carries the WHOLE config, not a field of it"
+        );
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("palette picks are addressed")
+                .path
+                .to_string(),
+            "consumed[palette].gradient.some",
+        );
+        assert!(
+            control.panel_target.is_none(),
+            "unwired: the swatch is the card's own, not a panel entry"
+        );
+        // The row's display is the palette summary (P2), never the padded
+        // 24-entry storage dump.
+        assert_eq!(control.value.display, "oklab \u{b7} linear \u{b7} 3 stops");
+    }
+
+    /// Publicity is the ordinary derived rule, and a wired palette's live
+    /// reading is the channel's own config summary.
+    #[test]
+    fn palette_publicity_follows_the_authored_binding() {
+        let config = lpc_model::GradientConfig::Cycle {
+            set: vec![ramp(2), ramp(3)],
+            step_seconds: 20.0,
+            fade_seconds: 0.5,
+        };
+        let mut endpoint = channel_endpoint("bus:palette", "palette", 3);
+        endpoint.live_value = crate::app::project::format_live_panel_value(
+            &lpc_model::ToLpValue::to_lp_value(&config),
+        );
+        let face = phasor_face(&phasor_sections(
+            palette_uniform("palette", &config),
+            Some(bound_row("palette", endpoint)),
+        ));
+
+        let control = &face.controls[0];
+        assert_eq!(
+            control
+                .panel_target
+                .as_ref()
+                .expect("an authored config channel is a panel write target")
+                .channel,
+            "palette"
+        );
+        assert_eq!(
+            control.live_value.as_deref(),
+            Some("cycle \u{b7} 2 palettes \u{b7} 3/min \u{b7} 0.5 s fade"),
+            "a driven palette reads back as words; the strip keeps the authored config"
+        );
+    }
+
+    /// An absent `gradient` option has no slot to edit (the engine runs the
+    /// default palette), and a non-gradient payload has nothing to sample —
+    /// both fall back to the generic row rather than an empty swatch.
+    #[test]
+    fn a_palette_without_a_readable_config_gets_no_swatch() {
+        let config = lpc_model::GradientConfig::Static(ramp(2));
+        let mut absent = palette_uniform("palette", &config);
+        if let UiConfigSlotBody::Record(record) = &mut absent.body {
+            record
+                .fields
+                .retain(|field| !field.key.ends_with(".gradient"));
+        }
+        assert!(
+            phasor_face(&phasor_sections(absent, None))
+                .controls
+                .is_empty(),
+            "option off: nothing to pick into"
+        );
+
+        let mut mis_shaped = palette_uniform("palette", &config);
+        if let UiConfigSlotBody::Record(record) = &mut mis_shaped.body
+            && let Some(row) = record
+                .fields
+                .iter_mut()
+                .find(|field| field.key.ends_with(".gradient"))
+        {
+            row.body = UiConfigSlotBody::Value(UiSlotValue::f32(0.5));
+        }
+        assert!(
+            phasor_face(&phasor_sections(mis_shaped, None))
+                .controls
+                .is_empty(),
+            "a non-palette payload behind a palette slot renders no swatch"
+        );
+    }
+
+    /// The hint mapping is the other entry point: any `Gradient`-hinted
+    /// value row reads as a swatch, the same hint the slot row draws its
+    /// read-only strip from (P2).
+    #[test]
+    fn the_gradient_hint_maps_to_the_swatch_widget() {
+        let value = UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(
+            &lpc_model::GradientConfig::Static(ramp(4)),
+        ))
+        .with_editor(UiSlotEditorHint::Gradient);
+        let slot = UiConfigSlot::value("palette", "Palette", value);
+
+        assert_eq!(panel_widget(&slot), Some(UiPanelWidget::PaletteSwatch));
     }
 
     // -- clock face (P7 item 4) --------------------------------------------

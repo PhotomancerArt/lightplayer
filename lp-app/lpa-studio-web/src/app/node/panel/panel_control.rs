@@ -26,6 +26,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::format_gradient_chip;
 use lpa_studio_core::{
     UiAction, UiPanelControl as UiPanelControlData, UiPanelEmit, UiPanelWidget, UiSlotAffordance,
     UiSlotValueKind,
@@ -36,7 +37,7 @@ use crate::app::node::slot_edit_actions::panel_clear_action;
 use crate::app::node::{SlotDetailButton, SlotUnitSuffix};
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
-use super::{HFaderField, KnobField, PanelEmit, ToggleField};
+use super::{HFaderField, KnobField, PaletteSwatchField, PanelEmit, ToggleField};
 
 static NEXT_PANEL_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -69,8 +70,13 @@ pub fn PanelControl(
         let id = NEXT_PANEL_CONTROL_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-panel-control-{id}")
     });
+    // A fader and a palette swatch are the WIDE controls: both want the
+    // row's width and stack label-over-widget, where a knob or a toggle is
+    // a fixed-width column.
     let outer_class = match control.widget {
-        UiPanelWidget::Fader { .. } => "tw:grid tw:min-w-0 tw:gap-1.5",
+        UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch => {
+            "tw:grid tw:min-w-0 tw:gap-1.5"
+        }
         UiPanelWidget::Knob { .. } | UiPanelWidget::Toggle => {
             "tw:flex tw:min-w-[52px] tw:flex-none tw:flex-col tw:items-center tw:gap-1"
         }
@@ -78,7 +84,7 @@ pub fn PanelControl(
     // The top-layer copy of the control painted over the anchor while the
     // popover is open — same component, same data, sized to the anchor rect.
     let anchor_visual_class = match control.widget {
-        UiPanelWidget::Fader { .. } => {
+        UiPanelWidget::Fader { .. } | UiPanelWidget::PaletteSwatch => {
             "tw:grid tw:h-full tw:w-full tw:min-w-0 tw:content-start tw:gap-1.5"
         }
         UiPanelWidget::Knob { .. } | UiPanelWidget::Toggle => {
@@ -178,15 +184,32 @@ fn PanelControlBody(
     } else {
         "authored value"
     };
+    // A palette's chip drops what the dense summary says (space, method,
+    // fade), so hovering keeps the full line reachable: the LIVE reading
+    // when a channel drives the slot, else the authored summary.
+    let palette_title = control
+        .live_value
+        .clone()
+        .unwrap_or_else(|| control.value.display.clone());
     // A phasor speed knob stores period_seconds but PRESENTS as speed (G2
     // feedback — "phase period" was expert vocabulary): the readout is the
     // reciprocal ("1/100 s") and the drag axis inverts so up = faster.
     // PROVISIONAL display language pending the clock-face UX spike.
     let phasor = matches!(control.emit, UiPanelEmit::PhasorPeriod { .. });
+    // A palette's readout is the compact chip (`5 stops`, `↻ 4 · 3/min`) —
+    // the strips below say which palette, so the words only have to say
+    // what KIND of palette it is and how fast it moves.
+    let palette = control.swatch_palette();
     let shown_value = if phasor {
         phasor_speed_display(control.shown_display())
+    } else if let Some(config) = &palette {
+        format_gradient_chip(config)
     } else {
         control.shown_display().to_string()
+    };
+    let readout_title = match &palette {
+        Some(_) => palette_title,
+        None => readout_title.to_string(),
     };
     let readout = rsx! {
         // `relative` so the engaged clear hangs past the readout without
@@ -243,6 +266,24 @@ fn PanelControlBody(
                     panel_target: control.panel_target.clone(),
                     emit,
                     on_action,
+                }
+            }
+        }
+        UiPanelWidget::PaletteSwatch => {
+            let Some(config) = palette else {
+                return mismatch_fallback(&control);
+            };
+            rsx! {
+                // The fader's anatomy: the name and the reading share one
+                // baseline above a control that wants the row's width.
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                    {label}
+                    {readout}
+                }
+                PaletteSwatchField {
+                    config,
+                    state: control.state.clone(),
+                    bound,
                 }
             }
         }
@@ -323,6 +364,10 @@ fn value_matches_widget(control: &UiPanelControlData) -> bool {
             numeric_value(control).is_some()
         }
         UiPanelWidget::Toggle => bool_value(control).is_some(),
+        // A swatch agrees with its value when that value READS as a
+        // palette (`UiPanelControl::swatch_palette`) — the same guard the
+        // render arm falls back on.
+        UiPanelWidget::PaletteSwatch => control.swatch_palette().is_some(),
     }
 }
 
