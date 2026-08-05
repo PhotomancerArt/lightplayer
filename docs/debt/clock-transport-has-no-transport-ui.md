@@ -46,6 +46,20 @@ produced state; Clear (per value or per node) returns to live time.
   Debug section (P3) at least makes the controls findable and marks the
   system as debug-driven while an offset is held; the transport gap is
   untouched.
+- 2026-08-04 — **the engine half now exists.** The TimeProduct work
+  (plan `2026-08-04-0003-timeproduct-m2-core`, P8) added a breakpoint
+  log to the timebase store: per-phasor `Breakpoint { t_eff, phase,
+  cycle, rate }` segments behind the default-on, host-only `scrub-log`
+  feature on `lpc-engine`, trimmed to a 30 s window. Reads at a
+  scrubbed-back effective time are answered by closed-form segment
+  lookup and are **bit-exact** against the values the live path
+  produced, so a future scrub bar can move time freely without the
+  motion changing. Devices keep the forward-only integrator with no
+  log (nm/strings on the rv32 ELF find no log symbols), and follow a
+  backward scrub through the clock's now-signed `delta_seconds`.
+  Nothing user-facing changed: the only way to drive it is still the
+  generic Debug slider, so the exit criteria below are untouched — the
+  half that was hard is simply no longer the blocker.
 
 **Exit criteria** — A transport surface exists (scrub/rate/run at the
 project level, with a position readout), the clock's three controls move

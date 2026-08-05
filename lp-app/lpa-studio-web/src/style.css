@@ -1956,6 +1956,20 @@ label:has(> input:not(:disabled)) {
     background: rgba(63, 214, 142, 0.1);
 }
 
+.ux-produced-product-metadata {
+    /* Compact caption band for metadata-only products (time): in normal
+       flow — no aspect frame, no absolute skeleton — so the pane hugs the
+       two text lines instead of framing an empty hero. */
+    display: grid;
+    gap: var(--studio-space-1);
+    padding: var(--studio-space-3);
+    text-align: center;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 38%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent),
+        var(--studio-color-terminal);
+}
+
 .ux-produced-product-skeleton {
     position: absolute;
     inset: 0;

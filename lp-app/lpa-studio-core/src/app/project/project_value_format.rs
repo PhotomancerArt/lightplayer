@@ -51,6 +51,41 @@ pub fn format_lp_value(value: &LpValue) -> String {
     }
 }
 
+/// The `period_seconds` inside a `PhasorConfig`-shaped struct value — the
+/// one number a phasor speed knob displays and tracks. `None` for anything
+/// that is not that record, so ordinary structs keep their no-live-display
+/// posture.
+pub fn phasor_config_period(value: &LpValue) -> Option<f32> {
+    let LpValue::Struct {
+        name: Some(name),
+        fields,
+    } = value
+    else {
+        return None;
+    };
+    if name != "PhasorConfig" {
+        return None;
+    }
+    match fields
+        .iter()
+        .find(|(field, _)| field == "period_seconds")?
+        .1
+    {
+        LpValue::F32(period) if period.is_finite() => Some(period),
+        _ => None,
+    }
+}
+
+/// A bus reading formatted for live display on a panel control (P6 item 1),
+/// including the one record with a panel presentation: a `PhasorConfig`,
+/// which displays as its period (the speed knob's tracking value).
+pub fn format_live_panel_value(value: &LpValue) -> Option<String> {
+    match phasor_config_period(value) {
+        Some(period) => format_live_scalar(&LpValue::F32(period)),
+        None => format_live_scalar(value),
+    }
+}
+
 /// A scalar bus reading formatted for live display on a panel control
 /// (P6 item 1). Floats are QUANTIZED to at most 2 decimals BEFORE the
 /// string enters any DTO, so a slowly-drifting channel only dirties the
@@ -103,6 +138,13 @@ fn format_product_ref(product: ProductRef) -> String {
                 product.output(),
                 extent.rows,
                 extent.samples_per_row
+            )
+        }
+        ProductRef::Time(product) => {
+            format!(
+                "time product node {} output {}",
+                product.node(),
+                product.output()
             )
         }
     }

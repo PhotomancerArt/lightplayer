@@ -9,13 +9,17 @@
   },
   "float_mode": "fixed",
   "consumed": {
-    "time": {
-      "kind": "value",
+    "phase": {
+      "kind": "phasor",
       "value": "f32",
+      "phasor": {
+        "period_seconds": 8.3333333,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
       "default": 0,
-      "label": "Time",
-      "description": "Project clock time in seconds",
-      "default_bind": "bus:time"
+      "label": "Phase",
+      "description": "Rainbow cycle position (0-1)"
     }
   }
 }

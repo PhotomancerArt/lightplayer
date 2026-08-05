@@ -1,6 +1,6 @@
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
-layout(binding = 2) uniform float speed;
+layout(binding = 1) uniform float wheelPhase;
+layout(binding = 2) uniform float paletteCycle;
 
 vec3 paletteRainbow(float t) {
     float phase = fract(t);
@@ -50,10 +50,11 @@ vec4 render(vec2 pos) {
     float radius = dot(p, p);
     float rim = smoothstep(0.0784, 0.1600, radius) * (1.0 - smoothstep(0.3136, 0.4900, radius));
 
-    float speedScale = max(speed, 0.0);
-    float rotation = time * 0.115 * speedScale;
-    float wheel = fract(angle + rotation);
-    float palettePhase = mod(time * 0.055 * speedScale, 3.0);
+    // Two phasors replace the old `time * k * speed` terms: the wheel spins
+    // once per `wheelPhase` period and the palette walks its three entries
+    // once per `paletteCycle` period.
+    float wheel = fract(angle + wheelPhase);
+    float palettePhase = paletteCycle * 3.0;
     float palette = min(floor(palettePhase), 2.0);
     float nextPalette = palette + 1.0;
     if (nextPalette > 2.5) {

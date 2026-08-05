@@ -8,7 +8,7 @@
 // visible as two dots moving together.
 
 layout(binding = 0) uniform vec2 outputSize;
-layout(binding = 1) uniform float time;
+layout(binding = 1) uniform float phase;
 
 vec3 bandColor(float band) {
     if (band < 0.5) {
@@ -30,8 +30,11 @@ vec4 render(vec2 pos) {
     vec2 uv = pos / outputSize;
     float band = floor(uv.y * 5.0);
 
-    float speed = 0.25 + band * 0.1;
-    float head = fract(time * speed + band * 0.2);
+    // Band speeds 0.25..0.65 Hz are the 5,7,9,11,13 harmonics of the
+    // authored 20 s phasor; fract(k*phase) is continuous under the wrap
+    // because k is an integer (the quad-strips doctrine).
+    float harmonic = 5.0 + band * 2.0;
+    float head = fract(phase * harmonic + band * 0.2);
     float d = abs(uv.x - head);
     d = min(d, 1.0 - d);
     float dot_i = smoothstep(0.3, 0.0, d);

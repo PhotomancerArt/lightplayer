@@ -6,29 +6,9 @@
   "bindings": {
     "glow": {
       "source": "bus:glow"
-    },
-    "speed": {
-      "source": "bus:speed"
     }
   },
   "consumed": {
-    "time": {
-      "kind": "value",
-      "value": "f32",
-      "default": 0,
-      "label": "",
-      "description": "",
-      "default_bind": "bus:time"
-    },
-    "speed": {
-      "kind": "value",
-      "value": "f32",
-      "default": 1,
-      "min": 0,
-      "max": 3,
-      "label": "Speed",
-      "description": "Animation speed multiplier"
-    },
     "glow": {
       "kind": "value",
       "value": "f32",
@@ -37,6 +17,73 @@
       "max": 1,
       "label": "Glow",
       "description": "Rainbow highlight intensity"
+    },
+    "zoomPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 19.6349546,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Zoom",
+      "description": "Zoom oscillation cycle position (0-1)"
+    },
+    "driftPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 34.906586,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Drift",
+      "description": "Drift oscillation cycle position (0-1)"
+    },
+    "bandPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 7.3919829,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Bands",
+      "description": "Band sweep cycle position (0-1)"
+    },
+    "breathPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 8.3775806,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Breath",
+      "description": "Breath cycle position (0-1)"
+    },
+    "paletteCycle": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 18.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Palette",
+      "description": "Palette cycle position (0-1)"
+    },
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Seconds from the scope's time product (noise scroll)"
     }
   }
 }

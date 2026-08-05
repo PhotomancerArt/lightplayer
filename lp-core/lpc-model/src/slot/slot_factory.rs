@@ -3,8 +3,8 @@
 use crate::{
     ControlProduct, LpType, LpValue, ModelStructMember, ProductKind, ProductRef, ResourceRef,
     SlotAccess, SlotData, SlotMapDyn, SlotMutAccess, SlotOptionDyn, SlotRecord, SlotShape,
-    SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotShapeRegistryError, VisualProduct,
-    WithRevision, current_revision,
+    SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotShapeRegistryError, TimeProduct,
+    VisualProduct, WithRevision, current_revision,
 };
 use alloc::boxed::Box;
 use alloc::format;
@@ -277,6 +277,9 @@ fn default_lp_value(ty: &LpType) -> LpValue {
         }
         LpType::Product(ProductKind::Control) => {
             LpValue::Product(ProductRef::control(ControlProduct::default()))
+        }
+        LpType::Product(ProductKind::Time) => {
+            LpValue::Product(ProductRef::time(TimeProduct::default()))
         }
     }
 }

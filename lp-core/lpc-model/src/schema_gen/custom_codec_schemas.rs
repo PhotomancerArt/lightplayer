@@ -21,7 +21,8 @@ use serde_json::{Value, json};
 
 use crate::{
     Affine2d, ArtifactPath, ColorOrderValue, ControlProduct, Dim2u, PositiveF32, ProductKind,
-    Ratio, RelativeNodeRef, RenderOrder, ResourceRef, SlotShapeId, SlotValue, VisualProduct, Xy,
+    Ratio, RelativeNodeRef, RenderOrder, ResourceRef, SlotShapeId, SlotValue, TimeProduct,
+    VisualProduct, Xy,
 };
 
 use super::slot_shape_schema::{
@@ -61,6 +62,7 @@ pub(crate) const CUSTOM_CODEC_SCHEMAS: &[(SlotShapeId, fn() -> Value)] = &[
     (ArtifactPath::SHAPE_ID, artifact_path_schema),
     (VisualProduct::SHAPE_ID, visual_product_schema),
     (ControlProduct::SHAPE_ID, control_product_schema),
+    (TimeProduct::SHAPE_ID, time_product_schema),
     (crate::slots::ASSET_SLOT_CODEC_ID, asset_slot_schema),
 ];
 
@@ -184,6 +186,11 @@ fn control_product_schema() -> Value {
     product_ref_schema(ProductKind::Control)
 }
 
+/// `TimeProduct` reads as `LpType::Product(Time)` (`read_product_ref`).
+fn time_product_schema() -> Value {
+    product_ref_schema(ProductKind::Time)
+}
+
 /// `AssetSlot` is the one true `SlotShape::Custom` codec
 /// (`lp::slots::AssetSlotCodec`). Its reader (`asset_slot::read_value`)
 /// accepts:
@@ -237,17 +244,17 @@ mod tests {
     use crate::{
         Affine2d, ArtifactPath, AssetSlot, ColorOrderValue, ControlProduct, Dim2u, EnumSlot,
         FieldSlot, FieldSlotMut, NodeId, PositiveF32, Ratio, RelativeNodeRef, RenderOrder,
-        ResourceRef, SlotEnumShape, SlotShape, SlotShapeRegistry, SlotValue, ValueSlot,
-        VisualProduct, Xy,
+        ResourceRef, SlotEnumShape, SlotShape, SlotShapeRegistry, SlotValue, TimeProduct,
+        ValueSlot, VisualProduct, Xy,
     };
 
     use super::{CUSTOM_CODEC_SCHEMAS, custom_codec_schema};
 
     #[test]
     fn table_has_one_entry_per_semantic_codec() {
-        // 13 semantic value leaves + the asset custom codec. NodeInvocation is
+        // 14 semantic value leaves + the asset custom codec. NodeInvocation is
         // deliberately absent (plain external enum shape).
-        assert_eq!(CUSTOM_CODEC_SCHEMAS.len(), 14);
+        assert_eq!(CUSTOM_CODEC_SCHEMAS.len(), 15);
         for (index, (id, _)) in CUSTOM_CODEC_SCHEMAS.iter().enumerate() {
             assert!(
                 custom_codec_schema(*id).is_some(),
@@ -444,6 +451,23 @@ mod tests {
                 r#"{"path":42}"#,
                 r#"42"#,
             ],
+        );
+    }
+
+    #[test]
+    fn time_product_pins_kind_time() {
+        check_typed(
+            shape::leaf(TimeProduct::value_shape()),
+            |shape, text| {
+                let mut slot = ValueSlot::new(TimeProduct::new(NodeId::new(0), 0));
+                typed_read(slot.slot_field_data_mut(), shape, text)
+            },
+            &[
+                r#"{"kind":"time","node":4,"output":0}"#,
+                r#"{"node":4}"#,
+                r#"{}"#,
+            ],
+            &[r#"{"kind":"visual","node":4,"output":0}"#, r#"{"port":1}"#],
         );
     }
 

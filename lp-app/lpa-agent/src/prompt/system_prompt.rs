@@ -28,11 +28,20 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          \n\
          - The entry point is `vec4 render(vec2 pos)`. `pos` is in pixel space \
          (0..outputSize); returned components are RGBA in [0, 1].\n\
-         - By convention the uniforms `vec2 outputSize` and `float time` exist \
-         when declared; declare uniforms with `layout(binding = N) uniform ...`.\n\
+         - By convention the uniform `vec2 outputSize` exists when declared; \
+         declare uniforms with `layout(binding = N) uniform ...`.\n\
          - The dialect is GLSL compiled by naga's `glsl-in` frontend (the \
          LightPlayer dialect): no textures unless declared, no derivatives, \
          no `discard`.\n\
+         - Time landmine (costs a wasted turn if hit): there is no raw \
+         `float time` uniform — `bus:time` carries the time product and \
+         cannot bind an f32. Periodic motion declares a phasor uniform \
+         (`upsert_param` kind `\"phasor\"`): a wrapped [0, 1) cycle position \
+         shaped by its own period/waveform/offset. NEVER derive it yourself \
+         with `time % period`, `fract(time * k)`, or `mod(time, T)` on a \
+         seconds value. Genuinely unbounded motion (noise-field advance, dt \
+         integration) declares a seconds uniform instead (kind \
+         `\"seconds\"`) — think twice; most motion is periodic.\n\
          - Dialect landmine (costs a wasted turn if hit): do NOT assign \
          through a swizzle of an indexed array element — `arr[i].x = v;` \
          and `arr[i].x += v;` fail to lower; rebuild the vector instead \
@@ -106,7 +115,10 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          - A `bound` record is bus-driven at runtime: its authored default \
          is inert while bound, so do not fight a bound param by editing its \
          default.\n\
-         - `outputSize` is engine-managed and never needs a record.\n\n",
+         - `outputSize` is engine-managed and never needs a record.\n\
+         - A phasor's period IS the speed control: expose `period_seconds` \
+         (`upsert_param` kind `\"phasor\"`), do not also add a speed \
+         multiplier uniform.\n\n",
     );
 
     // 6. Tool doctrine.
@@ -187,18 +199,18 @@ mod tests {
             }),
             bindings: vec![
                 BindingInfo {
-                    name: "time".into(),
+                    name: "phase".into(),
                     ty: "float".into(),
-                    value: "12.5".into(),
+                    value: "0.25".into(),
                 },
                 BindingInfo {
-                    name: "cfg.speed".into(),
+                    name: "cfg.hue".into(),
                     ty: "float".into(),
-                    value: "1.0".into(),
+                    value: "0.6".into(),
                 },
             ],
         };
-        let source = "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(sin(time), 0.0, 0.0, 1.0);\n}\n";
+        let source = "layout(binding = 0) uniform float phase;\n\nvec4 render(vec2 pos) {\n    return vec4(sin(phase * 6.28318530718), 0.0, 0.0, 1.0);\n}\n";
         let prompt = build_system_prompt(&ctx, source);
 
         if std::env::var("LPA_AGENT_UPDATE_SNAPSHOTS").is_ok() {

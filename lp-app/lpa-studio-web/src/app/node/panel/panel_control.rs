@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiPanelControl as UiPanelControlData, UiPanelWidget, UiSlotAffordance,
+    UiAction, UiPanelControl as UiPanelControlData, UiPanelEmit, UiPanelWidget, UiSlotAffordance,
     UiSlotValueKind,
 };
 
@@ -178,11 +178,21 @@ fn PanelControlBody(
     } else {
         "authored value"
     };
+    // A phasor speed knob stores period_seconds but PRESENTS as speed (G2
+    // feedback — "phase period" was expert vocabulary): the readout is the
+    // reciprocal ("1/100 s") and the drag axis inverts so up = faster.
+    // PROVISIONAL display language pending the clock-face UX spike.
+    let phasor = matches!(control.emit, UiPanelEmit::PhasorPeriod { .. });
+    let shown_value = if phasor {
+        phasor_speed_display(control.shown_display())
+    } else {
+        control.shown_display().to_string()
+    };
     let readout = rsx! {
         // `relative` so the engaged clear hangs past the readout without
         // occupying layout — its appearance must not reflow the row (GV2).
         span { class: "tw:relative {READOUT_CLASS} {readout_class}",
-            span { title: readout_title, "{control.shown_display()}" }
+            span { title: readout_title, "{shown_value}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
             {clear}
         }
@@ -202,6 +212,7 @@ fn PanelControlBody(
                     step,
                     state: control.state.clone(),
                     bound,
+                    invert: phasor,
                     address: control.address.clone(),
                     panel_target: control.panel_target.clone(),
                     emit,
@@ -260,6 +271,38 @@ fn PanelControlBody(
     }
 }
 
+/// A period reading presented as an auto-denominated rate: `"0.5"` → `2/s`,
+/// `"20"` → `3/min`, `"240"` → `15/hr` (G2 convergence — pick the smallest
+/// time unit that keeps the number ≥ 1, so the reading is always a natural
+/// count; the unit is part of the string, so these controls carry no
+/// separate unit suffix). A frozen phasor (period 0) never cycles: `0/s`.
+/// A reading that does not parse passes through untouched.
+pub(crate) fn phasor_speed_display(shown: &str) -> String {
+    let Ok(period) = shown.trim().parse::<f32>() else {
+        return shown.to_string();
+    };
+    if period <= 0.0 {
+        return "0/s".to_string();
+    }
+    // Smallest unit whose count reaches 1; /hr is the floor either way.
+    let (count, unit) = [(1.0, "s"), (60.0, "min"), (3600.0, "hr")]
+        .into_iter()
+        .map(|(seconds, unit)| (seconds / period, unit))
+        .find(|(count, unit)| *count >= 1.0 || *unit == "hr")
+        .expect("the ladder always yields");
+    let number = if count >= 9.95 {
+        format!("{}", count.round() as i64)
+    } else {
+        let rounded = (count * 10.0).round() / 10.0;
+        if rounded.fract() == 0.0 {
+            format!("{}", rounded as i64)
+        } else {
+            format!("{rounded:.1}")
+        }
+    };
+    format!("{number}/{unit}")
+}
+
 /// The label visual shared by the trigger button and its top-layer copy:
 /// the control name in the panel's label typography plus a small info glyph
 /// (the standing "this opens details" hint), both in the state color.
@@ -314,7 +357,7 @@ fn value_matches_widget(control: &UiPanelControlData) -> bool {
 /// non-numeric slot behind a numeric widget) falls back to the read-only
 /// display.
 fn numeric_value(control: &UiPanelControlData) -> Option<(f32, PanelEmit)> {
-    PanelEmit::for_value(&control.value.kind)
+    PanelEmit::for_control(control)
 }
 
 /// Boolean payload for toggle widgets.
@@ -341,8 +384,8 @@ fn mismatch_fallback(control: &UiPanelControlData) -> Element {
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{
-        UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiPanelControl, UiPanelWidget,
-        UiSlotFieldState, UiSlotSourceState, UiSlotValue,
+        UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiPanelControl, UiPanelEmit,
+        UiPanelWidget, UiSlotFieldState, UiSlotSourceState, UiSlotValue,
     };
 
     use super::{PanelEmit, bool_value, numeric_value, panel_label_class, value_matches_widget};
@@ -359,6 +402,7 @@ mod tests {
             .with_state(state.clone())
             .with_source(source);
         UiPanelControl {
+            emit: UiPanelEmit::Value,
             label: "speed".to_string(),
             address: None,
             widget: UiPanelWidget::Knob {
@@ -485,6 +529,22 @@ mod tests {
         bound.live_value = None;
         assert_eq!(bound.live_numeric(), None);
         assert_eq!(bound.shown_display(), "1.6");
+    }
+
+    #[test]
+    fn phasor_readouts_auto_denominate_the_rate() {
+        use super::phasor_speed_display;
+        // The G2 examples verbatim: 2/s → 3/min → 15/hr.
+        assert_eq!(phasor_speed_display("0.5"), "2/s");
+        assert_eq!(phasor_speed_display("20"), "3/min");
+        assert_eq!(phasor_speed_display("240"), "15/hr");
+        // Plasma's 100 s: under one per minute, so it reads per hour.
+        assert_eq!(phasor_speed_display("100"), "36/hr");
+        assert_eq!(phasor_speed_display("45"), "1.3/min");
+        // Period 0 is the frozen sentinel: it never cycles.
+        assert_eq!(phasor_speed_display("0.0"), "0/s");
+        // A non-numeric reading (product chip label, etc.) passes through.
+        assert_eq!(phasor_speed_display("Time product"), "Time product");
     }
 
     #[test]

@@ -8,7 +8,6 @@
       "source": "bus:trigger"
     }
   },
-  "time": 0,
   "idle_entry": 1,
   "default_fade": 0.35,
   "entries": {

@@ -10,12 +10,12 @@ use lpa_studio_core::{
     ArtifactLocation, ControllerId, ProjectEditorOp, ProjectNodeAddress, ProjectSlotAddress,
     ProjectSlotRoot, SlotPath, UiAction, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
     UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor, UiAssetEditorKind,
-    UiBindingEndpoint, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts, UiOutputChannelRow,
-    UiOutputFace, UiOutputPin, UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
-    UiProducedProduct, UiProductPreview, UiProductPreviewFrame, UiProductTrackingState,
-    UiShaderFace, UiShaderUniform, UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue,
-    UiStatus,
+    UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
+    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts,
+    UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit, UiPanelWidget,
+    UiPhasorRow, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProducedValue,
+    UiProductPreview, UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
+    UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
 };
 
 use crate::app::node::node_story_fixtures::{
@@ -66,9 +66,14 @@ pub(crate) fn knob_control_stepped(
     let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
         .with_state(state.clone())
         .with_source(source);
+    // Labels are display text ("Phase speed"); the story address is a slot
+    // PATH, which rejects spaces — slug it. Capture found this the hard way:
+    // a spaced label panicked the whole story page.
+    let slug = label.replace(' ', "_");
     UiPanelControl {
+        emit: UiPanelEmit::Value,
         label: label.to_string(),
-        address: Some(story_slot_address(&format!("controls.{label}"))),
+        address: Some(story_slot_address(&format!("controls.{slug}"))),
         widget: UiPanelWidget::Knob { min, max, step },
         value: slot_value,
         live_value: None,
@@ -91,6 +96,7 @@ pub(crate) fn fader_control(
         .with_state(state.clone())
         .with_source(source);
     UiPanelControl {
+        emit: UiPanelEmit::Value,
         label: "brightness".to_string(),
         address: Some(story_slot_address("brightness.some")),
         widget: UiPanelWidget::Fader {
@@ -119,6 +125,7 @@ pub(crate) fn toggle_control(
         .with_state(state.clone())
         .with_source(source);
     UiPanelControl {
+        emit: UiPanelEmit::Value,
         label: label.to_string(),
         address: Some(story_slot_address(&format!("controls.{label}"))),
         widget: UiPanelWidget::Toggle,
@@ -183,6 +190,96 @@ pub(crate) fn shader_controls(speed_bound: bool) -> Vec<UiPanelControl> {
             UiSlotSourceState::Unset,
         ),
     ]
+}
+
+// -- phasor period knob + clock face (P7 items 4-5) -----------------------
+
+/// A phasor slot's period knob (P7 item 5): the ONE control a phasor gets.
+///
+/// Its number is seconds-per-cycle and its emit family re-wraps that number
+/// into a whole `PhasorConfig` on the way out, so the slot's waveform and
+/// phase offset — never panel-editable (settled D11 v1) — survive a turn.
+///
+/// `shared` is the channel-driven case: an authored config channel puts the
+/// knob on the module panel, and every reader of that channel rides the one
+/// integrator it retunes (parent D3), which is what the violet bound
+/// treatment is saying.
+pub(crate) fn period_knob(label: &str, seconds: f32, shared: bool) -> UiPanelControl {
+    let source = if shared {
+        UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:speed"))
+    } else {
+        UiSlotSourceState::Unset
+    };
+    let mut control = knob_control(
+        label,
+        seconds,
+        0.0,
+        120.0,
+        UiSlotFieldState::editable(),
+        source,
+    );
+    control.emit = UiPanelEmit::PhasorPeriod {
+        waveform: lpa_studio_core::Waveform::Ramp,
+        phase_offset: 0.0,
+    };
+    // Production carries no unit suffix on speed knobs — the auto-
+    // denominated readout ("3/min") brings its own unit.
+    control.unit = None;
+    control.value = control.value.clone().with_unit(UiSlotUnit::seconds());
+    if shared {
+        control.panel_target = Some(lpa_studio_core::UiPanelTarget {
+            scope: lpc_wire::WireScopeRef::Module {
+                owner: lpa_studio_core::NodeId::new(1),
+            },
+            channel: "speed".to_string(),
+            engaged: false,
+        });
+    }
+    control
+}
+
+/// One phasor row for the clock's listing.
+pub(crate) fn phasor_row(
+    origin: &str,
+    detail: &str,
+    shared: bool,
+    phase: f32,
+    cycle: u32,
+    period_seconds: f32,
+) -> UiPhasorRow {
+    UiPhasorRow {
+        origin: origin.to_string(),
+        detail: Some(detail.to_string()),
+        shared,
+        phase,
+        phase_display: lpa_studio_core::format_phase(phase),
+        cycle,
+        period_display: lpa_studio_core::format_period_seconds(period_seconds),
+    }
+}
+
+/// A clock face in one of the listing's three states.
+pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorRow>) -> UiClockFace {
+    let mut face =
+        UiClockFace::new(UiProducedProduct::time("product").with_detail("node 2 output 0"));
+    face.readings = vec![
+        UiProducedValue::new("Seconds", "42.35").with_unit(UiSlotUnit::seconds()),
+        UiProducedValue::new("Delta seconds", "0.033").with_unit(UiSlotUnit::seconds()),
+    ];
+    face.timebase = timebase;
+    face.phasors = phasors;
+    face
+}
+
+/// A clock node card with the face installed.
+pub(crate) fn clock_node_view(face: UiClockFace) -> UiNodeView {
+    let header = UiNodeHeader::new("Clock", "Clock", "/fyeah_sign.show/clock.clock")
+        .with_status(UiStatus::good("Running"))
+        .with_summary("1.0x");
+    let mut view =
+        UiNodeView::new(header, vec![UiNodeTab::main(Vec::new())]).with_node_id("clock-fyeah");
+    view.face = Some(UiNodeFace::Clock(face));
+    view
 }
 
 /// Wide aurora-ish visual hero for the shader face (deterministic bytes).

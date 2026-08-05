@@ -149,6 +149,22 @@ mod tests {
     }
 
     #[test]
+    fn phasor_and_seconds_named_uniforms_are_diffed_by_name_not_kind() {
+        // The orphan diff never inspects a def record's `kind`: a
+        // phasor/seconds slot's uniform is a plain `float` at the compiled
+        // signature just like a value slot's, so it must not misclassify
+        // as an orphan on either side once a matching record exists.
+        let shader = "layout(binding = 0) uniform float phase;\n\
+             layout(binding = 1) uniform float elapsed;\n\
+             vec4 render(vec2 pos) { return vec4(fract(phase), elapsed, 0.0, 1.0); }";
+        let compiled = CompiledShader::compile(shader).expect("compiles");
+        let defs = vec![def("phase"), def("elapsed")];
+        let section = params_json(Some(&compiled), Some(&defs));
+        assert_eq!(section["orphans"]["declared_only"], json!([]));
+        assert_eq!(section["orphans"]["def_only"], json!([]));
+    }
+
+    #[test]
     fn def_records_serialize_compact_and_rounded() {
         let defs = vec![ParamDefRecord {
             name: "speed".into(),

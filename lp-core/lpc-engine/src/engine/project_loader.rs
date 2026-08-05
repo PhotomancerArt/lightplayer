@@ -2262,7 +2262,7 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2388,7 +2388,7 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2486,7 +2486,7 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2970,9 +2970,9 @@ mod tests {
     }
 
     #[test]
-    fn project_loader_loads_inline_clock_and_default_time_bus() {
+    fn project_loader_loads_inline_clock_and_default_time_product_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3045,9 +3045,8 @@ mod tests {
             .lookup_sibling(root, NodeName::parse("shader").unwrap())
             .expect("shader node");
 
-        rt.tick(1000).expect("first tick");
-        let first = rt
-            .resolve_with_engine_host(
+        let read_time_bus = |rt: &mut LoadedProjectRuntime| {
+            rt.resolve_with_engine_host(
                 QueryKey::Bus {
                     scope: None,
                     channel: ChannelName(String::from("time")),
@@ -3055,42 +3054,46 @@ mod tests {
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
-            .0;
-        assert_eq!(
-            *first.value_leaf().expect("time value").value(),
-            LpValue::F32(0.0)
-        );
-        let shader_first = rt
-            .resolve_with_engine_host(
-                QueryKey::ConsumedSlot {
-                    node: shader,
-                    slot: SlotPath::parse("time").expect("time slot"),
+            .0
+            .value_leaf()
+            .expect("time value")
+            .value()
+            .clone()
+        };
+        let read_clock_seconds = |rt: &mut LoadedProjectRuntime| {
+            rt.resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: clock,
+                    slot: SlotPath::parse("seconds").expect("seconds slot"),
                 },
                 ResolveLogLevel::Off,
             )
-            .expect("resolve visual shader time")
-            .0;
-        assert_eq!(
-            *shader_first.value_leaf().expect("time value").value(),
-            LpValue::F32(0.0)
-        );
+            .expect("resolve clock seconds")
+            .0
+            .value_leaf()
+            .expect("seconds value")
+            .value()
+            .clone()
+        };
+
+        rt.tick(1000).expect("first tick");
+        // The channel carries a HANDLE, not a number: the value is stable
+        // across ticks while the timebase behind it advances. Raw seconds stay
+        // readable on the clock's own produced slot (card face, probes).
+        let handle = LpValue::Product(lpc_model::ProductRef::Time(lpc_model::TimeProduct::new(
+            clock, 0,
+        )));
+        assert_eq!(read_time_bus(&mut rt), handle);
+        assert_eq!(read_clock_seconds(&mut rt), LpValue::F32(0.0));
 
         rt.tick(1000).expect("second tick");
-        let second = rt
-            .resolve_with_engine_host(
-                QueryKey::Bus {
-                    scope: None,
-                    channel: ChannelName(String::from("time")),
-                },
-                ResolveLogLevel::Off,
-            )
-            .expect("resolve time bus")
-            .0;
-        assert_eq!(
-            *second.value_leaf().expect("time value").value(),
-            LpValue::F32(1.0)
-        );
-        let shader_second = rt
+        assert_eq!(read_time_bus(&mut rt), handle);
+        assert_eq!(read_clock_seconds(&mut rt), LpValue::F32(1.0));
+
+        // The stale f32 uniform still RESOLVES the product (kind mismatch is a
+        // conversion failure, not a resolve failure) — and the shader card
+        // says so out loud instead of silently freezing (#316, D12).
+        let shader_time = rt
             .resolve_with_engine_host(
                 QueryKey::ConsumedSlot {
                     node: shader,
@@ -3101,15 +3104,123 @@ mod tests {
             .expect("resolve visual shader time")
             .0;
         assert_eq!(
-            *shader_second.value_leaf().expect("time value").value(),
-            LpValue::F32(1.0)
+            *shader_time.value_leaf().expect("time value").value(),
+            handle
+        );
+        // Nothing consumes this shader's visual, so pull on its produced
+        // output to make it run its uniform fill.
+        rt.resolve_with_engine_host(
+            QueryKey::ProducedSlot {
+                node: shader,
+                slot: SlotPath::parse("output").expect("output slot"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve shader output");
+        let status = rt.tree().get(shader).expect("shader entry").status.value();
+        let lpc_model::NodeRuntimeStatus::Warn(message) = status else {
+            panic!("an f32 uniform on bus:time must warn, got {status:?}");
+        };
+        assert!(
+            message.contains("input \"time\" using its default"),
+            "the warn names the input and the fallback: {message}"
+        );
+    }
+
+    /// The happy path the break exists for: an ordinary clock, an ordinary
+    /// phasor uniform, and no authored wiring anywhere. The clock's
+    /// `product` default-publish carries `bus:time`, the shader's evaluator
+    /// resolves it in the reader's scope, and the uniform walks its cycle.
+    #[test]
+    fn a_phasor_uniform_rides_the_clocks_default_time_product_with_no_authoring() {
+        let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
+            .expect("container manifest");
+        fs.write_file(
+            "/module.json".as_path(),
+            br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "compute": { "ref": "./compute.json" }
+  }
+}
+"#,
+        )
+        .expect("module.json");
+        fs.write_file("/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+            .expect("clock.json");
+        fs.write_file(
+            "/compute.json".as_path(),
+            br#"
+{
+  "kind": "ComputeShader",
+  "source": { "path": "compute.glsl" },
+  "consumed": {
+    "wave": { "kind": "phasor", "value": "f32",
+              "phasor": { "period_seconds": 4.0, "waveform": "ramp",
+                          "phase_offset": 0.0 } }
+  },
+  "produced": { "out_wave": { "kind": "value", "value": "f32" } }
+}
+"#,
+        )
+        .expect("compute.json");
+        fs.write_file(
+            "/compute.glsl".as_path(),
+            b"void tick() { out_wave = wave; }",
+        )
+        .expect("compute.glsl");
+
+        let services = EngineServices::new(TreePath::parse("/phasor.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        rt.engine_mut()
+            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+                lp_shader::ShaderFrontend::LpsGlsl,
+            ))));
+        let compute = sibling(&rt, "compute");
+
+        let read_wave = |rt: &mut LoadedProjectRuntime| {
+            rt.resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: compute,
+                    slot: SlotPath::parse("out_wave").expect("slot"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve out_wave")
+            .0
+            .value_leaf()
+            .expect("value")
+            .value()
+            .clone()
+        };
+
+        let mut seen = alloc::vec::Vec::new();
+        for _ in 0..4 {
+            rt.tick(500).expect("tick");
+            seen.push(read_wave(&mut rt));
+        }
+
+        assert_eq!(
+            rt.tree().get(compute).expect("entry").status.value(),
+            &lpc_model::NodeRuntimeStatus::Ok,
+            "no authored wiring is needed and nothing warns"
+        );
+        let LpValue::F32(last) = seen.last().expect("a sample") else {
+            panic!("expected f32 samples: {seen:?}");
+        };
+        assert!(
+            *last > 0.0,
+            "the phasor advanced off the top of its cycle: {seen:?}"
         );
     }
 
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3139,7 +3250,7 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3515,7 +3626,7 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3560,7 +3671,7 @@ mod tests {
     #[test]
     fn missing_module_json_returns_io_error() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3580,7 +3691,7 @@ mod tests {
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3751,7 +3862,7 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4323,7 +4434,7 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4394,7 +4505,7 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4688,7 +4799,7 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4882,7 +4993,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file("/module.json".as_path(), module.as_bytes())
             .expect("module.json");
@@ -5038,30 +5149,36 @@ mod tests {
     const CHAR_COMPUTE_GLSL: &[u8] = b"void compute() { phase = fract(time); }";
 
     #[test]
-    fn char_minimal_clock_publishes_time_default_only_for_seconds() {
+    fn char_minimal_clock_publishes_time_default_only_for_the_product() {
+        // `bus:time` carries the clock's TIME PRODUCT, never raw seconds:
+        // `seconds`/`delta_seconds` stay produced-but-unbound for the card
+        // face and probes. Two fallback producers on one channel would be an
+        // `AmbiguousBusBinding`, so this is a replacement, not an addition.
         let fs = char_project(&[("clock", "{ \"kind\": \"Clock\" }")]);
         let rt = load_project(&fs);
         let clock = sibling(&rt, "clock");
-        assert!(default_publishes(&rt, clock, "seconds", "time"));
-        assert!(
-            !rt.tree().bindings().any(|binding| matches!(
-                &binding.source,
-                BindingSource::ProducedSlot { node, slot }
-                    if *node == clock && slot == &SlotPath::parse("delta_seconds").expect("slot")
-            )),
-            "delta_seconds has no default channel"
-        );
+        assert!(default_publishes(&rt, clock, "product", "time"));
+        for unbound in ["seconds", "delta_seconds"] {
+            assert!(
+                !rt.tree().bindings().any(|binding| matches!(
+                    &binding.source,
+                    BindingSource::ProducedSlot { node, slot }
+                        if *node == clock && slot == &SlotPath::parse(unbound).expect("slot")
+                )),
+                "{unbound} has no default channel"
+            );
+        }
     }
 
     #[test]
     fn char_authored_clock_target_suppresses_the_default() {
         let fs = char_project(&[(
             "clock",
-            r#"{ "kind": "Clock", "bindings": { "seconds": { "target": "bus:custom" } } }"#,
+            r#"{ "kind": "Clock", "bindings": { "product": { "target": "bus:custom" } } }"#,
         )]);
         let rt = load_project(&fs);
         let clock = sibling(&rt, "clock");
-        assert!(!default_publishes(&rt, clock, "seconds", "time"));
+        assert!(!default_publishes(&rt, clock, "product", "time"));
         assert!(rt.tree().bindings().any(|binding| {
             binding.priority != BindingPriority::default_fallback()
                 && matches!(
@@ -5126,6 +5243,31 @@ mod tests {
         let rt = load_project(&fs);
         let shader = sibling(&rt, "shader");
         assert!(!default_sources(&rt, shader, "time", "time"));
+    }
+
+    /// The authored `"time": { "source": "bus:time" }` the five checked-in
+    /// `playlist.json` files carry keeps registering after the slot is
+    /// retyped from `f32` to a time product: registration is driven by the
+    /// DECLARED SLOT (the 2026-08-02 silent-drop fix), and the channel name
+    /// did not change. Only those files' authored `"time": 0` *value* is
+    /// stale — a product is not a number — which is P5's sweep.
+    #[test]
+    fn char_authored_playlist_time_binding_survives_the_product_retype() {
+        let fs = char_project(&[(
+            "playlist",
+            r#"{ "kind": "Playlist",
+                 "bindings": { "time": { "source": "bus:time" } },
+                 "idle_entry": 1 }"#,
+        )]);
+        let rt = load_project(&fs);
+        let playlist = sibling(&rt, "playlist");
+        assert!(rt.tree().bindings().any(|binding| matches!(
+            (&binding.source, &binding.target),
+            (BindingSource::BusChannel(channel), BindingTarget::ConsumedSlot { node, slot })
+                if channel.0 == "time"
+                    && *node == playlist
+                    && slot == &SlotPath::parse("time").expect("path")
+        )));
     }
 
     /// Fix for
@@ -5207,8 +5349,7 @@ mod tests {
   "solver_iterations": 1,
   "step_hz": 25,
   "fade_speed": 0.08,
-  "viscosity": 0.00003,
-  "time": 0
+  "viscosity": 0.00003
 }
 "#;
         let with_clock =
@@ -5323,7 +5464,7 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 4\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 5\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
