@@ -228,7 +228,10 @@ pub fn run() {
     report("raw1", run_trials(|| trial_raw1(base)));
     report("ram_word", run_trials(|| trial_ram_word(&hw)));
     report("fill_emu", run_trials(|| trial_fill_emu(&hw, HALF_WORDS)));
-    report("fill_hoist", run_trials(|| trial_fill_hoisted(base, HALF_WORDS)));
+    report(
+        "fill_hoist",
+        run_trials(|| trial_fill_hoisted(base, HALF_WORDS)),
+    );
 
     // `fill_emu` wrote real pulse words; leave the window all-STOP as the
     // driver expects an untouched channel to be.
