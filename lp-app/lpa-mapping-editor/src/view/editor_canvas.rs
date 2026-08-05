@@ -212,15 +212,15 @@ pub fn EditorCanvas(
     // polyline run, which lamps alone leave to inference.
     let repeat_center: Option<[f32; 2]> = selection
         .single()
-        .and_then(|index| doc.objects.get(index))
-        .and_then(|object| match &object.shape {
+        .and_then(|path| path.resolve(doc))
+        .and_then(|shape| match shape {
             Map2dShape::Repeat(repeat) => Some(repeat.center),
             _ => None,
         });
     let ghost_outlines: Vec<Vec<[f32; 2]>> = selection
         .single()
-        .and_then(|index| doc.objects.get(index))
-        .and_then(|object| match &object.shape {
+        .and_then(|path| path.resolve(doc))
+        .and_then(|shape| match shape {
             Map2dShape::Repeat(repeat) => {
                 let path = editable_path(&repeat.shape)?;
                 Some(
@@ -284,12 +284,12 @@ pub fn EditorCanvas(
     let show_numbers = opts.numbers && cam.scale * radius >= 5.0;
 
     // Selection visuals: bbox of the selected objects' lamps.
-    let selection_bounds = (!selection.objects.is_empty())
+    let selection_bounds = (!selection.is_empty())
         .then(|| {
             let sel_positions: Vec<[f32; 2]> = resolved
                 .lamps
                 .iter()
-                .filter(|lamp| selection.objects.contains(&(lamp.object as usize)))
+                .filter(|lamp| selection.object_selected(lamp.object as usize))
                 .map(|lamp| lamp.pos)
                 .collect();
             bounds_of_points(&sel_positions)
@@ -302,9 +302,9 @@ pub fn EditorCanvas(
     // repeat, whose other instances follow the drag on the next resolve.
     let vertex_points: Vec<[f32; 2]> = selection
         .single()
-        .and_then(|index| doc.objects.get(index))
+        .and_then(|path| path.resolve(doc))
         .filter(|_| tool_is_select)
-        .and_then(|object| editable_path(&object.shape))
+        .and_then(editable_path)
         .map(|path| path.points.clone())
         .unwrap_or_default();
     let selected_vertex = selection.vertex;
@@ -703,17 +703,17 @@ pub fn EditorCanvas(
                 for lamp in resolved
                     .lamps
                     .iter()
-                    .filter(|lamp| !selection.objects.contains(&(lamp.object as usize)))
+                    .filter(|lamp| !selection.object_selected(lamp.object as usize))
                     .chain(
                         resolved
                             .lamps
                             .iter()
-                            .filter(|lamp| selection.objects.contains(&(lamp.object as usize))),
+                            .filter(|lamp| selection.object_selected(lamp.object as usize)),
                     )
                 {
                     {
                         let object_index = lamp.object as usize;
-                        let selected = selection.objects.contains(&object_index);
+                        let selected = selection.object_selected(object_index);
                         // Fill precedence mirrors the display renderer:
                         // live output > universe color > object palette.
                         let fill = opts
@@ -1006,9 +1006,9 @@ fn select_and_start_move(
         return;
     }
     let mut collapse = None;
-    if !s.selection.objects.contains(&object_index) {
+    if !s.selection.object_selected(object_index) {
         s.selection.select_only(object_index);
-    } else if s.selection.objects.len() > 1 {
+    } else if s.selection.len() > 1 {
         collapse = Some(object_index);
     }
     s.selection.vertex = None;

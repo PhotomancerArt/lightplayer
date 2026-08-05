@@ -57,9 +57,16 @@ next ones.
 Tools V/G/R/P (select / grid / ring / path). Creation drops a default
 object and opens its properties (no drag-to-size); the path tool previews
 resolved lamps and the chain link live, Enter/double-click finishes,
-Escape backs out one vertex (never discards wholesale). Selection: click,
-shift-click, marquee, ⌘A; corner handles resize uniformly; single-path
-vertices drag; Delete removes. Views N/A/U/F: wiring numbers, direction
+Escape backs out one vertex (never discards wholesale). Selection is
+**tree-path based** (`ShapePath` + `MapSelection` in `editor_core`): a
+set of paths sharing one parent, where an ancestor of a selected path is
+the *scope* (context), never a co-selection; double-click descends into
+a group, Esc ascends, and edits through a descended path write through
+to the authored shape (every repeat instance follows). Rationale and
+invariants: `docs/adr/2026-08-05-map2d-editor-selection-tree-model.md`.
+Click, shift-click, marquee, ⌘A select; corner handles resize uniformly;
+single-path vertices drag; Delete removes (at depth it removes the whole
+object — unwrap is the keep-the-inner op). Views N/A/U/F: wiring numbers, direction
 arrows (gold dashed chain hops between objects), universe colors
 (auto-flow, 170 RGB lamps/universe; ranges annotate as `u:lo-hi`),
 texture-frame fit preview. ⌘Z/⇧⌘Z undo/redo; 0 fits.

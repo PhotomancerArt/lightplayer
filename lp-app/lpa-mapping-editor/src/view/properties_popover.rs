@@ -29,7 +29,7 @@ pub fn PropertiesPopover(
 ) -> Element {
     let session_read = session.read();
     let selection = session_read.selection.clone();
-    if selection.objects.is_empty() || drag().is_some() {
+    if selection.is_empty() || drag().is_some() {
         return rsx! {};
     }
     let doc = session_read.doc();
@@ -40,7 +40,7 @@ pub fn PropertiesPopover(
             resolved
                 .lamps
                 .iter()
-                .filter(|lamp| selection.objects.contains(&(lamp.object as usize)))
+                .filter(|lamp| selection.object_selected(lamp.object as usize))
                 .map(|lamp| lamp.pos)
                 .collect()
         })
@@ -62,7 +62,9 @@ pub fn PropertiesPopover(
     let y = right[1].clamp(10.0, (viewport_height - 120.0).max(10.0));
 
     let lamp_total = selected_positions.len();
-    let single = selection.single();
+    // P4 gives descended selections their own breadcrumbed popover; until
+    // then the popover presents the selected path's OBJECT (root behavior).
+    let single = selection.single().map(|path| path.object);
     let object = single.and_then(|index| doc.objects.get(index).cloned());
     // The object's whole lamp range, strands merged: a repeat resolves to one
     // span per instance, so `spans[index]` would report only its first strand.
@@ -71,7 +73,7 @@ pub fn PropertiesPopover(
             .as_ref()
             .and_then(|resolved| resolved.object_span(index as u32))
     });
-    let count_summary = selection.objects.len();
+    let count_summary = selection.len();
     let object_total = doc.objects.len();
     drop(session_read);
 

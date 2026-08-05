@@ -14,6 +14,7 @@ use lpc_mapping::{Map2dDoc, bounds_of_points, resolve};
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
 use crate::editor_core::map_tool::MapTool;
+use crate::editor_core::shape_path::ShapePath;
 use crate::view::editor_canvas::{CanvasDrag, EditorCanvas};
 use crate::view::editor_header::EditorHeader;
 use crate::view::object_list::ObjectList;
@@ -112,7 +113,7 @@ pub fn MapEditor(
     let mut session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
         for index in &initial_selection {
-            session.selection.objects.insert(*index);
+            session.selection.insert_path(ShapePath::root(*index));
         }
         if !initial_draft.is_empty() {
             session.tool = MapTool::Path {
