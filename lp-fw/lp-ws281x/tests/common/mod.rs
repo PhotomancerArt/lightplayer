@@ -7,6 +7,10 @@ use lp_ws281x::{ChannelTiming, PulseCodes};
 ///
 /// The terminating STOP word is deliberately absent — the transmitter stops
 /// *on* it and never puts it on the wire.
+// Each integration test binary compiles its own copy of this module, and not
+// every test asserts on the word stream (the handshake tests only need
+// frames), so the helper is dead code in some binaries by design.
+#[allow(dead_code)]
 pub fn expected_words(frame: &[u8], timing: &ChannelTiming) -> Vec<u32> {
     let codes = PulseCodes::at_default_clock(timing).expect("timing must be encodable");
     let mut out = Vec::new();

@@ -220,7 +220,12 @@ fw-core = { path = "../fw-core", default-features = false, optional = true }
 # Optional and gated behind `server`, like every other app-layer dependency
 # here: `src/output/` also needs `lpc-hardware`, `alloc` and the common
 # provider, none of which the bare hello / radio-probe entrypoints link.
-lp-ws281x = { path = "../lp-ws281x", default-features = false, optional = true }
+# `isr-in-ram`: the refill path must live in IRAM here — the ISR runs on the
+# APP core while the PRO core's engine misses flash cache constantly, and the
+# shared SPI bus turns those misses into 100 µs+ instruction-fetch stalls on
+# flash-resident service code (measured: entry delays blowing the 80 µs
+# deadline the moment transmission overlapped render).
+lp-ws281x = { path = "../lp-ws281x", default-features = false, features = ["isr-in-ram"], optional = true }
 
 # Async runtime for `serial::io_task`. Mirrors fw-esp32s3's set.
 embassy-executor = { version = "0.10.0", optional = true }

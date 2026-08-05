@@ -926,6 +926,17 @@ fwtest-backtrace-esp32s3 port="":
 # the re-derivation of `lp-fw/lp-ws281x/tests/golden/ws2812_grb_esp32s3.txt` —
 # a mismatch there is a finding to triage, never a reason to edit the golden.
 #
+# The cross-core teardown-race harness for lp-ws281x, under Miri (the UAF
+# oracle for the classic ESP32's APP-core ISR deployment). The preemption
+# flag is load-bearing: at Miri's default rate the schedules never land
+# inside the teardown window and the run proves much less. Needs the miri
+# component on the nightly toolchain (`rustup +nightly component add miri`).
+# Manual/pre-push; not wired into CI (nightly-only). See
+# lp-fw/lp-ws281x/tests/cross_core.rs for the validated-oracle note.
+ws281x-miri:
+    MIRIFLAGS="-Zmiri-preemption-rate=0.5" \
+        cargo +nightly miri test -p lp-ws281x --test cross_core
+
 # Run the host oracle first; it drives the same sequencing against a mock and
 # the same classifier against the committed capture:
 #
