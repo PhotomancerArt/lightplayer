@@ -133,7 +133,7 @@ pub fn PaletteChooser(
         let (name, origin) = palette_identity(&session.gradient, &choices);
         let edited_config = config.clone();
         let target = session.target;
-        let mut emit_done = emit;
+        let emit_done = emit;
         return rsx! {
             PaletteEditor {
                 gradient: session.gradient,
@@ -920,6 +920,92 @@ mod tests {
         // Frozen has no rate to state.
         assert_eq!(speed_readout(0.0), "held");
         assert_eq!(speed_readout(f32::NAN), "held");
+    }
+
+    #[test]
+    fn the_editor_opens_on_the_palette_the_target_holds() {
+        let held = GradientConfig::Static(ramp(0.3));
+        assert_eq!(
+            edit_source(&held, PaletteEditTarget::Static),
+            Some(ramp(0.3))
+        );
+
+        let three = cycle(3);
+        assert_eq!(
+            edit_source(&three, PaletteEditTarget::Member(1)),
+            Some(ramp(0.1))
+        );
+        // A stale ✎ (the set shrank underneath it) opens nothing.
+        assert_eq!(edit_source(&three, PaletteEditTarget::Member(9)), None);
+    }
+
+    #[test]
+    fn done_lands_the_edit_where_the_pencil_was_pressed() {
+        // A static edit stays static.
+        let held = GradientConfig::Static(ramp(0.3));
+        assert_eq!(
+            with_palette_edited(&held, PaletteEditTarget::Static, &ramp(0.9)),
+            GradientConfig::Static(ramp(0.9))
+        );
+
+        // A member edit replaces exactly that member, timings intact.
+        let three = cycle(3);
+        let GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+        } = with_palette_edited(&three, PaletteEditTarget::Member(1), &ramp(0.9))
+        else {
+            panic!("replacing a member keeps the cycle a cycle");
+        };
+        assert_eq!(set, vec![ramp(0.0), ramp(0.9), ramp(0.2)]);
+        assert_eq!(step_seconds, 20.0);
+        assert_eq!(fade_seconds, 0.5);
+
+        // A stale target changes nothing rather than appending.
+        assert_eq!(
+            with_palette_edited(&three, PaletteEditTarget::Member(9), &ramp(0.9)),
+            three
+        );
+    }
+
+    #[test]
+    fn provenance_is_decided_by_value_not_by_list() {
+        let choices = vec![
+            PaletteChoice {
+                id: "ocean".to_string(),
+                name: "Ocean".to_string(),
+                group: PaletteGroup::FastledStock,
+                license: None,
+                gradient: ramp(0.4),
+            },
+            PaletteChoice {
+                id: "mine".to_string(),
+                name: "Mine".to_string(),
+                group: PaletteGroup::ThisProject,
+                license: None,
+                gradient: ramp(0.6),
+            },
+        ];
+
+        // A shipped palette forks — wherever the ✎ was pressed.
+        assert_eq!(
+            palette_identity(&ramp(0.4), &choices),
+            (
+                "Ocean".to_string(),
+                PaletteOrigin::BuiltinCopy("Ocean".to_string())
+            )
+        );
+        // A project palette edits in place.
+        assert_eq!(
+            palette_identity(&ramp(0.6), &choices),
+            ("Mine".to_string(), PaletteOrigin::ProjectCustom)
+        );
+        // A value the catalog never heard of is already this project's.
+        assert_eq!(
+            palette_identity(&ramp(0.9), &choices),
+            ("Custom palette".to_string(), PaletteOrigin::ProjectCustom)
+        );
     }
 
     #[test]

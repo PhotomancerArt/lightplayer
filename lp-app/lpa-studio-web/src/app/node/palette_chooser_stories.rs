@@ -17,7 +17,8 @@ use lpc_model::{Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod
 
 use crate::app::node::face_story_fixtures::palette_swatch_control;
 use crate::app::node::{
-    PaletteCatalog, PaletteChoice, PaletteChooserTab, PaletteGroup, PaletteSwatchField,
+    PaletteCatalog, PaletteChoice, PaletteChooserTab, PaletteEditTarget, PaletteGroup,
+    PaletteSwatchField,
 };
 
 /// A two-stop Oklab ramp — enough to be visually distinct in a mini strip
@@ -144,6 +145,10 @@ fn ChooserStoryCard(catalog: PaletteCatalog, children: Element) -> Element {
 fn ChooserRow(
     config: GradientConfig,
     #[props(default = None)] tab: Option<PaletteChooserTab>,
+    /// Open straight into the editor takeover — the state a ✎ press
+    /// produces.
+    #[props(default = None)]
+    edit: Option<PaletteEditTarget>,
 ) -> Element {
     let control = palette_swatch_control("Palette", &config, UiSlotFieldState::editable(), false);
     rsx! {
@@ -157,6 +162,7 @@ fn ChooserRow(
             on_action: move |_| {},
             chooser_initially_open: true,
             chooser_initial_tab: tab,
+            chooser_initial_edit: edit,
         }
     }
 }
@@ -206,6 +212,45 @@ fn full_set() -> Element {
     rsx! {
         ChooserStoryCard { catalog: story_catalog(project_rows()),
             ChooserRow { config: cycle_of(8), tab: PaletteChooserTab::Cycle }
+        }
+    }
+}
+
+#[story(
+    description = "The editor TAKEOVER on a shipped built-in (M4-P5): the ✎ swapped the whole popover for the gradient editor — one popover, two views, never a popup over a popup. The provenance line says `copy of built-in \u{201c}Ocean\u{201d}` because done lands a COPY as the slot's authored value and the catalog entry is untouched; the first stop is selected, so its handle rings and the stop row below speaks display sRGB for exactly that stop. Nothing is written until done — a stop drag must not put half-built ramps on a live channel."
+)]
+fn editor_takeover_builtin_copy() -> Element {
+    rsx! {
+        ChooserStoryCard { catalog: story_catalog(project_rows()),
+            ChooserRow {
+                config: GradientConfig::Static(ramp(0.72, -0.09, -0.12)),
+                edit: PaletteEditTarget::Static,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The same takeover on a palette this project already owns: the provenance line says `project custom` and done edits it in place — no fork, because there is no shipped entry to protect. Provenance is decided by VALUE, not by which list the ✎ was pressed in. (A true mid-drag frame is not capturable — the drag lives in pointer capture — so the selected-stop state above stands in for the editor's working anatomy.)"
+)]
+fn editor_takeover_project_custom() -> Element {
+    rsx! {
+        ChooserStoryCard { catalog: story_catalog(project_rows()),
+            ChooserRow {
+                config: GradientConfig::Static(ramp(0.74, 0.02, 0.15)),
+                edit: PaletteEditTarget::Static,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Editing one MEMBER of a cycle: the ✎ on the second chip opened its palette, and done replaces exactly that member — same set order, same timings, still a cycle. These generated ramps are values the catalog has never heard of, so the title falls back to `Custom palette` / `project custom` — the identity a hand-built or imported member gets; a catalog member would carry its own name, as the built-in-copy story shows."
+)]
+fn editor_takeover_cycle_member() -> Element {
+    rsx! {
+        ChooserStoryCard { catalog: story_catalog(project_rows()),
+            ChooserRow { config: cycle_of(3), edit: PaletteEditTarget::Member(1) }
         }
     }
 }

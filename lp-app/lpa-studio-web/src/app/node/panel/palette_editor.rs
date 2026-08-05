@@ -319,7 +319,11 @@ pub fn stop_index_near(gradient: &Gradient, at: f32, radius: f32) -> Option<usiz
 pub fn with_stop_at(gradient: &Gradient, index: usize, at: f32) -> Gradient {
     let mut next = gradient.clone();
     if let Some(stop) = next.stops.get_mut(index) {
-        stop.at = if at.is_finite() { at.clamp(0.0, 1.0) } else { 0.0 };
+        stop.at = if at.is_finite() {
+            at.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
     }
     next
 }
@@ -344,7 +348,11 @@ pub fn with_stop_added(gradient: &Gradient, at: f32) -> (Gradient, usize) {
     if gradient.stops.len() >= MAX_GRADIENT_STOPS as usize {
         return (gradient.clone(), 0);
     }
-    let at = if at.is_finite() { at.clamp(0.0, 1.0) } else { 0.0 };
+    let at = if at.is_finite() {
+        at.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let mut next = gradient.clone();
     next.stops.push(GradientStop {
         at,
@@ -396,12 +404,9 @@ pub fn with_space(gradient: &Gradient, space: Colorspace) -> Gradient {
 /// show.
 #[must_use]
 pub fn stop_display_srgb(gradient: &Gradient, index: usize) -> [f32; 3] {
-    gradient
-        .stops
-        .get(index)
-        .map_or([0.0, 0.0, 0.0], |stop| {
-            to_display_srgb(gradient.space, stop.c)
-        })
+    gradient.stops.get(index).map_or([0.0, 0.0, 0.0], |stop| {
+        to_display_srgb(gradient.space, stop.c)
+    })
 }
 
 /// `#rrggbb` for an `<input type="color">`.
@@ -631,8 +636,16 @@ mod tests {
 
         // Stored in the gradient's own space...
         assert_ne!(recolored.stops[0].c, [0.93, 0.41, 0.06]);
-        // ...and read back as the color the user picked.
-        assert_eq!(hex_of(stop_display_srgb(&recolored, 0)), "#ed6910");
+        // ...and read back as the color the user picked, give or take the
+        // one-in-255 wobble an Oklab round trip costs a channel.
+        let read_back = stop_display_srgb(&recolored, 0);
+        for (channel, picked) in read_back.iter().zip([0.93, 0.41, 0.06]) {
+            assert!(
+                (channel - picked).abs() < 1.5 / 255.0,
+                "{read_back:?} strays from the picked color"
+            );
+        }
+        assert_eq!(hex_of(read_back), "#ed690f");
 
         assert_eq!(srgb_from_hex("#000000"), Some([0.0, 0.0, 0.0]));
         assert_eq!(srgb_from_hex("ffffff"), Some([1.0, 1.0, 1.0]));
