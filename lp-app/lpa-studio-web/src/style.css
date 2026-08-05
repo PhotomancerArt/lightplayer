@@ -1423,6 +1423,32 @@ label:has(> input:not(:disabled)) {
     font-size: 12px;
 }
 
+/* Refuse-to-edit: shown INSTEAD of the editor when a document cannot be
+   read (malformed, or written by a newer LightPlayer). Deliberately calm and
+   roomy — the document is intact; this build just will not touch it. */
+.lpme-refusal {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    color: var(--studio-color-text);
+    font-size: 12px;
+}
+
+.lpme-refusal-message {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.lpme-refusal-note {
+    max-width: 46em;
+    color: var(--studio-color-text-muted);
+    line-height: 1.5;
+}
+
 .lpme-hidden-input {
     display: none;
 }

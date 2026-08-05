@@ -553,8 +553,16 @@ fn scale_shape(shape: &mut Map2dShape, anchor: [f32; 2], factor: f32) {
     }
 }
 
-/// Clamp authored values so every session-produced document resolves.
+/// Clamp authored values so every session-produced document resolves, and
+/// stamp the minimal format its content needs.
+///
+/// The stamp is part of every commit, not a save-time afterthought: whatever
+/// the document declared when it was opened, what the editor emits declares
+/// the *lowest* format able to read it. Strip the last newer construct out of
+/// a document and it drops back to the older format, readable by older
+/// firmware again.
 fn sanitize_doc(doc: &mut Map2dDoc) {
+    doc.normalize_format();
     for object in &mut doc.objects {
         match &mut object.shape {
             Map2dShape::Grid(grid) => {
@@ -742,6 +750,19 @@ mod tests {
             session.doc().objects[0].shape,
             Map2dShape::Ring(_)
         ));
+    }
+
+    /// Minimal stamping: what the editor commits declares the lowest format
+    /// able to read it, whatever the document claimed on the way in.
+    #[test]
+    fn a_commit_stamps_the_minimal_required_format() {
+        let mut doc = corpus::basic_button();
+        doc.format = 9;
+        let mut session = MapEditorSession::new(doc);
+        session.rename_object(0, "renamed".to_string());
+        assert_eq!(session.doc().format, 1);
+        // The emitted body is therefore readable by this build again.
+        assert!(Map2dDoc::from_json(&session.doc().to_json()).is_ok());
     }
 
     #[test]
