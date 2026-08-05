@@ -1,19 +1,23 @@
-//! The clock card's permanent face: the published time product, the plain
-//! seconds readings, and the read-only listing of the phasors riding this
-//! timebase (parent D10).
+//! The clock card's permanent face: the published time product and the
+//! per-reading phasor trace cards riding this timebase (clock-face v2 —
+//! the direction converged at the TimeProduct G2 gate).
 //!
 //! Since the M2 break `bus:time` carries a `TimeProduct` handle, and
 //! everything behind that handle — effective seconds, this tick's delta,
 //! every phasor a consumer materialized — lives in the engine's timebase
-//! store rather than in any slot. Nothing on the ordinary read surface can
-//! see it, which is why a clock's card had no way to answer "what is
-//! actually running right now?".
+//! store rather than in any slot. The probe now reports each integrator's
+//! downstream READINGS too, so the face can answer "what is riding this
+//! clock" the way a consumer would: one little black-and-white scrolling
+//! trace per reading, drawing the SHAPED value that consumer actually
+//! reads. Sharing is the violet border + id (bound-violet convention); the
+//! trace itself stays monochrome. Seconds shrank into the section header;
+//! the Delta row is gone ("isn't useful at all" — G2).
 //!
 //! **This is a debug listing, not a control panel.** There is no gesture
 //! here at all: nothing creates, retunes, or deletes a phasor, because
 //! phasors materialize on query and despawn on silence and both are the
 //! consuming node's business. The one place a period IS editable is the
-//! consuming shader's own period knob.
+//! consuming shader's own speed knob.
 //!
 //! Three states have to read differently, and the middle one is the trap:
 //!
@@ -21,22 +25,28 @@
 //! |---|---|
 //! | no probe has landed | "Reading the timebase…" |
 //! | live, no phasors | "Nothing is riding this timebase." — NORMAL |
-//! | live, rows | one row per integrator |
+//! | live, cards | one trace card per reading |
 //!
 //! An empty listing is not a failure and must never look like one: a
 //! project whose shaders declare no phasor has none, and so does one whose
 //! phasors have all gone idle.
 //!
-//! A **shared** row is the listing's one load-bearing fact: a phasor keyed
-//! by a config channel is ONE integrator for every reader of that channel
-//! (parent D3), so its period is not a private setting. It gets the bound
-//! violet family — the shared thing here is bus wiring, which is exactly
-//! what violet means in Studio ([[studio-bound-violet-convention]]).
+//! Animation lives in [`super::phasor_trace`]: one rAF driver per face,
+//! extrapolating phase between probes and re-anchoring on each probe.
+
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiClockFace as UiClockFaceData, UiPhasorRow, UiTimebaseState};
+use lpa_studio_core::{UiAction, UiClockFace as UiClockFaceData, UiPhasorReading, UiTimebaseState};
 
-use crate::app::node::{NodeCardSection, ProducedProductView, ProducedValues};
+use crate::app::node::{NodeCardSection, ProducedProductView};
+
+use super::phasor_trace::PhasorTraceDriver;
+
+/// Monotonic per-face id base for trace canvases (one driver per face; one
+/// canvas per card, addressed `{base}-{index}`).
+static NEXT_TRACE_FACE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -44,19 +54,39 @@ pub fn ClockFace(
     face: UiClockFaceData,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let driver = use_hook(|| Rc::new(PhasorTraceDriver::new()));
+    let base_id = use_hook(|| {
+        let id = NEXT_TRACE_FACE_ID.fetch_add(1, Ordering::Relaxed);
+        format!("phasor-trace-{id}")
+    });
+
+    // Reconcile the animation driver with this render's cards: live cards
+    // animate, every other state stops the loop.
+    let cards: &[UiPhasorReading] = if face.timebase == UiTimebaseState::Live {
+        &face.phasors
+    } else {
+        &[]
+    };
+    {
+        let base = base_id.clone();
+        driver.sync(cards, move |index| format!("{base}-{index}"));
+    }
+
     rsx! {
         NodeCardSection { label: "output", first: true,
             div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-2 tw:p-2",
-                ProducedProductView { product: face.product.clone(), on_action }
-            }
-            if !face.readings.is_empty() {
-                div { class: "tw:min-w-0 tw:px-2 tw:pb-2",
-                    ProducedValues { values: face.readings.clone(), on_action }
+                // The hero is the SECONDS COUNTER — the number a scrub or
+                // speed change visibly moves ("Time product" as a caption
+                // did nothing; PR review). The Delta row stays dead.
+                ProducedProductView {
+                    product: face.product.clone(),
+                    on_action,
+                    time_seconds: face.seconds.clone(),
                 }
             }
         }
         NodeCardSection { label: "phasors",
-            div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:px-3 tw:py-2",
+            div { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:px-3 tw:py-2",
                 match face.timebase {
                     // No read yet: say so plainly rather than showing an
                     // empty listing, which would read as "nothing running".
@@ -78,8 +108,16 @@ pub fn ClockFace(
                         }
                     },
                     UiTimebaseState::Live => rsx! {
-                        for (index, row) in face.phasors.iter().enumerate() {
-                            PhasorRow { key: "{index}-{row.origin}", row: row.clone() }
+                        div { class: "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(112px,1fr))] tw:gap-2",
+                            for (index, reading) in face.phasors.iter().enumerate() {
+                                PhasorTraceCard {
+                                    key: "{index}-{reading.label}",
+                                    reading: reading.clone(),
+                                    canvas_id: format!("{base_id}-{index}"),
+                                    index,
+                                    driver: driver.clone(),
+                                }
+                            }
                         }
                     },
                 }
@@ -88,62 +126,61 @@ pub fn ClockFace(
     }
 }
 
-/// One integrator: who it belongs to, how long its cycle is, where in that
-/// cycle it currently sits, and how many cycles it has completed.
+/// One downstream reading: a scrolling trace of the shaped value the
+/// consumer actually reads (right edge = now), the reader's id, and the
+/// auto-denominated rate + waveform + completed cycles beneath it.
 ///
-/// The bar is the RAW `[0,1)` ramp — never a shaped reading. `waveform` and
-/// `phase_offset` are per-consumer output shaping applied after the store,
-/// so a shared integrator has exactly one phase and possibly several
-/// differently-shaped readings of it; picking one reader's and calling it
-/// the phasor's would be a lie the listing cannot detect.
+/// Shared readings wear the violet border and id (the shared thing is bus
+/// wiring — exactly what violet means in Studio); the trace stays
+/// black-and-white on the terminal background, spike proportions.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PhasorRow(row: UiPhasorRow) -> Element {
-    let origin_class = if row.shared {
-        "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px] tw:font-semibold tw:text-status-bound-foreground"
+fn PhasorTraceCard(
+    reading: UiPhasorReading,
+    canvas_id: String,
+    index: usize,
+    driver: Rc<PhasorTraceDriver>,
+) -> Element {
+    let card_class = if reading.shared {
+        "tw:flex tw:min-w-0 tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-status-bound-border tw:bg-terminal"
     } else {
-        "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px] tw:font-semibold tw:text-strong-foreground"
+        "tw:flex tw:min-w-0 tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-muted tw:bg-terminal"
     };
-    let fill_class = if row.shared {
-        "tw:h-full tw:rounded-xs tw:bg-status-bound-foreground"
+    let id_class = if reading.shared {
+        "tw:min-w-0 tw:truncate tw:font-mono tw:text-[10px] tw:font-semibold tw:text-status-bound-foreground"
     } else {
-        "tw:h-full tw:rounded-xs tw:bg-accent"
+        "tw:min-w-0 tw:truncate tw:font-mono tw:text-[10px] tw:font-semibold tw:text-muted-foreground"
     };
-    // The bar geometry follows the QUANTIZED phase for the same reason the
-    // readout does: a row that only changes when its number changes keeps
-    // the whole-DTO change gate quiet on a slow phasor.
-    let percent = (row.phase.clamp(0.0, 1.0) * 100.0).round();
+    // The shared channel rides the tooltip; the border is the signal.
+    let id_title = reading
+        .detail
+        .clone()
+        .unwrap_or_else(|| reading.label.clone());
 
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
-            div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-1.5",
-                span { class: origin_class, "{row.origin}" }
-                if row.shared {
-                    span {
-                        class: "tw:flex-none tw:text-[9px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-status-bound-foreground",
-                        title: "One integrator for every reader of this channel — its period is shared",
-                        "shared"
-                    }
-                }
-                if let Some(detail) = &row.detail {
-                    span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:text-subtle-foreground", "{detail}" }
-                }
-                span { class: "tw:min-w-0 tw:flex-1" }
-                span { class: "tw:flex-none tw:font-mono tw:text-[10px] tw:tabular-nums tw:text-muted-foreground",
-                    "{row.period_display}"
-                }
+        div { class: card_class,
+            // The canvas inherits its stroke color from `color` (B/W trace
+            // tone); painting is imperative from the face's rAF driver —
+            // never through the vdom.
+            canvas {
+                id: "{canvas_id}",
+                class: "tw:block tw:h-[42px] tw:w-full tw:text-strong-foreground",
+                onmounted: move |_| driver.canvas_mounted(index),
             }
-            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-                div { class: "tw:h-1 tw:min-w-0 tw:flex-1 tw:overflow-hidden tw:rounded-xs tw:bg-border-strong",
-                    div { class: fill_class, style: "width: {percent}%" }
-                }
-                span { class: "tw:flex-none tw:font-mono tw:text-[10px] tw:tabular-nums tw:text-muted-foreground",
-                    "\u{03c6} {row.phase_display}"
-                }
-                span {
-                    class: "tw:flex-none tw:font-mono tw:text-[10px] tw:tabular-nums tw:text-subtle-foreground",
-                    title: "Completed cycles since this integrator materialized",
-                    "\u{00d7}{row.cycle}"
+            div { class: "tw:grid tw:min-w-0 tw:gap-px tw:px-1.5 tw:pb-1 tw:pt-0.5",
+                span { class: id_class, title: "{id_title}", "{reading.label}" }
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-1.5",
+                    span { class: "tw:flex-none tw:font-mono tw:text-[10px] tw:tabular-nums tw:text-subtle-foreground",
+                        "{reading.rate_display}"
+                    }
+                    span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[9px] tw:text-dim-foreground",
+                        "{reading.waveform}"
+                    }
+                    span {
+                        class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9px] tw:tabular-nums tw:text-dim-foreground",
+                        title: "Completed cycles since this integrator materialized",
+                        "\u{00d7}{reading.cycle}"
+                    }
                 }
             }
         }

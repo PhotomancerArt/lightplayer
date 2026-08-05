@@ -8,24 +8,44 @@
 //!   before `arm` publishes them, and afterwards only reads;
 //! * the ISR owns the bit cursor and the counters.
 //!
-//! # Memory ordering
+//! # Memory ordering — the cross-core contract
 //!
-//! The one real hand-off is the frame descriptor (pointer + length + total
-//! bits + pulse codes) becoming visible to the ISR. `arm` stores it and then
-//! `frame_complete.store(false, Release)`; the ISR's `Acquire` load of
-//! `frame_complete` (or of `bit_cursor`, stored with `Release` by `arm`) orders
-//! everything written before it. That single release/acquire pair is what makes
-//! the plain `Relaxed` accesses on the counters safe.
+//! Thread context and the interrupt handler may run on **different cores**
+//! (fw-esp32v3 binds the RMT ISR on the classic ESP32's APP core), so nothing
+//! here may lean on "the handler cannot be running while thread code runs".
+//! The contract has three legs:
 //!
-//! `bit_cursor` uses `Release` on store and `Acquire` on load. On a
-//! single-core, single-ISR deployment `Relaxed` would in fact be sufficient —
-//! ISR entry and exit already fence — but the ordering is stated explicitly
-//! because the *frame buffer bytes* are read through it: an `Acquire` load of
-//! the cursor is what guarantees a refill sees the caller's pixel writes. (The
-//! lp2025 driver incremented `Relaxed` and loaded `Acquire`, which pairs with
-//! nothing; that is the wart being fixed here.)
+//! * **Publish (arm → ISR).** `arm` stores the frame descriptor (pointer +
+//!   length + total bits) and then `frame_complete.store(false, Release)`;
+//!   the ISR's first act on a channel is an [`Self::is_complete_sync`] load,
+//!   which pairs with it and orders every prior store — including the
+//!   configuration written by `configure`, which happens-before `arm` on the
+//!   caller's thread. `bit_cursor` is Release-stored / Acquire-loaded because
+//!   the *frame buffer bytes* are read through it: an `Acquire` load of the
+//!   cursor is what guarantees a refill sees the caller's pixel writes.
+//!   `threshold_boundary` is stored after the `arm` publish and therefore
+//!   carries its own Release/Acquire pair (it only feeds the entry-delay
+//!   statistic, but a stale read would file garbage).
+//!
+//! * **Teardown (disarm → handshake).** `disarm` publishes
+//!   `frame_complete = true` with `SeqCst`, and the driver's abort path then
+//!   waits until the ISR is provably out of service (the `isr_seq` handshake
+//!   in `driver.rs` — see the soundness argument there). An ISR pass that
+//!   began before the disarm may keep reading the old descriptor through
+//!   `Relaxed` loads in [`ChannelState::frame_slice`]; that is sound **only** because
+//!   the handshake keeps the caller from freeing or reusing the bytes until
+//!   that pass has exited. The `SeqCst` on `frame_complete` (store here, load
+//!   in the ISR's check) is one half of the store/load ("Dekker") pattern the
+//!   handshake needs; plain Release/Acquire would permit both sides to miss
+//!   each other.
+//!
+//! * **Ownership.** Exactly **one core services the ISR** — the handler never
+//!   nests and never runs concurrently with itself. That single-writer fact
+//!   is what keeps the counters plain `Relaxed` (staleness in a cross-core
+//!   stats snapshot is harmless) and the load/compare/store maxima in
+//!   [`Self::record_lag`] / [`Self::record_entry_delay`] lossless.
 
-use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use core::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicU8, AtomicUsize};
 
 use crate::timing::{ColorOrder, PulseCodes};
@@ -205,9 +225,14 @@ pub struct ChannelState {
     /// own entry delay: the boundary is where the transmitter *was* when the
     /// cause appeared, and [`crate::RmtHw::read_pos`] says where it is now.
     ///
-    /// Written by the driver only — from thread context at `start_frame` and
-    /// from the ISR at each threshold flip, which never overlap on the parts
-    /// this driver targets.
+    /// Written by the driver only — from thread context at `start_frame`
+    /// (before `start_tx`, so the two writers still never overlap even
+    /// cross-core: the ISR cannot fire for a frame that has not started) and
+    /// from the ISR at each threshold flip. The thread-side store is
+    /// `Release` and the ISR's read `Acquire` because this field is stored
+    /// *after* `arm`'s publish and would otherwise reach a cross-core ISR
+    /// stale; it only feeds the entry-delay statistic, but a stale boundary
+    /// files garbage samples.
     pub(crate) threshold_boundary: AtomicUsize,
 
     // --- counters ---
@@ -275,6 +300,7 @@ impl ChannelState {
     /// `reset_stats` from thread context can lose one reset, which is
     /// harmless — the same is true of every other counter here.)
     #[inline]
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn record_lag(&self, advanced: usize, half_words: usize) {
         let advanced_i32 = advanced.min(i32::MAX as usize) as i32;
         self.refill_lag_sum.fetch_add(advanced_i32, Relaxed);
@@ -298,6 +324,7 @@ impl ChannelState {
     /// interrupt handler never nests with itself) makes the load/compare/store
     /// maximum sound.
     #[inline]
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn record_entry_delay(&self, delay: usize, half_words: usize) {
         let delay_i32 = delay.min(i32::MAX as usize) as i32;
         if self.entry_delay_max.load(Relaxed) < delay_i32 {
@@ -315,6 +342,7 @@ impl ChannelState {
     }
 
     /// The compiled timing as written by [`Self::set_timing`].
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn codes(&self) -> PulseCodes {
         PulseCodes {
             zero: self.pulse_zero.load(Relaxed),
@@ -324,6 +352,7 @@ impl ChannelState {
     }
 
     /// The configured byte order.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub(crate) fn color_order(&self) -> ColorOrder {
         // The only writer stores a valid discriminant, so the fallback is
         // unreachable; it exists so the ISR path has no panic.
@@ -354,36 +383,52 @@ impl ChannelState {
 
     /// Drop the frame descriptor and mark the channel idle.
     ///
-    /// Clearing the pointer first means a late interrupt that slips past the
-    /// completion check reads zeros rather than freed memory. (On the single
-    /// core these parts have, thread context and the handler never overlap, so
-    /// there is no window in which a refill is already dereferencing the old
-    /// pointer.)
+    /// Length is cleared before the pointer so a racing [`Self::frame_slice`]
+    /// that sees the new state piecemeal fails its bounds check first, and the
+    /// pointer store is `Release` as belt-and-braces — but neither is the
+    /// guarantee. A cross-core ISR pass that entered before this call may
+    /// still be dereferencing the **old** pointer through `Relaxed` loads;
+    /// what makes that sound is the `isr_seq` handshake in
+    /// [`crate::Ws281xDriver::abort`], which keeps the caller from freeing or
+    /// reusing the frame bytes until that pass has exited. The `SeqCst` on
+    /// `frame_complete` is the store half of the store/load pattern that
+    /// handshake's soundness argument requires (see
+    /// [`Self::is_complete_sync`]).
     pub(crate) fn disarm(&self) {
         self.frame_len.store(0, Relaxed);
-        self.frame_ptr.store(core::ptr::null_mut(), Relaxed);
-        self.frame_complete.store(true, Release);
+        self.frame_ptr.store(core::ptr::null_mut(), Release);
+        self.frame_complete.store(true, SeqCst);
     }
 
-    /// Read the frame byte at `index`, or `0` if the index is out of range.
+    /// Snapshot the frame descriptor for **one service pass**: `(ptr, len)`,
+    /// with `len == 0` whenever the pointer is null.
     ///
-    /// The bounds check makes the raw read sound even if a caller violated the
-    /// `arm` contract about `len`; it costs one compare per byte on the refill
-    /// path.
+    /// The refill loop takes this once per fill and bounds-checks every byte
+    /// index against `len` before dereferencing, which keeps the raw reads
+    /// sound even if a caller violated the `arm` contract about the length.
+    /// The loads are deliberately `Relaxed` even though a cross-core `disarm`
+    /// can race them — an acquiring (`memw`-fenced) load would tax every
+    /// fill, and soundness does not depend on seeing the disarm: a pass that
+    /// misses it reads the *old* descriptor, whose bytes the `isr_seq`
+    /// handshake in [`crate::Ws281xDriver::abort`] keeps alive until that
+    /// pass exits — and no longer, so a snapshot may only live for the ISR
+    /// pass (or thread-side fill) that took it. Do NOT store one across
+    /// passes.
+    ///
+    /// Every torn interleaving with [`Self::disarm`] (which stores `len = 0`,
+    /// then nulls the pointer) is benign: a null pointer forces `len = 0`; a
+    /// new-`len`/old-`ptr` view reads nothing; an old/old view reads bytes
+    /// the handshake is keeping alive — never a dangling read.
     #[inline]
-    pub(crate) fn frame_byte(&self, index: usize) -> u8 {
-        if index >= self.frame_len.load(Relaxed) {
-            return 0;
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
+    pub(crate) fn frame_slice(&self) -> (*const u8, usize) {
+        let len = self.frame_len.load(Relaxed);
+        let ptr = self.frame_ptr.load(Relaxed);
+        if ptr.is_null() {
+            (ptr, 0)
+        } else {
+            (ptr, len)
         }
-        let base = self.frame_ptr.load(Relaxed);
-        if base.is_null() {
-            return 0;
-        }
-        // SAFETY: `arm` promised `frame_ptr` addresses at least `frame_len`
-        // readable bytes for the whole transmission, and `index < frame_len`
-        // was just checked. The frame is `u8`, so the offset cannot violate
-        // alignment, and `len` fits in an `isize` because it came from a slice.
-        unsafe { *base.add(index) }
     }
 
     /// True while a frame is in flight.
@@ -394,6 +439,25 @@ impl ChannelState {
     /// True once the in-flight frame has reached `tx_end`.
     pub fn is_complete(&self) -> bool {
         self.frame_complete.load(Acquire)
+    }
+
+    /// [`Self::is_complete`] with `SeqCst` — the ISR's entry check.
+    ///
+    /// The interrupt handler must use this form, not the `Acquire` one, at
+    /// the top of a channel's service. It is one half of a store/load
+    /// ("Dekker") pattern with [`crate::Ws281xDriver::abort`]: the ISR does
+    /// *increment `isr_seq`, then load `frame_complete`*; abort does *store
+    /// `frame_complete` (in [`Self::disarm`]), then load `isr_seq`*. The
+    /// forbidden outcome — the ISR missing the disarm **and** abort missing
+    /// the in-service increment, which would let abort's caller free frame
+    /// bytes a refill is about to read — is excluded only in the `SeqCst`
+    /// total order; Release/Acquire alone permits it (the classic
+    /// store-buffer litmus). On Xtensa every one of these compiles to the
+    /// same `memw`-fenced access an `Acquire` load costs, and it runs once
+    /// per channel service, not per byte.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
+    pub(crate) fn is_complete_sync(&self) -> bool {
+        self.frame_complete.load(SeqCst)
     }
 
     /// Bits **written into RMT RAM** so far for the current frame.

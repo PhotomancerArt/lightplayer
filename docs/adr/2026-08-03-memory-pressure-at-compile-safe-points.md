@@ -1,6 +1,8 @@
 # ADR: Memory pressure fires at compile safe points, and compiles wait one frame for it
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-08-04 (the `High` droppable set of §4
+  is removed — the ordering premise in §2 was measured false; the window
+  mechanism itself stands. See the Amendment section.)
 - **Date:** 2026-08-03
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -134,3 +136,85 @@ drop at the same safe point is recorded as follow-up, not attempted here.
 - The end-to-end assertion that 1500 LEDs now fits belongs to the dome
   validation plan (blocked on multi-endpoint output, PR #301), which owns
   the dome-scale project and silicon measurement.
+
+## Amendment (2026-08-04): the `High` droppable set is removed
+
+The dome-scale silicon bracket and the allocation profile that followed it
+falsified §2's ordering claim. **§4 (the widened droppable set) is
+withdrawn. Everything else in this ADR stands.**
+
+### What was measured
+
+§2 says the intra-tick demand order makes the window airtight: "the
+fixture resolves its **visual input first** — which is where the shader
+compiles — and only then runs `ensure_direct_points` / sample-buffer
+allocation." That is not where the compile is. `ensure_compiled` is
+reached only from `sample_visual_into` / `render_texture_into` — **render**
+time — while every buffer §4 listed is rebuilt *earlier in the same tick*
+by the dropping node's own code: `direct_channels` in fixture `produce`,
+`sample_points`/`sample_target` in render prep before `sample_visual_into`,
+`control_samples` in output `produce`. Net freed at the compile instant is
+**≈ 0 B**, against a nominal 26 B/LED on the Direct path (`precomputed`
+and `render_target` are 0 B there to begin with).
+
+The drop also made the peak *worse*: clearing the staleness keys forced
+`generate_mapping_points` to re-run twice inside the window frame, each
+run allocating the contiguous `Vec<MappingPoint>` whose doubling peak
+(2400 × 16 = 38,400 B at 1500 LEDs) is the exact ask that was killing the
+device. The broadcast itself was never in doubt — it is unconditional and
+does fire on device; it simply arrived at a moment when there was nothing
+left to free.
+
+Corroborating measurement: the 900-LED heavy-shader compile OOM'd at
+`used=183,024` of the 186,368 B arena with the drops nominally active.
+
+### What changed
+
+`FixtureNode::handle_memory_pressure` and
+`OutputNode::handle_memory_pressure` are now no-ops carrying the ordering
+rule as a seam comment.
+
+### What remains in force
+
+- **§1** — reclaim at safe points only; the top-of-tick broadcast and
+  `Engine::broadcast_memory_pressure` are unchanged and still reach every
+  alive node.
+- **§2** — the `wants_compile_window` / `open_compile_window` protocol,
+  the one-frame compile deferral, window expiry with the frame, and the
+  at-most-once progress guarantee. Only the ordering *rationale* sentence
+  is retracted; the deferral earns its keep on its own terms (it moves the
+  transient off the frame that also allocates, and it is what the
+  revision-stamped window tests pin).
+- **§3** — the level contract, with one clause added by measurement: at
+  `High`, a droppable must also be state **the same tick does not rebuild
+  before the transient runs**. Position, not just rebuildability.
+- **`Critical`** — the fluid solver's grid drop is untouched. It is the
+  one real droppable: nothing rebuilds it inside the tick.
+- **Never-droppable** list — unchanged.
+
+### Follow-ups
+
+- **`DisplayPipeline` stays open** (Q3, deferred at M6 planning): up to
+  21 B/LED firmware-side (6 always, +12 interpolation, +3 dither) — ~9 KB
+  at 1500 LEDs with interpolation and dither off. It is not a
+  `NodeRuntime`, so the engine broadcast cannot reach it by construction;
+  a firmware-side drop at the same safe point remains the open item this
+  ADR recorded on 2026-08-03.
+- The capacity problem this ADR was written for is being closed upstream
+  instead, by deleting the allocation rather than freeing around it:
+  M6's streaming mapping-point visitor and compact resolved carrier.
+
+### What happened to the tests Consequences pinned
+
+The drop → tick → bit-identical differential survives as
+`memory_pressure_broadcast_leaves_the_core_path_bit_identical` — same
+assertion, now pinning that a broadcast is *inert* on the core path, and
+standing as the identity guard for any droppable added back later.
+Broadcast counts, the second window on playlist switch, and the
+no-steady-state-broadcast assertion are unchanged. Per-node no-drop
+coverage was added beside each handler, sabotage-verified.
+
+Full evidence chain, and why no host test could have caught this (the
+wasm backend's `free` is a bump no-op, so reclaim is unobservable on the
+host):
+`docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.

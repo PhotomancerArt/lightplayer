@@ -77,6 +77,21 @@ pub trait OutputProvider {
     /// Returns `Ok(())` on success, or `OutputError` if handle is invalid
     fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError>;
 
+    /// Complete every transmission begun by [`write`](OutputProvider::write).
+    ///
+    /// A provider may begin a hardware transmission in `write` and return
+    /// without waiting for it, so channels written back to back transmit
+    /// **concurrently** — the frame then pays for its slowest wire rather than
+    /// the sum of all of them. Such a provider finishes the job here: wait out
+    /// every in-flight channel and report the first failure. The engine calls
+    /// this once per frame, after the last `write` of the flush.
+    ///
+    /// The default is a no-op, correct for any provider whose `write` is
+    /// already synchronous.
+    fn flush(&self) -> Result<(), OutputError> {
+        Ok(())
+    }
+
     /// Change signal for endpoint availability.
     ///
     /// The value changes whenever an endpoint that refused to [`open`] might

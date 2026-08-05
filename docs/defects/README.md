@@ -135,6 +135,13 @@ genuinely fits none of these, and define it here in one line.
 - **`retired-surface-still-reachable`** — a surface believed replaced is
   still rendered, because its replacement can be absent and the old
   surface is the fallback branch.
+- **`reclaim-ordered-behind-its-own-rebuild`** — a resource is released to
+  make room for a transient, but the releasing component rebuilds it
+  earlier in the same pass than the transient runs, so net reclaim at the
+  moment that matters is zero and the release only adds a second
+  allocation. The design's load-bearing claim is about *ordering*, and the
+  tests around it pin the protocol (it fired, output is unchanged) rather
+  than the ordering, so a mechanism that does nothing passes everything.
 
 ## Index
 
@@ -204,6 +211,7 @@ the combination first being registered as a target.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
 | assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
 | opt-in-degradation | 2026-08-01 | [xt-builtins-image-strands-just-test](2026-08-01-xt-builtins-image-strands-just-test.md) | fixed | justfile (`ci-prereqs`/`test`) + build-builtins-xt.sh + lpvm-native tests |
 | config-masked-defect | 2026-08-01 | [xtlpn-f32-loses-writes-to-value-parameters](2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md) | fixed | lpvm-native lowering (lower_f32.rs) |

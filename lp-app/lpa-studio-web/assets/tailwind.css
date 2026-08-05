@@ -368,6 +368,9 @@
   .tw\:h-\[22px\] {
     height: 22px;
   }
+  .tw\:h-\[42px\] {
+    height: 42px;
+  }
   .tw\:h-\[46px\] {
     height: 46px;
   }
@@ -877,6 +880,9 @@
   .tw\:grid-cols-\[minmax\(220px\,280px\)_minmax\(0\,1fr\)_minmax\(300px\,360px\)\] {
     grid-template-columns: minmax(220px,280px) minmax(0,1fr) minmax(300px,360px);
   }
+  .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(112px\,1fr\)\)\] {
+    grid-template-columns: repeat(auto-fill,minmax(112px,1fr));
+  }
   .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(200px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill,minmax(200px,1fr));
   }
@@ -1312,9 +1318,6 @@
   .tw\:bg-border-muted {
     background-color: var(--tw-color-border-muted);
   }
-  .tw\:bg-border-strong {
-    background-color: var(--tw-color-border-strong);
-  }
   .tw\:bg-card {
     background-color: var(--tw-color-card);
   }
@@ -1353,9 +1356,6 @@
   }
   .tw\:bg-status-bound-bg {
     background-color: var(--tw-color-status-bound-bg);
-  }
-  .tw\:bg-status-bound-foreground {
-    background-color: var(--tw-color-status-bound-foreground);
   }
   .tw\:bg-status-error-bg {
     background-color: var(--tw-color-status-error-bg);
@@ -1648,6 +1648,9 @@
   .tw\:pr-24 {
     padding-right: calc(var(--tw-spacing) * 24);
   }
+  .tw\:pb-1 {
+    padding-bottom: calc(var(--tw-spacing) * 1);
+  }
   .tw\:pb-1\.5 {
     padding-bottom: calc(var(--tw-spacing) * 1.5);
   }
@@ -1836,6 +1839,10 @@
   .tw\:tracking-\[-0\.015em\] {
     --tw-tracking: -0.015em;
     letter-spacing: -0.015em;
+  }
+  .tw\:tracking-\[0\.1em\] {
+    --tw-tracking: 0.1em;
+    letter-spacing: 0.1em;
   }
   .tw\:tracking-\[0\.08em\] {
     --tw-tracking: 0.08em;

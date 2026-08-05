@@ -57,7 +57,7 @@ use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 #[cfg(feature = "node-shader")]
 use crate::nodes::{ComputeShaderNode, ShaderNode};
 #[cfg(feature = "node-fixture")]
-use crate::nodes::{FixtureMap2dSource, FixtureNode};
+use crate::nodes::{FixtureMap2dSource, FixtureMapping, FixtureNode};
 #[cfg(feature = "node-playlist")]
 use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
 
@@ -1133,7 +1133,7 @@ fn resolve_fixture_mapping(
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<(MappingConfig, Option<FixtureMap2dSource>), ProjectLoadError> {
+) -> Result<(FixtureMapping, Option<FixtureMap2dSource>), ProjectLoadError> {
     match config.mapping.value() {
         MappingConfig::Map2d { .. } => {
             let text = materialize_node_text_asset(
@@ -1163,9 +1163,13 @@ fn resolve_fixture_mapping(
                 render_width: config.render_width(),
                 render_height: config.render_height(),
             };
-            Ok((mapping, Some(source)))
+            // Document geometry stays compact: never expanded into slots,
+            // never serialized, never slot-addressed.
+            Ok((FixtureMapping::Compact(mapping), Some(source)))
         }
-        other => Ok((other.clone(), None)),
+        // Hand-authored `PathPoints` (and an unset mapping) keep the slot
+        // form — Studio edits individual lamps there.
+        other => Ok((FixtureMapping::Slots(other.clone()), None)),
     }
 }
 
@@ -2095,6 +2099,9 @@ fn binding_kind(source: &BindingSource, target: &BindingTarget, slot_name: &str)
     }
     match slot_name {
         "time" | "seconds" | "delta_seconds" => Kind::Instant,
+        // A palette slot bound to a channel that is not the well-known
+        // `palette` still carries a gradient, not a color.
+        "palette" | "gradient" => Kind::Gradient,
         _ => Kind::Color,
     }
 }
@@ -2753,13 +2760,28 @@ mod tests {
         );
     }
 
-    /// M4 differential: after a `High` pressure broadcast at a safe point, the
-    /// next frame's published output bytes are bit-identical to an engine that
-    /// never dropped anything. Core path only — display-pipeline temporal
-    /// state (dither, interpolation) is firmware-side and exempt anyway; see
+    /// After a `High` pressure broadcast at a safe point, the next frame's
+    /// published output bytes are bit-identical to an engine that never got
+    /// the broadcast. Core path only — display-pipeline temporal state
+    /// (dither, interpolation) is firmware-side and exempt anyway; see
     /// docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.md.
+    ///
+    /// This started life (#303) as the drop→rebuild differential: the fixture
+    /// and output nodes dropped their per-LED buffers at `High`, and this
+    /// pinned that the lazy `ensure_*` seams rebuilt them to identical bytes.
+    /// M6 P4 removed those drops — they freed nothing at the compile instant,
+    /// because the compile runs at RENDER time and every dropped buffer was
+    /// rebuilt earlier in the same tick
+    /// (`docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`).
+    /// The assertion is unchanged and now pins the stronger, simpler property:
+    /// a pressure broadcast is **inert** on the core path. Per-node no-drop
+    /// coverage lives next to each handler
+    /// (`memory_pressure_does_not_drop_the_fixtures_derived_caches`,
+    /// `memory_pressure_does_not_drop_the_control_samples`); if a future
+    /// droppable is added back at `High`, this test is the identity guard it
+    /// must satisfy.
     #[test]
-    fn memory_pressure_drop_and_rebuild_is_bit_identical_on_the_core_path() {
+    fn memory_pressure_broadcast_leaves_the_core_path_bit_identical() {
         let warm = || {
             let mut rt = loaded_basic_runtime();
             // Frame 1 defers the shader compile (window request); frame 2
@@ -2787,7 +2809,7 @@ mod tests {
         );
         assert_eq!(
             expected, actual,
-            "state dropped under pressure must lazily rebuild to bit-identical output"
+            "a memory-pressure broadcast must not change core-path output bytes"
         );
     }
 

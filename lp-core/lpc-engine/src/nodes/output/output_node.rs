@@ -196,11 +196,18 @@ impl NodeRuntime for OutputNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
-        // Fully re-established on the next consume: the resolve path resizes
-        // to the control extent and renders the whole target. The runtime
-        // buffer this publishes into is deliberately NOT touched — its
-        // lifecycle belongs to the sink registration path.
-        self.control_samples = Vec::new();
+        // Nothing droppable here, deliberately. This handler used to clear
+        // `control_samples` at `High` (the #303 compile window). Measurement
+        // on 2026-08-04 showed the output's own `produce` resizes that buffer
+        // back to the control extent EARLIER in the same tick than the shader
+        // compile runs (compiles happen at render time), so the drop frees
+        // nothing at the compile instant and only re-does the allocation.
+        // Removed in M6 P4; see
+        // `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`
+        // and the 2026-08-04 amendment to
+        // `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+        // The runtime buffer this node publishes into was never touched here
+        // anyway — its lifecycle belongs to the sink registration path.
         Ok(())
     }
 }
@@ -591,6 +598,39 @@ mod tests {
             "an unreadable diagnostic reads as off; the output keeps pushing pixels",
         );
         assert_eq!(resolver.input_resolve_calls, 2);
+    }
+
+    /// The compile-window broadcast drops NOTHING here (M6 P4). The #303
+    /// handler cleared `control_samples`; measurement showed the output's own
+    /// `produce` resizes it back earlier in the same tick than the compile
+    /// runs, so the drop freed nothing at the compile instant. See
+    /// `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+    #[test]
+    fn memory_pressure_does_not_drop_the_control_samples() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
+        let samples_before = node.control_samples.clone();
+        assert!(
+            !samples_before.is_empty(),
+            "an empty baseline would prove nothing"
+        );
+
+        for level in [
+            PressureLevel::Low,
+            PressureLevel::Medium,
+            PressureLevel::High,
+            PressureLevel::Critical,
+        ] {
+            let mut ctx = MemPressureCtx::new(node_id(), Revision::new(2));
+            node.handle_memory_pressure(level, &mut ctx)
+                .expect("handle pressure");
+        }
+
+        assert_eq!(
+            node.control_samples, samples_before,
+            "control_samples must survive a pressure broadcast"
+        );
     }
 
     #[test]
