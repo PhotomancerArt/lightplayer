@@ -3,11 +3,14 @@
 //! 2026-08-04-2355-clock-tape-hero, P3).
 //!
 //! The strip is a ruler of effective time streaming under a fixed centered
-//! playhead: constant pixel velocity (base 14 css px/s at ×1), speed-linked
-//! zoom (`px_per_sec = base / rate`, so ×8 carries 8× the time in the same
-//! pixels — "fast" is tick density), an adaptive tick ladder picked
-//! map-style, the clock-birth edge at t = 0 with a faint pre-birth wash,
-//! and h:mm:ss / m:ss digits that stay whole-second calm at rest.
+//! playhead at a FIXED scale (14 css px per tape second): a faster rate
+//! streams the strip visibly faster, which is the point — "I really
+//! expect the speed slider to make that tape move faster / slower" (Q5
+//! reversed at the live build; the spike's speed-linked zoom is banked
+//! for the input-recorder reel). An adaptive tick ladder picked map-style
+//! (constant at this scale), the clock-birth edge at t = 0 with a faint
+//! pre-birth wash, and h:mm:ss / m:ss digits that stay whole-second calm
+//! at rest.
 //!
 //! Between probes the effective time extrapolates locally —
 //! `t = anchor.seconds + elapsed × rate` while running, frozen paused —
@@ -305,7 +308,7 @@ impl DriverInner {
             } else {
                 0.0
             };
-        let pps_css = tape_px_per_sec(transport.rate);
+        let pps_css = tape_px_per_sec();
         let pps = pps_css * dpr;
         let cx = w / 2.0;
 

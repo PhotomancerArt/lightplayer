@@ -73,6 +73,18 @@ pub struct UiClockTransport {
     pub rate_address: Option<ProjectSlotAddress>,
     /// `SetValue` target for `scrub_offset_seconds`; `None` = not editable.
     pub scrub_address: Option<ProjectSlotAddress>,
+    /// The row's own debug-override edit entry, present while an override
+    /// is ACTIVE (`state.dirty != Clean` on the flattened Debug row) —
+    /// one field serving as both the changed-tint flag and the per-value
+    /// **Clear** target (D7 vocabulary: debug overrides clear, never
+    /// revert/reset). The transport is Debug-role territory; the tape
+    /// wears the debug family's orange tint on a changed control instead
+    /// of the drawer's hazard stripes.
+    pub running_override: Option<ProjectSlotAddress>,
+    /// See [`Self::running_override`].
+    pub rate_override: Option<ProjectSlotAddress>,
+    /// See [`Self::running_override`].
+    pub scrub_override: Option<ProjectSlotAddress>,
 }
 
 /// The timebase probe's verdict for a clock's product.

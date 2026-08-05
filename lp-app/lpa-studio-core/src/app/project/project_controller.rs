@@ -9514,6 +9514,9 @@ mod tests {
                 running_address: Some(transport_address("running")),
                 rate_address: Some(transport_address("rate")),
                 scrub_address: Some(transport_address("scrub_offset_seconds")),
+                running_override: None,
+                rate_override: None,
+                scrub_override: None,
             });
             let mut node = crate::UiNodeView::new(
                 crate::UiNodeHeader::new("Clock", "Clock", "/demo.module/clock.clock"),

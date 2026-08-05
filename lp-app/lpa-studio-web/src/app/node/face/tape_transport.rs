@@ -9,9 +9,11 @@
 //! statically — every gesture (drag-scrub, fader, run/pause, tap-to-
 //! return) lands in P4 through the standard slot-edit path.
 //!
-//! Spike verdicts binding here: speed-linked zoom (constant pixel
-//! velocity — ×8 shows 8× the time in the same pixels, "fast" is tick
-//! density); octave detents with ×1 pulling hardest; a fixed-width
+//! Spike verdicts binding here — with ONE live-build reversal: the zoom
+//! is FIXED (a tape second is always the same pixels, so the speed
+//! slider visibly changes how fast the strip streams; the spike's
+//! speed-linked zoom is banked for the input-recorder reel). Still
+//! binding: octave detents with ×1 pulling hardest; a fixed-width
 //! readout that must NEVER reflow the fader; whole-second digits at rest
 //! with tenths only mid-drag; amber = off-live (`status-attention`
 //! family, class toggle on the box, not canvas).
@@ -23,8 +25,9 @@ use dioxus::prelude::*;
 use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiClockTransport};
 use wasm_bindgen::JsCast;
 
-use crate::app::node::slot_edit_actions::panel_or_slot_action;
+use crate::app::node::slot_edit_actions::{panel_or_slot_action, slot_clear_action};
 use crate::app::node::slot_fields::capture_field_pointer;
+use crate::base::{InlineButton, InlineButtonTone, StudioIconName};
 
 use super::tape_driver::TapeTransportDriver;
 
@@ -51,13 +54,15 @@ pub(crate) const OFFLIVE_CHIP_EPSILON_S: f32 = 0.05;
 /// elements (canvas + digits), same idiom as the trace canvases.
 static NEXT_TAPE_FACE_ID: AtomicU64 = AtomicU64::new(0);
 
-/// Speed-linked zoom (Q5, ships as-is): constant pixel velocity, so the
-/// px/s never changes and a faster clock packs more seconds into the same
-/// pixels. Rejected-for-now variant (open note from the gate): also raise
-/// actual velocity with `base / rate.sqrt()` — revisitable after field
-/// feel, NOT wired to any toggle.
-pub(crate) fn tape_px_per_sec(rate: f32) -> f64 {
-    TAPE_BASE_PX_PER_SEC / f64::from(rate).max(1e-3)
+/// FIXED zoom (Q5 reversed at the live build, 2026-08-05): a tape second
+/// is always the same pixels, so a faster rate visibly STREAMS faster —
+/// "I really expect the speed slider to make that tape move faster /
+/// slower." The speed-linked zoom the spike converged on (constant pixel
+/// velocity, rate changes seconds-per-pixel) is banked for the future
+/// input-recorder reel, where packing more recorded time into the frame
+/// is the point.
+pub(crate) fn tape_px_per_sec() -> f64 {
+    TAPE_BASE_PX_PER_SEC
 }
 
 /// Adaptive tick granularity, map-style: the first `[minor, major]` pair
@@ -167,11 +172,11 @@ pub(crate) fn adjacent_detent(rate: f32, up: bool) -> f32 {
 }
 
 /// The scrub value a horizontal tape drag reaches: pixels convert to
-/// seconds at the CURRENT zoom (px = s is the whole feel contract), and
-/// dragging the tape rightward moves time backwards — the strip goes
+/// seconds at the tape's fixed scale (px = s is the whole feel contract),
+/// and dragging the tape rightward moves time backwards — the strip goes
 /// where the finger goes.
-pub(crate) fn scrub_drag_value(anchor_scrub: f32, dx_px: f64, rate: f32) -> f32 {
-    anchor_scrub - (dx_px / tape_px_per_sec(rate)) as f32
+pub(crate) fn scrub_drag_value(anchor_scrub: f32, dx_px: f64) -> f32 {
+    anchor_scrub - (dx_px / tape_px_per_sec()) as f32
 }
 
 /// The `(address, handler)` pair a transport gesture needs to dispatch,
@@ -266,9 +271,18 @@ pub fn TapeTransport(
     } else {
         "tw:block tw:h-[62px] tw:w-full tw:cursor-grab tw:touch-none tw:text-strong-foreground"
     };
+    // The transport is Debug territory: a control with an ACTIVE session
+    // override wears the debug family's orange tint (no hazard stripes —
+    // "a bit strong" per gate feedback; the tint + Clear carry it).
+    let running_changed = transport.running_override.is_some();
+    let rate_changed = transport.rate_override.is_some();
     // `button { font: inherit }` in the base sheet beats layered tw
     // utilities — the font is set explicitly here (wiring-UI lesson).
-    let run_class = if running {
+    // Changed-tint outranks the run-state accent: an overridden control
+    // announces the override first (the glyph still says which state).
+    let run_class = if running_changed {
+        "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-status-attention-border tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-status-attention-foreground tw:disabled:cursor-default"
+    } else if running {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-accent tw:disabled:cursor-default"
     } else {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default"
@@ -278,11 +292,28 @@ pub fn TapeTransport(
     } else {
         "tw:relative tw:h-[22px] tw:w-[190px] tw:flex-none tw:cursor-ew-resize tw:touch-none tw:rounded-md tw:border tw:border-border-muted tw:bg-track tw:outline-none tw:focus-visible:outline tw:focus-visible:outline-1 tw:focus-visible:outline-border-strong"
     };
-    let readout_value_class = if on_detent(shown_rate) {
+    let readout_value_class = if rate_changed {
+        "tw:font-semibold tw:text-status-attention-foreground"
+    } else if on_detent(shown_rate) {
         "tw:font-semibold tw:text-accent"
     } else {
         "tw:font-semibold tw:text-strong-foreground"
     };
+    let thumb_class = if rate_changed {
+        "tw:pointer-events-none tw:absolute tw:inset-y-0.5 tw:w-4 tw:rounded tw:border tw:border-status-attention-border tw:bg-card-raised tw:after:absolute tw:after:inset-y-[3px] tw:after:left-1/2 tw:after:w-px tw:after:bg-status-attention-foreground tw:after:content-['']"
+    } else {
+        "tw:pointer-events-none tw:absolute tw:inset-y-0.5 tw:w-4 tw:rounded tw:border tw:border-border-strong tw:bg-card-raised tw:after:absolute tw:after:inset-y-[3px] tw:after:left-1/2 tw:after:w-px tw:after:bg-accent tw:after:content-['']"
+    };
+    // Every active override's Clear target, for the one clear affordance
+    // (D7 vocabulary: debug overrides CLEAR — never revert/reset).
+    let override_targets: Vec<_> = [
+        transport.running_override.clone(),
+        transport.rate_override.clone(),
+        transport.scrub_override.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let thumb_style = format!("left: calc((100% - 18px) * {} + 1px);", rate_frac(shown_rate));
     let chip_sign = if transport.scrub_offset_seconds < 0.0 {
         "\u{2212}"
@@ -345,7 +376,7 @@ pub fn TapeTransport(
                             return;
                         };
                         let dx = event.data().client_coordinates().x - anchor_x;
-                        let next = scrub_drag_value(anchor_scrub, dx, rate);
+                        let next = scrub_drag_value(anchor_scrub, dx);
                         scrub_move_driver.set_scrub_drag(Some(next));
                         let now = js_sys::Date::now();
                         if now - last_sent() < TAPE_DISPATCH_INTERVAL_MS {
@@ -529,10 +560,7 @@ pub fn TapeTransport(
                                 ),
                             }
                         }
-                        span {
-                            class: "tw:pointer-events-none tw:absolute tw:inset-y-0.5 tw:w-4 tw:rounded tw:border tw:border-border-strong tw:bg-card-raised tw:after:absolute tw:after:inset-y-[3px] tw:after:left-1/2 tw:after:w-px tw:after:bg-accent tw:after:content-['']",
-                            style: thumb_style,
-                        }
+                        span { class: thumb_class, style: thumb_style }
                     }
                     // Fixed width: a changing readout must NEVER reflow
                     // the fader (round-2 gate feedback).
@@ -559,6 +587,22 @@ pub fn TapeTransport(
                         span { " \u{00b7} live" }
                     }
                 }
+                if !override_targets.is_empty() && on_action.is_some() {
+                    InlineButton {
+                        label: "Clear transport overrides",
+                        icon: StudioIconName::Revert,
+                        text: "clear",
+                        tone: InlineButtonTone::Attention,
+                        title: "Clear this transport's debug overrides \u{2014} session only",
+                        on_press: move |_| {
+                            if let Some(handler) = on_action {
+                                for address in override_targets.clone() {
+                                    handler.call(slot_clear_action(address));
+                                }
+                            }
+                        },
+                    }
+                }
             }
         }
     }
@@ -583,22 +627,22 @@ mod tests {
         assert_eq!(format_clock(-12.46, true), "\u{2212}0:12.4");
     }
 
-    /// Speed-linked zoom: constant pixel velocity, so px-per-second is
-    /// inverse in the rate (×8 packs 8× the time into the same pixels).
+    /// FIXED zoom (Q5 reversed): a tape second is always the same pixels,
+    /// so rate changes how fast the strip STREAMS, never its scale.
     #[test]
-    fn zoom_is_speed_linked() {
-        assert_eq!(tape_px_per_sec(1.0), 14.0);
-        assert_eq!(tape_px_per_sec(8.0), 1.75);
-        assert_eq!(tape_px_per_sec(0.25), 56.0);
+    fn zoom_is_fixed_so_rate_changes_velocity() {
+        assert_eq!(tape_px_per_sec(), 14.0);
     }
 
     /// The ladder picks the first pair keeping minors ≥ 8 css px and major
-    /// labels ≥ 44 css px — the spike's map-style granularity.
+    /// labels ≥ 44 css px. At the tape's fixed scale that is always
+    /// 1 s / 5 s; the ladder itself stays correct for any future zoom
+    /// (the input-recorder reel inherits it).
     #[test]
     fn tick_ladder_adapts_to_zoom() {
-        assert_eq!(tape_tick_pair(tape_px_per_sec(1.0)), (1.0, 5.0));
-        assert_eq!(tape_tick_pair(tape_px_per_sec(8.0)), (5.0, 30.0));
-        assert_eq!(tape_tick_pair(tape_px_per_sec(0.25)), (0.2, 1.0));
+        assert_eq!(tape_tick_pair(tape_px_per_sec()), (1.0, 5.0));
+        assert_eq!(tape_tick_pair(1.75), (5.0, 30.0));
+        assert_eq!(tape_tick_pair(56.0), (0.2, 1.0));
         // Absurdly zoomed out: the coarsest pair is the floor.
         assert_eq!(tape_tick_pair(0.01), (900.0, 3600.0));
     }
@@ -665,15 +709,14 @@ mod tests {
         assert_eq!(adjacent_detent(0.25, false), 0.25);
     }
 
-    /// Drag-scrub is px = seconds at the current zoom, tape moving with
-    /// the finger (rightward drag = backwards in time).
+    /// Drag-scrub is px = seconds at the tape's fixed scale, tape moving
+    /// with the finger (rightward drag = backwards in time) — the same
+    /// conversion at every rate now that zoom is fixed.
     #[test]
-    fn scrub_drag_converts_pixels_at_the_current_zoom() {
-        // ×1: 14 px/s — a 14 px rightward drag is exactly −1 s.
-        assert_eq!(scrub_drag_value(0.0, 14.0, 1.0), -1.0);
-        // ×8: 1.75 px/s — the same 14 px carries −8 s.
-        assert_eq!(scrub_drag_value(0.0, 14.0, 8.0), -8.0);
+    fn scrub_drag_converts_pixels_at_the_fixed_scale() {
+        // 14 px/s — a 14 px rightward drag is exactly −1 s.
+        assert_eq!(scrub_drag_value(0.0, 14.0), -1.0);
         // Leftward drag scrubs forward, on top of the anchor.
-        assert_eq!(scrub_drag_value(-2.0, -28.0, 1.0), 0.0);
+        assert_eq!(scrub_drag_value(-2.0, -28.0), 0.0);
     }
 }
