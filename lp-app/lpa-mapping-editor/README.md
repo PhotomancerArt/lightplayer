@@ -70,4 +70,5 @@ texture-frame fit preview. ⌘Z/⇧⌘Z undo/redo; 0 fits.
 grid / multi-ring circle / path objects; object order is wiring order;
 universes derive from it. Rings auto-space from the outer radius; per-ring
 counts can override the circumference-derived defaults. The SVG importer
-(`lpc-mapping::import`) flattens curve commands to endpoint lines.
+(`lpc-mapping::import`) rejects curve commands (`UnsupportedCommand`) —
+it imports the straight-line subset only.

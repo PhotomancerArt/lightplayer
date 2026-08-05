@@ -5504,7 +5504,7 @@ impl ProjectController {
             // (see MAX_ASSET_BODY_BYTES), so the body is parked as Failed
             // with its bytes preserved and nothing is sent.
             let reason = format!(
-                "shader too large to send (limit {} KB)",
+                "asset too large to send (limit {} KB)",
                 MAX_ASSET_BODY_BYTES / 1024
             );
             let notice = format!(
@@ -13552,7 +13552,7 @@ mod tests {
             .expect("oversize entry parked as failed");
         assert_eq!(
             edit.failure_reason(),
-            Some("shader too large to send (limit 10 KB)")
+            Some("asset too large to send (limit 10 KB)")
         );
         assert_eq!(edit.bytes, oversize, "the user's text is not lost");
         assert_eq!(
