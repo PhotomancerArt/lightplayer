@@ -71,9 +71,15 @@ impl Project {
     }
 
     fn phasor(&mut self, clock: NodeId, period: f32) -> (f32, u32) {
+        let slot = SlotPath::parse("phase").expect("slot path");
         self.engine
             .timebases_mut()
-            .phasor_tick(clock, &key("phase"), &PhasorConfig::with_period(period))
+            .phasor_tick(
+                clock,
+                &key("phase"),
+                &PhasorConfig::with_period(period),
+                (NodeId::new(1), &slot),
+            )
             .expect("clock published a timebase")
     }
 

@@ -114,6 +114,24 @@ impl<'de> Deserialize<'de> for Waveform {
     }
 }
 
+// On the wire a waveform is its snake-case tag — the same string serde
+// writes above — so the schema is a closed string enum.
+#[cfg(feature = "schema-gen")]
+impl schemars::JsonSchema for Waveform {
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        "Waveform".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let tags: Vec<&'static str> = Waveform::all().iter().map(|w| w.as_str()).collect();
+        schemars::json_schema!({
+            "description": "Phasor output shaping, as its snake-case tag.",
+            "type": "string",
+            "enum": tags,
+        })
+    }
+}
+
 impl ToLpValue for Waveform {
     fn to_lp_value(&self) -> LpValue {
         LpValue::String(self.as_str().to_string())

@@ -152,13 +152,18 @@ pub trait ResolveHost {
     /// Tick-side phasor read: materializes on first ask and advances once per
     /// tick. Returns the raw wrapped ramp — waveform and phase offset are the
     /// caller's to apply.
+    ///
+    /// `reader` is the consuming node and the consumed slot the config was
+    /// resolved for; the store records it (with the config's shaping) as
+    /// witness data for the timebase probe. It never affects the answer.
     fn time_product_phasor(
         &mut self,
         product: TimeProduct,
         key: &PhasorKey,
         config: &PhasorConfig,
+        reader: (NodeId, &SlotPath),
     ) -> Result<(f32, u32), SessionResolveError> {
-        let _ = (product, key, config);
+        let _ = (product, key, config, reader);
         Err(SessionResolveError::other(
             "resolve host has no timebase store",
         ))

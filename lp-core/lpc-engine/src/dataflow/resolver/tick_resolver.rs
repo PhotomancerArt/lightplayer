@@ -107,8 +107,9 @@ pub trait TickResolver {
         product: TimeProduct,
         key: &PhasorKey,
         config: &PhasorConfig,
+        reader: (NodeId, &SlotPath),
     ) -> Result<(f32, u32), ResolveError> {
-        let _ = (product, key, config);
+        let _ = (product, key, config, reader);
         Err(ResolveError::new(alloc::format!(
             "resolver has no timebase access"
         )))
@@ -223,9 +224,10 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         product: TimeProduct,
         key: &PhasorKey,
         config: &PhasorConfig,
+        reader: (NodeId, &SlotPath),
     ) -> Result<(f32, u32), ResolveError> {
         self.host
-            .time_product_phasor(product, key, config)
+            .time_product_phasor(product, key, config, reader)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
     }
 }
