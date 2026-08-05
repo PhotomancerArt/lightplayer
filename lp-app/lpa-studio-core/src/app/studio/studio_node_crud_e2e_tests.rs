@@ -563,6 +563,72 @@ fn copy_then_paste_round_trips_a_shader_with_its_asset() {
 }
 
 #[test]
+fn pasting_a_node_from_another_project_format_is_refused_out_loud() {
+    // A bare node carries no project.json, so nothing can migrate it — and
+    // the paste flow's silent-classification rule is about the CLIPBOARD
+    // holding something else, not about a real `lp.node` that fails the
+    // check. This one has to be audible, or a stale shader pastes and
+    // fails later as what looks like a bug in the node.
+    let (server, mut actor, handle, clipboard) = connected_actor_with_clipboard();
+    let mut view = handle.view;
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("connect emits a snapshot");
+
+    handle
+        .tx
+        .send(create_action(NodeKind::Shader, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("create emits a snapshot");
+
+    handle.tx.send(copy_action("/edit_e2e.show/shader.shader"));
+    drive(actor.run_one_batch_for_test());
+    let envelope = clipboard.borrow().clone().expect("copied");
+
+    // Age the stamp: the same envelope, as an older Studio would have
+    // written it.
+    let stale = {
+        let mut value: serde_json::Value = serde_json::from_str(&envelope).unwrap();
+        value["artifact_format"] = serde_json::json!(lpc_model::PROJECT_FORMAT_VERSION - 1);
+        value.to_string()
+    };
+
+    handle
+        .tx
+        .send(paste_action(&stale, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refused paste emits a snapshot");
+
+    assert!(
+        !file_exists(&server, "shader_2.json"),
+        "a refused paste must create nothing"
+    );
+    let refusal = snapshot
+        .console
+        .entries
+        .iter()
+        .find(|entry| entry.message.contains("Cannot paste"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the refusal must reach the user: {:?}",
+                snapshot
+                    .console
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.message)
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert!(
+        refusal.message.contains("re-copy"),
+        "and it must name the remedy: {}",
+        refusal.message
+    );
+}
+
+#[test]
 fn pasting_a_node_into_a_playlist_lands_as_an_entry() {
     let (server, mut actor, handle, clipboard) = connected_actor_with_clipboard();
     let mut view = handle.view;
