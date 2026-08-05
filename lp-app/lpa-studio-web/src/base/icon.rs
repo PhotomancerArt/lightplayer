@@ -68,6 +68,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Cancel => rsx! { X { size } },
         StudioIconName::More => rsx! { Ellipsis { size } },
         StudioIconName::ExternalLink => rsx! { ArrowUpRight { size } },
+        StudioIconName::DesignSpike => rsx! { FlaskConical { size } },
         StudioIconName::Copy => rsx! { Copy { size } },
         StudioIconName::Download => rsx! { Download { size } },
         StudioIconName::Upload => rsx! { Upload { size } },
@@ -162,6 +163,11 @@ pub enum StudioIconName {
     More,
     /// Arrow leaving the box: a link that opens in a new tab.
     ExternalLink,
+    /// Flask: the design-spike index in the Tools menu. Same glyph as
+    /// [`Self::Test`] and deliberately a separate name — these are design
+    /// experiments, not test runs, and the two meanings will want to drift
+    /// apart before they want to stay welded together.
+    DesignSpike,
     /// Hash: wiring-order numbers on the mapping lamp view.
     MapNumbers,
     /// Route: wiring-direction arrows on the mapping lamp view.

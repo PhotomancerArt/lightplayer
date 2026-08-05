@@ -182,7 +182,7 @@ fn ToolsMenu() -> Element {
             }
             if cfg!(debug_assertions) {
                 ToolCard {
-                    icon: StudioIconName::MapUniverses,
+                    icon: StudioIconName::DesignSpike,
                     title: "Design spikes",
                     detail: "The HTML design playgrounds behind these surfaces, with their gate verdicts.",
                     href: "/spikes/index.html",
