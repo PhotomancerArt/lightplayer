@@ -7,6 +7,7 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
 };
+use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
 use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -30,11 +31,12 @@ use crate::{
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
-    MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
-    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
-    SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath,
-    glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
+    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, ControlDisplayLayout, ControlLayout2d,
+    FromLpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationEffect,
+    MutationOp, MutationRejection, NodeAttachSite, NodeId, NodeKind, NodeStarter,
+    ShaderValueShapeRef, SlotEdit, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId,
+    SlotShapeLookup, SlotShapeRegistry, TreePath, glsl_type_for_lp_type,
+    resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -3450,7 +3452,77 @@ impl ProjectController {
         // graph through `self.sync`, which was taken out during the view
         // apply — run it now that it is restored.
         self.refresh_binding_presentation();
+        // Last, because it reads the freshly reconciled node tree (mapping
+        // source and render extent) alongside the freshly applied previews,
+        // and every DTO build downstream expects the layouts already filled.
+        self.apply_synthesized_display_layouts();
         result
+    }
+
+    /// Fill in display layouts the engine declined to send.
+    ///
+    /// The engine refuses a display layout that would not fit one
+    /// project-read frame (`DISPLAY_LAYOUT_WIRE_BUDGET`), which at dome
+    /// scale leaves the fixture face and the module output face with
+    /// nothing to draw. When the producing node is a fixture whose mapping
+    /// is a map2d document Studio already holds, the layout is derivable
+    /// here from the same document the engine resolved, so it is —
+    /// device-identical by construction (see
+    /// `app::project::control_display_layout_fallback`).
+    ///
+    /// Everything is best-effort: an unfetched document, a parse failure, a
+    /// resolve failure, or a non-map2d fixture all leave the preview exactly
+    /// as the probe left it. The preview never blocks on this.
+    fn apply_synthesized_display_layouts(&mut self) {
+        let Some(sync) = self.sync.as_ref() else {
+            return;
+        };
+        let missing = sync.control_products_missing_display_layout();
+        if missing.is_empty() {
+            return;
+        }
+        // Synthesized under `&self` (the node tree and the asset body cache
+        // are both immutable reads), then installed — the sync mirror cannot
+        // be borrowed mutably while either is in hand.
+        let synthesized: Vec<(UiProductRef, ControlDisplayLayout)> = missing
+            .into_iter()
+            .filter_map(|(product, revision)| {
+                let layout = self.synthesized_display_layout(&product, revision)?;
+                Some((product, ControlDisplayLayout::Layout2d(layout)))
+            })
+            .collect();
+        let Some(sync) = self.sync.as_mut() else {
+            return;
+        };
+        for (product, layout) in synthesized {
+            sync.set_control_display_layout(&product, layout);
+        }
+    }
+
+    /// The display layout `product`'s producing fixture would publish, built
+    /// from its map2d document. `None` unless the producer really is a
+    /// map2d fixture whose document is resolvable from what is already
+    /// local.
+    fn synthesized_display_layout(
+        &self,
+        product: &UiProductRef,
+        revision: lpc_model::Revision,
+    ) -> Option<ControlLayout2d> {
+        let UiProductRef::Control { node_id, .. } = product else {
+            return None;
+        };
+        let node = self.node_by_runtime_id(NodeId::new(*node_id))?;
+        if !node.kind().eq_ignore_ascii_case("fixture") {
+            return None;
+        }
+        let source = fixture_map2d_source(node)?;
+        let artifact = self.resolve_node_asset_artifact(node, &source)?;
+        // The overlay-aware body: an applied (unsaved) mapping edit is what
+        // the engine is running, so it is what the layout must reflect.
+        let content = self.asset_content_cached(&artifact)?;
+        let doc = lpc_mapping::Map2dDoc::from_json(content.text()?).ok()?;
+        let extent = fixture_render_size(node)?;
+        synthesized_map2d_layout(&doc, revision, extent.width, extent.height)
     }
 
     fn record_sync_failure(
@@ -6134,6 +6206,43 @@ fn shader_source_path(node: &NodeController) -> Option<String> {
         ) && let Some(lpc_model::LpValue::String(path)) = slot.value()
         {
             return Some(path.clone());
+        }
+        slot.children().iter().find_map(find)
+    }
+    node.slots().iter().find_map(find)
+}
+
+/// The document path of a fixture node's `MappingConfig::Map2d` mapping:
+/// the `source` field under the `mapping` root slot. `None` for every other
+/// mapping variant, and deliberately anchored at `mapping` — a fixture's
+/// `bindings` carry `source` fields too (`"bus:visual.out"`), and the enum
+/// variant's own path segment is not something this needs to spell out.
+fn fixture_map2d_source(node: &NodeController) -> Option<String> {
+    fn find(slot: &SlotController) -> Option<String> {
+        let segments = slot.address().path.segments();
+        if matches!(segments.first(), Some(SlotPathSegment::Field(field)) if field.as_str() == "mapping")
+            && matches!(segments.last(), Some(SlotPathSegment::Field(field)) if field.as_str() == "source")
+            && let Some(lpc_model::LpValue::String(path)) = slot.value()
+        {
+            return Some(path.clone());
+        }
+        slot.children().iter().find_map(find)
+    }
+    node.slots().iter().find_map(find)
+}
+
+/// A fixture node's authored `render_size` — the texture extent the engine
+/// resolves its mapping document against, and the layout's width/height
+/// hints. `None` when the mirror carries no such row, which is the honest
+/// answer: guessing an extent would move every lamp.
+fn fixture_render_size(node: &NodeController) -> Option<lpc_model::Dim2u> {
+    fn find(slot: &SlotController) -> Option<lpc_model::Dim2u> {
+        if matches!(
+            slot.address().path.segments(),
+            [SlotPathSegment::Field(field)] if field.as_str() == "render_size"
+        ) && let Some(value) = slot.value()
+        {
+            return lpc_model::Dim2u::from_lp_value(value).ok();
         }
         slot.children().iter().find_map(find)
     }

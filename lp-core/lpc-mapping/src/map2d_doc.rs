@@ -1,12 +1,25 @@
 //! Authored 2D mapping document schema.
 //!
-//! Schema evolution: the document carries a `format` version gate; parsing
-//! rejects documents newer than [`MAP2D_FORMAT`] and ignores unknown fields,
-//! so additive changes (new optional fields) do not require a bump. Dense
-//! geometry is stored as plain JSON arrays today; a packed base64 alternative
-//! (e.g. `points_packed` beside [`PathShape::points`]) is deliberately left
-//! room for and would arrive as an additive field — do not encode bulk data
-//! in ways that would make that transition breaking.
+//! Schema evolution has three rules:
+//!
+//! 1. **Additive fields need no bump.** Unknown fields are ignored, so a new
+//!    optional field is readable by older parsers. Dense geometry is stored
+//!    as plain JSON arrays today; a packed base64 alternative (e.g.
+//!    `points_packed` beside [`PathShape::points`]) is deliberately left room
+//!    for and would arrive as an additive field — do not encode bulk data in
+//!    ways that would make that transition breaking.
+//! 2. **New variants bump the format, and old parsers refuse loudly.** An
+//!    unknown [`Map2dShape`] variant cannot be ignored — the document would
+//!    silently lose lamps — so a document using one declares a higher
+//!    `format` and older builds reject the whole document. [`Map2dDoc::from_json`]
+//!    *peeks* the `format` field before running the full parse, so such a
+//!    document fails as [`Map2dError::UnsupportedFormat`] with an honest
+//!    "this build reads up to N" message instead of an opaque parse error.
+//! 3. **Writers stamp the minimal required format.** [`Map2dDoc::required_format`]
+//!    reports the lowest format that can represent a document's actual
+//!    content, and [`Map2dDoc::normalize_format`] stamps it. Removing a newer
+//!    construct drops the document back to the older format, so it becomes
+//!    readable by older builds again.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -18,6 +31,10 @@ use crate::map2d_fit::Bounds2d;
 
 /// Newest document format this crate can read.
 pub const MAP2D_FORMAT: u32 = 1;
+
+/// The format every document using only the original constructs declares.
+/// [`Map2dDoc::required_format`] returns this unless the content needs more.
+const MAP2D_FORMAT_BASE: u32 = 1;
 
 /// Default lamp sample diameter (texture-space units, matches the legacy
 /// per-fixture default).
@@ -153,10 +170,11 @@ pub struct PathShape {
 }
 
 impl Map2dDoc {
-    /// An empty current-format document (the editor's starting point).
+    /// An empty document (the editor's starting point). Empty content needs
+    /// nothing newer than the base format — see [`Self::required_format`].
     pub fn new() -> Self {
         Self {
-            format: MAP2D_FORMAT,
+            format: MAP2D_FORMAT_BASE,
             sample_diameter: DEFAULT_SAMPLE_DIAMETER,
             canvas: None,
             objects: Vec::new(),
@@ -164,15 +182,43 @@ impl Map2dDoc {
     }
 
     /// Parse and format-gate a document.
+    ///
+    /// The format gate runs **before** the full parse (two-stage: peek, then
+    /// deserialize). A newer document may well use constructs this build has
+    /// never heard of — an unknown [`Map2dShape`] variant, say — and serde
+    /// would report that as an opaque "unknown variant" parse error. Peeking
+    /// `format` first means the honest answer wins: the document is newer
+    /// than this build, not malformed. The double parse costs nothing that
+    /// matters — documents are ≤10 KiB and this is a load-time path.
     pub fn from_json(json: &str) -> Result<Self, Map2dError> {
-        let doc: Self = serde_json::from_str(json).map_err(|e| Map2dError::Parse(e.to_string()))?;
-        if doc.format == 0 || doc.format > MAP2D_FORMAT {
+        let peek: FormatPeek =
+            serde_json::from_str(json).map_err(|e| Map2dError::Parse(e.to_string()))?;
+        if peek.format == 0 || peek.format > MAP2D_FORMAT {
             return Err(Map2dError::UnsupportedFormat {
-                found: doc.format,
+                found: peek.format,
                 supported: MAP2D_FORMAT,
             });
         }
+        let doc: Self = serde_json::from_str(json).map_err(|e| Map2dError::Parse(e.to_string()))?;
         Ok(doc)
+    }
+
+    /// The lowest `format` that can represent this document's content.
+    ///
+    /// Minimal stamping: a document declares the oldest format able to read
+    /// it, never simply "the newest format the writer knows". Everything in
+    /// today's schema is format 1; as newer constructs land, this predicate
+    /// grows a case per construct, so removing the last newer construct from
+    /// a document drops it back to 1 and makes it readable by old builds
+    /// again.
+    pub fn required_format(&self) -> u32 {
+        MAP2D_FORMAT_BASE
+    }
+
+    /// Stamp [`Self::required_format`] onto the document. Every writer runs
+    /// this before serializing so the declared format tracks the content.
+    pub fn normalize_format(&mut self) {
+        self.format = self.required_format();
     }
 
     pub fn to_json(&self) -> String {
@@ -201,6 +247,14 @@ impl Default for Map2dDoc {
     }
 }
 
+/// Stage one of [`Map2dDoc::from_json`]: the `format` field alone. Unknown
+/// fields are ignored by default, so this parses a document from any future
+/// version — including one whose shapes this build cannot represent.
+#[derive(Deserialize)]
+struct FormatPeek {
+    format: u32,
+}
+
 fn default_sample_diameter() -> f32 {
     DEFAULT_SAMPLE_DIAMETER
 }
@@ -216,6 +270,7 @@ fn default_start_angle() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::corpus;
     use alloc::string::ToString;
 
     #[test]
@@ -268,6 +323,57 @@ mod tests {
             Map2dDoc::from_json(r#"{"format":0}"#),
             Err(Map2dError::UnsupportedFormat { found: 0, .. })
         ));
+    }
+
+    /// A newer document is *newer*, not malformed: the format peek must beat
+    /// serde's "unknown variant" error so the user is told to upgrade rather
+    /// than told their file is broken.
+    #[test]
+    fn newer_format_with_unknown_variant_refuses_on_format_not_parse() {
+        let newer = r#"{
+            "format": 99,
+            "objects": [
+                { "name": "helix", "shape": { "helix": { "turns": 3, "count": 60 } } }
+            ]
+        }"#;
+        assert_eq!(
+            Map2dDoc::from_json(newer),
+            Err(Map2dError::UnsupportedFormat {
+                found: 99,
+                supported: 1
+            })
+        );
+    }
+
+    /// A *current*-format document with an unknown variant really is broken —
+    /// the peek must not swallow that.
+    #[test]
+    fn unknown_variant_at_a_supported_format_is_still_a_parse_error() {
+        let broken = r#"{"format":1,"objects":[{"shape":{"helix":{"turns":3}}}]}"#;
+        assert!(matches!(
+            Map2dDoc::from_json(broken),
+            Err(Map2dError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn a_document_missing_format_is_a_parse_error() {
+        assert!(matches!(
+            Map2dDoc::from_json(r#"{"objects":[]}"#),
+            Err(Map2dError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn normalize_stamps_the_minimal_required_format() {
+        let mut doc = corpus::cat_ears();
+        assert_eq!(doc.required_format(), 1);
+        // A doc stamped higher than its content needs drops back down.
+        doc.format = 7;
+        doc.normalize_format();
+        assert_eq!(doc.format, 1);
+        // And a normalized doc parses on this build.
+        assert!(Map2dDoc::from_json(&doc.to_json()).is_ok());
     }
 
     #[test]
