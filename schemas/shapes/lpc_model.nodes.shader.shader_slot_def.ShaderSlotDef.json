@@ -190,6 +190,24 @@
         }
       },
       {
+        "name": "panel",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 4287644159,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "default",
         "shape": {
           "option": {

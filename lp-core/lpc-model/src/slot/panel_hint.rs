@@ -1,6 +1,6 @@
 //! Authored panel-visibility hint on a slot declaration.
 
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -19,11 +19,15 @@ use crate::{
 /// module-level curation (the deferred authored panel layouts), not a
 /// kind-level veto, and a hint that can silently override an author's
 /// binding is the deleted `panel: bool` flag growing back.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PanelHint {
     /// The slot's default-bound channel presents a panel control.
+    ///
+    /// Also the `Default` — `OptionSlot` materializes a default value when
+    /// presence is set, and the only thing presence can mean here is Show.
+    #[default]
     Show,
 }
 
@@ -89,12 +93,18 @@ impl SlotValue for PanelHint {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
+
     use super::*;
 
     #[test]
     fn the_hint_round_trips_as_its_authored_string() {
         assert_eq!(PanelHint::parse("show"), Some(PanelHint::Show));
-        assert_eq!(PanelHint::parse("hide"), None, "there is deliberately no Hide");
+        assert_eq!(
+            PanelHint::parse("hide"),
+            None,
+            "there is deliberately no Hide"
+        );
         assert_eq!(
             PanelHint::from_lp_value(&PanelHint::Show.to_lp_value()),
             Ok(PanelHint::Show)
