@@ -1343,6 +1343,12 @@ label:has(> input:not(:disabled)) {
     font-size: 12px;
 }
 
+/* Reference-image opacity: header furniture, so it stays slim. */
+.lpme-ref-opacity {
+    width: 72px;
+    accent-color: var(--studio-color-text-muted);
+}
+
 .lpme-canvas-wrap {
     position: relative;
     flex: 1;
