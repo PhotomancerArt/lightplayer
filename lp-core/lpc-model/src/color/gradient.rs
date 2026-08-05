@@ -462,16 +462,18 @@ impl FromLpValue for GradientStop {
 
 impl ToLpValue for Gradient {
     fn to_lp_value(&self) -> LpValue {
-        let mut stops = Vec::with_capacity(MAX_GRADIENT_STOPS as usize);
-        stops.extend(
-            self.stops
-                .iter()
-                .take(MAX_GRADIENT_STOPS as usize)
-                .map(ToLpValue::to_lp_value),
-        );
-        // Padding is zeroed and never read: `count` bounds every consumer.
-        let padding = GradientStop::default().to_lp_value();
-        stops.resize(MAX_GRADIENT_STOPS as usize, padding);
+        // Count-bounded, not padded: `count` bounds every consumer, so the
+        // `MAX_GRADIENT_STOPS` tail of default stops carries no information —
+        // and at ~90 wire bytes per stop, a fully padded config (8 × 24
+        // stops) alone overflows the 16 KiB project-read frame budget. The
+        // fixed size stays the TYPE's maximum (`gradient_lp_type`), not the
+        // value's stored length.
+        let stops: Vec<LpValue> = self
+            .stops
+            .iter()
+            .take(MAX_GRADIENT_STOPS as usize)
+            .map(ToLpValue::to_lp_value)
+            .collect();
 
         LpValue::Struct {
             name: Some("Gradient".to_string()),
@@ -555,7 +557,11 @@ fn stop_count_from_tag(tag: i32) -> Result<usize, ValueRootError> {
     Ok(count)
 }
 
-/// Read the fixed `stops` array and keep only the `count` authored entries.
+/// Read the `stops` array and keep only the `count` authored entries.
+///
+/// Accepts any length in `count..=MAX_GRADIENT_STOPS`: the canonical stored
+/// form is count-bounded, and the legacy zero-padded form (padding entries
+/// past `count` are never read) still decodes.
 fn read_stop_array(
     fields: &[(String, LpValue)],
     count: usize,
@@ -565,9 +571,9 @@ fn read_stop_array(
     else {
         return Err(ValueRootError::new("expected Gradient.stops"));
     };
-    if stops.len() != MAX_GRADIENT_STOPS as usize {
+    if stops.len() < count || stops.len() > MAX_GRADIENT_STOPS as usize {
         return Err(ValueRootError::new(alloc::format!(
-            "Gradient.stops must hold {MAX_GRADIENT_STOPS} entries, got {}",
+            "Gradient.stops must hold count..={MAX_GRADIENT_STOPS} entries, got {}",
             stops.len()
         )));
     }
@@ -793,10 +799,13 @@ mod tests {
         );
     }
 
-    /// Storage is the fixed `color.md` §5 recipe: always 24 stops, authored
-    /// length in `count`, integer enum tags.
+    /// Storage is the `color.md` §5 recipe with COUNT-BOUNDED stops: the
+    /// authored length in `count`, exactly that many array entries (the
+    /// fixed 24 is the type's maximum, not the stored length — padding at
+    /// ~90 wire bytes per stop is what overflowed the project-read frame
+    /// budget), integer enum tags.
     #[test]
-    fn gradient_storage_is_the_fixed_recipe() {
+    fn gradient_storage_is_the_count_bounded_recipe() {
         let LpValue::Struct { name, fields } = ramp(3).to_lp_value() else {
             panic!("Gradient storage must be a Struct");
         };
@@ -809,8 +818,29 @@ mod tests {
         let LpValue::Array(stops) = &fields[3].1 else {
             panic!("stops must be an Array");
         };
-        assert_eq!(stops.len(), MAX_GRADIENT_STOPS as usize);
-        assert_eq!(stops[23], GradientStop::default().to_lp_value());
+        assert_eq!(stops.len(), 3);
+    }
+
+    /// The legacy zero-padded storage form (a full `MAX_GRADIENT_STOPS`
+    /// array with `count` bounding the read) still decodes.
+    #[test]
+    fn gradient_storage_accepts_the_legacy_padded_form() {
+        let gradient = ramp(3);
+        let LpValue::Struct { name, mut fields } = gradient.to_lp_value() else {
+            panic!("Gradient storage must be a Struct");
+        };
+        let LpValue::Array(stops) = &mut fields[3].1 else {
+            panic!("stops must be an Array");
+        };
+        stops.resize(
+            MAX_GRADIENT_STOPS as usize,
+            GradientStop::default().to_lp_value(),
+        );
+
+        assert_eq!(
+            Gradient::from_lp_value(&LpValue::Struct { name, fields }).unwrap(),
+            gradient
+        );
     }
 
     #[test]
