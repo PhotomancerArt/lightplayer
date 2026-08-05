@@ -225,14 +225,38 @@ pub fn MapEditor(
         });
     }
 
-    let tool_hint = match session.read().tool {
-        MapTool::Select => {
-            "click selects · ⇧-click adds · drag empty space for marquee · corners resize · ⌘Z undo"
-        }
-        MapTool::Grid => "click to drop a default grid — size it in the properties popover",
-        MapTool::Ring => "click to drop a default ring — tune it in the properties popover",
-        MapTool::Path { .. } => {
-            "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
+    // The hint teaches the group grammar exactly when it applies (G1
+    // feedback: double-click descend is undiscoverable without a prompt):
+    // a selected group invites entering; a descended selection explains
+    // write-through and the way out. Tool hints otherwise.
+    let tool_hint = {
+        let session_read = session.read();
+        let selected_group = matches!(session_read.tool, MapTool::Select)
+            && session_read.selection.single().is_some_and(|path| {
+                path.resolve(session_read.doc()).is_some_and(|shape| {
+                    crate::editor_core::shape_path::structural_child_count(shape) > 0
+                })
+            });
+        let descended = matches!(session_read.tool, MapTool::Select)
+            && session_read
+                .selection
+                .single()
+                .is_some_and(|path| !path.is_root());
+        match session_read.tool {
+            MapTool::Select if selected_group => {
+                "double-click enters the group — edit its sub-object with every instance live · esc leaves"
+            }
+            MapTool::Select if descended => {
+                "editing the sub-object — every instance follows · esc leaves the group"
+            }
+            MapTool::Select => {
+                "click selects · ⇧-click adds · drag empty space for marquee · corners resize · ⌘Z undo"
+            }
+            MapTool::Grid => "click to drop a default grid — size it in the properties popover",
+            MapTool::Ring => "click to drop a default ring — tune it in the properties popover",
+            MapTool::Path { .. } => {
+                "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
+            }
         }
     };
 

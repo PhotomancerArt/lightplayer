@@ -1704,6 +1704,9 @@ label:has(> input:not(:disabled)) {
 
 .lpme-pop-actions {
     display: flex;
+    /* The action set grew with the tree model (expand/unwrap/reorder/
+       delete): wrap inside the popover instead of spilling past its edge. */
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 10px;
 }
