@@ -497,6 +497,12 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_manifest.board_id(),
         hardware_manifest.board_name()
     );
+    // Extracted before the manifest moves into the registry: the hello's
+    // soft-limit fact (see `set_total_led_budget` below).
+    let total_led_budget = hardware_manifest
+        .soft_limits()
+        .and_then(|limits| limits.total_leds.as_ref())
+        .map(|limit| limit.value);
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
 
@@ -622,6 +628,12 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The chip's own permanent identity (efuse): the factory MAC and the
     // silicon revision. The server cannot derive either.
     server.set_hardware_identity(chip_identity());
+    // The board manifest's measured LED envelope (a SOFT limit — evidence,
+    // never a refusal), and the per-wire telemetry collector the heartbeat
+    // polls. Both are this embedder's to provide: only it holds the manifest
+    // and the pusher's mailboxes.
+    server.set_total_led_budget(total_led_budget);
+    fw_esp32_common::output::wire_stats_source::install(collect_wire_stats);
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
     // safe mode, in which case the server comes up reachable but nothing
@@ -814,6 +826,34 @@ fn main() -> ! {
 /// Injected rather than derived: the server cannot read silicon, and the
 /// chip-generic firmware layer deliberately has no `esp_hal`
 /// (ADR 2026-07-29-per-chip-fw-toolchains). See
+/// Collect per-wire output telemetry for the heartbeat, from the pusher's
+/// mailboxes. Empty (→ absent heartbeat field) until a wire posts, and in
+/// the single-core fallback (whose inline path keeps no per-wire
+/// attribution).
+fn collect_wire_stats() -> alloc::vec::Vec<lpc_wire::server::OutputWireStatus> {
+    let mut out = alloc::vec::Vec::new();
+    if !output::rmt::shared_driver::isr_on_app_core() {
+        return out;
+    }
+    for (wire, mailbox) in output::rmt::wire_pusher::MAILBOXES.iter().enumerate() {
+        let stats = mailbox.wire_stats();
+        if stats.posted == 0 {
+            continue;
+        }
+        out.push(lpc_wire::server::OutputWireStatus {
+            wire: wire as u8,
+            gpio: stats.gpio,
+            posted: stats.posted,
+            sent: stats.transmitted,
+            torn: stats.torn,
+            waved: stats.waved,
+            mux: stats.takeovers,
+            queue_wait_max_us: stats.queue_wait_max_us,
+        });
+    }
+    out
+}
+
 /// `fw_esp32_common::chip_identity` for why this reports the BASE MAC
 /// rather than a per-interface list.
 fn chip_identity() -> lpc_wire::HardwareIdentity {
