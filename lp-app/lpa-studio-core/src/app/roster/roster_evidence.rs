@@ -28,6 +28,7 @@
 //! | [`DeviceState::Ready`] + [`DeviceContent::Adopted`] | Running, up to date (adoption made the library head this content) |
 //! | [`DeviceState::Ready`] + [`DeviceContent::Empty`] | Connected, empty |
 //! | [`DeviceState::Ready`] + [`DeviceContent::PendingIdentity`] | Needs a name |
+//! | [`DeviceState::Ready`] + [`DeviceContent::OldFormat`] | Holds an old-format project (amber; the format found + expected as copy; Upgrade only where the migration chain reaches, else Wipe) |
 //! | [`DeviceState::Ready`] + [`DeviceContent::Unreadable`] | Holds unreadable data (amber; detail as sub-line; choose-a-project replaces, erase rides the actions popover) |
 //! | [`DeviceState::Ready`], pull not yet classified | Connecting/retrying (the attach isn't done until the pull lands) |
 //! | [`DeviceState::Gone`], or no link at all | Offline (last seen from the registry) |
@@ -38,11 +39,12 @@
 //! [`DeviceSession`]: lpa_link::DeviceSession
 
 use lpa_link::DeviceState;
+use lpa_upgrade::FormatClass;
 
 use crate::app::places::{DeviceContent, RegisteredDevice};
 use lpc_history::SyncRelation;
 
-use super::roster_card_state::{ConnectPhase, RosterCardState};
+use super::roster_card_state::{ConnectPhase, DeviceFormatStanding, RosterCardState};
 
 /// Everything a roster card may know, from any source. Assemble it from
 /// whatever is on hand: a live session contributes `link` + `content`,
@@ -65,11 +67,17 @@ pub struct RosterEvidence<'a> {
     pub local_saved_at: Option<f64>,
     /// When we last pushed to this device (its registry association).
     pub pushed_at: Option<f64>,
-    /// The connect-as-pull landed WITHOUT a stamped identity (M8′): an
-    /// EMPTY unstamped board must ask for its name before anything can
-    /// be pushed to it (the provisioning order: flash → name → choose).
-    /// `false` while no sync landed or when an identity exists.
-    pub unstamped: bool,
+    /// The connect-as-pull landed on a board with NO NAME (M8′): an
+    /// empty unnamed board must ask for its name before anything can be
+    /// pushed to it (the provisioning order: flash → name → choose).
+    /// `false` while no sync landed, or once the board is named.
+    ///
+    /// It used to mean "no stamped identity", which was the same thing
+    /// while a uid arrived only at provisioning. Since identity anchors
+    /// in silicon (`docs/adr/2026-08-04-device-identity-anchored-in-silicon.md`)
+    /// a board has a uid from its first hello and still has no name, so
+    /// the evidence is about the NAME.
+    pub unnamed: bool,
     /// The registry entry, when the device is remembered.
     pub registry: Option<&'a RegisteredDevice>,
     /// What the connect flow / management operation is doing right now.
@@ -149,12 +157,27 @@ fn running_state(evidence: &RosterEvidence<'_>) -> RosterCardState {
             },
         },
         Some(DeviceContent::Adopted { .. }) => RosterCardState::RunningUpToDate,
-        // An empty UNSTAMPED board names itself before anything else
+        // An empty UNNAMED board names itself before anything else
         // (M8′ provisioning order: flash → name → choose — a push needs
-        // the identity); a stamped empty board offers the picker.
-        Some(DeviceContent::Empty) if evidence.unstamped => RosterCardState::NeedsAName,
+        // the name); a named empty board offers the picker.
+        Some(DeviceContent::Empty) if evidence.unnamed => RosterCardState::NeedsAName,
         Some(DeviceContent::Empty) => RosterCardState::ConnectedEmpty,
         Some(DeviceContent::PendingIdentity { .. }) => RosterCardState::NeedsAName,
+        // A readable project at a format this build does not use. The
+        // firmware refused to load it, so nothing here may say "Running".
+        Some(DeviceContent::OldFormat { class, .. }) => match format_standing(class) {
+            Some(standing) => RosterCardState::HoldsOldFormatProject {
+                standing,
+                expected: lpc_model::PROJECT_FORMAT_VERSION,
+            },
+            // Current / not-a-project / unreadable never produce this
+            // variant; if one ever does, the truthful card is the one that
+            // says the content cannot be read — not a format claim we
+            // cannot back up.
+            None => RosterCardState::HoldsUnreadableData {
+                detail: class.describe(),
+            },
+        },
         Some(DeviceContent::Unreadable { detail }) => RosterCardState::HoldsUnreadableData {
             detail: detail.clone(),
         },
@@ -163,6 +186,22 @@ fn running_state(evidence: &RosterEvidence<'_>) -> RosterCardState {
         None => RosterCardState::ConnectingRetrying {
             phase: ConnectPhase::Connecting,
         },
+    }
+}
+
+/// The classifier's verdict in the card's vocabulary. `None` for the
+/// classes that are not a format standoff at all (a current project, a
+/// missing or unreadable manifest) — those are somebody else's card.
+fn format_standing(class: &FormatClass) -> Option<DeviceFormatStanding> {
+    match class {
+        FormatClass::Upgradable { found } => {
+            Some(DeviceFormatStanding::Upgradable { found: *found })
+        }
+        FormatClass::BelowFloor { found } => Some(DeviceFormatStanding::TooOld { found: *found }),
+        FormatClass::FutureFormat { found } => {
+            Some(DeviceFormatStanding::FromNewerStudio { found: *found })
+        }
+        FormatClass::Current | FormatClass::NotAProject | FormatClass::Unreadable { .. } => None,
     }
 }
 
@@ -324,6 +363,68 @@ mod tests {
         );
     }
 
+    /// P5: a board holding a project this build does not read must say so
+    /// — with the version it found — instead of claiming to run it. Before
+    /// this, the pull never looked at `format` and a format-4 board
+    /// classified as Running.
+    #[test]
+    fn an_old_format_copy_maps_to_the_format_card_not_a_running_one() {
+        let ready = ready_link();
+        let content = old_format(FormatClass::Upgradable { found: 4 });
+        assert_eq!(
+            derive(&evidence().with_link(&ready).with_content(&content)),
+            RosterCardState::HoldsOldFormatProject {
+                standing: DeviceFormatStanding::Upgradable { found: 4 },
+                expected: lpc_model::PROJECT_FORMAT_VERSION,
+            }
+        );
+    }
+
+    #[test]
+    fn below_the_floor_and_ahead_of_this_build_are_told_apart() {
+        let ready = ready_link();
+        for (class, standing) in [
+            (
+                FormatClass::BelowFloor { found: Some(2) },
+                DeviceFormatStanding::TooOld { found: Some(2) },
+            ),
+            (
+                FormatClass::BelowFloor { found: None },
+                DeviceFormatStanding::TooOld { found: None },
+            ),
+            (
+                FormatClass::FutureFormat { found: 99 },
+                DeviceFormatStanding::FromNewerStudio { found: 99 },
+            ),
+        ] {
+            let content = old_format(class.clone());
+            assert_eq!(
+                derive(&evidence().with_link(&ready).with_content(&content)),
+                RosterCardState::HoldsOldFormatProject {
+                    standing,
+                    expected: lpc_model::PROJECT_FORMAT_VERSION,
+                },
+                "{class:?}"
+            );
+        }
+    }
+
+    /// Totality guard: the format variant is only ever produced for a real
+    /// format standoff, but a card must never make a format claim it
+    /// cannot back up — an unreadable class degrades to the unreadable
+    /// card, which is the honest one.
+    #[test]
+    fn a_format_variant_that_is_not_a_format_standoff_degrades_to_unreadable() {
+        let ready = ready_link();
+        let content = old_format(FormatClass::Unreadable {
+            detail: "boom".to_string(),
+        });
+        assert!(matches!(
+            derive(&evidence().with_link(&ready).with_content(&content)),
+            RosterCardState::HoldsUnreadableData { .. }
+        ));
+    }
+
     #[test]
     fn ready_before_the_pull_lands_is_still_connecting() {
         let ready = ready_link();
@@ -437,28 +538,28 @@ mod tests {
             head_version: None,
             local_saved_at: None,
             pushed_at: None,
-            unstamped: false,
+            unnamed: false,
             registry: None,
             connect: ConnectEvidence::Idle,
         }
     }
 
     #[test]
-    fn empty_unstamped_board_asks_for_a_name_before_the_picker() {
+    fn empty_unnamed_board_asks_for_a_name_before_the_picker() {
         // M8′ provisioning order: flash → NAME → choose — a push needs
-        // the stamped identity, so the empty unstamped board's card is
-        // Needs-a-name; the stamped empty board offers the picker.
+        // the name, so the empty unnamed board's card is Needs-a-name;
+        // the named empty board offers the picker.
         let ready = ready_link();
-        let mut unstamped = evidence();
-        unstamped.link = Some(&ready);
-        unstamped.content = Some(&DeviceContent::Empty);
-        unstamped.unstamped = true;
-        assert_eq!(derive(&unstamped), RosterCardState::NeedsAName);
+        let mut unnamed = evidence();
+        unnamed.link = Some(&ready);
+        unnamed.content = Some(&DeviceContent::Empty);
+        unnamed.unnamed = true;
+        assert_eq!(derive(&unnamed), RosterCardState::NeedsAName);
 
-        let mut stamped = evidence();
-        stamped.link = Some(&ready);
-        stamped.content = Some(&DeviceContent::Empty);
-        assert_eq!(derive(&stamped), RosterCardState::ConnectedEmpty);
+        let mut named = evidence();
+        named.link = Some(&ready);
+        named.content = Some(&DeviceContent::Empty);
+        assert_eq!(derive(&named), RosterCardState::ConnectedEmpty);
     }
 
     fn ready_link() -> DeviceState {
@@ -483,6 +584,15 @@ mod tests {
         }
     }
 
+    fn old_format(class: FormatClass) -> DeviceContent {
+        DeviceContent::OldFormat {
+            project_uid: Some("prj_0000000000000001".to_string()),
+            slug: Some("porch-sign".to_string()),
+            observed: ContentHash::of(b"v"),
+            class,
+        }
+    }
+
     fn known(relation: SyncRelation) -> DeviceContent {
         DeviceContent::Known {
             project_uid: "prj_0000000000000001".to_string(),
@@ -500,6 +610,8 @@ mod tests {
             last_seen_at: 50.0,
             association: None,
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         }
     }
 

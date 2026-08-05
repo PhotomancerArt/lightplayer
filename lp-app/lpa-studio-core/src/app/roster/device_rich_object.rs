@@ -259,8 +259,8 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
     }
     // The chip's OWN identity, from efuse. Worth its own line above the
     // capability gaps: unlike everything else here it is permanent — it
-    // survives an erase, which the `dev_…` uid does not, because that one
-    // lives in the device's filesystem.
+    // survives an erase, and since 2026-08-04 it is what the board's
+    // `dev_…` uid is DERIVED from, so the two lines say one thing.
     if let Some(hardware) = input.hardware {
         if let Some(mac) = hardware.base_mac.as_deref() {
             lines.push(RichLine::new("mac", mac));
@@ -410,12 +410,26 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
             let mut rows = Vec::new();
             // A live card holding a project can always wipe it back to
             // blank from here (2026-07-26 walk: a problematic project
-            // must be removable without waiting for a sad state). The
-            // unreadable card already leads with wipe on Health — no
-            // double offer.
-            if input.project_name.is_some()
-                && !matches!(input.state, RosterCardState::HoldsUnreadableData { .. })
-            {
+            // must be removable without waiting for a sad state). Cards
+            // that already LEAD with wipe on Health — unreadable content,
+            // and a format this build cannot migrate — skip it here: one
+            // offer, not two.
+            //
+            // The old-format card has no project chip (its content never
+            // resolved to a running library project), so it is named
+            // explicitly rather than through `project_name`: an upgradable
+            // board still deserves the way out, in case the user would
+            // rather start over than migrate.
+            let holds_project = input.project_name.is_some()
+                || matches!(input.state, RosterCardState::HoldsOldFormatProject { .. });
+            let leads_with_wipe = match input.state {
+                RosterCardState::HoldsUnreadableData { .. } => true,
+                RosterCardState::HoldsOldFormatProject { standing, .. } => {
+                    !standing.is_upgradable()
+                }
+                _ => false,
+            };
+            if holds_project && !leads_with_wipe {
                 rows.push(DeviceDetailAffordance::Roster(
                     RosterAffordance::WipeProject,
                 ));
@@ -474,10 +488,10 @@ mod tests {
 
     /// The chip's own efuse identity reaches the Technical tab (2026-08-03).
     ///
-    /// The MAC matters beyond display: it is the only identity of a board
-    /// that SURVIVES AN ERASE. The `dev_…` uid lives in the device
-    /// filesystem and dies with it, so before this the card had no
-    /// permanent way to say which physical board it was.
+    /// The MAC matters beyond display: it is the identity of a board that
+    /// SURVIVES AN ERASE, and the one the `dev_…` uid now derives from.
+    /// Before this the card had no permanent way to say which physical
+    /// board it was.
     #[test]
     fn the_technical_tab_reports_the_chips_own_identity() {
         let hardware = HardwareFacts {
@@ -808,6 +822,69 @@ mod tests {
         assert!(
             !lines.iter().any(|(label, _)| *label == "graphics"),
             "{lines:?}"
+        );
+    }
+
+    /// P5: the old-format card leads with the verb that fixes it, and the
+    /// way out stays reachable underneath. The card carries no project
+    /// chip (its content never resolved to a running library project), so
+    /// the wipe row has to be offered on the STATE, not on the chip.
+    #[test]
+    fn an_upgradable_board_leads_with_upgrade_and_still_offers_the_way_out() {
+        let state = RosterCardState::HoldsOldFormatProject {
+            standing: crate::app::roster::DeviceFormatStanding::Upgradable { found: 4 },
+            expected: lpc_model::PROJECT_FORMAT_VERSION,
+        };
+        let mut fixture = input(&state);
+        fixture.project_name = None;
+        let view = device_rich_object(&fixture);
+
+        assert_eq!(
+            view.rollup().affordance,
+            Some(&DeviceDetailAffordance::Roster(
+                RosterAffordance::UpgradeProject
+            ))
+        );
+        assert!(
+            view.sections
+                .last()
+                .unwrap()
+                .affordances
+                .contains(&DeviceDetailAffordance::Roster(
+                    RosterAffordance::WipeProject
+                )),
+            "starting over must stay reachable: {:?}",
+            view.sections.last().unwrap().affordances
+        );
+    }
+
+    /// A format with no upgrade path already LEADS with wipe on Health —
+    /// offering it again in the danger zone would be two buttons for one
+    /// decision.
+    #[test]
+    fn a_board_with_no_upgrade_path_offers_the_wipe_exactly_once() {
+        let state = RosterCardState::HoldsOldFormatProject {
+            standing: crate::app::roster::DeviceFormatStanding::TooOld { found: Some(2) },
+            expected: lpc_model::PROJECT_FORMAT_VERSION,
+        };
+        let mut fixture = input(&state);
+        fixture.project_name = None;
+        let view = device_rich_object(&fixture);
+
+        let wipes = view
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .filter(|affordance| {
+                **affordance == DeviceDetailAffordance::Roster(RosterAffordance::WipeProject)
+            })
+            .count();
+        assert_eq!(wipes, 1, "one offer, not two");
+        assert_eq!(
+            view.rollup().affordance,
+            Some(&DeviceDetailAffordance::Roster(
+                RosterAffordance::WipeProject
+            ))
         );
     }
 

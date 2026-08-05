@@ -51,6 +51,17 @@ pub enum DeployOp {
     /// Diverged verb (D11/D30): fork the device's copy into a new
     /// project named after the device; the line stays where it is.
     KeepBothFork { target: crate::DeviceTarget },
+    /// Format verb (P5): the board holds a project at an older format
+    /// this build can migrate. Migrate it in the LIBRARY and push the
+    /// result — the device is never rewritten in place (D14 / ADR
+    /// 2026-07-05 decision 5).
+    ///
+    /// A deploy op because it ends in a push: same target resolution,
+    /// same hash-checked `open_library_project` lane, same
+    /// Operation-in-flight narration. Non-destructive (the pre-migration
+    /// copy stays in project history), so it dispatches from the card
+    /// face without a confirm — like `UseBoardCopy`.
+    UpgradeDeviceProject { target: crate::DeviceTarget },
     /// Erase the device's flash (firmware op; destructive). The card's
     /// Danger tab carries it behind the D41 confirm sheet.
     EraseDevice { target: crate::DeviceTarget },
@@ -78,6 +89,14 @@ impl ControllerOp for DeployOp {
                 ActionPriority::Secondary,
             )
             .with_icon("copy"),
+            Self::UpgradeDeviceProject { .. } => ActionMeta::new(
+                "Upgrade project",
+                "Bring this board's project up to the format this Studio \
+                 uses, and put it back on the board. The copy that is there \
+                 now is already saved in your library.",
+                ActionPriority::Primary,
+            )
+            .with_icon("upload"),
             Self::EraseDevice { .. } => ActionMeta::new(
                 "Erase device…",
                 "Erase the device's flash storage entirely.",

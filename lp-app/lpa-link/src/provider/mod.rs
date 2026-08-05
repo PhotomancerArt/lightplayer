@@ -9,6 +9,7 @@
 //! serial ports, browser workers, spawned host runtimes, and protocol handles
 //! stay owned by the provider implementation that created them.
 
+pub mod base_mac;
 pub mod chip;
 pub mod connection;
 pub mod diagnostic;
