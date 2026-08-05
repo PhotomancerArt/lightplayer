@@ -119,11 +119,11 @@ fn write(fs: &LpFsMemory, path: &str, body: &str) {
 }
 
 /// clock → shader (`bus:time`) → fixture → output, under one `prefix`.
-fn write_pipeline(fs: &LpFsMemory, prefix: &str, clock_controls: &str, endpoint: &str) {
+fn write_pipeline(fs: &LpFsMemory, prefix: &str, clock_transport: &str, endpoint: &str) {
     write(
         fs,
         &format!("/{prefix}clock.json"),
-        &format!("{{ \"kind\": \"Clock\", \"controls\": {clock_controls} }}"),
+        &format!("{{ \"kind\": \"Clock\", \"transport\": {clock_transport} }}"),
     );
     write(
         fs,
@@ -202,10 +202,10 @@ fn write_shared_assets(fs: &LpFsMemory) {
     );
 }
 
-fn single_clock_fs(clock_controls: &str) -> LpFsMemory {
+fn single_clock_fs(clock_transport: &str) -> LpFsMemory {
     let fs = LpFsMemory::new();
     write_shared_assets(&fs);
-    write_pipeline(&fs, "", clock_controls, "ws281x:local:D10");
+    write_pipeline(&fs, "", clock_transport, "ws281x:local:D10");
     write(
         &fs,
         "/module.json",
@@ -368,7 +368,7 @@ fn the_timebase_survives_an_authoring_edit() {
     write(
         &project.fs,
         "/clock.json",
-        r#"{ "kind": "Clock", "controls": { "rate": 1.0, "scrub_offset_seconds": 0.0 } }"#,
+        r#"{ "kind": "Clock", "transport": { "rate": 1.0, "scrub_offset_seconds": 0.0 } }"#,
     );
     project.apply_edit("/clock.json");
 

@@ -1,4 +1,4 @@
-use crate::{BindingDefs, ClockControls, Slotted};
+use crate::{BindingDefs, ClockTransport, Slotted};
 
 /// Authored clock node definition.
 #[derive(Debug, Clone, Default, PartialEq, Slotted)]
@@ -6,8 +6,8 @@ pub struct ClockDef {
     /// Authored slot bindings for clock outputs.
     pub bindings: BindingDefs,
 
-    /// Runtime clock controls.
-    pub controls: ClockControls,
+    /// Transient transport: run/pause, rate, scrub offset.
+    pub transport: ClockTransport,
 }
 
 impl ClockDef {
@@ -29,8 +29,8 @@ mod tests {
         let NodeDef::Clock(def) = def else {
             panic!("clock def");
         };
-        assert!(*def.controls.running.value());
-        assert_eq!(*def.controls.rate.value(), 1.0);
+        assert!(*def.transport.running.value());
+        assert_eq!(*def.transport.rate.value(), 1.0);
     }
 
     #[test]
@@ -45,8 +45,8 @@ mod tests {
             &SlotPath::parse("bindings").unwrap()
         );
         assert_eq!(
-            view.controls().path(),
-            &SlotPath::parse("controls").unwrap()
+            view.transport().path(),
+            &SlotPath::parse("transport").unwrap()
         );
     }
 }

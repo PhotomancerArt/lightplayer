@@ -128,7 +128,7 @@ fn project_apply_body_change_does_not_recreate_runtime_node() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 2.0
   }
 }
@@ -510,7 +510,7 @@ fn clock_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }
@@ -636,7 +636,7 @@ fn project_apply_binding_body_change_rebinds_runtime() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   },
   "bindings": {
@@ -699,7 +699,7 @@ fn project_apply_unbind_restores_declared_default() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   },
   "bindings": {
@@ -727,7 +727,7 @@ fn project_apply_unbind_restores_declared_default() {
         br#"
 {
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "rate": 1.0
   }
 }

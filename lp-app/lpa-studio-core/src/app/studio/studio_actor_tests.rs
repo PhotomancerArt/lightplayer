@@ -738,14 +738,14 @@ fn planned_slot_ops(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
 #[test]
 fn queued_set_values_for_one_address_coalesce_to_the_last() {
     let plan = CommandPlan::from_batch(vec![
-        set_value_action("controls.rate", 1.0),
-        set_value_action("controls.rate", 2.0),
-        set_value_action("controls.rate", 3.0),
+        set_value_action("transport.rate", 1.0),
+        set_value_action("transport.rate", 2.0),
+        set_value_action("transport.rate", 3.0),
     ]);
 
     assert_eq!(
         planned_slot_ops(&plan),
-        vec![("controls.rate".to_string(), Some(3.0))],
+        vec![("transport.rate".to_string(), Some(3.0))],
         "an oninput flood collapses to one mutation with the last value"
     );
 }
@@ -753,16 +753,16 @@ fn queued_set_values_for_one_address_coalesce_to_the_last() {
 #[test]
 fn set_values_for_different_addresses_keep_their_order() {
     let plan = CommandPlan::from_batch(vec![
-        set_value_action("controls.rate", 1.0),
-        set_value_action("controls.running", 0.0),
-        set_value_action("controls.rate", 2.0),
+        set_value_action("transport.rate", 1.0),
+        set_value_action("transport.running", 0.0),
+        set_value_action("transport.rate", 2.0),
     ]);
 
     assert_eq!(
         planned_slot_ops(&plan),
         vec![
-            ("controls.rate".to_string(), Some(2.0)),
-            ("controls.running".to_string(), Some(0.0)),
+            ("transport.rate".to_string(), Some(2.0)),
+            ("transport.running".to_string(), Some(0.0)),
         ],
         "latest value wins in place; order across addresses is preserved"
     );
@@ -771,19 +771,41 @@ fn set_values_for_different_addresses_keep_their_order() {
 #[test]
 fn revert_between_set_values_is_a_coalescing_barrier() {
     let plan = CommandPlan::from_batch(vec![
-        set_value_action("controls.rate", 1.0),
-        revert_action("controls.rate"),
-        set_value_action("controls.rate", 2.0),
+        set_value_action("transport.rate", 1.0),
+        revert_action("transport.rate"),
+        set_value_action("transport.rate", 2.0),
     ]);
 
     assert_eq!(
         planned_slot_ops(&plan),
         vec![
-            ("controls.rate".to_string(), Some(1.0)),
-            ("revert:controls.rate".to_string(), None),
-            ("controls.rate".to_string(), Some(2.0)),
+            ("transport.rate".to_string(), Some(1.0)),
+            ("revert:transport.rate".to_string(), None),
+            ("transport.rate".to_string(), Some(2.0)),
         ],
         "nothing coalesces across a Revert"
+    );
+}
+
+/// The tape's drag-scrub (clock-tape-hero P4): a pointer drag floods
+/// `transport.scrub_offset_seconds` through the same `SetValue` path as
+/// every fader, and the queue must collapse to the release value — the
+/// widget throttles at 50 ms but the actor is the backstop.
+#[test]
+fn a_scrub_flood_coalesces_to_the_final_offset() {
+    let plan = CommandPlan::from_batch(vec![
+        set_value_action("transport.scrub_offset_seconds", -3.1),
+        set_value_action("transport.scrub_offset_seconds", -7.6),
+        set_value_action("transport.scrub_offset_seconds", -12.4),
+    ]);
+
+    assert_eq!(
+        planned_slot_ops(&plan),
+        vec![(
+            "transport.scrub_offset_seconds".to_string(),
+            Some(-12.4)
+        )],
+        "a drag's write stream lands as one mutation with the release value"
     );
 }
 
@@ -908,13 +930,13 @@ fn structural_ops_never_coalesce_even_for_one_address() {
 #[test]
 fn structural_ops_are_coalescing_barriers_for_set_values() {
     for barrier in [
-        ensure_present_action("controls.rate"),
-        remove_value_action("controls.rate"),
+        ensure_present_action("transport.rate"),
+        remove_value_action("transport.rate"),
     ] {
         let plan = CommandPlan::from_batch(vec![
-            set_value_action("controls.rate", 1.0),
+            set_value_action("transport.rate", 1.0),
             barrier,
-            set_value_action("controls.rate", 2.0),
+            set_value_action("transport.rate", 2.0),
         ]);
 
         assert_eq!(
@@ -923,26 +945,26 @@ fn structural_ops_are_coalescing_barriers_for_set_values() {
             "nothing coalesces across a structural gesture"
         );
         let ops = planned_slot_ops(&plan);
-        assert_eq!(ops[0], ("controls.rate".to_string(), Some(1.0)));
-        assert_eq!(ops[2], ("controls.rate".to_string(), Some(2.0)));
+        assert_eq!(ops[0], ("transport.rate".to_string(), Some(1.0)));
+        assert_eq!(ops[2], ("transport.rate".to_string(), Some(2.0)));
     }
 }
 
 #[test]
 fn other_project_ops_are_coalescing_barriers() {
     let plan = CommandPlan::from_batch(vec![
-        set_value_action("controls.rate", 1.0),
+        set_value_action("transport.rate", 1.0),
         StudioCommand::Action(UiAction::from_op(
             ControllerId::new(ProjectController::NODE_ID),
             ProjectOp::SaveOverlay,
         )),
-        set_value_action("controls.rate", 2.0),
+        set_value_action("transport.rate", 2.0),
     ]);
 
     assert_eq!(plan.actions.len(), 3, "SaveOverlay is a barrier");
     assert_eq!(
         planned_slot_ops(&plan)[0],
-        ("controls.rate".to_string(), Some(1.0))
+        ("transport.rate".to_string(), Some(1.0))
     );
 }
 

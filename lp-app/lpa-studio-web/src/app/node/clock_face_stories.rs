@@ -1,11 +1,16 @@
-//! Stories for the clock card face: the published time product plus the
-//! per-reading phasor trace cards (clock-face v2).
+//! Stories for the clock card face: the tape transport hero, the published
+//! time product, and the per-reading phasor trace cards (clock-face v2 +
+//! the tape instrument, plan 2026-08-04-2355-clock-tape-hero P3).
 //!
 //! Coverage is the states the face has to be right in:
 //!
 //! - **live** — a few mixed cards: private and shared, different waveforms
 //!   and rates, since the violet shared border is the face's one
 //!   load-bearing distinction;
+//! - **transport states** — paused (frozen strip, ▶), scrubbed-back
+//!   (amber border + off-live chip, negative digits offset), ×8 (the
+//!   speed-linked zoom's coarser tick ladder, readout seated on a
+//!   detent), and a 3 h 47 m runtime (h:mm:ss digits and labels);
 //! - **shared** — every card on one shared channel, the violet treatment
 //!   alone;
 //! - **crowd** — a full house (8+ cards, a frozen 0/s, a long reader name)
@@ -25,18 +30,24 @@ use lpa_studio_core::{UiTimebaseState, Waveform};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
-use crate::app::node::face_story_fixtures::{clock_face, clock_node_view, phasor_reading};
+use crate::app::node::face_story_fixtures::{
+    clock_face, clock_face_with_transport, clock_node_view, clock_transport,
+    clock_transport_overridden, phasor_reading,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ClockCardCanvas(children: Element) -> Element {
     rsx! {
-        div { class: "tw:w-full tw:max-w-md", {children} }
+        // max-w-lg, matching the card's natural editor width (~500px): at
+        // md the taperow's reserved per-control clear slots wrap the row,
+        // which is real responsive behavior, not the design frame.
+        div { class: "tw:w-full tw:max-w-lg", {children} }
     }
 }
 
 #[story(
-    description = "Live face: three trace cards, one per downstream reading. `plasma · phase` rides its own private integrator (ramp), the two `bus:speed` readers share ONE integrator — violet border and id — while each shapes the cycle its own way (sine vs square). Rates auto-denominate (2/s → 3/min → 15/hr); tiny muted seconds sit in the section header; the Delta row is gone."
+    description = "Live face: the tape transport hero (running at ×1, 7:27 — one-second minor ticks streaming under the fixed playhead, run button lit, readout seated on the ×1 detent) above three trace cards, one per downstream reading. `plasma · phase` rides its own private integrator (ramp), the two `bus:speed` readers share ONE integrator — violet border and id — while each shapes the cycle its own way (sine vs square). Rates auto-denominate (2/s → 3/min → 15/hr)."
 )]
 fn default() -> Element {
     rsx! {
@@ -76,6 +87,141 @@ fn default() -> Element {
                             0.5,
                         ),
                     ],
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Paused: the strip and digits hold still (the driver freezes extrapolation, not the paint), the run button shows ▶ unlit. Everything else keeps its place — pausing is calm, not a mode change."
+)]
+fn paused() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(447.0, false, 1.0, 0.0),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Scrubbed off-live: −12.4 s behind the live edge. The tape box border goes amber (status-attention family), and the offset reads on the amber line UNDER the digits — one time cluster next to the run button, tap-to-return (the free-floating chip jumped around and died at G1). Alarming is wrong — this is a deliberate state the user chose."
+)]
+fn scrubbed() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(434.6, true, 1.0, -12.4),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Running ×8: the zoom is FIXED (Q5 reversed at the live build — the speed-linked variant is banked for the input-recorder reel), so the ruler keeps its 1 s/5 s scale and ×8 shows as the strip streaming 8× faster. In a still capture only the fader tells: thumb at the top of the log track, readout seated on the ×8 detent in accent."
+)]
+fn fast() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(447.0, true, 8.0, 0.0),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Every transport value carries an ACTIVE debug override (session-only): the changed controls wear the debug family's orange tint — paused run button, engaged-amber fader rail, ×2 readout — without the drawer's hazard stripes, and the one `clear` affordance sits in the product header beside the detail button (G1: 'the clear should be in the header'). The scrubbed offset doubles as off-live: amber border + the offset line under the digits."
+)]
+fn overridden() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport_overridden(434.6, false, 2.0, -12.4),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A 3 h 47 m runtime: the digits and ruler labels switch to h:mm:ss and stay calm — no tenths churn at rest, and quantized ticks keep a long runtime free of float drift across the strip."
+)]
+fn long_runtime() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport(3.0 * 3600.0 + 47.0 * 60.0, true, 1.0, 0.0),
                 )),
                 on_action: move |_| {},
             }
