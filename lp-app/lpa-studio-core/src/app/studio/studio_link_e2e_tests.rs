@@ -992,7 +992,7 @@ fn device_rename_reconciles_registry_name_over_the_link() {
 #[test]
 fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     use super::studio_edit_e2e_tests::{
-        InProcessServerIo, edit_e2e_files, edit_e2e_server, find_slot, slot_value_display,
+        InProcessServerIo, clock_transport_block, edit_e2e_files, edit_e2e_server,
     };
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, SlotEditOp, StudioServerClient, UiLogDraft, UiLogLevel, UiLogOrigin};
@@ -1086,8 +1086,10 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     // The editor mirror is live on the sim: a slot-edit round-trips.
     let view = studio.view();
     assert!(view.home.is_none(), "the open left the gallery");
-    let rate = find_slot(&view, "transport.rate");
-    let address = rate.address.clone().expect("rate slot carries an address");
+    let address = clock_transport_block(&view)
+        .rate_address
+        .clone()
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -1097,7 +1099,7 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     )))
     .expect("slot edit lands on the sim session");
     let view = studio.view();
-    assert_eq!(slot_value_display(find_slot(&view, "transport.rate")), "2");
+    assert_eq!(clock_transport_block(&view).rate, 2.0);
 
     // The device heartbeat drains a buffered console line into the
     // SESSION's console tail (D42: the per-device console — session
@@ -1226,7 +1228,7 @@ fn push_replaces_the_running_project_with_a_different_one() {
 /// the detached session's own client is the worker-alive proxy.
 #[test]
 fn detach_lens_keeps_sessions_and_reattach_rebuilds_the_mirror() {
-    use super::studio_edit_e2e_tests::{find_slot, slot_value_display};
+    use super::studio_edit_e2e_tests::clock_transport_block;
     use crate::{ProjectOp, SlotEditOp, UxUpdateSink};
     use lpc_model::LpValue;
 
@@ -1235,10 +1237,10 @@ fn detach_lens_keeps_sessions_and_reattach_rebuilds_the_mirror() {
     // An acked edit on the sim mirror.
     let view = studio.view();
     assert!(view.home.is_none(), "the open left the gallery");
-    let address = find_slot(&view, "transport.rate")
-        .address
+    let address = clock_transport_block(&view)
+        .rate_address
         .clone()
-        .expect("rate slot carries an address");
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -1282,8 +1284,8 @@ fn detach_lens_keeps_sessions_and_reattach_rebuilds_the_mirror() {
     let view = studio.view();
     assert!(view.home.is_none(), "the editor is back");
     assert_eq!(
-        slot_value_display(find_slot(&view, "transport.rate")),
-        "2",
+        clock_transport_block(&view).rate,
+        2.0,
         "the acked edit survived detach → re-attach"
     );
 }
@@ -1548,7 +1550,7 @@ fn arm_sim_fatal(studio: &StudioController, message: &str) {
 /// no URL work — D37 stays M5.)
 #[test]
 fn d29_click_opens_the_devices_running_project_in_the_editor() {
-    use super::studio_edit_e2e_tests::{edit_e2e_files, find_slot, slot_value_display};
+    use super::studio_edit_e2e_tests::{clock_transport_block, edit_e2e_files};
     use crate::{ProjectOp, SlotEditOp};
     use lpc_model::LpValue;
 
@@ -1604,10 +1606,10 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
     };
     let view = studio.view();
     assert!(view.home.is_none(), "the editor shows the device's project");
-    let address = find_slot(&view, "transport.rate")
-        .address
+    let address = clock_transport_block(&view)
+        .rate_address
         .clone()
-        .expect("rate slot carries an address");
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -1616,10 +1618,7 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
         },
     )))
     .expect("slot edit round-trips over the device's wire");
-    assert_eq!(
-        slot_value_display(find_slot(&studio.view(), "transport.rate")),
-        "2"
-    );
+    assert_eq!(clock_transport_block(&studio.view()).rate, 2.0);
     assert_eq!(
         studio.runtime_pool_for_test().lens(),
         Some(device_id),
@@ -1955,7 +1954,7 @@ fn d29_click_with_a_sim_project_open_moves_the_lens_and_keeps_the_sim() {
 #[test]
 fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
     use super::studio_edit_e2e_tests::{
-        InProcessServerIo, edit_e2e_files, edit_e2e_server, find_slot, slot_value_display,
+        InProcessServerIo, clock_transport_block, edit_e2e_files, edit_e2e_server,
     };
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, StudioServerClient};
@@ -2028,7 +2027,7 @@ fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
     // The sim mirror is untouched…
     let view = studio.view();
     assert!(view.home.is_none(), "the editor stayed open");
-    assert_eq!(slot_value_display(find_slot(&view, "transport.rate")), "1");
+    assert_eq!(clock_transport_block(&view).rate, 1.0);
     // …and the device reconciled in the background on its own client.
     let sync = studio
         .device_sync_for_test()
@@ -2104,7 +2103,7 @@ fn device_route_attaches_the_existing_session_by_uid() {
 /// binds the sim lens with the loaded project's key (the URL's evidence).
 #[test]
 fn open_package_reattaches_when_the_sim_already_runs_it() {
-    use super::studio_edit_e2e_tests::{find_slot, slot_value_display};
+    use super::studio_edit_e2e_tests::clock_transport_block;
     use crate::app::home::HOME_NODE_ID;
     use crate::{HomeOp, ProjectOp, SlotEditOp, UiLensRuntime};
     use lpc_model::LpValue;
@@ -2112,10 +2111,10 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     let (mut studio, _device, sim_id) = coexisting_sim_and_device();
     // an acked edit on the open sim project ("Sign")
     let view = studio.view();
-    let address = find_slot(&view, "transport.rate")
-        .address
+    let address = clock_transport_block(&view)
+        .rate_address
         .clone()
-        .expect("rate slot carries an address");
+        .expect("transport block carries the rate dispatch address");
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
         SlotEditOp::SetValue {
@@ -2159,8 +2158,8 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     let view = studio.view();
     assert!(view.home.is_none(), "the editor is back");
     assert_eq!(
-        slot_value_display(find_slot(&view, "transport.rate")),
-        "2",
+        clock_transport_block(&view).rate,
+        2.0,
         "the applied edit survived — re-attach, not a head re-push"
     );
     assert_eq!(

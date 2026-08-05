@@ -152,20 +152,22 @@ pub(crate) fn node_delete_pane_action() -> UiPaneAction {
     )
 }
 
-/// A Clock node card: one persisted **Settings** section plus the **Debug**
-/// section the D3/D4 partition produces. The clock's three `transport.*`
-/// fields are `SlotRole::Debug`, so core lifts them FLAT into
-/// `UiNodeSection::DebugSlots` — the card shows "Running / Rate / Scrub
-/// offset seconds" as top-level rows, never a nested "Controls" group.
+/// A multi-row Debug-section specimen: one persisted **Settings** section
+/// plus the **Debug** section the D3/D4 partition produces, on a
+/// story-only "probe" node. The clock used to be this specimen, but its
+/// `transport.*` rows retired into the tape face (clock-tape-hero P5) —
+/// the section widget's design record needs a card that honestly still
+/// shows flattened rows, and `OutputDef::test_pattern` (the real in-tree
+/// Debug slot) has only one.
 ///
-/// `overrides` seeds how many of them carry an active override: `0` is the
+/// `overrides` seeds how many rows carry an active override: `0` is the
 /// idle case (the section header is still debug territory — D8 tier c), and a
 /// non-zero count also lights the card's header marking (tier b).
 ///
 /// `debug_open` seeds the core-owned disclosure (`NodeCardUiState::
 /// debug_open`). The live default is `false` — the rows are collapsed behind
 /// the always-visible striped header.
-pub(crate) fn clock_node_view(overrides: usize, debug_open: bool) -> UiNodeView {
+pub(crate) fn debug_rows_node_view(overrides: usize, debug_open: bool) -> UiNodeView {
     let debug_row = |key: &str, label: &str, value: UiSlotValue, index: usize| {
         let state = if index < overrides {
             UiSlotFieldState::editable()
@@ -175,44 +177,44 @@ pub(crate) fn clock_node_view(overrides: usize, debug_open: bool) -> UiNodeView 
             UiSlotFieldState::editable().with_debug(true)
         };
         let mut row = UiConfigSlot::value(key, label, value)
-            .with_address(clock_slot_address(&format!("transport.{key}")))
+            .with_address(probe_slot_address(&format!("diagnostics.{key}")))
             .with_state(state);
         if index < overrides {
             // An active override owns its overlay entry, which is what puts
             // the inline Clear verb on the row (untouched rows reserve its
             // footprint instead, so the two are the same box).
-            row = row.with_edit_entry_address(clock_slot_address(&format!("transport.{key}")));
+            row = row.with_edit_entry_address(probe_slot_address(&format!("diagnostics.{key}")));
         }
         row
     };
 
     let mut view = UiNodeView::new(
-        UiNodeHeader::new("clock", "Clock", CLOCK_NODE)
+        UiNodeHeader::new("probe", "Probe", PROBE_NODE)
             .with_status(UiStatus::good("Running"))
             .with_debug_overrides(overrides),
         vec![UiNodeTab::main(vec![
-            UiNodeSection::ProducedValues(vec![UiProducedValue::new("Time", "12.480")]),
+            UiNodeSection::ProducedValues(vec![UiProducedValue::new("Signal", "0.482")]),
             UiNodeSection::ConfigSlots(vec![
                 UiConfigSlot::value(
-                    "epoch_offset_seconds",
-                    "Epoch offset seconds",
+                    "smoothing_seconds",
+                    "Smoothing seconds",
                     UiSlotValue::f32(0.0).with_unit(UiSlotUnit::seconds()),
                 )
-                .with_address(clock_slot_address("epoch_offset_seconds")),
+                .with_address(probe_slot_address("smoothing_seconds")),
             ]),
             UiNodeSection::DebugSlots(vec![
-                debug_row("running", "Running", UiSlotValue::bool(true), 0),
-                debug_row("rate", "Rate", UiSlotValue::f32(2.0), 1),
+                debug_row("enabled", "Enabled", UiSlotValue::bool(true), 0),
+                debug_row("gain", "Gain", UiSlotValue::f32(2.0), 1),
                 debug_row(
-                    "scrub_offset_seconds",
-                    "Scrub offset seconds",
+                    "window_seconds",
+                    "Window seconds",
                     UiSlotValue::f32(0.0).with_unit(UiSlotUnit::seconds()),
                     2,
                 ),
             ]),
         ])],
     )
-    .with_node_id(CLOCK_NODE);
+    .with_node_id(PROBE_NODE);
     view.card_ui = NodeCardUiState {
         debug_open,
         ..NodeCardUiState::default()
@@ -220,7 +222,7 @@ pub(crate) fn clock_node_view(overrides: usize, debug_open: bool) -> UiNodeView 
     view.action = Some(UiAction::from_op(
         ControllerId::new("story.project"),
         SlotEditOp::Revert {
-            address: clock_slot_address("epoch_offset_seconds"),
+            address: probe_slot_address("smoothing_seconds"),
         },
     ));
     view
@@ -309,11 +311,11 @@ fn output_slot_address(path: &str) -> ProjectSlotAddress {
     )
 }
 
-const CLOCK_NODE: &str = "/fyeah_sign.show/clock.clock";
+const PROBE_NODE: &str = "/fyeah_sign.show/probe.probe";
 
-fn clock_slot_address(path: &str) -> ProjectSlotAddress {
+fn probe_slot_address(path: &str) -> ProjectSlotAddress {
     ProjectSlotAddress::new(
-        ProjectNodeAddress::parse(CLOCK_NODE).expect("valid story node address"),
+        ProjectNodeAddress::parse(PROBE_NODE).expect("valid story node address"),
         ProjectSlotRoot::def(),
         SlotPath::parse(path).expect("valid story slot path"),
     )

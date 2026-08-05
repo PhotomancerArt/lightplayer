@@ -1,12 +1,14 @@
 ---
-status: carried
+status: resolved
 since: 2026-05-12
 logged: 2026-08-01
+resolved: 2026-08-05
 area: clock node / studio node faces
 related:
   - "../adr/2026-08-01-debug-slots-taxonomy.md"
   - "../adr/2026-07-26-node-card-faces.md"
   - "plan notes: ~/.photomancer/planning/lp2025/2026-07-31-1736-ephemeral-slots/notes.md (S9, D6)"
+  - "plan: ~/.photomancer/planning/lp2025/2026-08-04-2355-clock-tape-hero/"
 ---
 # The clock's transport controls have no transport UI
 
@@ -62,9 +64,25 @@ produced state; Clear (per value or per node) returns to live time.
   Nothing user-facing changed: the only way to drive it is still the
   generic Debug slider, so the exit criteria below are untouched — the
   half that was hard is simply no longer the blocker.
+- 2026-08-05 — **RESOLVED by the tape transport** (plan
+  `2026-08-04-2355-clock-tape-hero`, P3–P5 on PR #345, after the spike's
+  two gate rounds chose the tape direction). The clock card's OUTPUT
+  hero is now a transport instrument: a scrolling tape strip under a
+  fixed playhead (drag = scrub, px = seconds), a log ׼–×8 speed fader
+  with magnetic octave detents, run/pause, calm m:ss digits, and an
+  amber off-live chip with tap-to-return. The three slots stay
+  `SlotRole::Debug` (transient by design — Q2) but their generic rows
+  no longer render anywhere: the face claims them
+  (`retire_face_claimed_debug_rows`, `node_controller.rs`), and the
+  tape carries the debug affordance itself — changed controls tint
+  attention-orange and one `clear` affordance drops every override.
+  The surface is card-level (and P6 exposes it on the module panel),
+  not the project level the exit criteria guessed — the clock IS the
+  project's timebase, so its card is the transport's natural home.
 
-**Exit criteria** — A transport surface exists (scrub/rate/run at the
-project level, with a position readout), the clock's three controls move
-onto it, and the `Debug` naming re-check in
-`../adr/2026-08-01-debug-slots-taxonomy.md` (follow-up (a)) can be
-answered against a Debug category that holds only diagnostics.
+**Exit criteria** — MET 2026-08-05, with one deliberate refinement: the
+transport surface lives on the clock card (+ module panel, P6) rather
+than a separate project-level home. The `Debug` naming re-check
+(taxonomy follow-up (a)) is answered by this plan's ADR (P7): with the
+transport rows retired into a real instrument, the drawer's remaining
+in-tree example is pure diagnostics (`OutputDef::test_pattern`).

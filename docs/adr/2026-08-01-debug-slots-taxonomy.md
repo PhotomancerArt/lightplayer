@@ -289,7 +289,11 @@ Per the deferred-decision convention, these are indexed in
 - **(a) `Debug` naming re-check.** Ratified as provisional. **Revisit when**
   the clock's transport controls (`rate`, `scrub_offset_seconds`) move to a
   transport surface and Debug holds only diagnostics — if the word still fits
-  then, it is permanent.
+  then, it is permanent. *2026-08-05: the move happened — the tape transport
+  (plan `2026-08-04-2355-clock-tape-hero`, P3–P5) claimed the clock's rows
+  into a real instrument on the clock card, and the drawer's remaining
+  in-tree occupant is `test_pattern`, pure diagnostics. The re-check itself
+  is answered by that plan's ADR (P7).*
 - **(b) Debug indication on preview/play surfaces.** D8 covered the workspace
   (chip, card, section) only; a running installation showing a test pattern
   has no indication outside the editor. **Revisit when** the panels/play-mode

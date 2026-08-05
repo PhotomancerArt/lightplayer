@@ -188,7 +188,9 @@ impl TapeTransportDriver {
 
     /// The scrub value under the finger, when a drag is live.
     pub(crate) fn scrub_preview(&self) -> Option<f32> {
-        self.inner.as_ref().and_then(|inner| inner.scrub_preview.get())
+        self.inner
+            .as_ref()
+            .and_then(|inner| inner.scrub_preview.get())
     }
 }
 
@@ -297,10 +299,9 @@ impl DriverInner {
         // value rides on top of the extrapolation, so the strip follows
         // the pointer exactly and converges to zero correction as the
         // throttled writes echo back through the DTO.
-        let preview_delta = self
-            .scrub_preview
-            .get()
-            .map_or(0.0, |preview| f64::from(preview - transport.scrub_offset_seconds));
+        let preview_delta = self.scrub_preview.get().map_or(0.0, |preview| {
+            f64::from(preview - transport.scrub_offset_seconds)
+        });
         let t = f64::from(transport.seconds)
             + preview_delta
             + if transport.running {

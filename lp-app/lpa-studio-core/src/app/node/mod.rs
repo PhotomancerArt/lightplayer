@@ -41,8 +41,8 @@ pub use face::{
     UiClockFace, UiClockTransport, UiFixtureFace, UiFixturePower, UiModuleFace, UiNodeFace,
     UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
     UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget,
-    UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiShaderFace,
-    UiTimebaseState, phasor_rate_display, phasor_speed_display,
+    UiPanelWidget, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiShaderFace, UiTimebaseState,
+    phasor_rate_display, phasor_speed_display,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};

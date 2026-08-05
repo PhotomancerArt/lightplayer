@@ -314,7 +314,10 @@ pub fn TapeTransport(
     .into_iter()
     .flatten()
     .collect();
-    let thumb_style = format!("left: calc((100% - 18px) * {} + 1px);", rate_frac(shown_rate));
+    let thumb_style = format!(
+        "left: calc((100% - 18px) * {} + 1px);",
+        rate_frac(shown_rate)
+    );
     let chip_sign = if transport.scrub_offset_seconds < 0.0 {
         "\u{2212}"
     } else {
