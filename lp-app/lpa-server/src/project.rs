@@ -704,6 +704,16 @@ impl OutputProvider for SharedOutputProvider {
         self.0.borrow().close(handle)
     }
 
+    // ⚠️ Forward every method, including the defaulted ones. This wrapper
+    // once omitted `flush`, so the engine's end-of-frame barrier resolved to
+    // the trait's no-op default and never reached the device provider — on
+    // the classic ESP32 that silently truncated the last wire of every frame
+    // (measured 2026-08-04, G2). A defaulted trait method plus a hand-written
+    // delegate is exactly the combination the compiler cannot catch.
+    fn flush(&self) -> Result<(), lpc_hardware::OutputError> {
+        self.0.borrow().flush()
+    }
+
     fn hardware_generation(&self) -> u64 {
         self.0.borrow().hardware_generation()
     }
