@@ -1071,12 +1071,28 @@ impl StudioController {
     /// not of a session") while nothing is attached. Recorded in the
     /// multi-device ADR so M5 inherits the attribution decision.
     fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
+        // F5b: while the setup wizard owns a flow, the wizard card IS the
+        // bound device's surface — its roster card stands down until
+        // DEVICE_HOME hands off, and the gallery's connect narration stays
+        // quiet (the wizard narrates its own port request). Sessions the
+        // wizard did not open keep their cards.
+        let wizard_active = self.setup.as_ref().is_some_and(|session| {
+            !matches!(
+                session.state().kind(),
+                crate::SetupStateKind::DeviceHome | crate::SetupStateKind::Closed
+            )
+        });
         let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
             .pool
             .device_sessions()
+            .filter(|session| !(wizard_active && self.setup_device == Some(session.id())))
             .map(|session| self.device_evidence(session))
             .collect();
-        let flow_connect = self.gallery_connect_evidence();
+        let flow_connect = if wizard_active {
+            crate::ConnectEvidence::Idle
+        } else {
+            self.gallery_connect_evidence()
+        };
         let pending_uid = self.device.pending_reconnect_uid().map(str::to_string);
         match devices.first_mut() {
             Some(first) => {
@@ -8434,6 +8450,71 @@ mod tests {
         assert!(
             wizard_of(&studio).is_none(),
             "a closed flow leaves no card behind"
+        );
+    }
+
+    #[test]
+    fn the_wizard_card_is_the_bound_devices_only_card_until_device_home() {
+        // G2 finding 2026-08-05: connecting through the wizard produced TWO
+        // cards — the wizard card plus the live session's roster card. F5b
+        // says the wizard IS the device's card until DEVICE_HOME hands off.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let device_id = studio
+            .pool
+            .install(
+                crate::app::runtime_pool::RuntimePayload::stub_device_for_test(
+                    crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+                ),
+            )
+            .unwrap_or_else(|refusal| panic!("stub device installs: {}", refusal.message));
+        studio.bind_setup_device(device_id);
+
+        let home = studio.view().home.expect("home view");
+        assert!(home.setup.is_some(), "the wizard card is on the grid");
+        assert!(
+            home.devices.is_empty(),
+            "the bound session's roster card stands down while the wizard \
+             owns the flow; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+
+        // Walk the pure machine to DEVICE_HOME: the roster card returns
+        // (the wizard's handoff frame yields the surface back).
+        {
+            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+            flow.handle(crate::SetupEvent::ItsConnected);
+            flow.handle(crate::SetupEvent::PortGranted);
+            flow.handle(crate::SetupEvent::ProbeCompleted {
+                probe: crate::BoardProbe {
+                    verdict: crate::BoardVerdict::Blank { known: None },
+                    detected_chip: Some("esp32c6".to_string()),
+                    hardware_uid: None,
+                    hardware_origin: None,
+                },
+            });
+            flow.handle(crate::SetupEvent::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            });
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::FlashSucceeded);
+            flow.handle(crate::SetupEvent::Confirm);
+            flow.handle(crate::SetupEvent::ProjectGenerated {
+                project_uid: "prj_test".to_string(),
+            });
+            flow.handle(crate::SetupEvent::PushCompleted);
+        }
+        assert_eq!(
+            studio.setup.as_ref().expect("wizard").state().kind(),
+            crate::SetupStateKind::DeviceHome,
+        );
+        let home = studio.view().home.expect("home view");
+        assert!(
+            !home.devices.is_empty(),
+            "at DEVICE_HOME the real card is back on the roster"
         );
     }
 

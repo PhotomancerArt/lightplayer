@@ -902,6 +902,9 @@
   .tw\:grid-cols-\[minmax\(260px\,320px\)\] {
     grid-template-columns: minmax(260px,320px);
   }
+  .tw\:grid-cols-\[minmax\(320px\,380px\)\] {
+    grid-template-columns: minmax(320px,380px);
+  }
   .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(112px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill,minmax(112px,1fr));
   }
@@ -910,6 +913,9 @@
   }
   .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(260px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill,minmax(260px,1fr));
+  }
+  .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(320px\,1fr\)\)\] {
+    grid-template-columns: repeat(auto-fill,minmax(320px,1fr));
   }
   .tw\:grid-cols-\[repeat\(auto-fit\,minmax\(130px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fit,minmax(130px,1fr));
