@@ -163,14 +163,47 @@ fn node_faces_derive_and_edit_end_to_end() {
         Some("node 1 output 0"),
         "the handle names the clock's own node and output"
     );
-    assert!(
-        face.seconds.is_some(),
-        "the seconds readout rides the face for the section header"
+    let transport = face
+        .transport
+        .clone()
+        .expect("the transport block rides the face (tape-hero P2)");
+    assert!(transport.running, "authored default: running");
+    assert_eq!(transport.rate, 1.0);
+    assert_eq!(transport.scrub_offset_seconds, 0.0);
+    assert_eq!(
+        transport.seconds, 0.0,
+        "numeric seconds is probe-only; no probe answers in this harness"
     );
+    let scrub_address = transport
+        .scrub_address
+        .clone()
+        .expect("writable Debug row → dispatch address");
     // No timebase probe has answered in this harness, and "no read yet" is
     // deliberately NOT the same state as an empty listing.
     assert_eq!(face.timebase, crate::UiTimebaseState::Unread);
     assert!(face.phasors.is_empty());
+
+    // -- scrub drag flood: the tape gesture is a SetValue flood on the
+    // transport row; the face's transport block must read the staged value
+    // back IMMEDIATELY (edit-buffer echo suppression — the contract that
+    // keeps the tape from snapping back under the finger, tape-hero P2).
+    for value in [-4.0_f32, -8.0, -12.4] {
+        handle
+            .tx
+            .send(set_value_action(scrub_address.clone(), LpValue::F32(value)));
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("scrub edits emit a snapshot");
+    let clock = node_by_kind(&snapshot, "Clock");
+    let Some(UiNodeFace::Clock(face)) = &clock.face else {
+        panic!("clock keeps its face through a scrub, got {:?}", clock.face);
+    };
+    let scrubbed = face.transport.clone().expect("block survives the edit");
+    assert_eq!(
+        scrubbed.scrub_offset_seconds, -12.4,
+        "the staged scrub value reads back through the face at once"
+    );
+    assert!(scrubbed.running, "siblings untouched by the scrub");
 
     // -- knob drag flood: coalesced SetValues flow back into the face -------
     for value in [1.4_f32, 1.9, 2.5] {
@@ -1392,7 +1425,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1515,7 +1548,7 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
@@ -1763,7 +1796,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let playlist_json = r#"{
   "kind": "Playlist",
@@ -1875,7 +1908,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let playlist_json = format!(
         r#"{{
@@ -1975,7 +2008,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": { "running": true, "rate": 1.0 }
+  "transport": { "running": true, "rate": 1.0 }
 }"#;
     let shader_json = r#"{
   "kind": "Shader",
