@@ -312,7 +312,7 @@ fn control_rgb_at_sample(preview: &UiControlProductPreview, sample_start: u32) -
         let byte_index = index.checked_mul(2)?;
         let lo = *preview.bytes.get(byte_index)?;
         let hi = *preview.bytes.get(byte_index + 1)?;
-        Some((u16::from_le_bytes([lo, hi]) >> 8) as u8)
+        Some(linear_unorm16_to_srgb8(u16::from_le_bytes([lo, hi])))
     };
     let a = sample(0)?;
     let b = sample(1)?;
@@ -325,6 +325,25 @@ fn control_rgb_at_sample(preview: &UiControlProductPreview, sample_start: u32) -
         ColorOrder::Brg => [b, c, a],
         ColorOrder::Bgr => [c, b, a],
     })
+}
+
+/// Encode one LINEAR unorm16 control sample as display sRGB8.
+///
+/// Control samples ride the wire in linear light (the engine renders
+/// `Unorm16` and ships the buffer raw); the render-TEXTURE probe converts
+/// engine-side (`rgba16_linear_to_srgb8`), so until this conversion the two
+/// previews disagreed — linear-as-sRGB reads darker and oversaturated (the
+/// 2026-08-05 G1 finding: "much more saturated than the shader"). Same
+/// transfer as the engine's LUT, float form (non-embedded client; ~4.5k
+/// calls/frame is nothing here).
+fn linear_unorm16_to_srgb8(value: u16) -> u8 {
+    let linear = value as f32 / 65535.0;
+    let srgb = if linear <= 0.003_130_8 {
+        12.92 * linear
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb * 255.0 + 0.5) as u8
 }
 
 fn install_lamp_resize_observer(
@@ -380,5 +399,24 @@ impl LampResizeObserver {
 impl Drop for LampResizeObserver {
     fn drop(&mut self) {
         self.observer.disconnect();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Endpoints exact; the linear midtone must brighten (linear 0.2 →
+    /// sRGB ≈ 0.48), which is the whole point of the conversion — shown
+    /// raw it read dark/oversaturated next to the shader hero.
+    #[test]
+    fn linear_to_srgb_matches_the_transfer() {
+        assert_eq!(linear_unorm16_to_srgb8(0), 0);
+        assert_eq!(linear_unorm16_to_srgb8(65535), 255);
+        let mid = linear_unorm16_to_srgb8((0.2f32 * 65535.0) as u16);
+        assert!(
+            (123..=125).contains(&mid),
+            "linear 0.2 ≈ sRGB 124, got {mid}"
+        );
     }
 }
