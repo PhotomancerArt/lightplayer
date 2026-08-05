@@ -361,7 +361,7 @@ fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
 /// `GradientConfig` — a STRUCT, where every other panel command carries a
 /// scalar. The engine's `resolve_gradient_config` takes a driven config
 /// whole (never as a partial overlay), so what has to round-trip is the
-/// entire record: kind tag, padded set, count, and both timings.
+/// entire record: kind tag, count-bounded set, count, and both timings.
 #[test]
 fn a_gradient_config_panel_write_round_trips_on_a_palette_channel() {
     let (mut server, project_path) = server_with_palette_shader_project("panel-palette-write");
@@ -402,6 +402,75 @@ fn a_gradient_config_panel_write_round_trips_on_a_palette_channel() {
         channel_value(&probe(project), "palette"),
         Some(picked.to_lp_value()),
         "clearing drops the panel's palette"
+    );
+}
+
+/// The same gradient panel write, read back through the REAL wire transport
+/// — the budgeted project-read stream sink — instead of calling the engine
+/// probe directly. This is browser Studio's actual read path after a
+/// palette pick, and it is where the padded §5 storage form used to fail
+/// the whole read: the probe echoes the held channel value raw inside one
+/// event, and a padded `GradientConfig` (~17.7 KiB) alone exceeded
+/// `PROJECT_READ_FRAME_MAX_BYTES` ("project-read event exceeded frame
+/// budget of 16384 bytes"). The count-bounded storage form is what keeps
+/// this passing.
+#[test]
+fn a_gradient_panel_write_survives_a_wire_project_read() {
+    let (mut server, project_path) = server_with_palette_shader_project("panel-palette-wire-read");
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.advance_frame(16).expect("tick");
+
+    let project = project_mut(&mut server, handle);
+    let scope = channel_scope(&probe(project), "palette");
+    let picked = GradientConfig::Cycle {
+        set: vec![solid([1.0, 0.0, 0.0]), solid([0.0, 0.4, 1.0])],
+        step_seconds: 20.0,
+        fade_seconds: 0.5,
+    };
+    let response = project.panel_write(&WirePanelWriteRequest {
+        scope,
+        channel: "palette".to_string(),
+        value: picked.to_lp_value(),
+        ttl_ms: None,
+    });
+    assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });
+
+    let messages = vec![WireMessage::Client(ClientMessage {
+        id: 13,
+        msg: ClientRequest::ProjectRead {
+            handle,
+            request: ProjectReadRequest {
+                since: None,
+                queries: Vec::new(),
+                probes: vec![lpc_wire::ProjectProbeRequest::BindingGraph(
+                    BindingGraphProbeRequest {
+                        include_values: true,
+                    },
+                )],
+            },
+        },
+    })];
+    let mut transport = VecTransport::default();
+    block_on(server.tick_and_send(16, messages, &mut transport)).expect("tick");
+    let events: Vec<ProjectReadEvent> = transport
+        .sent
+        .into_iter()
+        .filter_map(|message| match message.msg {
+            WireServerMsgBody::ProjectRead { events } => Some(events),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let errors: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            ProjectReadEvent::Error { message } => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "the wire read after a palette pick must not fail: {errors:?}"
     );
 }
 
