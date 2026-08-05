@@ -118,10 +118,11 @@
   .tcard .id { font: 600 10px var(--mono); color: var(--muted);
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tcard.shared .id { color: var(--bound-text); }
-  .tcard .sub { display: flex; gap: 6px; align-items: baseline; }
-  .tcard .sub .rate { font: 10px var(--mono); color: var(--subtle); font-variant-numeric: tabular-nums; }
-  .tcard .sub .cyc  { font: 9px var(--mono); color: var(--dim); margin-left: auto; font-variant-numeric: tabular-nums; }
-  .tcard .sub .wf   { font: 9px var(--mono); color: var(--dim); }
+  .tcard .sub { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  .tcard .sub .rate { font: 10px var(--mono); color: var(--subtle); font-variant-numeric: tabular-nums; flex: none; }
+  .tcard .sub .cyc  { font: 9px var(--mono); color: var(--dim); margin-left: auto; font-variant-numeric: tabular-nums; flex: none; }
+  .tcard .sub .wf   { font: 9px var(--mono); color: var(--dim); min-width: 0;
+                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ---- shared hero bits --------------------------------------------- */
   .dg { font: 600 20px var(--mono); color: var(--strong);
@@ -373,7 +374,7 @@ amber while off-live. Speed is the log knob (׼–×8, detent at ×1, double-cli
           </div>
           <div class="btnrow">
             <button class="tbtn" data-runbtn><span class="glyph">❚❚</span></button>
-            <span class="livechip" data-livechip><b>12.0 s</b> back · tap = live</span>
+            <span class="livechip" data-livechip><b>−12.0 s</b> · live</span>
           </div>
         </div>
       </div>
@@ -410,7 +411,7 @@ center line = ×1, up = fast, snaps at the detent.</p>
             <div><span class="dg" data-dg>7:27</span></div>
             <span class="dg-label">clock time</span>
           </div>
-          <span class="livechip" data-livechip><b>12.0 s</b> back · tap = live</span>
+          <span class="livechip" data-livechip><b>−12.0 s</b> · live</span>
           <span class="hint-under">spin = scrub · fader = speed</span>
         </div>
       </div>
@@ -438,7 +439,7 @@ edge. Speed is a chip row — discrete detents rather than a knob.</p>
             <span class="dg" style="font-size:16px" data-dg>7:27</span>
           </span>
           <span class="chips" id="tp-chips" style="margin-left:auto"></span>
-          <span class="livechip" data-livechip><b>12.0 s</b> back · tap = live</span>
+          <span class="livechip" data-livechip><b>−12.0 s</b> · live</span>
         </div>
       </div>
     </div></div>
@@ -468,7 +469,7 @@ compete with the phasors for attention, this is the floor.</p>
           <span class="dg" style="font-size:17px" data-dg>7:27</span>
         </span>
         <span class="ratechip" id="hr-rate" title="drag = speed · double-click = ×1">×1</span>
-        <span class="livechip" data-livechip style="margin-left:auto"><b>12.0 s</b> back · tap = live</span>
+        <span class="livechip" data-livechip style="margin-left:auto"><b>−12.0 s</b> · live</span>
       </div>
     </div></div>
     <div class="section phasors"><div class="rail">phasors</div><div class="body">
@@ -641,7 +642,10 @@ const runBtns = [...document.querySelectorAll("[data-runbtn]")];
 for (const b of runBtns) b.addEventListener("click", () => { clock.running = !clock.running; });
 
 const liveChips = [...document.querySelectorAll("[data-livechip]")];
-for (const c of liveChips) c.addEventListener("click", () => { clock.offset = 0; });
+for (const c of liveChips) {
+  c.title = "scrubbed off-live — tap to return";
+  c.addEventListener("click", () => { clock.offset = 0; });
+}
 
 const digitEls = [...document.querySelectorAll("[data-dg]")];
 const rateReads = [...document.querySelectorAll("[data-rate-read]")];
@@ -868,10 +872,10 @@ function frame(now) {
   if (clock.offset !== cache.off) {
     cache.off = clock.offset;
     const show = Math.abs(clock.offset) > 0.05;
-    const dir = clock.offset < 0 ? "back" : "ahead";
+    const sign = clock.offset < 0 ? "−" : "+";
     for (const c of liveChips) {
       c.toggleAttribute("data-show", show);
-      if (show) c.innerHTML = `<b>${Math.abs(clock.offset).toFixed(1)} s</b> ${dir} · tap = live`;
+      if (show) c.innerHTML = `<b>${sign}${Math.abs(clock.offset).toFixed(1)} s</b> · live`;
     }
     document.getElementById("base-offset").textContent = clock.offset.toFixed(1) + " s";
   }
