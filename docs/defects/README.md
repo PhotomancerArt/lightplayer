@@ -241,6 +241,7 @@ the combination first being registered as a target.
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
 | budget-exhaustion | 2026-07-28 | [esp32c6-app-partition-overflow](2026-07-28-esp32c6-app-partition-overflow.md) | **open** (mitigated −42 KB) | lp-fw/fw-esp32 (partitions) |
+| unbounded-payload-on-bounded-transport | 2026-08-04 | [oversized-display-layout-wedges-project-read](2026-08-04-oversized-display-layout-wedges-project-read.md) | fixed | lpc-engine probe + lpc-shared transport |
 | ungated-variant | 2026-07-28 | [fw-esp32-harnesses-rotted-uncompiled](2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md) | fixed | lp-fw/fw-esp32c6 (src/tests/ + cfg gates) |
 | ungated-variant | 2026-07-30 | [stacked-prs-get-no-ci](2026-07-30-stacked-prs-get-no-ci.md) | fixed | .github/workflows/pre-merge.yml (trigger) |
 | lifecycle-ownership | 2026-07-16 | [browser-serial-endpoint-lost](2026-07-16-browser-serial-endpoint-lost.md) | fixed | lpa-link/registry |

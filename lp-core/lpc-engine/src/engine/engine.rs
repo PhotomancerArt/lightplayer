@@ -2031,6 +2031,20 @@ impl EngineResolveHost<'_> {
     }
 }
 
+/// The most bytes a serialized display layout may occupy and still ride one
+/// project-read frame alongside its probe header and frame envelope.
+///
+/// The transport rejects any single event larger than
+/// [`lpc_wire::PROJECT_READ_FRAME_MAX_BYTES`], and that rejection is terminal
+/// for the whole read stream — an over-budget layout wedges the entire
+/// project view, not just one probe. Until layouts stream in bounded chunks
+/// (the "semantic layout split" escalation noted in
+/// `lpc-wire`'s probe tests), an oversized layout is refused here as
+/// `Unsupported`, which clients already render as a graceful fallback. The
+/// 2 KiB margin covers the probe header (extent, sample layout, product) and
+/// the frame envelope around the event.
+const DISPLAY_LAYOUT_WIRE_BUDGET: usize = lpc_wire::PROJECT_READ_FRAME_MAX_BYTES - 2048;
+
 fn control_display_layout_result(
     control_node: &mut dyn crate::node::ControlNode,
     product: ControlProduct,
@@ -2054,7 +2068,19 @@ fn control_display_layout_result(
                 } if known == revision => {
                     Ok(ControlDisplayLayoutProbeResult::Unchanged { revision })
                 }
-                _ => Ok(ControlDisplayLayoutProbeResult::Layout(layout)),
+                _ => {
+                    let layout_len = lpc_wire::ser_write_json_len(&layout);
+                    if layout_len > DISPLAY_LAYOUT_WIRE_BUDGET {
+                        return Ok(ControlDisplayLayoutProbeResult::Unsupported {
+                            reason: alloc::format!(
+                                "display layout is {layout_len} bytes serialized, over the \
+                                 {DISPLAY_LAYOUT_WIRE_BUDGET}-byte wire budget; layouts this \
+                                 large need chunked streaming (not yet implemented)"
+                            ),
+                        });
+                    }
+                    Ok(ControlDisplayLayoutProbeResult::Layout(layout))
+                }
             }
         }
     }
