@@ -57,6 +57,7 @@ mod slot_dimensions_field;
 pub(crate) mod slot_edit_actions;
 mod slot_fields;
 mod slot_gesture_fields;
+mod slot_gradient_field;
 mod slot_issue_list;
 mod slot_matrix_field;
 mod slot_option_presence;
@@ -116,6 +117,7 @@ pub use slot_fields::{
 pub use slot_gesture_fields::{
     EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton,
 };
+pub use slot_gradient_field::{GradientDisplayDensity, GradientSlotField, GradientValueDisplay};
 pub use slot_issue_list::SlotIssueList;
 pub use slot_matrix_field::MatrixSlotField;
 pub use slot_option_presence::{

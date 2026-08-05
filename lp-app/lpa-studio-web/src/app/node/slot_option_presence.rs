@@ -115,6 +115,11 @@ impl OptionPresenceWidth {
             UiSlotEditorHint::Power if matches!(value.kind, UiSlotValueKind::Struct { .. }) => {
                 return Self::ExtraWide;
             }
+            // A palette strip wants the row's width, and its summary line
+            // ("cycle · 4 palettes · 3/min · 0.5 s fade") is wider still.
+            UiSlotEditorHint::Gradient if matches!(value.kind, UiSlotValueKind::Struct { .. }) => {
+                return Self::ExtraWide;
+            }
             _ => {}
         }
         match &value.kind {
@@ -446,8 +451,15 @@ mod tests {
         let xy = UiSlotValue::vec2([0.25, 0.75]).with_editor(UiSlotEditorHint::Xy);
         assert_eq!(tier(xy), Wide);
 
-        // ExtraWide: mat4 rows and the slider track + readout.
+        // ExtraWide: mat4 rows, the slider track + readout, and the palette
+        // strip with its summary line.
         assert_eq!(tier(UiSlotValue::mat4x4([[0.0; 4]; 4])), ExtraWide);
+        let gradient = UiSlotValue::struct_value(
+            Some("Gradient".to_string()),
+            vec![("space".to_string(), UiSlotValue::i32(4))],
+        )
+        .with_editor(UiSlotEditorHint::Gradient);
+        assert_eq!(tier(gradient), ExtraWide);
         let slider = UiSlotValue::f32(0.5).with_editor(UiSlotEditorHint::Slider {
             min: 0.0,
             max: 1.0,

@@ -746,6 +746,12 @@
   .tw\:shrink-0 {
     flex-shrink: 0;
   }
+  .tw\:grow {
+    flex-grow: 1;
+  }
+  .tw\:basis-0 {
+    flex-basis: calc(var(--tw-spacing) * 0);
+  }
   .tw\:basis-\[220px\] {
     flex-basis: 220px;
   }

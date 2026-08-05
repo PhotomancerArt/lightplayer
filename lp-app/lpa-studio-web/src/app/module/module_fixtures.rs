@@ -621,6 +621,7 @@ fn channel(
         primary_visual: false,
         contended: false,
         preview: None,
+        gradient: None,
         writers,
         readers,
     }
