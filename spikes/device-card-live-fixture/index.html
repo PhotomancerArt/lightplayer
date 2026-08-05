@@ -268,6 +268,17 @@
 <script>
 /* ================= state ================= */
 const ctl = { pattern: 'wave', layout: 'dome', fps: 30, hiccup: false };
+// hash presets, e.g. #hiccup,chase,rings,12 — for sharing a specific state
+for (const tok of location.hash.slice(1).split(',')) {
+  if (tok === 'hiccup') ctl.hiccup = true;
+  else if (['wave', 'chase', 'sparkle'].includes(tok)) ctl.pattern = tok;
+  else if (['dome', 'rings', 'matrix'].includes(tok)) ctl.layout = tok;
+  else if (['30', '12', '5'].includes(tok)) ctl.fps = +tok;
+}
+document.querySelectorAll('.controls .seg').forEach(b => {
+  const k = b.dataset.ctl, v = b.dataset.val;
+  b.setAttribute('aria-pressed', String(k === 'hiccup' ? ctl.hiccup : String(ctl[k]) === v));
+});
 document.querySelectorAll('.controls .seg').forEach(btn => {
   btn.addEventListener('click', () => {
     const k = btn.dataset.ctl, v = btn.dataset.val;
