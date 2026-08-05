@@ -156,6 +156,11 @@ pub fn HomeGallery(
                                 project_choices: home
                                     .projects
                                     .iter()
+                                    // A project this Studio cannot open is
+                                    // not a thing to put on a board — it is
+                                    // listed so it can be exported or
+                                    // deleted, not deployed.
+                                    .filter(|project| project.health.is_openable())
                                     .map(|project| lpa_studio_core::UiDeviceProjectChip {
                                         uid: project.uid.clone(),
                                         name: project.slug.clone(),
