@@ -25,6 +25,7 @@ use lpc_wire::{ServerHello, TransportError, WireServerMessage};
 use crate::provider::endpoint::LinkEndpointId;
 use crate::{
     LinkConnection, LinkConnector, LinkError, LinkProvider, LinkSession, LinkSessionStatus,
+    normalize_base_mac,
 };
 
 use super::device_client_io::DeviceClientIo;
@@ -83,6 +84,7 @@ impl DeviceSession {
             mode: Rc::new(Cell::new(DeviceMode::AppProtocol)),
             channel_busy: Cell::new(0),
             classifier: RefCell::new(BootLineClassifier::new()),
+            probed_mac: RefCell::new(None),
         });
         shared.sink.emit(DeviceEvent::State {
             from: None,
@@ -125,6 +127,7 @@ impl DeviceSession {
             recent_lines: self.shared.classifier.borrow().recent_lines().to_vec(),
             link_mode,
             detected_chip,
+            probed_mac: self.shared.probed_mac.borrow().clone(),
         }
     }
 
@@ -233,6 +236,12 @@ pub(crate) struct DeviceShared {
     /// Management refuses to take the wire while this is nonzero.
     channel_busy: Cell<u32>,
     classifier: RefCell<BootLineClassifier>,
+    /// The base MAC a download-mode session read, normalized. Deliberately
+    /// NOT part of the classifier: `rebuild_link` throws that away with each
+    /// link generation, and this fact is about the silicon, which a rebuild
+    /// does not change. A flash that reads a MAC and then reconnects must
+    /// still know whose board it just wrote.
+    probed_mac: RefCell<Option<String>>,
 }
 
 impl DeviceShared {
@@ -245,6 +254,25 @@ impl DeviceShared {
 
     pub(crate) fn state(&self) -> DeviceState {
         self.state.borrow().clone()
+    }
+
+    /// Record a base MAC a management operation's bootloader session
+    /// reported (acquisition rule A2), if it is one.
+    ///
+    /// The single validation gate for probed identity: providers hand over
+    /// whatever their flasher said — the browser one crosses untestable JS
+    /// to get here — and [`normalize_base_mac`] decides. Anything that is
+    /// not six hex octets is dropped, silently and on purpose: an invented
+    /// identity is worse than none, and no flash outcome depends on this.
+    ///
+    /// Never clears an already-recorded MAC. A later operation that fails to
+    /// read one has learned nothing about the board, and efuse does not
+    /// change under us.
+    pub(super) fn record_probed_mac(&self, reported: Option<&str>) {
+        let Some(mac) = reported.and_then(normalize_base_mac) else {
+            return;
+        };
+        *self.probed_mac.borrow_mut() = Some(mac);
     }
 
     pub(crate) fn timers(&self) -> &DeviceTimers {
