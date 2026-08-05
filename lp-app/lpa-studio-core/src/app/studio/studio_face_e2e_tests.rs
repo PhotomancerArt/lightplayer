@@ -1316,8 +1316,8 @@ fn fixture_display_layout(view: &UiStudioView) -> Option<lpc_model::ControlLayou
             face.preview.preview
         );
     };
-    match preview.display_layout {
-        Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) => Some(layout),
+    match preview.display_layout.as_deref() {
+        Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) => Some(layout.clone()),
         None => None,
     }
 }

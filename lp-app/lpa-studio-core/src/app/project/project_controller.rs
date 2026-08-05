@@ -1,6 +1,7 @@
 use core::future::Future;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
@@ -104,6 +105,16 @@ pub struct ProjectController {
     /// the body cache and stop qualifying; failures are remembered here so
     /// a broken read warns once instead of on every refresh.
     attempted_layout_document_fetches: BTreeSet<ArtifactLocation>,
+    /// Memoized display-layout syntheses, keyed per artifact by the exact
+    /// inputs that shape the geometry: a hash of the document body plus the
+    /// render extent. The engine re-refuses an over-budget layout every
+    /// tick, which re-marks the preview as missing every tick — without
+    /// this cache the fallback re-parsed and re-resolved a 1500-lamp
+    /// document per frame (a top slice of the 2026-08-05 editor-perf
+    /// trace). The cached layout keeps the revision it was synthesized at;
+    /// the refusal loop never compares it, and consumers only read
+    /// geometry.
+    synthesized_layout_cache: BTreeMap<ArtifactLocation, SynthesizedLayoutEntry>,
     /// The connected project's **server** filesystem root (e.g.
     /// `/projects/studio`), from the connect flow. Artifact locations are
     /// project-relative; the base-body fetch ([`Self::asset_content`])
@@ -232,6 +243,7 @@ impl ProjectController {
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
             attempted_layout_document_fetches: BTreeSet::new(),
+            synthesized_layout_cache: BTreeMap::new(),
             project_fs_root: None,
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
@@ -3505,6 +3517,7 @@ impl ProjectController {
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
         self.attempted_layout_document_fetches.clear();
+        self.synthesized_layout_cache.clear();
         self.project_fs_root = None;
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
@@ -3616,16 +3629,53 @@ impl ProjectController {
         if missing.is_empty() {
             return;
         }
-        // Synthesized under `&self` (the node tree and the asset body cache
-        // are both immutable reads), then installed — the sync mirror cannot
+        // Inputs gathered under `&self` (the node tree and the asset body
+        // cache are both immutable reads), then the cache consulted under
+        // `&mut self`, then the results installed — the sync mirror cannot
         // be borrowed mutably while either is in hand.
-        let synthesized: Vec<(UiProductRef, ControlDisplayLayout)> = missing
+        type LayoutInput = (
+            UiProductRef,
+            lpc_model::Revision,
+            ArtifactLocation,
+            String,
+            (u32, u32),
+            u64,
+        );
+        let inputs: Vec<LayoutInput> = missing
             .into_iter()
             .filter_map(|(product, revision)| {
-                let layout = self.synthesized_display_layout(&product, revision)?;
-                Some((product, ControlDisplayLayout::Layout2d(layout)))
+                let (artifact, text, extent) = self.synthesized_layout_inputs(&product)?;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::hash::DefaultHasher::new();
+                text.hash(&mut hasher);
+                extent.hash(&mut hasher);
+                Some((product, revision, artifact, text, extent, hasher.finish()))
             })
             .collect();
+        let mut synthesized: Vec<(UiProductRef, Rc<ControlDisplayLayout>)> = Vec::new();
+        for (product, revision, artifact, text, extent, input_hash) in inputs {
+            let cached = self
+                .synthesized_layout_cache
+                .get(&artifact)
+                .filter(|entry| entry.input_hash == input_hash);
+            let layout = if let Some(entry) = cached {
+                Rc::clone(&entry.layout)
+            } else {
+                let Some(layout) = synthesize_layout_from_text(revision, &text, extent) else {
+                    continue;
+                };
+                let layout = Rc::new(ControlDisplayLayout::Layout2d(layout));
+                self.synthesized_layout_cache.insert(
+                    artifact,
+                    SynthesizedLayoutEntry {
+                        input_hash,
+                        layout: Rc::clone(&layout),
+                    },
+                );
+                layout
+            };
+            synthesized.push((product, layout));
+        }
         let Some(sync) = self.sync.as_mut() else {
             return;
         };
@@ -3707,15 +3757,15 @@ impl ProjectController {
             .collect()
     }
 
-    /// The display layout `product`'s producing fixture would publish, built
-    /// from its map2d document. `None` unless the producer really is a
-    /// map2d fixture whose document is resolvable from what is already
-    /// local.
-    fn synthesized_display_layout(
+    /// The inputs the display-layout fallback synthesizes from: the mapping
+    /// artifact, its overlay-aware body text (an applied unsaved edit is
+    /// what the engine is running), and the fixture's render extent. `None`
+    /// unless the producer really is a map2d fixture whose document is
+    /// resolvable from what is already local.
+    fn synthesized_layout_inputs(
         &self,
         product: &UiProductRef,
-        revision: lpc_model::Revision,
-    ) -> Option<ControlLayout2d> {
+    ) -> Option<(ArtifactLocation, String, (u32, u32))> {
         let UiProductRef::Control { node_id, .. } = product else {
             return None;
         };
@@ -3725,12 +3775,10 @@ impl ProjectController {
         }
         let source = fixture_map2d_source(node)?;
         let artifact = self.resolve_node_asset_artifact(node, &source)?;
-        // The overlay-aware body: an applied (unsaved) mapping edit is what
-        // the engine is running, so it is what the layout must reflect.
         let content = self.asset_content_cached(&artifact)?;
-        let doc = lpc_mapping::Map2dDoc::from_json(content.text()?).ok()?;
+        let text = content.text()?.to_owned();
         let extent = fixture_render_size(node)?;
-        synthesized_map2d_layout(&doc, revision, extent.width, extent.height)
+        Some((artifact, text, (extent.width, extent.height)))
     }
 
     fn record_sync_failure(
@@ -4085,6 +4133,7 @@ impl ProjectController {
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
         self.attempted_layout_document_fetches.clear();
+        self.synthesized_layout_cache.clear();
         // Staged node removals materialized (files deleted); the records
         // backing their save-panel rows are done.
         self.staged_removals.clear();
@@ -4126,6 +4175,7 @@ impl ProjectController {
         // base bodies re-fetch on the next editor open (invalidate-on-clear).
         self.asset_base_bodies.clear();
         self.attempted_layout_document_fetches.clear();
+        self.synthesized_layout_cache.clear();
         // The wholesale Clear also un-stages every node removal (site edits
         // and Delete overlays included) — the records go with them.
         self.staged_removals.clear();
@@ -6427,6 +6477,28 @@ fn shader_source_path(node: &NodeController) -> Option<String> {
 /// mapping variant, and deliberately anchored at `mapping` — a fixture's
 /// `bindings` carry `source` fields too (`"bus:visual.out"`), and the enum
 /// variant's own path segment is not something this needs to spell out.
+/// One memoized display-layout synthesis (see
+/// `ProjectController::synthesized_layout_cache`).
+struct SynthesizedLayoutEntry {
+    /// Hash of the document body text + render extent that produced
+    /// `layout`.
+    input_hash: u64,
+    layout: Rc<ControlDisplayLayout>,
+}
+
+/// Parse and resolve a map2d document body into the display layout its
+/// fixture would publish. The slow half of the fallback — the cache in
+/// [`ProjectController::apply_synthesized_display_layouts`] makes sure it
+/// runs per document change, not per tick.
+fn synthesize_layout_from_text(
+    revision: lpc_model::Revision,
+    text: &str,
+    (width, height): (u32, u32),
+) -> Option<ControlLayout2d> {
+    let doc = lpc_mapping::Map2dDoc::from_json(text).ok()?;
+    synthesized_map2d_layout(&doc, revision, width, height)
+}
+
 fn fixture_map2d_source(node: &NodeController) -> Option<String> {
     fn find(slot: &SlotController) -> Option<String> {
         let segments = slot.address().path.segments();
