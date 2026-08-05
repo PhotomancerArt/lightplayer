@@ -424,3 +424,20 @@ escalate rather than widening the threshold.
   compile error is at the top of the step, thousands of lines above the
   failure line. Local prophylactic for studio-touching changes:
   `cargo check -p lpa-studio-web --target wasm32-unknown-unknown`.
+
+- 2026-08-05 — **The auto-commit can churn forever, and it looks like
+  ordinary drift.** On PR #349 (touching no clock-face code) two
+  consecutive green runs each fired the baseline auto-commit and moved the
+  same clock-face stories *back and forth*: run 30984999205 rewrote
+  `clock-face__crowd__lg` and `__shared__sm`, and run 30985988371 restored
+  both to **blob hashes byte-identical to main**. Filed as
+  `docs/defects/2026-08-05-clock-face-baselines-oscillate.md`
+  (`nondeterministic-capture`, open).
+  The operational lesson for this entry: the ADR's accepted tradeoff — merge
+  with the green run one commit behind the bot's — assumes the bot commit is
+  a one-time settling. Under oscillation the gap never closes, because the
+  next run disagrees with the one that just wrote, so waiting for
+  "green on the head" is an infinite loop. **When a baseline refresh lands,
+  diff its blob hashes against the PREVIOUS refresh, not only against main**;
+  a hash returning to an earlier value is the signature, and byte counts
+  alone hide it.
