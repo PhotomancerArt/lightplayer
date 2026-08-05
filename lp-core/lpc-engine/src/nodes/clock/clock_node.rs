@@ -130,10 +130,10 @@ impl ClockAccessors {
     fn compile(registry: &SlotShapeRegistry) -> Result<Self, lpc_model::SlotAccessorError> {
         Ok(Self {
             registry_revision: registry.revision(),
-            running: compile_clock_accessor("controls.running", registry)?,
-            rate: compile_clock_accessor("controls.rate", registry)?,
+            running: compile_clock_accessor("transport.running", registry)?,
+            rate: compile_clock_accessor("transport.rate", registry)?,
             scrub_offset_seconds: compile_clock_accessor(
-                "controls.scrub_offset_seconds",
+                "transport.scrub_offset_seconds",
                 registry,
             )?,
         })
@@ -214,9 +214,9 @@ mod tests {
                 .consumed_slot_path()
                 .ok_or_else(|| ResolveError::new(String::from("unexpected query kind")))?;
             let value = match path.to_string().as_str() {
-                "controls.running" => LpValue::Bool(self.running),
-                "controls.rate" => LpValue::F32(self.rate),
-                "controls.scrub_offset_seconds" => LpValue::F32(self.scrub_offset_seconds),
+                "transport.running" => LpValue::Bool(self.running),
+                "transport.rate" => LpValue::F32(self.rate),
+                "transport.scrub_offset_seconds" => LpValue::F32(self.scrub_offset_seconds),
                 other => {
                     return Err(ResolveError::new(alloc::format!("no control {other}")));
                 }
