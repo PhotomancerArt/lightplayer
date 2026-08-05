@@ -187,6 +187,13 @@ pub struct StudioController {
     /// grant produced one. Kept beside the session because the card key
     /// the executor addresses is derived from it.
     setup_device: Option<crate::RuntimeId>,
+    /// The device sessions that existed when the flow asked for its port.
+    /// `open_provider` is a long await (chooser, open, reset, boot wait)
+    /// that emits renders while the new session installs — before
+    /// `setup_device` can bind. Any session NOT in this snapshot is the
+    /// flow's own and stands down with it (the connect-window card flash,
+    /// G2 2026-08-05). Cleared when the port request settles.
+    setup_port_snapshot: Option<Vec<crate::RuntimeId>>,
     /// The layered settings store (user > host > baked defaults). Pure
     /// state: the platform edges load its layers and persist the user
     /// layer via [`Self::set_on_user_settings`].
@@ -285,6 +292,7 @@ impl StudioController {
             },
             setup: None,
             setup_device: None,
+            setup_port_snapshot: None,
             settings: crate::app::settings::SettingsStore::default(),
             on_user_settings: None,
             on_copy_text: None,
@@ -1173,10 +1181,22 @@ impl StudioController {
         // remembered card of a board we already know
         // ([`Self::setup_pre_verdict_session`]).
         let pre_verdict = self.setup_pre_verdict_session();
+        // …and during the port request itself the flow's session exists
+        // BEFORE the bind can land (`open_provider` is a long await that
+        // renders while the session installs — the connect-window card
+        // flash). Any session absent from the request's snapshot is the
+        // flow's own and stands down with it.
+        let unclaimed_newborn = |id: crate::RuntimeId| {
+            self.setup_flow_running()
+                && self
+                    .setup_port_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| !snapshot.contains(&id))
+        };
         let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
             .pool
             .device_sessions()
-            .filter(|session| Some(session.id()) != pre_verdict)
+            .filter(|session| Some(session.id()) != pre_verdict && !unclaimed_newborn(session.id()))
             .map(|session| self.device_evidence(session))
             .collect();
         // The connect NARRATION does still stand down while a flow is
@@ -3820,6 +3840,10 @@ impl StudioController {
             .device_sessions()
             .map(crate::RuntimeSession::id)
             .collect();
+        // Claim any session born during this request before it can render:
+        // the await below emits views while the session installs, and the
+        // bind only lands after it returns.
+        self.setup_port_snapshot = Some(before.clone());
         let outcome = self.device.open_provider(provider_id).await;
         // The chooser's own vocabulary: a grant that produced no session
         // is a cancel. Web Serial cannot tell "cancelled" from "the list
@@ -3859,6 +3883,8 @@ impl StudioController {
                         .map(crate::RuntimeSession::id)
                 }
             });
+        // The bind (or the cancel) supersedes the snapshot claim.
+        self.setup_port_snapshot = None;
         match granted {
             Some(device_id) => {
                 self.bind_setup_device(device_id);
@@ -8840,6 +8866,39 @@ mod tests {
             home.setup.expect("wizard").takeover_card.as_deref(),
             Some(home.devices[0].identity_key()),
         );
+    }
+
+    #[test]
+    fn a_session_born_during_the_port_request_never_renders_before_the_bind() {
+        // The connect-window card flash (G2, 2026-08-05): `open_provider`
+        // is a long await that emits renders while the new session
+        // installs, and `bind_setup_device` only runs after it returns.
+        // The request's snapshot claims the newborn for the flow.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        studio
+            .setup
+            .as_mut()
+            .expect("wizard")
+            .flow
+            .handle(crate::SetupEvent::ItsConnected);
+        // What run_setup_port_request does before the await:
+        studio.setup_port_snapshot = Some(vec![]);
+        // …and what the connect flow does DURING it:
+        let newborn = install_stub_device(&mut studio);
+        assert_eq!(studio.setup_device, None, "the bind has not landed yet");
+        let home = studio.view().home.expect("home view");
+        assert!(
+            home.devices.is_empty(),
+            "the flow's own newborn session must not flash a card; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        // A session that predates the request keeps its card.
+        studio.setup_port_snapshot = Some(vec![newborn]);
+        assert!(!studio.view().home.expect("home view").devices.is_empty());
     }
 
     #[test]
