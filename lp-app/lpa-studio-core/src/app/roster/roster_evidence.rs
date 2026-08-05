@@ -500,6 +500,8 @@ mod tests {
             last_seen_at: 50.0,
             association: None,
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         }
     }
 

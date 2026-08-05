@@ -916,6 +916,8 @@ mod tests {
                     last_seen_at: 5.0,
                     association: None,
                     board_id: None,
+                    hardware_id: None,
+                    previous_uids: Vec::new(),
                 })
                 .unwrap();
         }
@@ -997,6 +999,8 @@ mod tests {
                     at: 5.0,
                 }),
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
 
@@ -1037,6 +1041,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1076,6 +1082,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1116,6 +1124,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1179,6 +1189,8 @@ mod tests {
                     last_seen_at: seen,
                     association: None,
                     board_id: None,
+                    hardware_id: None,
+                    previous_uids: Vec::new(),
                 })
                 .unwrap();
         }
@@ -1240,6 +1252,8 @@ mod tests {
                 last_seen_at: 50.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
