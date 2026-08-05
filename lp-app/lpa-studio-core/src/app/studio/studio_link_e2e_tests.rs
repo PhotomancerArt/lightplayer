@@ -3286,6 +3286,95 @@ fn a_mac_board_is_still_pushed_through_the_naming_flow() {
     .expect("a named board pushes");
 }
 
+/// Erase amnesia, cured (design §6): erasing a named board wipes its
+/// projects and leaves the BOARD remembered. The registry row is not
+/// forgotten, and when the board comes back from a re-flash — same
+/// silicon, empty filesystem, nothing stamped anywhere — it lands on that
+/// same row, under its own name, without asking to be named again.
+///
+/// The old scheme could not do this: the erase took `/.lp/device.json`
+/// with it and the board reconnected as a stranger.
+#[test]
+fn erasing_a_board_keeps_it_remembered_and_it_comes_back_as_itself() {
+    use crate::HomeOp;
+    use crate::app::home::HOME_NODE_ID;
+
+    let (store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_base_mac(BENCH_MAC),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::NameDevice {
+            target: studio.device_target_for_test(),
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
+    .expect("naming dispatches");
+
+    drive(studio.dispatch(deploy_action(DeployOp::EraseDevice {
+        target: studio.device_target_for_test(),
+    })))
+    .expect("erase from the card is a success");
+    assert!(
+        matches!(
+            studio.device_state_for_test(),
+            Some(DeviceState::BlankFlash)
+        ),
+        "the erase landed: {:?}",
+        studio.device_state_for_test()
+    );
+    let rows = registry(&store);
+    assert_eq!(
+        rows.len(),
+        1,
+        "an erase wipes the board's projects, not our memory of it: {rows:?}"
+    );
+    assert_eq!(rows[0].name, "Luna's porch sign");
+
+    // Back from a re-flash: fresh firmware, empty filesystem — and the
+    // same efuse MAC, because nothing a flash tool does can change it.
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        target: studio.device_target_for_test(),
+        setup_name: None,
+        board_id: None,
+    })))
+    .expect("re-flash succeeds");
+
+    let sync = studio
+        .device_sync_for_test()
+        .expect("re-pulled after flash");
+    let identity = sync.identity.as_ref().expect("identified again");
+    assert_eq!(
+        identity.uid,
+        derived_uid(BENCH_MAC),
+        "the same board derives the same uid after an erase"
+    );
+    assert_eq!(
+        identity.name, "Luna's porch sign",
+        "it comes back under the name it was given"
+    );
+    assert_eq!(registry(&store).len(), 1, "no stranger row was created");
+    let states: Vec<_> = studio
+        .view()
+        .home
+        .expect("gallery shows")
+        .devices
+        .iter()
+        .filter(|card| !card.sim)
+        .map(|card| card.state.clone())
+        .collect();
+    assert!(
+        !states.contains(&crate::RosterCardState::NeedsAName),
+        "a remembered board is never asked for its name again: {states:?}"
+    );
+}
+
 /// D5 (clones): two live boards reporting one MAC. The newcomer stays
 /// ANONYMOUS — two cards sharing an `identity_key()` is a duplicate key
 /// in a Dioxus keyed list, which panics (the 2026-07-15 crash class) —

@@ -2341,6 +2341,11 @@ pub(super) fn flash_device_action_destructive(card_key: &str) -> UiAction {
 /// Erase the device's flash entirely, from the Danger tab. Confirmation
 /// states the honest facts: full wipe; anything Studio could read was
 /// banked at connect (D8) — unreadable content is gone for good.
+///
+/// What it no longer costs is the BOARD (device identity design §6): an
+/// erase takes the projects, not the identity, because the identity is
+/// the chip's own factory MAC. The board comes back as itself, under its
+/// own name, with its history intact.
 pub(crate) fn erase_device_action(card_key: &str, name: String) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DEPLOY_NODE_ID),
@@ -2352,7 +2357,8 @@ pub(crate) fn erase_device_action(card_key: &str, name: String) -> UiAction {
         "Erase device",
         format!(
             "Erase everything on \"{name}\"? Its flash is wiped clean; \
-                 anything Studio could read was already saved to your library."
+                 anything Studio could read was already saved to your library. \
+                 The board itself stays remembered — its identity is in its silicon."
         ),
         "Erase",
     ))

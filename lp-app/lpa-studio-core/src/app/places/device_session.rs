@@ -1,9 +1,18 @@
 //! Connect-is-a-pull (D8): what Studio learns — and banks — when it
 //! attaches to a real device.
 //!
-//! On attach the studio pulls the device's project copy, reads its
-//! identity (`/.lp/device.json` at the device's fs ROOT) and manifest,
-//! and relates the content to the library:
+//! On attach the studio pulls the device's project copy, reads the legacy
+//! identity file (`/.lp/device.json` at the device's fs ROOT) and the
+//! manifest, and relates the content to the library. The file is only
+//! evidence now — the session RESOLVES its identity from silicon first
+//! (`super::identity_resolution`, design §3) — but the read stays: it is
+//! rule A3, and it is what re-keys a legacy row at first sight.
+//!
+//! Because identity is known at attach, adoption runs THERE for any
+//! MAC-reporting board; `DeviceContent::PendingIdentity` is now only the
+//! A4 corner (no MAC, no stamp). Nothing waits for a provisioning stamp.
+//!
+//! The classifications:
 //!
 //! - **Known uid, known hash** → nothing to store (the library already
 //!   knows this version); a `Connected` observation is still recorded.

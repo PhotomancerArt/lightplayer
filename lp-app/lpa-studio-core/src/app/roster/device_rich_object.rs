@@ -259,8 +259,8 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
     }
     // The chip's OWN identity, from efuse. Worth its own line above the
     // capability gaps: unlike everything else here it is permanent — it
-    // survives an erase, which the `dev_…` uid does not, because that one
-    // lives in the device's filesystem.
+    // survives an erase, and since 2026-08-04 it is what the board's
+    // `dev_…` uid is DERIVED from, so the two lines say one thing.
     if let Some(hardware) = input.hardware {
         if let Some(mac) = hardware.base_mac.as_deref() {
             lines.push(RichLine::new("mac", mac));
@@ -474,10 +474,10 @@ mod tests {
 
     /// The chip's own efuse identity reaches the Technical tab (2026-08-03).
     ///
-    /// The MAC matters beyond display: it is the only identity of a board
-    /// that SURVIVES AN ERASE. The `dev_…` uid lives in the device
-    /// filesystem and dies with it, so before this the card had no
-    /// permanent way to say which physical board it was.
+    /// The MAC matters beyond display: it is the identity of a board that
+    /// SURVIVES AN ERASE, and the one the `dev_…` uid now derives from.
+    /// Before this the card had no permanent way to say which physical
+    /// board it was.
     #[test]
     fn the_technical_tab_reports_the_chips_own_identity() {
         let hardware = HardwareFacts {
