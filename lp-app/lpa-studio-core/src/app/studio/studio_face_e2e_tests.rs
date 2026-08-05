@@ -21,6 +21,7 @@ use lpc_model::{AsLpPath, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
+use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
@@ -1182,6 +1183,159 @@ fn every_gallery_example_opens_onto_a_populated_root_panel() {
     }
 }
 
+/// The phase's oracle: what Studio synthesizes client-side must be what the
+/// engine would have sent, field for field.
+///
+/// The face project's fixture is small (16 lamps), so the engine sends its
+/// display layout outright. Synthesizing from the SAME document at the same
+/// render extent and comparing the two layouts is the only check that keeps
+/// the mirrored construction (`control_display_layout_fallback`) honest as
+/// the engine's own layout builder evolves.
+#[test]
+fn synthesized_display_layout_matches_the_engines_own_layout() {
+    let server = Rc::new(RefCell::new(face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    // The connect read arms the product subscriptions; the probe answers on
+    // the next read.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+
+    let engine = fixture_display_layout(&snapshot)
+        .expect("a 16-lamp layout is far under the wire budget, so the engine sends it");
+    let doc = lpc_mapping::Map2dDoc::from_json(FACE_MAP2D).expect("the mapping document parses");
+
+    let synthesized = synthesized_map2d_layout(&doc, engine.revision, 4, 4)
+        .expect("the same document synthesizes client-side");
+
+    assert_eq!(
+        synthesized, engine,
+        "client synthesis and engine layout must agree on every lamp, hint, and path span"
+    );
+}
+
+/// Dome scale: the engine refuses the 1500-lamp layout (over the read-frame
+/// wire budget), and the client fills it in from the mapping document
+/// instead of leaving both faces reading "Control product has no display
+/// layout."
+#[test]
+fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
+    let example = crate::app::home::embedded_example("examples/zook-dome")
+        .expect("the zook-dome example ships in the bundle");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    // The connect read arms the product subscriptions; the probe answers on
+    // the next read.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+
+    // The engine refused the layout and the mapping body has not been
+    // fetched yet, so there is nothing to synthesize from either.
+    assert!(
+        fixture_display_layout(&snapshot).is_none(),
+        "the dome layout is over the wire budget, so the engine sends none"
+    );
+
+    // The fixture face's mapping editor fetches the document — the same
+    // gesture the web component makes when the card mounts.
+    let Some(UiNodeFace::Fixture(face)) = node_by_kind(&snapshot, "Fixture").face else {
+        panic!("the dome fixture wears a fixture face");
+    };
+    let editor = face
+        .mapping_editor
+        .expect("a map2d fixture carries the in-face mapping editor");
+    handle.tx.send(StudioCommand::Action(editor.fetch_action()));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+
+    let layout = fixture_display_layout(&snapshot)
+        .expect("with the document local, the client synthesizes the layout the engine refused");
+    assert_eq!(layout.lamps.len(), 1500, "every dome lamp is laid out");
+    assert_eq!(
+        (layout.width_hint, layout.height_hint),
+        (32, 32),
+        "the hints are the fixture's own render size"
+    );
+    assert_eq!(layout.lamps[0].lamp_index, 0);
+    assert_eq!(layout.lamps[0].sample_start, 0);
+    assert_eq!(layout.lamps[1499].lamp_index, 1499);
+    assert_eq!(
+        layout.lamps[1499].sample_start, 4497,
+        "the last lamp's RGB triple starts at 1499 * 3"
+    );
+    assert_eq!(
+        layout.paths.len(),
+        10,
+        "one span per document object (five channels, two runs each)"
+    );
+    assert_eq!(
+        layout.paths.iter().map(|span| span.lamp_count).sum::<u32>(),
+        1500,
+        "the spans cover the whole chain"
+    );
+    for lamp in &layout.lamps {
+        assert!(
+            (0.0..=1.0).contains(&lamp.center[0]) && (0.0..=1.0).contains(&lamp.center[1]),
+            "lamp {} fits the render target",
+            lamp.lamp_index
+        );
+    }
+}
+
+/// The 2D display layout riding the fixture card's face preview, when there
+/// is one.
+///
+/// This is the exact value both G1 symptoms read: a control-first module's
+/// output hero re-homes onto the scope's `control.out` product and pulls its
+/// preview out of the same product-keyed cache, so filling this in fills in
+/// that face too.
+fn fixture_display_layout(view: &UiStudioView) -> Option<lpc_model::ControlLayout2d> {
+    let Some(UiNodeFace::Fixture(face)) = node_by_kind(view, "Fixture").face else {
+        panic!("fixture face present");
+    };
+    let crate::UiProductPreview::ControlNative(preview) = face.preview.preview else {
+        panic!(
+            "the fixture's produced control product previews natively, got {:?}",
+            face.preview.preview
+        );
+    };
+    match preview.display_layout {
+        Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) => Some(layout),
+        None => None,
+    }
+}
+
 // -- harness -----------------------------------------------------------------
 
 /// A server holding one embedded gallery example, loaded from the very
@@ -1216,6 +1370,16 @@ const PROJECT_DIR: &str = "/projects/face-e2e";
 
 /// The shader uses the panel uniform so its compile stays honest.
 const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
+
+/// The face fixture's mapping document — 16 lamps, small enough that the
+/// engine sends its display layout outright, which makes it the parity
+/// oracle for the client-side synthesis.
+const FACE_MAP2D: &str = r#"{
+  "format": 1,
+  "objects": [
+    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  ]
+}"#;
 
 fn face_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
@@ -1291,12 +1455,6 @@ fn face_e2e_server() -> LpServer {
     "output": { "target": "bus:control.out" }
   }
 }"#;
-    let map2d_json = r#"{
-  "format": 1,
-  "objects": [
-    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
-  ]
-}"#;
     let output_json = r#"{
   "kind": "Output",
   "channels": {
@@ -1314,7 +1472,7 @@ fn face_e2e_server() -> LpServer {
         ("clock.json", clock_json),
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),
-        ("sign.map2d.json", map2d_json),
+        ("sign.map2d.json", FACE_MAP2D),
         ("output.json", output_json),
         ("shader.glsl", FACE_SHADER),
     ];
