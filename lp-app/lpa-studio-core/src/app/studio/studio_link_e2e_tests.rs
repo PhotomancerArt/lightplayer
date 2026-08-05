@@ -918,6 +918,8 @@ fn device_rename_reconciles_registry_name_over_the_link() {
             last_seen_at: 1.0,
             association: None,
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         })
         .unwrap();
     registry
@@ -2343,6 +2345,8 @@ fn push_progress_stays_on_the_live_card() {
             last_seen_at: 1.0,
             association: None,
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         })
         .unwrap();
 
@@ -2445,6 +2449,8 @@ fn diverged_board_fixture(
                 at: 1.0,
             }),
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         })
         .unwrap();
     if local_moves_after_push {

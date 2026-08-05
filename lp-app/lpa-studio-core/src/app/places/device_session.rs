@@ -253,6 +253,8 @@ pub fn registry_entry_for(
         last_seen_at: now,
         association: None,
         board_id: None,
+        hardware_id: None,
+        previous_uids: Vec::new(),
     }
 }
 
@@ -573,6 +575,8 @@ mod tests {
             last_seen_at: 50.0,
             association: None,
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         }
     }
 
