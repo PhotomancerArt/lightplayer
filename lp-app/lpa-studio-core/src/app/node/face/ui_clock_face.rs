@@ -14,7 +14,9 @@
 //! are the consuming node's business. The one place a phasor's period IS
 //! editable is the consuming shader's own period knob.
 
-use crate::{UiProducedProduct, UiProducedValue};
+use lpc_model::Waveform;
+
+use crate::UiProducedProduct;
 
 /// Kind-specific face for a clock node.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,19 +24,21 @@ pub struct UiClockFace {
     /// The published time-product row: identity, detail, and the `bus:time`
     /// binding chip. The same row the produced-products section carries.
     pub product: UiProducedProduct,
-    /// Plain produced readings kept beside the listing (`seconds`,
-    /// `delta_seconds`) — the numbers the product handle no longer puts on
-    /// the bus, still produced-but-unbound for exactly this reason.
-    pub readings: Vec<UiProducedValue>,
+    /// The clock's effective seconds as text ("42.35"), rendered tiny and
+    /// muted in the PHASORS section header (clock-face v2 — the Delta row
+    /// is gone outright; delta was "not useful at all" at the G2 gate).
+    pub seconds: Option<String>,
     /// What the timebase probe last said about this product.
     pub timebase: UiTimebaseState,
-    /// Live integrators riding this timebase, in store order.
+    /// Trace cards, one per downstream READING riding this timebase, in
+    /// store order (a shared integrator contributes one card per reader).
     ///
     /// **Empty is a normal state**, not a failure: a project whose shaders
     /// declare no phasor has none, and so does one whose phasors have all
-    /// gone idle. Rows are inherently transient — a phasor no consumer asked
-    /// for in the last couple of seconds is simply gone from the next read.
-    pub phasors: Vec<UiPhasorRow>,
+    /// gone idle. Cards are inherently transient — a phasor no consumer
+    /// asked for in the last couple of seconds is simply gone from the next
+    /// read.
+    pub phasors: Vec<UiPhasorReading>,
 }
 
 /// The timebase probe's verdict for a clock's product.
@@ -52,40 +56,44 @@ pub enum UiTimebaseState {
     Unknown,
 }
 
-/// One live phasor integrator, prepared for display.
+/// One downstream reading of a live phasor, prepared for a trace card.
 ///
 /// Read-only by construction: there is nothing here a client could use to
-/// address the integrator, only enough provenance to *name* it in a row.
+/// address the integrator, only enough provenance to *name* the card and
+/// enough shaping to *draw* the consumer's actual waveform.
 #[derive(Clone, Debug, PartialEq)]
-pub struct UiPhasorRow {
-    /// Who this integrator belongs to: the consuming node ("plasma"), or the
-    /// bus channel every reader of it shares ("bus:speed").
-    pub origin: String,
-    /// What sits behind the origin: the CONSUMED slot for a private
-    /// integrator (the uniform's own path — two uniforms on one node are
-    /// two integrators), or the scope for a shared one.
+pub struct UiPhasorReading {
+    /// Who reads it: "plasma · phase" (reader node label · consumed slot),
+    /// with the departed-node fallback ("node 8 · phase"). A row the probe
+    /// caught before its first tick-side reading landed falls back to the
+    /// integrator's own origin name so the card count never flickers to
+    /// zero.
+    pub label: String,
+    /// The shared channel behind a shared integrator ("bus:speed in Orbit")
+    /// — `None` for a private one. Tooltip fodder; the violet border is the
+    /// visible signal.
     pub detail: Option<String>,
     /// The integrator is keyed by a `(scope, channel)` config channel, so
     /// **every reader of that channel rides this one phase** (parent D3).
-    /// A private integrator (keyed by node + slot) is nobody else's.
+    /// Violet border + violet id per the bound-violet convention; the trace
+    /// itself stays black-and-white.
     pub shared: bool,
-    /// Wrapped cycle position in `[0,1)` — the geometry the position bar
-    /// follows. Quantized with [`Self::phase_display`], so a slow phasor's
-    /// row only changes when its readout does.
+    /// Wrapped cycle position in `[0,1)` at the probe — the RAW ramp. The
+    /// trace extrapolates from here between probes (`φ + elapsed/T`) and
+    /// corrects when the next probe lands.
     pub phase: f32,
-    /// The phase as text (≤2 decimals).
-    ///
-    /// The RAW ramp: `waveform` and `phase_offset` are per-consumer output
-    /// shaping applied AFTER the store, so one shared integrator has exactly
-    /// one phase and possibly several differently-shaped readings of it.
-    /// Listing a waveform here would have to pick one reader's and call it
-    /// the phasor's — so the listing reports the phase, never a shaped value.
-    pub phase_display: String,
     /// Completed cycles since the integrator materialized.
     pub cycle: u32,
-    /// The period the integrator last advanced at, as text ("4s"), or
-    /// "frozen" when the rate is zero.
-    pub period_display: String,
+    /// The period the integrator last advanced at, in seconds. `0.0` means
+    /// frozen — the trace holds still.
+    pub period_seconds: f32,
+    /// Auto-denominated rate ("2/s", "3/min", "15/hr"; frozen = "0/s") —
+    /// the unit-awareness principle, same string the speed knob shows.
+    pub rate_display: String,
+    /// This reader's output shaping — what the trace actually draws.
+    pub waveform: Waveform,
+    /// Added to the wrapped phase before shaping.
+    pub phase_offset: f32,
 }
 
 impl UiClockFace {
@@ -94,10 +102,50 @@ impl UiClockFace {
     pub fn new(product: UiProducedProduct) -> Self {
         Self {
             product,
-            readings: Vec::new(),
+            seconds: None,
             timebase: UiTimebaseState::Unread,
             phasors: Vec::new(),
         }
+    }
+}
+
+/// A period presented as an auto-denominated rate: `0.5` → `2/s`, `20` →
+/// `3/min`, `240` → `15/hr` (G2 convergence — pick the smallest time unit
+/// that keeps the number ≥ 1, so the reading is always a natural count; the
+/// unit is part of the string). A frozen phasor (period ≤ 0, or non-finite)
+/// never cycles: `0/s`.
+#[must_use]
+pub fn phasor_rate_display(period_seconds: f32) -> String {
+    if !period_seconds.is_finite() || period_seconds <= 0.0 {
+        return "0/s".to_string();
+    }
+    // Smallest unit whose count reaches 1; /hr is the floor either way.
+    let (count, unit) = [(1.0, "s"), (60.0, "min"), (3600.0, "hr")]
+        .into_iter()
+        .map(|(seconds, unit)| (seconds / period_seconds, unit))
+        .find(|(count, unit)| *count >= 1.0 || *unit == "hr")
+        .expect("the ladder always yields");
+    let number = if count >= 9.95 {
+        format!("{}", count.round() as i64)
+    } else {
+        let rounded = (count * 10.0).round() / 10.0;
+        if rounded.fract() == 0.0 {
+            format!("{}", rounded as i64)
+        } else {
+            format!("{rounded:.1}")
+        }
+    };
+    format!("{number}/{unit}")
+}
+
+/// [`phasor_rate_display`] over a formatted period reading — the shape the
+/// panel readout path has in hand. A reading that does not parse passes
+/// through untouched.
+#[must_use]
+pub fn phasor_speed_display(shown: &str) -> String {
+    match shown.trim().parse::<f32>() {
+        Ok(period) => phasor_rate_display(period),
+        Err(_) => shown.to_string(),
     }
 }
 
@@ -157,5 +205,28 @@ mod tests {
         // Two ticks a hair apart read the same, so the row does not change.
         assert_eq!(format_phase(0.123_4), format_phase(0.124_9));
         assert_eq!(format_phase(f32::NAN), "—");
+    }
+
+    /// The auto-denominated ladder (G2 convergence): smallest unit keeping
+    /// the count ≥ 1, unit riding the string, frozen = 0/s.
+    #[test]
+    fn rates_auto_denominate_and_frozen_never_cycles() {
+        assert_eq!(phasor_rate_display(0.5), "2/s");
+        assert_eq!(phasor_rate_display(20.0), "3/min");
+        assert_eq!(phasor_rate_display(240.0), "15/hr");
+        assert_eq!(phasor_rate_display(100.0), "36/hr");
+        assert_eq!(phasor_rate_display(1.0), "1/s");
+        assert_eq!(phasor_rate_display(0.0), "0/s");
+        assert_eq!(phasor_rate_display(-3.0), "0/s");
+        assert_eq!(phasor_rate_display(f32::NAN), "0/s");
+    }
+
+    /// The string entry point (panel readouts): parses and delegates, and a
+    /// non-numeric reading passes through untouched.
+    #[test]
+    fn speed_display_parses_or_passes_through() {
+        assert_eq!(phasor_speed_display("0.5"), "2/s");
+        assert_eq!(phasor_speed_display("  20 "), "3/min");
+        assert_eq!(phasor_speed_display("frozen"), "frozen");
     }
 }

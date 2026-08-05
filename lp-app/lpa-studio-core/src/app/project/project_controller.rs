@@ -2612,7 +2612,7 @@ impl ProjectController {
                     crate::UiTimebaseState::Live,
                     phasors
                         .iter()
-                        .map(|row| controller.ui_phasor_row(row))
+                        .flat_map(|row| controller.ui_phasor_readings(row))
                         .collect(),
                 ),
                 Some(crate::UiTimebaseRead::Unknown) => {
@@ -2635,55 +2635,82 @@ impl ProjectController {
         }
     }
 
-    /// One wire phasor row → its display row.
+    /// One wire phasor row → its trace cards, one per downstream READING
+    /// (clock-face v2; the flattening the G2 gate converged on).
     ///
-    /// The two origins are the two ways a phasor gets its identity, and the
-    /// listing names them the way a reader would ask about them:
+    /// Cards are named by the READER — "plasma · phase", with the
+    /// departed-node fallback "node 8 · phase" — because "what is riding
+    /// this clock" is a question about consumers. The integrator's own
+    /// identity survives as the `shared` flag plus a channel detail:
     ///
-    /// - **`Node`** — config private to one node's slot. Named by that
-    ///   node's card title when the tree still carries it ("plasma"), with
-    ///   the slot path as the detail. Nobody else rides this phase.
-    /// - **`Channel`** — config driven by a bus channel. Named `bus:<name>`,
-    ///   and marked SHARED: every reader of that `(scope, channel)` is on
-    ///   this one integrator (parent D3), so moving its period moves all of
-    ///   them at once. That consequence is the single most useful thing the
-    ///   listing can say, which is why `shared` is a field and not a hint.
-    fn ui_phasor_row(&self, row: &lpc_wire::WirePhasorRow) -> crate::UiPhasorRow {
-        let (origin, detail, shared) = match &row.origin {
-            lpc_wire::WirePhasorOrigin::Node { node, slot } => {
-                let id = lpc_model::NodeId::new(*node);
-                let name = self
-                    .node_by_runtime_id(id)
-                    .map(|node| node.label().to_string())
-                    // A node that just left the tree still has rows in the
-                    // store until the next sweep; naming it by id beats
-                    // dropping the row and pretending it stopped.
-                    .unwrap_or_else(|| format!("node {node}"));
-                (name, Some(slot.clone()), false)
-            }
+    /// - **`Node`** origin — config private to one node's slot. Its one
+    ///   reading IS that node; nobody else rides this phase.
+    /// - **`Channel`** origin — config driven by a bus channel: every
+    ///   reader of that `(scope, channel)` is on one integrator (parent
+    ///   D3), so each of its cards wears the violet shared treatment and
+    ///   names the channel in `detail`.
+    ///
+    /// A row with NO readings yet (the probe can race the first tick-side
+    /// query) falls back to one unshaped card named by the origin, so the
+    /// card count never flickers to zero.
+    fn ui_phasor_readings(&self, row: &lpc_wire::WirePhasorRow) -> Vec<crate::UiPhasorReading> {
+        let node_label = |node: u32| {
+            self.node_by_runtime_id(lpc_model::NodeId::new(node))
+                .map(|node| node.label().to_string())
+                // A node that just left the tree still has rows in the
+                // store until the next sweep; naming it by id beats
+                // dropping the card and pretending it stopped.
+                .unwrap_or_else(|| format!("node {node}"))
+        };
+        let (shared, detail) = match &row.origin {
+            lpc_wire::WirePhasorOrigin::Node { .. } => (false, None),
             lpc_wire::WirePhasorOrigin::Channel { scope, channel } => {
-                let owner = self
-                    .node_by_runtime_id(scope.owner())
-                    .map(|node| node.label().to_string())
-                    .unwrap_or_else(|| format!("node {}", scope.owner().0));
-                let detail = match scope {
+                let owner = node_label(scope.owner().0);
+                let place = match scope {
                     lpc_wire::WireScopeRef::Module { .. } => format!("in {owner}"),
                     lpc_wire::WireScopeRef::Sink { entry, .. } => {
                         format!("in {owner} entry {entry}")
                     }
                 };
-                (format!("bus:{channel}"), Some(detail), true)
+                (true, Some(format!("bus:{channel} {place}")))
             }
         };
-        crate::UiPhasorRow {
-            origin,
-            detail,
-            shared,
-            phase: row.phase,
-            phase_display: crate::format_phase(row.phase),
-            cycle: row.cycle,
-            period_display: crate::format_period_seconds(row.period_seconds),
+        let card = |label: String,
+                    waveform: lpc_model::Waveform,
+                    phase_offset: f32|
+         -> crate::UiPhasorReading {
+            crate::UiPhasorReading {
+                label,
+                detail: detail.clone(),
+                shared,
+                phase: row.phase,
+                cycle: row.cycle,
+                period_seconds: row.period_seconds,
+                rate_display: crate::phasor_rate_display(row.period_seconds),
+                waveform,
+                phase_offset,
+            }
+        };
+        if row.readings.is_empty() {
+            // Unshaped fallback named by the integrator's own origin.
+            let label = match &row.origin {
+                lpc_wire::WirePhasorOrigin::Node { node, slot } => {
+                    format!("{} · {slot}", node_label(*node))
+                }
+                lpc_wire::WirePhasorOrigin::Channel { channel, .. } => format!("bus:{channel}"),
+            };
+            return vec![card(label, lpc_model::Waveform::Ramp, 0.0)];
         }
+        row.readings
+            .iter()
+            .map(|reading| {
+                card(
+                    format!("{} · {}", node_label(reading.node), reading.slot),
+                    reading.waveform,
+                    reading.phase_offset,
+                )
+            })
+            .collect()
     }
 
     /// One module card's face. `None` when the card's address resolves to no
@@ -9252,17 +9279,19 @@ mod tests {
         view
     }
 
-    /// P7 item 4: the listing names the SOURCE a reader can go look at, and
-    /// marks the one fact that changes what a period edit means — whether
-    /// the integrator is shared.
+    /// Clock-face v2: one card per downstream READING, named by the reader;
+    /// a shared integrator fans out one violet card per reader; a row the
+    /// probe caught before its first reading falls back to one origin-named
+    /// card so the count never flickers to zero.
     #[test]
-    fn phasor_rows_name_their_origin_and_mark_the_shared_ones() {
+    fn phasor_rows_flatten_into_reader_named_cards() {
         let view = single_node_view(1, NodeRuntimeStatus::Ok);
         let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
 
-        let private = project.ui_phasor_row(&lpc_wire::WirePhasorRow {
+        // A private row with its own reading: one card, reader-named.
+        let private = project.ui_phasor_readings(&lpc_wire::WirePhasorRow {
             origin: lpc_wire::WirePhasorOrigin::Node {
                 node: 1,
                 slot: "phase".to_string(),
@@ -9270,23 +9299,28 @@ mod tests {
             phase: 0.256,
             cycle: 3,
             period_seconds: 4.0,
-            readings: vec![],
+            readings: vec![lpc_wire::WirePhasorReading {
+                node: 1,
+                slot: "phase".to_string(),
+                waveform: lpc_model::Waveform::Sine,
+                phase_offset: 0.25,
+            }],
         });
+        assert_eq!(private.len(), 1);
         assert_eq!(
-            private.origin, "Orbit",
-            "named by the consuming node's card"
+            private[0].label, "Orbit · phase",
+            "reader node label · consumed slot"
         );
-        assert_eq!(
-            private.detail.as_deref(),
-            Some("phase"),
-            "the CONSUMED slot, which is what makes the key private"
-        );
-        assert!(!private.shared, "a node+slot key is nobody else's");
-        assert_eq!(private.phase_display, "0.26");
-        assert_eq!(private.period_display, "4s");
-        assert_eq!(private.cycle, 3);
+        assert!(!private[0].shared, "a node+slot key is nobody else's");
+        assert_eq!(private[0].detail, None);
+        assert_eq!(private[0].rate_display, "15/min");
+        assert_eq!(private[0].waveform, lpc_model::Waveform::Sine);
+        assert_eq!(private[0].phase_offset, 0.25);
+        assert_eq!((private[0].phase, private[0].cycle), (0.256, 3));
 
-        let shared = project.ui_phasor_row(&lpc_wire::WirePhasorRow {
+        // A shared row with two readers: two cards, both violet, each with
+        // its OWN shaping of the one cycle, channel named in the detail.
+        let shared = project.ui_phasor_readings(&lpc_wire::WirePhasorRow {
             origin: lpc_wire::WirePhasorOrigin::Channel {
                 scope: lpc_wire::WireScopeRef::Module {
                     owner: lpc_model::NodeId::new(1),
@@ -9296,32 +9330,57 @@ mod tests {
             phase: 0.5,
             cycle: 0,
             period_seconds: 0.0,
-            readings: vec![],
+            readings: vec![
+                lpc_wire::WirePhasorReading {
+                    node: 1,
+                    slot: "wave".to_string(),
+                    waveform: lpc_model::Waveform::Ramp,
+                    phase_offset: 0.0,
+                },
+                lpc_wire::WirePhasorReading {
+                    node: 99,
+                    slot: "wave".to_string(),
+                    waveform: lpc_model::Waveform::Square,
+                    phase_offset: 0.5,
+                },
+            ],
         });
-        assert_eq!(shared.origin, "bus:speed");
-        assert_eq!(shared.detail.as_deref(), Some("in Orbit"));
+        assert_eq!(shared.len(), 2, "one card per reader of the channel");
+        assert_eq!(shared[0].label, "Orbit · wave");
+        // A node the tree no longer carries still has readings in the store
+        // until the next sweep: name it by id rather than dropping it.
+        assert_eq!(shared[1].label, "node 99 · wave");
+        assert!(shared.iter().all(|card| card.shared));
         assert!(
-            shared.shared,
-            "a channel-keyed integrator is every reader's at once"
+            shared
+                .iter()
+                .all(|card| card.detail.as_deref() == Some("bus:speed in Orbit")),
+            "{shared:?}"
         );
         assert_eq!(
-            shared.period_display, "frozen",
-            "a zero period holds the phase; the row says so rather than printing a rate"
+            shared[0].rate_display, "0/s",
+            "frozen never cycles (unit-awareness: the rate says 0, not a period)"
         );
+        assert_eq!(shared[1].waveform, lpc_model::Waveform::Square);
 
-        // A node the tree no longer carries still has rows in the store
-        // until the next sweep: name it by id rather than dropping it.
-        let orphan = project.ui_phasor_row(&lpc_wire::WirePhasorRow {
-            origin: lpc_wire::WirePhasorOrigin::Node {
-                node: 99,
-                slot: "x".to_string(),
+        // No readings yet (probe raced the first advance): one fallback
+        // card named by the origin, unshaped.
+        let fallback = project.ui_phasor_readings(&lpc_wire::WirePhasorRow {
+            origin: lpc_wire::WirePhasorOrigin::Channel {
+                scope: lpc_wire::WireScopeRef::Module {
+                    owner: lpc_model::NodeId::new(1),
+                },
+                channel: "speed".to_string(),
             },
-            phase: 0.0,
+            phase: 0.5,
             cycle: 0,
-            period_seconds: 1.0,
+            period_seconds: 2.0,
             readings: vec![],
         });
-        assert_eq!(orphan.origin, "node 99");
+        assert_eq!(fallback.len(), 1, "the card count never drops to zero");
+        assert_eq!(fallback[0].label, "bus:speed");
+        assert_eq!(fallback[0].waveform, lpc_model::Waveform::Ramp);
+        assert_eq!(fallback[0].phase_offset, 0.0);
     }
 
     /// P7 item 4, the decoration seam: the listing is engine state, so it
@@ -9382,8 +9441,8 @@ mod tests {
         let (state, rows) = listing(&nodes);
         assert_eq!(state, crate::UiTimebaseState::Live);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].origin, "Orbit");
-        assert_eq!(rows[0].period_display, "4s");
+        assert_eq!(rows[0].label, "Orbit · phase");
+        assert_eq!(rows[0].rate_display, "15/min");
 
         // A live answer with no rows is STILL Live: nothing is riding it.
         project.sync_mut().unwrap().set_timebase_for_test(

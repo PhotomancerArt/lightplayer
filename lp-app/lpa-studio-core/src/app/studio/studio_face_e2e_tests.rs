@@ -163,12 +163,8 @@ fn node_faces_derive_and_edit_end_to_end() {
         "the handle names the clock's own node and output"
     );
     assert!(
-        face.readings.iter().any(|value| value.key == "seconds"),
-        "the plain seconds readings stay beside the handle, got {:?}",
-        face.readings
-            .iter()
-            .map(|value| value.key.as_str())
-            .collect::<Vec<_>>()
+        face.seconds.is_some(),
+        "the seconds readout rides the face for the section header"
     );
     // No timebase probe has answered in this harness, and "no read yet" is
     // deliberately NOT the same state as an empty listing.
