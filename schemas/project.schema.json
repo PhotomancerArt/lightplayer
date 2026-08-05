@@ -12,6 +12,11 @@
       "title": "Human-readable project name",
       "type": "string"
     },
+    "target": {
+      "description": "A board catalog id in the registry's vendor/product vocabulary (e.g. espressif/esp32-c6-devkitc-1), the same strings as RegisteredDevice.board_id. Advisory only — the engine never reads it.",
+      "title": "Advisory board target",
+      "type": "string"
+    },
     "uid": {
       "title": "Stable project identity (prj_…, base-62)",
       "type": "string"
