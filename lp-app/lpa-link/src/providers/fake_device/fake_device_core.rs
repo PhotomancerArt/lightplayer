@@ -273,6 +273,7 @@ impl FakeDeviceCore {
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
+        let base_mac = lp.base_mac.clone();
         let hello_identity = lp
             .provenance
             .clone()
@@ -298,6 +299,14 @@ impl FakeDeviceCore {
                 }
             }
             let mut server = create_memory_server_with(fs, hello_identity);
+            // The efuse half of the hello: only the embedder can read it,
+            // so the fake plays embedder here (A1 identity evidence).
+            if base_mac.is_some() {
+                server.set_hardware_identity(lpc_wire::HardwareIdentity {
+                    base_mac: base_mac.clone(),
+                    ..lpc_wire::HardwareIdentity::default()
+                });
+            }
             if load_at_boot {
                 // the real-hardware shape: firmware auto-resumes its
                 // startup project before serving (fw-esp32c6 boot.rs)

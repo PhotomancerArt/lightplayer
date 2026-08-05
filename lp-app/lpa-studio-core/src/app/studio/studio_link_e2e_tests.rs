@@ -2971,6 +2971,476 @@ fn an_op_aimed_at_no_live_board_refuses_instead_of_picking_one() {
     );
 }
 
+// ---------------------------------------------------------------------
+// Device identity anchored in silicon (design §3/§4): the connect path
+// resolves A1–A4, migrates legacy rows at first sight, and refuses to
+// let two boards share one identity.
+// ---------------------------------------------------------------------
+
+/// A1, end to end: a board that reports its efuse MAC is identified by
+/// SILICON — no stamp, no file — and its uid is the deterministic
+/// derivation of that MAC.
+///
+/// And the rule that keeps the registry honest (design §4 step 4): being
+/// seen is not being remembered. A board nobody has adopted, provisioned,
+/// or named registers NOTHING; the card carries the whole story.
+#[test]
+fn a_mac_only_board_derives_its_uid_and_registers_nothing() {
+    let (store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_base_mac(BENCH_MAC),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync_for_test().expect("pull landed");
+    let identity = sync.identity.as_ref().expect("silicon is an identity");
+    assert_eq!(identity.uid, derived_uid(BENCH_MAC));
+    assert_eq!(identity.name, "", "a MAC names nothing — the user does");
+    assert!(
+        registry(&store).is_empty(),
+        "a sighting alone never registers a board: {:?}",
+        registry(&store)
+    );
+    // and the naming flow is still insisted on: identity ≠ named
+    assert!(
+        studio
+            .view()
+            .home
+            .expect("gallery shows")
+            .devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::NeedsAName),
+        "an unnamed MAC board still asks for a name"
+    );
+}
+
+/// The migration (design §4 steps 1–2): a board remembered under the uid
+/// a stamp gave it shows up carrying BOTH that stamp and its MAC. The row
+/// moves to the derived uid at first sight, keeping its name, its board,
+/// and its association — and recording where it came from so old history
+/// events still resolve.
+#[test]
+fn a_stamped_board_rekeys_its_legacy_registry_row_at_first_sight() {
+    let (store, host) = library();
+    seed_registry(
+        &store,
+        crate::app::places::RegisteredDevice {
+            uid: STAMPED_UID.to_string(),
+            name: "Luna's porch sign".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 10.0,
+            association: None,
+            board_id: Some("esp32-c6-devkit".to_string()),
+            hardware_id: None,
+            previous_uids: Vec::new(),
+        },
+    );
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_MAC)
+            .with_identity(FakeDeviceIdentity::new(STAMPED_UID, "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync_for_test().expect("pull landed");
+    let identity = sync.identity.as_ref().expect("identified");
+    assert_eq!(
+        identity.uid,
+        derived_uid(BENCH_MAC),
+        "silicon outranks the stamp"
+    );
+    assert_eq!(
+        identity.name, "Luna's porch sign",
+        "D34: the registry names the device, not the device's file"
+    );
+
+    let rows = registry(&store);
+    assert_eq!(rows.len(), 1, "moved, not duplicated: {rows:?}");
+    assert_eq!(rows[0].uid, derived_uid(BENCH_MAC));
+    assert_eq!(rows[0].name, "Luna's porch sign");
+    assert_eq!(rows[0].board_id.as_deref(), Some("esp32-c6-devkit"));
+    assert_eq!(
+        rows[0].previous_uids,
+        vec![STAMPED_UID.to_string()],
+        "the old uid is kept so old history events still resolve"
+    );
+    assert_eq!(
+        rows[0].hardware_id.as_deref(),
+        Some(format!("efuse:{BENCH_MAC}").as_str())
+    );
+}
+
+/// Design §4 step 3: the board was sighted under BOTH schemes (a stamped
+/// row from before, a derived row from a studio that already saw its
+/// MAC). The rows merge into the derived key rather than one shadowing
+/// the other.
+#[test]
+fn rows_under_both_uids_merge_into_the_derived_one() {
+    let (store, host) = library();
+    seed_registry(
+        &store,
+        crate::app::places::RegisteredDevice {
+            uid: STAMPED_UID.to_string(),
+            name: "Luna's porch sign".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 10.0,
+            association: None,
+            board_id: Some("esp32-c6-devkit".to_string()),
+            hardware_id: None,
+            previous_uids: Vec::new(),
+        },
+    );
+    seed_registry(
+        &store,
+        crate::app::places::RegisteredDevice {
+            uid: derived_uid(BENCH_MAC),
+            name: String::new(),
+            transport: String::new(),
+            last_seen_at: 20.0,
+            association: None,
+            board_id: None,
+            hardware_id: Some(format!("efuse:{BENCH_MAC}")),
+            previous_uids: Vec::new(),
+        },
+    );
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_MAC)
+            .with_identity(FakeDeviceIdentity::new(STAMPED_UID, "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let rows = registry(&store);
+    assert_eq!(rows.len(), 1, "one board, one row: {rows:?}");
+    assert_eq!(rows[0].uid, derived_uid(BENCH_MAC));
+    assert_eq!(
+        rows[0].name, "Luna's porch sign",
+        "the named row's name survives the merge"
+    );
+    assert_eq!(rows[0].board_id.as_deref(), Some("esp32-c6-devkit"));
+    assert_eq!(rows[0].previous_uids, vec![STAMPED_UID.to_string()]);
+}
+
+/// A3/D6, unchanged: pre-hello-MAC firmware (and host-class embedders)
+/// keep the stamped uid as their identity. Nothing is re-keyed, and the
+/// row records that its identity was minted rather than read.
+#[test]
+fn a_board_with_no_mac_keeps_its_stamped_identity() {
+    let (store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(STAMPED_UID, "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync_for_test().expect("pull landed");
+    let identity = sync.identity.as_ref().expect("the stamp is the identity");
+    assert_eq!(identity.uid, STAMPED_UID);
+    assert_eq!(identity.name, "Bench board");
+
+    let rows = registry(&store);
+    assert_eq!(rows.len(), 1, "a stamped board still registers on sight");
+    assert_eq!(rows[0].uid, STAMPED_UID);
+    assert_eq!(rows[0].hardware_id.as_deref(), Some("minted"));
+    assert!(rows[0].previous_uids.is_empty(), "nothing was re-keyed");
+}
+
+/// A failed efuse read reports all-zeroes. Trusting it would hand every
+/// board whose read failed the SAME identity, so it is treated as no MAC
+/// at all and the board falls back to its stamp (A3).
+#[test]
+fn an_all_zero_mac_is_treated_as_no_mac() {
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac("00:00:00:00:00:00")
+            .with_identity(FakeDeviceIdentity::new(STAMPED_UID, "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync_for_test().expect("pull landed");
+    assert_eq!(
+        sync.identity.as_ref().map(|identity| identity.uid.as_str()),
+        Some(STAMPED_UID),
+        "a failed read is evidence of nothing"
+    );
+}
+
+/// Unknown content on a MAC-identified board ADOPTS at connect (design
+/// §5): the uid exists from the first hello, so there is nothing left for
+/// `PendingIdentity` to wait for. Adoption is also the event that earns
+/// the board its registry row.
+#[test]
+fn unknown_content_on_a_mac_board_adopts_instead_of_pending_identity() {
+    let (store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_MAC)
+            .with_project_files(project_files("wild")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync_for_test().expect("pull landed");
+    assert!(
+        matches!(&sync.content, DeviceContent::Adopted { .. }),
+        "a MAC board's unknown project adopts, got {:?}",
+        sync.content
+    );
+    let rows = registry(&store);
+    assert_eq!(rows.len(), 1, "adoption remembers the board: {rows:?}");
+    assert_eq!(rows[0].uid, derived_uid(BENCH_MAC));
+    assert_eq!(
+        rows[0].hardware_id.as_deref(),
+        Some(format!("efuse:{BENCH_MAC}").as_str())
+    );
+}
+
+/// The product rule the uid must not quietly repeal: a MAC board HAS an
+/// identity from its first hello, but it has no NAME, so the flow still
+/// gently insists on one — the card asks, a push refuses until it is
+/// answered, and the answer lands on the derived uid's row.
+#[test]
+fn a_mac_board_is_still_pushed_through_the_naming_flow() {
+    use crate::HomeOp;
+    use crate::app::home::HOME_NODE_ID;
+
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_base_mac(BENCH_MAC),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let refused = drive(studio.dispatch(deploy_action(DeployOp::PushProject {
+        target: studio.device_target_for_test(),
+        key: summary.uid.to_string(),
+    })));
+    assert!(
+        matches!(refused, Err(crate::UiError::MissingSession(ref message))
+            if message.contains("no named device")),
+        "an unnamed board is not pushable, uid or no uid: {refused:?}"
+    );
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::NameDevice {
+            target: studio.device_target_for_test(),
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
+    .expect("naming dispatches");
+
+    let sync = studio
+        .device_sync_for_test()
+        .expect("re-pulled after naming");
+    let identity = sync.identity.as_ref().expect("identified");
+    assert_eq!(
+        identity.uid,
+        derived_uid(BENCH_MAC),
+        "the name lands on the SILICON's uid, not the one the stamp minted"
+    );
+    assert_eq!(identity.name, "Luna's porch sign");
+    let rows = registry(&store);
+    assert_eq!(rows.len(), 1, "one board, one row: {rows:?}");
+    assert_eq!(rows[0].uid, derived_uid(BENCH_MAC));
+    assert_eq!(rows[0].name, "Luna's porch sign");
+
+    drive(studio.dispatch(deploy_action(DeployOp::PushProject {
+        target: studio.device_target_for_test(),
+        key: summary.uid.to_string(),
+    })))
+    .expect("a named board pushes");
+}
+
+/// D5 (clones): two live boards reporting one MAC. The newcomer stays
+/// ANONYMOUS — two cards sharing an `identity_key()` is a duplicate key
+/// in a Dioxus keyed list, which panics (the 2026-07-15 crash class) —
+/// and the console says plainly what happened.
+#[test]
+fn a_second_board_with_the_same_mac_stays_anonymous_and_warns() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac(BENCH_MAC),
+        )),
+        FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac(BENCH_MAC),
+        )),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &first_id).expect("first board connects");
+    connect_through_link(&mut studio, &second_id).expect("second board connects");
+
+    let home = studio.view().home.expect("gallery shows");
+    let boards: Vec<_> = home.devices.iter().filter(|card| !card.sim).collect();
+    assert_eq!(boards.len(), 2, "both boards still render");
+    let uids: Vec<Option<&str>> = boards.iter().map(|card| card.uid.as_deref()).collect();
+    assert!(
+        uids.contains(&Some(derived_uid(BENCH_MAC).as_str())),
+        "the first board keeps the identity: {uids:?}"
+    );
+    assert!(
+        uids.contains(&None),
+        "the clone stays anonymous rather than sharing a key: {uids:?}"
+    );
+    assert_ne!(
+        boards[0].render_key(),
+        boards[1].render_key(),
+        "two live cards must never share a render key"
+    );
+    let logs = studio.logs();
+    assert!(
+        logs.iter().any(|entry| {
+            entry.level == crate::UiLogLevel::Warn && entry.message.contains("same hardware id")
+        }),
+        "the duplicate is reported, not swallowed: {:?}",
+        logs.iter().map(|entry| &entry.message).collect::<Vec<_>>()
+    );
+}
+
+/// Design §6: card UI state survives the anonymous → identified key flip.
+///
+/// A card keys by its session while the board is anonymous and by its
+/// `dev_…` uid the moment identity resolves, so state built on the
+/// anonymous card orphans at the flip — the same 2026-08-02 wart
+/// `migrate_card_op` carries op flows across. Naming an anonymous board
+/// is the flip that is easiest to drive; a blank board's first hello
+/// after a flash takes exactly the same path.
+#[test]
+fn card_ui_state_survives_the_identity_key_flip() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{CardUiOp, DeviceCardTab, HomeOp};
+
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let card_key = device_card_key(&studio);
+    assert!(
+        card_key.starts_with("runtime-"),
+        "the board is anonymous to start: {card_key}"
+    );
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::CardUi(CardUiOp::SelectTab {
+            card: card_key.clone(),
+            tab: DeviceCardTab::Danger,
+        }),
+    )))
+    .expect("tab select dispatches");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::NameDevice {
+            target: studio.device_target_for_test(),
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
+    .expect("naming dispatches");
+
+    let flipped = device_card_key(&studio);
+    assert!(
+        flipped.starts_with("dev_"),
+        "identity arrived and the key flipped: {flipped}"
+    );
+    let view = studio.view();
+    let card = view
+        .home
+        .as_ref()
+        .expect("gallery shows")
+        .devices
+        .iter()
+        .find(|card| !card.sim)
+        .expect("the board's card");
+    assert_eq!(
+        card.ui.tab,
+        DeviceCardTab::Danger,
+        "the open tab followed the card across the flip"
+    );
+}
+
+/// The base MAC the identity fakes report — a plausible Espressif OUI, in
+/// the canonical lowercase spelling the hello uses.
+const BENCH_MAC: &str = "60:55:f9:0a:0b:0c";
+
+/// The `dev_` uid a legacy stamp gave the same board.
+const STAMPED_UID: &str = "dev_aaaaaaaaaaaaaaaa";
+
+/// The uid `mac` derives to — computed through the production derivation
+/// so the tests assert the RELATIONSHIP, never a hand-copied string (the
+/// derivation itself is pinned by a golden in `hardware_id.rs`).
+fn derived_uid(mac: &str) -> String {
+    crate::app::places::HardwareId::from_base_mac(mac)
+        .expect("a well-formed MAC")
+        .device_uid()
+        .to_string()
+}
+
+fn registry(store: &LibraryStore) -> Vec<crate::app::places::RegisteredDevice> {
+    crate::app::places::DeviceRegistry::new(store.fs_handle())
+        .list()
+        .expect("the registry reads")
+}
+
+fn seed_registry(store: &LibraryStore, entry: crate::app::places::RegisteredDevice) {
+    crate::app::places::DeviceRegistry::new(store.fs_handle())
+        .upsert(entry)
+        .expect("the registry writes");
+}
+
+/// The one live board's card key (`identity_key()`).
+fn device_card_key(studio: &StudioController) -> String {
+    studio
+        .view()
+        .home
+        .expect("gallery shows")
+        .devices
+        .iter()
+        .find(|card| !card.sim)
+        .expect("the board's card")
+        .identity_key()
+        .to_string()
+}
+
 fn studio_with_two_fake_devices(
     first: FakeDeviceScript,
     second: FakeDeviceScript,

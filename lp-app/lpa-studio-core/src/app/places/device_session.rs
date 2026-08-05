@@ -36,7 +36,11 @@ use crate::{UiError, UiLogDraft};
 /// attach time and held while the device stays connected.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceSyncState {
-    /// Stamped identity, when `/.lp/device.json` exists on the device.
+    /// The identity this session RESOLVED (see
+    /// `super::identity_resolution`): the uid derived from the board's
+    /// efuse MAC, else a legacy stamped uid, else `None` for a board
+    /// that can name neither. The `name` is the registry's (D34) and may
+    /// be empty — an identified board is not a named one.
     pub identity: Option<DeviceIdentity>,
     pub content: DeviceContent,
 }
@@ -60,10 +64,16 @@ pub enum DeviceContent {
         slug: String,
         observed: ContentHash,
     },
-    /// A project the library doesn't know, on a device with no stamped
-    /// identity: adoption waits for provisioning to stamp a `dev_` uid
-    /// (the deploy wizard re-pulls after stamping). Classification only —
-    /// nothing is persisted for anonymous hardware.
+    /// A project the library doesn't know, on a board with NO identity at
+    /// all: adoption waits until the board can be attributed (the deploy
+    /// wizard re-pulls after naming). Classification only — nothing is
+    /// persisted for anonymous hardware.
+    ///
+    /// This is rule A4's corner now
+    /// (`docs/adr/2026-08-04-device-identity-anchored-in-silicon.md`): a
+    /// board that reports its efuse MAC has a uid from its first hello,
+    /// so its unknown content ADOPTS at connect. Old firmware with no
+    /// MAC and no stamp is what still lands here.
     PendingIdentity { observed: ContentHash },
     /// Files exist but the manifest is missing/unparseable. Not fatal:
     /// the link stays usable (flash/erase still work).
@@ -284,6 +294,17 @@ pub fn upsert_device_merged(
         // provisioning (or a future hello report), never on sight.
         if device.board_id.is_none() {
             device.board_id = existing.board_id;
+        }
+        // So does the migration trail (device identity design §4): the
+        // uids this board used to wear are what make its OLD history
+        // events resolve, and a sighting is the one event that must never
+        // cost a device its past. The re-key writes them; every later
+        // sighting carries them forward.
+        if device.previous_uids.is_empty() {
+            device.previous_uids = existing.previous_uids;
+        }
+        if device.hardware_id.is_none() {
+            device.hardware_id = existing.hardware_id;
         }
         if !existing.name.is_empty() {
             device.name = existing.name;
@@ -755,6 +776,36 @@ mod tests {
         let listed = registry.list().unwrap();
         assert_eq!(listed[0].last_seen_at, 99.0);
         assert_eq!(listed[0].association, seeded.association);
+    }
+
+    #[test]
+    fn registry_merge_preserves_the_rekey_trail() {
+        // device identity design §4: the sighting that FOLLOWS a re-key
+        // carries a fresh entry (no previous_uids, and only the origin
+        // the live session resolved). Neither may erase what the re-key
+        // recorded — the old uids are what resolve this device's older
+        // history events.
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        let mut rekeyed = device();
+        rekeyed.previous_uids = vec!["dev_000000000000old1".to_string()];
+        rekeyed.hardware_id = Some("efuse:aa:bb:cc:dd:ee:ff".to_string());
+        registry.upsert(rekeyed).unwrap();
+
+        let mut sighting = device();
+        sighting.last_seen_at = 99.0;
+        upsert_device_merged(&store, sighting).unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(
+            listed[0].previous_uids,
+            vec!["dev_000000000000old1".to_string()]
+        );
+        assert_eq!(
+            listed[0].hardware_id.as_deref(),
+            Some("efuse:aa:bb:cc:dd:ee:ff")
+        );
+        assert_eq!(listed[0].last_seen_at, 99.0);
     }
 
     #[test]
