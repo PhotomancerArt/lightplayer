@@ -85,23 +85,30 @@ const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 
 /// How many RMT channels this driver lets transmit **at the same time**.
 ///
-/// The bound is the chip's interrupt budget, not the RMT's. With the
+/// The bound is interrupt-service margin, not an RMT limitation. With the
 /// four-channel block plan every transmitter wants a refill each 80 µs
-/// (12.5 k/s per channel), against a measured per-core ISR delivery ceiling
-/// of ~46–55 k/s ([`super::v3_rmt::plan_for_declared`]'s table). Four
-/// concurrent transmitters demand 50 k/s — arithmetically marginal, and the
-/// 2026-08-04 G2 measurement on the DOM-Z-102 app path showed what marginal
-/// means in practice: the two last-started channels starved (guard trips on
-/// ~99 % of frames — strands visibly truncated). Two concurrent transmitters
-/// demand 25 k/s, comfortably inside the ceiling.
+/// (12.5 k/s per channel) against a measured per-core ISR delivery ceiling of
+/// ~46–55 k/s ([`super::v3_rmt::plan_for_declared`]'s table). Measured
+/// 2026-08-04 on the DOM-Z-102 app path (900 LEDs, 4×225, quiet-covered by
+/// the provider's flush barrier): **both 2 and 4 concurrent run clean**
+/// (zero guard trips), and at this scale the same fps — but their margins
+/// differ sharply. At 2 concurrent the worst entry delay was 8 words of the
+/// 64-word deadline; at 4 concurrent it was 53. Two is the shipped default
+/// because that margin has to survive things this measurement did not
+/// exercise; four (50 k/s demand) is the measured, one-line lever if
+/// dome-scale wire time ever needs halving again.
 ///
-/// Starts past the cap wait in [`Ws281xOutput::start`] for a slot to free.
-/// With deferred completion (the output provider waits for a frame at the
-/// *next* write of the same channel), a four-wire flush becomes two waves:
-/// the first pair costs nothing, the second pair blocks roughly one wave's
-/// wire time — and the second wave's transmission still overlaps the next
-/// frame's render.
-const MAX_CONCURRENT_TX: usize = 1;
+/// ⚠️ Any transmission this cap admits is only safe while the CPU quietly
+/// spins: this chip's app path masks interrupts in stretches long enough to
+/// blow the 80 µs refill deadline, so a wire transmitting while the engine
+/// runs truncates on nearly every frame (measured before the barrier
+/// existed). The provider's end-of-flush barrier is what guarantees quiet
+/// coverage — see `Esp32OutputProvider::flush`.
+///
+/// Starts past the cap wait in [`Ws281xOutput::start`] for a slot to free, so
+/// a four-wire flush is two waves of two and costs roughly two wave wire
+/// times, versus four sequentially before this seam existed.
+const MAX_CONCURRENT_TX: usize = 2;
 
 /// Channels currently transmitting a frame, across the whole driver.
 fn transmitting_channels() -> usize {
@@ -541,14 +548,17 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
             return Ok(());
         };
 
-        // The hang detector: a frame that outlives its deadline is aborted and
-        // reported rather than wedging the render loop forever. The deadline
-        // is measured from `start`, so in the deferred pattern — start all
-        // wires, render the next frame, wait here — a healthy frame has long
-        // finished and this loop never spins at all.
+        // The hang detector: a frame that outlives its deadline is aborted
+        // and reported rather than wedging the render loop forever. The
+        // deadline runs from `start` — under the provider's flush barrier a
+        // healthy frame is waited out here well inside it. The deadline check
+        // reads a timer over APB and is throttled so the common case is a
+        // pure SRAM-atomic spin.
         let mut timed_out = false;
+        let mut iterations = 0u32;
         while !DRIVER.is_complete(self.channel) {
-            if in_flight.started.elapsed() > FRAME_TIMEOUT {
+            iterations = iterations.wrapping_add(1);
+            if iterations % 1024 == 0 && in_flight.started.elapsed() > FRAME_TIMEOUT {
                 timed_out = true;
                 DRIVER.abort(self.channel);
                 break;
