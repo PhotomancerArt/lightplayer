@@ -36,6 +36,9 @@ pub struct StudioServerClient {
     /// this refreshes on every wire operation — the lens pull cadence while
     /// editing, the attach sequence on connect.
     last_recovery: Option<lpc_wire::server::RecoveryStatus>,
+    /// The latest heartbeat-reported per-wire output status — same cadence
+    /// and freshness caveats as [`Self::last_recovery`].
+    last_output_status: Option<Vec<lpc_wire::server::OutputWireStatus>>,
 }
 
 impl StudioServerClient {
@@ -46,6 +49,7 @@ impl StudioServerClient {
             protocol: protocol.into(),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
+            last_output_status: None,
         }
     }
 
@@ -64,6 +68,7 @@ impl StudioServerClient {
             protocol,
             pending_logs,
             last_recovery: None,
+            last_output_status: None,
         })
     }
 
@@ -76,6 +81,7 @@ impl StudioServerClient {
             protocol: connection_protocol(&session.connection().kind),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
+            last_output_status: None,
         }
     }
 
@@ -134,6 +140,9 @@ impl StudioServerClient {
         if let Some(recovery) = latest_recovery(&events) {
             self.last_recovery = Some(recovery.clone());
         }
+        if let Some(outputs) = latest_output_status(&events) {
+            self.last_output_status = Some(outputs.clone());
+        }
         map_client_events(events)
     }
 
@@ -141,6 +150,12 @@ impl StudioServerClient {
     /// arrived on this client yet.
     pub fn recovery_status(&self) -> Option<&lpc_wire::server::RecoveryStatus> {
         self.last_recovery.as_ref()
+    }
+
+    /// The latest heartbeat-reported per-wire output status, if any
+    /// heartbeat carrying one has arrived on this client yet.
+    pub fn output_wire_status(&self) -> Option<&[lpc_wire::server::OutputWireStatus]> {
+        self.last_output_status.as_deref()
     }
 
     /// Open a library project on the runtime: whole-project replace →
@@ -818,6 +833,19 @@ fn latest_recovery(events: &[ClientEvent]) -> Option<&lpc_wire::server::Recovery
     })
 }
 
+/// The newest heartbeat-reported per-wire output status in an event batch.
+fn latest_output_status(
+    events: &[ClientEvent],
+) -> Option<&Vec<lpc_wire::server::OutputWireStatus>> {
+    events.iter().rev().find_map(|event| match event {
+        ClientEvent::Heartbeat {
+            outputs: Some(outputs),
+            ..
+        } => Some(outputs),
+        _ => None,
+    })
+}
+
 /// Map side-channel client events to console log drafts.
 ///
 /// Healthy heartbeats are telemetry, not log content: they arrive every
@@ -1085,6 +1113,7 @@ mod tests {
             uptime_ms: 1_000,
             memory: None,
             recovery,
+            outputs: None,
         }
     }
 

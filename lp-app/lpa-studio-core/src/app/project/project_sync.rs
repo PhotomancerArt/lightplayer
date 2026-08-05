@@ -483,12 +483,69 @@ impl ProjectSync {
         }
     }
 
+    /// Control products whose latest preview carries no display layout,
+    /// paired with that preview's product revision — the candidates for the
+    /// client-side fallback
+    /// ([`crate::app::project::control_display_layout_fallback`]).
+    ///
+    /// A layout is missing whenever the engine refused it (over the wire
+    /// budget, or a producer that publishes none) and nothing cached stands
+    /// in, which is exactly the state
+    /// [`display_layout_from_probe_result`]'s `Unsupported` arm leaves
+    /// behind.
+    pub(in crate::app::project) fn control_products_missing_display_layout(
+        &self,
+    ) -> Vec<(UiProductRef, Revision)> {
+        self.product_previews
+            .iter()
+            .filter_map(|(product, preview)| match preview {
+                UiProductPreview::ControlNative(preview) if preview.display_layout.is_none() => {
+                    Some((*product, Revision::new(preview.revision)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Install a client-synthesized display layout on a cached control
+    /// preview. A no-op when the preview is gone or is not a native control
+    /// preview — the fallback never creates preview state of its own.
+    pub(in crate::app::project) fn set_control_display_layout(
+        &mut self,
+        product: &UiProductRef,
+        layout: Rc<ControlDisplayLayout>,
+    ) {
+        if let Some(UiProductPreview::ControlNative(preview)) =
+            self.product_previews.get_mut(product)
+        {
+            preview.display_layout = Some(layout);
+        }
+    }
+
+    /// What the next probe should ask for: nothing new while the cached
+    /// layout's revision still stands, otherwise the whole layout.
+    ///
+    /// A client-synthesized layout ([`Self::set_control_display_layout`])
+    /// rides this the same way an engine-sent one does, carrying the
+    /// preview's PRODUCT revision rather than the engine's layout revision —
+    /// the refusal never tells us the latter. Both answers the engine can
+    /// give back are correct:
+    ///
+    /// - the revisions differ (the normal case, since the product revision
+    ///   advances every tick), so the engine re-evaluates, refuses again,
+    ///   and the fallback re-synthesizes from the current document;
+    /// - they coincide, so the engine answers `Unchanged` and the cached
+    ///   synthesis is kept — which is what a matching layout revision means
+    ///   anyway: the geometry has not moved.
+    ///
+    /// Neither path issues an extra request or loses the layout, so the
+    /// fallback cannot churn the read loop.
     fn display_layout_read_for(&self, product: UiProductRef) -> ControlDisplayLayoutRead {
         match self
             .product_previews
             .get(&product)
             .and_then(control_preview_display_layout)
-            .map(ControlDisplayLayout::revision)
+            .map(|layout| layout.revision())
         {
             Some(revision) => ControlDisplayLayoutRead::IfChanged {
                 known_revision: Some(revision),
@@ -513,8 +570,7 @@ impl ProjectSync {
             }) => {
                 let product_ref = UiProductRef::from_control_product(*product);
                 let cached = self.product_previews.get(&product_ref);
-                let display_layout =
-                    display_layout_from_probe_result(display_layout, cached).cloned();
+                let display_layout = display_layout_from_probe_result(display_layout, cached);
                 Some((
                     product_ref,
                     UiProductPreview::ControlNative(UiControlProductPreview {
@@ -790,23 +846,30 @@ fn timebase_from_probe(probe: &ProjectProbeResult) -> Option<(UiProductRef, UiTi
     }
 }
 
-fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&ControlDisplayLayout> {
+fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&Rc<ControlDisplayLayout>> {
     match preview {
         UiProductPreview::ControlNative(preview) => preview.display_layout.as_ref(),
         _ => None,
     }
 }
 
-fn display_layout_from_probe_result<'a>(
-    result: &'a ControlDisplayLayoutProbeResult,
-    cached: Option<&'a UiProductPreview>,
-) -> Option<&'a ControlDisplayLayout> {
+/// The layout the fresh preview should carry. Reuses the cached `Rc` on the
+/// per-tick `Unchanged`/`Omitted` paths — a dome-scale layout is 1500 lamps,
+/// and deep-copying it every tick was a measurable slice of the 2026-08-05
+/// editor-perf trace. Only a genuinely new engine-sent layout allocates.
+fn display_layout_from_probe_result(
+    result: &ControlDisplayLayoutProbeResult,
+    cached: Option<&UiProductPreview>,
+) -> Option<Rc<ControlDisplayLayout>> {
     match result {
-        ControlDisplayLayoutProbeResult::Layout(layout) => Some(layout),
+        ControlDisplayLayoutProbeResult::Layout(layout) => Some(Rc::new(layout.clone())),
         ControlDisplayLayoutProbeResult::Unchanged { revision } => cached
             .and_then(control_preview_display_layout)
-            .filter(|layout| layout.revision() == *revision),
-        ControlDisplayLayoutProbeResult::Omitted => cached.and_then(control_preview_display_layout),
+            .filter(|layout| layout.revision() == *revision)
+            .cloned(),
+        ControlDisplayLayoutProbeResult::Omitted => {
+            cached.and_then(control_preview_display_layout).cloned()
+        }
         ControlDisplayLayoutProbeResult::Unsupported { .. } => None,
     }
 }
@@ -1336,7 +1399,7 @@ mod tests {
                 extent: product.preferred_extent(),
                 sample_format: UiControlSampleFormat::U16,
                 sample_layout,
-                display_layout: Some(display_layout),
+                display_layout: Some(Rc::new(display_layout)),
                 bytes: Rc::from(second_bytes.as_slice()),
             }))
         );
@@ -1347,7 +1410,7 @@ mod tests {
     }
 
     fn overlay_test_path() -> SlotPath {
-        SlotPath::parse("controls.rate").unwrap()
+        SlotPath::parse("transport.rate").unwrap()
     }
 
     fn put_cmd(id: u64, value: f32) -> (MutationCmd, MutationEffect) {

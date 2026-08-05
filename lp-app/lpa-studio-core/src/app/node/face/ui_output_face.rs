@@ -45,6 +45,10 @@ pub struct UiOutputFace {
     /// project running, or the input is unbound) — in which case the remainder
     /// channel's [`UiOutputChannelRow::resolved_count`] is unknown too.
     pub total_lamps: Option<u32>,
+    /// The board's measured LED envelope vs the project's total use of it —
+    /// board-wide (every face on the same device shows the same bar).
+    /// `None` when the board carries no record or no device is connected.
+    pub led_budget: Option<UiLedBudget>,
     /// Lamp indices where the upstream fixture's authored paths begin, in
     /// ascending order — the snapping grid for the channel-boundary gesture
     /// (P2's honest per-path spans).
@@ -127,6 +131,40 @@ pub struct UiOutputChannelRow {
     /// Address of this channel's `count` slot (`channels[k].count`); the row
     /// is an `OptionSlot`, so the value edit targets its interior `some`.
     pub count_address: Option<ProjectSlotAddress>,
+    /// Live per-wire transmission status from the device's heartbeat, joined
+    /// by GPIO. `None` while no device is reporting (sim, disconnected, a
+    /// firmware without per-wire attribution) — absence is a state the face
+    /// must render quietly, not an error.
+    pub wire_status: Option<UiWireStatus>,
+}
+
+/// Live transmission health for one wire, as the face shows it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiWireStatus {
+    /// Frames transmitted since boot.
+    pub sent: u32,
+    /// Frames torn on the strand (guard-word truncation). Zero is the
+    /// healthy steady state; any growth is distress.
+    pub torn: u32,
+    /// This wire runs in the second wave — it waits for a pooled
+    /// transmitter slot each frame (more wires than slots). Discrete state
+    /// language: the face renders it as a squared block, not a warning.
+    pub waves: bool,
+    /// Worst observed wait for a slot, in ms (rounded up from µs).
+    pub queue_wait_ms: u32,
+}
+
+/// The board's measured total-LED envelope against the project's use of it.
+///
+/// A SOFT limit (see `lpc-hardware`'s `HwSoftLimits`): `used > budget` is
+/// rendered as advice (amber), never as an error — the record is evidence
+/// of what has run clean, and exceeding it is exploring, not breaking.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiLedBudget {
+    /// Lamps this project drives across every output node's wires.
+    pub used: u32,
+    /// The board's measured envelope.
+    pub budget: u32,
 }
 
 /// What Studio knows about the board the running device is.

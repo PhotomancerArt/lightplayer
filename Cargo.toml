@@ -267,6 +267,24 @@ opt-level = 3
 [profile.dev.package.lp-gfx-lpvm]
 opt-level = 3
 
+# The dev Studio's per-frame path runs through workspace crates the "*"
+# override above does not cover (it only reaches registry dependencies):
+# every server frame is serde-JSON-parsed by lpc-wire's generated visitors,
+# and dome-scale fixtures resolve 1500 lamps through lpc-mapping and shuttle
+# them through lpc-model layouts. At opt-level 0 that parse alone was 28% of
+# main-thread samples in a 2026-08-05 Chrome trace (12ms per message) and
+# made the mapping editor unusable at 1500 LEDs. These crates are schema/
+# engine surfaces that change rarely; the mapping editor is UI but small,
+# and its diff/format loop over 1500 SVG nodes runs per live-color frame.
+[profile.dev.package.lpc-wire]
+opt-level = 2
+[profile.dev.package.lpc-model]
+opt-level = 2
+[profile.dev.package.lpc-mapping]
+opt-level = 2
+[profile.dev.package.lpa-mapping-editor]
+opt-level = 2
+
 [profile.release]
 # Link-time optimization for all release builds - saves ~100-300 KB
 lto = true

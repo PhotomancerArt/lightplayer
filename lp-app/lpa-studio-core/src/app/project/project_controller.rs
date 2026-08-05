@@ -1,12 +1,14 @@
 use core::future::Future;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
 };
+use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
 use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -30,11 +32,12 @@ use crate::{
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
-    MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
-    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
-    SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath,
-    glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
+    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, ControlDisplayLayout, ControlLayout2d,
+    FromLpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationEffect,
+    MutationOp, MutationRejection, NodeAttachSite, NodeId, NodeKind, NodeStarter,
+    ShaderValueShapeRef, SlotEdit, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId,
+    SlotShapeLookup, SlotShapeRegistry, TreePath, glsl_type_for_lp_type,
+    resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -97,6 +100,21 @@ pub struct ProjectController {
     /// invalidated after commit acks (save rewrites files) and overlay
     /// clears (revert).
     asset_base_bodies: BTreeMap<ArtifactLocation, Vec<u8>>,
+    /// Mapping documents the display-layout fallback already tried to
+    /// fetch ([`Self::fetch_missing_layout_documents`]). Successes land in
+    /// the body cache and stop qualifying; failures are remembered here so
+    /// a broken read warns once instead of on every refresh.
+    attempted_layout_document_fetches: BTreeSet<ArtifactLocation>,
+    /// Memoized display-layout syntheses, keyed per artifact by the exact
+    /// inputs that shape the geometry: a hash of the document body plus the
+    /// render extent. The engine re-refuses an over-budget layout every
+    /// tick, which re-marks the preview as missing every tick — without
+    /// this cache the fallback re-parsed and re-resolved a 1500-lamp
+    /// document per frame (a top slice of the 2026-08-05 editor-perf
+    /// trace). The cached layout keeps the revision it was synthesized at;
+    /// the refusal loop never compares it, and consumers only read
+    /// geometry.
+    synthesized_layout_cache: BTreeMap<ArtifactLocation, SynthesizedLayoutEntry>,
     /// The connected project's **server** filesystem root (e.g.
     /// `/projects/studio`), from the connect flow. Artifact locations are
     /// project-relative; the base-body fetch ([`Self::asset_content`])
@@ -224,6 +242,8 @@ impl ProjectController {
             asset_edit_buffer: BTreeMap::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
+            attempted_layout_document_fetches: BTreeSet::new(),
+            synthesized_layout_cache: BTreeMap::new(),
             project_fs_root: None,
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
@@ -2734,13 +2754,24 @@ impl ProjectController {
             };
             let (state, phasors) = match controller.sync.as_ref().and_then(|s| s.timebase(&product))
             {
-                Some(crate::UiTimebaseRead::Live { phasors, .. }) => (
-                    crate::UiTimebaseState::Live,
-                    phasors
-                        .iter()
-                        .flat_map(|row| controller.ui_phasor_readings(row))
-                        .collect(),
-                ),
+                Some(crate::UiTimebaseRead::Live {
+                    seconds, phasors, ..
+                }) => {
+                    // The transport block's numeric seconds is probe-only —
+                    // `clock_transport` (node_face_builder.rs) has no probe
+                    // access, so it seeds `0.0`; this decoration pass is the
+                    // one place that can fill in the real number (P2).
+                    if let Some(transport) = clock.transport.as_mut() {
+                        transport.seconds = *seconds;
+                    }
+                    (
+                        crate::UiTimebaseState::Live,
+                        phasors
+                            .iter()
+                            .flat_map(|row| controller.ui_phasor_readings(row))
+                            .collect(),
+                    )
+                }
                 Some(crate::UiTimebaseRead::Unknown) => {
                     (crate::UiTimebaseState::Unknown, Vec::new())
                 }
@@ -3362,6 +3393,7 @@ impl ProjectController {
         let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
+        logs.extend(self.fetch_missing_layout_documents(server).await);
         logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
@@ -3417,6 +3449,7 @@ impl ProjectController {
             Err(error) => return Err(error),
         }
         self.apply_synced_project_view()?;
+        logs.extend(self.fetch_missing_layout_documents(server).await);
         logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
@@ -3494,6 +3527,8 @@ impl ProjectController {
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
+        self.attempted_layout_document_fetches.clear();
+        self.synthesized_layout_cache.clear();
         self.project_fs_root = None;
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
@@ -3576,7 +3611,185 @@ impl ProjectController {
         // graph through `self.sync`, which was taken out during the view
         // apply — run it now that it is restored.
         self.refresh_binding_presentation();
+        // Last, because it reads the freshly reconciled node tree (mapping
+        // source and render extent) alongside the freshly applied previews,
+        // and every DTO build downstream expects the layouts already filled.
+        self.apply_synthesized_display_layouts();
         result
+    }
+
+    /// Fill in display layouts the engine declined to send.
+    ///
+    /// The engine refuses a display layout that would not fit one
+    /// project-read frame (`DISPLAY_LAYOUT_WIRE_BUDGET`), which at dome
+    /// scale leaves the fixture face and the module output face with
+    /// nothing to draw. When the producing node is a fixture whose mapping
+    /// is a map2d document Studio already holds, the layout is derivable
+    /// here from the same document the engine resolved, so it is —
+    /// device-identical by construction (see
+    /// `app::project::control_display_layout_fallback`).
+    ///
+    /// Everything is best-effort: an unfetched document, a parse failure, a
+    /// resolve failure, or a non-map2d fixture all leave the preview exactly
+    /// as the probe left it. The preview never blocks on this.
+    fn apply_synthesized_display_layouts(&mut self) {
+        let Some(sync) = self.sync.as_ref() else {
+            return;
+        };
+        let missing = sync.control_products_missing_display_layout();
+        if missing.is_empty() {
+            return;
+        }
+        // Inputs gathered under `&self` (the node tree and the asset body
+        // cache are both immutable reads), then the cache consulted under
+        // `&mut self`, then the results installed — the sync mirror cannot
+        // be borrowed mutably while either is in hand.
+        type LayoutInput = (
+            UiProductRef,
+            lpc_model::Revision,
+            ArtifactLocation,
+            String,
+            (u32, u32),
+            u64,
+        );
+        let inputs: Vec<LayoutInput> = missing
+            .into_iter()
+            .filter_map(|(product, revision)| {
+                let (artifact, text, extent) = self.synthesized_layout_inputs(&product)?;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::hash::DefaultHasher::new();
+                text.hash(&mut hasher);
+                extent.hash(&mut hasher);
+                Some((product, revision, artifact, text, extent, hasher.finish()))
+            })
+            .collect();
+        let mut synthesized: Vec<(UiProductRef, Rc<ControlDisplayLayout>)> = Vec::new();
+        for (product, revision, artifact, text, extent, input_hash) in inputs {
+            let cached = self
+                .synthesized_layout_cache
+                .get(&artifact)
+                .filter(|entry| entry.input_hash == input_hash);
+            let layout = if let Some(entry) = cached {
+                Rc::clone(&entry.layout)
+            } else {
+                let Some(layout) = synthesize_layout_from_text(revision, &text, extent) else {
+                    continue;
+                };
+                let layout = Rc::new(ControlDisplayLayout::Layout2d(layout));
+                self.synthesized_layout_cache.insert(
+                    artifact,
+                    SynthesizedLayoutEntry {
+                        input_hash,
+                        layout: Rc::clone(&layout),
+                    },
+                );
+                layout
+            };
+            synthesized.push((product, layout));
+        }
+        let Some(sync) = self.sync.as_mut() else {
+            return;
+        };
+        for (product, layout) in synthesized {
+            sync.set_control_display_layout(&product, layout);
+        }
+    }
+
+    /// Fetch the mapping documents the display-layout fallback is starved
+    /// of, then re-run the synthesis over the freshly cached bodies.
+    ///
+    /// [`Self::apply_synthesized_display_layouts`] is a pure local read — it
+    /// can only use bodies already in the cache, and nothing fetches a
+    /// mapping document until its editor mounts. A dome-scale fixture whose
+    /// card sits unopened would keep "no display layout" forever. This is
+    /// the async half: called by both sync paths right after the view
+    /// applies, it fetches each qualifying document once per connection
+    /// (successes land in the body cache; failures warn once rather than on
+    /// every refresh) and re-applies the synthesis.
+    async fn fetch_missing_layout_documents(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Vec<UiLogDraft> {
+        let artifacts = self.missing_layout_document_artifacts();
+        if artifacts.is_empty() {
+            return Vec::new();
+        }
+        let mut logs = Vec::new();
+        for artifact in artifacts {
+            self.attempted_layout_document_fetches
+                .insert(artifact.clone());
+            match self.asset_content(server, &artifact).await {
+                Ok(run) => logs.extend(run.logs),
+                // Not fatal to the sync: the preview keeps the engine's
+                // answer (no layout) and the editor path can still recover
+                // the body later.
+                Err(error) => logs.push(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "mapping document fetch for the display-layout \
+                         fallback failed ({}): {error}",
+                        artifact.file_path().as_str()
+                    ),
+                )),
+            }
+        }
+        self.apply_synthesized_display_layouts();
+        logs
+    }
+
+    /// Mapping-document artifacts wanted by the display-layout fallback but
+    /// absent from the local body cache (and not already attempted this
+    /// connection). Mirrors [`Self::synthesized_display_layout`]'s lookup
+    /// chain up to the body read.
+    fn missing_layout_document_artifacts(&self) -> Vec<ArtifactLocation> {
+        let Some(sync) = self.sync.as_ref() else {
+            return Vec::new();
+        };
+        sync.control_products_missing_display_layout()
+            .into_iter()
+            .filter_map(|(product, _revision)| {
+                let UiProductRef::Control { node_id, .. } = product else {
+                    return None;
+                };
+                let node = self.node_by_runtime_id(NodeId::new(node_id))?;
+                if !node.kind().eq_ignore_ascii_case("fixture") {
+                    return None;
+                }
+                let source = fixture_map2d_source(node)?;
+                let artifact = self.resolve_node_asset_artifact(node, &source)?;
+                if self.asset_content_cached(&artifact).is_some()
+                    || self.attempted_layout_document_fetches.contains(&artifact)
+                {
+                    return None;
+                }
+                Some(artifact)
+            })
+            .collect()
+    }
+
+    /// The inputs the display-layout fallback synthesizes from: the mapping
+    /// artifact, its overlay-aware body text (an applied unsaved edit is
+    /// what the engine is running), and the fixture's render extent. `None`
+    /// unless the producer really is a map2d fixture whose document is
+    /// resolvable from what is already local.
+    fn synthesized_layout_inputs(
+        &self,
+        product: &UiProductRef,
+    ) -> Option<(ArtifactLocation, String, (u32, u32))> {
+        let UiProductRef::Control { node_id, .. } = product else {
+            return None;
+        };
+        let node = self.node_by_runtime_id(NodeId::new(*node_id))?;
+        if !node.kind().eq_ignore_ascii_case("fixture") {
+            return None;
+        }
+        let source = fixture_map2d_source(node)?;
+        let artifact = self.resolve_node_asset_artifact(node, &source)?;
+        let content = self.asset_content_cached(&artifact)?;
+        let text = content.text()?.to_owned();
+        let extent = fixture_render_size(node)?;
+        Some((artifact, text, (extent.width, extent.height)))
     }
 
     fn record_sync_failure(
@@ -3930,6 +4143,8 @@ impl ProjectController {
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
+        self.attempted_layout_document_fetches.clear();
+        self.synthesized_layout_cache.clear();
         // Staged node removals materialized (files deleted); the records
         // backing their save-panel rows are done.
         self.staged_removals.clear();
@@ -3970,6 +4185,8 @@ impl ProjectController {
         // Every artifact's overlay entry clears with the batch, so cached
         // base bodies re-fetch on the next editor open (invalidate-on-clear).
         self.asset_base_bodies.clear();
+        self.attempted_layout_document_fetches.clear();
+        self.synthesized_layout_cache.clear();
         // The wholesale Clear also un-stages every node removal (site edits
         // and Delete overlays included) — the records go with them.
         self.staged_removals.clear();
@@ -5298,7 +5515,7 @@ impl ProjectController {
             // (see MAX_ASSET_BODY_BYTES), so the body is parked as Failed
             // with its bytes preserved and nothing is sent.
             let reason = format!(
-                "shader too large to send (limit {} KB)",
+                "asset too large to send (limit {} KB)",
                 MAX_ASSET_BODY_BYTES / 1024
             );
             let notice = format!(
@@ -6260,6 +6477,65 @@ fn shader_source_path(node: &NodeController) -> Option<String> {
         ) && let Some(lpc_model::LpValue::String(path)) = slot.value()
         {
             return Some(path.clone());
+        }
+        slot.children().iter().find_map(find)
+    }
+    node.slots().iter().find_map(find)
+}
+
+/// The document path of a fixture node's `MappingConfig::Map2d` mapping:
+/// the `source` field under the `mapping` root slot. `None` for every other
+/// mapping variant, and deliberately anchored at `mapping` — a fixture's
+/// `bindings` carry `source` fields too (`"bus:visual.out"`), and the enum
+/// variant's own path segment is not something this needs to spell out.
+/// One memoized display-layout synthesis (see
+/// `ProjectController::synthesized_layout_cache`).
+struct SynthesizedLayoutEntry {
+    /// Hash of the document body text + render extent that produced
+    /// `layout`.
+    input_hash: u64,
+    layout: Rc<ControlDisplayLayout>,
+}
+
+/// Parse and resolve a map2d document body into the display layout its
+/// fixture would publish. The slow half of the fallback — the cache in
+/// [`ProjectController::apply_synthesized_display_layouts`] makes sure it
+/// runs per document change, not per tick.
+fn synthesize_layout_from_text(
+    revision: lpc_model::Revision,
+    text: &str,
+    (width, height): (u32, u32),
+) -> Option<ControlLayout2d> {
+    let doc = lpc_mapping::Map2dDoc::from_json(text).ok()?;
+    synthesized_map2d_layout(&doc, revision, width, height)
+}
+
+fn fixture_map2d_source(node: &NodeController) -> Option<String> {
+    fn find(slot: &SlotController) -> Option<String> {
+        let segments = slot.address().path.segments();
+        if matches!(segments.first(), Some(SlotPathSegment::Field(field)) if field.as_str() == "mapping")
+            && matches!(segments.last(), Some(SlotPathSegment::Field(field)) if field.as_str() == "source")
+            && let Some(lpc_model::LpValue::String(path)) = slot.value()
+        {
+            return Some(path.clone());
+        }
+        slot.children().iter().find_map(find)
+    }
+    node.slots().iter().find_map(find)
+}
+
+/// A fixture node's authored `render_size` — the texture extent the engine
+/// resolves its mapping document against, and the layout's width/height
+/// hints. `None` when the mirror carries no such row, which is the honest
+/// answer: guessing an extent would move every lamp.
+fn fixture_render_size(node: &NodeController) -> Option<lpc_model::Dim2u> {
+    fn find(slot: &SlotController) -> Option<lpc_model::Dim2u> {
+        if matches!(
+            slot.address().path.segments(),
+            [SlotPathSegment::Field(field)] if field.as_str() == "render_size"
+        ) && let Some(value) = slot.value()
+        {
+            return lpc_model::Dim2u::from_lp_value(value).ok();
         }
         slot.children().iter().find_map(find)
     }
@@ -9753,6 +10029,83 @@ mod tests {
         assert_eq!(listing(&nodes).0, crate::UiTimebaseState::Unknown);
     }
 
+    /// Plan 2026-08-04-2355-clock-tape-hero, P2: the transport block's
+    /// numeric `seconds` is probe-only — `clock_transport`
+    /// (node_face_builder.rs) has no probe access, so it always seeds
+    /// `0.0`. This decoration pass is the one place that can fill in the
+    /// real number, from the SAME cached `Live` read the phasor listing
+    /// already consults.
+    #[test]
+    fn apply_clock_faces_copies_the_probes_seconds_into_the_transport_block() {
+        let view = single_node_view(1, NodeRuntimeStatus::Ok);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let product = lpc_model::TimeProduct::new(lpc_model::NodeId::new(2), 0);
+        let product_ref = crate::UiProductRef::from_time_product(product);
+        let node_address = ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap();
+        let transport_address = |field: &str| {
+            ProjectSlotAddress::new(
+                node_address.clone(),
+                ProjectSlotRoot::def(),
+                SlotPath::parse(&format!("transport.{field}")).unwrap(),
+            )
+        };
+        let clock_node = || {
+            let mut face = crate::UiClockFace::new(
+                crate::UiProducedProduct::time("Product").with_product(product_ref),
+            );
+            face.transport = Some(crate::UiClockTransport {
+                seconds: 0.0,
+                running: true,
+                rate: 1.0,
+                scrub_offset_seconds: 0.0,
+                running_address: Some(transport_address("running")),
+                rate_address: Some(transport_address("rate")),
+                scrub_address: Some(transport_address("scrub_offset_seconds")),
+                running_override: None,
+                rate_override: None,
+                scrub_override: None,
+            });
+            let mut node = crate::UiNodeView::new(
+                crate::UiNodeHeader::new("Clock", "Clock", "/demo.module/clock.clock"),
+                vec![crate::UiNodeTab::main(Vec::new())],
+            );
+            node.face = Some(crate::UiNodeFace::Clock(face));
+            vec![node]
+        };
+        let transport = |nodes: &[crate::UiNodeView]| {
+            let Some(crate::UiNodeFace::Clock(face)) = &nodes[0].face else {
+                panic!("clock face");
+            };
+            face.transport.clone().expect("transport block present")
+        };
+
+        // No probe read cached yet: the builder's placeholder survives.
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        assert_eq!(transport(&nodes).seconds, 0.0);
+
+        project.sync_mut().unwrap().set_timebase_for_test(
+            product_ref,
+            crate::UiTimebaseRead::Live {
+                seconds: 42.35,
+                delta_seconds: 0.033,
+                phasors: Vec::new(),
+            },
+        );
+        let mut nodes = clock_node();
+        project.apply_clock_faces(&mut nodes);
+        let after = transport(&nodes);
+        assert_eq!(after.seconds, 42.35, "the probe's seconds lands in the DTO");
+        // Everything else the builder set stays untouched — this pass only
+        // ever writes `seconds`.
+        assert!(after.running);
+        assert_eq!(after.rate, 1.0);
+        assert_eq!(after.scrub_offset_seconds, 0.0);
+    }
+
     /// P7 item 3: the picker knows which channels carry a HANDLE, so it can
     /// mark a pick that could only earn a Warn — without moving `time` off
     /// the head of the list or refusing anything.
@@ -10327,7 +10680,7 @@ mod tests {
     }
 
     fn overlay_slot_path() -> SlotPath {
-        SlotPath::parse("controls.rate").unwrap()
+        SlotPath::parse("transport.rate").unwrap()
     }
 
     fn overlay_with_rate_edit() -> ProjectOverlay {
@@ -13287,7 +13640,7 @@ mod tests {
             .expect("oversize entry parked as failed");
         assert_eq!(
             edit.failure_reason(),
-            Some("shader too large to send (limit 10 KB)")
+            Some("asset too large to send (limit 10 KB)")
         );
         assert_eq!(edit.bytes, oversize, "the user's text is not lost");
         assert_eq!(

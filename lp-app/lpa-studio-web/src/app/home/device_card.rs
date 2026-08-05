@@ -27,7 +27,7 @@ use lpa_studio_core::{
     BootloaderEntryFlow, BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp,
     CardVerb, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController,
     DeviceDetailAffordance, DeviceOp, DeviceRichInput, DeviceTarget, HomeOp, LinkProviderKind,
-    ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
+    PreviewSource, ProjectController, ProjectOp, RecoveryInstructions, RichObjectView, RichSection,
     RosterAffordance, RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput,
     UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind, device_card_tabs,
     device_rich_object, sim_rich_object,
@@ -37,7 +37,7 @@ use lpa_studio_core::{UiLogEntry, UiLogLevel};
 use crate::app::home::card_sheet::{
     CardSheet, CardSheetButton, CardSheetButtons, CardSheetMessage, CardSheetTitle, SheetButtonTone,
 };
-use crate::app::home::card_thumb::thumb_swatch_style;
+use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::package_card::home_action;
 use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, chip_status, quiet_action_class};
@@ -889,6 +889,25 @@ pub(crate) fn DeviceCard(
                     }
                 }
             }
+            // D12 hero strip (gallery-rework P05): the held/last-run
+            // project as the card's default identity treatment —
+            // replacing the small in-body chip. Live cards lease a real
+            // preview by project uid, reusing the gallery's PreviewHost
+            // machinery (gradient fallback until a frame presents);
+            // offline/not-responding cards get no lease — there is no
+            // snapshot seam yet (`card_thumb`'s M6 seam) — so the frame
+            // itself dims instead (identity, not health, per
+            // `UiDeviceProjectChip`'s doc comment). No project, no strip:
+            // the body's own "nothing on it yet" line carries that case.
+            if let Some(chip) = card.project.as_ref() {
+                CardThumb {
+                    seed: chip.uid.clone(),
+                    label: chip.name.clone(),
+                    hero: true,
+                    muted: chip_muted,
+                    source: (!chip_muted).then(|| PreviewSource::ProjectUid(chip.uid.clone())),
+                }
+            }
             // Everything below the title bar shares one wrapper: a D41
             // sheet dims exactly this region, so the name above it stays
             // readable (spike round 3: sheets spare the title bar).
@@ -931,7 +950,7 @@ pub(crate) fn DeviceCard(
                     div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
                         match active_tab {
                             DeviceCardTab::Status => rsx! {
-                                {status_tab_body(&card, &tabs, chip_muted, on_action, &card_key, now_secs)}
+                                {status_tab_body(&card, &tabs, on_action, &card_key, now_secs)}
                             },
                             DeviceCardTab::Console => rsx! {
                                 {console_tab_body(&card.console_tail)}
@@ -1201,13 +1220,13 @@ fn tab_button<A>(
     }
 }
 
-/// The Status tab: the Health section with the status line up front, the
-/// project chip as identity, and the state-table affordance — today's
-/// card body, re-homed.
+/// The Status tab: the Health section with the status line up front, and
+/// the state-table affordance — today's card body, re-homed. The project's
+/// identity now rides the hero strip (gallery-rework P05) rather than a
+/// row here.
 fn status_tab_body(
     card: &UiDeviceCard,
     tabs: &[CardTabView<CardRowAction>],
-    chip_muted: bool,
     on_action: EventHandler<UiAction>,
     card_key: &str,
     now_secs: Option<f64>,
@@ -1257,18 +1276,6 @@ fn status_tab_body(
                 div { class: "tw:mt-1",
                     StatusChip { status: chip_status(chip) }
                 }
-            }
-        }
-        if let Some(chip) = card.project.clone() {
-            // identity, not status: the project the device holds (or last
-            // ran — muted on offline/error cards); the drift facts live on
-            // the Project tab
-            span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5",
-                span {
-                    class: "tw:inline-block tw:h-3 tw:w-3 tw:flex-none tw:rounded-[3px]",
-                    style: thumb_swatch_style(&chip.uid, chip_muted),
-                }
-                span { class: chip_name_class(chip_muted), "{chip.name}" }
             }
         }
         if setup_form {
@@ -2416,14 +2423,6 @@ fn device_card_class(faded: bool, treatment: RosterTreatment, pane: bool) -> Str
         // tw:group anchors the pencil's hover reveal
         "tw:group tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card {edge}{fade}{grown}"
     )
-}
-
-fn chip_name_class(muted: bool) -> &'static str {
-    if muted {
-        "tw:truncate tw:text-[11px] tw:text-dim-foreground"
-    } else {
-        "tw:truncate tw:text-[11px] tw:text-muted-foreground"
-    }
 }
 
 fn device_name_class(faded: bool, editable: bool) -> &'static str {
