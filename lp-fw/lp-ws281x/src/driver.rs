@@ -701,6 +701,27 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// Walks bits — not LEDs — so any half size works. When the pixel data runs
     /// out the latch is emitted exactly once and the remainder of the half is
     /// STOP-filled, which is what actually ends the transmission.
+    ///
+    /// # The hoists (why this loop is shaped the way it is)
+    ///
+    /// This is the hot core of the refill deadline: at four concurrent
+    /// transmitters the last-serviced channel eats every earlier channel's
+    /// fill before its own, so per-word cycles here multiply by the number of
+    /// coincident refills. A boot-time probe on the classic ESP32
+    /// (`fw-esp32v3`'s `refill_floor_probe`, 2026-08-05) put the raw APB
+    /// floor for a 64-word half at ~3.2 µs while this loop's previous shape
+    /// cost ~11.2 µs — the gap was per-word `/`/`%` addressing math, two
+    /// atomic loads per frame byte, and the backend's per-word block-plan
+    /// lookup. Hence, hoisted once per fill:
+    ///
+    /// * the frame descriptor ([`ChannelState::frame_slice`] — sound for
+    ///   exactly one service pass, see its docs; this function never outlives
+    ///   one),
+    /// * the byte address, tracked incrementally (`pixel_base`/`slot`/`mask`)
+    ///   instead of divided out of the cursor per word,
+    /// * the RAM window base and bound ([`RmtHw::ram_window`]), when the
+    ///   backend offers one — the fallback stays the per-word
+    ///   [`RmtHw::write_ram`] path bit-for-bit.
     #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     fn fill_half(&self, ch: u8, state: &ChannelState, half: Half) -> FillResult {
         let half_words = state.half_words.load(Relaxed);
@@ -713,24 +734,70 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         let codes = state.codes();
         let order = state.color_order();
         let total = state.total_bits.load(Relaxed);
+        let (frame_ptr, frame_len) = state.frame_slice();
+        let window = self.hw.ram_window(ch);
         let mut cursor = state.bit_cursor.load(Acquire);
         let mut word = start;
 
-        let mut byte = 0u8;
-        let mut byte_loaded = false;
-        while word < end && cursor < total {
-            let bit_in_byte = cursor % 8;
-            if !byte_loaded || bit_in_byte == 0 {
-                let pixel = cursor / BITS_PER_PIXEL;
-                let slot = (cursor % BITS_PER_PIXEL) / 8;
-                byte = state.frame_byte(pixel * BYTES_PER_PIXEL + order.source_index(slot));
-                byte_loaded = true;
+        // One store, either shape. The raw path keeps a bounds check — one
+        // register compare, not the per-word plan lookup — so a bug here
+        // still cannot scribble outside the window `ram_window` promised.
+        let put = |word: usize, value: u32| match window {
+            Some(w) => {
+                if word < w.words {
+                    // SAFETY: `RamWindow`'s contract — `base` addresses
+                    // `w.words` writable MMIO words for the driver's
+                    // lifetime, and `word` was just bounds-checked. Volatile:
+                    // the transmitter reads this memory behind the compiler's
+                    // back.
+                    unsafe { w.base.add(word).write_volatile(value) };
+                }
             }
-            // WS281x is MSB-first within each byte.
-            let one = byte & (0x80 >> bit_in_byte) != 0;
-            self.hw.write_ram(ch, word, codes.bit(one));
-            word += 1;
-            cursor += 1;
+            None => self.hw.write_ram(ch, word, value),
+        };
+
+        // Byte address of the cursor position, then tracked incrementally:
+        // `pixel_base + source[slot]` replaces the per-word divisions of the
+        // previous shape.
+        let source = [
+            order.source_index(0),
+            order.source_index(1),
+            order.source_index(2),
+        ];
+        let mut pixel_base = (cursor / BITS_PER_PIXEL) * BYTES_PER_PIXEL;
+        let mut slot = (cursor % BITS_PER_PIXEL) / 8;
+        // WS281x is MSB-first within each byte; a resume mid-byte starts at
+        // the cursor's bit.
+        let mut mask = 0x80u8 >> (cursor % 8);
+
+        while word < end && cursor < total {
+            let index = pixel_base + source[slot];
+            let byte = if index < frame_len {
+                // SAFETY: `frame_slice` promises `frame_ptr` addresses
+                // `frame_len` readable bytes for the duration of this service
+                // pass, and `index < frame_len` was just checked. The frame
+                // is `u8`, so no alignment concern, and `frame_len` came from
+                // a slice so the offset fits an `isize`.
+                unsafe { *frame_ptr.add(index) }
+            } else {
+                // Out-of-range reads as zero — sound even if a caller
+                // violated the `arm` length contract.
+                0
+            };
+            while mask != 0 && word < end && cursor < total {
+                put(word, codes.bit(byte & mask != 0));
+                word += 1;
+                cursor += 1;
+                mask >>= 1;
+            }
+            if mask == 0 {
+                mask = 0x80;
+                slot += 1;
+                if slot == BYTES_PER_PIXEL {
+                    slot = 0;
+                    pixel_base += BYTES_PER_PIXEL;
+                }
+            }
         }
         state.bit_cursor.store(cursor, Release);
 
@@ -746,14 +813,14 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
                 // first word of the next half.
                 return FillResult::More;
             }
-            self.hw.write_ram(ch, word, codes.latch);
+            put(word, codes.latch);
             word += 1;
             state.latch_written.store(true, Relaxed);
             result = FillResult::Tail;
         }
 
         while word < end {
-            self.hw.write_ram(ch, word, STOP_WORD);
+            put(word, STOP_WORD);
             word += 1;
         }
         result

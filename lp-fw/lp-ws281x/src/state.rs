@@ -32,7 +32,7 @@
 //!   waits until the ISR is provably out of service (the `isr_seq` handshake
 //!   in `driver.rs` — see the soundness argument there). An ISR pass that
 //!   began before the disarm may keep reading the old descriptor through
-//!   `Relaxed` loads in [`Self::frame_byte`]; that is sound **only** because
+//!   `Relaxed` loads in [`ChannelState::frame_slice`]; that is sound **only** because
 //!   the handshake keeps the caller from freeing or reusing the bytes until
 //!   that pass has exited. The `SeqCst` on `frame_complete` (store here, load
 //!   in the ISR's check) is one half of the store/load ("Dekker") pattern the
@@ -383,7 +383,7 @@ impl ChannelState {
 
     /// Drop the frame descriptor and mark the channel idle.
     ///
-    /// Length is cleared before the pointer so a racing [`Self::frame_byte`]
+    /// Length is cleared before the pointer so a racing [`Self::frame_slice`]
     /// that sees the new state piecemeal fails its bounds check first, and the
     /// pointer store is `Release` as belt-and-braces — but neither is the
     /// guarantee. A cross-core ISR pass that entered before this call may
@@ -400,36 +400,35 @@ impl ChannelState {
         self.frame_complete.store(true, SeqCst);
     }
 
-    /// Read the frame byte at `index`, or `0` if the index is out of range.
+    /// Snapshot the frame descriptor for **one service pass**: `(ptr, len)`,
+    /// with `len == 0` whenever the pointer is null.
     ///
-    /// The bounds check makes the raw read sound even if a caller violated the
-    /// `arm` contract about `len`; it costs one compare per byte on the refill
-    /// path.
-    ///
+    /// The refill loop takes this once per fill and bounds-checks every byte
+    /// index against `len` before dereferencing, which keeps the raw reads
+    /// sound even if a caller violated the `arm` contract about the length.
     /// The loads are deliberately `Relaxed` even though a cross-core `disarm`
-    /// can race them: this function runs **per frame byte** on the refill
-    /// path, and an acquiring (`memw`-fenced) load here would tax every byte
-    /// of every refill. Soundness does not depend on seeing the disarm — a
-    /// pass that misses it reads the *old* descriptor, whose bytes the
-    /// `isr_seq` handshake in [`crate::Ws281xDriver::abort`] keeps alive
-    /// until this pass exits. A torn view (new `len`, old `ptr`, or vice
-    /// versa) yields zeros or old-frame bytes on a frame that is being
-    /// aborted anyway — never a dangling read.
+    /// can race them — an acquiring (`memw`-fenced) load would tax every
+    /// fill, and soundness does not depend on seeing the disarm: a pass that
+    /// misses it reads the *old* descriptor, whose bytes the `isr_seq`
+    /// handshake in [`crate::Ws281xDriver::abort`] keeps alive until that
+    /// pass exits — and no longer, so a snapshot may only live for the ISR
+    /// pass (or thread-side fill) that took it. Do NOT store one across
+    /// passes.
+    ///
+    /// Every torn interleaving with [`Self::disarm`] (which stores `len = 0`,
+    /// then nulls the pointer) is benign: a null pointer forces `len = 0`; a
+    /// new-`len`/old-`ptr` view reads nothing; an old/old view reads bytes
+    /// the handshake is keeping alive — never a dangling read.
     #[inline]
     #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
-    pub(crate) fn frame_byte(&self, index: usize) -> u8 {
-        if index >= self.frame_len.load(Relaxed) {
-            return 0;
+    pub(crate) fn frame_slice(&self) -> (*const u8, usize) {
+        let len = self.frame_len.load(Relaxed);
+        let ptr = self.frame_ptr.load(Relaxed);
+        if ptr.is_null() {
+            (ptr, 0)
+        } else {
+            (ptr, len)
         }
-        let base = self.frame_ptr.load(Relaxed);
-        if base.is_null() {
-            return 0;
-        }
-        // SAFETY: `arm` promised `frame_ptr` addresses at least `frame_len`
-        // readable bytes for the whole transmission, and `index < frame_len`
-        // was just checked. The frame is `u8`, so the offset cannot violate
-        // alignment, and `len` fits in an `isize` because it came from a slice.
-        unsafe { *base.add(index) }
     }
 
     /// True while a frame is in flight.
