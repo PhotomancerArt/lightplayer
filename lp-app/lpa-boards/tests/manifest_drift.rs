@@ -187,6 +187,61 @@ fn embedded_runtime_manifests_match_the_directory() {
     }
 }
 
+/// Every catalog board must say where the pixels plug in: project
+/// generation (P03 of the gallery rework) authors
+/// `ws281x:local:<default wire>`, so a board with no stated wire cannot be
+/// generated for. Structural validity (the name is an output-eligible pin
+/// or terminal) is `BoardDisplayFile::validate`'s job; this adds the
+/// completeness gate and the runtime cross-check.
+#[test]
+fn every_board_declares_a_default_led_wire_the_runtime_manifest_allows() {
+    for (board_id, (display, runtime)) in manifest_pairs() {
+        let Some(display) = display else { continue };
+        let Some(first) = display.default_led_wire() else {
+            panic!(
+                "{board_id}: no default_led_wires — the setup flow cannot generate a \
+                 first project for this board"
+            );
+        };
+        let wires: Vec<(&str, u8)> = display.output_wires().collect();
+        let gpio = wires
+            .iter()
+            .find(|(label, _)| *label == first)
+            .map(|(_, gpio)| *gpio)
+            .unwrap_or_else(|| panic!("{board_id}: default wire {first} has no gpio"));
+        let Some(runtime) = runtime else { continue };
+        for wire in &display.default_led_wires {
+            let gpio = wires
+                .iter()
+                .find(|(label, _)| label == wire)
+                .map(|(_, gpio)| *gpio)
+                .unwrap_or_else(|| panic!("{board_id}: default wire {wire} has no gpio"));
+            let resource = runtime
+                .gpio
+                .iter()
+                .find(|resource| resource.address == format!("/gpio/{gpio}"))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{board_id}: default LED wire {wire} (gpio {gpio}) is not a claimable \
+                         resource in the runtime manifest"
+                    )
+                });
+            assert!(
+                resource.reserved_reason.is_none(),
+                "{board_id}: default LED wire {wire} (gpio {gpio}) is reserved in the runtime \
+                 manifest ({:?}) — generation would author an endpoint the firmware refuses",
+                resource.reserved_reason
+            );
+        }
+        // The first wire is the one single-output generation takes.
+        assert_eq!(
+            display.default_led_wire(),
+            Some(first),
+            "{board_id}: default wire is the head of the list (gpio {gpio})"
+        );
+    }
+}
+
 #[test]
 fn display_pins_agree_with_runtime_manifests() {
     for (board_id, (display, runtime)) in manifest_pairs() {

@@ -32,6 +32,12 @@
       "text": "The BOOT/RESET buttons are stacked: BOOT is the top button of the pair, RESET the bottom."
     }
   ],
+  "default_led_wires": [
+    "IO18",
+    "IO16",
+    "IO14",
+    "IO2"
+  ],
   "hw": {
     "width": 210,
     "module": {
