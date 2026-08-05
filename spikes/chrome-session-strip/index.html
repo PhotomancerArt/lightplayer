@@ -140,17 +140,26 @@
     appearance: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
     font: 600 11.5px/1 var(--sans); color: var(--subtle);
     border: 1px solid var(--border-muted); background: transparent;
-    border-radius: 999px; padding: 5px 10px 5px 8px; min-width: 0; max-width: 150px;
+    padding: 5px 10px 5px 8px; min-width: 0; max-width: 165px;
   }
   .schip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .schip:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-wash); }
-  /* lensed + editor is the current route: you are HERE */
   .schip.here { color: var(--strong); border-color: var(--accent-border);
     background: rgba(123,224,178,.09); }
-  /* lensed but you're on another page: open in the background, click returns */
   .schip.open { color: var(--muted); border-color: var(--border-strong); background: var(--bg-wash); }
-  .schip.sim svg { color: var(--bound-text); flex: none; }
-  .md .schip { max-width: 104px; padding: 4px 8px 4px 7px; }
+  .md .schip { max-width: 112px; padding: 4px 8px 4px 7px; }
+  /* chip glyphs */
+  .schip .glyph { flex: none; color: var(--subtle); display: inline-flex; }
+  .schip.sim .glyph { color: var(--bound-text); }
+  .schip.here .glyph { color: var(--accent); }
+  .schip.sim.here .glyph { color: var(--bound-text); }
+  .icowrap { position: relative; display: inline-flex; flex: none; }
+  .icowrap .dot.corner { position: absolute; right: -2px; bottom: -2px; width: 6px; height: 6px;
+    box-shadow: 0 0 0 2px var(--bg); }
+  /* presentation variants */
+  .st-pill .schip { border-radius: 999px; }
+  .st-tab .schip { border-radius: 6px; }
+  .st-tile .schip { border-radius: 7px; padding: 4px 10px 4px 6px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .dot.run { background: var(--accent); }
   .dot.behind { background: var(--warn-text); }
@@ -161,6 +170,7 @@
     border: 1px solid var(--border-muted); background: transparent;
     border-radius: 999px; padding: 5px 8px;
   }
+  .st-tab .morechip, .st-tile .morechip { border-radius: 6px; }
   .morechip:hover { color: var(--text); border-color: var(--border-strong); }
   /* the narrow collapse: one pill of stacked dots + count */
   .countpill {
@@ -168,22 +178,25 @@
     border: 1px solid var(--border-strong); background: transparent; border-radius: 999px;
     padding: 5px 9px; font: 600 11px/1 var(--mono); color: var(--subtle);
   }
+  .st-tab .countpill, .st-tile .countpill { border-radius: 6px; }
   .countpill:hover { color: var(--text); background: var(--bg-wash); }
   .countpill.herein { border-color: var(--accent-border); color: var(--muted); }
   .countpill .dots { display: inline-flex; }
   .countpill .dots .dot { width: 6px; height: 6px; margin-left: -2px; box-shadow: 0 0 0 2px var(--bg); }
   .countpill .dots .dot:first-child { margin-left: 0; }
-  /* concept C: badge grown onto the Devices tab */
-  .tabbadge {
-    display: inline-flex; align-items: center; gap: 4px; margin-left: 6px;
-    font: 600 10px/1 var(--mono); color: var(--subtle);
-    border: 1px solid var(--border-muted); border-radius: 999px; padding: 2px 6px;
-    vertical-align: 1px;
-  }
-  .navlink:hover .tabbadge { border-color: var(--border-strong); }
-  .tabbadge .dot { width: 6px; height: 6px; }
 
-  /* ---- session flyout menu (shared by collapses + concept C) ---- */
+  /* ---- anatomy strips ---- */
+  .anat { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle);
+    padding: 14px 16px 12px; margin: 10px 0 4px; max-width: 1100px; cursor: pointer; }
+  .anat:hover { border-color: var(--border-strong); }
+  .anat.sel { border-color: var(--accent-border); }
+  .anat .ahead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .anat .aname { font: 700 12px/1 var(--sans); color: var(--text); }
+  .anat.sel .aname::after { content: " · selected"; color: var(--accent); font-weight: 600; }
+  .anat .anote { font: 400 11.5px/1.4 var(--sans); color: var(--dim); }
+  .anat .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+  /* ---- session flyout menu ---- */
   .popmenu {
     position: absolute; top: calc(100% + 6px); z-index: 30;
     background: var(--surface-raised); border: 1px solid var(--border-strong);
@@ -202,7 +215,8 @@
   .popmenu .mi .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .popmenu .mi .tag { font: 600 9.5px/1 var(--mono); color: var(--dim); }
   .popmenu .mi.here .tag { color: var(--accent); }
-  .popmenu .mi svg { color: var(--bound-text); flex: none; }
+  .popmenu .mi .glyph { display: inline-flex; flex: none; color: var(--subtle); }
+  .popmenu .mi.simmi .glyph { color: var(--bound-text); }
 
   /* ---- frame bodies (context peeks) ---- */
   .peek { padding: 14px 16px 16px; display: flex; gap: 10px; align-items: stretch; min-height: 86px; }
@@ -221,7 +235,6 @@
   .bodylabel { font: 600 10.5px/1.5 var(--mono); color: var(--dim); padding: 0 16px 12px; }
   .bodylabel b { color: var(--muted); }
 
-  /* mini device cards for the devices-page body in §3 */
   .dcard { border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
     flex: 1; min-width: 0; padding: 9px 10px; }
   .dcard .dh { display: flex; align-items: center; gap: 6px; }
@@ -239,6 +252,7 @@
   .rejnote { border: 1px solid var(--border-muted); border-left: 3px solid var(--border-strong);
     border-radius: 8px; background: var(--surface-subtle); color: var(--dim);
     font-size: 12px; padding: 10px 14px; max-width: 860px; margin-top: 10px; }
+  .rejnote b { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -257,6 +271,23 @@
     <g stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round">
       <rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></g>
   </symbol>
+  <symbol id="i-board" viewBox="0 0 16 16">
+    <rect x="2.5" y="4" width="11" height="8" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none"/>
+    <circle cx="5.4" cy="6.6" r=".8" fill="currentColor"/><circle cx="5.4" cy="9.4" r=".8" fill="currentColor"/>
+    <rect x="8.2" y="6" width="3.4" height="4" rx=".6" stroke="currentColor" stroke-width="1.1" fill="none"/>
+  </symbol>
+  <symbol id="b-generic" viewBox="0 0 84 46">
+    <rect x="2" y="2" width="80" height="42" rx="4" fill="#101418" stroke="#2c3440" stroke-width="1.5"/>
+    <rect x="26" y="8" width="32" height="20" rx="2" fill="#1a2027" stroke="#3e4852"/>
+    <g fill="#8b93a0"><circle cx="9" cy="9" r="2.4"/><circle cx="9" cy="37" r="2.4"/>
+      <circle cx="75" cy="9" r="2.4"/><circle cx="75" cy="37" r="2.4"/></g>
+    <rect x="34" y="32" width="16" height="9" rx="1.5" fill="#26313a"/>
+  </symbol>
+  <symbol id="b-sim" viewBox="0 0 84 46">
+    <rect x="2" y="2" width="80" height="42" rx="4" fill="#17121f" stroke="#5f4a85" stroke-width="1.5"/>
+    <rect x="18" y="9" width="48" height="24" rx="2" fill="#241a33" stroke="#5f4a85"/>
+    <path d="M34 40h16M42 33v7" stroke="#8f77b8" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </symbol>
   <symbol id="i-bot" viewBox="0 0 16 16">
     <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
       <rect x="3" y="5" width="10" height="7.4" rx="2"/><path d="M8 5V2.8"/>
@@ -270,81 +301,80 @@
   </symbol>
 </defs></svg>
 
-<h1>Chrome session strip — what's running, and where you are</h1>
+<h1>Chrome session strip — running sessions in the bar</h1>
 <p class="hint">
-  Thesis (vision follow-up, 2026-08-05): runtime sessions are global — the pool, sims, and device links
-  keep running while you sit on Boards or Docs — but nothing outside the gallery page shows them, and the
-  editor has <b>no representation in the nav at all</b> (today the Studio tab even <i>detaches your lens</i>
-  when clicked). The strip makes each <b>live session a place in the chrome</b>: one chip per running
-  session, name + status dot only (<b>D43: wayfinding, never a device surface</b> — no controls ever),
-  the lensed one marked, click = open in the editor. Chip exists exactly while the session does
-  (D36 rule); registry-offline devices never appear. Builds on chrome C (D11, split weights, ⋯ at narrow).
+  <b>Gate 2026-08-05: concept A chosen</b> (strip docked with your-stuff, behind a divider) — B/C
+  rejected below. This round iterates the <b>chip anatomy</b>: Yona's note was that round pills
+  "don't quite read as device" — try board vs sim icons and squarer shapes. Invariants hold:
+  one chip per <b>live</b> session (D36 rule — chip exists exactly while the session does,
+  registry-offline devices never appear), name + status only (<b>D43: wayfinding, never a device
+  surface</b>), lensed chip marked, click = open in the editor. Chrome C per D11.
 </p>
 
 <div class="controls">
+  <span class="group"><b>Chip style</b>
+    <button class="ctl" data-style="st-pill">P1 · pill + icon</button>
+    <button class="ctl" data-style="st-tab" aria-pressed="true">P2 · tab-chip</button>
+    <button class="ctl" data-style="st-tile">P3 · board tile</button>
+  </span>
   <span class="group"><b>Sessions</b>
     <button class="ctl" data-ds="none">none</button>
     <button class="ctl" data-ds="solo">sim only</button>
     <button class="ctl" data-ds="trio" aria-pressed="true">sim + 2 devices</button>
     <button class="ctl" data-ds="five">5 · long names</button>
   </span>
-  <span class="group"><b>Lens (open in editor)</b>
+  <span class="group"><b>Lens</b>
     <button class="ctl" data-lens="none">nothing</button>
     <button class="ctl" data-lens="porch" aria-pressed="true">Porch sign</button>
     <button class="ctl" data-lens="sim">Simulator</button>
   </span>
   <span class="group"><b>You're on</b>
-    <button class="ctl" data-route="editor" aria-pressed="true">the editor</button>
-    <button class="ctl" data-route="devices">devices page</button>
-    <button class="ctl" data-route="boards">boards page</button>
-  </span>
-  <span class="group"><b>Zook dome status</b>
-    <button class="ctl" id="ctl-zook">behind ⟳</button>
+    <button class="ctl" data-route="editor" aria-pressed="true">editor</button>
+    <button class="ctl" data-route="devices">devices</button>
+    <button class="ctl" data-route="boards">boards</button>
   </span>
 </div>
 
-<!-- ==================== 1 · concepts ==================== -->
-<h2 id="s1"><span class="n">1</span> Four shapes, wide (~1100px)</h2>
-<p class="sub">Same state in every frame — flip the controls above and watch all of them.
-  <b>0</b> is today's chrome (nothing device-shaped, brand inert). <b>A</b> docks the strip with
-  your-stuff, after a hairline divider: sessions read as siblings of Devices·Projects.
-  <b>B</b> docks it right, next to the branch chip: sessions read as ambient status.
-  <b>C</b> adds no strip — the Devices tab grows a count badge whose flyout lists sessions.</p>
+<!-- ==================== 1 · anatomy ==================== -->
+<h2 id="s1"><span class="n">1</span> Chip anatomy — three reads of "device"</h2>
+<p class="sub">Click a strip (or use the control) to select a style — <b>every frame below re-renders
+  in it</b>. All three keep the same states: idle / <b>here</b> (accent — lensed, editor is the
+  current page) / <b>open</b> (washed — lensed but you're elsewhere) / behind (amber) /
+  connected-empty (hollow dot). Sim is always violet-marked.</p>
 
-<div class="barwrap">
-  <div class="caprow"><span class="cname">0 · Today (baseline)</span>
-    <span class="cnote">Studio / Boards / Docs · brand inert · running sessions invisible; Studio click detaches the lens</span></div>
-  <div class="appframe" style="max-width:1100px" data-frame data-concept="zero" data-bp="wide"></div>
+<div class="anat" data-anat="st-pill">
+  <div class="ahead"><span class="aname">P1 · pill + icon</span>
+    <span class="anote">round pill keeps the bar's soft grammar; board/sim glyph carries the device read</span></div>
+  <div class="row" data-anatrow></div>
+</div>
+<div class="anat" data-anat="st-tab">
+  <div class="ahead"><span class="aname">P2 · tab-chip</span>
+    <span class="anote">squared corners — entity/card grammar, reads as a small tab (a place), not a status pill</span></div>
+  <div class="row" data-anatrow></div>
+</div>
+<div class="anat" data-anat="st-tile">
+  <div class="ahead"><span class="aname">P3 · board tile</span>
+    <span class="anote">miniature board silhouette (the picker-thumbnail language); status dot rides the tile's corner</span></div>
+  <div class="row" data-anatrow></div>
 </div>
 
+<!-- ==================== 2 · in context ==================== -->
+<h2 id="s2"><span class="n">2</span> A in context — wide (~1100px)</h2>
+<p class="sub">The chosen shape: chips after Devices·Projects behind a hairline divider.
+  Flip the controls to see every state in place.</p>
+
 <div class="barwrap">
-  <div class="caprow"><span class="cname">A · Strip with your-stuff</span>
-    <span class="cnote">chips after Devices·Projects behind a divider — "these are yours and alive"; active chip = where your editor is</span></div>
   <div class="appframe" style="max-width:1100px" data-frame data-concept="a" data-bp="wide"></div>
 </div>
 
-<div class="barwrap">
-  <div class="caprow"><span class="cname">B · Right-side dock</span>
-    <span class="cnote">chips live right, before the branch chip — ambient "what's running", nav stays untouched</span></div>
-  <div class="appframe" style="max-width:1100px" data-frame data-concept="b" data-bp="wide"></div>
-</div>
+<!-- ==================== 3 · breakpoints ==================== -->
+<h2 id="s3"><span class="n">3</span> 768 and 390</h2>
+<p class="sub">At 768 chips tighten (harder ellipsis, +n past two). At 390 the strip collapses to
+  <b>one count chip</b> — stacked status dots + count, accent-ringed when your editor is inside —
+  opening the session flyout (same grammar as D11's ⋯ menu). The collapse chip inherits the
+  selected style's shape.</p>
 
 <div class="barwrap">
-  <div class="caprow"><span class="cname">C · Badge on the Devices tab</span>
-    <span class="cnote">no strip — count + worst-status dot grows on Devices; the flyout is the only session list. Cheapest, one indirection.</span></div>
-  <div class="appframe" style="max-width:1100px" data-frame data-concept="c" data-bp="wide"></div>
-</div>
-
-<!-- ==================== 2 · breakpoints ==================== -->
-<h2 id="s2"><span class="n">2</span> The same bars at 768 and 390</h2>
-<p class="sub">The narrow story, spiked concretely. <b>A + B collapse the chips into one count pill</b> —
-  stacked status dots + count, tap opens the session flyout (same grammar as D11's ⋯ menu, which
-  already holds Explore·Boards·Docs at this width). An accent ring on the pill means your editor is
-  in there. <b>At 768 chips stay but tighten</b>: harder ellipsis, and beyond two chips the rest fold
-  into a +n chip. <b>C is its own collapse</b> — the badge just stays.</p>
-
-<div class="barwrap">
-  <div class="caprow"><span class="cname">A · md + sm</span></div>
   <div class="frames">
     <div>
       <p class="bplabel">768px</p>
@@ -357,56 +387,29 @@
   </div>
 </div>
 
-<div class="barwrap">
-  <div class="caprow"><span class="cname">B · md + sm</span></div>
-  <div class="frames">
-    <div>
-      <p class="bplabel">768px</p>
-      <div class="appframe" style="width:768px" data-frame data-concept="b" data-bp="md"></div>
-    </div>
-    <div>
-      <p class="bplabel">390px</p>
-      <div class="appframe" style="width:390px" data-frame data-concept="b" data-bp="sm"></div>
-    </div>
-  </div>
-</div>
-
-<div class="barwrap">
-  <div class="caprow"><span class="cname">C · md + sm</span></div>
-  <div class="frames">
-    <div>
-      <p class="bplabel">768px</p>
-      <div class="appframe" style="width:768px" data-frame data-concept="c" data-bp="md"></div>
-    </div>
-    <div>
-      <p class="bplabel">390px</p>
-      <div class="appframe" style="width:390px" data-frame data-concept="c" data-bp="sm"></div>
-    </div>
-  </div>
-</div>
-
-<!-- ==================== 3 · the return trip ==================== -->
-<h2 id="s3"><span class="n">3</span> The return trip — a working miniature (concept A wiring)</h2>
-<p class="sub">The interaction the strip exists for. You're editing <b>Porch sign</b>; wander to
-  Boards; the chip stays lit ("open"); click it and you're back in your editor, lens intact.
-  Also shows the live-vs-registry rule: <b>Garage matrix</b> is registered but offline — it has a
-  card on the devices page, and <b>no chip</b>. Everything here is clickable: brand, tabs, chips, cards.</p>
+<!-- ==================== 4 · the return trip ==================== -->
+<h2 id="s4"><span class="n">4</span> The return trip — a working miniature</h2>
+<p class="sub">You're editing <b>Porch sign</b>; wander to Boards; the chip stays lit ("open");
+  click it and you're back, lens intact. <b>Garage matrix</b> is registered but offline — card on
+  the devices page, <b>no chip</b>. Everything is clickable: brand, tabs, chips, cards.</p>
 
 <div class="barwrap">
   <div class="appframe" style="max-width:1100px" id="miniapp"></div>
 </div>
 
-<p class="leannote"><b>Lean: A.</b> Sessions are places you go, not telemetry — putting them with
-  your-stuff makes the active chip read as "where I am", which is the whole point (and it's what
-  makes deleting the Studio-tab-detaches-lens behavior safe). B keeps the nav pure but the chips read
-  as status lights, and the right side is already contended (branch chip, AI, settings). C is nearly
-  free and is the natural sm-collapse of A — but as the <i>only</i> affordance it hides the one thing
-  we want visible, and gives the lensed session no presence at all. Narrow lean: count pill opening
-  the flyout, accent-ringed when your editor is inside.</p>
+<p class="leannote"><b>Lean: P2 · tab-chip with board/sim glyphs.</b> Squared corners put the chips
+  in the app's entity grammar (cards, tiles) rather than the status-pill grammar Yona flagged —
+  they read as small <i>places</i>, which is the strip's whole argument — and the 16px board glyph
+  stays legible at bar density. P3's silhouette is the strongest "device" read and rhymes with the
+  board-picker thumbnails, but at 13px tall the detail turns to noise and the fixed-color artwork
+  fights the accent/washed chip states. P1 is the safe minimum if the squared chips feel heavy
+  next to the round branch chip.</p>
 
-<p class="rejnote"><b>Deliberately absent</b>, per D43 + small-scope: live thumbnails in chips (the
-  global PreviewHost could feed them later — sparkle, not round one), any control on a chip
-  (play/stop/eject), offline/registry devices in the strip, and any second sim.</p>
+<p class="rejnote"><b>Settled at the 2026-08-05 gate:</b> concept A (strip with your-stuff) over
+  B · right-dock (chips read as status lights; right side already contended) and C · devices-tab
+  badge (hides the one thing we want visible; no presence for the lensed session). Narrow collapse =
+  count chip opening the flyout. <b>Deliberately absent</b> per D43 + small-scope: live thumbnails
+  in chips, any control on a chip, offline/registry devices in the strip, any second sim.</p>
 
 <script>
 (function(){
@@ -424,24 +427,17 @@
     none: [], solo: ['sim'], trio: ['sim','porch','zook'],
     five: ['sim','porch','zook','bike','shelf'],
   };
-  const ZOOK_CYCLE = ['behind','run','empty'];
   const STATUS_LABEL = { run:'running', behind:'behind', empty:'connected — empty' };
 
   const state = {
+    style: 'st-tab',
     ds: 'trio',
-    lens: 'porch',      // 'none' | key
-    route: 'editor',    // editor | devices | boards | home (mini-app only)
-    zook: 'behind',
+    lens: 'porch',
+    route: 'editor',
     miniRoute: 'editor',
   };
 
-  function sessions(){
-    return DATASETS[state.ds].map(k => {
-      const s = Object.assign({}, SESSIONS[k]);
-      if (k === 'zook') s.status = state.zook;
-      return s;
-    });
-  }
+  function sessions(){ return DATASETS[state.ds].map(k => Object.assign({}, SESSIONS[k])); }
   function lensKey(){
     if (state.lens === 'none') return null;
     return DATASETS[state.ds].includes(state.lens) ? state.lens : null;
@@ -454,16 +450,25 @@
     if (html != null) el.innerHTML = html;
     return el;
   }
-  const svg = (id, s) => `<svg width="${s}" height="${s}"><use href="#${id}"/></svg>`;
+  const svg = (id, w, hh) => `<svg width="${w}" height="${hh||w}"><use href="#${id}"/></svg>`;
+
+  /* chip glyph per style */
+  function glyphFor(s){
+    if (state.style === 'st-tile'){
+      const art = s.sim ? 'b-sim' : 'b-generic';
+      return `<span class="icowrap"><svg width="24" height="13" viewBox="0 0 84 46"><use href="#${art}"/></svg>` +
+             `<span class="dot corner ${s.status}"></span></span>`;
+    }
+    const icon = s.sim ? svg('i-sim', 12) : svg('i-board', 13);
+    return `<span class="glyph">${icon}</span>`;
+  }
 
   /* ---------- chrome renderer ---------- */
-  // opts: { concept: zero|a|b|c, bp: wide|md|sm, route, interactive, onNav(chipKeyOrRoute) }
   function renderBar(opts){
     const bp = opts.bp, route = opts.route;
     const live = sessions(), lens = lensKey();
     const bar = h('div', 'bar' + (bp !== 'wide' ? ' ' + bp : ''));
 
-    // brand
     const brand = h('button', 'brand', (bp === 'sm')
       ? svg('mark-e', 22)
       : svg('mark-e', 22) + '<span class="word">LightPlayer</span>');
@@ -471,68 +476,41 @@
     if (opts.onNav) brand.onclick = () => opts.onNav('home');
     bar.appendChild(brand);
 
-    if (opts.concept === 'zero'){
-      const nav = h('span', 'navrow');
-      [['Studio', route === 'editor' || route === 'devices'], ['Boards', route === 'boards'], ['Docs', false]]
-        .forEach(([label, act]) => nav.appendChild(h('button', 'navlink' + (act ? ' active' : ''), label)));
-      bar.appendChild(nav);
-      bar.appendChild(rightSide(bp, null, opts));
-      return bar;
-    }
-
-    // chrome C primary family
     const nav = h('span', 'navrow');
-    nav.appendChild(navBtn('Devices', 'devices', route, opts, conceptCBadge(opts, live, lens)));
+    nav.appendChild(navBtn('Devices', 'devices', route, opts));
     nav.appendChild(navBtn('Projects', 'projects', route, opts));
     bar.appendChild(nav);
 
-    // concept A: strip right after the primary family
-    if (opts.concept === 'a' && live.length){
+    if (live.length){
       bar.appendChild(h('span', 'sdiv'));
       bar.appendChild(buildStrip(live, lens, route, bp, opts));
     }
 
-    bar.appendChild(rightSide(bp, (opts.concept === 'b' && live.length) ? buildStrip(live, lens, route, bp, opts) : null, opts));
+    bar.appendChild(rightSide(bp, opts));
     return bar;
   }
 
-  function navBtn(label, key, route, opts, badgeEl){
+  function navBtn(label, key, route, opts){
     const btn = h('button', 'navlink' + (route === key ? ' active' : ''), label);
-    if (badgeEl) btn.appendChild(badgeEl);
     if (opts.onNav) btn.onclick = () => opts.onNav(key);
     return btn;
   }
 
-  function conceptCBadge(opts, live, lens){
-    if (opts.concept !== 'c' || !live.length) return null;
-    const worst = live.some(s => s.status === 'behind') ? 'behind' : 'run';
-    const badge = h('span', 'tabbadge',
-      `<span class="dot ${worst}"></span>${live.length}`);
-    badge.title = live.length + ' running session' + (live.length > 1 ? 's' : '');
-    badge.onclick = (e) => { e.stopPropagation(); toggleMenu(badge, opts); };
-    return badge;
-  }
-
-  function rightSide(bp, dockStrip, opts){
+  function rightSide(bp, opts){
     const rs = h('span', 'rside');
-    if (dockStrip){ rs.appendChild(dockStrip); rs.appendChild(h('span', 'sdiv')); }
-    if (opts.concept !== 'zero'){
-      if (bp === 'sm'){
-        const more = h('button', 'iconbtn', '⋯');
-        more.title = 'Explore, Boards, Docs';
-        more.style.cssText = 'width:25px;height:25px;font-size:15px;line-height:1';
-        rs.appendChild(more);
-      } else {
-        const sec = h('span', 'navrow'); sec.style.marginRight = '6px';
-        [['Explore','explore'], ['Boards','boards'], ['Docs','docs']].forEach(([label, key]) => {
-          const btn = h('button', 'navlink secondary' + (opts.route === key ? ' active' : ''), label);
-          if (opts.onNav) btn.onclick = () => opts.onNav(key);
-          sec.appendChild(btn);
-        });
-        rs.appendChild(sec);
-      }
-    } else if (bp !== 'sm'){
-      // today's chrome has no secondary family; keep its right side as shipped
+    if (bp === 'sm'){
+      const more = h('button', 'iconbtn', '⋯');
+      more.title = 'Explore, Boards, Docs';
+      more.style.cssText = 'width:25px;height:25px;font-size:15px;line-height:1';
+      rs.appendChild(more);
+    } else {
+      const sec = h('span', 'navrow'); sec.style.marginRight = '6px';
+      [['Explore','explore'], ['Boards','boards'], ['Docs','docs']].forEach(([label, key]) => {
+        const btn = h('button', 'navlink secondary' + (opts.route === key ? ' active' : ''), label);
+        if (opts.onNav) btn.onclick = () => opts.onNav(key);
+        sec.appendChild(btn);
+      });
+      rs.appendChild(sec);
     }
     if (bp === 'wide'){
       rs.appendChild(h('button', 'vchip',
@@ -544,7 +522,7 @@
     return rs;
   }
 
-  /* ---------- the strip itself ---------- */
+  /* ---------- the strip ---------- */
   function buildStrip(live, lens, route, bp, opts){
     const strip = h('span', 'strip');
     if (bp === 'sm'){
@@ -568,9 +546,11 @@
     const isLens = lens === s.key;
     const cls = 'schip' + (s.sim ? ' sim' : '')
       + (isLens ? (route === 'editor' ? ' here' : ' open') : '');
+    const showDot = state.style !== 'st-tile';
     const el = h('button', cls,
-      (s.sim ? svg('i-sim', 11) : '') +
-      `<span class="dot ${s.status}"></span><span class="nm">${s.name}</span>`);
+      glyphFor(s) +
+      (showDot ? `<span class="dot ${s.status}"></span>` : '') +
+      `<span class="nm">${s.name}</span>`);
     el.title = s.name + ' — ' + STATUS_LABEL[s.status] + (isLens ? ' · open in editor' : '');
     if (opts.onNav) el.onclick = () => opts.onNav('chip:' + s.key);
     return el;
@@ -600,14 +580,14 @@
     menu.appendChild(h('div', 'mhead', 'Running'));
     live.forEach(s => {
       const isLens = lens === s.key;
-      const mi = h('button', 'mi' + (isLens ? ' here' : ''),
-        `<span class="dot ${s.status}"></span>` + (s.sim ? svg('i-sim', 11) : '') +
+      const mi = h('button', 'mi' + (isLens ? ' here' : '') + (s.sim ? ' simmi' : ''),
+        `<span class="dot ${s.status}"></span>` +
+        `<span class="glyph">${s.sim ? svg('i-sim', 11) : svg('i-board', 12)}</span>` +
         `<span class="nm">${s.name}</span>` +
         `<span class="tag">${isLens ? 'open' : STATUS_LABEL[s.status]}</span>`);
       mi.onclick = () => { closeMenu(); if (opts.onNav) opts.onNav('chip:' + s.key); };
       menu.appendChild(mi);
     });
-    // position: below anchor, clamped to frame
     const frame = anchor.closest('.appframe');
     frame.appendChild(menu);
     const fr = frame.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
@@ -622,7 +602,7 @@
     const lens = lensKey(); const live = sessions();
     const peek = h('div', 'peek' + (bp === 'sm' ? ' tight' : ''));
     if (route === 'editor'){
-      const who = lens ? sessions().find(s => s.key === lens) : null;
+      const who = lens ? live.find(s => s.key === lens) : null;
       if (!who){
         peek.appendChild(h('div', 'pane', '<div class="pt">no lens — gallery</div><div class="ln w80"></div><div class="ln w60"></div>'));
         return peek;
@@ -635,12 +615,11 @@
       node.style.flex = '1.4'; card.style.flex = '1.1';
       return peek;
     }
-    if (route === 'boards' || route === 'projects' || route === 'explore' || route === 'docs' || route === 'home'){
+    if (route !== 'devices'){
       const titles = { boards: 'board catalog', projects: 'project library', explore: 'explore', docs: 'docs', home: 'home — in-app marketing' };
-      peek.appendChild(h('div', 'pane', `<div class="pt">${titles[route]}</div><div class="ln w80"></div><div class="ln w80"></div><div class="ln w60"></div>`));
+      peek.appendChild(h('div', 'pane', `<div class="pt">${titles[route] || route}</div><div class="ln w80"></div><div class="ln w80"></div><div class="ln w60"></div>`));
       return peek;
     }
-    // devices page
     live.slice(0, bp === 'sm' ? 2 : 3).forEach(s => {
       peek.appendChild(h('div', 'dcard' + (s.sim ? ' simc' : ''),
         `<div class="dh"><span class="dot ${s.status}"></span><span class="nm">${s.name}</span></div>` +
@@ -652,51 +631,72 @@
     return peek;
   }
 
-  /* ---------- static frames (sections 1 + 2) ---------- */
-  function renderFrames(){
-    document.querySelectorAll('[data-frame]').forEach(frame => {
-      frame.innerHTML = '';
-      const opts = {
-        concept: frame.dataset.concept,
-        bp: frame.dataset.bp,
-        route: state.route,
-        onNav: () => {},   // static frames: clicks open menus only
-      };
-      // menus need real handlers on pills/badges; chips inert here
-      opts.onNav = null;
-      frame.appendChild(renderBar(opts));
-      frame.appendChild(peekFor(state.route, frame.dataset.bp));
-      const lbl = frame.dataset.concept === 'zero'
-        ? 'body · ' + (state.route === 'boards' ? 'boards' : 'studio')
-        : 'body · ' + state.route + (state.route === 'editor' && lensKey() ? ' → ' + SESSIONS[lensKey()].name : '');
-      frame.appendChild(h('div', 'bodylabel', lbl));
+  /* ---------- anatomy strips ---------- */
+  function renderAnatomy(){
+    document.querySelectorAll('.anat').forEach(box => {
+      const style = box.dataset.anat;
+      box.classList.toggle('sel', style === state.style);
+      const row = box.querySelector('[data-anatrow]');
+      row.innerHTML = '';
+      row.className = 'row ' + style;
+      const saved = state.style;
+      state.style = style;   // glyphFor reads state.style
+      const demo = [
+        Object.assign({}, SESSIONS.sim),
+        Object.assign({}, SESSIONS.porch),                 // rendered as "here"
+        Object.assign({}, SESSIONS.zook),                  // behind
+        { key:'shelf', name:'Kitchen shelf', sim:false, status:'empty' },
+        { key:'bike', name:'Burning man bike — rear wheel', sim:false, status:'run' },
+      ];
+      demo.forEach(s => {
+        const el = chip(s, 'porch', 'editor', {});
+        el.onclick = null;
+        row.appendChild(el);
+      });
+      // the washed "open elsewhere" variant, labeled by position (same session, other page)
+      const open = chip(Object.assign({}, SESSIONS.porch), 'porch', 'boards', {});
+      open.onclick = null;
+      row.appendChild(h('span', 'anote', '· and open-elsewhere: '));
+      row.appendChild(open);
+      state.style = saved;
+      box.onclick = () => { state.style = style; renderAll(); };
     });
   }
 
-  /* ---------- section 3 mini-app ---------- */
+  /* ---------- static frames ---------- */
+  function renderFrames(){
+    document.querySelectorAll('[data-frame]').forEach(frame => {
+      frame.innerHTML = '';
+      frame.classList.remove('st-pill','st-tab','st-tile');
+      frame.classList.add(state.style);
+      const opts = { bp: frame.dataset.bp, route: state.route, onNav: null };
+      frame.appendChild(renderBar(opts));
+      frame.appendChild(peekFor(state.route, frame.dataset.bp));
+      frame.appendChild(h('div', 'bodylabel',
+        'body · ' + state.route + (state.route === 'editor' && lensKey() ? ' → ' + SESSIONS[lensKey()].name : '')));
+    });
+  }
+
+  /* ---------- mini-app ---------- */
   const mini = document.getElementById('miniapp');
   function renderMini(){
     mini.innerHTML = '';
+    mini.classList.remove('st-pill','st-tab','st-tile');
+    mini.classList.add(state.style);
     const opts = {
-      concept: 'a', bp: 'wide', route: state.miniRoute,
+      bp: 'wide', route: state.miniRoute,
       onNav: (target) => {
         if (target.startsWith('chip:')){
           state.lens = target.slice(5);
           state.miniRoute = 'editor';
         } else {
-          state.miniRoute = target;   // home | devices | projects | explore | boards | docs
+          state.miniRoute = target;
         }
         renderAll();
       },
     };
     mini.appendChild(renderBar(opts));
-    if (state.miniRoute === 'home'){
-      const peek = h('div', 'peek');
-      peek.appendChild(h('div', 'pane', '<div class="pt">home — in-app marketing</div><div class="ln w60"></div><div class="ln w80"></div>'));
-      mini.appendChild(peek);
-    } else {
-      mini.appendChild(peekFor(state.miniRoute, 'wide'));
-    }
+    mini.appendChild(peekFor(state.miniRoute, 'wide'));
     const lens = lensKey();
     const msg = state.miniRoute === 'editor'
       ? (lens ? `editing <b>${SESSIONS[lens].name}</b> — its chip is the accent one` : 'no lens attached — pick a chip')
@@ -704,34 +704,29 @@
     mini.appendChild(h('div', 'bodylabel', msg));
   }
 
-  function renderAll(){ closeMenu(); renderFrames(); renderMini(); syncControls(); }
+  function renderAll(){ closeMenu(); renderAnatomy(); renderFrames(); renderMini(); syncControls(); }
 
   /* ---------- controls ---------- */
   function syncControls(){
+    document.querySelectorAll('.ctl[data-style]').forEach(b => b.setAttribute('aria-pressed', b.dataset.style === state.style));
     document.querySelectorAll('.ctl[data-ds]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ds === state.ds));
     document.querySelectorAll('.ctl[data-lens]').forEach(b => b.setAttribute('aria-pressed', b.dataset.lens === state.lens));
     document.querySelectorAll('.ctl[data-route]').forEach(b => b.setAttribute('aria-pressed', b.dataset.route === state.route));
-    document.getElementById('ctl-zook').textContent = state.zook + ' ⟳';
   }
+  document.querySelectorAll('.ctl[data-style]').forEach(b => b.onclick = () => { state.style = b.dataset.style; renderAll(); });
   document.querySelectorAll('.ctl[data-ds]').forEach(b => b.onclick = () => { state.ds = b.dataset.ds; renderAll(); });
   document.querySelectorAll('.ctl[data-lens]').forEach(b => b.onclick = () => { state.lens = b.dataset.lens; renderAll(); });
   document.querySelectorAll('.ctl[data-route]').forEach(b => b.onclick = () => { state.route = b.dataset.route; state.miniRoute = b.dataset.route; renderAll(); });
-  document.getElementById('ctl-zook').onclick = () => {
-    state.zook = ZOOK_CYCLE[(ZOOK_CYCLE.indexOf(state.zook) + 1) % ZOOK_CYCLE.length];
-    renderAll();
-  };
-
-  /* static frames still need working pills/badges for the flyout */
-  // re-render with menu-capable opts: pills/badges call toggleMenu directly, which
-  // works without onNav; chips in static frames stay inert (menus are the demo).
 
   renderAll();
 
-  /* hash-boot for capture / linking: #flyout=a-sm opens that frame's session flyout */
-  const m = location.hash.match(/flyout=([a-z]+)-(wide|md|sm)/);
+  /* hash-boot for capture / linking: #flyout=sm opens the sm frame's flyout; #style=st-tile picks a style */
+  const sm = location.hash.match(/style=(st-[a-z]+)/);
+  if (sm && ['st-pill','st-tab','st-tile'].includes(sm[1])){ state.style = sm[1]; renderAll(); }
+  const m = location.hash.match(/flyout=(wide|md|sm)/);
   if (m){
-    const frame = document.querySelector(`[data-concept="${m[1]}"][data-bp="${m[2]}"]`);
-    const trigger = frame && frame.querySelector('.countpill, .tabbadge, .morechip');
+    const frame = document.querySelector(`[data-frame][data-bp="${m[1]}"]`);
+    const trigger = frame && frame.querySelector('.countpill, .morechip');
     if (trigger) trigger.click();
   }
 })();
