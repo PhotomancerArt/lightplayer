@@ -73,6 +73,7 @@ pub use manifest::hw_manifest_file::{
     HardwareBoardLabelFile, HardwareBoardLabelStatus, HardwareManifestFile,
     HardwareManifestFileError,
 };
+pub use manifest::hw_soft_limits::{HwMeasuredLimit, HwSoftLimits};
 pub use manifest::hw_target::HardwareTarget;
 pub use registry::hw_claim::HwClaim;
 pub use registry::hw_lease::{HardwareLease, HwLeaseId};
