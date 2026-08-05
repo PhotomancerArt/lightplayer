@@ -13,7 +13,7 @@ use lpa_studio_core::{
     UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
     UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts,
     UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit, UiPanelWidget,
-    UiPhasorRow, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProducedValue,
+    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProducedValue,
     UiProductPreview, UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
     UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
 };
@@ -238,34 +238,41 @@ pub(crate) fn period_knob(label: &str, seconds: f32, shared: bool) -> UiPanelCon
     control
 }
 
-/// One phasor row for the clock's listing.
-pub(crate) fn phasor_row(
-    origin: &str,
-    detail: &str,
+/// One downstream reading for the clock face's trace cards (clock-face
+/// v2). `detail` is the shared-channel tooltip; `shared` wears the violet
+/// border.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a fixture builder mirrors the DTO field for field"
+)]
+pub(crate) fn phasor_reading(
+    label: &str,
+    detail: Option<&str>,
     shared: bool,
     phase: f32,
     cycle: u32,
     period_seconds: f32,
-) -> UiPhasorRow {
-    UiPhasorRow {
-        origin: origin.to_string(),
-        detail: Some(detail.to_string()),
+    waveform: lpa_studio_core::Waveform,
+    phase_offset: f32,
+) -> UiPhasorReading {
+    UiPhasorReading {
+        label: label.to_string(),
+        detail: detail.map(str::to_string),
         shared,
         phase,
-        phase_display: lpa_studio_core::format_phase(phase),
         cycle,
-        period_display: lpa_studio_core::format_period_seconds(period_seconds),
+        period_seconds,
+        rate_display: lpa_studio_core::phasor_rate_display(period_seconds),
+        waveform,
+        phase_offset,
     }
 }
 
 /// A clock face in one of the listing's three states.
-pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorRow>) -> UiClockFace {
+pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorReading>) -> UiClockFace {
     let mut face =
         UiClockFace::new(UiProducedProduct::time("product").with_detail("node 2 output 0"));
-    face.readings = vec![
-        UiProducedValue::new("Seconds", "42.35").with_unit(UiSlotUnit::seconds()),
-        UiProducedValue::new("Delta seconds", "0.033").with_unit(UiSlotUnit::seconds()),
-    ];
+    face.seconds = Some("42.35".to_string());
     face.timebase = timebase;
     face.phasors = phasors;
     face
