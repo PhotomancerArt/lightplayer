@@ -1,0 +1,1292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gallery rework — device-first studio, design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via top-bar spike) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --gold: #e4c065; --gold-bg: rgba(228,192,101,.10);
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 820px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 820px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button { font-family: var(--sans); }
+
+  /* ---- exploration controls ---- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer;
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- shared chrome bones (top-bar spike winner A, extended) ---- */
+  .appframe {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 140px), var(--bg);
+  }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 9px 20px; min-height: 44px;
+    border-bottom: 1px solid var(--border-subtle); }
+  .brand { display: inline-flex; align-items: center; gap: 8px; flex: none;
+    appearance: none; border: 0; background: transparent; padding: 4px 6px; margin: -4px 0 -4px -6px;
+    border-radius: 8px; }
+  .brand svg { color: var(--accent); }
+  .brand .word { font-size: 12.5px; font-weight: 700; color: var(--strong); letter-spacing: .01em; white-space: nowrap; }
+  .brand.aslink { cursor: pointer; }
+  .brand.aslink:hover { background: var(--bg-wash); }
+  .brand.aslink:hover .word { color: var(--accent); }
+  .brand.aslink.athome { background: var(--bg-wash); }
+  .navrow { display: inline-flex; align-items: center; gap: 2px; }
+  .navlink {
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: 600 12px/1 var(--sans); color: var(--subtle);
+    padding: 8px 10px 9px; border-radius: 6px; position: relative; white-space: nowrap;
+  }
+  .navlink:hover { color: var(--text); background: var(--bg-wash); }
+  .navlink.active { color: var(--heading); }
+  .navlink.active::after {
+    content: ""; position: absolute; left: 10px; right: 10px; bottom: 2px;
+    height: 2px; border-radius: 2px; background: var(--accent);
+  }
+  .navlink.secondary { color: color-mix(in srgb, var(--subtle) 72%, transparent); font-weight: 500; }
+  .navlink.secondary:hover { color: var(--text); }
+  .navlink.secondary.active { color: var(--heading); font-weight: 600; }
+  .navdiv { width: 1px; height: 16px; background: var(--border-strong); margin: 0 8px; flex: none; }
+  .navgap { width: 14px; flex: none; }
+  .rside { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .vchip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font: 600 10.5px/1 var(--mono); color: var(--subtle);
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    border-radius: 999px; padding: 4px 10px; max-width: 180px; min-width: 0;
+  }
+  .vchip .vtxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg);
+    color: var(--neutral-text); padding: 0;
+  }
+  .iconbtn.ai { color: var(--bound-text); border-color: var(--bound-border); background: var(--bound-bg); }
+
+  .barwrap { max-width: 1400px; margin-bottom: 24px; }
+  .barwrap .cap { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .barwrap .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .barwrap .cap .cnote { font-size: 11.5px; color: var(--dim); }
+  .peek { display: flex; gap: 14px; padding: 14px 20px 18px; opacity: .5; pointer-events: none;
+    mask-image: linear-gradient(180deg, #000 30%, transparent 96%); }
+  .pcard { flex: 1; height: 74px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface); overflow: hidden; display: flex; flex-direction: column; }
+  .pcard .strip { height: 40px; }
+  .pcard .meta { padding: 6px 10px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .g1 { background: linear-gradient(90deg, #14323f, #1d5c50, #7be0b2, #1d5c50, #14323f); }
+  .g2 { background: linear-gradient(90deg, #3f2114, #a34b1e, #f0b97a, #a34b1e, #3f2114); }
+  .g3 { background: linear-gradient(90deg, #241a33, #5f4a85, #c9b1f5, #5f4a85, #241a33); }
+
+  /* ---- section 2 · devices page ---- */
+  .pagewrap { max-width: 1400px; }
+  .pagebody { padding: 18px 20px 24px; }
+  .sechead { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; }
+  .sechead .t { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+  .sechead .cta { margin-left: auto; }
+  .devgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(252px, 1fr)); gap: 14px; }
+
+  .dcard {
+    border-radius: 10px; overflow: hidden; background: var(--surface);
+    border: 1px solid var(--border); border-left: 3px solid var(--tint, var(--neutral-border));
+    display: flex; flex-direction: column; position: relative; min-height: 132px;
+  }
+  .dcard[data-st=running] { --tint: var(--good-text); --tint-bg: var(--good-bg); }
+  .dcard[data-st=setup]   { --tint: var(--warn-text); --tint-bg: var(--warn-bg); }
+  .dcard[data-st=offline] { --tint: var(--neutral-border); --tint-bg: var(--neutral-bg); opacity: .6; }
+  .dcard[data-st=offline]:hover { opacity: 1; }
+  .dcard[data-st=sim]     { --tint: var(--bound-text); --tint-bg: var(--bound-bg); }
+  .dcard header {
+    display: flex; align-items: center; gap: 7px; padding: 7px 10px;
+    background: linear-gradient(to bottom, var(--tint-bg, transparent), transparent), var(--terminal);
+    border-bottom: 1px solid var(--border-muted); min-height: 36px;
+  }
+  .dcard .kglyph { color: var(--dim); display: inline-flex; flex: none; }
+  .dcard .dname { font-weight: 700; color: var(--gold); font-size: 13.5px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .dcard .transport { margin-left: auto; font: 700 10px/1 var(--mono); letter-spacing: .08em;
+    color: var(--dim); text-transform: uppercase; flex: none; }
+  .dcard .dbody { padding: 9px 11px 11px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .dcard .stline { color: var(--tint); font-size: 11.5px; font-weight: 600; }
+  .dcard .bfact { font: 500 10.5px/1.3 var(--mono); color: var(--dim); }
+
+  /* running-project treatments */
+  .projchip { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+  .projchip .sw { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+  .projchip .pn { color: var(--muted); font-size: 12px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .projchip .plabel { font-size: 10px; color: var(--dim); font-weight: 700;
+    text-transform: uppercase; letter-spacing: .07em; flex: none; }
+  .herostrip { height: 44px; position: relative; border-bottom: 1px solid var(--border-muted);
+    background-size: 300% 100%; }
+  .herostrip .hname {
+    position: absolute; left: 8px; bottom: 5px; font-size: 10.5px; font-weight: 700; color: #fffaf0;
+    background: rgba(8,10,13,.55); border-radius: 4px; padding: 2px 7px; backdrop-filter: blur(2px);
+  }
+  .herostrip.animate, .dcard:hover .herostrip { animation: slide 4s linear infinite; }
+  @keyframes slide { to { background-position: 300% 0; } }
+  .herostrip.dead { filter: saturate(.25) brightness(.7); animation: none; }
+  .nothing { color: var(--dim); font-size: 11.5px; }
+
+  /* creation cards (the split "connect / simulate") */
+  .newstack { display: flex; flex-direction: column; gap: 10px; min-height: 132px; }
+  .newcard {
+    flex: 1; border: 1px dashed var(--border-strong); border-radius: 10px; cursor: pointer;
+    background: transparent; display: flex; align-items: center; gap: 11px; padding: 10px 13px;
+    color: var(--subtle); text-align: left;
+  }
+  .newcard:hover { border-color: var(--accent-border); color: var(--text); background: rgba(123,224,178,.04); }
+  .newcard.simflavor:hover { border-color: var(--bound-border); background: rgba(201,177,245,.05); }
+  .newcard svg { flex: none; color: var(--dim); }
+  .newcard:hover svg { color: var(--accent); }
+  .newcard.simflavor:hover svg { color: var(--bound-text); }
+  .newcard .nt { font-size: 12.5px; font-weight: 700; color: var(--text); }
+  .newcard .nd { font-size: 10.5px; color: var(--dim); line-height: 1.35; }
+
+  /* ---- section 3 · wizard ---- */
+  .wizwrap { max-width: 1400px; }
+  .wizard {
+    border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden;
+    background: var(--surface-subtle); box-shadow: 0 16px 44px rgba(0,0,0,.45);
+  }
+  .wizard.simpath { border-color: var(--bound-border); }
+  .wizhead { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: var(--terminal); border-bottom: 1px solid var(--border-muted); }
+  .wizhead .wt { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .wizhead .wk { font: 700 9.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase;
+    border-radius: 999px; padding: 3px 9px; }
+  .wizhead .wk.hw  { color: var(--good-text); background: var(--good-bg); border: 1px solid var(--good-border); }
+  .wizhead .wk.sim { color: var(--bound-text); background: var(--bound-bg); border: 1px solid var(--bound-border); }
+  .wizhead .close { margin-left: auto; appearance: none; border: 0; background: transparent;
+    color: var(--dim); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 5px; }
+  .wizhead .close:hover { color: var(--text); background: var(--bg-wash); }
+  .steps { display: flex; gap: 4px; align-items: center; padding: 10px 16px 0; flex-wrap: wrap; }
+  .step { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700;
+    color: var(--dim); padding: 4px 10px 4px 6px; border-radius: 999px; }
+  .step .dotn { width: 17px; height: 17px; border-radius: 50%; display: inline-flex; align-items: center;
+    justify-content: center; font-size: 9.5px; border: 1px solid var(--border-strong); color: var(--subtle); }
+  .step.now { color: var(--text); background: var(--surface-raised); }
+  .step.now .dotn { border-color: var(--accent-border); color: var(--accent); }
+  .step.done { color: var(--heading); }
+  .step.done .dotn { border-color: var(--accent-border); background: var(--good-bg); color: var(--accent); }
+  .step.skip { opacity: .35; text-decoration: line-through; }
+  .steparrow { color: var(--dim); font-size: 10px; }
+  .wizbody { padding: 14px 16px 16px; min-height: 210px; }
+
+  .boardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .bcard { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; cursor: pointer;
+    padding: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: left; }
+  .bcard:hover { border-color: var(--border-strong); }
+  .bcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .bcard svg { align-self: center; }
+  .bcard .bn { font-size: 11.5px; font-weight: 700; color: var(--strong); }
+  .bcard .bio { font: 500 9.5px/1.3 var(--mono); color: var(--dim); }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 800;
+    letter-spacing: .09em; text-transform: uppercase; border-radius: 999px; padding: 1.5px 8px; }
+  .badge.detected { color: var(--live-text); background: var(--live-bg); border: 1px solid var(--live-border); }
+  .badge.gold { color: var(--gold); background: var(--gold-bg); border: 1px solid rgba(228,192,101,.35); }
+  .badge.forboard { color: var(--subtle); background: var(--neutral-bg); border: 1px solid var(--neutral-border);
+    text-transform: none; letter-spacing: .02em; font-weight: 700; font-size: 9.5px; }
+  .badge.warnb { color: var(--warn-text); background: var(--warn-bg); border: 1px solid var(--warn-border);
+    text-transform: none; letter-spacing: .02em; font-size: 9.5px; }
+
+  .contentsplit { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .contentsplit { grid-template-columns: 1fr; } }
+  .choicebox { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+  .choicebox.picked { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .choicebox h4 { margin: 0; font-size: 12.5px; color: var(--strong); }
+  .choicebox h4 small { color: var(--dim); font-weight: 500; font-size: 11px; margin-left: 6px; }
+  .genflow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    background: var(--terminal); border: 1px solid var(--border-muted); border-radius: 8px; padding: 10px; }
+  .gnode { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px;
+    padding: 5px 8px; display: flex; flex-direction: column; gap: 2px; min-width: 64px; }
+  .gnode .gh { font-size: 9.5px; font-weight: 800; color: var(--muted); letter-spacing: .04em; }
+  .gnode .gv { font: 600 9.5px/1.2 var(--mono); color: var(--dim); }
+  .gnode.hot .gv { color: var(--accent); }
+  .garr { color: var(--bound-text); font-size: 12px; flex: none; }
+  .genline { font-size: 11px; color: var(--dim); line-height: 1.5; }
+  .genline b { color: var(--muted); }
+  .projlist { display: flex; flex-direction: column; gap: 5px; max-height: 168px; overflow-y: auto; }
+  .prow { display: flex; align-items: center; gap: 9px; appearance: none; border: 1px solid transparent;
+    background: transparent; border-radius: 7px; padding: 6px 8px; cursor: pointer; text-align: left; }
+  .prow:hover { background: var(--bg-wash); }
+  .prow[aria-pressed=true] { border-color: var(--accent-border); background: rgba(123,224,178,.05); }
+  .prow .sw { width: 22px; height: 15px; border-radius: 3px; flex: none; background-size: 300% 100%; }
+  .prow .pn { font-size: 12px; font-weight: 600; color: var(--text); flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .warnbox { border: 1px solid var(--warn-border); background: var(--warn-bg); border-radius: 9px;
+    padding: 10px 12px; font-size: 11.5px; color: var(--warn-text); line-height: 1.5; }
+  .warnbox b { color: var(--strong); }
+  .warnbox .wactions { display: flex; gap: 8px; margin-top: 8px; }
+  .abtn { appearance: none; cursor: pointer; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--text); font-size: 12px; font-weight: 600; border-radius: 7px; padding: 6px 12px; }
+  .abtn:hover { border-color: var(--accent-border); color: var(--strong); }
+  .abtn.primary { border-color: var(--accent-border); color: var(--accent); }
+  .abtn.primary:hover { background: rgba(123,224,178,.08); }
+  .abtn.warn { border-color: var(--warn-border); color: var(--warn-text); }
+  .abtn.ghost { border-color: transparent; color: var(--subtle); }
+  .abtn.ghost:hover { color: var(--text); border-color: var(--border-strong); }
+  .wizfoot { display: flex; gap: 8px; align-items: center; padding: 0 16px 16px; }
+  .wizfoot .spacer { flex: 1; }
+  .flashrow { display: flex; flex-direction: column; gap: 10px; max-width: 460px; }
+  .flashbar { height: 8px; border-radius: 999px; background: var(--terminal);
+    border: 1px solid var(--border-muted); overflow: hidden; }
+  .flashbar .fill { height: 100%; width: 0%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-border), var(--accent)); transition: width .3s; }
+  .flashlog { font: 500 10.5px/1.6 var(--mono); color: var(--dim); background: var(--terminal);
+    border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 10px; min-height: 64px; }
+  .flashlog .ok { color: var(--good-text); }
+
+  /* ---- section 4 · editor landing ---- */
+  .edframe { display: flex; gap: 0; min-height: 330px; }
+  .edcanvas { flex: 1; padding: 16px; position: relative;
+    background: radial-gradient(circle at 1px 1px, rgba(255,255,255,.045) 1px, transparent 1px) 0 0/22px 22px, var(--bg); }
+  .enode { position: absolute; background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 9px; min-width: 120px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+  .enode .nh { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700;
+    color: var(--muted); padding: 5px 9px; border-bottom: 1px solid var(--border-subtle); background: var(--surface-muted); }
+  .enode .nh .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good-text); box-shadow: 0 0 5px var(--good-text); }
+  .enode .nb { padding: 7px 9px; display: flex; flex-direction: column; gap: 5px; }
+  .enode .fv { font: 600 10px/1.3 var(--mono); color: var(--dim); }
+  .enode .fv b { color: var(--accent); font-weight: 600; }
+  .entry { display: flex; align-items: center; gap: 7px; background: var(--terminal);
+    border: 1px solid var(--border-muted); border-radius: 6px; padding: 4px 7px; }
+  .entry .sw { width: 18px; height: 12px; border-radius: 2.5px; background-size: 300% 100%; flex: none; }
+  .entry .en { font-size: 11px; font-weight: 600; color: var(--text); flex: 1; }
+  .entry .rep { appearance: none; border: 0; background: transparent; color: var(--dim); cursor: pointer;
+    font-size: 12px; padding: 1px 4px; border-radius: 4px; }
+  .entry .rep:hover { color: var(--accent); background: var(--bg-wash); }
+  .addentry { appearance: none; cursor: pointer; border: 1px dashed var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 10.5px; font-weight: 700; border-radius: 6px; padding: 4px 7px; text-align: left; }
+  .addentry:hover { color: var(--accent); border-color: var(--accent-border); }
+  .wire { position: absolute; pointer-events: none; }
+  .modpicker { position: absolute; z-index: 20; width: 216px; background: var(--surface);
+    border: 1px solid var(--neutral-border); border-radius: 10px; padding: 7px;
+    box-shadow: 0 14px 38px rgba(0,0,0,.55); display: flex; flex-direction: column; gap: 2px; }
+  .modpicker .mh { font-size: 9.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--dim); padding: 3px 6px 5px; }
+  .modrow { display: flex; align-items: center; gap: 8px; appearance: none; border: 0; background: transparent;
+    border-radius: 7px; padding: 5px 7px; cursor: pointer; text-align: left; }
+  .modrow:hover { background: var(--surface-raised); }
+  .modrow .sw { width: 22px; height: 14px; border-radius: 3px; background-size: 300% 100%; flex: none; }
+  .modrow:hover .sw { animation: slide 3s linear infinite; }
+  .modrow .mn { font-size: 11.5px; font-weight: 600; color: var(--text); flex: 1; }
+  .modrow .prov { font-size: 8.5px; color: var(--dim); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+  .edtoast { position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    background: var(--good-bg); border: 1px solid var(--good-border); color: var(--good-text);
+    font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 5px 14px; }
+
+  /* ---- section 5 · home ---- */
+  .homehero { display: flex; flex-direction: column; align-items: center; text-align: center;
+    padding: 34px 20px 10px; gap: 10px; }
+  .homehero .lock { display: flex; align-items: center; gap: 12px; }
+  .homehero .lock svg { color: var(--accent); }
+  .homehero .lock .word { font-size: 22px; font-weight: 800; color: var(--strong); letter-spacing: .01em; }
+  .homehero .tag { font-size: 13px; color: var(--subtle); max-width: 480px; }
+  .divegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px;
+    padding: 18px 20px 8px; max-width: 980px; margin: 0 auto; }
+  .dive { background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    padding: 15px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; text-align: left; }
+  .dive:hover { border-color: var(--border-strong); }
+  .dive svg { color: var(--accent); }
+  .dive.viol svg { color: var(--bound-text); }
+  .dive .dt { font-size: 13px; font-weight: 700; color: var(--strong); }
+  .dive .dd { font-size: 11.5px; color: var(--dim); line-height: 1.45; }
+  .dive .go { margin-top: auto; font-size: 11.5px; font-weight: 700; color: var(--accent); }
+  .dive.viol .go { color: var(--bound-text); }
+  .homestrip { padding: 14px 20px 24px; max-width: 980px; margin: 0 auto; width: 100%; }
+  .homestrip .sh { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 8px; }
+  .stripgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stripcard { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface);
+    cursor: pointer; position: relative; }
+  .stripcard .th { height: 56px; background-size: 300% 100%; }
+  .stripcard:hover .th { animation: slide 3.2s linear infinite; }
+  .stripcard .sm { display: flex; align-items: center; padding: 6px 9px; gap: 6px; }
+  .stripcard .sn { font-size: 11px; font-weight: 700; color: var(--text); flex: 1; }
+  .stripcard .rmx { font-size: 10px; font-weight: 700; color: var(--accent); opacity: 0; }
+  .stripcard:hover .rmx { opacity: 1; }
+
+  /* ---- section 6 · explore ---- */
+  .xhead { display: flex; gap: 8px; align-items: center; padding: 16px 20px 0; flex-wrap: wrap; }
+  .xgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 14px; padding: 14px 20px 24px; }
+  .xcard { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface);
+    display: flex; flex-direction: column; cursor: pointer; }
+  .xcard:hover { border-color: var(--border-strong); }
+  .xcard .th { height: 84px; background-size: 300% 100%; position: relative; }
+  .xcard:hover .th { animation: slide 3.4s linear infinite; }
+  .xcard .th .hoverhint { position: absolute; right: 6px; bottom: 5px; font-size: 9px; font-weight: 800;
+    color: rgba(255,250,240,.85); background: rgba(8,10,13,.5); border-radius: 4px; padding: 2px 6px;
+    text-transform: uppercase; letter-spacing: .06em; }
+  .xcard .xb { padding: 9px 11px 11px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .xcard .xn { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .xcard .xd { font-size: 10.5px; color: var(--dim); line-height: 1.4; flex: 1; }
+  .xcard .xmeta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .xcard .prov { font: 600 9px/1 var(--mono); color: var(--dim); }
+  .xcard .xfoot { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--border-muted);
+    padding: 7px 11px; }
+  .xcard .xfoot .kind { font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .xcard .xfoot .act { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--accent); }
+  .t1 { background: linear-gradient(90deg, #14323f, #1d5c50, #7be0b2, #2b8064, #14323f); }
+  .t2 { background: linear-gradient(90deg, #3f2114, #a34b1e, #f0b97a, #d95f26, #3f2114); }
+  .t3 { background: linear-gradient(90deg, #241a33, #5f4a85, #c9b1f5, #7a5fb0, #241a33); }
+  .t4 { background: linear-gradient(90deg, #0e2438, #2d5f8a, #9cc8ee, #3f7ab0, #0e2438); }
+  .t5 { background: linear-gradient(90deg, #2b1a10, #8a4a1d, #f0dc7a, #c27b2a, #2b1a10); }
+  .t6 { background: linear-gradient(90deg, #101c14, #2b6b42, #7be0b2, #3f9c62, #101c14); }
+  .t7 { background: linear-gradient(90deg, #331a1a, #8a2d3d, #ef7a76, #b04455, #331a1a); }
+
+  .leannote { font-size: 11.5px; color: var(--dim); max-width: 1400px; margin: 10px 0 0;
+    padding: 9px 12px; border: 1px solid var(--border-muted); border-radius: 8px;
+    background: var(--surface-muted); line-height: 1.55; }
+  .leannote b { color: var(--subtle); }
+
+  /* narrow overflow menu (chrome C @ sm) */
+  .popmenu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
+    min-width: 148px; padding: 6px;
+    background: var(--surface); border: 1px solid var(--neutral-border); border-radius: 10px;
+    box-shadow: 0 12px 34px rgba(0,0,0,.5);
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .popmenu .mi {
+    appearance: none; border: 0; background: transparent; cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px;
+    font: 600 12px/1 var(--sans); color: var(--muted);
+  }
+  .popmenu .mi:hover { background: var(--surface-raised); color: var(--strong); }
+  .popmenu .mi.active { color: var(--heading); }
+</style>
+</head>
+<body>
+
+<!-- ==================== SVG defs ==================== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- mark E · pixel (the shipped interim mark, from spikes/top-bar) -->
+  <symbol id="mark-e" viewBox="0 0 32 32">
+    <rect x="5.5" y="5.5" width="21" height="21" rx="2.4" stroke="currentColor" stroke-width="1.7" fill="none"/>
+    <g fill="currentColor" opacity=".75">
+      <rect x="3.2" y="8" width="2.3" height="4.6" rx="1"/><rect x="3.2" y="19.4" width="2.3" height="4.6" rx="1"/>
+      <rect x="26.5" y="8" width="2.3" height="4.6" rx="1"/><rect x="26.5" y="19.4" width="2.3" height="4.6" rx="1"/>
+    </g>
+    <circle cx="16" cy="16" r="7.6" stroke="currentColor" stroke-width="1.5" fill="none"/>
+    <path d="M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-usb" viewBox="0 0 24 24">
+    <g stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
+      <path d="M12 3v14M12 21v-4M8 8l4-5 4 5M7 14l5 3 5-3"/></g>
+  </symbol>
+  <symbol id="i-sim" viewBox="0 0 24 24">
+    <g stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
+      <rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></g>
+  </symbol>
+  <symbol id="i-board" viewBox="0 0 16 16">
+    <rect x="2.5" y="4" width="11" height="8" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none"/>
+    <circle cx="5.4" cy="6.6" r=".8" fill="currentColor"/><circle cx="5.4" cy="9.4" r=".8" fill="currentColor"/>
+    <rect x="8.2" y="6" width="3.4" height="4" rx=".6" stroke="currentColor" stroke-width="1.1" fill="none"/>
+  </symbol>
+  <symbol id="i-bot" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round">
+      <rect x="3" y="5" width="10" height="7.4" rx="2"/><path d="M8 5V2.8"/>
+      <circle cx="8" cy="2.2" r=".9" fill="currentColor" stroke="none"/></g>
+    <circle cx="5.9" cy="8.4" r="1" fill="currentColor"/><circle cx="10.1" cy="8.4" r="1" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-branch" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <circle cx="4.5" cy="3.5" r="1.7"/><circle cx="4.5" cy="12.5" r="1.7"/><circle cx="11.5" cy="6" r="1.7"/>
+      <path d="M4.5 5.2v5.6M11.5 7.7c0 2.6-3 3-5 3.4"/></g>
+  </symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24">
+    <g stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round">
+      <path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></g>
+  </symbol>
+  <symbol id="i-spark" viewBox="0 0 16 16">
+    <path d="M6.2 1.8l1.05 2.85 2.85 1.05-2.85 1.05L6.2 9.6 5.15 6.75 2.3 5.7l2.85-1.05z" fill="currentColor"/>
+    <path d="M11.6 8.4l.72 1.98 1.98.72-1.98.72-.72 1.98-.72-1.98-1.98-.72 1.98-.72z" fill="currentColor" opacity=".8"/>
+  </symbol>
+  <symbol id="b-generic" viewBox="0 0 84 46">
+    <rect x="2" y="2" width="80" height="42" rx="4" fill="#101418" stroke="#2c3440" stroke-width="1.5"/>
+    <rect x="26" y="8" width="32" height="20" rx="2" fill="#1a2027" stroke="#3e4852"/>
+    <g fill="#8b93a0"><circle cx="9" cy="9" r="2.4"/><circle cx="9" cy="37" r="2.4"/>
+      <circle cx="75" cy="9" r="2.4"/><circle cx="75" cy="37" r="2.4"/></g>
+    <rect x="34" y="32" width="16" height="9" rx="1.5" fill="#26313a"/>
+  </symbol>
+</defs></svg>
+
+<h1>Gallery rework — device-first studio</h1>
+<p class="hint">
+  Thesis (vision D1–D10, dir 2026-08-04-1053): the old gallery dissolves. Nav becomes
+  <b>home | devices · projects | explore · boards · docs</b> — your stuff vs not-your-stuff — and the
+  <b>logo becomes the home link</b>. Creation inverts to device-first: pick the target (hardware or sim),
+  pick the board, then get a project <b>generated for that board</b> or load one with a mismatch warning.
+  You land in the editor with LEDs already animating. Everything below is interactive; §3 is the heart.
+  <b>Converged 2026-08-04:</b> chrome C (split weights, ⋯ menu at narrow), hero strip, panel wizard;
+  round one implements chrome + provisioning — home/explore stay placeholders, §4's graph is someday.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Wizard</b>
+    <button class="chip" id="ctl-hw">open · connect hardware</button>
+    <button class="chip" id="ctl-sim">open · simulate</button>
+  </span>
+  <span class="group"><b>Probe detects</b>
+    <button class="chip" data-det="c6" aria-pressed="true">ESP32-C6</button>
+    <button class="chip" data-det="s3">ESP32-S3</button>
+    <button class="chip" data-det="none">nothing</button>
+  </span>
+  <span class="group"><b>Device card wears project as</b>
+    <button class="chip" data-wear="hero" aria-pressed="true">hero strip</button>
+    <button class="chip" data-wear="chip">header chip</button>
+  </span>
+</div>
+
+<!-- ==================== 1 · chrome ==================== -->
+<h2 id="s1"><span class="n">1</span> The bar — six entries, two families</h2>
+<p class="sub"><b>Chosen: C · split weights</b> (gate 2026-08-04 — "what I had always imagined").
+  Yours sits by the brand at full weight; not-yours drifts right, lighter. At narrow widths the
+  secondary family collapses into the <b>⋯ menu</b>. Concept 0 stays as the frozen baseline;
+  A and B shrink to the rejected note below. Hover the brand: logo → home.</p>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">0 · Today (baseline)</span>
+    <span class="cnote">Studio / Boards / Docs · brand inert · home is the Studio tab</span></p>
+  <div class="appframe">
+    <div class="bar">
+      <span class="brand"><svg width="22" height="22"><use href="#mark-e"/></svg>
+        <span class="word">LightPlayer</span></span>
+      <span class="navrow">
+        <button class="navlink active">Studio</button>
+        <button class="navlink">Boards</button>
+        <button class="navlink">Docs</button>
+      </span>
+      <span class="rside">
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
+        <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+      </span>
+    </div>
+    <div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="barwrap">
+  <p class="cap"><span class="cname">C · Split weights (chosen)</span>
+    <span class="cnote">yours sits by the brand at full weight; not-yours drifts right, lighter — no divider, hierarchy by position + weight</span></p>
+  <div class="appframe">
+    <div class="bar" data-cbar>
+      <button class="brand aslink" data-nav="home" title="Home">
+        <svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></button>
+      <span class="navrow">
+        <button class="navlink" data-nav="devices">Devices</button>
+        <button class="navlink" data-nav="projects">Projects</button>
+      </span>
+      <span class="rside">
+        <span class="navrow" style="margin-right:6px">
+          <button class="navlink secondary" data-nav="explore">Explore</button>
+          <button class="navlink secondary" data-nav="boards">Boards</button>
+          <button class="navlink secondary" data-nav="docs">Docs</button>
+        </span>
+        <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
+        <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+      </span>
+    </div>
+    <div class="peek">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+      <div class="pcard"><div class="strip g3"></div><div class="meta">violet-drift</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="barwrap" style="max-width:390px">
+  <p class="cap"><span class="cname">C @ 390px — the ⋯ menu</span>
+    <span class="cnote">word yields; explore·boards·docs collapse into ⋯ next to the AI chip — tap it</span></p>
+  <div class="appframe">
+    <div class="bar" data-cbar style="padding:9px 12px; gap:8px">
+      <button class="brand aslink" data-nav="home" title="Home" style="padding:4px">
+        <svg width="22" height="22"><use href="#mark-e"/></svg></button>
+      <span class="navrow" style="gap:0">
+        <button class="navlink" data-nav="devices" style="padding:8px 8px 9px">Devices</button>
+        <button class="navlink" data-nav="projects" style="padding:8px 8px 9px">Projects</button>
+      </span>
+      <span class="rside" style="gap:6px; position:relative">
+        <button class="iconbtn" id="nmBtn" title="Explore, Boards, Docs"
+          style="width:25px;height:25px;font-size:15px;color:var(--subtle);line-height:1">⋯</button>
+        <button class="iconbtn ai" style="width:25px;height:25px"><svg width="14" height="14"><use href="#i-bot"/></svg></button>
+        <div class="popmenu" id="nmMenu" hidden>
+          <button class="mi" data-nav="explore">Explore</button>
+          <button class="mi" data-nav="boards">Boards</button>
+          <button class="mi" data-nav="docs">Docs</button>
+        </div>
+      </span>
+    </div>
+    <div class="peek" style="padding:12px 12px 16px">
+      <div class="pcard"><div class="strip g1"></div><div class="meta">chromatic-pulse</div></div>
+      <div class="pcard"><div class="strip g2"></div><div class="meta">ember-field</div></div>
+    </div>
+  </div>
+</div>
+
+<p class="leannote"><b>Gate outcome (2026-08-04):</b> C chosen — split weights was the shape Yona
+  had always imagined; at small widths the secondary family goes into the ⋯ menu (his call, spiked
+  above). <b>Rejected:</b> A · flat six — five peers that aren't peers; B · hairline divider —
+  legible but the divider formalizes what position + weight already say. Logo-as-home stands:
+  no Home tab, the brand is the only way home.</p>
+
+<!-- ==================== 2 · devices page ==================== -->
+<h2 id="s2"><span class="n">2</span> Devices — the main jump-off</h2>
+<p class="sub"><b>Gate: hero strip chosen</b> ("looks really good") — the header-chip toggle stays for
+  contrast. The old gallery's device roster becomes the whole page. The connect card splits:
+  <b>connect a device / simulate a device</b> — same flow, one skips flash. Hover a running card:
+  the strip animates, Shadertoy-style. The sim wears the same grammar in violet. Awkward cases
+  included: long name, offline (dimmed last-known art), fresh board with nothing on it.</p>
+
+<div class="pagewrap appframe">
+  <div class="bar" data-cbar>
+    <button class="brand aslink" data-nav="home" title="Home">
+      <svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></button>
+    <span class="navrow">
+      <button class="navlink" data-nav="devices">Devices</button>
+      <button class="navlink" data-nav="projects">Projects</button>
+    </span>
+    <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
+      <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
+      <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+    </span>
+  </div>
+  <div class="pagebody">
+    <div class="sechead"><span class="t">Devices</span></div>
+    <div class="devgrid" id="devgrid"></div>
+  </div>
+</div>
+
+<!-- ==================== 3 · the wizard ==================== -->
+<h2 id="s3"><span class="n">3</span> Creation wizard — board → content → (flash) → editor</h2>
+<p class="sub"><b>Gate: chosen direction</b> — the panel wizard stays. Opens from either §2 card (or the
+  controls strip). Hardware path: the probe suggests the detected board and adds a flash step.
+  Sim path: any board, no flash — <b>the sim inherits the board</b> (vision D4). Content step:
+  <b>New</b> shows the actual generated project for the chosen board; <b>Load</b> lists your
+  projects — pick one targeting another board to see the mismatch warning (no auto-fixup, per D5).
+  Finish to land in §4.</p>
+
+<div class="wizwrap">
+  <div class="wizard" id="wizard">
+    <div class="wizhead">
+      <span class="wt" id="wiztitle">Connect a device</span>
+      <span class="wk hw" id="wizkind">Hardware</span>
+      <button class="close" id="wizclose" title="Close">✕</button>
+    </div>
+    <div class="steps" id="wizsteps"></div>
+    <div class="wizbody" id="wizbody"></div>
+    <div class="wizfoot" id="wizfoot"></div>
+  </div>
+</div>
+
+<!-- ==================== 4 · land in the editor ==================== -->
+<h2 id="s4"><span class="n">4</span> The landing — LEDs already animating</h2>
+<p class="sub"><b>Gate: aspirational — out of scope for round one.</b> This graph is not today's editor;
+  what carries forward is the <i>moment</i> (arrive with the project already running on the target)
+  and two ideas for later: <b>“+ add entry” at the insertion point</b> (opens the module picker)
+  and <b>⇄ replace</b> on entries. Round one lands you in the editor as it exists.</p>
+
+<div class="pagewrap appframe" id="edwrap">
+  <div class="bar" data-cbar>
+    <button class="brand aslink" data-nav="home" title="Home">
+      <svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></button>
+    <span class="navrow">
+      <button class="navlink" data-nav="devices">Devices</button>
+      <button class="navlink" data-nav="projects">Projects</button>
+    </span>
+    <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
+      <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
+      <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+    </span>
+  </div>
+  <div class="edframe">
+    <div class="edcanvas" id="edcanvas">
+      <div class="edtoast" id="edtoast" hidden>Running on <b id="toasttarget">Garage C6</b></div>
+      <svg class="wire" width="100%" height="100%" style="inset:0" id="wiresvg"></svg>
+      <div class="enode" style="left:18px; top:52px">
+        <div class="nh"><span class="dot"></span> clock</div>
+        <div class="nb"><span class="fv">time.s <b id="clocktick">0.00</b></span></div>
+      </div>
+      <div class="enode" style="left:190px; top:40px; min-width:172px" id="playlistnode">
+        <div class="nh"><span class="dot"></span> playlist</div>
+        <div class="nb" id="plentries"></div>
+      </div>
+      <div class="enode" style="left:415px; top:60px">
+        <div class="nh"><span class="dot"></span> fixture</div>
+        <div class="nb"><span class="fv">strip · <b>256 px</b></span>
+          <div class="herostrip animate t1" style="height:14px; border-radius:4px; border:0" id="fixturepreview"></div></div>
+      </div>
+      <div class="enode" style="left:588px; top:74px">
+        <div class="nh"><span class="dot"></span> output</div>
+        <div class="nb"><span class="fv">ws281x · <b id="outpin">local:IO8</b></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 5 · home ==================== -->
+<h2 id="s5"><span class="n">5</span> Home — marketing with dive-in points</h2>
+<p class="sub"><b>Gate: fine as-is; placeholder-level for round one</b> — goes deeper later. In-app for
+  now (slow first load accepted — revisit later). Three doors + a taste of the gallery, remixable
+  on hover. The logo in the bar is lit: <b>you are home</b>.</p>
+
+<div class="pagewrap appframe">
+  <div class="bar" data-cbar data-homeframe>
+    <button class="brand aslink athome" data-nav="home" title="Home">
+      <svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></button>
+    <span class="navrow">
+      <button class="navlink" data-nav="devices">Devices</button>
+      <button class="navlink" data-nav="projects">Projects</button>
+    </span>
+    <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
+      <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
+      <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+    </span>
+  </div>
+  <div class="homehero">
+    <span class="lock"><svg width="44" height="44"><use href="#mark-e"/></svg>
+      <span class="word">LightPlayer</span></span>
+    <span class="tag">Node-based light shows, from browser to bare hardware. Plug in a board and it's
+      glowing in two minutes.</span>
+  </div>
+  <div class="divegrid">
+    <button class="dive">
+      <svg width="22" height="22"><use href="#i-plug"/></svg>
+      <span class="dt">I have a board</span>
+      <span class="dd">ESP32-family dev board or LED controller? Plug it in — we detect it, flash it,
+        and generate a project shaped for its pins.</span>
+      <span class="go">Connect a device →</span>
+    </button>
+    <button class="dive viol">
+      <svg width="22" height="22"><use href="#i-bot"/></svg>
+      <span class="dt">Play with AI</span>
+      <span class="dd">No hardware needed. Start a simulator and describe the effect you want —
+        the agent writes the shader while you watch it run.</span>
+      <span class="go">Open the agentic editor →</span>
+    </button>
+    <button class="dive">
+      <svg width="22" height="22"><use href="#i-spark"/></svg>
+      <span class="dt">Steal something</span>
+      <span class="dd">Browse full projects and effects from the gallery and the WLED-compat pack.
+        Remix anything into your own copy.</span>
+      <span class="go">Explore the gallery →</span>
+    </button>
+  </div>
+  <div class="homestrip">
+    <div class="sh">A taste — hover to run, remix to make it yours</div>
+    <div class="stripgrid">
+      <button class="stripcard"><div class="th t1"></div>
+        <span class="sm"><span class="sn">chromatic-pulse</span><span class="rmx">remix ↗</span></span></button>
+      <button class="stripcard"><div class="th t2"></div>
+        <span class="sm"><span class="sn">ember-field</span><span class="rmx">remix ↗</span></span></button>
+      <button class="stripcard"><div class="th t3"></div>
+        <span class="sm"><span class="sn">violet-drift</span><span class="rmx">remix ↗</span></span></button>
+      <button class="stripcard"><div class="th t4"></div>
+        <span class="sm"><span class="sn">deep-water</span><span class="rmx">remix ↗</span></span></button>
+      <button class="stripcard"><div class="th t5"></div>
+        <span class="sm"><span class="sn">meteor</span><span class="rmx">remix ↗</span></span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 6 · explore ==================== -->
+<h2 id="s6"><span class="n">6</span> Explore — one content system, many sources</h2>
+<p class="sub"><b>Gate: fine as-is; placeholder-level for round one</b> — goes deeper later. Backed by
+  the modpack registry shape (wled-compat D3/M5) — embedded examples, repo packs, later community.
+  Two kinds: <b>full projects</b> (board-targeted demos, board badge) and <b>effects</b>
+  (.lpmod modules, provenance line). Previews are <b>static PNG, animate on hover</b> (D7).
+  Kind chips filter live.</p>
+
+<div class="pagewrap appframe">
+  <div class="bar" data-cbar data-exploreframe>
+    <button class="brand aslink" data-nav="home" title="Home">
+      <svg width="22" height="22"><use href="#mark-e"/></svg><span class="word">LightPlayer</span></button>
+    <span class="navrow">
+      <button class="navlink" data-nav="devices">Devices</button>
+      <button class="navlink" data-nav="projects">Projects</button>
+    </span>
+    <span class="rside">
+      <span class="navrow" style="margin-right:6px">
+        <button class="navlink secondary active" data-nav="explore">Explore</button>
+        <button class="navlink secondary" data-nav="boards">Boards</button>
+        <button class="navlink secondary" data-nav="docs">Docs</button>
+      </span>
+      <button class="vchip"><svg width="12" height="12"><use href="#i-branch"/></svg><span class="vtxt">gallery-rework-878899</span></button>
+      <button class="iconbtn ai"><svg width="15" height="15"><use href="#i-bot"/></svg></button>
+    </span>
+  </div>
+  <div class="xhead">
+    <button class="chip" data-xkind="all" aria-pressed="true">All</button>
+    <button class="chip" data-xkind="project">Full projects</button>
+    <button class="chip" data-xkind="effect">Effects</button>
+  </div>
+  <div class="xgrid" id="xgrid"></div>
+</div>
+
+<script>
+/* =================== shared state =================== */
+const state = {
+  nav: "devices",
+  detected: "c6",         // c6 | s3 | none
+  wear: "hero",           // hero | chip
+};
+
+/* boards — names + tiers from the real catalog (lp-core/lpc-hardware/boards/) */
+const BOARDS = [
+  { id: "c6",  name: "ESP32-C6 DevKitC-1",  vendor: "espressif", tier: "gold", chip: "ESP32-C6", pin: "IO8",  wires: 2 },
+  { id: "s3",  name: "ESP32-S3 DevKitC-1",  vendor: "espressif", tier: "gold", chip: "ESP32-S3", pin: "IO18", wires: 4 },
+  { id: "v4",  name: "ESP32 DevKitC v4",    vendor: "espressif", tier: null,   chip: "ESP32",    pin: "IO18", wires: 3 },
+  { id: "uno", name: "QuinLED Dig-Uno",     vendor: "quinled",   tier: null,   chip: "ESP32",    pin: "IO16", wires: 2 },
+  { id: "xc6", name: "XIAO ESP32-C6",       vendor: "seeed",     tier: null,   chip: "ESP32-C6", pin: "D0",   wires: 1 },
+];
+const boardById = id => BOARDS.find(b => b.id === id);
+
+/* the user's projects — with (or without) a board target (vision D3) */
+const PROJECTS = [
+  { name: "porch-sign",                     target: "c6",  sw: "t2" },
+  { name: "2026-07-10-2120-basic",          target: null,  sw: "t1" },
+  { name: "dome-mapper-test",               target: "s3",  sw: "t4" },
+  { name: "burning-bike-rear-rack",         target: "uno", sw: "t5" },
+];
+
+/* =================== chrome bars =================== */
+function setNav(nav) {
+  state.nav = nav;
+  document.querySelectorAll("[data-cbar]").forEach(bar => {
+    // frames pinned to a section keep their own active tab
+    if (bar.hasAttribute("data-homeframe") || bar.hasAttribute("data-exploreframe")) return;
+    bar.querySelectorAll(".navlink[data-nav], .mi[data-nav]").forEach(el =>
+      el.classList.toggle("active", el.dataset.nav === nav));
+    const brand = bar.querySelector(".brand.aslink");
+    if (brand) brand.classList.toggle("athome", nav === "home");
+  });
+}
+document.querySelectorAll("[data-cbar] [data-nav]").forEach(el =>
+  el.addEventListener("click", () => setNav(el.dataset.nav)));
+
+/* narrow ⋯ menu (chrome C @ sm) */
+const nmBtn = document.getElementById("nmBtn"), nmMenu = document.getElementById("nmMenu");
+nmBtn.addEventListener("click", e => { e.stopPropagation(); nmMenu.hidden = !nmMenu.hidden; });
+document.addEventListener("click", e => {
+  if (!e.target.closest("#nmMenu, #nmBtn")) nmMenu.hidden = true;
+});
+nmMenu.querySelectorAll("[data-nav]").forEach(el =>
+  el.addEventListener("click", () => { nmMenu.hidden = true; }));
+
+/* =================== section 2 · device cards =================== */
+const DEVICES = [
+  { name: "Porch sign", st: "running", transport: "USB", board: "c6",
+    project: { name: "porch-sign", sw: "t2" }, fact: "ESP32-C6 DevKitC-1 · 241 px · 60 fps" },
+  { name: "Back porch soffit — west run (2nd controller)", st: "offline", transport: "USB", board: "uno",
+    project: { name: "burning-bike-rear-rack", sw: "t5" }, fact: "QuinLED Dig-Uno · seen 2d ago" },
+  { name: "New board", st: "setup", transport: "USB", board: null,
+    project: null, fact: "detected: ESP32-C6 · unprovisioned" },
+  { name: "Simulator", st: "sim", transport: "SIM", board: "s3",
+    project: { name: "dome-mapper-test", sw: "t4" }, fact: "as ESP32-S3 DevKitC-1 · browser worker" },
+];
+const KGLYPH = {
+  usb: '<svg width="12" height="12" viewBox="0 0 24 24"><use href="#i-usb"/></svg>',
+  sim: '<svg width="12" height="12" viewBox="0 0 24 24"><use href="#i-sim"/></svg>',
+};
+
+function renderDevices() {
+  const grid = document.getElementById("devgrid");
+  grid.innerHTML = "";
+  DEVICES.forEach(d => {
+    const el = document.createElement("article");
+    el.className = "dcard"; el.dataset.st = d.st;
+    const dead = d.st === "offline";
+    const wearHero = state.wear === "hero" && d.project;
+    el.innerHTML = `
+      <header>
+        <span class="kglyph">${d.transport === "SIM" ? KGLYPH.sim : KGLYPH.usb}</span>
+        <span class="dname" title="${d.name}">${d.name}</span>
+        ${state.wear === "chip" && d.project ? `
+          <span class="projchip" style="margin-left:2px; min-width:0">
+            <span class="sw ${d.project.sw}" style="background-size:300% 100%"></span>
+            <span class="pn">${d.project.name}</span></span>` : ""}
+        <span class="transport">${d.transport}</span>
+      </header>
+      ${wearHero ? `<div class="herostrip ${d.project.sw} ${dead ? "dead" : ""}">
+          <span class="hname">${d.project.name}</span></div>` : ""}
+      <div class="dbody">
+        <span class="stline">${{
+          running: "Running", offline: "Seen 2d ago", setup: "Ready to set up", sim: "Running",
+        }[d.st]}</span>
+        ${!d.project ? `<span class="nothing">Nothing on it yet — set it up to generate a first project.</span>` : ""}
+        <span class="bfact">${d.fact}</span>
+      </div>`;
+    grid.appendChild(el);
+  });
+  // the split creation cards, at the insertion point (end of the grid)
+  const stack = document.createElement("div");
+  stack.className = "newstack";
+  stack.innerHTML = `
+    <button class="newcard" id="cc-hw">
+      <svg width="20" height="20" viewBox="0 0 24 24"><use href="#i-plug"/></svg>
+      <span><span class="nt">Connect a device</span><br>
+        <span class="nd">USB board → detect, flash, generate a project for it</span></span>
+    </button>
+    <button class="newcard simflavor" id="cc-sim">
+      <svg width="20" height="20" viewBox="0 0 24 24"><use href="#i-sim"/></svg>
+      <span><span class="nt">Simulate a device</span><br>
+        <span class="nd">same flow, no hardware — the sim takes on the board you pick</span></span>
+    </button>`;
+  grid.appendChild(stack);
+  document.getElementById("cc-hw").onclick = () => openWizard("hw");
+  document.getElementById("cc-sim").onclick = () => openWizard("sim");
+}
+
+/* =================== section 3 · wizard =================== */
+const wiz = { open: false, path: "hw", step: "board", board: null, content: null, loadPick: null, flashed: 0 };
+
+function openWizard(path) {
+  wiz.open = true; wiz.path = path; wiz.step = "board";
+  wiz.board = null; wiz.content = null; wiz.loadPick = null; wiz.flashed = 0;
+  if (path === "hw" && state.detected !== "none") wiz.board = state.detected;
+  renderWizard();
+  document.getElementById("s3").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function stepList() {
+  const steps = [["board", "Board"], ["content", "Project"]];
+  steps.push(["flash", "Flash", wiz.path !== "hw"]);
+  steps.push(["editor", "Editor"]);
+  return steps;
+}
+
+function renderWizard() {
+  const w = document.getElementById("wizard");
+  w.classList.toggle("simpath", wiz.path === "sim");
+  document.getElementById("wiztitle").textContent =
+    wiz.path === "hw" ? "Connect a device" : "Simulate a device";
+  const wk = document.getElementById("wizkind");
+  wk.textContent = wiz.path === "hw" ? "Hardware" : "Simulator";
+  wk.className = "wk " + (wiz.path === "hw" ? "hw" : "sim");
+
+  const order = ["board", "content", "flash", "editor"];
+  const idx = order.indexOf(wiz.step);
+  document.getElementById("wizsteps").innerHTML = stepList().map(([k, label, skipped], i) => {
+    const st = skipped ? "skip" : (order.indexOf(k) < idx ? "done" : (k === wiz.step ? "now" : ""));
+    return (i ? '<span class="steparrow">›</span>' : "") +
+      `<span class="step ${st}"><span class="dotn">${order.indexOf(k) < idx && !skipped ? "✓" : i + 1}</span>${label}</span>`;
+  }).join("");
+
+  const body = document.getElementById("wizbody");
+  const foot = document.getElementById("wizfoot");
+  foot.innerHTML = "";
+
+  if (!wiz.open) { body.innerHTML = `<span class="nothing">Closed — reopen from §2 or the controls strip.</span>`; return; }
+
+  /* ---- step: board ---- */
+  if (wiz.step === "board") {
+    body.innerHTML = `
+      ${wiz.path === "hw" && state.detected === "none" ? `
+        <div class="warnbox" style="margin-bottom:12px">Probe couldn't identify the chip —
+          pick the board yourself. <b>Flashing a mismatched image is refused later, not here.</b></div>` : ""}
+      <div class="boardgrid">${BOARDS.map(b => `
+        <button class="bcard" data-board="${b.id}" aria-pressed="${wiz.board === b.id}">
+          <svg width="84" height="46"><use href="#b-generic"/></svg>
+          <span class="bn">${b.name}</span>
+          <span class="bio">${b.chip} · ${b.wires} LED wire${b.wires > 1 ? "s" : ""} · default ${b.pin}</span>
+          <span style="display:flex; gap:5px">
+            ${wiz.path === "hw" && state.detected === b.id ? `<span class="badge detected">detected</span>` : ""}
+            ${b.tier === "gold" ? `<span class="badge gold">Gold</span>` : ""}
+          </span>
+        </button>`).join("")}
+      </div>`;
+    body.querySelectorAll("[data-board]").forEach(el =>
+      el.onclick = () => { wiz.board = el.dataset.board; renderWizard(); });
+    foot.innerHTML = `<span class="spacer"></span>
+      <button class="abtn primary" id="wnext" ${wiz.board ? "" : "disabled style='opacity:.4;pointer-events:none'"}>
+        Continue with ${wiz.board ? boardById(wiz.board).name : "…"} →</button>`;
+    document.getElementById("wnext").onclick = () => { wiz.step = "content"; renderWizard(); };
+  }
+
+  /* ---- step: content ---- */
+  if (wiz.step === "content") {
+    const b = boardById(wiz.board);
+    const pick = wiz.loadPick ? PROJECTS.find(p => p.name === wiz.loadPick) : null;
+    const mismatch = pick && pick.target && pick.target !== wiz.board;
+    body.innerHTML = `
+      <div class="contentsplit">
+        <div class="choicebox ${wiz.content === "new" ? "picked" : ""}" id="ch-new">
+          <h4>New — generated for the ${b.name}<small>recommended</small></h4>
+          <div class="genflow">
+            <span class="gnode hot"><span class="gh">clock</span><span class="gv">time.s</span></span>
+            <span class="garr">⟶</span>
+            <span class="gnode"><span class="gh">playlist</span><span class="gv">1 entry · meteor</span></span>
+            <span class="garr">⟶</span>
+            <span class="gnode"><span class="gh">fixture</span><span class="gv">strip · 256 px</span></span>
+            <span class="garr">⟶</span>
+            <span class="gnode hot"><span class="gh">output</span><span class="gv">ws281x local:${b.pin}</span></span>
+          </div>
+          <span class="genline">Wired for this board: <b>${b.wires} output${b.wires > 1 ? "s" : ""}</b> available,
+            first on <b>${b.pin}</b>. Target recorded on the project (<span style="font-family:var(--mono)">target:
+            ${b.id === "xc6" ? "seeed/xiao-esp32-c6" : b.vendor + "/" + b.name.toLowerCase().replaceAll(" ", "-")}</span>) —
+            advisory only, the engine never reads it.</span>
+        </div>
+        <div class="choicebox ${wiz.content === "load" ? "picked" : ""}" id="ch-load">
+          <h4>Load one of yours</h4>
+          <div class="projlist">${PROJECTS.map(p => `
+            <button class="prow" data-load="${p.name}" aria-pressed="${wiz.loadPick === p.name}">
+              <span class="sw ${p.sw}"></span><span class="pn">${p.name}</span>
+              ${p.target ? (p.target === wiz.board
+                ? `<span class="badge forboard">for ${boardById(p.target).chip}</span>`
+                : `<span class="badge warnb">for ${boardById(p.target).chip}</span>`)
+                : `<span class="badge forboard">no target</span>`}
+            </button>`).join("")}
+          </div>
+          ${mismatch ? `
+            <div class="warnbox"><b>${pick.name}</b> targets the <b>${boardById(pick.target).name}</b> —
+              its outputs use ${boardById(pick.target).wires} wires from ${boardById(pick.target).pin};
+              this board has ${b.wires} on ${b.pin}. It may not light up as wired.
+              <div class="wactions">
+                <button class="abtn warn" id="loadanyway">Load anyway</button>
+                <button class="abtn primary" id="newinstead">New for this board instead</button>
+              </div>
+              <div style="margin-top:7px; color:var(--dim); font-size:10.5px">
+                No auto-fix-up — later you'll be able to start new and <b>import nodes</b> from this one.</div>
+            </div>` : ""}
+        </div>
+      </div>`;
+    document.getElementById("ch-new").onclick = e => {
+      if (e.target.closest(".prow,.abtn")) return;
+      wiz.content = "new"; wiz.loadPick = null; renderWizard();
+    };
+    body.querySelectorAll("[data-load]").forEach(el => el.onclick = () => {
+      wiz.content = "load"; wiz.loadPick = el.dataset.load; renderWizard();
+    });
+    if (mismatch) {
+      document.getElementById("loadanyway").onclick = () => advanceFromContent();
+      document.getElementById("newinstead").onclick = () => { wiz.content = "new"; wiz.loadPick = null; renderWizard(); };
+    }
+    const ready = wiz.content === "new" || (wiz.content === "load" && wiz.loadPick && !mismatch);
+    foot.innerHTML = `
+      <button class="abtn ghost" id="wback">← Board</button><span class="spacer"></span>
+      <button class="abtn primary" id="wnext" ${ready ? "" : "disabled style='opacity:.4;pointer-events:none'"}>
+        ${wiz.path === "hw" ? "Continue to flash →" : "Start the simulator →"}</button>`;
+    document.getElementById("wback").onclick = () => { wiz.step = "board"; renderWizard(); };
+    document.getElementById("wnext").onclick = advanceFromContent;
+  }
+
+  /* ---- step: flash (hardware only) ---- */
+  if (wiz.step === "flash") {
+    const b = boardById(wiz.board);
+    body.innerHTML = `
+      <div class="flashrow">
+        <span style="font-size:12.5px; color:var(--muted)">Flashing <b style="color:var(--strong)">fw-esp32</b>
+          for the ${b.name}, then pushing <b style="color:var(--strong)">${wiz.content === "new" ? "the generated project" : wiz.loadPick}</b>.</span>
+        <div class="flashbar"><div class="fill" id="flashfill"></div></div>
+        <div class="flashlog" id="flashlog"></div>
+      </div>`;
+    foot.innerHTML = `<span class="spacer"></span><span style="font-size:11px;color:var(--dim)" id="flashwait">…</span>`;
+    runFlash();
+  }
+
+  /* ---- step: editor handoff ---- */
+  if (wiz.step === "editor") {
+    const b = boardById(wiz.board);
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:10px; align-items:flex-start">
+        <span style="font-size:13px; color:var(--strong); font-weight:700">
+          ${wiz.path === "hw" ? "It's glowing." : "The simulator is running."}</span>
+        <span style="font-size:12px; color:var(--muted)">
+          ${wiz.content === "new" ? "Generated project" : wiz.loadPick} is live on
+          <b>${wiz.path === "hw" ? "your " + b.name : "the sim (as " + b.name + ")"}</b> —
+          output ws281x local:${b.pin}.</span>
+        <div class="herostrip animate t1" style="height:26px; width:320px; border-radius:6px; border:1px solid var(--border-muted)"></div>
+      </div>`;
+    foot.innerHTML = `<span class="spacer"></span>
+      <button class="abtn primary" id="wnext">Open the editor →</button>`;
+    document.getElementById("wnext").onclick = () => {
+      document.getElementById("outpin").textContent = "local:" + b.pin;
+      document.getElementById("toasttarget").textContent =
+        wiz.path === "hw" ? "your " + b.chip : "Simulator (" + b.chip + ")";
+      const toast = document.getElementById("edtoast");
+      toast.hidden = false; setTimeout(() => toast.hidden = true, 2600);
+      document.getElementById("s4").scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  }
+}
+
+function advanceFromContent() {
+  wiz.step = wiz.path === "hw" ? "flash" : "editor";
+  renderWizard();
+}
+
+function runFlash() {
+  const LINES = [
+    [8,  "esptool: chip is " + boardById(wiz.board).chip + " (revision v0.2)"],
+    [30, "flash: fw-esp32 @ f799ee61e · 1.9 MB"],
+    [62, "flash: verified · rebooting"],
+    [80, "link: hello · stamping device name"],
+    [96, "push: project head → device"],
+    [100,"engine: frame 1 · first light"],
+  ];
+  const fill = document.getElementById("flashfill");
+  const log = document.getElementById("flashlog");
+  let i = 0;
+  const t = setInterval(() => {
+    if (wiz.step !== "flash") { clearInterval(t); return; }
+    if (i >= LINES.length) {
+      clearInterval(t);
+      wiz.step = "editor"; renderWizard(); return;
+    }
+    const [pct, line] = LINES[i++];
+    fill.style.width = pct + "%";
+    const d = document.createElement("div");
+    if (pct === 100) d.className = "ok";
+    d.textContent = (pct === 100 ? "✓ " : "› ") + line;
+    log.appendChild(d);
+  }, 550);
+}
+
+document.getElementById("wizclose").onclick = () => { wiz.open = false; renderWizard(); };
+document.getElementById("ctl-hw").onclick = () => openWizard("hw");
+document.getElementById("ctl-sim").onclick = () => openWizard("sim");
+
+/* =================== section 4 · editor landing =================== */
+const MODULES = [
+  { name: "meteor",       sw: "t5", prov: "example" },
+  { name: "plasma",       sw: "t3", prov: "example" },
+  { name: "chromatic-pulse", sw: "t1", prov: "example" },
+  { name: "colorwaves",   sw: "t6", prov: "wled-compat" },
+  { name: "fire-2012",    sw: "t2", prov: "wled-compat" },
+  { name: "ripple-red",   sw: "t7", prov: "wled-compat" },
+];
+let plEntries = [{ name: "meteor", sw: "t5" }];
+let pickerFor = null; // null | "add" | index
+
+function renderPlaylist() {
+  const host = document.getElementById("plentries");
+  host.innerHTML = plEntries.map((e, i) => `
+    <span class="entry"><span class="sw ${e.sw}"></span><span class="en">${e.name}</span>
+      <button class="rep" title="Replace this effect" data-rep="${i}">⇄</button></span>`).join("") +
+    `<button class="addentry" id="addentry">+ add entry</button>`;
+  host.querySelectorAll("[data-rep]").forEach(el =>
+    el.onclick = ev => { ev.stopPropagation(); openPicker(parseInt(el.dataset.rep), el); });
+  document.getElementById("addentry").onclick = ev => { ev.stopPropagation(); openPicker("add", ev.target); };
+}
+
+function openPicker(target, anchor) {
+  closePicker();
+  pickerFor = target;
+  const canvas = document.getElementById("edcanvas");
+  const p = document.createElement("div");
+  p.className = "modpicker"; p.id = "modpicker";
+  const ar = anchor.getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+  p.style.left = Math.min(ar.left - cr.left, cr.width - 232) + "px";
+  p.style.top = (ar.bottom - cr.top + 6) + "px";
+  p.innerHTML = `<span class="mh">${target === "add" ? "Add to playlist" : "Replace “" + plEntries[target].name + "”"}</span>` +
+    MODULES.map(m => `
+      <button class="modrow" data-mod="${m.name}">
+        <span class="sw ${m.sw}"></span><span class="mn">${m.name}</span>
+        <span class="prov">${m.prov}</span></button>`).join("");
+  p.querySelectorAll("[data-mod]").forEach(el => el.onclick = () => {
+    const mod = MODULES.find(m => m.name === el.dataset.mod);
+    if (pickerFor === "add") plEntries.push({ name: mod.name, sw: mod.sw });
+    else plEntries[pickerFor] = { name: mod.name, sw: mod.sw };
+    document.getElementById("fixturepreview").className = "herostrip animate " + mod.sw;
+    document.getElementById("fixturepreview").style.cssText = "height:14px;border-radius:4px;border:0";
+    closePicker(); renderPlaylist();
+  });
+  canvas.appendChild(p);
+}
+function closePicker() { document.getElementById("modpicker")?.remove(); pickerFor = null; }
+document.addEventListener("click", e => { if (!e.target.closest(".modpicker,.rep,.addentry")) closePicker(); });
+
+setInterval(() => {
+  const el = document.getElementById("clocktick");
+  if (el) el.textContent = (performance.now() / 1000).toFixed(2);
+}, 60);
+
+/* wires between editor nodes */
+function drawWires() {
+  const svg = document.getElementById("wiresvg");
+  const canvas = document.getElementById("edcanvas");
+  const nodes = canvas.querySelectorAll(".enode");
+  if (nodes.length < 4) return;
+  const cr = canvas.getBoundingClientRect();
+  let d = "";
+  for (let i = 0; i < 3; i++) {
+    const a = nodes[i].getBoundingClientRect(), b = nodes[i + 1].getBoundingClientRect();
+    const x1 = a.right - cr.left, y1 = a.top + a.height / 2 - cr.top;
+    const x2 = b.left - cr.left,  y2 = b.top + b.height / 2 - cr.top;
+    d += `M${x1},${y1} C${x1 + 26},${y1} ${x2 - 26},${y2} ${x2},${y2} `;
+  }
+  svg.innerHTML = `<path d="${d}" stroke="#5f4a85" stroke-width="1.6" fill="none" opacity=".8"/>`;
+}
+new ResizeObserver(drawWires).observe(document.getElementById("edcanvas"));
+
+/* =================== section 6 · explore =================== */
+const XITEMS = [
+  { kind: "project", name: "music-reactive wall art", sw: "t4", board: "s3",
+    desc: "16×16 panel + mic line-in; four zones follow the beat.", prov: "lightplayer" },
+  { kind: "project", name: "burning-man bike", sw: "t5", board: "c6",
+    desc: "Two whips + a frame run off one C6 on a battery pack.", prov: "lightplayer" },
+  { kind: "project", name: "porch-sign starter", sw: "t2", board: "c6",
+    desc: "The classic first build: one strip, one playlist, three effects.", prov: "lightplayer" },
+  { kind: "effect", name: "colorwaves", sw: "t6", board: null,
+    desc: "Slow palette-crossing waves — the WLED classic, honestly 1D.", prov: "wled-compat · EUPL-1.2" },
+  { kind: "effect", name: "fire-2012", sw: "t2", board: null,
+    desc: "Mark Kriegsman's fire, ported with provenance intact.", prov: "wled-compat · EUPL-1.2" },
+  { kind: "effect", name: "plasma", sw: "t3", board: null,
+    desc: "Embedded example — the studio demo shader.", prov: "example · AGPL-3.0" },
+  { kind: "effect", name: "meteor", sw: "t5", board: null,
+    desc: "A meteor with a decaying tail; projection-ready.", prov: "example · AGPL-3.0" },
+];
+let xfilter = "all";
+function renderExplore() {
+  const grid = document.getElementById("xgrid");
+  grid.innerHTML = XITEMS.filter(x => xfilter === "all" || x.kind === xfilter).map(x => `
+    <article class="xcard">
+      <div class="th ${x.sw}"><span class="hoverhint">hover to run</span></div>
+      <div class="xb">
+        <span class="xn">${x.name}</span>
+        <span class="xd">${x.desc}</span>
+        <span class="xmeta">
+          ${x.board ? `<span class="badge forboard">for ${boardById(x.board).name}</span>` : ""}
+          <span class="prov">${x.prov}</span>
+        </span>
+      </div>
+      <div class="xfoot">
+        <span class="kind">${x.kind === "project" ? "Full project" : "Effect · .lpmod"}</span>
+        <span class="act">${x.kind === "project" ? "Run on a device →" : "Remix ↗"}</span>
+      </div>
+    </article>`).join("");
+}
+document.querySelectorAll("[data-xkind]").forEach(el => el.onclick = () => {
+  xfilter = el.dataset.xkind;
+  document.querySelectorAll("[data-xkind]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  renderExplore();
+});
+
+/* =================== controls =================== */
+document.querySelectorAll("[data-det]").forEach(el => el.onclick = () => {
+  state.detected = el.dataset.det;
+  document.querySelectorAll("[data-det]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  if (wiz.open && wiz.step === "board" && wiz.path === "hw") {
+    wiz.board = state.detected === "none" ? null : state.detected;
+    renderWizard();
+  }
+});
+document.querySelectorAll("[data-wear]").forEach(el => el.onclick = () => {
+  state.wear = el.dataset.wear;
+  document.querySelectorAll("[data-wear]").forEach(b => b.setAttribute("aria-pressed", b === el));
+  renderDevices();
+});
+
+/* =================== boot =================== */
+setNav("devices");
+renderDevices();
+wiz.open = false; renderWizard();
+renderPlaylist();
+renderExplore();
+drawWires();
+
+/* hash boot for screenshot capture, e.g. #wiz=hw&step=content&board=c6&load=dome-mapper-test */
+(function bootFromHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.has("menu")) nmMenu.hidden = false;
+  if (!h.get("wiz")) return;
+  wiz.open = true;
+  wiz.path = h.get("wiz");
+  wiz.board = h.get("board") || (wiz.path === "hw" && state.detected !== "none" ? state.detected : null);
+  wiz.step = h.get("step") || "board";
+  if (h.get("load")) { wiz.content = "load"; wiz.loadPick = h.get("load"); }
+  else if (h.get("content") === "new" || wiz.step !== "board") wiz.content = h.get("content") || null;
+  renderWizard();
+  if (h.has("solo")) {
+    document.querySelectorAll("body > *").forEach(el => {
+      if (!el.matches(".wizwrap, svg[aria-hidden]")) el.style.display = "none";
+    });
+    document.body.style.padding = "16px";
+  }
+})();
+</script>
+</body>
+</html>

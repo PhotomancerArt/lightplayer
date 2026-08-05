@@ -7,6 +7,7 @@
 //! the web crate renders it and dispatches [`HomeOp`]s back through the
 //! normal action path.
 
+pub mod board_project;
 pub mod card_ui_state;
 pub mod embedded_example;
 pub mod home_op;
@@ -16,6 +17,9 @@ pub mod ui_example_card;
 pub mod ui_home_view;
 pub mod ui_package_card;
 
+pub use board_project::{
+    DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, generate_board_project,
+};
 pub use card_ui_state::{CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb};
 pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
 pub use home_op::{HOME_NODE_ID, HomeOp, ZipBytes};
