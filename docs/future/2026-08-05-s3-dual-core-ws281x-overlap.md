@@ -7,6 +7,17 @@ shipped (PR #341, ADR `2026-08-04-rmt-isr-on-app-core.md`). The S3 is also
 dual-core; this note records how much of that work transfers and what an S3
 adoption milestone actually contains, so it can be sized without rediscovery.
 
+## Amendment (2026-08-05, later the same day)
+
+Written before the wire pusher shipped (ADR
+`2026-08-05-ws281x-transmission-on-app-core.md`). The pusher STRENGTHENS the
+transfer story: `lp_ws281x::pusher` (mailboxes + scheduler) is chip-free and
+carries to the S3 unchanged, host tests and Miri topology included; the
+deployment shell (`fw-esp32v3/src/output/rmt/wire_pusher.rs` — statics,
+doorbell software interrupt, lost-wakeup guard) ports the same way the
+core-1 machinery below does. "Idles in `waiti 0` forever" below describes
+the pre-pusher shape; core 1 now runs the pusher loop around that idle.
+
 ## What transfers as-is (no new work)
 
 - **The cross-core frame lifecycle** in `lp-ws281x`: the `isr_seq` teardown
