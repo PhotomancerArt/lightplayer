@@ -66,6 +66,8 @@ pub enum UiSlotEditorHint {
     /// Render a lamp type + supply budget pair (`FixturePower`-shaped
     /// struct) as one compact power control.
     Power,
+    /// Render a `Gradient` or `GradientConfig` palette value.
+    Gradient,
 }
 
 impl UiSlotEditorHint {

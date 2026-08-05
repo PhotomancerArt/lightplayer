@@ -328,7 +328,7 @@ impl SlotValue for GradientConfig {
             id: <GradientConfig as SlotValue>::SHAPE_ID,
             ty: GRADIENT_CONFIG_STATIC_TYPE,
             meta: StaticSlotMeta::EMPTY,
-            editor: StaticValueEditorHint::Plain,
+            editor: StaticValueEditorHint::Gradient,
         });
 
     fn value_shape() -> SlotValueShape {
@@ -336,7 +336,7 @@ impl SlotValue for GradientConfig {
             id: <GradientConfig as SlotValue>::SHAPE_ID,
             ty: gradient_config_lp_type(),
             meta: SlotMeta::empty(),
-            editor: ValueEditorHint::Plain,
+            editor: ValueEditorHint::Gradient,
         }
     }
 }
@@ -349,7 +349,7 @@ impl StaticSlotShape for GradientConfig {
                 id: <GradientConfig as SlotValue>::SHAPE_ID,
                 ty: GRADIENT_CONFIG_STATIC_TYPE,
                 meta: StaticSlotMeta::EMPTY,
-                editor: StaticValueEditorHint::Plain,
+                editor: StaticValueEditorHint::Gradient,
             },
         });
 

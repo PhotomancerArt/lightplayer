@@ -630,7 +630,7 @@ impl SlotValue for Gradient {
             id: <Gradient as SlotValue>::SHAPE_ID,
             ty: GRADIENT_STATIC_TYPE,
             meta: StaticSlotMeta::EMPTY,
-            editor: StaticValueEditorHint::Plain,
+            editor: StaticValueEditorHint::Gradient,
         });
 
     fn value_shape() -> SlotValueShape {
@@ -638,7 +638,7 @@ impl SlotValue for Gradient {
             id: <Gradient as SlotValue>::SHAPE_ID,
             ty: gradient_lp_type(),
             meta: SlotMeta::empty(),
-            editor: ValueEditorHint::Plain,
+            editor: ValueEditorHint::Gradient,
         }
     }
 }
@@ -651,7 +651,7 @@ impl StaticSlotShape for Gradient {
                 id: <Gradient as SlotValue>::SHAPE_ID,
                 ty: GRADIENT_STATIC_TYPE,
                 meta: StaticSlotMeta::EMPTY,
-                editor: StaticValueEditorHint::Plain,
+                editor: StaticValueEditorHint::Gradient,
             },
         });
 
