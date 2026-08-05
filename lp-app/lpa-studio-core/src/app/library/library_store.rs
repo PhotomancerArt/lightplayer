@@ -3,12 +3,15 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use lpa_upgrade::FormatClass;
 use lpc_history::{
     ContentHash, EventKind, EventLog, HistoryEvent, PrefixedUid, ProjectHistory, SnapshotStore,
+    UidPrefix,
 };
 use lpc_model::{AsLpPath, LpPath};
 use lpfs::{FsError, LpFs};
 
+use super::package_format::{self, PackageHealth};
 use super::package_manifest::{self, ManifestFields};
 use super::package_meta::{self, PackageMeta, PackageProvenance};
 use super::package_slug::{dated_slug, slugify, strip_date_prefix, unique_slug};
@@ -22,6 +25,15 @@ pub enum LibraryError {
     Meta(String),
     History(String),
     NotFound(String),
+    /// An incoming package is at a format this build will not install:
+    /// below the upgrade floor, from a newer LightPlayer, or unreadable.
+    ///
+    /// Carries [`lpa_upgrade::FormatClass::describe`] verbatim, which
+    /// already names what was found, what was expected, and a remedy — so
+    /// this one is printed bare rather than behind a category prefix. It
+    /// exists so an import refusal reaches the user as a visible error
+    /// instead of installing bytes that fail later, node by node.
+    Format(String),
 }
 
 impl core::fmt::Display for LibraryError {
@@ -32,6 +44,7 @@ impl core::fmt::Display for LibraryError {
             LibraryError::Meta(m) => write!(f, "meta: {m}"),
             LibraryError::History(m) => write!(f, "history: {m}"),
             LibraryError::NotFound(m) => write!(f, "not found: {m}"),
+            LibraryError::Format(m) => write!(f, "{m}"),
         }
     }
 }
@@ -49,6 +62,10 @@ pub struct PackageSummary {
     pub name: String,
     pub kind: String,
     pub slug: String,
+    /// What the format sniff found, and whether the package can be opened.
+    /// Present on EVERY summary: a package that cannot be opened is listed
+    /// with its problem, never dropped.
+    pub health: PackageHealth,
 }
 
 /// An opened package: chrooted views + replayed history.
@@ -206,14 +223,21 @@ impl LibraryStore {
         Rc::clone(&self.fs)
     }
 
+    /// Every package directory, one summary each.
+    ///
+    /// A directory that exists ALWAYS produces a summary. It used to be
+    /// skipped with a `log::warn!` when its manifest would not parse, which
+    /// meant a too-old or damaged project simply disappeared from the
+    /// gallery with no user-visible trace — and, because the strict parser
+    /// runs before the format gate, "too old" and "corrupt" looked
+    /// identical. Now the problem rides the summary
+    /// ([`PackageHealth::Blocked`]) and the card says so.
     pub fn list(&self) -> Result<Vec<PackageSummary>, LibraryError> {
-        let mut summaries = Vec::new();
-        for slug in self.package_slugs()? {
-            match self.read_summary(&slug) {
-                Ok(summary) => summaries.push(summary),
-                Err(e) => log::warn!("skipping package dir {slug}: {e}"),
-            }
-        }
+        let mut summaries: Vec<PackageSummary> = self
+            .package_slugs()?
+            .into_iter()
+            .map(|slug| self.summarize(&slug))
+            .collect();
         // slug order = date order for stamped slugs (newest naming sorts last)
         summaries.sort_by(|a, b| a.slug.cmp(&b.slug));
         Ok(summaries)
@@ -376,14 +400,9 @@ impl LibraryStore {
         if !self.package_slugs()?.iter().any(|slug| slug == key) {
             return Err(LibraryError::NotFound(key.to_string()));
         }
-        let package_fs = self.chroot_package(key)?;
-        let view = package_fs.borrow();
-        let fields = package_manifest::read_manifest(&*view)?;
-        fields
-            .uid
-            .ok_or_else(|| LibraryError::Manifest(format!("package {key} has no uid")))?
-            .parse()
-            .map_err(|e| LibraryError::Manifest(format!("package {key} uid: {e}")))
+        // Lenient, like the gallery: a package the strict parser rejects is
+        // still addressable, so its card's remedies work.
+        Ok(self.sniff(key).uid)
     }
 
     pub fn open(&self, uid: PrefixedUid) -> Result<PackageHandle, LibraryError> {
@@ -465,6 +484,9 @@ impl LibraryStore {
         Ok(slugs)
     }
 
+    /// The strict summary: used by the paths that have just written a
+    /// healthy package (install, seed lookup) and must hear about it loudly
+    /// if it is not. [`Self::list`] uses [`Self::summarize`] instead.
     fn read_summary(&self, slug: &str) -> Result<PackageSummary, LibraryError> {
         let package_fs = self.chroot_package(slug)?;
         let view = package_fs.borrow();
@@ -473,31 +495,170 @@ impl LibraryStore {
             .ok_or_else(|| LibraryError::Manifest(format!("package {slug} has no uid")))?
             .parse()
             .map_err(|e| LibraryError::Manifest(format!("package {slug} uid: {e}")))?;
+        let health = package_format::health_for(&package_format::classify_package(&*view), None);
         Ok(PackageSummary {
             uid,
             name: name.unwrap_or_else(|| slug.to_string()),
             kind: String::from("Module"),
             slug: slug.to_string(),
+            health,
         })
     }
 
-    fn slug_for_uid(&self, uid: PrefixedUid) -> Result<Option<String>, LibraryError> {
-        for slug in self.package_slugs()? {
-            let package_fs = self.chroot_package(&slug)?;
-            let view = package_fs.borrow();
-            if let Ok(fields) = package_manifest::read_manifest(&*view) {
-                if fields.uid.as_deref() == Some(uid.to_string().as_str()) {
-                    return Ok(Some(slug));
-                }
-            }
+    /// A summary for `slug` that cannot fail. Whatever is wrong with the
+    /// package rides its [`PackageHealth`]; the gallery shows the card
+    /// either way.
+    fn summarize(&self, slug: &str) -> PackageSummary {
+        let sniff = self.sniff(slug);
+        PackageSummary {
+            uid: sniff.uid,
+            name: sniff.name.unwrap_or_else(|| slug.to_string()),
+            kind: String::from("Module"),
+            slug: slug.to_string(),
+            health: package_format::health_for(&sniff.class, sniff.defect.as_deref()),
         }
-        Ok(None)
+    }
+
+    /// Read `slug`'s manifest twice over: leniently for the facts a card
+    /// needs, strictly for the verdict on whether it would load today.
+    fn sniff(&self, slug: &str) -> PackageSniff {
+        let package_fs = match self.chroot_package(slug) {
+            Ok(package_fs) => package_fs,
+            Err(error) => {
+                return PackageSniff {
+                    class: FormatClass::Unreadable {
+                        detail: error.to_string(),
+                    },
+                    uid: derived_uid(slug),
+                    name: None,
+                    defect: Some(error.to_string()),
+                };
+            }
+        };
+        let view = package_fs.borrow();
+        let class = package_format::classify_package(&*view);
+
+        // The strict read is the "would this load today" question, and its
+        // answer is advisory here — NEVER the reason a package disappears.
+        let (strict_uid, strict_name, defect) = match package_manifest::read_manifest(&*view) {
+            Ok(fields) => match fields.uid.as_deref().map(str::parse) {
+                Some(Ok(uid)) => (Some(uid), fields.name, None),
+                Some(Err(error)) => (
+                    None,
+                    fields.name,
+                    Some(format!("project.json uid: {error}")),
+                ),
+                None => (
+                    None,
+                    fields.name,
+                    Some(String::from("project.json states no uid")),
+                ),
+            },
+            Err(error) => (None, None, Some(error.to_string())),
+        };
+
+        let lenient = strict_name.is_none().then(|| lenient_manifest(&*view));
+        PackageSniff {
+            class,
+            // A package with no readable uid still needs a handle its card's
+            // delete and export can address — that is the whole point of
+            // keeping it on screen. Derived from the slug, so every lookup
+            // agrees; never written back.
+            uid: strict_uid
+                .or_else(|| lenient.as_ref().and_then(|fields| fields.uid))
+                .unwrap_or_else(|| derived_uid(slug)),
+            name: strict_name.or_else(|| lenient.and_then(|fields| fields.name)),
+            defect,
+        }
+    }
+
+    /// The uid a package answers to, read the same lenient way the gallery
+    /// read it. Strict-parse-rejected packages used to resolve to "not
+    /// found" here, which made them unreachable by exactly the remedies
+    /// (delete, export) they needed.
+    fn slug_for_uid(&self, uid: PrefixedUid) -> Result<Option<String>, LibraryError> {
+        Ok(self
+            .package_slugs()?
+            .into_iter()
+            .find(|slug| self.sniff(slug).uid == uid))
     }
 
     fn chroot_package(&self, slug: &str) -> Result<Rc<RefCell<dyn LpFs>>, LibraryError> {
         let fs = self.fs.borrow();
         Ok(fs.chroot(format!("{PACKAGES_DIR}/{slug}").as_str().as_path())?)
     }
+}
+
+/// What one lenient look at a package directory found.
+struct PackageSniff {
+    /// The authored format, sniffed without any typed parse.
+    class: FormatClass,
+    /// The uid the package answers to (its own, or one derived from the
+    /// slug when the manifest states none we can read).
+    uid: PrefixedUid,
+    name: Option<String>,
+    /// What the strict manifest reader complained about, if it did.
+    defect: Option<String>,
+}
+
+/// The two manifest fields a card needs, dug out of raw JSON.
+struct LenientFields {
+    uid: Option<PrefixedUid>,
+    name: Option<String>,
+}
+
+/// Best-effort `uid`/`name` from a manifest the strict reader refused.
+/// Deliberately `serde_json::Value`, not [`lpc_model::ProjectManifest`]:
+/// the strict reader is what refused, so asking it again would only fail
+/// the same way.
+fn lenient_manifest(fs: &dyn LpFs) -> LenientFields {
+    let Ok(bytes) = fs.read_file(package_manifest::MANIFEST_PATH.as_path()) else {
+        return LenientFields {
+            uid: None,
+            name: None,
+        };
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return LenientFields {
+            uid: None,
+            name: None,
+        };
+    };
+    LenientFields {
+        uid: value
+            .get("uid")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|uid| uid.parse().ok()),
+        name: value
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+    }
+}
+
+/// A stand-in identity for a package whose manifest states no uid we can
+/// read.
+///
+/// Derived from the slug, so the gallery card, `resolve_key`, `open` and
+/// `delete` all name the same package — and never written to disk: looking
+/// at a broken project must not author anything into it. The FNV-1a spread
+/// is arbitrary but stable; collisions with a minted uid are not a practical
+/// concern (a minted uid comes from 128 bits of randomness).
+fn derived_uid(slug: &str) -> PrefixedUid {
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&fnv1a64(slug.as_bytes()).to_le_bytes());
+    bytes[8..]
+        .copy_from_slice(&fnv1a64(&[slug.as_bytes(), b"\x00lp-package"].concat()).to_le_bytes());
+    PrefixedUid::mint(UidPrefix::Project, &bytes)
+}
+
+fn fnv1a64(input: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in input {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn origin_event_for(meta: Option<PackageMeta>) -> HistoryEvent {
@@ -693,6 +854,177 @@ mod tests {
                 &ctx,
             )
             .expect("a freshly created package must load through the registry");
+    }
+
+    /// Write a package directory straight into the store's fs, bypassing
+    /// `install_package` — which is the only way to get the shapes this
+    /// suite is about (a hand-copied v4 export, a pre-mitosis leftover, a
+    /// torn manifest) into the library at all.
+    fn plant_package(fs: &Rc<RefCell<dyn LpFs>>, slug: &str, manifest: &[u8]) {
+        let view = fs.borrow();
+        view.write_file(
+            format!("{PACKAGES_DIR}/{slug}/project.json")
+                .as_str()
+                .as_path(),
+            manifest,
+        )
+        .unwrap();
+        view.write_file(
+            format!("{PACKAGES_DIR}/{slug}/module.json")
+                .as_str()
+                .as_path(),
+            b"{\n  \"kind\": \"Module\"\n}\n",
+        )
+        .unwrap();
+    }
+
+    fn store_over(fs: Rc<RefCell<dyn LpFs>>) -> LibraryStore {
+        LibraryStore::new(
+            fs,
+            Rc::new(|| [42u8; 16]),
+            Rc::new(|| "2026-07-09-1421".to_string()),
+        )
+    }
+
+    #[test]
+    fn no_package_directory_ever_vanishes_from_the_gallery() {
+        // The bug this is here to prevent: a package whose manifest the
+        // strict reader refuses used to be logged and dropped, so a project
+        // the user could see yesterday was simply gone.
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let store = store_over(fs.clone());
+        let healthy = store.create("Healthy", 1.0).unwrap();
+
+        let uid = PrefixedUid::mint(UidPrefix::Project, &[9u8; 16]);
+        plant_package(
+            &fs,
+            "a-format-4",
+            format!(r#"{{"format":4,"uid":"{uid}","name":"Four"}}"#).as_bytes(),
+        );
+        plant_package(&fs, "b-format-3", br#"{"format":3,"name":"Three"}"#);
+        plant_package(&fs, "c-format-99", br#"{"format":99,"name":"Future"}"#);
+        plant_package(&fs, "d-garbage", b"{ not json at all");
+        plant_package(
+            &fs,
+            "e-pre-mitosis",
+            br#"{"kind":"Project","format":1,"name":"Ancient","nodes":{}}"#,
+        );
+        fs.borrow()
+            .write_file(
+                format!("{PACKAGES_DIR}/f-no-manifest/notes.txt")
+                    .as_str()
+                    .as_path(),
+                b"nothing to see",
+            )
+            .unwrap();
+
+        let listed = store.list().unwrap();
+        let slugs: Vec<&str> = listed.iter().map(|s| s.slug.as_str()).collect();
+        assert_eq!(
+            slugs,
+            vec![
+                "2026-07-09-1421-healthy",
+                "a-format-4",
+                "b-format-3",
+                "c-format-99",
+                "d-garbage",
+                "e-pre-mitosis",
+                "f-no-manifest",
+            ],
+            "every directory that exists is listed"
+        );
+
+        let health = |slug: &str| {
+            listed
+                .iter()
+                .find(|summary| summary.slug == slug)
+                .map(|summary| summary.health.clone())
+                .unwrap()
+        };
+        assert_eq!(health("2026-07-09-1421-healthy"), PackageHealth::Ready);
+        assert_eq!(
+            health("a-format-4"),
+            PackageHealth::UpgradesOnOpen { found: 4 },
+            "the floor migrates on open, so its card stays a normal card"
+        );
+        for (slug, expected) in [
+            ("b-format-3", "Format 3 — too old for this Studio"),
+            ("c-format-99", "Format 99 — made by a newer LightPlayer"),
+            ("d-garbage", "project.json could not be read"),
+            ("e-pre-mitosis", "Format 1 — too old for this Studio"),
+            ("f-no-manifest", "No project.json — not a project"),
+        ] {
+            let health = health(slug);
+            let (headline, remedy) = health
+                .blocked()
+                .unwrap_or_else(|| panic!("{slug}: {health:?}"));
+            assert_eq!(headline, expected);
+            assert!(remedy.ends_with('.'), "{slug}: {remedy}");
+        }
+
+        // the healthy package is untouched by all of this
+        assert!(listed.iter().any(|summary| summary.uid == healthy.uid));
+    }
+
+    #[test]
+    fn a_package_the_strict_parser_rejects_stays_reachable_by_its_remedies() {
+        // Swallow point 3: `slug_for_uid` used to skip anything the strict
+        // manifest reader refused, so the packages that most needed
+        // deleting or exporting answered "not found".
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let store = store_over(fs.clone());
+        plant_package(
+            &fs,
+            "e-pre-mitosis",
+            br#"{"kind":"Project","format":1,"name":"Ancient","nodes":{}}"#,
+        );
+
+        let summary = store.list().unwrap().into_iter().next().unwrap();
+        // resolvable by slug AND by the uid the card carries
+        assert_eq!(store.resolve_key("e-pre-mitosis").unwrap(), summary.uid);
+        assert_eq!(
+            store.resolve_key(&summary.uid.to_string()).unwrap(),
+            summary.uid
+        );
+
+        // export reads raw files through an open handle — it must work
+        let handle = store.open(summary.uid).unwrap();
+        assert!(
+            handle
+                .read_all_files()
+                .unwrap()
+                .iter()
+                .any(|(path, _)| path == "project.json")
+        );
+
+        store.delete(summary.uid).unwrap();
+        assert!(store.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_derived_identity_is_stable_and_slug_scoped() {
+        // The stand-in uid must be the same every time it is computed, or
+        // the card, `resolve_key` and `delete` would name different things.
+        assert_eq!(derived_uid("porch-sign"), derived_uid("porch-sign"));
+        assert_ne!(derived_uid("porch-sign"), derived_uid("porch-sign-2"));
+        assert!(derived_uid("porch-sign").to_string().starts_with("prj_"));
+    }
+
+    #[test]
+    fn a_manifest_uid_still_wins_over_the_derived_one() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let store = store_over(fs.clone());
+        let uid = PrefixedUid::mint(UidPrefix::Project, &[9u8; 16]);
+        // pre-mitosis root: the strict reader refuses it, the lenient read
+        // still finds the identity the package states
+        plant_package(
+            &fs,
+            "old-but-identified",
+            format!(r#"{{"kind":"Project","format":2,"uid":"{uid}","nodes":{{}}}}"#).as_bytes(),
+        );
+        let summary = store.list().unwrap().into_iter().next().unwrap();
+        assert_eq!(summary.uid, uid);
+        assert_ne!(summary.uid, derived_uid("old-but-identified"));
     }
 
     #[test]

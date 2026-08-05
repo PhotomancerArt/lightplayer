@@ -279,6 +279,91 @@
         "description": {
           "type": "string"
         },
+        "gradient": {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            "fade_seconds": {
+              "type": "number"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "set": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "count": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "method": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "space": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  },
+                  "stops": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "number"
+                        },
+                        "c": {
+                          "items": {
+                            "type": "number"
+                          },
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "at",
+                        "c"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 24,
+                    "minItems": 24,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "space",
+                  "method",
+                  "count",
+                  "stops"
+                ],
+                "type": "object"
+              },
+              "maxItems": 8,
+              "minItems": 8,
+              "type": "array"
+            },
+            "step_seconds": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "set",
+            "count",
+            "step_seconds",
+            "fade_seconds"
+          ],
+          "type": "object"
+        },
         "key": {
           "type": "string"
         },
