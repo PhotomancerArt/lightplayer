@@ -117,10 +117,12 @@ pub fn EditorCanvas(
     view_opts: Signal<EditorViewOptions>,
     viewport: Signal<Option<[f32; 2]>>,
     drag: Signal<Option<CanvasDrag>>,
-    /// Live lamp colors indexed by wiring index (host feed); rendered when
-    /// `view_opts.live` is on, falling back per-lamp when absent.
-    #[props(default)]
-    live_colors: Vec<[u8; 3]>,
+    /// Live lamp colors indexed by wiring index (host feed, written by
+    /// [`super::map_editor::MapEditor`]). A color frame must NOT re-render
+    /// this component: the VDOM owns each lamp's palette `fill` attribute,
+    /// and a post-render effect overrides via inline `style` — per-frame
+    /// colors are direct DOM writes, never a 1500-node diff.
+    live_feed: Signal<Vec<[u8; 3]>>,
     /// Fired after any committed (undoable) change.
     on_committed: EventHandler<()>,
     /// Host-owned reference image, rendered doc-space at the origin between
@@ -155,21 +157,31 @@ pub fn EditorCanvas(
     #[cfg(target_arch = "wasm32")]
     let resize_observer =
         use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<CanvasResizeObserver>)));
-    // Keep-last-good live colors: an apply round-trip (undo, upload, any
-    // committed edit) makes the engine re-resolve, and the host's color
-    // feed goes empty for a frame or two — falling back to the object
-    // palette there reads as the display "dropping out of live mode".
-    // Bridge the gap with the last non-empty feed; the live toggle itself
-    // still gates rendering, so switching live off stays immediate.
-    let live_cache = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(Vec::<[u8; 3]>::new())));
-    if !live_colors.is_empty() {
-        *live_cache.borrow_mut() = live_colors.clone();
+    // One id per mounted canvas so the live-color effect scopes its DOM
+    // writes to THIS editor (face + page can mount simultaneously).
+    let canvas_dom_id = use_hook(|| {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("lpme-canvas-{id}")
+    });
+
+    // Live colors as direct DOM writes (P2 of the view/edit-split plan):
+    // subscribe to the feed and the session (a doc edit rebuilds the lamp
+    // nodes, so the override must re-apply after that render), then write
+    // inline `style` fills. The VDOM owns the `fill` ATTRIBUTE (palette /
+    // universe); this effect owns inline style ONLY — one writer per
+    // surface, so the two never fight.
+    {
+        let canvas_dom_id = canvas_dom_id.clone();
+        use_effect(move || {
+            let colors = live_feed();
+            let live_on = view_opts().live;
+            // Subscribe to session so a doc-edit re-render re-applies the
+            // overrides to the rebuilt nodes.
+            let _revision_witness = session.read().doc().objects.len();
+            apply_live_fills(&canvas_dom_id, live_on, &colors);
+        });
     }
-    let live_colors = if live_colors.is_empty() {
-        live_cache.borrow().clone()
-    } else {
-        live_colors
-    };
 
     let cam = camera();
     let opts = view_opts();
@@ -362,6 +374,7 @@ pub fn EditorCanvas(
 
     rsx! {
         svg {
+            id: "{canvas_dom_id}",
             class: if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
             onmounted: move |evt| {
                 #[cfg(target_arch = "wasm32")]
@@ -714,24 +727,20 @@ pub fn EditorCanvas(
                     {
                         let object_index = lamp.object as usize;
                         let selected = selection.object_selected(object_index);
-                        // Fill precedence mirrors the display renderer:
-                        // live output > universe color > object palette.
-                        let fill = opts
-                            .live
-                            .then(|| live_colors.get(lamp.index as usize))
-                            .flatten()
-                            .map(|[r, g, b]| format!("rgb({r} {g} {b})"))
-                            .unwrap_or_else(|| {
-                                if opts.universes {
-                                    let [r, g, b] = universe_rgb(lamp.index);
-                                    format!("rgb({r} {g} {b})")
-                                } else {
-                                    object_color(object_index).to_string()
-                                }
-                            });
+                        // The ATTRIBUTE fill is the non-live look (universe
+                        // color > object palette); live output rides an
+                        // inline-style override written by the live-color
+                        // effect, so color frames never re-render this tree.
+                        let fill = if opts.universes {
+                            let [r, g, b] = universe_rgb(lamp.index);
+                            format!("rgb({r} {g} {b})")
+                        } else {
+                            object_color(object_index).to_string()
+                        };
                         rsx! {
                             circle {
                                 key: "l{lamp.index}",
+                                "data-lamp": "{lamp.index}",
                                 cx: "{lamp.pos[0]}",
                                 cy: "{lamp.pos[1]}",
                                 r: "{radius}",
@@ -1127,6 +1136,53 @@ fn event_doc_point(
 ) -> [f32; 2] {
     let view = event_view_point(anchor, evt);
     camera.peek().view_to_doc(view)
+}
+
+/// Write (or clear) per-lamp live-color overrides as inline styles on the
+/// mounted canvas's `[data-lamp]` circles. Direct DOM only — the whole
+/// point is that a 60Hz color feed costs zero VDOM work. Inline style beats
+/// the `fill` attribute per SVG presentation rules; clearing the style
+/// restores the palette without this code knowing what the palette was.
+fn apply_live_fills(canvas_dom_id: &str, live_on: bool, colors: &[[u8; 3]]) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Ok(lamps) = document.query_selector_all(&format!("#{canvas_dom_id} [data-lamp]"))
+        else {
+            return;
+        };
+        use wasm_bindgen::JsCast;
+        for slot in 0..lamps.length() {
+            let Some(element) = lamps
+                .item(slot)
+                .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+            else {
+                continue;
+            };
+            let color = (live_on && !colors.is_empty())
+                .then(|| {
+                    element
+                        .get_attribute("data-lamp")
+                        .and_then(|index| index.parse::<usize>().ok())
+                        .and_then(|index| colors.get(index))
+                })
+                .flatten();
+            match color {
+                Some([r, g, b]) => {
+                    let _ = element.set_attribute("style", &format!("fill: rgb({r} {g} {b})"));
+                }
+                None => {
+                    let _ = element.remove_attribute("style");
+                }
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (canvas_dom_id, live_on, colors);
+    }
 }
 
 fn event_view_point_wheel(anchor: &Signal<CanvasAnchor>, evt: &Event<WheelData>) -> [f32; 2] {

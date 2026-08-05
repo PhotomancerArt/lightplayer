@@ -140,6 +140,17 @@ pub fn MapEditor(
     // floating over it (M5 gate direction).
     let mut rail_open = use_signal(|| false);
 
+    // The live feed crosses into the canvas as a SIGNAL so a 60Hz color
+    // frame re-renders only this thin component, never the 1500-node lamp
+    // tree (P2 of the view/edit-split plan; the canvas applies colors as
+    // direct DOM writes). Keep-last-good lives here: an apply round-trip
+    // empties the host feed for a frame or two, and falling back to the
+    // palette would read as live mode dropping out.
+    let mut live_feed = use_signal(Vec::<[u8; 3]>::new);
+    if !live_colors.is_empty() && *live_feed.peek() != live_colors {
+        live_feed.set(live_colors.clone());
+    }
+
     // Re-seed when the host bumps the epoch (render-time guarded write).
     let mut seen_epoch = use_signal(|| doc_epoch);
     if *seen_epoch.peek() != doc_epoch {
@@ -244,7 +255,7 @@ pub fn MapEditor(
                         view_opts,
                         viewport,
                         drag,
-                        live_colors,
+                        live_feed,
                         on_committed,
                         reference,
                     }
