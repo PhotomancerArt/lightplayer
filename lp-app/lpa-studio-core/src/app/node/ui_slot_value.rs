@@ -484,6 +484,21 @@ fn join_displays<'a>(values: impl IntoIterator<Item = &'a UiSlotValue>) -> Strin
 }
 
 fn format_struct_value(name: Option<&str>, fields: &[(String, UiSlotValue)]) -> String {
+    // A palette says what it IS on every text surface (M4 P2), and this is
+    // the one that was still printing the 24-entry padded storage: the slot
+    // DTO's own display, which is what a panel control's readout and the
+    // "Authored value" row in its detail popup carry. Gated on the shape
+    // name so no other struct pays for the LpValue round-trip.
+    if matches!(name, Some("Gradient" | "GradientConfig")) {
+        let mirror = UiSlotValueKind::Struct {
+            name: name.map(str::to_string),
+            fields: fields.to_vec(),
+        }
+        .to_lp_value();
+        if let Some(config) = crate::app::project::gradient_config_value(&mirror) {
+            return crate::app::project::format_gradient_summary(&config);
+        }
+    }
     let fields = fields
         .iter()
         .map(|(name, value)| format!("{name}: {}", value.display))
@@ -693,6 +708,43 @@ mod tests {
                 "round trip"
             );
         }
+    }
+
+    /// A palette-shaped slot value displays as the palette summary, never
+    /// as the padded storage — this DTO's display is what a panel readout
+    /// and the "Authored value" row in a control's popup carry, so it has
+    /// to agree with `format_lp_value` (M4 P3).
+    #[test]
+    fn gradient_shaped_structs_display_as_the_palette_summary() {
+        let gradient = lpc_model::Gradient {
+            space: lpc_model::Colorspace::Oklab,
+            method: lpc_model::InterpMethod::Linear,
+            stops: vec![
+                lpc_model::GradientStop {
+                    at: 0.0,
+                    c: [0.0, 0.0, 0.0],
+                },
+                lpc_model::GradientStop {
+                    at: 1.0,
+                    c: [0.9, 0.1, 0.1],
+                },
+            ],
+        };
+        let config = lpc_model::GradientConfig::Static(gradient.clone());
+        let value = UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(&config));
+        assert_eq!(value.display, "oklab \u{b7} linear \u{b7} 2 stops");
+        // The bare `Gradient` storage form reads the same way.
+        let bare = UiSlotValue::from_lp_value(&lpc_model::ToLpValue::to_lp_value(&gradient));
+        assert_eq!(bare.display, "oklab \u{b7} linear \u{b7} 2 stops");
+        // Any other struct keeps the generic field dump.
+        assert_eq!(
+            UiSlotValue::from_lp_value(&LpValue::Struct {
+                name: Some("Dim2u".to_string()),
+                fields: vec![("width".to_string(), LpValue::U32(16))],
+            })
+            .display,
+            "Dim2u { width: 16 }"
+        );
     }
 
     #[test]

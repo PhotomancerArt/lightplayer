@@ -114,6 +114,38 @@ pub fn format_gradient_summary(config: &GradientConfig) -> String {
     }
 }
 
+/// The compact palette readout a PANEL control shows beside its strips —
+/// the dense summary trimmed to what fits in a control's value slot.
+///
+/// A held palette states its stop count (`5 stops`); a cycle states its
+/// size and step rate (`\u{21bb} 4 \u{b7} 3/min`), or `\u{21bb} 4 \u{b7}
+/// held` when the step is frozen. The colorspace, interpolation method, and
+/// fade — everything [`format_gradient_summary`] says and this does not —
+/// stay one click away in the control's detail popup, because a control
+/// panel is read at a glance while it is being played.
+#[must_use]
+pub fn format_gradient_chip(config: &GradientConfig) -> String {
+    match config {
+        GradientConfig::Static(gradient) => {
+            let stops = gradient.stops.len();
+            let unit = if stops == 1 { "stop" } else { "stops" };
+            format!("{stops} {unit}")
+        }
+        GradientConfig::Cycle {
+            set, step_seconds, ..
+        } => {
+            let count = set.len();
+            if config.is_frozen() {
+                return format!("\u{21bb} {count} \u{b7} held");
+            }
+            format!(
+                "\u{21bb} {count} \u{b7} {}",
+                phasor_rate_display(*step_seconds)
+            )
+        }
+    }
+}
+
 /// The `period_seconds` inside a `PhasorConfig`-shaped struct value — the
 /// one number a phasor speed knob displays and tracks. `None` for anything
 /// that is not that record, so ordinary structs keep their no-live-display
@@ -140,9 +172,21 @@ pub fn phasor_config_period(value: &LpValue) -> Option<f32> {
 }
 
 /// A bus reading formatted for live display on a panel control (P6 item 1),
-/// including the one record with a panel presentation: a `PhasorConfig`,
-/// which displays as its period (the speed knob's tracking value).
+/// including the records that HAVE a panel presentation — the two of them:
+/// a `PhasorConfig`, which displays as its period (the speed knob's
+/// tracking value), and a `GradientConfig`, which displays as the palette
+/// summary its swatch sits under (M4 P3).
+///
+/// A palette reading is the dense [`format_gradient_summary`] line rather
+/// than the compact chip: this string is what the popup and the readout's
+/// tooltip carry, and a channel-driven palette is exactly the case where
+/// "which palette is this" needs to be answerable in words. The strip
+/// itself still shows the AUTHORED config — a live reading arrives as text,
+/// not as a config the swatch could sample.
 pub fn format_live_panel_value(value: &LpValue) -> Option<String> {
+    if let Some(config) = gradient_config_value(value) {
+        return Some(format_gradient_summary(&config));
+    }
     match phasor_config_period(value) {
         Some(period) => format_live_scalar(&LpValue::F32(period)),
         None => format_live_scalar(value),
@@ -340,6 +384,65 @@ mod tests {
                 fade_seconds: 0.0,
             }),
             "cycle \u{b7} 2 palettes \u{b7} held"
+        );
+    }
+
+    /// The panel chip is the summary trimmed to a control's value slot: a
+    /// held palette counts stops, a cycle counts members and states the
+    /// auto-denominated step rate.
+    #[test]
+    fn the_panel_chip_is_short_enough_to_sit_beside_a_swatch() {
+        assert_eq!(
+            format_gradient_chip(&GradientConfig::Static(ramp(5))),
+            "5 stops"
+        );
+        assert_eq!(
+            format_gradient_chip(&GradientConfig::Cycle {
+                set: vec![ramp(2), ramp(3), ramp(4), ramp(5)],
+                step_seconds: 20.0,
+                fade_seconds: 0.5,
+            }),
+            "\u{21bb} 4 \u{b7} 3/min"
+        );
+        // A frozen cycle states no rate here either.
+        assert_eq!(
+            format_gradient_chip(&GradientConfig::Cycle {
+                set: vec![ramp(2), ramp(3)],
+                step_seconds: 0.0,
+                fade_seconds: 0.0,
+            }),
+            "\u{21bb} 2 \u{b7} held"
+        );
+    }
+
+    /// A palette channel HAS a panel presentation, so its live reading must
+    /// not fall through the scalar filter the way any other struct does.
+    #[test]
+    fn a_palette_channel_reading_reaches_the_panel_readout() {
+        assert_eq!(
+            format_live_panel_value(&ramp(3).to_lp_value()).as_deref(),
+            Some("oklab \u{b7} linear \u{b7} 3 stops")
+        );
+        assert_eq!(
+            format_live_panel_value(
+                &GradientConfig::Cycle {
+                    set: vec![ramp(2), ramp(3)],
+                    step_seconds: 20.0,
+                    fade_seconds: 0.5,
+                }
+                .to_lp_value()
+            )
+            .as_deref(),
+            Some("cycle \u{b7} 2 palettes \u{b7} 3/min \u{b7} 0.5 s fade")
+        );
+        // The phasor presentation is untouched, and every other struct still
+        // has no panel readout at all.
+        assert_eq!(
+            format_live_panel_value(&LpValue::Struct {
+                name: Some("Dim2u".to_string()),
+                fields: vec![("width".to_string(), LpValue::U32(16))],
+            }),
+            None
         );
     }
 

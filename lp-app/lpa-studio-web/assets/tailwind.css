@@ -143,6 +143,9 @@
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
   }
+  .tw\:right-0\.5 {
+    right: calc(var(--tw-spacing) * 0.5);
+  }
   .tw\:right-1 {
     right: calc(var(--tw-spacing) * 1);
   }
@@ -472,6 +475,9 @@
   }
   .tw\:min-h-\[380px\] {
     min-height: 380px;
+  }
+  .tw\:min-h-\[420px\] {
+    min-height: 420px;
   }
   .tw\:min-h-\[460px\] {
     min-height: 460px;
@@ -1647,6 +1653,9 @@
   }
   .tw\:pr-1\.5 {
     padding-right: calc(var(--tw-spacing) * 1.5);
+  }
+  .tw\:pr-5 {
+    padding-right: calc(var(--tw-spacing) * 5);
   }
   .tw\:pr-8 {
     padding-right: calc(var(--tw-spacing) * 8);

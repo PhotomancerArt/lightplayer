@@ -168,6 +168,70 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
     )
 }
 
+/// One palette swatch control (M4 P3) — the closed face of the chooser, on
+/// a module panel. Its value is a whole `GradientConfig`, built through the
+/// model's own storage exactly as the projection builds one.
+fn swatch(
+    scope: &str,
+    channel: &str,
+    label: &str,
+    config: &lpc_model::GradientConfig,
+) -> UiPanelControlView {
+    UiPanelControlView::new(
+        channel,
+        UiPanelControl {
+            emit: UiPanelEmit::Gradient,
+            label: label.to_string(),
+            address: Some(walk_address(scope, channel)),
+            widget: UiPanelWidget::PaletteSwatch,
+            value: crate::app::node::node_story_fixtures::gradient_slot_value(config),
+            live_value: None,
+            panel_target: Some(lpa_studio_core::UiPanelTarget {
+                scope: scope_target(scope),
+                channel: channel.to_string(),
+                engaged: false,
+            }),
+            unit: None,
+            state: UiSlotFieldState::editable(),
+            aspects: Vec::new(),
+        },
+    )
+}
+
+/// A panel of palette swatches in the three panel states — the module-panel
+/// half of the P3 gate, where the node card's `palette-swatch` stories are
+/// the other. Static and cycle sit side by side on purpose: the two modes
+/// are the widget's whole design question.
+pub(crate) fn palette_panel() -> UiPanelGroup {
+    use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
+    let held = lpc_model::GradientConfig::Static(sunset_gradient());
+    UiPanelGroup::new("Palettes", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![
+            at_default(
+                swatch(ROOT_SCOPE, "palette", "at default", &held),
+                "authored palette",
+            ),
+            {
+                // Following: a config channel drives the slot, and what
+                // comes back is the channel's summary in words — the strips
+                // keep showing the authored config.
+                let mut view = swatch(ROOT_SCOPE, "cycle", "following", &palette_cycle());
+                view.control.live_value = Some(
+                    lpa_studio_core::app::project::format_gradient_summary(&palette_cycle()),
+                );
+                view.with_state(
+                    UiPanelControlState::ReadFollowing,
+                    Some("show \u{b7} palette"),
+                )
+            },
+            engaged(
+                swatch(ROOT_SCOPE, "held", "engaged", &palette_cycle()),
+                "show \u{b7} palette",
+            ),
+        ])
+}
+
 /// Put a control in Read-following-automation, displaying `live`.
 fn following(mut view: UiPanelControlView, live: &str, source: &str) -> UiPanelControlView {
     view.control.live_value = Some(live.to_string());
