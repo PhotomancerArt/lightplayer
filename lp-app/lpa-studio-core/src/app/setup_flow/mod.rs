@@ -24,6 +24,7 @@
 pub mod command;
 pub mod event;
 pub mod executor;
+pub mod gesture;
 pub mod naming;
 pub mod reducer;
 pub mod state;
@@ -33,6 +34,7 @@ pub mod verdict;
 pub use command::SetupCommand;
 pub use event::{SetupEvent, SetupEventKind};
 pub use executor::{SetupDispatch, SetupExecutorContext, dispatch_for};
+pub use gesture::SetupGesture;
 pub use naming::{derive_device_name, month_day_label, unique_device_name};
 pub use reducer::{SetupContext, SetupFlow, SetupStep, reduce};
 pub use state::{

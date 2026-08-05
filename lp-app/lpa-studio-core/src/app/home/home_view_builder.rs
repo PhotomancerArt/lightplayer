@@ -232,6 +232,7 @@ pub fn build_home_view(
             opening,
             issue,
             backup: None,
+            setup: None,
         };
     };
 
@@ -261,6 +262,7 @@ pub fn build_home_view(
         // The controller overlays a finished backup after the build (it is
         // controller state, not library/roster evidence).
         backup: None,
+        setup: None,
     }
 }
 

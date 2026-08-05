@@ -241,10 +241,22 @@ Recorded so the two can be reconciled rather than silently diverge:
    to CONNECT_INTRO" rule would throw away the retry affordance on exactly
    the boards that need it: the second-attempt guidance ASKS for a replug,
    and a replug is a port loss.
-10. **No PROVISION failure edge exists yet.** flow-spec declared none; a
-    generate/push failure currently has nowhere to land except
-    `CloseRequested`. Closing that gap is P06 work and needs a decision
-    about whether a failed push leaves a flashed, registered board.
+10. **No PROVISION failure edge exists yet — still open after P06.** A
+    generate or push failure has nowhere to land but `CloseRequested`. The
+    UI phase (P06) did NOT close it: the missing decision is a product one
+    — what a failed push leaves on a board that is already flashed and
+    written to the registry — and inventing a transition to render would
+    have been answering it by accident. What P06 does instead is refuse to
+    hide it: the controller records the error on the wizard card
+    (`UiSetupWizard::error`, outside the machine), the PROVISION step shows
+    it, and the ✕ stays the door. The board keeps whatever landed on it and
+    appears on the roster, where a project can be pushed from the gallery.
+    **The cost of leaving it open**: the forward verb stays disabled in the
+    `Generating`/`Pushing` phase, so a failure cannot be retried in place —
+    the user has to close and start again. Closing the gap means naming the
+    edge (`GenerateFailed` / `PushFailed` → PROVISION at
+    `ProvisionPhase::Editing`, presumably) in §2, the reducer, and the
+    transition tests together.
 
 ## 8 · Command → existing machinery
 
@@ -263,3 +275,34 @@ nothing. Each `SetupCommand` names machinery that already exists:
 | `PushProject` | `DeployOp::PushProject { key, target }` |
 | `OpenDeviceHome` | `StudioController::attach_lens` on the target's session |
 | `MarkIncompleteFlash` | the card-owned op flow's Failed phase (`CardOp::failed`) |
+
+## 9 · What renders each state (P06)
+
+The wizard is a **card** (flow-spec F5b): the roster's fixed card width, in
+the devices grid where the setup form used to sit, becoming the device card
+at DEVICE_HOME. One component per state, no flow logic in any of them —
+every control dispatches a `SetupGesture` and the reducer decides what it
+means. `lp-app/lpa-studio-web/src/app/home/setup_wizard.rs`, one static
+story per state beside it.
+
+| State | Card body |
+|---|---|
+| CONNECT_INTRO | headline + two stacked full-width CTAs; the `ConnectHint` line escalates toward the secondary |
+| BOARD_FIRST | the shipped board picker (full catalog, no Generic) + board-specific connect guidance (CH340 driver steps or cable/port tips) + "it's plugged in" |
+| PORT_PICKING | indeterminate wait — the browser owns the dialog |
+| PROBING | indeterminate wait, one line about what is being read |
+| BOARD_PICK | recognition line, chip-filtered picker + Generic, picked-board bio, the forward verb (armed only when something is picked), Back |
+| WLED_FOUND | verdict + the wipe warning (migration is future work) + wipe / keep-WLED |
+| ALREADY_LP | registry name + chip, "Done writes nothing", adopt / set-up-fresh |
+| PROBE_FAILED | the failure, the BOOT-button hint, retry / driver help / back |
+| FLASHING | the card-owned op flow's OWN activity view, verbatim; attempt number when > 1 |
+| FLASH_FAILED | the detail, "retry re-runs from erase", replug guidance from attempt 2, retry / abandon |
+| ABANDON_GUARD | the FLASHING body under the card-resident sheet (keep flashing / abandon) |
+| PROVISION | project box (compact line + ⓘ) + derived name field (hardware only) + the forward verb; any §7.10 failure above it |
+| DEVICE_HOME | the handoff frame — the editor is already lensed to the target |
+| CLOSED | the frame between the last command and the card being removed |
+
+The two entry cards (**connect a device** / **simulate a device**, half
+height, one grid cell) are the only way in; the bare "open the port
+chooser" action they replaced is gone.
+

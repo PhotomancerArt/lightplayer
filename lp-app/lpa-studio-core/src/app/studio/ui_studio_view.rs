@@ -287,6 +287,7 @@ mod tests {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         }))
     }
 

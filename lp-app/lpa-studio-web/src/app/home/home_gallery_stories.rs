@@ -130,6 +130,7 @@ fn first_run() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -158,6 +159,7 @@ fn gallery_chooser_buttons() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -217,6 +219,7 @@ fn project_format_states() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -240,6 +243,7 @@ fn populated() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -296,6 +300,7 @@ fn connected_device_and_project_chip() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -323,6 +328,7 @@ fn project_open_in_another_tab() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -346,6 +352,7 @@ fn opening_a_project() -> Element {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     };
     home.opening = Some(home.projects[0].uid.clone());
     rsx! {
@@ -462,6 +469,7 @@ fn sim_and_live_device_home() -> UiHomeView {
         opening: None,
         issue: None,
         backup: None,
+        setup: None,
     }
 }
 
@@ -494,6 +502,7 @@ fn sim_running_only() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -521,6 +530,7 @@ fn device_in_safe_mode() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -553,6 +563,7 @@ fn project_live_in_two_places() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -574,6 +585,7 @@ fn sim_and_offline_device() -> Element {
             opening: None,
             issue: None,
             backup: None,
+            setup: None,
         },
         None,
     )
@@ -610,6 +622,7 @@ fn store_unavailable_with_issue() -> Element {
         opening: None,
         issue: Some(UiIssue::new("Failed to open serial port.")),
         backup: None,
+        setup: None,
     };
     rsx! {
         section { class: "tw:p-4",

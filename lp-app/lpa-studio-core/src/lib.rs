@@ -44,8 +44,9 @@ pub use app::device::{
 pub use app::home::{
     CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
     GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
-    HomePoolEvidence, HomeSimEvidence, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
-    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes, generate_board_project,
+    HomePoolEvidence, HomeSimEvidence, SetupSession, UiCardConnection, UiDeviceCard,
+    UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, UiSetupProject,
+    UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes, generate_board_project, setup_rail,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -114,8 +115,8 @@ pub use app::settings::{
 pub use app::setup_flow::{
     BoardPickState, BoardProbe, BoardVerdict, CloseReason, ConnectHint, HardwareSetupTarget,
     ProbeEvidence, ProvisionPhase, ProvisionState, SetupCapabilities, SetupCommand, SetupContext,
-    SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext, SetupFlow, SetupState,
-    SetupStateKind, SetupStep, SetupTarget, SimulatorSetupTarget, classify_board,
+    SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext, SetupFlow, SetupGesture,
+    SetupState, SetupStateKind, SetupStep, SetupTarget, SimulatorSetupTarget, classify_board,
     derive_device_name, dispatch_for, known_device_for, month_day_label, unique_device_name,
 };
 pub use app::share::{

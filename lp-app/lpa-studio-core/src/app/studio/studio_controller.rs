@@ -173,6 +173,20 @@ pub struct StudioController {
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
     random: Rc<dyn Fn() -> [u8; 16]>,
+    /// The LOCAL `YYYY-MM-DD-HHMM` stamp the library dates slugs with —
+    /// the same string the setup flow derives a device name's date from
+    /// (`derive_device_name`, design §3). Injected for the same reason as
+    /// the clock: core reads neither time nor timezone. The default
+    /// derives UTC from `now_secs`, which is honest in tests and one
+    /// timezone off in a shell that forgets to install its own.
+    local_stamp: Rc<dyn Fn() -> String>,
+    /// The one open setup wizard (flow design F5b: the wizard is a card).
+    /// One at a time — two would be two flows racing for one serial port.
+    setup: Option<crate::SetupSession>,
+    /// The device session the open setup flow is driving, once a port
+    /// grant produced one. Kept beside the session because the card key
+    /// the executor addresses is derived from it.
+    setup_device: Option<crate::RuntimeId>,
     /// The layered settings store (user > host > baked defaults). Pure
     /// state: the platform edges load its layers and persist the user
     /// layer via [`Self::set_on_user_settings`].
@@ -231,6 +245,7 @@ impl StudioController {
     /// the crate stays platform-free (P1).
     pub fn new(now_secs: impl Fn() -> f64 + 'static) -> Self {
         let now_secs: LogClock = Rc::new(now_secs);
+        let now_secs_for_stamp = Rc::clone(&now_secs);
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         let mut device = DeviceController::new();
         device.set_event_recorder(DeviceEventRecorder::new(
@@ -264,6 +279,12 @@ impl StudioController {
             device_backup_seq: 0,
             sim_crash_reboot_at: None,
             random: Rc::new(clock_fallback_random),
+            local_stamp: {
+                let clock = Rc::clone(&now_secs_for_stamp);
+                Rc::new(move || utc_slug_stamp(clock()))
+            },
+            setup: None,
+            setup_device: None,
             settings: crate::app::settings::SettingsStore::default(),
             on_user_settings: None,
             on_copy_text: None,
@@ -479,6 +500,14 @@ impl StudioController {
     /// clock — unique enough for tests, not for production.
     pub fn set_random(&mut self, random: impl Fn() -> [u8; 16] + 'static) {
         self.random = Rc::new(random);
+    }
+
+    /// Install the platform's LOCAL slug stamp (`YYYY-MM-DD-HHMM`) — the
+    /// same closure the library host dates package slugs with, so a
+    /// device named at provision and the project generated beside it read
+    /// the same day. The default is UTC off the injected clock.
+    pub fn set_local_stamp(&mut self, stamp: impl Fn() -> String + 'static) {
+        self.local_stamp = Rc::new(stamp);
     }
 
     /// Install the platform's timer factory for hardware device-session
@@ -1025,6 +1054,7 @@ impl StudioController {
             .map(|card| self.overlay_card_ui(card))
             .collect();
         view.backup = self.device_backup.clone();
+        view.setup = self.setup_view();
         Some(view)
     }
 
@@ -3468,11 +3498,472 @@ impl StudioController {
                     identity.name
                 ))))
             }
+            HomeOp::StartSetup { sim } => self.start_setup(sim, updates).await,
+            HomeOp::Setup(gesture) => self.advance_setup(gesture, updates).await,
             HomeOp::CardUi(op) => {
                 self.apply_card_ui_op(op);
                 Ok(UiNotices::new())
             }
         }
+    }
+
+    // ---- the setup wizard (P06 over the P11 machine) -------------------
+    //
+    // Design: `docs/design/device-setup-flow.md`. Everything below runs
+    // commands the REDUCER produced; nothing here decides a transition.
+    // `dispatch_for` (§8) says which machinery performs each command, and
+    // this is where that machinery is actually awaited.
+
+    /// Open the wizard on a target — the two entry cards' gesture.
+    async fn start_setup(&mut self, sim: bool, updates: UxUpdateSink) -> UiResult {
+        let stamp = (self.local_stamp)();
+        let taken = self.registered_device_names().await;
+        self.setup_device = None;
+        self.setup = Some(if sim {
+            crate::SetupSession::simulator(
+                crate::SimulatorSetupTarget::default().card_key,
+                stamp,
+                taken,
+            )
+        } else {
+            crate::SetupSession::hardware(stamp, taken)
+        });
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        Ok(UiNotices::new())
+    }
+
+    /// Apply one wizard gesture, then run whatever the reducer asked for.
+    async fn advance_setup(
+        &mut self,
+        gesture: crate::SetupGesture,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let Some(session) = self.setup.as_mut() else {
+            // A click that arrived after the card went away. Inert, like
+            // every other stale gesture in this flow (§2 cross-cutting).
+            return Ok(UiNotices::new());
+        };
+        let commands = session.handle(gesture);
+        self.run_setup_commands(commands, updates).await
+    }
+
+    /// Run a command list to quiescence: each command's outcome may feed
+    /// the machine another event, whose commands join the queue. The loop
+    /// is flat on purpose — a flash that fails, retries, and fails again
+    /// must not grow the stack.
+    async fn run_setup_commands(
+        &mut self,
+        commands: Vec<crate::SetupCommand>,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let mut queue: std::collections::VecDeque<crate::SetupCommand> = commands.into();
+        let mut notices = UiNotices::new();
+        while let Some(command) = queue.pop_front() {
+            if self.setup.is_none() {
+                break;
+            }
+            let (outcome, event) = self.run_setup_command(&command, updates.clone()).await;
+            notices.notices.extend(outcome.notices);
+            self.mark_dirty();
+            updates.emit(UxUpdate::View(self.view()));
+            if let Some(event) = event
+                && let Some(session) = self.setup.as_mut()
+            {
+                queue.extend(session.flow.handle(event));
+            }
+        }
+        // A finished flow takes its card off the grid. DEVICE_HOME keeps
+        // it only until the real device card exists — which it does by
+        // then, because OpenDeviceHome ran.
+        if self
+            .setup
+            .as_ref()
+            .is_some_and(|session| session.is_closed())
+        {
+            self.setup = None;
+            self.setup_device = None;
+        }
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        Ok(notices)
+    }
+
+    /// One command → the machinery `dispatch_for` names, plus the event
+    /// (if any) its outcome reports back to the machine.
+    async fn run_setup_command(
+        &mut self,
+        command: &crate::SetupCommand,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        use crate::{SetupCommand, SetupDispatch, SetupEvent};
+
+        let context = self.setup_executor_context();
+        match crate::dispatch_for(command, &context) {
+            SetupDispatch::Device(DeviceOp::OpenProvider { provider_id }) => {
+                self.run_setup_port_request(provider_id, updates).await
+            }
+            SetupDispatch::ReadProbe => {
+                let probe = self.read_setup_probe().await;
+                (UiNotices::new(), Some(SetupEvent::ProbeCompleted { probe }))
+            }
+            SetupDispatch::Device(op @ DeviceOp::ProvisionFirmware { .. }) => {
+                self.run_setup_flash(op, updates).await
+            }
+            SetupDispatch::Device(op) => {
+                // ReleasePort. A port that is already gone is not an
+                // error: the flow asked for it to be released, and it is.
+                let _ = self.execute_device_op(op, updates).await;
+                self.setup_device = None;
+                (UiNotices::new(), None)
+            }
+            SetupDispatch::Catalog(op) => match (command, self.run_catalog_op(op).await) {
+                (SetupCommand::GenerateProject { .. }, Ok(outcome)) => {
+                    match outcome.summary.map(|summary| summary.uid.to_string()) {
+                        Some(project_uid) => (
+                            UiNotices::new(),
+                            Some(SetupEvent::ProjectGenerated { project_uid }),
+                        ),
+                        None => {
+                            self.fail_setup("the generator installed no project");
+                            (UiNotices::new(), None)
+                        }
+                    }
+                }
+                (SetupCommand::GenerateProject { .. }, Err(error)) => {
+                    self.fail_setup(error.to_string());
+                    (UiNotices::new(), None)
+                }
+                // The registry writes (name at provision, sighting at
+                // adopt). The name is what makes the push's identity gate
+                // pass, so the session's identity is re-read here.
+                (_, result) => {
+                    if let Err(error) = result {
+                        self.fail_setup(error.to_string());
+                        return (UiNotices::new(), None);
+                    }
+                    if let Some(device_id) = self.setup_device {
+                        self.refresh_device_sync_for(device_id).await;
+                    }
+                    (UiNotices::new(), None)
+                }
+            },
+            SetupDispatch::Deploy(op) => self.run_setup_push(op, updates).await,
+            SetupDispatch::AttachLens => {
+                let landed = self.open_setup_device_home(updates).await;
+                match landed {
+                    Ok(notices) => (notices, None),
+                    Err(error) => {
+                        self.fail_setup(error.to_string());
+                        (UiNotices::new(), None)
+                    }
+                }
+            }
+            SetupDispatch::MarkIncompleteFlash => {
+                self.mark_setup_flash_incomplete();
+                (UiNotices::new(), None)
+            }
+            // `Home` is never produced by `dispatch_for` today; a future
+            // command that maps to one lands here rather than silently.
+            SetupDispatch::Home(_) => (UiNotices::new(), None),
+        }
+    }
+
+    /// What the executor needs that a command does not carry.
+    fn setup_executor_context(&self) -> crate::SetupExecutorContext {
+        let context = crate::SetupExecutorContext::new((self.now_secs)());
+        match self
+            .setup
+            .as_ref()
+            .and_then(|session| session.card_key.clone())
+        {
+            Some(card_key) => context.with_card_key(card_key),
+            None => context,
+        }
+    }
+
+    /// `RequestPort`: the browser's own chooser, then a connect. The port
+    /// grant is what gives the flow a session — and therefore a card key.
+    async fn run_setup_port_request(
+        &mut self,
+        provider_id: LinkProviderKind,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let before: Vec<crate::RuntimeId> = self
+            .pool
+            .device_sessions()
+            .map(crate::RuntimeSession::id)
+            .collect();
+        let outcome = self.device.open_provider(provider_id).await;
+        // The chooser's own vocabulary: a grant that produced no session
+        // is a cancel. Web Serial cannot tell "cancelled" from "the list
+        // was empty" — both are one `NotFoundError` — so the flow only
+        // ever hears `PortPickerCancelled` here, and the escalation to
+        // board-first rides the intro's secondary CTA instead.
+        let cancelled = matches!(
+            outcome,
+            Ok(DeviceOpenOutcome::Cancelled { .. } | DeviceOpenOutcome::Opened)
+        );
+        let failed = outcome.is_err();
+        let settled = self
+            .settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
+            .await;
+        let notices = match settled {
+            Ok(notices) => notices,
+            Err(error) => {
+                self.push_log(UiLogDraft::from_notice(UiNotice::warning(
+                    error.to_string(),
+                )));
+                UiNotices::new()
+            }
+        };
+        let granted = self
+            .pool
+            .device_sessions()
+            .map(crate::RuntimeSession::id)
+            .find(|id| !before.contains(id))
+            // A re-picked port reconnects the SAME endpoint rather than
+            // adding a session; the flow still holds a port then.
+            .or_else(|| {
+                if cancelled || failed {
+                    None
+                } else {
+                    self.pool
+                        .oldest_device_session()
+                        .map(crate::RuntimeSession::id)
+                }
+            });
+        match granted {
+            Some(device_id) => {
+                self.bind_setup_device(device_id);
+                (notices, Some(crate::SetupEvent::PortGranted))
+            }
+            None => (notices, Some(crate::SetupEvent::PortPickerCancelled)),
+        }
+    }
+
+    /// Remember which session the flow drives, and give the executor the
+    /// card key its ops address (`DeviceTarget::card`).
+    fn bind_setup_device(&mut self, device_id: crate::RuntimeId) {
+        self.setup_device = Some(device_id);
+        if let Some(session) = self.setup.as_mut() {
+            session.card_key = Some(device_id.to_string());
+        }
+    }
+
+    /// `ProbeBoard`: one passive read of what the session already knows,
+    /// classified by [`classify_board`](crate::classify_board) against the
+    /// registry. Nothing is re-derived here — the evidence is exactly what
+    /// the link layer observed.
+    async fn read_setup_probe(&mut self) -> crate::BoardProbe {
+        let registry = self.registered_devices().await;
+        let Some(device_id) = self.setup_device else {
+            return crate::classify_board(&crate::ProbeEvidence::default(), &registry);
+        };
+        let evidence = self.setup_probe_evidence(device_id);
+        let probe = crate::classify_board(&evidence, &registry);
+        if !matches!(probe.verdict, crate::BoardVerdict::Unresponsive { .. }) {
+            return probe;
+        }
+        // Design §8: escalate ONLY on `Unresponsive`. The sync probe
+        // resets the board to talk to its ROM loader, which is why it is
+        // never automatic — but a board that said nothing intelligible has
+        // nothing to lose, and this is what turns "it's dead" into "it's
+        // blank, here are your boards".
+        let Some(session) = self.hardware_session_for(device_id) else {
+            return probe;
+        };
+        let _ = session
+            .probe_link_mode(lpa_link::DeviceEventSink::noop())
+            .await;
+        let escalated = self.setup_probe_evidence(device_id);
+        crate::classify_board(&escalated, &registry)
+    }
+
+    /// One probe pass's evidence, in the link layer's own vocabulary.
+    fn setup_probe_evidence(&self, device_id: crate::RuntimeId) -> crate::ProbeEvidence {
+        let session = self.pool.device_session(device_id);
+        let hello = session.and_then(|session| match session.device_state() {
+            Some(DeviceState::Ready { hello }) => Some(hello),
+            _ => None,
+        });
+        let snapshot = session
+            .and_then(crate::RuntimeSession::hardware_session)
+            .map(lpa_link::DeviceSession::snapshot);
+        crate::ProbeEvidence {
+            hello_seen: hello.is_some(),
+            no_firmware_signature: snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.link_mode.is_bootloader()),
+            lines: snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.recent_lines.clone())
+                .unwrap_or_default(),
+            detected_chip: snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.detected_chip.clone()),
+            base_mac: snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.probed_mac.clone())
+                .or_else(|| hello.and_then(|hello| hello.hardware.base_mac)),
+        }
+    }
+
+    /// `Flash`: the EXISTING provisioning op, unchanged. Its verdict is
+    /// read off the card-owned op flow rather than the notices — that flow
+    /// is what the refusal path (no image for this chip) writes to, and it
+    /// is the same surface the abandon guard marks.
+    async fn run_setup_flash(
+        &mut self,
+        op: DeviceOp,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let result = self.execute_device_op(op, updates).await;
+        let failure = self.setup_flash_failure();
+        let notices = match result {
+            Ok(notices) => notices,
+            Err(error) => {
+                return (
+                    UiNotices::new(),
+                    Some(crate::SetupEvent::FlashFailed {
+                        detail: error.to_string(),
+                    }),
+                );
+            }
+        };
+        match failure {
+            Some(detail) => (notices, Some(crate::SetupEvent::FlashFailed { detail })),
+            None => (notices, Some(crate::SetupEvent::FlashSucceeded)),
+        }
+    }
+
+    /// The failure text the card-owned op flow is carrying, if it failed.
+    fn setup_flash_failure(&self) -> Option<String> {
+        let device_id = self.setup_device?;
+        let op = self.device_card_ops.get(&device_id)?.borrow();
+        match &op.phase {
+            crate::CardOpPhase::Failed { error, .. } => Some(error.clone()),
+            _ => None,
+        }
+    }
+
+    /// `PushProject`. On hardware that is the deploy lane, verbatim. On a
+    /// target with no device session — THE simulator — it is the sim's own
+    /// load path, reached explicitly here rather than by the open-anything
+    /// hardwiring the device-first-creation ADR retired.
+    async fn run_setup_push(
+        &mut self,
+        op: DeployOp,
+        updates: UxUpdateSink,
+    ) -> (UiNotices, Option<crate::SetupEvent>) {
+        let sim = self.setup.as_ref().is_some_and(|session| session.sim);
+        let result = if sim {
+            let DeployOp::PushProject { key, .. } = &op else {
+                return (UiNotices::new(), None);
+            };
+            self.open_on_simulator(PendingOpen::Package(key.clone()), updates)
+                .await
+        } else {
+            self.execute_deploy_op(op, updates).await
+        };
+        match result {
+            Ok(notices) => (notices, Some(crate::SetupEvent::PushCompleted)),
+            Err(error) => {
+                self.fail_setup(error.to_string());
+                (UiNotices::new(), None)
+            }
+        }
+    }
+
+    /// `OpenDeviceHome`: the editor lensed to this target (vision D17).
+    /// The sim path is already lensed by its own load, so this is the
+    /// hardware landing.
+    async fn open_setup_device_home(&mut self, updates: UxUpdateSink) -> UiResult {
+        if self.setup.as_ref().is_some_and(|session| session.sim) {
+            return Ok(UiNotices::new());
+        }
+        let Some(device_id) = self.setup_device else {
+            return Ok(UiNotices::new());
+        };
+        self.attach_lens(device_id, updates).await
+    }
+
+    /// `MarkIncompleteFlash`: leave the board's card saying so. An
+    /// interrupted image is never trusted, and the card is where the user
+    /// will look. The board stays REMEMBERED — identity is anchored in
+    /// silicon, so an incomplete flash costs a re-flash, not a name.
+    fn mark_setup_flash_incomplete(&mut self) {
+        let Some(device_id) = self.setup_device else {
+            return;
+        };
+        self.device_card_ops.insert(
+            device_id,
+            Rc::new(RefCell::new(crate::CardOp::failed(
+                "Flashing firmware",
+                "Incomplete flash — the board needs re-flashing before it can run. \
+                 Nothing was bricked: its bootloader is untouched.",
+                "Back to set up",
+            ))),
+        );
+        self.mark_dirty();
+    }
+
+    /// Record a failure the MACHINE has no edge for — a generate or a push
+    /// that did not land (design §7.10). The wizard shows it and offers
+    /// its ✕; inventing a transition here would be inventing the answer to
+    /// "what does a flashed, registered board with no project mean".
+    fn fail_setup(&mut self, error: impl Into<String>) {
+        let error = error.into();
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Error,
+            UiLogOrigin::Studio,
+            error.clone(),
+        ));
+        if let Some(session) = self.setup.as_mut() {
+            session.error = Some(error);
+        }
+        self.mark_dirty();
+    }
+
+    /// Every remembered device row (the recognition lookup's corpus).
+    async fn registered_devices(&mut self) -> Vec<crate::app::places::RegisteredDevice> {
+        let Ok(host) = self.library_host() else {
+            return Vec::new();
+        };
+        let Ok(fs) = host.catalog_snapshot().await else {
+            return Vec::new();
+        };
+        crate::app::places::DeviceRegistry::new(fs)
+            .list()
+            .unwrap_or_default()
+    }
+
+    /// Every remembered device's name, for the provision step's collision
+    /// suffix (design §3).
+    async fn registered_device_names(&mut self) -> Vec<String> {
+        self.registered_devices()
+            .await
+            .into_iter()
+            .map(|row| row.name)
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
+    /// The wizard card, if one is open: the machine's state plus the two
+    /// things only the controller can see — the live flash op and the
+    /// session's console tail.
+    fn setup_view(&self) -> Option<crate::UiSetupWizard> {
+        let session = self.setup.as_ref()?;
+        let flash = self
+            .setup_device
+            .and_then(|id| self.device_card_ops.get(&id))
+            .map(|slot| slot.borrow().clone());
+        let console_tail = self
+            .setup_device
+            .and_then(|id| self.pool.device_session(id))
+            .map(|session| session.console_tail().iter().cloned().collect())
+            .unwrap_or_default();
+        Some(session.view(flash, console_tail))
     }
 
     /// Apply a card UI view-state mutation (2026-07-25 re-home): flip the
@@ -3665,6 +4156,17 @@ impl StudioController {
     /// (P2 coexistence — the old "disconnect the device to open this
     /// project" refusal is gone).
     async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
+        // Opening a LIBRARY CARD still means the simulator, and now says
+        // so: the destination is named at the call site rather than being
+        // the one thing `open_from_home_inner` could do (device-first
+        // creation ADR — the setup wizard reaches the sim through
+        // `open_on_simulator` too, explicitly, and never through here).
+        self.open_on_simulator(pending, updates).await
+    }
+
+    /// Open a package or example ON THE SIMULATOR: start or reuse THE sim
+    /// session, put the lens on it, and load. The explicit sim path.
+    async fn open_on_simulator(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
         self.library_host()?;
         self.pending_open = Some(pending);
         let result = self.open_from_home_inner(updates).await;
@@ -6086,6 +6588,29 @@ fn clock_fallback_random() -> [u8; 16] {
     bytes
 }
 
+/// `YYYY-MM-DD-HHMM` in UTC from epoch seconds — the fallback slug stamp
+/// for a shell that installed no local one (see
+/// [`StudioController::set_local_stamp`]). Howard Hinnant's civil-from-days.
+fn utc_slug_stamp(now_secs: f64) -> String {
+    let secs = now_secs as i64;
+    let days = secs.div_euclid(86_400);
+    let seconds_of_day = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}-{:02}{:02}",
+        seconds_of_day / 3_600,
+        (seconds_of_day % 3_600) / 60,
+    )
+}
+
 fn emit_activity(
     updates: &UxUpdateSink,
     target: UxActivityTarget,
@@ -7850,6 +8375,148 @@ mod tests {
 
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
+    }
+
+    // ---- the setup wizard ------------------------------------------------
+
+    fn setup_action(op: HomeOp) -> UiAction {
+        UiAction::from_op(ControllerId::new(crate::HOME_NODE_ID), op)
+    }
+
+    fn wizard_of(studio: &StudioController) -> Option<crate::UiSetupWizard> {
+        studio.view().home.and_then(|home| home.setup)
+    }
+
+    #[test]
+    fn the_wizard_is_a_card_on_the_home_view_from_the_moment_it_opens() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        assert!(
+            wizard_of(&studio).is_none(),
+            "no wizard until one is asked for"
+        );
+
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let wizard = wizard_of(&studio).expect("the wizard renders as a card");
+        assert!(!wizard.sim);
+        assert_eq!(wizard.title, "Connect a device");
+        assert_eq!(wizard.state.kind(), crate::SetupStateKind::ConnectIntro);
+        assert_eq!(
+            wizard
+                .steps
+                .iter()
+                .map(|step| step.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Connect", "Flash", "Project", "Done"],
+        );
+    }
+
+    #[test]
+    fn the_simulator_entry_opens_on_the_board_pick_with_no_probe() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: true }))).unwrap();
+        let wizard = wizard_of(&studio).expect("the sim wizard is a card too");
+        assert!(wizard.sim);
+        // Design §7.1: the sim's entry IS `BOARD_PICK`, entered with no
+        // probe evidence — not a second state wearing a disguise.
+        assert_eq!(wizard.state.kind(), crate::SetupStateKind::BoardPick);
+        assert_eq!(wizard.state.probe(), None);
+        assert_eq!(wizard.detected_chip(), None);
+    }
+
+    #[test]
+    fn closing_the_wizard_takes_its_card_off_the_grid() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(
+            crate::SetupGesture::CloseRequested,
+        ))))
+        .unwrap();
+        assert!(
+            wizard_of(&studio).is_none(),
+            "a closed flow leaves no card behind"
+        );
+    }
+
+    #[test]
+    fn a_gesture_with_no_wizard_open_is_inert() {
+        // The stale-click case (§2 cross-cutting): the card went away
+        // between render and click. Nothing happens, and nothing errors.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        let notices = block_on_ready(
+            studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))),
+        )
+        .expect("a stale gesture is not an error");
+        assert!(notices.notices.is_empty());
+        assert!(wizard_of(&studio).is_none());
+    }
+
+    #[test]
+    fn the_sim_path_reaches_provision_with_a_project_line_and_no_name() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: true }))).unwrap();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(
+            crate::SetupGesture::BoardChosen {
+                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+            },
+        ))))
+        .unwrap();
+        block_on_ready(studio.dispatch(setup_action(HomeOp::Setup(crate::SetupGesture::Confirm))))
+            .unwrap();
+        let wizard = wizard_of(&studio).expect("still a card");
+        assert_eq!(wizard.state.kind(), crate::SetupStateKind::Provision);
+        let project = wizard.project.expect("the compact project line");
+        assert!(project.summary.starts_with("meteor → 256-px strip → "));
+        // §3: the sim names nothing — `can_rename` is false, so the state
+        // carries no name for a field to show.
+        let crate::SetupState::Provision(provision) = &wizard.state else {
+            panic!("provision state")
+        };
+        assert_eq!(provision.name, "");
+    }
+
+    #[test]
+    fn the_hardware_name_derives_from_the_injected_stamp() {
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        studio.set_local_stamp(|| "2026-08-05-0930".to_string());
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        // Walk the hardware path's tail without a wire: the machine does
+        // not care where the events came from, which is the point of R1.
+        let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+        flow.handle(crate::SetupEvent::ItsConnected);
+        flow.handle(crate::SetupEvent::PortGranted);
+        flow.handle(crate::SetupEvent::ProbeCompleted {
+            probe: crate::BoardProbe {
+                verdict: crate::BoardVerdict::Blank { known: None },
+                detected_chip: Some("esp32c6".to_string()),
+                hardware_uid: None,
+                hardware_origin: None,
+            },
+        });
+        flow.handle(crate::SetupEvent::BoardChosen {
+            board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+        });
+        flow.handle(crate::SetupEvent::Confirm);
+        flow.handle(crate::SetupEvent::FlashSucceeded);
+        let crate::SetupState::Provision(provision) = flow.state() else {
+            panic!("the flash lands on provision")
+        };
+        assert!(
+            provision.name.ends_with(" · Aug 5"),
+            "the derived name reads the LIBRARY's stamp, not a clock: {}",
+            provision.name
+        );
+    }
+
+    #[test]
+    fn the_utc_fallback_stamp_is_a_well_formed_slug_stamp() {
+        // The default when a shell installs no local stamp. `Aug 5 2026,
+        // 12:00 UTC` — the naming helper must be able to read it.
+        let stamp = utc_slug_stamp(1_786_000_000.0);
+        assert_eq!(stamp.len(), 15, "{stamp}");
+        assert!(
+            crate::month_day_label(&stamp).is_some(),
+            "the naming helper must be able to read the fallback: {stamp}"
+        );
     }
 }
 
