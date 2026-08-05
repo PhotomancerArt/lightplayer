@@ -37,11 +37,16 @@ pr="${1:-}"
 
 # gh infers the PR from the branch when $pr is empty; keep args as an array so
 # an explicit number/URL passes through unchanged.
+#
+# Always expand it as ${pr_args[@]+"${pr_args[@]}"}. macOS ships bash 3.2,
+# where a bare "${pr_args[@]}" on an EMPTY array is an unbound-variable error
+# under `set -u` — i.e. exactly the no-argument case this script exists to
+# support. The +alternate form yields zero words instead of tripping set -u.
 pr_args=()
 [[ -n "$pr" ]] && pr_args=("$pr")
 
 view() {
-  gh pr view "${pr_args[@]}" --json "$1" --jq "$2"
+  gh pr view ${pr_args[@]+"${pr_args[@]}"} --json "$1" --jq "$2"
 }
 
 state="$(view state .state)"
@@ -97,7 +102,7 @@ while true; do
   # watch itself can die with "no checks reported" when the list goes empty
   # mid-run — that is the same transient state as above, so re-enter the poll
   # loop instead of passing gh's failure through.
-  if out="$(gh pr checks "${pr_args[@]}" --watch --fail-fast --interval "$POLL_INTERVAL" 2>&1)"; then
+  if out="$(gh pr checks ${pr_args[@]+"${pr_args[@]}"} --watch --fail-fast --interval "$POLL_INTERVAL" 2>&1)"; then
     rc=0
   else
     rc=$?
