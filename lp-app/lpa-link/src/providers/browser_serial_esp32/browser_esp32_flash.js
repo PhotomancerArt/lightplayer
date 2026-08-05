@@ -101,6 +101,10 @@ export async function flashFirmware(
       // onto an S3 — after `writeFlash` the board is already bricked-ish
       // and the user has no idea why. Refuse loudly instead.
       assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
+      // Identity evidence, taken while the loader session is already open —
+      // see `readBaseMac`. Before the write, deliberately: a flash that
+      // fails halfway still learned which board it was talking to.
+      const baseMac = await readBaseMac(loader);
       pushProgress(progress, onEvent, {
         label: "Connected to ESP32 bootloader",
         completedSteps: 1,
@@ -137,6 +141,7 @@ export async function flashFirmware(
       return {
         manifest: summarizeManifest(manifest, manifestPath),
         chipName: chipName ? String(chipName) : null,
+        baseMac,
         logs,
         progress: compactProgress(progress),
       };
@@ -552,6 +557,35 @@ async function loadEsptoolModule(esptoolModulePath) {
     return await import(esptoolModulePath);
   } catch (error) {
     throw new Error(`Failed to import esptool module ${esptoolModulePath}: ${errorMessage(error)}`);
+  }
+}
+
+/// The chip's factory base MAC, read from the loader session the flash
+/// preflight ALREADY opened.
+///
+/// esptool-js 0.6.0 puts the read on the per-target ROM class, reached as
+/// `loader.chip.readMac(loader)` (`lib/targets/esp32.js`, `esp32c6.js`,
+/// `esp32s3.js` — each returns `%02x`-joined colon hex). `loader.main()`
+/// calls it itself to log the `MAC: …` line, so this costs two register
+/// reads and NO reset: no new bootloader-entry path exists here, which is
+/// the whole reason the read lives in this flow rather than in a probe of
+/// its own.
+///
+/// Nothing is validated here — the string goes to Rust as-is, where
+/// `lpa_link::normalize_base_mac` decides whether it is an address at all.
+/// A failed read returns null and is NOT a failed flash: identity is
+/// evidence, and a board that will not name itself still deserves its
+/// firmware.
+async function readBaseMac(loader) {
+  try {
+    if (typeof loader.chip?.readMac !== "function") {
+      return null;
+    }
+    const mac = await loader.chip.readMac(loader);
+    return mac ? String(mac) : null;
+  } catch (error) {
+    console.warn(`[esp32-flash] base MAC read failed: ${errorMessage(error)}`);
+    return null;
   }
 }
 

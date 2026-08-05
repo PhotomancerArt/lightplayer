@@ -35,9 +35,14 @@ pub struct FakeEsp32Device {
 impl FakeEsp32Device {
     pub fn new(script: FakeDeviceScript) -> Self {
         let phase = FakePhase::fresh(&script.boot);
+        let efuse_mac = match &script.boot {
+            FakeBootState::LightPlayer(lp) => lp.base_mac.clone(),
+            _ => None,
+        };
         Self {
             inner: Arc::new(Mutex::new(FakeDeviceCore {
                 script,
+                efuse_mac,
                 phase,
                 out: VecDeque::new(),
                 out_since: None,
@@ -77,10 +82,16 @@ impl FakeEsp32Device {
     /// Scripted management transition: "flash firmware" — the device becomes
     /// a fresh LightPlayer (empty storage, no identity) whose provenance
     /// records `image_identity`, then reboots.
+    ///
+    /// The base MAC is NOT fresh: it is burned into efuse, so it survives
+    /// every flash and erase this fake can script. The new firmware
+    /// reports the same one the board always had.
     pub fn fake_flash(&self, image_identity: &str) {
         let mut core = self.lock();
+        let base_mac = core.efuse_mac.clone();
         core.script.boot = FakeBootState::LightPlayer(FakeLightPlayerState {
             provenance: fake_provenance(image_identity),
+            base_mac,
             ..FakeLightPlayerState::new()
         });
         core.reset_current();
@@ -157,6 +168,10 @@ impl FakePhase {
 
 pub(crate) struct FakeDeviceCore {
     script: FakeDeviceScript,
+    /// The board's factory base MAC, held at DEVICE level because that is
+    /// where the real one lives: efuse outlives every boot state, so a
+    /// flash or an erase must not be able to change it.
+    efuse_mac: Option<String>,
     phase: FakePhase,
     /// Device→host bytes not yet served to the reader.
     out: VecDeque<u8>,
@@ -273,6 +288,7 @@ impl FakeDeviceCore {
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
+        let base_mac = lp.base_mac.clone();
         let hello_identity = lp
             .provenance
             .clone()
@@ -298,6 +314,14 @@ impl FakeDeviceCore {
                 }
             }
             let mut server = create_memory_server_with(fs, hello_identity);
+            // The efuse half of the hello: only the embedder can read it,
+            // so the fake plays embedder here (A1 identity evidence).
+            if base_mac.is_some() {
+                server.set_hardware_identity(lpc_wire::HardwareIdentity {
+                    base_mac: base_mac.clone(),
+                    ..lpc_wire::HardwareIdentity::default()
+                });
+            }
             if load_at_boot {
                 // the real-hardware shape: firmware auto-resumes its
                 // startup project before serving (fw-esp32c6 boot.rs)

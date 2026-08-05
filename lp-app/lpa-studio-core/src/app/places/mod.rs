@@ -12,6 +12,8 @@
 pub mod device_identity;
 pub mod device_registry;
 pub mod device_session;
+pub mod hardware_id;
+pub mod identity_resolution;
 pub mod place;
 pub mod runtime_place;
 
@@ -20,5 +22,7 @@ pub use device_registry::{DeviceRegistry, RegisteredDevice};
 pub use device_session::{
     DeviceContent, DeviceSyncState, PulledDeviceCopy, pull_device_copy, registry_entry_for,
 };
+pub use hardware_id::{HardwareId, HardwareIdParseError};
+pub use identity_resolution::{IdentityEvidence, ResolvedIdentity, resolve_identity};
 pub use place::{Place, PlaceDescriptor, PlaceKind};
 pub use runtime_place::{RuntimePlace, relate_runtime_content};
