@@ -78,6 +78,26 @@ already recorded in story-capture-pipeline.md).
   `test-rust-core` fails on this test alone, re-run the LATER recipes
   explicitly (`just test-studio-host`) before believing the tree.
 
+- 2026-08-05 — spike-index visual-gate session (PR #349). Two full-gate
+  runs, each aborted in `test-rust-core` by a *different* load-sensitive
+  test. The second was this one at **19.16 s against the 10 s bound** —
+  the worst number in this log — with `uptime` reporting a load average
+  of **246** and 49+ cargo processes from a sibling agent session, on top
+  of this worktree's dev server and a headless Chrome. Per the 2026-08-02
+  note, no local verdict was attempted; it was deferred to CI.
+  **The first abort was NOT this test**:
+  `lp-ws281x/tests/cross_core.rs::panicking_send_blocking_aborts_before_the_borrow_ends`
+  failed 3 of 5 consecutive isolated runs. That one is a genuine race,
+  not just load — its poll closure panics on the *second* poll and the
+  test asserts the call panicked, but nothing guarantees two polls happen
+  when the ISR drains first. It arrived with PR #346 (main at c9f73b70e).
+  The lesson for THIS entry: the "re-run the later recipes" workaround
+  now has **more than one trigger**, so the rule is not "when this test
+  fails" but **"whenever `test-rust-core` aborts, run `just
+  test-studio-host` and `just test-xt-host` explicitly before believing
+  the tree"**. Done here — `test-studio-host` passed 278/278, which was
+  the only recipe covering the crate this PR changed.
+
 **Exit criteria** — The default suite contains no load-sensitive
 wall-clock assert: the perf measurement either moves behind an opt-in
 feature/recipe (perf job), switches to a load-insensitive proxy (eval
