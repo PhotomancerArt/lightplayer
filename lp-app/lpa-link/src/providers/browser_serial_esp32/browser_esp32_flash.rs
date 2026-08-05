@@ -21,6 +21,11 @@ pub struct BrowserEsp32FirmwareManifest {
 pub struct BrowserEsp32FlashResult {
     pub manifest: BrowserEsp32FirmwareManifest,
     pub chip_name: Option<String>,
+    /// The base MAC the preflight read from efuse, exactly as esptool-js
+    /// spelled it. Unvalidated on purpose — the JS side is untestable
+    /// (`docs/debt/web-serial-js-untestable.md`), so the check runs in Rust,
+    /// on the way into the device session.
+    pub base_mac: Option<String>,
     pub logs: Vec<String>,
     pub progress: Vec<BrowserEsp32FlashProgress>,
 }
@@ -140,6 +145,7 @@ pub async fn flash_firmware_with_events(
     Ok(BrowserEsp32FlashResult {
         manifest: parse_manifest(&manifest_value)?,
         chip_name: reflect_optional_string(&value, "chipName")?,
+        base_mac: reflect_optional_string(&value, "baseMac")?,
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,
     })

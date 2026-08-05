@@ -81,6 +81,19 @@ pub enum CatalogOp {
     ForgetRegisteredDevice {
         uid: String,
     },
+    /// Lazy re-key at sighting (device identity design §4): a board that
+    /// was remembered under a stamped uid has resolved to a derived one,
+    /// so its row moves — or merges, when both rows exist. Runs BEFORE
+    /// the sighting upsert, under the same catalog lock every other
+    /// registry write takes. Idempotent: nothing under `old_uid` is a
+    /// no-op.
+    RekeyRegisteredDevice {
+        old_uid: String,
+        new_uid: String,
+        /// Canonical origin string ([`HardwareId`](crate::app::places::HardwareId)'s
+        /// `Display`) recorded on the surviving row.
+        hardware_id: String,
+    },
     /// Connect-as-pull (D8) for a project NOT open in this tab: bank the
     /// observed device copy into that project's history (no-op when the
     /// hash is known) and refresh the registry entry. The host takes the
@@ -319,6 +332,16 @@ pub fn apply_catalog_op(
         CatalogOp::ForgetRegisteredDevice { uid } => {
             crate::app::places::DeviceRegistry::new(store.fs_handle())
                 .forget(&uid)
+                .map_err(LibraryHostError::from)?;
+            None
+        }
+        CatalogOp::RekeyRegisteredDevice {
+            old_uid,
+            new_uid,
+            hardware_id,
+        } => {
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .rekey_or_merge(&old_uid, &new_uid, &hardware_id)
                 .map_err(LibraryHostError::from)?;
             None
         }
