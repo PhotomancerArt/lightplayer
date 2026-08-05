@@ -2,11 +2,23 @@
   "$id": "https://lightplayer.dev/schemas/project.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Workspace identity of a project folder: format version, library uid, and display name. Not a node artifact — the root module node lives in module.json.",
+  "description": "Workspace identity of a project folder: format version, library uid, display name, and provenance. Not a node artifact — the root module node lives in module.json.",
   "properties": {
+    "author": {
+      "title": "Provenance: author attribution",
+      "type": "string"
+    },
+    "created": {
+      "title": "Provenance: ISO date the project was created",
+      "type": "string"
+    },
     "format": {
       "const": 5,
       "title": "Authored format version"
+    },
+    "license": {
+      "title": "Provenance: license identifier (e.g. \"CC0-1.0\")",
+      "type": "string"
     },
     "name": {
       "title": "Human-readable project name",
@@ -14,6 +26,10 @@
     },
     "uid": {
       "title": "Stable project identity (prj_…, base-62)",
+      "type": "string"
+    },
+    "version": {
+      "title": "Provenance: authored version string (no semver semantics yet)",
       "type": "string"
     }
   },

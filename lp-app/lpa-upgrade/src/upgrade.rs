@@ -68,6 +68,8 @@ pub fn chain_tip() -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -75,6 +77,29 @@ mod tests {
         // The whole point of this crate in one assertion: bump
         // PROJECT_FORMAT_VERSION without adding a step and CI goes red.
         assert_eq!(chain_tip(), PROJECT_FORMAT_VERSION);
+    }
+
+    #[test]
+    fn the_current_format_has_a_history_snapshot() {
+        // Companion to the chain-tip test above, closing the other half of
+        // the ADR README's deferred follow-up ("CI check that a
+        // PROJECT_FORMAT_VERSION bump lands with a schemas/history/v<N-1>/
+        // snapshot" — open since bump 2, `docs/adr/2026-07-05-artifact-
+        // format-version-and-schema-snapshots.md`). A step without its
+        // `just format-bump` snapshot means the goldens in this crate were
+        // authored against nothing: the fixtures a future vN→vN+1 step
+        // needs come FROM that directory.
+        let outgoing = PROJECT_FORMAT_VERSION - 1;
+        let history_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../schemas/history")
+            .join(format!("v{outgoing}"));
+        assert!(
+            history_dir.is_dir(),
+            "schemas/history/v{outgoing}/ is missing for PROJECT_FORMAT_VERSION \
+             {PROJECT_FORMAT_VERSION} — run `just format-bump` before bumping the \
+             constant (expected directory: {})",
+            history_dir.display()
+        );
     }
 
     #[test]
