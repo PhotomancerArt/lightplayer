@@ -76,7 +76,7 @@ use lpc_hardware::{
 #[cfg(feature = "frame-dump")]
 use crate::output::rmt::frame_dump::{self, FrameDump};
 use crate::output::rmt::shared_driver::{
-    DRIVER, FRAME_TIMEOUT, install_isr, report_telemetry_if_due,
+    DRIVER, FRAME_TIMEOUT, install_isr, isr_on_app_core, report_telemetry_if_due,
 };
 use crate::output::rmt::v3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 
@@ -88,27 +88,38 @@ const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 /// The bound is interrupt-service margin, not an RMT limitation. With the
 /// four-channel block plan every transmitter wants a refill each 80 µs
 /// (12.5 k/s per channel) against a measured per-core ISR delivery ceiling of
-/// ~46–55 k/s ([`super::v3_rmt::plan_for_declared`]'s table). Measured
-/// 2026-08-04 on the DOM-Z-102 app path (900 LEDs, 4×225, quiet-covered by
-/// the provider's flush barrier): **both 2 and 4 concurrent run clean**
-/// (zero guard trips), and at this scale the same fps — but their margins
-/// differ sharply. At 2 concurrent the worst entry delay was 8 words of the
-/// 64-word deadline; at 4 concurrent it was 53. Two is the shipped default
-/// because that margin has to survive things this measurement did not
-/// exercise; four (50 k/s demand) is the measured, one-line lever if
-/// dome-scale wire time ever needs halving again.
+/// ~46–55 k/s ([`super::v3_rmt::plan_for_declared`]'s table). Two answers,
+/// keyed on where the ISR runs this boot:
 ///
-/// ⚠️ Any transmission this cap admits is only safe while the CPU quietly
-/// spins: this chip's app path masks interrupts in stretches long enough to
-/// blow the 80 µs refill deadline, so a wire transmitting while the engine
-/// runs truncates on nearly every frame (measured before the barrier
-/// existed). The provider's end-of-flush barrier is what guarantees quiet
-/// coverage — see `Esp32OutputProvider::flush`.
+/// * **Dual-core (ISR on the dedicated APP core): 4** — every declared wire
+///   in one wave, overlapped with render. The budget argument: 50 k/s of
+///   demand against the ~48 k/s per-core delivery ceiling was measured
+///   trip-free even on a shared core; a core that does *nothing else* only
+///   gains margin. The number to re-judge at the silicon gate is the
+///   worst-case entry delay — 53/64 words when the four channels' coincident
+///   causes queued behind engine noise, expected far lower on the quiet
+///   core.
+/// * **Single-core fallback: 2** — the M4-shipped cap, unchanged. Measured
+///   2026-08-04 on the DOM-Z-102 app path (900 LEDs, 4×225, quiet-covered by
+///   the provider's flush barrier): both 2 and 4 ran clean (zero guard
+///   trips), but at 2 the worst entry delay was 8/64 words versus 53/64 at
+///   4, and that margin has to survive things the measurement did not
+///   exercise.
 ///
-/// Starts past the cap wait in [`Ws281xOutput::start`] for a slot to free, so
-/// a four-wire flush is two waves of two and costs roughly two wave wire
-/// times, versus four sequentially before this seam existed.
-const MAX_CONCURRENT_TX: usize = 2;
+/// ⚠️ In the single-core shape, any transmission this cap admits is only
+/// safe while the CPU quietly spins: this chip's app path masks interrupts
+/// in stretches long enough to blow the 80 µs refill deadline, so a wire
+/// transmitting while the engine runs truncates on nearly every frame
+/// (measured before the barrier existed). The provider's end-of-flush
+/// barrier guarantees quiet coverage — and it keys off the same
+/// [`Ws281xOutput::background_tx_safe`] answer, so cap and barrier switch
+/// together. See `Esp32OutputProvider::flush`.
+///
+/// Starts past the cap wait in [`Ws281xOutput::start`] for a slot to free —
+/// in the fallback shape a four-wire flush is two waves of two.
+fn max_concurrent_tx() -> usize {
+    if isr_on_app_core() { 4 } else { 2 }
+}
 
 /// Channels currently transmitting a frame, across the whole driver.
 fn transmitting_channels() -> usize {
@@ -497,6 +508,16 @@ struct InFlightFrame {
 }
 
 impl Ws281xOutput for Esp32V3RmtWs281xOutput {
+    /// True exactly when the refill ISR is on the dedicated APP core this
+    /// boot: refills then survive anything the render core does, so the
+    /// provider may let this wire's transmission overlap the next render.
+    /// In the single-core fallback this is `false` and the M4 barrier
+    /// semantics apply unchanged — same flag as [`max_concurrent_tx`], so
+    /// the cap and the barrier always switch together.
+    fn background_tx_safe(&self) -> bool {
+        isr_on_app_core()
+    }
+
     fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
         // The borrow of `data` provably outlives the transmission: `start`'s
         // contract holds until `wait_complete` returns, and both happen inside
@@ -515,17 +536,16 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
         }
 
         // Admission control: hold the start until fewer than
-        // [`MAX_CONCURRENT_TX`] other channels are transmitting. The bound is
-        // this chip's ISR budget, not a driver limitation — see the constant.
-        // The in-flight channels complete by interrupt with no help from this
-        // thread, so the spin always ends; the deadline is pure paranoia
-        // against a wedged sibling, and on expiry the start proceeds (worst
-        // case is the over-subscription the cap exists to avoid, for one
-        // frame, on a board that already has a hung channel to report).
+        // [`max_concurrent_tx`] other channels are transmitting. The bound is
+        // this chip's per-core ISR budget, not a driver limitation — see the
+        // function. The in-flight channels complete by interrupt with no help
+        // from this thread, so the spin always ends; the deadline is pure
+        // paranoia against a wedged sibling, and on expiry the start proceeds
+        // (worst case is the over-subscription the cap exists to avoid, for
+        // one frame, on a board that already has a hung channel to report).
         let admission_wait = Instant::now();
-        while transmitting_channels() >= MAX_CONCURRENT_TX
-            && admission_wait.elapsed() <= FRAME_TIMEOUT
-        {}
+        let cap = max_concurrent_tx();
+        while transmitting_channels() >= cap && admission_wait.elapsed() <= FRAME_TIMEOUT {}
 
         // SAFETY: forwarding this method's own contract — the caller keeps
         // `data` alive, in place, and unmodified until `wait_complete` returns
