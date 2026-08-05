@@ -9,16 +9,23 @@
 //   node scripts/spikes-index.mjs            # write spikes/index.html
 //   node scripts/spikes-index.mjs --check    # fail if it would change
 //
-// Output must be deterministic: no timestamps, no git state, directories in
-// sorted order. A `--check` that can flap is worse than no gate at all.
+// Output must be deterministic: no timestamps, no live git state, entries in
+// a stable order. A `--check` that can flap is worse than no gate at all —
+// which is why dates live in `spikes/dates.json` instead of being read from
+// git on every run. CI checks out shallow (`actions/checkout` defaults to
+// depth 1), so `git log -- <path>` there answers for the tip commit alone and
+// would disagree with any full clone. The date is asked of git ONCE, when a
+// spike first appears, and is a plain committed fact from then on.
 
 import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const spikesDir = path.join(repoRoot, "spikes");
 const indexPath = path.join(spikesDir, "index.html");
+const datesPath = path.join(spikesDir, "dates.json");
 const check = process.argv.slice(2).includes("--check");
 
 /** Ledes are teasers, not abstracts — long opening paragraphs get cut here. */
@@ -28,22 +35,36 @@ const LEDE_MAX = 260;
 // that this walk reaches through, and they are in the temporal dead zone
 // until the whole module has evaluated.
 function main() {
-  const spikes = collectSpikes();
+  const spikes = collectSpikes().sort(newestFirst);
   const pages = spikes.filter((spike) => spike.href !== null);
   const code = spikes.filter((spike) => spike.href === null);
-  const rendered = renderIndex(pages, code);
+  const outputs = [
+    [datesPath, renderDates(spikes)],
+    [indexPath, renderIndex(pages, code)],
+  ];
   const tally = `${pages.length} pages, ${code.length} code spikes`;
 
+  const stale = outputs.filter(([file, want]) => !existsSync(file) || readFileSync(file, "utf8") !== want);
   if (!check) {
-    writeFileSync(indexPath, rendered);
-    console.log(`wrote spikes/index.html (${tally})`);
-  } else if (!existsSync(indexPath) || readFileSync(indexPath, "utf8") !== rendered) {
-    console.error("spikes/index.html is out of date.");
-    console.error("  regenerate it with: just spikes-index");
+    for (const [file, contents] of outputs) writeFileSync(file, contents);
+    console.log(`wrote spikes/index.html and spikes/dates.json (${tally})`);
+  } else if (stale.length > 0) {
+    for (const [file] of stale) console.error(`${path.relative(repoRoot, file)} is out of date.`);
+    console.error("  regenerate with: just spikes-index");
     process.exit(1);
   } else {
     console.log(`spikes/index.html is up to date (${tally})`);
   }
+}
+
+/**
+ * Newest spike first — the contact sheet is read for "what happened lately".
+ * Undated spikes sink to the bottom, and the name breaks ties so the order
+ * never depends on readdir.
+ */
+function newestFirst(a, b) {
+  if (a.date !== b.date) return (b.date ?? "").localeCompare(a.date ?? "");
+  return a.name.localeCompare(b.name);
 }
 
 // ---------------------------------------------------------------- collection
@@ -55,21 +76,46 @@ function main() {
  * silently dropping it is how an index stops being a complete list.
  */
 function collectSpikes() {
+  const recorded = existsSync(datesPath) ? JSON.parse(readFileSync(datesPath, "utf8")) : {};
   return readdirSync(spikesDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort()
     .map((name) => {
+      const date = spikeDate(name, recorded);
       const page = path.join(spikesDir, name, "index.html");
       if (existsSync(page)) {
-        return { name, href: `./${name}/index.html`, ...describePage(readFileSync(page, "utf8")) };
+        return { name, date, href: `./${name}/index.html`, ...describePage(readFileSync(page, "utf8")) };
       }
       const readme = path.join(spikesDir, name, "README.md");
       if (existsSync(readme)) {
-        return { name, href: null, ...describeReadme(readFileSync(readme, "utf8")) };
+        return { name, date, href: null, ...describeReadme(readFileSync(readme, "utf8")) };
       }
       throw new Error(`spikes/${name}/ has neither index.html nor README.md — nothing to index`);
     });
+}
+
+/**
+ * A spike's date, in `spikes/dates.json` order of authority: what is recorded
+ * there wins, and git is asked only for a spike that has none yet. Recorded
+ * dates are never refreshed — see the header note on shallow CI clones.
+ *
+ * Edit `dates.json` by hand when a spike gets a later round and you want the
+ * index to say so; that file is the fact, and a regeneration will keep it.
+ * A spike still uncommitted has no date yet and sorts last until it does.
+ */
+function spikeDate(name, recorded) {
+  if (typeof recorded[name] === "string") return recorded[name];
+  try {
+    const date = execFileSync("git", ["log", "-1", "--format=%as", "--", `spikes/${name}`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Title from `<title>`; lede from the first paragraph in the body. */
@@ -233,7 +279,9 @@ function renderIndex(pages, code) {
   }
   a.card:hover { background: var(--raised); border-color: var(--border-strong); transform: translateY(-1px); }
   a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .card .name { font: 500 11px/1 var(--mono); color: var(--accent); letter-spacing: .02em; }
+  .meta { display: flex; align-items: baseline; gap: 10px; }
+  .meta .name { font: 500 11px/1 var(--mono); color: var(--accent); letter-spacing: .02em; }
+  .meta .date { margin-left: auto; flex: none; font: 400 11px/1 var(--mono); color: var(--subtle); }
   .card .title { font-size: 13.5px; font-weight: 600; color: var(--strong); }
   .card .lede { font-size: 12px; line-height: 1.5; color: var(--dim); }
 
@@ -242,11 +290,11 @@ function renderIndex(pages, code) {
     padding: 10px 13px;
     background: var(--surface); border: 1px solid var(--border-muted); border-radius: 6px;
   }
-  ul.code .name { font: 500 11px/1 var(--mono); color: var(--subtle); }
+  ul.code .name { color: var(--subtle); }
   ul.code .lede { font-size: 12px; color: var(--dim); margin-top: 5px; }
 
   footer { margin-top: 40px; color: var(--subtle); font-size: 11px; }
-  footer code { font-family: var(--mono); color: var(--dim); }
+  code { font-family: var(--mono); color: var(--dim); }
 </style>
 </head>
 <body>
@@ -259,8 +307,9 @@ function renderIndex(pages, code) {
   the shipped Studio means the design moved on, not that the spike is broken.
 </p>
 <p class="hint">
-  Titles and blurbs below are read straight out of each spike, so this page
-  cannot describe them wrongly for long.
+  Newest first. Titles and blurbs are read straight out of each spike, so this
+  page cannot describe them wrongly for long; the dates come from
+  <code>spikes/dates.json</code>, which records when each spike landed.
 </p>
 
 <h2>Playgrounds <span style="color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">· ${pages.length}</span></h2>
@@ -285,7 +334,10 @@ ${rows}
 
 function renderCard(spike) {
   return `  <a class="card" href="${escapeHtml(spike.href)}">
-    <span class="name">${escapeHtml(spike.name)}</span>
+    <span class="meta">
+      <span class="name">${escapeHtml(spike.name)}</span>
+      <span class="date">${escapeHtml(spike.date ?? "undated")}</span>
+    </span>
     <span class="title">${escapeHtml(spike.title)}</span>
     <span class="lede">${escapeHtml(spike.lede)}</span>
   </a>`;
@@ -293,9 +345,25 @@ function renderCard(spike) {
 
 function renderCodeRow(spike) {
   return `  <li>
-    <div class="name">spikes/${escapeHtml(spike.name)}</div>
+    <div class="meta">
+      <span class="name">spikes/${escapeHtml(spike.name)}</span>
+      <span class="date">${escapeHtml(spike.date ?? "undated")}</span>
+    </div>
     <div class="lede">${escapeHtml(spike.lede)}</div>
   </li>`;
+}
+
+/**
+ * `spikes/dates.json` — one date per spike, sorted by name so the file reads
+ * as a lookup table and diffs stay small. Written on every run so a deleted
+ * spike stops being listed here too.
+ */
+function renderDates(spikes) {
+  const table = {};
+  for (const spike of [...spikes].sort((a, b) => a.name.localeCompare(b.name))) {
+    if (spike.date !== null) table[spike.name] = spike.date;
+  }
+  return `${JSON.stringify(table, null, 2)}\n`;
 }
 
 main();
