@@ -237,6 +237,11 @@ impl Esp32V3RmtWs281xDriver {
         // `configure_tx`.
         v3_rmt::init_tx();
 
+        // One-shot refill-cost floor measurement, telemetry builds only —
+        // prints [PROBE] lines before any output can open. See the module.
+        #[cfg(feature = "ws281x_telemetry")]
+        super::refill_floor_probe::run();
+
         log::info!(
             "Esp32V3RmtWs281xDriver: {} WS281x channels for {} declared (plan={:?} \
              ch0_window_words={} ch0_half_words={})",
