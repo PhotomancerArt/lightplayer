@@ -1343,7 +1343,7 @@ fn resolve_palette_input(
         Err(e) => return (None, Some(format!("invalid palette slot {name:?}: {e}"))),
     };
     let (config, key, mut failure) = resolve_gradient_config(ctx, &slot_path, slot);
-    let position = palette_cycle_position_for(ctx, &config, &key, &mut failure);
+    let position = palette_cycle_position_for(ctx, &config, &key, &slot_path, &mut failure);
 
     let Some((from, to)) = palette_cycle_gradients(&config, position) else {
         failure.get_or_insert_with(|| String::from("palette config has no gradients"));
@@ -1377,6 +1377,7 @@ fn palette_cycle_position_for(
     ctx: &mut TickContext<'_>,
     config: &GradientConfig,
     key: &PhasorKey,
+    slot_path: &SlotPath,
     failure: &mut Option<String>,
 ) -> PaletteCyclePosition {
     if matches!(config, GradientConfig::Static(_)) {
@@ -1390,7 +1391,13 @@ fn palette_cycle_position_for(
             return palette_frame_zero(config);
         }
     };
-    match ctx.time_product_phasor(product, key, &palette_phasor_config(config)) {
+    let reader_node = ctx.node_id();
+    match ctx.time_product_phasor(
+        product,
+        key,
+        &palette_phasor_config(config),
+        (reader_node, slot_path),
+    ) {
         Ok((phase, _cycle)) => palette_cycle_position(config, phase),
         Err(error) => {
             failure.get_or_insert_with(|| error.to_string());
