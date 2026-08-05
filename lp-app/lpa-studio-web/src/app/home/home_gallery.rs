@@ -395,5 +395,5 @@ fn card_grid_class() -> &'static str {
 /// so the min-height lives on the row, not the card component. Projects/
 /// Examples keep the compact grid.
 fn device_grid_class() -> &'static str {
-    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]"
+    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]"
 }

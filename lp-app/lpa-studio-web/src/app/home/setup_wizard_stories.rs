@@ -69,7 +69,7 @@ fn console() -> Vec<UiLogEntry> {
 fn frame(wizard: UiSetupWizard) -> Element {
     rsx! {
         section { class: "tw:p-4",
-            div { class: "tw:grid tw:grid-cols-[minmax(260px,320px)] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]",
+            div { class: "tw:grid tw:grid-cols-[minmax(320px,380px)] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]",
                 SetupWizardCard { wizard, on_action: |_| {} }
             }
         }
@@ -110,7 +110,7 @@ fn simulated(state: SetupState) -> UiSetupWizard {
 fn entry_cards() -> Element {
     rsx! {
         section { class: "tw:p-4",
-            div { class: "tw:grid tw:grid-cols-[minmax(260px,320px)] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]",
+            div { class: "tw:grid tw:grid-cols-[minmax(320px,380px)] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]",
                 ConnectDeviceCard { on_action: |_| {} }
             }
         }
