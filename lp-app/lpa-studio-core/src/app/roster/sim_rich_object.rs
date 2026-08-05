@@ -15,6 +15,11 @@
 //! exists for the sim — worker/tier facts don't flow to cards), no Backup
 //! (nothing is banked from the sim), no Performance. Omission is honest
 //! evidence of absence, exactly like the device builder.
+//!
+//! The one fact the sim gained is its BOARD identity (gallery-rework
+//! vision D4): a sim running a targeted project says "as \<board\>" under
+//! its status line — a Health fact, not a Technical claim, because it is
+//! what this session is pretending to be rather than anything measured.
 
 use crate::app::rich_object::{RichLine, RichObjectView, RichSection, RichWeight};
 use crate::core::status::UiStatusKind;
@@ -40,6 +45,10 @@ pub struct SimRichInput<'a> {
     pub state: &'a RosterCardState,
     /// The loaded project's display name, when one is loaded.
     pub project_name: Option<&'a str>,
+    /// The board the sim claims to be (`vendor/product`), when it has one
+    /// — vision D4. `None` (no board known) is the ordinary default and
+    /// simply omits the line.
+    pub board_id: Option<&'a str>,
     /// f64 epoch seconds for status-line copy.
     pub now_secs: f64,
 }
@@ -57,13 +66,25 @@ pub fn sim_rich_object(input: &SimRichInput<'_>) -> RichObjectView<SimDetailAffo
 /// everywhere (the popover can never disagree with the circle). With a
 /// project loaded it carries the visible editor CTA (the grow ⇲ stays).
 fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> {
+    let mut lines = vec![RichLine::new(
+        "status",
+        input.state.status_line(input.now_secs),
+    )];
+    // D4: "as ESP32-S3 DevKitC-1" — the board this session pretends to be.
+    // Omitted entirely when no board is known (the default), so an
+    // untargeted sim card reads exactly as it did before.
+    if let Some(board_id) = input.board_id {
+        // the VALUE carries the "as", because the card face renders a
+        // Health line's value alone (the label is a kv-row affordance)
+        lines.push(RichLine::new(
+            "board",
+            format!("as {}", board_display_name(board_id)),
+        ));
+    }
     RichSection {
         title: "Health".to_string(),
         tone: input.state.spec().tone,
-        lines: vec![RichLine::new(
-            "status",
-            input.state.status_line(input.now_secs),
-        )],
+        lines,
         chip: None,
         affordances: input
             .project_name
@@ -87,6 +108,17 @@ fn project_section(input: &SimRichInput<'_>) -> Option<RichSection<SimDetailAffo
         affordances: Vec::new(),
         weight: RichWeight::Actionable,
     })
+}
+
+/// A board id's human name for the card line: the catalog's `display_name`
+/// when the id is a known board, else the raw id verbatim — advisory
+/// metadata may name a board this build's catalog doesn't carry (a future
+/// board, a typo'd id), and the line should still say something rather
+/// than disappear. Same rule as the project card's "for \<board\>" badge.
+fn board_display_name(board_id: &str) -> String {
+    lpa_boards::board_by_id(board_id)
+        .map(|board| board.display_name.clone())
+        .unwrap_or_else(|| board_id.to_string())
 }
 
 /// Danger zone, pinned last: Stop simulator (runtime-pool P3's explicit
@@ -115,6 +147,7 @@ mod tests {
         let view = sim_rich_object(&SimRichInput {
             state: &RosterCardState::RunningUpToDate,
             project_name: Some("2026-07-02-0930-porch-sign"),
+            board_id: None,
             now_secs: NOW,
         });
         assert_eq!(titles(&view), vec!["Health", "Project", "Danger zone"]);
@@ -137,6 +170,7 @@ mod tests {
         let view = sim_rich_object(&SimRichInput {
             state: &RosterCardState::ConnectedEmpty,
             project_name: None,
+            board_id: None,
             now_secs: NOW,
         });
         assert_eq!(titles(&view), vec!["Health", "Danger zone"]);
@@ -145,6 +179,47 @@ mod tests {
             view.sections[0].lines[0].value, "Connected — nothing loaded",
             "the health fact speaks the card copy"
         );
+        assert_eq!(
+            view.sections[0].lines.len(),
+            1,
+            "no board known: no 'as <board>' line at all (today's card)"
+        );
+    }
+
+    #[test]
+    fn a_boarded_sim_says_what_it_is_pretending_to_be() {
+        // D4: the sim inherits its board from the project it runs, and the
+        // card's fact line names it with the CATALOG's display name.
+        let view = sim_rich_object(&SimRichInput {
+            state: &RosterCardState::RunningUpToDate,
+            project_name: Some("2026-07-02-0930-porch-sign"),
+            board_id: Some("seeed/xiao-esp32-c6"),
+            now_secs: NOW,
+        });
+        let health = &view.sections[0];
+        assert_eq!(health.lines[1].label, "board");
+        assert_eq!(
+            health.lines[1].value,
+            format!(
+                "as {}",
+                lpa_boards::board_by_id("seeed/xiao-esp32-c6")
+                    .expect("a catalog board")
+                    .display_name
+            )
+        );
+    }
+
+    #[test]
+    fn an_unknown_board_id_still_says_something() {
+        // Advisory metadata may name a board this build doesn't carry —
+        // the line degrades to the raw id rather than vanishing.
+        let view = sim_rich_object(&SimRichInput {
+            state: &RosterCardState::ConnectedEmpty,
+            project_name: None,
+            board_id: Some("acme/not-a-real-board"),
+            now_secs: NOW,
+        });
+        assert_eq!(view.sections[0].lines[1].value, "as acme/not-a-real-board");
     }
 
     fn titles(view: &RichObjectView<SimDetailAffordance>) -> Vec<&str> {
