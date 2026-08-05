@@ -423,8 +423,11 @@ impl MapEditorSession {
     /// inner shape and center both rotate); only a grid, which has no rotation
     /// of its own, bakes down to a path through its resolved lamps.
     pub fn expand_repeat(&mut self, index: usize) {
-        let Some(Map2dShape::Repeat(repeat)) =
-            self.doc.objects.get(index).map(|object| object.shape.clone())
+        let Some(Map2dShape::Repeat(repeat)) = self
+            .doc
+            .objects
+            .get(index)
+            .map(|object| object.shape.clone())
         else {
             return;
         };
@@ -450,8 +453,7 @@ impl MapEditorSession {
         };
         let objects: Vec<Map2dObject> = (0..count)
             .map(|instance| {
-                let rotation =
-                    Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
+                let rotation = Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
                 let degrees = repeat.instance_degrees(instance);
                 let shape = rotate_shape(&repeat.shape, rotation, degrees)
                     .unwrap_or_else(|| bake_path(&instance_positions[instance as usize]));
