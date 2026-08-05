@@ -25,7 +25,7 @@ pub fn sample_gradient_as_srgb(gradient: &Gradient, t: f32) -> [f32; 3] {
 
     let raw = match gradient.method {
         InterpMethod::Step => sample_step(&stops, t),
-        InterpMethod::Linear | InterpMethod::Smooth => sample_linear(&stops, t),
+        InterpMethod::Linear | InterpMethod::Smooth => sample_linear(gradient.space, &stops, t),
     };
 
     to_display_srgb(gradient.space, raw)
@@ -46,11 +46,15 @@ pub fn sample_step(stops: &[GradientStop], t: f32) -> [f32; 3] {
     chosen
 }
 
-/// Linear interpolation between the two stops bracketing `t`. Also used for
-/// [`InterpMethod::Smooth`] here — a preview only needs the color sequence
-/// to be legible, not the easing curve.
+/// Linear interpolation between the two stops bracketing `t`, in `space`.
+/// Also used for [`InterpMethod::Smooth`] here — a preview only needs the
+/// color sequence to be legible, not the easing curve.
+///
+/// Cylindrical spaces take the **shortest arc** through their hue lane, the
+/// engine's `interpolate_in_space` rule — a preview that lerps 350°→10°
+/// numerically would sweep the whole wheel the engine's bake does not.
 #[must_use]
-pub fn sample_linear(stops: &[GradientStop], t: f32) -> [f32; 3] {
+pub fn sample_linear(space: Colorspace, stops: &[GradientStop], t: f32) -> [f32; 3] {
     if t <= stops[0].at {
         return stops[0].c;
     }
@@ -63,14 +67,55 @@ pub fn sample_linear(stops: &[GradientStop], t: f32) -> [f32; 3] {
         if t >= a.at && t <= b.at {
             let span = (b.at - a.at).max(f32::EPSILON);
             let f = (t - a.at) / span;
-            return [
-                a.c[0] + (b.c[0] - a.c[0]) * f,
-                a.c[1] + (b.c[1] - a.c[1]) * f,
-                a.c[2] + (b.c[2] - a.c[2]) * f,
-            ];
+            let mut out = [0.0; 3];
+            for lane in 0..3 {
+                out[lane] = if hue_lane(space) == Some(lane) {
+                    lerp_hue_degrees(a.c[lane], b.c[lane], f)
+                } else {
+                    a.c[lane] + (b.c[lane] - a.c[lane]) * f
+                };
+            }
+            return out;
         }
     }
     stops[last].c
+}
+
+/// Which coordinate of `space` is a hue angle, if any (the engine's
+/// `hue_lane` rule, mirrored).
+fn hue_lane(space: Colorspace) -> Option<usize> {
+    match space {
+        Colorspace::Hsl | Colorspace::Hsv => Some(0),
+        Colorspace::Oklch => Some(2),
+        Colorspace::LinearSrgb | Colorspace::Srgb | Colorspace::Oklab => None,
+    }
+}
+
+/// Interpolate two hue angles along the shorter arc, in degrees.
+fn lerp_hue_degrees(from: f32, to: f32, t: f32) -> f32 {
+    let from = wrap_degrees(from);
+    let to = wrap_degrees(to);
+    let mut delta = to - from;
+    if delta > 180.0 {
+        delta -= 360.0;
+    } else if delta < -180.0 {
+        delta += 360.0;
+    }
+    wrap_degrees(from + delta * t)
+}
+
+/// Wrap an angle into `[0, 360)`. Non-finite input pins to 0 rather than
+/// poisoning every sample after it.
+fn wrap_degrees(degrees: f32) -> f32 {
+    if !degrees.is_finite() {
+        return 0.0;
+    }
+    let wrapped = degrees % 360.0;
+    if wrapped < 0.0 {
+        wrapped + 360.0
+    } else {
+        wrapped
+    }
 }
 
 /// Convert a sampled color from the gradient's authoring space to display
@@ -82,9 +127,11 @@ pub fn to_display_srgb(space: Colorspace, c: [f32; 3]) -> [f32; 3] {
         Colorspace::Srgb => c,
         Colorspace::LinearSrgb => c.map(linear_to_srgb),
         Colorspace::Oklab => oklab_to_display_srgb(c),
-        // Hsl/Hsv/Oklch aren't used by the M3 catalog; fall back to a clamp
-        // so a sampler never panics if one is added later.
-        Colorspace::Hsl | Colorspace::Hsv | Colorspace::Oklch => [
+        // Polar Oklab: (L, C, hue °) → (L, a, b), then the Oklab chain.
+        Colorspace::Oklch => oklab_to_display_srgb(oklch_to_oklab(c)),
+        // Hsl/Hsv aren't used by the M3 catalog; fall back to a clamp so a
+        // sampler never panics if one is added later.
+        Colorspace::Hsl | Colorspace::Hsv => [
             c[0].clamp(0.0, 1.0),
             c[1].clamp(0.0, 1.0),
             c[2].clamp(0.0, 1.0),
@@ -107,14 +154,33 @@ pub fn from_display_srgb(space: Colorspace, srgb: [f32; 3]) -> [f32; 3] {
         Colorspace::Srgb => srgb,
         Colorspace::LinearSrgb => srgb.map(srgb_to_linear),
         Colorspace::Oklab => display_srgb_to_oklab(srgb),
+        Colorspace::Oklch => oklab_to_oklch(display_srgb_to_oklab(srgb)),
         // Mirrors `to_display_srgb`'s fallback for the spaces the catalog
         // does not use: a clamp, never a panic.
-        Colorspace::Hsl | Colorspace::Hsv | Colorspace::Oklch => [
+        Colorspace::Hsl | Colorspace::Hsv => [
             srgb[0].clamp(0.0, 1.0),
             srgb[1].clamp(0.0, 1.0),
             srgb[2].clamp(0.0, 1.0),
         ],
     }
+}
+
+/// Oklch (L, C, hue °) → Oklab — hue is DEGREES (`color.md` §4).
+fn oklch_to_oklab(c: [f32; 3]) -> [f32; 3] {
+    let radians = wrap_degrees(c[2]).to_radians();
+    [c[0], c[1] * radians.cos(), c[1] * radians.sin()]
+}
+
+/// Oklab → Oklch. A near-achromatic color has no meaningful hue; it takes
+/// 0° rather than whatever noise `atan2` reads out of two ~zero components.
+fn oklab_to_oklch(lab: [f32; 3]) -> [f32; 3] {
+    let chroma = (lab[1] * lab[1] + lab[2] * lab[2]).sqrt();
+    let hue = if chroma < 1e-5 {
+        0.0
+    } else {
+        wrap_degrees(lab[2].atan2(lab[1]).to_degrees())
+    };
+    [lab[0], chroma, hue]
 }
 
 fn linear_to_srgb(c: f32) -> f32 {
@@ -256,7 +322,12 @@ mod tests {
     /// trip for in-gamut colors.
     #[test]
     fn display_srgb_round_trips_through_every_authoring_space_the_editor_offers() {
-        for space in [Colorspace::Srgb, Colorspace::LinearSrgb, Colorspace::Oklab] {
+        for space in [
+            Colorspace::Srgb,
+            Colorspace::LinearSrgb,
+            Colorspace::Oklab,
+            Colorspace::Oklch,
+        ] {
             for srgb in [
                 [0.0, 0.0, 0.0],
                 [1.0, 1.0, 1.0],
@@ -282,5 +353,48 @@ mod tests {
         for channel in sampled {
             assert!((0.0..=1.0).contains(&channel), "{sampled:?}");
         }
+    }
+
+    /// The engine's rule, mirrored: an Oklch 350°→10° ramp crosses through
+    /// 0°, never the 340° sweep back through green.
+    #[test]
+    fn oklch_hue_takes_the_shortest_arc() {
+        let stops = vec![
+            GradientStop {
+                at: 0.0,
+                c: [0.7, 0.15, 350.0],
+            },
+            GradientStop {
+                at: 1.0,
+                c: [0.7, 0.15, 10.0],
+            },
+        ];
+
+        let mid = sample_linear(Colorspace::Oklch, &stops, 0.5);
+        assert!(
+            mid[2] < 1.0 || mid[2] > 359.0,
+            "the midpoint hue must sit at the wrap, got {mid:?}"
+        );
+        // The non-hue lanes still lerp componentwise.
+        assert!((mid[0] - 0.7).abs() < 1e-6 && (mid[1] - 0.15).abs() < 1e-6);
+        // Oklab has no hue lane: the same numbers lerp numerically.
+        let numeric = sample_linear(Colorspace::Oklab, &stops, 0.5);
+        assert!((numeric[2] - 180.0).abs() < 1e-3, "{numeric:?}");
+    }
+
+    /// Achromatic Oklab reads back as hue 0 with ~zero chroma, not as
+    /// `atan2` noise — a gray stop's hue must be stable under re-editing.
+    #[test]
+    fn oklch_conversion_pins_achromatic_hue_to_zero() {
+        let gray = from_display_srgb(Colorspace::Oklch, [0.5, 0.5, 0.5]);
+        assert!(gray[1] < 1e-4, "gray carries no chroma: {gray:?}");
+        assert_eq!(gray[2], 0.0, "gray's hue is the 0 convention: {gray:?}");
+
+        // A saturated red lands near the published Oklch red hue (~29°).
+        let red = from_display_srgb(Colorspace::Oklch, [1.0, 0.0, 0.0]);
+        assert!(
+            (red[2] - 29.23).abs() < 0.5,
+            "sRGB red sits at ~29.23 deg in Oklch: {red:?}"
+        );
     }
 }

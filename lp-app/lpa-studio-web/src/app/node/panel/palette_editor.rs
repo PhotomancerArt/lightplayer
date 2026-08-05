@@ -18,12 +18,14 @@
 //!   puts it back wherever the edit came from), and the provenance line says
 //!   which of the two is happening.
 //!
-//! Only two of [`Colorspace`]'s six spaces are exposed — sRGB and Oklab.
+//! Three of [`Colorspace`]'s six spaces are exposed — sRGB, Oklab, and
+//! Oklch (added at the P6 gate: polar Oklab is the hue-first way to author
+//! a ramp, and its shortest-arc hue lerp is a genuinely different blend).
 //! The model stores all six and a loaded palette in any of them edits fine
-//! (the segment simply shows neither as active); what the editor does not do
-//! is offer Hsl/Hsv/Oklch as authoring choices, because "which space do I
-//! interpolate in" is a two-answer question in practice (D8: imports stay
-//! sRGB for WLED fidelity, new palettes want Oklab).
+//! (the segment simply shows none as active); what the editor does not do
+//! is offer Hsl/Hsv as authoring choices — D8's fidelity concern (imports
+//! stay sRGB for WLED fidelity) doesn't extend to legacy cylindrical
+//! spaces a perceptual pair already covers.
 
 use dioxus::prelude::*;
 use lpa_palettes::{from_display_srgb, sample_linear, sample_step, to_display_srgb};
@@ -287,9 +289,12 @@ pub fn PaletteEditor(
     }
 }
 
-/// The two spaces the editor offers (see the module docs for why not six).
-const EDITOR_SPACES: [(&str, Colorspace); 2] =
-    [("sRGB", Colorspace::Srgb), ("Oklab", Colorspace::Oklab)];
+/// The three spaces the editor offers (see the module docs for why not six).
+const EDITOR_SPACES: [(&str, Colorspace); 3] = [
+    ("sRGB", Colorspace::Srgb),
+    ("Oklab", Colorspace::Oklab),
+    ("Oklch", Colorspace::Oklch),
+];
 
 const EDITOR_METHODS: [(&str, InterpMethod); 3] = [
     ("Step", InterpMethod::Step),
@@ -443,7 +448,7 @@ fn sample_in_space(gradient: &Gradient, at: f32) -> [f32; 3] {
     stops.sort_by(|a, b| a.at.total_cmp(&b.at));
     match gradient.method {
         InterpMethod::Step => sample_step(&stops, at),
-        InterpMethod::Linear | InterpMethod::Smooth => sample_linear(&stops, at),
+        InterpMethod::Linear | InterpMethod::Smooth => sample_linear(gradient.space, &stops, at),
     }
 }
 
@@ -612,21 +617,27 @@ mod tests {
         let srgb = ramp(Colorspace::Srgb);
         let recolored = with_stop_color(&srgb, 1, [0.2, 0.55, 0.9]);
 
-        let oklab = with_space(&recolored, Colorspace::Oklab);
-        assert_eq!(oklab.space, Colorspace::Oklab);
-        assert_eq!(oklab.method, recolored.method);
-        for index in 0..oklab.stops.len() {
-            let before = stop_display_srgb(&recolored, index);
-            let after = stop_display_srgb(&oklab, index);
-            for channel in 0..3 {
-                assert!(
-                    (before[channel] - after[channel]).abs() < 2e-3,
-                    "stop {index}: {before:?} vs {after:?}"
-                );
+        // Every hop of the editor's segment keeps the COLORS: sRGB-authored
+        // stops through Oklab, then Oklch, look the same at each step.
+        let mut previous = recolored.clone();
+        for space in [Colorspace::Oklab, Colorspace::Oklch] {
+            let converted = with_space(&previous, space);
+            assert_eq!(converted.space, space);
+            assert_eq!(converted.method, previous.method);
+            for index in 0..converted.stops.len() {
+                let before = stop_display_srgb(&previous, index);
+                let after = stop_display_srgb(&converted, index);
+                for channel in 0..3 {
+                    assert!(
+                        (before[channel] - after[channel]).abs() < 2e-3,
+                        "{space:?} stop {index}: {before:?} vs {after:?}"
+                    );
+                }
             }
+            // Same space in, same gradient out.
+            assert_eq!(with_space(&converted, space), converted);
+            previous = converted;
         }
-        // Same space in, same gradient out.
-        assert_eq!(with_space(&oklab, Colorspace::Oklab), oklab);
     }
 
     #[test]
