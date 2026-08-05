@@ -26,6 +26,7 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::{
@@ -745,6 +746,31 @@ fn a_shared_config_still_leaves_the_waveform_slot_local() {
         1.0,
         "the square reader sees the same cycle, squared"
     );
+
+    // Clock-face-v2 P1: the shared integrator's probe row lists BOTH
+    // readers with their own shaping — one integrator, two readings.
+    let result = project
+        .engine
+        .read_project_timebase_probe(lpc_wire::TimebaseProbeRequest {
+            product: TimeProduct::new(root, 0),
+        });
+    let lpc_wire::TimebaseProbeResult::Timebase { phasors, .. } = result else {
+        panic!("a producing clock resolves a timebase, got {result:?}");
+    };
+    assert_eq!(phasors.len(), 1, "one shared integrator: {phasors:?}");
+    let mut readings = phasors[0].readings.clone();
+    readings.sort_by_key(|reading| reading.node);
+    assert_eq!(
+        readings
+            .iter()
+            .map(|reading| (reading.node, reading.slot.as_str(), reading.waveform))
+            .collect::<Vec<_>>(),
+        vec![
+            (a.0, "wave", Waveform::Ramp),
+            (b.0, "wave", Waveform::Square),
+        ],
+        "two shaped readings of one shared cycle"
+    );
 }
 
 /// P7 item 4: the timebase probe is the ONLY way a client can see what is
@@ -779,11 +805,23 @@ fn the_timebase_probe_lists_what_rides_the_clock() {
     let periods: Vec<f32> = phasors.iter().map(|row| row.period_seconds).collect();
     assert!(periods.contains(&1.0) && periods.contains(&8.0));
     for row in &phasors {
-        let lpc_wire::WirePhasorOrigin::Node { slot, .. } = &row.origin else {
+        let lpc_wire::WirePhasorOrigin::Node { node, slot } = &row.origin else {
             panic!("an unwired config is private to its slot, got {row:?}");
         };
         assert_eq!(slot, "wave", "the CONSUMED slot, not the config field");
         assert!((0.0..1.0).contains(&row.phase), "raw ramp: {row:?}");
+        // Clock-face-v2 P1: the row carries its readings — a private
+        // integrator has exactly its own consumer, shaping and all.
+        assert_eq!(
+            row.readings,
+            vec![lpc_wire::WirePhasorReading {
+                node: *node,
+                slot: String::from("wave"),
+                waveform: Waveform::Ramp,
+                phase_offset: 0.0,
+            }],
+            "one reader on a private integrator: {row:?}"
+        );
     }
 
     // A product naming a node that publishes no timebase is a structured
