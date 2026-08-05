@@ -60,7 +60,7 @@ pub fn ObjectList(
                     .as_ref()
                     .and_then(|resolved| resolved.object_span(index as u32))
                     .map(|span| (span.start, span.count)),
-                session_read.selection.objects.contains(&index),
+                session_read.selection.contains_root(index),
             )
         })
         .collect();
