@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Clock transport hero — the widget IS the debug drawer — design spike</title>
+<title>Clock transport hero — tape direction + piano reel — design spike (round 2)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio dark palette (from spikes/clock-phasor-face) ---------- */
@@ -76,12 +76,11 @@
   /* ---- the clock card shell ---------------------------------------- */
   .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
   .card {
-    width: 380px; border-radius: 10px; overflow: hidden;
+    width: 560px; border-radius: 10px; overflow: hidden;
     background: var(--surface);
     border: 1px solid var(--border);
     display: flex; flex-direction: column;
   }
-  .card.wide { width: 560px; }
   .card > header {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 12px; background: var(--terminal);
@@ -125,10 +124,8 @@
                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ---- shared hero bits --------------------------------------------- */
-  .dg { font: 600 20px var(--mono); color: var(--strong);
+  .dg { font: 600 18px var(--mono); color: var(--strong);
         font-variant-numeric: tabular-nums; letter-spacing: .01em; }
-  .dg small { font: 500 11px var(--mono); color: var(--subtle); }
-  .dg-label { font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); }
   .tbtn {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     font: 600 11px -apple-system, sans-serif; letter-spacing: .04em;
@@ -149,138 +146,70 @@
   .livechip b { font-weight: 600; }
   .scrub-surface { cursor: grab; touch-action: none; }
   .scrub-surface.dragging { cursor: grabbing; }
-  .hint-under { font-size: 9.5px; color: var(--dim); }
 
-  /* ---- 1 · baseline -------------------------------------------------- */
-  .base-hero { display: grid; justify-items: center; gap: 2px; padding: 18px 0 14px; }
-  .base-hero .num { font: 600 26px var(--mono); color: var(--strong); font-variant-numeric: tabular-nums; }
-  .base-hero .num small { font: 400 14px var(--mono); color: var(--subtle); }
-  .slotrow {
-    display: flex; align-items: center; gap: 8px;
-    padding: 7px 4px; border-top: 1px solid var(--border-muted); font-size: 12px;
-  }
-  .slotrow:first-child { border-top: 0; }
-  .slotrow .icon { width: 14px; height: 14px; border: 1.5px solid var(--dim);
-                   border-radius: 50%; position: relative; flex: none; }
-  .slotrow .icon::after { content: ""; position: absolute; inset: 3.5px;
-                          background: var(--dim); border-radius: 50%; }
-  .slotrow .name { color: var(--text); }
-  .slotrow .val { margin-left: auto; font: 12px var(--mono); color: var(--muted);
-                  font-variant-numeric: tabular-nums; }
-
-  /* ---- 2 · sweepwatch ------------------------------------------------ */
-  .hero-sweep { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px;
-                align-items: center; padding: 6px 2px 4px; }
-  .dial { width: 148px; height: 148px; touch-action: none; }
-  .dial .hand { stroke: var(--accent); stroke-width: 2; stroke-linecap: round;
-                transition: stroke .2s; }
-  .dial.paused .hand { stroke: var(--subtle); }
-  .dial .offring { stroke: var(--attn-border); opacity: 0; transition: opacity .15s; }
-  .dial.offlive .offring { opacity: 1; }
-  .sweep-col { display: grid; gap: 9px; justify-items: start; align-content: center; }
-  .knobwrap { display: inline-flex; align-items: center; gap: 8px; }
-  .knob { width: 44px; height: 44px; cursor: ns-resize; touch-action: none; }
-  .kread { font: 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
-  .kread b { color: var(--text); font-weight: 600; }
-  .klabel { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); }
-  .btnrow { display: flex; align-items: center; gap: 8px; }
-
-  /* ---- 3 · platter --------------------------------------------------- */
-  .hero-platter { display: grid; grid-template-columns: auto auto 1fr; gap: 14px;
-                  align-items: center; padding: 8px 2px 6px; }
-  .platter {
-    width: 132px; height: 132px; border-radius: 50%; position: relative;
-    background: radial-gradient(circle at 38% 32%, #1b2127, #0d1115 72%);
-    border: 1px solid var(--border-strong);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), inset 0 6px 18px rgba(0,0,0,.5);
-    touch-action: none;
-  }
-  .platter.offlive { border-color: var(--attn-border); }
-  .platter .spin {
-    position: absolute; inset: 6px; border-radius: 50%;
-    background:
-      repeating-conic-gradient(rgba(255,255,255,.06) 0deg 5deg, transparent 5deg 30deg),
-      radial-gradient(circle, transparent 54%, rgba(255,255,255,.03) 55%);
-  }
-  .platter .spin::after { /* rim marker: rotation made legible */
-    content: ""; position: absolute; top: 3px; left: calc(50% - 3px);
-    width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
-  }
-  .platter.paused .spin::after { background: var(--subtle); }
-  .platter .pcenter {
-    position: absolute; inset: 0; margin: auto; width: 44px; height: 44px;
-    border-radius: 50%; border: 1px solid var(--border-strong);
-    background: var(--raised); color: var(--muted); cursor: pointer;
-    font-size: 12px; display: flex; align-items: center; justify-content: center;
-  }
-  .platter .pcenter:hover { color: var(--text); }
-  .platter .pcenter.running { color: var(--accent); }
-  .pitch { display: grid; justify-items: center; gap: 5px; }
-  .ptrack {
-    width: 26px; height: 104px; border-radius: 7px; position: relative;
-    background: var(--track); border: 1px solid var(--border-muted);
-    cursor: ns-resize; touch-action: none;
-  }
-  .ptrack .midline { position: absolute; left: 3px; right: 3px; top: 50%;
-                     border-top: 1px solid var(--border-strong); }
-  .ptrack .pthumb {
-    position: absolute; left: 2px; right: 2px; height: 14px; border-radius: 5px;
-    background: var(--raised); border: 1px solid var(--border-strong);
-  }
-  .ptrack .pthumb::after { content: ""; position: absolute; left: 4px; right: 4px;
-                           top: 50%; border-top: 1px solid var(--accent); }
-  .platter-col { display: grid; gap: 8px; justify-items: start; align-content: center; }
-
-  /* ---- 4 · tape ------------------------------------------------------ */
+  /* ---- tape + fader --------------------------------------------------- */
   .hero-tape { display: grid; gap: 8px; padding: 4px 0 2px; }
   .tapebox { background: var(--terminal); border: 1px solid var(--border-muted);
              border-radius: 6px; overflow: hidden; position: relative; }
   .tapebox.offlive { border-color: var(--attn-border); }
   .tapebox canvas { display: block; width: 100%; height: 62px; }
-  .taperow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .chips { display: inline-flex; gap: 4px; }
-  .chips button {
-    font: 10.5px var(--mono); color: var(--dim); background: none;
-    border: 1px solid var(--border-muted); border-radius: 5px;
-    padding: 3px 7px; cursor: pointer;
-  }
-  .chips button:hover { color: var(--muted); border-color: var(--border-strong); }
-  .chips button[data-on] { color: var(--accent); border-color: var(--accent); }
+  .taperow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-  /* ---- 5 · hairline -------------------------------------------------- */
-  .hero-hair { display: flex; align-items: center; gap: 10px; padding: 5px 2px; }
-  .hero-hair .tbtn { min-width: 30px; height: 26px; padding: 0 8px; }
-  .ringsvg { width: 24px; height: 24px; flex: none; }
-  .ringsvg .arc { stroke: var(--accent); transition: stroke .2s; }
-  .ringsvg.paused .arc { stroke: var(--subtle); }
-  .ratechip {
-    font: 10.5px var(--mono); color: var(--muted);
-    border: 1px solid var(--border-muted); border-radius: 5px;
-    padding: 3px 8px; cursor: ew-resize; user-select: none; touch-action: none;
-    font-variant-numeric: tabular-nums;
+  .fader { display: inline-flex; align-items: center; gap: 8px; }
+  .flabel { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); }
+  .ftrack {
+    width: 190px; height: 22px; border-radius: 6px; position: relative;
+    background: var(--track); border: 1px solid var(--border-muted);
+    cursor: ew-resize; touch-action: none;
   }
-  .ratechip:hover { border-color: var(--border-strong); color: var(--text); }
+  .ftrack .tick { position: absolute; top: 15px; bottom: 2px; width: 1px;
+                  background: var(--border-strong); }
+  .ftrack .tick.one { top: 12px; background: var(--subtle); }
+  .ftrack .fthumb {
+    position: absolute; top: 2px; bottom: 2px; width: 16px; border-radius: 4px;
+    background: var(--raised); border: 1px solid var(--border-strong);
+  }
+  .ftrack .fthumb::after { content: ""; position: absolute; top: 3px; bottom: 3px;
+                           left: 50%; border-left: 1px solid var(--accent); }
+  .kread { font: 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .kread b { color: var(--text); font-weight: 600; }
+  .kread[data-detent] b { color: var(--accent); }
 
-  /* ---- 6 · gesture map ---------------------------------------------- */
-  table.gmap { border-collapse: collapse; font-size: 11px; color: var(--muted); }
-  table.gmap th, table.gmap td { border: 1px solid var(--border-muted);
-                                 padding: 5px 10px; text-align: left; vertical-align: top; }
-  table.gmap th { color: var(--subtle); font-weight: 600; font-size: 10px;
-                  text-transform: uppercase; letter-spacing: .06em; background: var(--surface-muted); }
-  table.gmap td:first-child { color: var(--text); white-space: nowrap; }
+  /* ---- piano reel ----------------------------------------------------- */
+  .reelbox { background: var(--terminal); border: 1px solid var(--border-muted);
+             border-radius: 6px; overflow: hidden; position: relative; }
+  .reelbox.offlive { border-color: var(--attn-border); }
+  .reelbox canvas { display: block; width: 100%; height: 168px; }
+  .reelbox .lanelabels { position: absolute; inset: 0; pointer-events: none; }
+  .lanelabel { position: absolute; left: 6px; display: flex; gap: 6px; align-items: baseline;
+               white-space: nowrap; font: 600 9px var(--mono); color: var(--subtle);
+               text-shadow: 0 1px 3px rgba(0,0,0,.9); }
+  .lanelabel .lv { font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .recbadge { position: absolute; right: 8px; top: 5px; display: inline-flex; gap: 5px;
+              align-items: center; font: 600 9px var(--mono); letter-spacing: .1em;
+              color: var(--attn-text); }
+  .recbadge::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                      background: var(--attn-text); animation: recblink 2s infinite; }
+  @keyframes recblink { 0%, 60% { opacity: 1; } 80% { opacity: .25; } 100% { opacity: 1; } }
+
+  /* ---- rejected strip ------------------------------------------------- */
+  .rej { display: flex; gap: 10px; flex-wrap: wrap; }
+  .rejcard { width: 230px; border: 1px dashed var(--border-muted); border-radius: 8px;
+             padding: 8px 10px; }
+  .rejcard b { display: block; font-size: 11px; color: var(--subtle); margin-bottom: 3px; }
+  .rejcard span { font-size: 10.5px; color: var(--dim); }
 </style>
 </head>
 <body>
 
-<h1>Clock transport hero — the widget IS the debug drawer</h1>
+<h1>Clock transport hero — tape direction <small style="color:var(--dim)">(round 2)</small></h1>
 <p class="hint">
-  Thesis (G3 gate, PR #335): the clock card's OUTPUT hero stops being a churning
-  digits counter and becomes a <em>time instrument</em> — it shows the passage of time
-  and it <em>is</em> the transport: run/pause, speed, and scrubbing live in the widget,
-  and the Debug drawer's <code style="font-family:var(--mono)">Running / Rate / Scrub offset</code>
-  rows go away. Every concept below drives the <b>same</b> three slots — one shared clock —
-  so touching any instrument moves all of them, including the phasor traces (scrub-exact,
-  like the engine). Digits are calm (whole seconds); sub-second motion is analog.
+  Gate verdict (2026-08-04): <b>Tape</b> wins. This round iterates it — speed moves to a
+  <b>fader with snap detents</b>, and the tape <b>zooms with speed</b>: the strip always streams at
+  the same pixel velocity, so what your eye reads as "fast" is tick <em>density</em>, not motion.
+  Section 2 explores where the idiom grows: the <b>piano reel</b> — the future input subsystem's
+  flight-recorder, riding the exact same transport. One shared clock everywhere; scrubbing the reel
+  rewinds the tape and the phasors, scrub-exact like the engine.
 </p>
 
 <div class="controls">
@@ -299,146 +228,42 @@
     <button data-grate="1" data-on>×1</button>
     <button data-grate="4">×4</button>
   </span>
+  <span class="group"><b>zoom</b>
+    <button data-zoom="linked" data-on>speed-linked</button>
+    <button data-zoom="fixed">fixed</button>
+  </span>
+  <span class="group"><b>detents</b>
+    <button data-det="oct" data-on>octaves</button>
+    <button data-det="tenth">tenths</button>
+  </span>
   <span class="group"><b>card</b>
     <button id="g-phasors" data-on>phasors</button>
   </span>
 </div>
 
-<h2>1 · Today <small>— big-digits counter + Debug-drawer slot rows (the comparison baseline)</small></h2>
-<p class="note">Faithful reproduction of what shipped in #335: centisecond digits churning at 60 fps
-(“very noisy”), and the three transport controls as raw slot rows in the drawer. Read-only here —
-this is the thing being replaced.</p>
+<h2>1 · Tape, iterated <small>— ★ the chosen hero · speed fader with detents · zoom rides the rate</small></h2>
+<p class="note">Constant pixel velocity: at ×1 a second is 14 px; at ×8 the view zooms out 8× so the
+same px/s carries 8× the time — dense ticks whipping past <em>feel</em> fast. Tick granularity adapts
+like a map. <b>Drag the tape</b> to scrub (px = s at the current zoom). The fader is log ׼–×8;
+detents at the octave stops (toggle <code>tenths</code> in the strip for quantize-to-0.1 instead —
+open question), readout goes green when seated on a detent. Double-click the fader = ×1.
+The <code>fixed</code> zoom toggle keeps round 1's behavior for comparison.</p>
 <div class="row">
   <div class="card">
-    <header>Clock <span class="kind">clock</span></header>
-    <div class="section"><div class="rail">output</div><div class="body">
-      <div class="base-hero">
-        <span class="num"><span id="base-num">447.00</span><small> s</small></span>
-        <span class="dg-label">seconds</span>
-      </div>
-    </div></div>
-    <div class="section phasors"><div class="rail">phasors</div><div class="body">
-      <div class="tgrid" data-phasors></div>
-    </div></div>
-    <div class="section"><div class="rail">slots</div><div class="body">
-      <div class="slotrow"><span class="icon"></span><span class="name">Running</span><span class="val" id="base-running">true</span></div>
-      <div class="slotrow"><span class="icon"></span><span class="name">Rate</span><span class="val" id="base-rate">1</span></div>
-      <div class="slotrow"><span class="icon"></span><span class="name">Scrub offset</span><span class="val" id="base-offset">0.0 s</span></div>
-    </div></div>
-  </div>
-</div>
-
-<h2>2 · Sweepwatch <small>— stopwatch dial · drag the face to scrub · speed knob</small></h2>
-<p class="note">A stopwatch: the sweep hand (1 rev = 60 s) carries all the sub-second motion, so the
-digits can sit still at whole seconds. The minutes sub-dial gives long runtimes a face.
-<b>Drag anywhere on the dial</b> to scrub (clockwise = forward, 1 turn = 1 min); the bezel goes
-amber while off-live. Speed is the log knob (׼–×8, detent at ×1, double-click resets).</p>
-<div class="row">
-  <div class="card">
-    <header>Clock <span class="kind">clock</span></header>
-    <div class="section"><div class="rail">output</div><div class="body">
-      <div class="hero-sweep">
-        <svg class="dial scrub-surface" id="sw-dial" viewBox="0 0 148 148">
-          <circle cx="74" cy="74" r="70" fill="var(--terminal)" stroke="var(--border-strong)"/>
-          <circle class="offring" cx="74" cy="74" r="70" fill="none" stroke-width="2"/>
-          <g class="ticks"></g>
-          <g class="nums"></g>
-          <g id="sw-mindial">
-            <circle cx="74" cy="99" r="15" fill="none" stroke="var(--border-muted)"/>
-            <line id="sw-minhand" x1="74" y1="99" x2="74" y2="87"
-                  stroke="var(--live-text)" stroke-width="1.5" stroke-linecap="round"/>
-          </g>
-          <line class="hand" id="sw-hand" x1="74" y1="86" x2="74" y2="16"/>
-          <circle cx="74" cy="74" r="4" fill="var(--raised)" stroke="var(--border-strong)"/>
-        </svg>
-        <div class="sweep-col">
-          <div>
-            <div><span class="dg" data-dg>7:27</span></div>
-            <span class="dg-label">clock time</span>
-          </div>
-          <div class="knobwrap">
-            <svg class="knob" id="sw-knob" viewBox="0 0 48 48">
-              <path d="M10.56 37.44 A19 19 0 1 1 37.44 37.44" pathLength="100" fill="none"
-                    stroke="var(--border-strong)" stroke-width="2.5" stroke-linecap="round"/>
-              <path class="arc" d="M10.56 37.44 A19 19 0 1 1 37.44 37.44" pathLength="100" fill="none"
-                    stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="40 100"/>
-              <line x1="24" y1="3.4" x2="24" y2="7.4" stroke="var(--border-strong)" stroke-width="1.5"/>
-              <circle cx="24" cy="24" r="12.5" fill="var(--raised)" stroke="var(--border-strong)"/>
-              <line class="ptr" x1="24" y1="19" x2="24" y2="12.5" stroke="var(--accent)" stroke-width="2"
-                    stroke-linecap="round" transform="rotate(0 24 24)"/>
-            </svg>
-            <span style="display:grid;gap:2px">
-              <span class="klabel">speed</span>
-              <span class="kread" data-rate-read>×<b>1</b></span>
-            </span>
-          </div>
-          <div class="btnrow">
-            <button class="tbtn" data-runbtn><span class="glyph">❚❚</span></button>
-            <span class="livechip" data-livechip><b>−12.0 s</b> · live</span>
-          </div>
-        </div>
-      </div>
-    </div></div>
-    <div class="section phasors"><div class="rail">phasors</div><div class="body">
-      <div class="tgrid" data-phasors></div>
-    </div></div>
-  </div>
-</div>
-
-<h2>3 · Platter <small>— jog wheel · spin it to scrub · DJ pitch fader for speed</small></h2>
-<p class="note">A turntable: the platter itself rotates with clock time (1 rev = 10 s) — the rim dot
-makes speed <em>visible</em> without any number. <b>Grab and spin the platter</b> to jog: fine,
-tactile scrubbing (1 turn = 10 s). Center button = run/pause. The vertical fader is speed —
-center line = ×1, up = fast, snaps at the detent.</p>
-<div class="row">
-  <div class="card">
-    <header>Clock <span class="kind">clock</span></header>
-    <div class="section"><div class="rail">output</div><div class="body">
-      <div class="hero-platter">
-        <div class="platter scrub-surface" id="pl-platter">
-          <div class="spin" id="pl-spin"></div>
-          <button class="pcenter" data-runbtn title="run / pause">❚❚</button>
-        </div>
-        <div class="pitch">
-          <div class="ptrack" id="pl-track">
-            <div class="midline"></div>
-            <div class="pthumb" id="pl-thumb" style="top:45px"></div>
-          </div>
-          <span class="kread" data-rate-read>×<b>1</b></span>
-        </div>
-        <div class="platter-col">
-          <div>
-            <div><span class="dg" data-dg>7:27</span></div>
-            <span class="dg-label">clock time</span>
-          </div>
-          <span class="livechip" data-livechip><b>−12.0 s</b> · live</span>
-          <span class="hint-under">spin = scrub · fader = speed</span>
-        </div>
-      </div>
-    </div></div>
-    <div class="section phasors"><div class="rail">phasors</div><div class="body">
-      <div class="tgrid" data-phasors></div>
-    </div></div>
-  </div>
-</div>
-
-<h2>4 · Tape <small>— scrolling timeline under a fixed playhead · drag the tape · rate chips</small></h2>
-<p class="note">Time as tape: ticks stream right-to-left under a fixed playhead — passage of time is
-literal motion, and speed changes read as tape speed. <b>Drag the tape</b> to scrub (direct
-manipulation: the moment under the playhead is the clock time); the clock's birth (0:00) is a hard
-edge. Speed is a chip row — discrete detents rather than a knob.</p>
-<div class="row">
-  <div class="card wide">
     <header>Clock <span class="kind">clock</span></header>
     <div class="section"><div class="rail">output</div><div class="body">
       <div class="hero-tape">
         <div class="tapebox scrub-surface" id="tp-box"><canvas id="tp-canvas"></canvas></div>
         <div class="taperow">
           <button class="tbtn" data-runbtn><span class="glyph">❚❚</span></button>
-          <span style="display:grid;gap:1px">
-            <span class="dg" style="font-size:16px" data-dg>7:27</span>
+          <span class="dg" data-dg>7:27</span>
+          <span class="fader" style="margin-left:auto">
+            <span class="flabel">speed</span>
+            <span class="ftrack" id="fd-track" title="drag · double-click = ×1">
+              <span class="fthumb" id="fd-thumb"></span>
+            </span>
+            <span class="kread" id="fd-read">×<b>1</b></span>
           </span>
-          <span class="chips" id="tp-chips" style="margin-left:auto"></span>
           <span class="livechip" data-livechip><b>−12.0 s</b> · live</span>
         </div>
       </div>
@@ -449,56 +274,54 @@ edge. Speed is a chip row — discrete detents rather than a knob.</p>
   </div>
 </div>
 
-<h2>5 · Hairline <small>— one-row transport strip · the smallest thing that could work</small></h2>
-<p class="note">The minimal counter-argument: a single 28 px row. Sweep ring (1 rev = 10 s) shows
-passage; digits stay whole-second; <b>drag the digits</b> horizontally to scrub;
-the <code>×1</code> chip drags like a value slider (double-click resets). If the hero shouldn't
-compete with the phasors for attention, this is the floor.</p>
+<h2>2 · Piano reel <small>— FUTURE · the input flight-recorder the tape grows into (concept, not clock scope)</small></h2>
+<p class="note">When the proper input subsystem lands, every input is recorded — continuously, by
+design, like a flight recorder — onto lanes riding the same timebase: taps as hits, faders as
+curves, knobs as steps, keys as piano-roll bars. Same transport, same scrub, same zoom: drag the
+reel back and the tape, phasors, and digits all rewind with it; lane labels read the value
+<em>under the playhead</em>. Ahead of the live edge there is nothing yet — the darker region is
+unrecorded future. This card is here to test that the tape idiom scales, so choosing it for the
+clock now doesn't paint us into a corner.</p>
 <div class="row">
   <div class="card">
-    <header>Clock <span class="kind">clock</span></header>
-    <div class="section"><div class="rail">output</div><div class="body">
-      <div class="hero-hair">
-        <button class="tbtn" data-runbtn><span class="glyph">❚❚</span></button>
-        <svg class="ringsvg" id="hr-ring" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="9" fill="none" stroke="var(--track)" stroke-width="3"/>
-          <circle class="arc" cx="12" cy="12" r="9" fill="none" stroke-width="3" pathLength="100"
-                  stroke-dasharray="0 100" stroke-linecap="round" transform="rotate(-90 12 12)"/>
-        </svg>
-        <span class="scrub-surface" id="hr-scrub" style="display:grid;gap:1px;padding:0 2px">
-          <span class="dg" style="font-size:17px" data-dg>7:27</span>
-        </span>
-        <span class="ratechip" id="hr-rate" title="drag = speed · double-click = ×1">×1</span>
-        <span class="livechip" data-livechip style="margin-left:auto"><b>−12.0 s</b> · live</span>
+    <header>Inputs <span class="kind">recorder</span></header>
+    <div class="section"><div class="rail">reel</div><div class="body">
+      <div class="hero-tape">
+        <div class="reelbox scrub-surface" id="rl-box">
+          <canvas id="rl-canvas"></canvas>
+          <div class="lanelabels" id="rl-labels"></div>
+          <span class="recbadge">REC</span>
+        </div>
+        <div class="taperow">
+          <button class="tbtn" data-runbtn><span class="glyph">❚❚</span></button>
+          <span class="dg" data-dg>7:27</span>
+          <span style="font-size:9.5px;color:var(--dim)">same clock as the tape above — one timebase</span>
+          <span class="livechip" data-livechip style="margin-left:auto"><b>−12.0 s</b> · live</span>
+        </div>
       </div>
-    </div></div>
-    <div class="section phasors"><div class="rail">phasors</div><div class="body">
-      <div class="tgrid" data-phasors></div>
     </div></div>
   </div>
 </div>
 
-<h2>6 · Gesture map <small>— the same three slots, four instruments</small></h2>
-<table class="gmap">
-  <tr><th></th><th>2 · Sweepwatch</th><th>3 · Platter</th><th>4 · Tape</th><th>5 · Hairline</th></tr>
-  <tr><td>passage of time</td><td>sweep hand + minutes sub-dial</td><td>platter rotation (rim dot)</td><td>tape streaming under playhead</td><td>sweep ring</td></tr>
-  <tr><td>run / pause</td><td>button</td><td>platter center button</td><td>button</td><td>button</td></tr>
-  <tr><td>scrub <code>scrub_offset</code></td><td>drag dial face · 1 turn = 1 min</td><td>spin platter · 1 turn = 10 s</td><td>drag tape · direct (px = s)</td><td>drag digits</td></tr>
-  <tr><td>speed <code>rate</code></td><td>log knob ׼–×8, ×1 detent</td><td>pitch fader, center detent</td><td>chip row ¼ ½ 1 2 4 8</td><td>draggable ×n chip</td></tr>
-  <tr><td>off-live signal</td><td>amber bezel + chip</td><td>amber rim + chip</td><td>amber frame + chip</td><td>chip only</td></tr>
-</table>
+<h2>3 · Rejected at the gate <small>— kept as one-liners; full builds live in git history (round 1)</small></h2>
+<div class="rej">
+  <div class="rejcard"><b>Today — counter + drawer rows</b>
+    <span>The replaced thing: centisecond churn said nothing, and the transport hid in the Debug drawer as three number rows.</span></div>
+  <div class="rejcard"><b>Sweepwatch — stopwatch dial</b>
+    <span>Prettiest at rest, but turn-based scrubbing is indirect, and the dial answers "what time" — not "what happened".</span></div>
+  <div class="rejcard"><b>Platter — jog wheel</b>
+    <span>Novelty won't survive daily use; murky at card scale; rotation shows speed but carries no history.</span></div>
+  <div class="rejcard"><b>Hairline — one-row strip</b>
+    <span>Too little presence for the hero, and no room for the future the tape points at (recording lanes).</span></div>
+</div>
 
 <script>
 /* ================= the three slots — one shared clock ================= */
 const clock = { running: true, rate: 1, accum: 447.0, offset: 0 };
 const eff = () => clock.accum + clock.offset;
-let anyDragging = false;      // digits grow tenths while a scrub is in flight
+let anyDragging = false;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-function snapRate(r) {
-  r = clamp(r, 0.25, 8);
-  return Math.abs(Math.log2(r)) < 0.08 ? 1 : r;
-}
 function fmtRate(r) {
   if (r >= 1) return Number.isInteger(r) ? String(r) : r.toFixed(1).replace(/\.0$/, "");
   return (Math.round(r * 100) / 100).toString().replace(/^0\./, ".");
@@ -513,11 +336,40 @@ function fmtClock(t, tenths) {
   return sign + core + (tenths ? "." + Math.floor((t % 1) * 10) : "");
 }
 
-/* ================= phasors riding this clock (production data) ======== */
+/* ================= speed fader (log ׼..×8) ================= */
+const rateFrac = r => (Math.log2(r) + 2) / 5;
+const fracRate = f => Math.pow(2, clamp(f, 0, 1) * 5 - 2);
+const DETENTS = [0.25, 0.5, 1, 2, 4, 8];
+let detentMode = "oct";           // 'oct' | 'tenth'
+function applyDetents(r) {
+  r = clamp(r, 0.25, 8);
+  if (detentMode === "tenth") return clamp(Math.round(r * 10) / 10, 0.3, 8);
+  for (const d of DETENTS) {
+    const radius = d === 1 ? 0.05 : 0.028;          // ×1 pulls hardest
+    if (Math.abs(Math.log2(r / d)) < radius * 5) return d;
+  }
+  return r;
+}
+const onDetent = r => detentMode === "tenth" || DETENTS.includes(r);
+
+/* ================= zoom model ================= */
+const BASE_PX_PER_SEC = 14;
+let zoomMode = "linked";          // 'linked' | 'fixed'
+const pxPerSec = () => zoomMode === "linked" ? BASE_PX_PER_SEC / clock.rate : BASE_PX_PER_SEC;
+// Adaptive tick granularity, map-style: [minor, major] chosen so minors
+// stay >= 8 css px apart and major labels >= 44 css px apart.
+const TICK_LADDER = [[0.2, 1], [1, 5], [5, 30], [15, 60], [60, 300], [300, 1800], [900, 3600]];
+function tickPair(pps) {
+  for (const [minor, major] of TICK_LADDER)
+    if (minor * pps >= 8 && major * pps >= 44) return [minor, major];
+  return TICK_LADDER[TICK_LADDER.length - 1];
+}
+
+/* ================= phasors riding this clock ================= */
 const WF = {
-  ramp:     x => x,
-  sine:     x => 0.5 + 0.5 * Math.sin(2 * Math.PI * x),
-  square:   x => (x % 1) < 0.5 ? 1 : 0,
+  ramp:   x => x,
+  sine:   x => 0.5 + 0.5 * Math.sin(2 * Math.PI * x),
+  square: x => (x % 1) < 0.5 ? 1 : 0,
 };
 const PHASORS = [
   { id: "plasma · phase", wf: "ramp",   T: 20, off: 0,    shared: false },
@@ -525,7 +377,6 @@ const PHASORS = [
   { id: "strobe · gate",  wf: "square", T: 2,  off: 0,    shared: true  },
 ];
 function autoRate(T) {
-  if (T <= 0) return "0/s";
   const ladder = [[1, "s"], [60, "min"], [3600, "hr"]];
   for (const [secs, unit] of ladder) {
     const count = secs / T;
@@ -534,8 +385,7 @@ function autoRate(T) {
               : (Math.round(count * 10) / 10).toString().replace(/\.0$/, "")) + "/" + unit;
   }
 }
-const phase = (p, t) => ((t / p.T) + p.off) % 1;
-const valueOf = (p, t) => WF[p.wf](((phase(p, t)) % 1 + 1) % 1);
+const valueOf = (p, t) => WF[p.wf]((((t / p.T) + p.off) % 1 + 1) % 1);
 const cyclesOf = (p, t) => Math.max(0, Math.floor(t / p.T));
 const windowFor = p => Math.max(4, Math.min(2.5 * p.T, 300));
 
@@ -564,8 +414,6 @@ function drawTrace(ctx, w, h, p, t, color) {
   }
   ctx.stroke();
 }
-
-// Instantiate the production phasor grid into every [data-phasors] host.
 const traceCards = [];
 for (const host of document.querySelectorAll("[data-phasors]")) {
   for (const p of PHASORS) {
@@ -584,7 +432,7 @@ for (const host of document.querySelectorAll("[data-phasors]")) {
 function dragify(el, handlers) {
   let active = null;
   el.addEventListener("pointerdown", e => {
-    if (e.target.closest("button")) return;   // center run button etc.
+    if (e.target.closest("button")) return;
     active = e.pointerId;
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add("dragging");
@@ -607,153 +455,115 @@ function dragify(el, handlers) {
   el.addEventListener("pointerup", end);
   el.addEventListener("pointercancel", end);
 }
-function angularScrub(el, secondsPerRev) {
-  let last = null;
-  const angleAt = e => {
-    const r = el.getBoundingClientRect();
-    return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
-  };
-  dragify(el, {
-    start: e => { last = angleAt(e); },
-    move: e => {
-      const a = angleAt(e);
-      let d = a - last;
-      if (d > Math.PI) d -= 2 * Math.PI;
-      if (d < -Math.PI) d += 2 * Math.PI;
-      clock.offset += d / (2 * Math.PI) * secondsPerRev;
-      last = a;
-    },
-    end: () => { last = null; },
-  });
-}
-function linearScrub(el, pxPerSec) {
+function linearScrub(el) {
   let lastX = null;
   dragify(el, {
     start: e => { lastX = e.clientX; },
     move: e => {
-      clock.offset -= (e.clientX - lastX) / pxPerSec;
+      clock.offset -= (e.clientX - lastX) / pxPerSec();
       lastX = e.clientX;
     },
   });
 }
+linearScrub(document.getElementById("tp-box"));
+linearScrub(document.getElementById("rl-box"));
 
-/* ================= shared widget wiring ================= */
-const runBtns = [...document.querySelectorAll("[data-runbtn]")];
-for (const b of runBtns) b.addEventListener("click", () => { clock.running = !clock.running; });
-
-const liveChips = [...document.querySelectorAll("[data-livechip]")];
-for (const c of liveChips) {
-  c.title = "scrubbed off-live — tap to return";
-  c.addEventListener("click", () => { clock.offset = 0; });
-}
-
-const digitEls = [...document.querySelectorAll("[data-dg]")];
-const rateReads = [...document.querySelectorAll("[data-rate-read]")];
-
-/* ================= 2 · sweepwatch ================= */
+/* ================= fader wiring ================= */
 {
-  const svg = document.getElementById("sw-dial");
-  const ticks = svg.querySelector(".ticks");
-  const nums = svg.querySelector(".nums");
-  const polar = (r, deg) => {
-    const a = (deg - 90) * Math.PI / 180;
-    return [74 + r * Math.cos(a), 74 + r * Math.sin(a)];
-  };
-  for (let i = 0; i < 60; i++) {
-    const major = i % 5 === 0;
-    const [x1, y1] = polar(major ? 60 : 63, i * 6);
-    const [x2, y2] = polar(67, i * 6);
-    const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    l.setAttribute("x1", x1); l.setAttribute("y1", y1);
-    l.setAttribute("x2", x2); l.setAttribute("y2", y2);
-    l.setAttribute("stroke", major ? "rgba(255,255,255,.35)" : "rgba(255,255,255,.13)");
-    l.setAttribute("stroke-width", major ? 1.6 : 1);
-    ticks.appendChild(l);
+  const track = document.getElementById("fd-track");
+  // detent ticks at the octave stops
+  for (const d of DETENTS) {
+    const tick = document.createElement("span");
+    tick.className = "tick" + (d === 1 ? " one" : "");
+    tick.style.left = `calc(${(rateFrac(d) * 100).toFixed(1)}% + ${(1 - rateFrac(d)) * 16 - 8}px)`;
+    track.appendChild(tick);
   }
-  for (const [sec, deg] of [[0, 0], [15, 90], [30, 180], [45, 270]]) {
-    const [x, y] = polar(51, deg);
-    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    t.setAttribute("x", x); t.setAttribute("y", y + 3);
-    t.setAttribute("text-anchor", "middle");
-    t.setAttribute("style", "font:9px var(--mono);fill:var(--dim)");
-    t.textContent = sec;
-    nums.appendChild(t);
-  }
-  angularScrub(svg, 60);
-}
-// speed knob (shared log mapping: frac 0..1 over ×¼..×8; ×1 sits at .4)
-const rateFrac = r => (Math.log2(r) + 2) / 5;
-const fracRate = f => Math.pow(2, clamp(f, 0, 1) * 5 - 2);
-{
-  const knob = document.getElementById("sw-knob");
-  let startY = 0, startFrac = 0;
-  dragify(knob, {
-    start: e => { startY = e.clientY; startFrac = rateFrac(clock.rate); },
-    move: e => { clock.rate = snapRate(fracRate(startFrac + (startY - e.clientY) / 150)); },
-  });
-  knob.addEventListener("dblclick", () => { clock.rate = 1; });
-}
-
-/* ================= 3 · platter ================= */
-angularScrub(document.getElementById("pl-platter"), 10);
-{
-  const track = document.getElementById("pl-track");
   const setFromEvent = e => {
     const r = track.getBoundingClientRect();
-    const frac = 1 - clamp((e.clientY - r.top - 7) / (r.height - 14), 0, 1);
-    clock.rate = snapRate(fracRate(frac));
+    const frac = clamp((e.clientX - r.left - 8) / (r.width - 16), 0, 1);
+    clock.rate = applyDetents(fracRate(frac));
   };
   dragify(track, { start: setFromEvent, move: setFromEvent });
   track.addEventListener("dblclick", () => { clock.rate = 1; });
 }
 
-/* ================= 4 · tape ================= */
-const TAPE_PX_PER_SEC = 14;
-linearScrub(document.getElementById("tp-box"), TAPE_PX_PER_SEC);
-{
-  const chips = document.getElementById("tp-chips");
-  for (const v of [0.25, 0.5, 1, 2, 4, 8]) {
-    const b = document.createElement("button");
-    b.dataset.rate = v;
-    b.textContent = v < 1 ? (v === 0.25 ? "¼×" : "½×") : v + "×";
-    b.addEventListener("click", () => { clock.rate = v; });
-    chips.appendChild(b);
+/* ================= piano reel ================= */
+// Deterministic "recorded input" — a pure function of clock time, which is
+// exactly the scrub-exact contract a real flight-recorder buffer would obey.
+const hash = n => { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); };
+const faderVal = t => clamp(0.5 + 0.35 * Math.sin(t * 0.31) + 0.12 * Math.sin(t * 1.7 + 1), 0, 1);
+const knobVal = t => Math.floor(hash(Math.floor(t / 7) + 31) * 6);
+function padHitsIn(t0, t1, out) {
+  for (let s = Math.floor(t0); s <= Math.floor(t1); s++) {
+    const h = hash(s + 977);
+    if (h < 0.30) out.push(s + (h * 3.3) % 1);
   }
 }
-function drawTape() {
-  const canvas = document.getElementById("tp-canvas");
-  const { w, h, dpr } = px(canvas);
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#0c1114"; ctx.fillRect(0, 0, w, h);
-  const scale = TAPE_PX_PER_SEC * dpr;
-  const t = eff(), cx = w / 2;
-  // before the clock's birth: a visibly different void
-  const zeroX = cx - t * scale;
+const KEY_ROWS = 4;
+function notesIn(t0, t1, out) {          // 2 s slots; ~60% carry a note
+  for (let s = Math.floor(t0 / 2) - 1; s <= Math.floor(t1 / 2); s++) {
+    const h = hash(s + 409);
+    if (h < 0.6) out.push({
+      pitch: Math.floor(hash(s + 811) * KEY_ROWS),
+      start: s * 2 + h,
+      dur: 0.6 + hash(s + 613) * 1.4,
+    });
+  }
+}
+const LANES = [                            // [label, top, height] in css px (ruler is 0..16)
+  { name: "pad · hit",      y: 20,  h: 22 },
+  { name: "keys · melody",  y: 46,  h: 48 },
+  { name: "fader · warmth", y: 98,  h: 32 },
+  { name: "knob · size",    y: 134, h: 28 },
+];
+{
+  const host = document.getElementById("rl-labels");
+  for (const lane of LANES) {
+    const el = document.createElement("span");
+    el.className = "lanelabel";
+    el.style.top = (lane.y + 1) + "px";
+    el.innerHTML = `${lane.name} <span class="lv"></span>`;
+    host.appendChild(el);
+    lane.lv = el.querySelector(".lv");
+  }
+}
+
+/* ================= shared timeline painting ================= */
+function drawRuler(ctx, w, h, dpr, t, pps, yTop, yBottom, labelY) {
+  const cx = w / 2;
+  const [minor, major] = tickPair(pps / dpr);
+  const scale = pps;
+  const first = Math.max(0, Math.ceil((t - cx / scale) / minor) * minor);
+  const last = t + cx / scale;
+  ctx.font = `${9 * dpr}px ui-monospace, Menlo, monospace`;
+  ctx.textAlign = "center";
+  for (let s = first; s <= last; s += minor) {
+    const sq = Math.round(s / minor) * minor;   // fight float drift
+    const x = cx + (sq - t) * scale;
+    const isMajor = Math.abs(sq / major - Math.round(sq / major)) < 1e-6;
+    ctx.strokeStyle = isMajor ? "rgba(255,255,255,.32)" : "rgba(255,255,255,.12)";
+    ctx.lineWidth = dpr;
+    ctx.beginPath();
+    ctx.moveTo(x, isMajor ? yTop : (yTop + yBottom) / 2);
+    ctx.lineTo(x, yBottom);
+    ctx.stroke();
+    if (isMajor && labelY != null) {
+      ctx.fillStyle = "rgba(155,164,173,.9)";
+      ctx.fillText(fmtClock(sq), x, labelY);
+    }
+  }
+}
+function drawBirthEdge(ctx, w, h, dpr, t, pps) {
+  const zeroX = w / 2 - t * pps;
   if (zeroX > 0) {
     ctx.fillStyle = "rgba(255,255,255,.025)";
     ctx.fillRect(0, 0, Math.min(zeroX, w), h);
     ctx.strokeStyle = "rgba(123,224,178,.5)"; ctx.lineWidth = dpr;
     ctx.beginPath(); ctx.moveTo(zeroX, 0); ctx.lineTo(zeroX, h); ctx.stroke();
   }
-  const first = Math.max(0, Math.ceil(t - cx / scale));
-  const last = Math.floor(t + cx / scale);
-  ctx.font = `${9 * dpr}px ui-monospace, Menlo, monospace`;
-  ctx.textAlign = "center";
-  for (let s = first; s <= last; s++) {
-    const x = cx + (s - t) * scale;
-    const major = s % 5 === 0;
-    ctx.strokeStyle = major ? "rgba(255,255,255,.32)" : "rgba(255,255,255,.12)";
-    ctx.lineWidth = dpr;
-    ctx.beginPath();
-    ctx.moveTo(x, h - (major ? 26 : 12) * dpr);
-    ctx.lineTo(x, h);
-    ctx.stroke();
-    if (major) {
-      ctx.fillStyle = "rgba(155,164,173,.9)";
-      ctx.fillText(fmtClock(s), x, h - 32 * dpr);
-    }
-  }
-  // fixed playhead
+}
+function drawPlayhead(ctx, w, h, dpr) {
+  const cx = w / 2;
   ctx.strokeStyle = "#7be0b2"; ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath(); ctx.moveTo(cx, 8 * dpr); ctx.lineTo(cx, h); ctx.stroke();
   ctx.fillStyle = "#7be0b2";
@@ -762,17 +572,134 @@ function drawTape() {
   ctx.closePath(); ctx.fill();
 }
 
-/* ================= 5 · hairline ================= */
-linearScrub(document.getElementById("hr-scrub"), 30);
-{
-  const chip = document.getElementById("hr-rate");
-  let startX = 0, startRate = 1;
-  dragify(chip, {
-    start: e => { startX = e.clientX; startRate = clock.rate; },
-    move: e => { clock.rate = snapRate(startRate * Math.pow(2, (e.clientX - startX) / 60)); },
-  });
-  chip.addEventListener("dblclick", () => { clock.rate = 1; });
+function drawTape() {
+  const canvas = document.getElementById("tp-canvas");
+  const { w, h, dpr } = px(canvas);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#0c1114"; ctx.fillRect(0, 0, w, h);
+  const pps = pxPerSec() * dpr, t = eff();
+  drawBirthEdge(ctx, w, h, dpr, t, pps);
+  drawRuler(ctx, w, h, dpr, t, pps, h - 26 * dpr, h, h - 32 * dpr);
+  drawPlayhead(ctx, w, h, dpr);
 }
+
+function drawReel() {
+  const canvas = document.getElementById("rl-canvas");
+  const { w, h, dpr } = px(canvas);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#0c1114"; ctx.fillRect(0, 0, w, h);
+  const pps = pxPerSec() * dpr, t = eff(), cx = w / 2;
+  const liveT = clock.accum;                     // the record head: nothing exists past it
+  const winL = t - cx / pps, winR = t + cx / pps;
+  const X = s => cx + (s - t) * pps;
+
+  drawBirthEdge(ctx, w, h, dpr, t, pps);
+  // top ruler
+  drawRuler(ctx, w, h, dpr, t, pps, 2 * dpr, 14 * dpr, 12 * dpr);
+  // lane separators
+  ctx.strokeStyle = "rgba(255,255,255,.06)"; ctx.lineWidth = dpr;
+  for (const lane of LANES) {
+    ctx.beginPath();
+    ctx.moveTo(0, (lane.y - 3) * dpr); ctx.lineTo(w, (lane.y - 3) * dpr);
+    ctx.stroke();
+  }
+  const drawT1 = Math.min(winR, liveT);          // clip all lanes at the record head
+
+  // pads: diamonds
+  {
+    const lane = LANES[0], yc = (lane.y + lane.h / 2) * dpr, r = 4 * dpr;
+    const hits = [];
+    padHitsIn(Math.max(0, winL), Math.max(0, drawT1), hits);
+    ctx.fillStyle = "#e6e4de";
+    for (const ht of hits) {
+      const x = X(ht);
+      ctx.beginPath();
+      ctx.moveTo(x, yc - r); ctx.lineTo(x + r, yc); ctx.lineTo(x, yc + r); ctx.lineTo(x - r, yc);
+      ctx.closePath(); ctx.fill();
+    }
+    lane.lv.textContent = hits.some(ht => Math.abs(ht - t) < 0.15) ? "HIT" : "";
+  }
+  // keys: piano-roll bars
+  {
+    const lane = LANES[1], rowH = lane.h / KEY_ROWS;
+    const notes = [];
+    notesIn(Math.max(0, winL - 4), Math.max(0, drawT1), notes);
+    let activePitch = null;
+    for (const n of notes) {
+      const end = Math.min(n.start + n.dur, drawT1);
+      if (end <= winL || n.start >= drawT1) continue;
+      const y = (lane.y + (KEY_ROWS - 1 - n.pitch) * rowH) * dpr;
+      const active = t >= n.start && t <= n.start + n.dur;
+      if (active) activePitch = n.pitch;
+      ctx.fillStyle = active ? "#7be0b2" : "#9cc8ee";
+      ctx.globalAlpha = active ? 1 : 0.75;
+      ctx.fillRect(X(Math.max(n.start, winL)), y + 2 * dpr,
+                   Math.max(2 * dpr, (end - Math.max(n.start, winL)) * pps), rowH * dpr - 4 * dpr);
+      ctx.globalAlpha = 1;
+    }
+    lane.lv.textContent = activePitch != null ? ["C", "E", "G", "B"][activePitch] : "";
+  }
+  // fader: continuous curve
+  {
+    const lane = LANES[2];
+    ctx.strokeStyle = "#e6e4de"; ctx.lineWidth = 1.4 * dpr;
+    ctx.beginPath();
+    let started = false;
+    const xEnd = Math.min(w, X(drawT1));
+    for (let x = 0; x <= xEnd; x += 2) {
+      const tx = t + (x - cx) / pps;
+      if (tx < 0) continue;
+      const y = (lane.y + (1 - faderVal(tx)) * lane.h) * dpr;
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    lane.lv.textContent = t >= 0 && t <= liveT ? faderVal(t).toFixed(2) : "—";
+  }
+  // knob: stepped line
+  {
+    const lane = LANES[3];
+    ctx.strokeStyle = "#e6e4de"; ctx.lineWidth = 1.4 * dpr;
+    ctx.beginPath();
+    let prev = null;
+    const t0 = Math.max(0, winL), t1 = Math.max(0, drawT1);
+    for (let s = Math.floor(t0 / 7) * 7; s <= t1; s += 7) {
+      const v = knobVal(s + 0.01);
+      const y = (lane.y + lane.h - 3 - (v / 5) * (lane.h - 8)) * dpr;
+      const xa = Math.max(X(s), 0), xb = Math.min(X(Math.min(s + 7, t1)), w);
+      if (xb <= 0) continue;
+      if (prev !== null) { ctx.moveTo(xa, prev); ctx.lineTo(xa, y); }
+      ctx.moveTo(xa, y); ctx.lineTo(xb, y);
+      prev = y;
+    }
+    ctx.stroke();
+    lane.lv.textContent = t >= 0 && t <= liveT ? String(knobVal(t)) : "—";
+  }
+  // the unrecorded future, when the playhead trails the record head off-screen-right
+  const edgeX = X(liveT);
+  if (edgeX < w) {
+    ctx.fillStyle = "rgba(0,0,0,.5)";
+    ctx.fillRect(Math.max(edgeX, 0), 0, w, h);
+    ctx.strokeStyle = "rgba(240,185,122,.55)"; ctx.lineWidth = dpr;
+    ctx.beginPath(); ctx.moveTo(edgeX, 0); ctx.lineTo(edgeX, h); ctx.stroke();
+    if (w - edgeX > 90 * dpr) {
+      ctx.fillStyle = "rgba(240,185,122,.6)";
+      ctx.font = `${9 * dpr}px ui-monospace, Menlo, monospace`;
+      ctx.textAlign = "left";
+      ctx.fillText("unrecorded", edgeX + 8 * dpr, 26 * dpr);
+    }
+  }
+  drawPlayhead(ctx, w, h, dpr);
+}
+
+/* ================= shared widget wiring ================= */
+const runBtns = [...document.querySelectorAll("[data-runbtn]")];
+for (const b of runBtns) b.addEventListener("click", () => { clock.running = !clock.running; });
+const liveChips = [...document.querySelectorAll("[data-livechip]")];
+for (const c of liveChips) {
+  c.title = "scrubbed off-live — tap to return";
+  c.addEventListener("click", () => { clock.offset = 0; });
+}
+const digitEls = [...document.querySelectorAll("[data-dg]")];
 
 /* ================= exploration strip ================= */
 document.getElementById("g-run").addEventListener("click", () => { clock.running = !clock.running; });
@@ -783,6 +710,19 @@ document.getElementById("g-back120").addEventListener("click", () => { clock.off
 document.getElementById("g-live").addEventListener("click", () => { clock.offset = 0; });
 for (const b of document.querySelectorAll("[data-grate]"))
   b.addEventListener("click", () => { clock.rate = +b.dataset.grate; });
+for (const b of document.querySelectorAll("[data-zoom]"))
+  b.addEventListener("click", () => {
+    zoomMode = b.dataset.zoom;
+    for (const x of document.querySelectorAll("[data-zoom]"))
+      x.toggleAttribute("data-on", x === b);
+  });
+for (const b of document.querySelectorAll("[data-det]"))
+  b.addEventListener("click", () => {
+    detentMode = b.dataset.det;
+    for (const x of document.querySelectorAll("[data-det]"))
+      x.toggleAttribute("data-on", x === b);
+    clock.rate = applyDetents(clock.rate);
+  });
 document.getElementById("g-phasors").addEventListener("click", e => {
   document.body.classList.toggle("no-phasors");
   e.target.toggleAttribute("data-on", !document.body.classList.contains("no-phasors"));
@@ -792,6 +732,7 @@ document.getElementById("g-phasors").addEventListener("click", e => {
 if (location.hash.includes("scrubbed")) clock.offset = -12.4;
 if (location.hash.includes("paused")) clock.running = false;
 if (location.hash.includes("long")) clock.accum = 3 * 3600 + 47 * 60;
+if (location.hash.includes("fast")) clock.rate = 8;
 
 /* ================= frame loop ================= */
 let lastFrame = performance.now();
@@ -801,36 +742,14 @@ function frame(now) {
   if (clock.running) clock.accum += dt * clock.rate;
   const t = eff();
 
-  // baseline: the churn, faithfully
-  document.getElementById("base-num").textContent = t.toFixed(2);
-
-  // calm digits everywhere else
   const dg = fmtClock(t, anyDragging);
   if (dg !== cache.dg) { cache.dg = dg; for (const el of digitEls) el.textContent = dg; }
 
-  // sweepwatch
-  const swDial = document.getElementById("sw-dial");
-  document.getElementById("sw-hand").setAttribute("transform", `rotate(${(t % 60) / 60 * 360} 74 74)`);
-  document.getElementById("sw-minhand").setAttribute("transform", `rotate(${(t / 3600) % 1 * 360} 74 99)`);
-  swDial.classList.toggle("paused", !clock.running);
-  swDial.classList.toggle("offlive", clock.offset !== 0);
-
-  // platter
-  document.getElementById("pl-spin").style.transform = `rotate(${(t % 10) / 10 * 360}deg)`;
-  const platter = document.getElementById("pl-platter");
-  platter.classList.toggle("paused", !clock.running);
-  platter.classList.toggle("offlive", clock.offset !== 0);
-
-  // tape
   drawTape();
+  drawReel();
   document.getElementById("tp-box").classList.toggle("offlive", clock.offset !== 0);
+  document.getElementById("rl-box").classList.toggle("offlive", clock.offset !== 0);
 
-  // hairline ring (1 rev = 10 s)
-  const ring = document.getElementById("hr-ring");
-  ring.querySelector(".arc").setAttribute("stroke-dasharray", `${((t % 10) / 10 * 100).toFixed(1)} 100`);
-  ring.classList.toggle("paused", !clock.running);
-
-  // phasor traces: scrub-exact, everywhere
   if (!document.body.classList.contains("no-phasors")) {
     for (const { p, canvas, cyc } of traceCards) {
       const { w, h } = px(canvas);
@@ -839,13 +758,11 @@ function frame(now) {
     }
   }
 
-  // state-diffed widget sync
   if (clock.running !== cache.run) {
     cache.run = clock.running;
     for (const b of runBtns) {
       b.classList.toggle("running", clock.running);
-      const g = b.querySelector(".glyph") || b;
-      g.textContent = clock.running ? "❚❚" : "▶";
+      (b.querySelector(".glyph") || b).textContent = clock.running ? "❚❚" : "▶";
     }
     const gb = document.getElementById("g-run");
     gb.textContent = clock.running ? "pause" : "run";
@@ -853,21 +770,14 @@ function frame(now) {
   }
   if (clock.rate !== cache.rate) {
     cache.rate = clock.rate;
-    const label = fmtRate(clock.rate);
-    for (const el of rateReads) el.innerHTML = `×<b>${label}</b>`;
-    document.getElementById("hr-rate").textContent = "×" + label;
-    const frac = rateFrac(clock.rate);
-    const knob = document.getElementById("sw-knob");
-    knob.querySelector(".arc").setAttribute("stroke-dasharray", `${(frac * 100).toFixed(1)} 100`);
-    knob.querySelector(".ptr").setAttribute("transform", `rotate(${-135 + frac * 270} 24 24)`);
-    const track = document.getElementById("pl-track");
-    document.getElementById("pl-thumb").style.top =
-      `${(1 - frac) * (track.clientHeight - 16) + 1}px`;
-    for (const b of document.querySelectorAll("#tp-chips button"))
-      b.toggleAttribute("data-on", Math.abs(Math.log2(clock.rate / +b.dataset.rate)) < 0.03);
+    const read = document.getElementById("fd-read");
+    read.innerHTML = `×<b>${fmtRate(clock.rate)}</b>`;
+    read.toggleAttribute("data-detent", onDetent(clock.rate));
+    const track = document.getElementById("fd-track");
+    document.getElementById("fd-thumb").style.left =
+      `${rateFrac(clock.rate) * (track.clientWidth - 18) + 1}px`;
     for (const b of document.querySelectorAll("[data-grate]"))
       b.toggleAttribute("data-on", Math.abs(Math.log2(clock.rate / +b.dataset.grate)) < 0.03);
-    document.getElementById("base-rate").textContent = label;
   }
   if (clock.offset !== cache.off) {
     cache.off = clock.offset;
@@ -877,10 +787,7 @@ function frame(now) {
       c.toggleAttribute("data-show", show);
       if (show) c.innerHTML = `<b>${sign}${Math.abs(clock.offset).toFixed(1)} s</b> · live`;
     }
-    document.getElementById("base-offset").textContent = clock.offset.toFixed(1) + " s";
   }
-  document.getElementById("base-running").textContent = String(clock.running);
-
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
