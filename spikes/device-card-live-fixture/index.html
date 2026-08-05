@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Device card — what's running on this board (live fixture view)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio-ish palette (device-card-panel spike lineage) -------- */
+  :root {
+    --bg: #0b0c0e;
+    --card: #14161a;
+    --terminal: #0e1013;
+    --border: #262a31;
+    --border-strong: #3a3f48;
+    --text: #e8e6e1;
+    --strong: #f4f2ec;
+    --muted: #9a978f;
+    --dim: #6f6d66;
+    --name: #e4c065;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+    --good: #3fd68e;       --good-bg: rgba(63,214,142,.08);
+    --attn: #f0913b;       --attn-bg: rgba(240,145,59,.09);
+    --error: #ef5350;      --error-bg: rgba(239,83,80,.09);
+    --neutral: #8a8f98;    --neutral-bg: rgba(138,143,152,.06);
+    --sim: #a78bfa;        --sim-bg: rgba(167,139,250,.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 32px 140px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 720px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 34px 0 4px; }
+
+  /* ---- exploration controls ---------------------------------------- */
+  .controls {
+    display: flex; gap: 20px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px;
+    position: sticky; top: 8px; z-index: 5;
+    background: rgba(11,12,14,.92); backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .controls button.seg {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--muted); font-size: 11.5px; border-radius: 6px; padding: 3px 9px; cursor: pointer;
+  }
+  .controls button.seg:hover { color: var(--text); }
+  .controls button.seg[aria-pressed=true] {
+    color: var(--strong); border-color: var(--good); background: var(--good-bg);
+  }
+  .controls button.seg.warn[aria-pressed=true] {
+    color: var(--attn); border-color: var(--attn); background: var(--attn-bg);
+  }
+
+  /* ---- card chrome -------------------------------------------------- */
+  .gallery { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+
+  .dcard {
+    width: 280px; border-radius: 10px; overflow: hidden;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--tint, var(--neutral));
+    display: flex; flex-direction: column; position: relative;
+  }
+  .dcard[data-status=running]  { --tint: var(--good);    --tint-bg: var(--good-bg); }
+  .dcard[data-status=offline]  { --tint: var(--neutral); --tint-bg: var(--neutral-bg); opacity: .68; }
+  .dcard[data-status=offline]:hover { opacity: 1; }
+  .dcard[data-status=sim]      { --tint: var(--sim);     --tint-bg: var(--sim-bg); }
+
+  .dcard header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px 8px 12px;
+    background: linear-gradient(to bottom, var(--tint-bg, transparent), transparent), var(--terminal);
+    border-bottom: 1px solid var(--border);
+    min-height: 38px;
+  }
+  .dcard .kind-glyph { display: inline-flex; align-items: center; color: var(--dim); flex: none; }
+  .dcard .kind-glyph svg { width: 14px; height: 14px; stroke: currentColor; fill: none;
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .dcard .name {
+    font-weight: 700; color: var(--name); font-size: 14.5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 0 1 auto; min-width: 34px;
+  }
+  .dcard .transport {
+    margin-left: auto; font-size: 10.5px; font-weight: 700;
+    letter-spacing: .09em; color: var(--dim); text-transform: uppercase; flex: none;
+  }
+  .dcard .grow {
+    appearance: none; border: 0; background: transparent; color: var(--dim);
+    width: 24px; height: 24px; border-radius: 6px; cursor: pointer; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+  }
+  .dcard .grow:hover { color: var(--text); background: rgba(255,255,255,.06); }
+
+  /* tab strip below title bar (production anatomy) */
+  .tabs-row {
+    display: flex; gap: 2px; padding: 4px 8px;
+    background: var(--terminal); border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    appearance: none; border: 0; background: transparent; color: var(--dim);
+    flex: 1; height: 26px; border-radius: 6px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .tab:hover { color: var(--text); background: rgba(255,255,255,.06); }
+  .tab[aria-selected=true] { color: var(--tint); background: var(--tint-bg); }
+  .tab.danger[aria-selected=true] { color: var(--error); background: var(--error-bg); }
+  .tab svg { width: 15px; height: 15px; stroke: currentColor; fill: none;
+             stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+  .dcard .body { padding: 10px 12px; min-height: 84px; display: grid; gap: 7px;
+                 align-content: start; }
+  .statusline { color: var(--tint); font-size: 12px; font-weight: 600; margin: 0; }
+  .explain { color: var(--muted); font-size: 11.5px; margin: 0; line-height: 1.4; }
+  .projchip { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+  .projchip .swatch { width: 13px; height: 13px; border-radius: 3px; flex: none; }
+  .projchip .pname { color: var(--muted); font-size: 12px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+
+  .consolebar {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--terminal); border-top: 1px solid var(--border);
+    padding: 5px 10px; min-height: 26px;
+  }
+  .consolebar .line {
+    font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+  }
+
+  /* ---- hero strips & fixture canvases ------------------------------ */
+  .hero { position: relative; width: 100%; overflow: hidden; background: #07080a; }
+  .hero.h-raster { height: 44px; }
+  .hero.h-fixture { height: 56px; }
+  .hero canvas, .fixv canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .hero .namepill, .pill {
+    position: absolute; bottom: 6px; left: 6px; max-width: calc(100% - 12px);
+    background: rgba(11,12,14,.72); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; font-size: 10.5px; font-weight: 700;
+    color: var(--strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .livepill {
+    position: absolute; top: 6px; right: 6px; display: inline-flex; gap: 5px; align-items: center;
+    background: rgba(11,12,14,.72); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; font-size: 9.5px; font-weight: 800;
+    letter-spacing: .07em; text-transform: uppercase; font-family: var(--mono);
+  }
+  .livepill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .livepill.live   { color: var(--good); }  .livepill.live .dot { background: var(--good);
+    animation: blink 2s ease-in-out infinite; }
+  .livepill.stale  { color: var(--attn); }  .livepill.stale .dot { background: var(--attn); }
+  .livepill.frozen { color: var(--neutral);} .livepill.frozen .dot { background: var(--neutral); }
+  .livepill.simed  { color: var(--sim); }   .livepill.simed .dot { background: var(--sim); }
+  @keyframes blink { 50% { opacity: .35; } }
+
+  .fixv { position: relative; width: 100%; overflow: hidden; border-radius: 7px;
+          background: #07080a; border: 1px solid var(--border); }
+  .fixv.tall { height: 150px; }
+  .fixv.mid  { height: 104px; }
+  .fixv .offline-veil {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em;
+    background: rgba(7,8,10,.25); text-transform: uppercase;
+  }
+  .dim-frame { filter: saturate(.45) brightness(.55); }
+
+  .meta-row { display: flex; align-items: center; gap: 8px; min-width: 0;
+              font-size: 11px; color: var(--dim); }
+  .meta-row .spring { flex: 1; }
+  .meta-row .fps { font-family: var(--mono); font-size: 10.5px; }
+  .meta-row .fps.stale { color: var(--attn); }
+
+  /* wire ticker (concept E) */
+  .wires { position: relative; width: 100%; background: #07080a; }
+  .wires canvas { display: block; width: 100%; height: 100%; }
+
+  .note { border-left: 2px solid var(--border-strong); padding: 2px 0 2px 10px;
+          color: var(--dim); font-size: 11.5px; margin: 6px 0 12px; max-width: 720px; }
+  .note b { color: var(--muted); }
+  .caption { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+             color: var(--dim); margin: 0 0 6px; font-weight: 700; }
+  .cardcol { display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Device card — show what's running on the board</h1>
+<p class="hint">
+  G2 ruling: the hero strip's re-simulated raster reads <b>dishonest</b> on a device card
+  ("too smooth to believe that's coming from the actual device"). Thesis: when a device is
+  connected, the card should primarily show <b>the running control product</b> — the fixture's
+  lamps, fed by actual frames off the link — degrading honestly (frame age, stalls) and
+  falling back to a dimmed last-known frame offline. Sim cards may keep re-simulation:
+  they <b>are</b> the simulator. A 3D fixture model may take this slot later; every concept
+  below treats the lamp view as "the best honest thing we can render today".
+</p>
+
+<div class="controls">
+  <span class="group"><b>Pattern</b>
+    <button class="seg" data-ctl="pattern" data-val="wave" aria-pressed="true">hue wave</button>
+    <button class="seg" data-ctl="pattern" data-val="chase" aria-pressed="false">chase</button>
+    <button class="seg" data-ctl="pattern" data-val="sparkle" aria-pressed="false">sparkle</button>
+  </span>
+  <span class="group"><b>Fixture</b>
+    <button class="seg" data-ctl="layout" data-val="dome" aria-pressed="true">zook dome · 540</button>
+    <button class="seg" data-ctl="layout" data-val="rings" aria-pressed="false">rings · 300</button>
+    <button class="seg" data-ctl="layout" data-val="matrix" aria-pressed="false">matrix · 256</button>
+  </span>
+  <span class="group"><b>Device fps</b>
+    <button class="seg" data-ctl="fps" data-val="30" aria-pressed="true">30</button>
+    <button class="seg" data-ctl="fps" data-val="12" aria-pressed="false">12</button>
+    <button class="seg" data-ctl="fps" data-val="5" aria-pressed="false">5</button>
+  </span>
+  <span class="group"><b>Reality</b>
+    <button class="seg warn" data-ctl="hiccup" data-val="on" aria-pressed="false">device hiccups</button>
+  </span>
+</div>
+
+<p class="note"><b>Try "device hiccups"</b>: the board stalls ~700&nbsp;ms every few seconds.
+  Concept A keeps gliding — it can't know. Every honest concept freezes with the board and
+  says how old the frame is. That contrast is the whole argument.</p>
+
+<!-- ================================================================ -->
+<h2>1 · Today (baseline) — re-simulated raster hero</h2>
+<p class="hint">Production gallery-rework P05: 44px hero strip under the title bar,
+  re-simulating the project's <i>visual</i> raster in the browser. Smooth, pretty,
+  and unrelated to what the silicon is doing right now.</p>
+<div class="gallery" id="sec1"></div>
+
+<!-- ================================================================ -->
+<h2>2 · Honest hero — fixture strip under the title bar</h2>
+<p class="hint">Same slot, honest content: the strip renders the fixture's lamp layout with
+  frames read back from the device. Keeps the "identity at a glance" role; the LIVE pill
+  carries frame age. Offline = dimmed last-known frame (D12 stays). Sim = smooth, marked SIM.</p>
+<div class="gallery" id="sec2"></div>
+
+<!-- ================================================================ -->
+<h2>3 · Play tab — the preview is a tab, not a banner</h2>
+<p class="hint">G2 direction (1) taken literally: no hero strip at all. A ▶ tab —
+  the connected card's <b>default</b> tab — holds a taller fixture view plus a meta row
+  (project · fps · frame age). Status stays one tab away. The card is shorter when
+  you're on another tab.</p>
+<div class="gallery" id="sec3"></div>
+
+<!-- ================================================================ -->
+<h2>4 · Status-face embed — health and output in one glance</h2>
+<p class="hint">No new tab: the Status face embeds a mid-height fixture view between the
+  status headline and the detail rows. "Is it okay" and "what is it doing" answer together;
+  the Play tab's extra click disappears, but Status gets denser.</p>
+<div class="gallery" id="sec4"></div>
+
+<!-- ================================================================ -->
+<h2>5 · Wire ticker + Play tab — output-space honesty</h2>
+<p class="hint">A skinny per-wire ticker under the title bar: one row per output wire,
+  each LED a pixel column — literally what the wires carry (zook: 5 × 300). Spatial fixture
+  view lives in the ▶ tab. The ticker is cheap at any scale and reads like a VU meter;
+  whether it reads as "the artwork" is the question.</p>
+<div class="gallery" id="sec5"></div>
+
+<script>
+/* ================= state ================= */
+const ctl = { pattern: 'wave', layout: 'dome', fps: 30, hiccup: false };
+document.querySelectorAll('.controls .seg').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const k = btn.dataset.ctl, v = btn.dataset.val;
+    if (k === 'hiccup') {
+      ctl.hiccup = !ctl.hiccup;
+      btn.setAttribute('aria-pressed', String(ctl.hiccup));
+      return;
+    }
+    ctl[k] = (k === 'fps') ? +v : v;
+    document.querySelectorAll(`.seg[data-ctl=${k}]`)
+      .forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    if (k === 'layout') rebuildLayouts();
+  });
+});
+
+/* ================= layouts ================= */
+function domeLayout() {
+  // 2D front projection of a dome: hub, rings of 6/12/18, strut segments.
+  const rings = [
+    { r: 0.16, n: 6,  rot: 0 },
+    { r: 0.46, n: 12, rot: Math.PI / 12 },
+    { r: 0.78, n: 18, rot: 0 },
+  ];
+  const verts = [[0, 0]];
+  const ringStart = [];
+  for (const { r, n, rot } of rings) {
+    ringStart.push(verts.length);
+    for (let i = 0; i < n; i++) {
+      const a = rot + i * 2 * Math.PI / n;
+      verts.push([r * Math.cos(a), r * Math.sin(a) * 0.92]);
+    }
+  }
+  const segs = [];
+  rings.forEach(({ n }, ri) => {
+    const s = ringStart[ri];
+    for (let i = 0; i < n; i++) segs.push([s + i, s + (i + 1) % n]); // ring edges
+  });
+  for (let i = 0; i < 6; i++) segs.push([0, ringStart[0] + i]);       // hub spokes
+  for (let i = 0; i < 12; i++)                                        // ring1→ring0
+    segs.push([ringStart[1] + i, ringStart[0] + Math.round(i / 2) % 6]);
+  for (let i = 0; i < 18; i++)                                        // ring2→ring1
+    segs.push([ringStart[2] + i, ringStart[1] + Math.round(i * 12 / 18) % 12]);
+  const pts = [];
+  for (const [a, b] of segs) {
+    const [ax, ay] = verts[a], [bx, by] = verts[b];
+    const len = Math.hypot(bx - ax, by - ay);
+    const n = Math.max(2, Math.round(len / 0.115));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      pts.push([ax + (bx - ax) * t, ay + (by - ay) * t]);
+    }
+  }
+  return pts.slice(0, 540);
+}
+function ringsLayout() {
+  const pts = [];
+  const rr = [0.2, 0.38, 0.56, 0.74, 0.92];
+  const counts = [24, 42, 60, 78, 96];
+  rr.forEach((r, k) => {
+    for (let i = 0; i < counts[k]; i++) {
+      const a = i * 2 * Math.PI / counts[k] + k * 0.3;
+      pts.push([r * Math.cos(a), r * Math.sin(a) * 0.9]);
+    }
+  });
+  return pts;
+}
+function matrixLayout() {
+  const pts = [];
+  for (let y = 0; y < 16; y++)
+    for (let x = 0; x < 16; x++) {
+      const c = (y % 2) ? 15 - x : x; // serpentine
+      pts.push([(c / 15) * 1.7 - 0.85, (y / 15) * 1.7 - 0.85]);
+    }
+  return pts;
+}
+let LAYOUT = [];
+function rebuildLayouts() {
+  LAYOUT = ctl.layout === 'dome' ? domeLayout()
+         : ctl.layout === 'rings' ? ringsLayout() : matrixLayout();
+}
+rebuildLayouts();
+
+/* ================= patterns ================= */
+function hash01(i) { let h = i * 2654435761 % 4294967296; h = (h ^ (h >>> 13)) * 1103515245;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function hsl2rgb(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+function sampleColor(i, n, x, y, t) {
+  if (ctl.pattern === 'wave') {
+    return hsl2rgb((x * 0.6 + y * 0.25) * 320 - t * 70, 0.85, 0.55);
+  }
+  if (ctl.pattern === 'chase') {
+    const p = i / n, head = (t * 0.22) % 1;
+    let d = Math.abs(p - head); d = Math.min(d, 1 - d);
+    const v = Math.max(0, 1 - d * 14);
+    const glow = Math.pow(v, 2.2);
+    return [30 + 225 * glow, 12 + 160 * glow, 4 + 40 * glow]; // ember chase
+  }
+  // sparkle
+  const ph = hash01(i) * 6.28, sp = 0.6 + hash01(i + 9999) * 2.2;
+  const v = Math.pow(Math.max(0, Math.sin(t * sp + ph)), 6);
+  const cold = hash01(i + 777) > 0.5;
+  return cold ? [40 * v + 8, 120 * v + 10, 255 * v + 18] : [255 * v + 18, 90 * v + 8, 190 * v + 12];
+}
+
+/* device time: quantized to fps; hiccups stall it */
+function deviceTime(t) {
+  let dt = t;
+  if (ctl.hiccup) {
+    const cyc = 3.2, stall = 0.7, k = Math.floor(t / cyc), ph = t - k * cyc;
+    dt = k * (cyc - stall) + Math.min(ph, cyc - stall);
+    if (ph > cyc - stall) dt = k * (cyc - stall) + (cyc - stall); // frozen tail
+  }
+  return Math.floor(dt * ctl.fps) / ctl.fps;
+}
+function frameAge(t) { return t - (ctl.hiccup ? invHiccup(t) : t) + (1 / ctl.fps) / 2; }
+function invHiccup(t) { // wall-clock moment of the frame deviceTime produced
+  const cyc = 3.2, stall = 0.7, k = Math.floor(t / cyc), ph = t - k * cyc;
+  return ph > cyc - stall ? k * cyc + (cyc - stall) : t;
+}
+
+/* ================= renderers ================= */
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+const painters = [];
+function fixtureCanvas(el, mode, opts = {}) {
+  const cv = document.createElement('canvas');
+  el.appendChild(cv);
+  const ctx = cv.getContext('2d');
+  painters.push(t => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    if (cv.width !== w * DPR) { cv.width = w * DPR; cv.height = h * DPR; }
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = '#07080a'; ctx.fillRect(0, 0, w, h);
+    const tt = mode === 'sim' ? t : mode === 'frozen' ? 13.7 : deviceTime(t);
+    const n = LAYOUT.length;
+    // contain in tab/status views; cover (crop) in the letterboxed hero strip
+    const fit = opts.cover ? Math.min(w / 2.3, h / 0.62) : Math.min(w / 2.06, h / 2.06);
+    const cx = w / 2, cy = h / 2;
+    const r = Math.max(1.3, Math.min(2.6, fit / 34));
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < n; i++) {
+      const [x, y] = LAYOUT[i];
+      let [cr, cg, cb] = sampleColor(i, n, x, y, tt);
+      const px = cx + x * fit, py = cy + y * fit;
+      ctx.fillStyle = `rgba(${cr | 0},${cg | 0},${cb | 0},.16)`;
+      ctx.beginPath(); ctx.arc(px, py, r * 2.4, 0, 6.284); ctx.fill();
+      ctx.fillStyle = `rgb(${cr | 0},${cg | 0},${cb | 0})`;
+      ctx.beginPath(); ctx.arc(px, py, r, 0, 6.284); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    if (opts.pill) updatePill(opts.pill, mode, t);
+  });
+}
+function rasterCanvas(el) { // concept A: the re-simulated visual raster
+  const cv = document.createElement('canvas');
+  el.appendChild(cv);
+  const ctx = cv.getContext('2d');
+  painters.push(t => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    if (cv.width !== w * DPR) { cv.width = w * DPR; cv.height = h * DPR; }
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    // always smooth: it re-simulates, so it never sees a hiccup
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    for (let i = 0; i <= 4; i++) {
+      const [r, gg, b] = hsl2rgb(i * 60 + t * 40, 0.7, 0.42);
+      g.addColorStop(i / 4, `rgb(${r | 0},${gg | 0},${b | 0})`);
+    }
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    for (let k = 0; k < 3; k++) { // drifting blobs, visual.out-ish
+      const bx = w * (0.5 + 0.4 * Math.sin(t * 0.5 + k * 2.1));
+      const by = h * (0.5 + 0.4 * Math.cos(t * 0.34 + k * 1.7));
+      const rad = ctx.createRadialGradient(bx, by, 0, bx, by, h * 0.9);
+      const [r, gg, b] = hsl2rgb(k * 120 - t * 30, 0.8, 0.55);
+      rad.addColorStop(0, `rgba(${r | 0},${gg | 0},${b | 0},.55)`);
+      rad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = rad; ctx.fillRect(0, 0, w, h);
+    }
+  });
+}
+function wireCanvas(el, mode, wires) {
+  const cv = document.createElement('canvas');
+  el.appendChild(cv);
+  const ctx = cv.getContext('2d');
+  painters.push(t => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    if (cv.width !== w * DPR) { cv.width = w * DPR; cv.height = h * DPR; }
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = '#07080a'; ctx.fillRect(0, 0, w, h);
+    const tt = mode === 'sim' ? t : mode === 'frozen' ? 13.7 : deviceTime(t);
+    const n = LAYOUT.length, per = Math.ceil(n / wires);
+    const rowH = h / wires;
+    for (let wi = 0; wi < wires; wi++) {
+      for (let j = 0; j < per; j++) {
+        const i = wi * per + j;
+        if (i >= n) break;
+        const [x, y] = LAYOUT[i];
+        const [r, g, b] = sampleColor(i, n, x, y, tt);
+        ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+        ctx.fillRect(j / per * w, wi * rowH + 1, w / per + 0.5, rowH - 2);
+      }
+    }
+  });
+}
+function updatePill(pill, mode, t) {
+  if (mode === 'sim') { pill.className = 'livepill simed'; pill.innerHTML = dot() + 'sim'; return; }
+  if (mode === 'frozen') { pill.className = 'livepill frozen'; pill.innerHTML = dot() + 'last seen 2 h'; return; }
+  const age = frameAge(t);
+  if (age > 0.25) { pill.className = 'livepill stale'; pill.innerHTML = dot() + `live · ${age.toFixed(1)} s ago`; }
+  else { pill.className = 'livepill live'; pill.innerHTML = dot() + `live · ${ctl.fps} fps`; }
+}
+function metaFps(el, mode) {
+  painters.push(t => {
+    if (mode !== 'device') return;
+    const age = frameAge(t);
+    if (age > 0.25) { el.textContent = `frame ${age.toFixed(1)} s ago`; el.className = 'fps stale'; }
+    else { el.textContent = `${ctl.fps} fps from device`; el.className = 'fps'; }
+  });
+}
+function dot() { return '<span class="dot"></span>'; }
+
+/* ================= card factory ================= */
+const GLYPH_USB = '<svg viewBox="0 0 24 24"><path d="M12 3v13"/><circle cx="12" cy="19" r="2"/><path d="M12 8l4-2v-2"/><path d="M12 12l-4-2V6"/><circle cx="16" cy="3.5" r="1.4"/><rect x="6.8" y="3.2" width="2.6" height="2.6"/></svg>';
+const GLYPH_SIM = '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6M12 17v4"/></svg>';
+const ICONS = {
+  status: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>',
+  play: '<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>',
+  settings: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
+  console: '<svg viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8"/></svg>',
+  danger: '<svg viewBox="0 0 24 24"><path d="M12 3L2 20h20zM12 10v5M12 18.2v.1"/></svg>',
+};
+const SWATCHES = {
+  'zook-dome': 'linear-gradient(135deg,#5a3c48,#303a2c)',
+  'aurora-drift': 'linear-gradient(135deg,#2c3a58,#583c2c)',
+  '2026-07-09-1421-basic-workbench-rainbow-test': 'linear-gradient(135deg,#3a2c58,#2c584б)'.replace('б','6'),
+};
+
+function card({ status, name, transport, project, tabs, activeTab, glyph }) {
+  const el = document.createElement('article');
+  el.className = 'dcard'; el.dataset.status = status;
+  const tabBtns = tabs.map(id =>
+    `<button class="tab ${id === 'danger' ? 'danger' : ''}" aria-selected="${id === activeTab}" title="${id}">${ICONS[id]}</button>`).join('');
+  el.innerHTML = `
+    <header>
+      <span class="kind-glyph">${glyph || GLYPH_USB}</span>
+      <span class="name">${name}</span>
+      <span class="transport">${transport}</span>
+      <button class="grow" title="Open in the editor">⤢</button>
+    </header>
+    <div class="slot-hero"></div>
+    <div class="tabs-row">${tabBtns}</div>
+    <div class="body"></div>
+    <div class="consolebar"><span class="line">› [WS281X-WIRE] ch1 29.9 fps · queue 8.9 ms</span></div>`;
+  return el;
+}
+function statusBody(el, status, project, extraTop) {
+  const body = el.querySelector('.body');
+  if (extraTop) body.appendChild(extraTop);
+  const line = document.createElement('p');
+  line.className = 'statusline';
+  line.textContent = status === 'running' ? 'Running · up to date'
+    : status === 'sim' ? 'Simulating' : 'Off · remembered';
+  const chip = document.createElement('div');
+  chip.className = 'projchip';
+  chip.innerHTML = `<span class="swatch" style="background:${SWATCHES[project] || SWATCHES['zook-dome']}"></span><span class="pname">${project}</span>`;
+  const ex = document.createElement('p');
+  ex.className = 'explain';
+  ex.textContent = status === 'running'
+    ? 'The device runs the same project as your library copy.'
+    : status === 'sim' ? 'Browser simulator session — this is the simulation.'
+    : 'Last connected 2 hours ago over USB.';
+  body.append(line, chip, ex);
+}
+
+/* ---------------- section builders ---------------- */
+const TABS_NOPLAY = ['status', 'settings', 'console', 'danger'];
+const TABS_PLAY = ['play', 'status', 'settings', 'console', 'danger'];
+
+function labeled(colTitle, cardEl) {
+  const col = document.createElement('div');
+  col.className = 'cardcol';
+  col.innerHTML = `<p class="caption">${colTitle}</p>`;
+  col.appendChild(cardEl);
+  return col;
+}
+
+/* --- 1 · today --- */
+(function () {
+  const sec = document.getElementById('sec1');
+  const mk = (status, name, transport, project, mode) => {
+    const c = card({ status, name, transport, project, tabs: TABS_NOPLAY, activeTab: 'status',
+                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
+    const hero = document.createElement('div');
+    hero.className = 'hero h-raster' + (mode === 'frozen' ? ' dim-frame' : '');
+    if (mode === 'frozen') {
+      // production today: no preview lease offline — the identity gradient
+      hero.style.background = 'linear-gradient(135deg, hsl(210 12% 16%), hsl(80 24% 26%))';
+    } else {
+      rasterCanvas(hero);
+    }
+    hero.insertAdjacentHTML('beforeend', `<span class="namepill">${project}</span>`);
+    c.querySelector('.slot-hero').appendChild(hero);
+    statusBody(c, status, project);
+    return c;
+  };
+  sec.append(
+    labeled('connected — but this is a re-simulation', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device')),
+    labeled('offline — no lease: identity gradient, no art at all', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen')),
+    labeled('simulator — honest here, it IS the sim', mk('sim', 'Simulator', 'SIMULATOR', 'zook-dome', 'sim')),
+  );
+})();
+
+/* --- 2 · honest hero --- */
+(function () {
+  const sec = document.getElementById('sec2');
+  const mk = (status, name, transport, project, mode) => {
+    const c = card({ status, name, transport, project, tabs: TABS_NOPLAY, activeTab: 'status',
+                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
+    const hero = document.createElement('div');
+    hero.className = 'hero h-fixture' + (mode === 'frozen' ? ' dim-frame' : '');
+    c.querySelector('.slot-hero').appendChild(hero);
+    const pill = document.createElement('span');
+    pill.className = 'livepill';
+    fixtureCanvas(hero, mode, { pill, cover: true });
+    hero.insertAdjacentHTML('beforeend', `<span class="namepill">${project}</span>`);
+    hero.appendChild(pill);
+    statusBody(c, status, project);
+    return c;
+  };
+  sec.append(
+    labeled('connected — device frames, stalls and all', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device')),
+    labeled('offline — dimmed last-known frame, frozen', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen')),
+    labeled('sim — re-simulation, marked', mk('sim', 'Simulator', 'SIMULATOR', 'zook-dome', 'sim')),
+  );
+})();
+
+/* --- 3 · play tab --- */
+(function () {
+  const sec = document.getElementById('sec3');
+  const mk = (status, name, transport, project, mode, active) => {
+    const c = card({ status, name, transport, project, tabs: TABS_PLAY, activeTab: active,
+                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
+    const body = c.querySelector('.body');
+    if (active === 'play') {
+      const fv = document.createElement('div');
+      fv.className = 'fixv tall' + (mode === 'frozen' ? ' dim-frame' : '');
+      const pill = document.createElement('span'); pill.className = 'livepill';
+      fixtureCanvas(fv, mode, { pill });
+      fv.appendChild(pill);
+      if (mode === 'frozen') fv.insertAdjacentHTML('beforeend', '<div class="offline-veil">offline · last frame</div>');
+      body.appendChild(fv);
+      const meta = document.createElement('div');
+      meta.className = 'meta-row';
+      const fps = document.createElement('span'); fps.className = 'fps';
+      fps.textContent = mode === 'sim' ? 'browser simulation' : mode === 'frozen' ? 'last seen 2 h ago' : '';
+      metaFps(fps, mode === 'device' ? 'device' : 'na');
+      meta.innerHTML = `<span class="projchip"><span class="swatch" style="background:${SWATCHES[project] || SWATCHES['zook-dome']}"></span><span class="pname">${project}</span></span><span class="spring"></span>`;
+      meta.appendChild(fps);
+      body.appendChild(meta);
+    } else {
+      statusBody(c, status, project);
+    }
+    return c;
+  };
+  sec.append(
+    labeled('connected — ▶ is the default tab', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'play')),
+    labeled('offline — ▶ shows the last frame, veiled', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen', 'play')),
+    labeled('same card on the status tab — no preview at all', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'status')),
+  );
+})();
+
+/* --- 4 · status embed --- */
+(function () {
+  const sec = document.getElementById('sec4');
+  const mk = (status, name, transport, project, mode) => {
+    const c = card({ status, name, transport, project, tabs: TABS_NOPLAY, activeTab: 'status',
+                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
+    const fv = document.createElement('div');
+    fv.className = 'fixv mid' + (mode === 'frozen' ? ' dim-frame' : '');
+    const pill = document.createElement('span'); pill.className = 'livepill';
+    fixtureCanvas(fv, mode, { pill });
+    fv.appendChild(pill);
+    statusBody(c, status, project, fv);
+    return c;
+  };
+  sec.append(
+    labeled('connected — health + output, one face', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device')),
+    labeled('offline — dimmed, then the explain line', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen')),
+    labeled('sim', mk('sim', 'Simulator', 'SIMULATOR', 'zook-dome', 'sim')),
+  );
+})();
+
+/* --- 5 · wire ticker --- */
+(function () {
+  const sec = document.getElementById('sec5');
+  const mk = (status, name, transport, project, mode, active) => {
+    const c = card({ status, name, transport, project, tabs: TABS_PLAY, activeTab: active,
+                     glyph: status === 'sim' ? GLYPH_SIM : GLYPH_USB });
+    const wr = document.createElement('div');
+    wr.className = 'wires' + (mode === 'frozen' ? ' dim-frame' : '');
+    wr.style.height = '30px';
+    wireCanvas(wr, mode, 5);
+    c.querySelector('.slot-hero').appendChild(wr);
+    const body = c.querySelector('.body');
+    if (active === 'play') {
+      const fv = document.createElement('div');
+      fv.className = 'fixv tall' + (mode === 'frozen' ? ' dim-frame' : '');
+      const pill = document.createElement('span'); pill.className = 'livepill';
+      fixtureCanvas(fv, mode, { pill });
+      fv.appendChild(pill);
+      body.appendChild(fv);
+    } else {
+      statusBody(c, status, project);
+    }
+    return c;
+  };
+  sec.append(
+    labeled('connected — ticker + status face', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'status')),
+    labeled('connected — ticker + ▶ tab open', mk('running', 'DOM-Z-102', 'USB', 'zook-dome', 'device', 'play')),
+    labeled('offline — ticker freezes dim', mk('offline', 'garage-matrix', 'USB', '2026-07-09-1421-basic-workbench-rainbow-test', 'frozen', 'status')),
+  );
+})();
+
+/* ================= loop ================= */
+const t0 = performance.now();
+function frame() {
+  const t = (performance.now() - t0) / 1000;
+  for (const p of painters) p(t);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
