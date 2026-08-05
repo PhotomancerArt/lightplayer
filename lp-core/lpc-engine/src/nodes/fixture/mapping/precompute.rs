@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use libm;
 use lpc_model::Revision;
-use lpc_model::nodes::fixture::MappingConfig;
+use lpc_model::nodes::fixture::{MappingConfig, MappingRef};
 use lps_q32::q32::Q32;
 
 use super::entry::PixelMappingEntry;
@@ -22,7 +22,7 @@ use lpc_model::nodes::fixture::generate_mapping_points;
 /// # Returns
 /// PrecomputedMapping with entries ordered by pixel (x, y)
 pub fn compute_mapping(
-    config: &MappingConfig,
+    config: MappingRef<'_>,
     texture_width: u32,
     texture_height: u32,
     mapping_data_ver: Revision,
@@ -30,13 +30,10 @@ pub fn compute_mapping(
     let mut mapping = PrecomputedMapping::new(texture_width, texture_height, mapping_data_ver);
 
     match config {
-        MappingConfig::Unset => {}
-        MappingConfig::Map2d { .. } => {}
-        MappingConfig::PathPoints {
-            paths: _,
-            sample_diameter: _,
-            ..
-        } => {
+        // An unresolved mapping publishes no entries at all — distinct from
+        // a resolved-but-empty one, which publishes a full grid of skips.
+        MappingRef::Slots(MappingConfig::Unset | MappingConfig::Map2d { .. }) => {}
+        MappingRef::Slots(MappingConfig::PathPoints { .. }) | MappingRef::Compact(_) => {
             // First pass: collect all mapping points (circles)
             let mapping_points = generate_mapping_points(config, texture_width, texture_height);
 
