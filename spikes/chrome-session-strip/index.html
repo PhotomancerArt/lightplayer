@@ -271,6 +271,21 @@
     <g stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round">
       <rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></g>
   </symbol>
+  <symbol id="i-usb" viewBox="0 0 24 24">
+    <g stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v14M12 21v-4M8 8l4-5 4 5M7 14l5 3 5-3"/></g>
+    <circle cx="7" cy="12" r="1.6" fill="currentColor"/>
+    <rect x="15.4" y="10.4" width="3.2" height="3.2" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-wifi" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round">
+      <path d="M2.5 6.5a8.4 8.4 0 0 1 11 0M4.8 9.1a5 5 0 0 1 6.4 0"/></g>
+    <circle cx="8" cy="12" r="1.3" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-bt" viewBox="0 0 16 16">
+    <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2v12l3.5-3L4.5 5M8 2l3.5 3L4.5 11"/></g>
+  </symbol>
   <symbol id="i-board" viewBox="0 0 16 16">
     <rect x="2.5" y="4" width="11" height="8" rx="1.4" stroke="currentColor" stroke-width="1.3" fill="none"/>
     <circle cx="5.4" cy="6.6" r=".8" fill="currentColor"/><circle cx="5.4" cy="9.4" r=".8" fill="currentColor"/>
@@ -303,20 +318,16 @@
 
 <h1>Chrome session strip — running sessions in the bar</h1>
 <p class="hint">
-  <b>Gate 2026-08-05: concept A chosen</b> (strip docked with your-stuff, behind a divider) — B/C
-  rejected below. This round iterates the <b>chip anatomy</b>: Yona's note was that round pills
-  "don't quite read as device" — try board vs sim icons and squarer shapes. Invariants hold:
-  one chip per <b>live</b> session (D36 rule — chip exists exactly while the session does,
-  registry-offline devices never appear), name + status only (<b>D43: wayfinding, never a device
-  surface</b>), lensed chip marked, click = open in the editor. Chrome C per D11.
+  <b>Converged 2026-08-05, two gate rounds:</b> concept A (strip docked with your-stuff, behind a
+  divider) with <b>P2 tab-chips</b>, and the chip glyph is the <b>transport</b> — USB icon for
+  hardware (the registry's `transport` field is the source), violet sim glyph for the simulator;
+  network/Bluetooth glyphs arrive with those transports. Invariants: one chip per <b>live</b>
+  session (D36 rule — chip exists exactly while the session does, registry-offline devices never
+  appear), name + status only (<b>D43: wayfinding, never a device surface</b>), lensed chip marked,
+  click = open in the editor. Chrome C per D11.
 </p>
 
 <div class="controls">
-  <span class="group"><b>Chip style</b>
-    <button class="ctl" data-style="st-pill">P1 · pill + icon</button>
-    <button class="ctl" data-style="st-tab" aria-pressed="true">P2 · tab-chip</button>
-    <button class="ctl" data-style="st-tile">P3 · board tile</button>
-  </span>
   <span class="group"><b>Sessions</b>
     <button class="ctl" data-ds="none">none</button>
     <button class="ctl" data-ds="solo">sim only</button>
@@ -336,26 +347,21 @@
 </div>
 
 <!-- ==================== 1 · anatomy ==================== -->
-<h2 id="s1"><span class="n">1</span> Chip anatomy — three reads of "device"</h2>
-<p class="sub">Click a strip (or use the control) to select a style — <b>every frame below re-renders
-  in it</b>. All three keep the same states: idle / <b>here</b> (accent — lensed, editor is the
-  current page) / <b>open</b> (washed — lensed but you're elsewhere) / behind (amber) /
-  connected-empty (hollow dot). Sim is always violet-marked.</p>
+<h2 id="s1"><span class="n">1</span> Chip anatomy — states and transports</h2>
+<p class="sub">The chosen chip: squared tab-chip, <b>transport glyph</b> + status dot + name.
+  States: idle / <b>here</b> (accent — lensed, editor is the current page) / <b>open</b> (washed —
+  lensed but you're elsewhere) / behind (amber) / connected-empty (hollow dot) / long-name ellipsis.
+  Sim is violet-marked.</p>
 
-<div class="anat" data-anat="st-pill">
-  <div class="ahead"><span class="aname">P1 · pill + icon</span>
-    <span class="anote">round pill keeps the bar's soft grammar; board/sim glyph carries the device read</span></div>
+<div class="anat" data-anat="st-tab" style="cursor:default">
+  <div class="ahead"><span class="aname">States</span>
+    <span class="anote">every state the strip must render, side by side</span></div>
   <div class="row" data-anatrow></div>
 </div>
-<div class="anat" data-anat="st-tab">
-  <div class="ahead"><span class="aname">P2 · tab-chip</span>
-    <span class="anote">squared corners — entity/card grammar, reads as a small tab (a place), not a status pill</span></div>
-  <div class="row" data-anatrow></div>
-</div>
-<div class="anat" data-anat="st-tile">
-  <div class="ahead"><span class="aname">P3 · board tile</span>
-    <span class="anote">miniature board silhouette (the picker-thumbnail language); status dot rides the tile's corner</span></div>
-  <div class="row" data-anatrow></div>
+<div class="anat" data-anat="transports" style="cursor:default">
+  <div class="ahead"><span class="aname">The glyph slot is the transport</span>
+    <span class="anote">USB today (registry `transport`); network and Bluetooth glyphs land with those transports; sim is just another transport</span></div>
+  <div class="row st-tab" id="transportrow"></div>
 </div>
 
 <!-- ==================== 2 · in context ==================== -->
@@ -397,15 +403,14 @@
   <div class="appframe" style="max-width:1100px" id="miniapp"></div>
 </div>
 
-<p class="leannote"><b>Lean: P2 · tab-chip with board/sim glyphs.</b> Squared corners put the chips
-  in the app's entity grammar (cards, tiles) rather than the status-pill grammar Yona flagged —
-  they read as small <i>places</i>, which is the strip's whole argument — and the 16px board glyph
-  stays legible at bar density. P3's silhouette is the strongest "device" read and rhymes with the
-  board-picker thumbnails, but at 13px tall the detail turns to noise and the fixed-color artwork
-  fights the accent/washed chip states. P1 is the safe minimum if the squared chips feel heavy
-  next to the round branch chip.</p>
+<p class="leannote"><b>Settled (gate round 2, 2026-08-05): P2 · tab-chip, glyph = transport.</b>
+  Squared corners put the chips in the app's entity grammar — small <i>places</i>, not status
+  pills — and Yona's ruling makes the glyph slot semantic: <b>USB icon for hardware</b> (from the
+  registry's `transport`), network/Bluetooth icons when those transports land, violet sim glyph
+  for the simulator. P1 (round pill) and P3 (board silhouette — detail turns to noise at 13px,
+  fixed-color art fights the accent/washed states) rejected.</p>
 
-<p class="rejnote"><b>Settled at the 2026-08-05 gate:</b> concept A (strip with your-stuff) over
+<p class="rejnote"><b>Settled at gate round 1:</b> concept A (strip with your-stuff) over
   B · right-dock (chips read as status lights; right side already contended) and C · devices-tab
   badge (hides the one thing we want visible; no presence for the lensed session). Narrow collapse =
   count chip opening the flyout. <b>Deliberately absent</b> per D43 + small-scope: live thumbnails
@@ -430,7 +435,7 @@
   const STATUS_LABEL = { run:'running', behind:'behind', empty:'connected — empty' };
 
   const state = {
-    style: 'st-tab',
+    style: 'st-tab',   // settled: P2 tab-chip (gate round 2)
     ds: 'trio',
     lens: 'porch',
     route: 'editor',
@@ -452,14 +457,9 @@
   }
   const svg = (id, w, hh) => `<svg width="${w}" height="${hh||w}"><use href="#${id}"/></svg>`;
 
-  /* chip glyph per style */
+  /* chip glyph = the session's transport: usb | sim (future: wifi, bt) */
   function glyphFor(s){
-    if (state.style === 'st-tile'){
-      const art = s.sim ? 'b-sim' : 'b-generic';
-      return `<span class="icowrap"><svg width="24" height="13" viewBox="0 0 84 46"><use href="#${art}"/></svg>` +
-             `<span class="dot corner ${s.status}"></span></span>`;
-    }
-    const icon = s.sim ? svg('i-sim', 12) : svg('i-board', 13);
+    const icon = s.sim ? svg('i-sim', 12) : svg('i-usb', 13);
     return `<span class="glyph">${icon}</span>`;
   }
 
@@ -633,34 +633,43 @@
 
   /* ---------- anatomy strips ---------- */
   function renderAnatomy(){
-    document.querySelectorAll('.anat').forEach(box => {
-      const style = box.dataset.anat;
-      box.classList.toggle('sel', style === state.style);
-      const row = box.querySelector('[data-anatrow]');
-      row.innerHTML = '';
-      row.className = 'row ' + style;
-      const saved = state.style;
-      state.style = style;   // glyphFor reads state.style
-      const demo = [
-        Object.assign({}, SESSIONS.sim),
-        Object.assign({}, SESSIONS.porch),                 // rendered as "here"
-        Object.assign({}, SESSIONS.zook),                  // behind
-        { key:'shelf', name:'Kitchen shelf', sim:false, status:'empty' },
-        { key:'bike', name:'Burning man bike — rear wheel', sim:false, status:'run' },
-      ];
-      demo.forEach(s => {
-        const el = chip(s, 'porch', 'editor', {});
-        el.onclick = null;
-        row.appendChild(el);
-      });
-      // the washed "open elsewhere" variant, labeled by position (same session, other page)
-      const open = chip(Object.assign({}, SESSIONS.porch), 'porch', 'boards', {});
-      open.onclick = null;
-      row.appendChild(h('span', 'anote', '· and open-elsewhere: '));
-      row.appendChild(open);
-      state.style = saved;
-      box.onclick = () => { state.style = style; renderAll(); };
+    const row = document.querySelector('[data-anatrow]');
+    row.innerHTML = '';
+    row.className = 'row st-tab';
+    const demo = [
+      Object.assign({}, SESSIONS.sim),
+      Object.assign({}, SESSIONS.porch),                 // rendered as "here"
+      Object.assign({}, SESSIONS.zook),                  // behind
+      { key:'shelf', name:'Kitchen shelf', sim:false, status:'empty' },
+      { key:'bike', name:'Burning man bike — rear wheel', sim:false, status:'run' },
+    ];
+    demo.forEach(s => {
+      const el = chip(s, 'porch', 'editor', {});
+      el.onclick = null;
+      row.appendChild(el);
     });
+    const open = chip(Object.assign({}, SESSIONS.porch), 'porch', 'boards', {});
+    open.onclick = null;
+    row.appendChild(h('span', 'anote', '· and open-elsewhere: '));
+    row.appendChild(open);
+
+    // transport row: usb today, wifi/bt ghosted future, sim
+    const trow = document.getElementById('transportrow');
+    trow.innerHTML = '';
+    const mk = (icon, name, dot, extra) => {
+      const el = h('button', 'schip', `<span class="glyph">${svg(icon, 13)}</span>` +
+        `<span class="dot ${dot}"></span><span class="nm">${name}</span>`);
+      if (extra) el.style.cssText = extra;
+      el.onclick = null;
+      return el;
+    };
+    trow.appendChild(mk('i-usb', 'Porch sign', 'run'));
+    trow.appendChild(mk('i-wifi', 'Porch sign', 'run', 'opacity:.45'));
+    trow.appendChild(mk('i-bt', 'Porch sign', 'run', 'opacity:.45'));
+    const simchip = chip(Object.assign({}, SESSIONS.sim), null, 'editor', {});
+    simchip.onclick = null;
+    trow.appendChild(simchip);
+    trow.appendChild(h('span', 'anote', '— wifi/bt are future transports, ghosted'));
   }
 
   /* ---------- static frames ---------- */
@@ -708,21 +717,17 @@
 
   /* ---------- controls ---------- */
   function syncControls(){
-    document.querySelectorAll('.ctl[data-style]').forEach(b => b.setAttribute('aria-pressed', b.dataset.style === state.style));
     document.querySelectorAll('.ctl[data-ds]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ds === state.ds));
     document.querySelectorAll('.ctl[data-lens]').forEach(b => b.setAttribute('aria-pressed', b.dataset.lens === state.lens));
     document.querySelectorAll('.ctl[data-route]').forEach(b => b.setAttribute('aria-pressed', b.dataset.route === state.route));
   }
-  document.querySelectorAll('.ctl[data-style]').forEach(b => b.onclick = () => { state.style = b.dataset.style; renderAll(); });
   document.querySelectorAll('.ctl[data-ds]').forEach(b => b.onclick = () => { state.ds = b.dataset.ds; renderAll(); });
   document.querySelectorAll('.ctl[data-lens]').forEach(b => b.onclick = () => { state.lens = b.dataset.lens; renderAll(); });
   document.querySelectorAll('.ctl[data-route]').forEach(b => b.onclick = () => { state.route = b.dataset.route; state.miniRoute = b.dataset.route; renderAll(); });
 
   renderAll();
 
-  /* hash-boot for capture / linking: #flyout=sm opens the sm frame's flyout; #style=st-tile picks a style */
-  const sm = location.hash.match(/style=(st-[a-z]+)/);
-  if (sm && ['st-pill','st-tab','st-tile'].includes(sm[1])){ state.style = sm[1]; renderAll(); }
+  /* hash-boot for capture / linking: #flyout=sm opens the sm frame's flyout */
   const m = location.hash.match(/flyout=(wide|md|sm)/);
   if (m){
     const frame = document.querySelector(`[data-frame][data-bp="${m[1]}"]`);
