@@ -430,6 +430,32 @@ follow its Workarounds, and append the incident; file a new entry only for a
 structural, recurring burden. Do the same during push and CI repair — a CI
 failure that matches a known burden belongs in that entry's incident log.
 
+## Design spikes
+
+`spikes/` holds self-contained HTML design playgrounds, one per exploration
+(`yona-ux` writes them). They are **records, not living UI**: each is frozen at
+the state it was judged in, and several state their gate verdicts as settled
+fact, so a spike disagreeing with shipped Studio means the design moved on.
+Never edit a spike to "fix" it.
+
+`spikes/index.html` is the browsable contact sheet, **generated** from each
+spike's own `<title>` and opening paragraph:
+
+```bash
+just spikes-index          # rewrite it after adding a spike
+```
+
+`just lint-spikes-index` (in `check-lint`) fails when the checked-in copy has
+drifted, so a new spike cannot go missing from the index quietly.
+
+Reading them: `just studio-dev` copies the pages into the served directory each
+second, and Studio's Tools ("…") menu links to `/spikes/index.html` — **in
+debug builds only** (`cfg!(debug_assertions)` in `site_chrome.rs`, not the
+`stories` feature, which the release Pages build also enables). Spikes never
+deploy: nothing in the Pages path copies them, and the studio smoke check's
+`forbidden` list fails if that ever changes. Opening `spikes/index.html` over
+`file://` works too — every link on it is relative.
+
 ## Dev server ports
 
 Multiple agent worktrees share this machine, so dev servers must not assume a
