@@ -215,7 +215,7 @@ fn ControlProductPreview(
     preview: UiControlProductPreview,
     #[props(default)] map_view: MapViewOptions,
 ) -> Element {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
         return rsx! {
             ProductMessage {
                 tone: ProductMessageTone::Warning,
@@ -517,7 +517,7 @@ fn product_tracking_overlay(
 
 fn preview_frame_style(preview: &UiProductPreview, frame: UiProductPreviewFrame) -> String {
     if let UiProductPreview::ControlNative(control) = preview
-        && let Some(ControlDisplayLayout::Layout2d(layout)) = control.display_layout.as_ref()
+        && let Some(ControlDisplayLayout::Layout2d(layout)) = control.display_layout.as_deref()
     {
         return format!(
             "aspect-ratio: {} / {};",
@@ -547,7 +547,7 @@ fn control_lamp_render(
     preview: &UiControlProductPreview,
     map_view: MapViewOptions,
 ) -> Vec<ControlLampRender> {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
         return Vec::new();
     };
     layout
@@ -585,7 +585,7 @@ fn control_lamp_render(
 /// Live lamp colors indexed by wiring index — the same sample decode the
 /// display renderer uses, packaged for the mapping editor's live view.
 pub(crate) fn control_live_lamp_colors(preview: &UiControlProductPreview) -> Vec<[u8; 3]> {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
         return Vec::new();
     };
     let len = layout

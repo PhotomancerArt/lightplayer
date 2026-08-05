@@ -3,8 +3,9 @@
 //!
 //! The mapping *document* ([`Map2dDoc`]) is an opaque, format-versioned JSON
 //! asset authored per fixture (e.g. `fixture.map2d.json`). It contains
-//! parametric objects — grids, multi-ring circles, sampled paths — whose
-//! vec order **is** the wiring order. [`resolve`] turns a document into the
+//! parametric objects — grids, multi-ring circles, sampled paths, and
+//! rotational repeats of any of those — whose vec order **is** the wiring
+//! order. [`resolve`] turns a document into the
 //! ordered lamp list (positions in doc space plus derived DMX-style
 //! `{universe, channel}` addresses); [`fit_points`] maps doc-space positions
 //! into a fixture render target without stretching.
@@ -29,12 +30,12 @@ mod map2d_fit;
 mod map2d_resolve;
 
 pub use map2d_doc::{
-    DEFAULT_SAMPLE_DIAMETER, GridCorner, GridRouting, GridShape, MAP2D_FORMAT, Map2dDoc,
-    Map2dObject, Map2dShape, PathShape, RingDir, RingOrder, RingShape,
+    DEFAULT_SAMPLE_DIAMETER, GridCorner, GridRouting, GridShape, MAP2D_FORMAT, MAX_REPEAT_COUNT,
+    Map2dDoc, Map2dObject, Map2dShape, PathShape, RepeatShape, RingDir, RingOrder, RingShape,
 };
 pub use map2d_error::Map2dError;
 pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};
 pub use map2d_resolve::{
     CHANNELS_PER_LAMP, LAMPS_PER_UNIVERSE, LampAddress, ObjectSpan, ResolvedLamp, ResolvedMap2d,
-    resolve,
+    Rotation2d, resolve,
 };

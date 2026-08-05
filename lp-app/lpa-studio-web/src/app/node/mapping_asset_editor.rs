@@ -4,6 +4,11 @@
 //! whole-body (`AssetEditOp::ApplyBody`), Save = project `SaveOverlay`,
 //! Revert = drop the applied edit. The "one home" flip: this mounts inside
 //! the fixture face's output section, no separate pane.
+//!
+//! Refuse-don't-rewrite: a body this build cannot parse — malformed, or
+//! written by a newer LightPlayer — renders as a refusal instead of an
+//! editor. Nothing mounts, nothing is applied, nothing is saved, so the
+//! stored asset survives open → close byte-identical.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use base64::Engine as _;
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Download, Upload};
-use lpa_mapping_editor::{EditorViewOptions, Map2dDoc, MapEditor};
+use lpa_mapping_editor::{DocOpen, DocRefusal, EditorViewOptions, Map2dDoc, MapEditor};
 use lpa_studio_core::{UiAction, UiAssetEditor};
 
 use crate::base::icon::{StudioIcon, StudioIconName};
@@ -55,7 +60,7 @@ pub fn MappingAssetEditor(
     // of our own applies so in-editor undo history survives its round-trip.
     let mut seeded = use_signal(|| None::<(u64, Map2dDoc)>);
     let last_applied = use_hook(|| Rc::new(RefCell::new(None::<String>)));
-    let mut parse_failure = use_signal(|| None::<String>);
+    let mut parse_failure = use_signal(|| None::<DocRefusal>);
     let content_text = editor
         .content
         .as_ref()
@@ -70,24 +75,26 @@ pub fn MappingAssetEditor(
             // and re-arming fit on every host re-render (per-frame, now
             // that the live color feed re-renders this component).
             // All signal writes below are guarded: this runs during render.
-            match Map2dDoc::from_json(text) {
-                Ok(doc) => {
-                    let same = seeded
-                        .peek()
-                        .as_ref()
-                        .is_some_and(|(_, current)| *current == doc);
-                    if !same {
-                        let epoch = seeded.peek().as_ref().map_or(0, |(epoch, _)| epoch + 1);
-                        seeded.set(Some((epoch, doc)));
-                    }
+            let decision = {
+                let current = seeded.peek();
+                decide_seed(&editor.source, text, current.as_ref().map(|(_, doc)| doc))
+            };
+            match decision {
+                SeedDecision::Keep => {
                     if parse_failure.peek().is_some() {
                         parse_failure.set(None);
                     }
                 }
-                Err(error) => {
-                    let message = error.to_string();
-                    if parse_failure.peek().as_deref() != Some(message.as_str()) {
-                        parse_failure.set(Some(message));
+                SeedDecision::Seed(doc) => {
+                    let epoch = seeded.peek().as_ref().map_or(0, |(epoch, _)| epoch + 1);
+                    seeded.set(Some((epoch, doc)));
+                    if parse_failure.peek().is_some() {
+                        parse_failure.set(None);
+                    }
+                }
+                SeedDecision::Refuse(refusal) => {
+                    if parse_failure.peek().as_ref() != Some(&refusal) {
+                        parse_failure.set(Some(refusal));
                     }
                 }
             }
@@ -128,8 +135,13 @@ pub fn MappingAssetEditor(
 
     rsx! {
         div { class: "lpme-face-editor",
-            if let Some(failure) = parse_failure() {
-                div { class: "lpme-error", "{editor.source}: {failure}" }
+            if let Some(refusal) = parse_failure() {
+                div { class: "lpme-refusal",
+                    div { class: "lpme-refusal-message", "{refusal.message}" }
+                    div { class: "lpme-refusal-note",
+                        "This mapping is not being edited, and the stored file has been left exactly as it is."
+                    }
+                }
             } else if let Some((epoch, doc)) = seeded() {
                 MapEditor {
                     doc_epoch: epoch,
@@ -181,15 +193,17 @@ pub fn MappingAssetEditor(
                                 let Some(file) = file else { return };
                                 let name = file.name();
                                 match file.read_string().await {
-                                    Ok(text) => match Map2dDoc::from_json(&text) {
-                                        Ok(parsed) => {
+                                    Ok(text) => match DocOpen::parse(&name, &text) {
+                                        DocOpen::Ready(parsed) => {
                                             upload_error.set(None);
                                             if let Some(handler) = &on_action {
                                                 handler.call(editor.apply_action(&parsed.to_json()));
                                             }
                                         }
-                                        Err(error) => {
-                                            upload_error.set(Some(format!("{name}: {error}")));
+                                        // A file this build cannot read is
+                                        // never applied to the fixture.
+                                        DocOpen::Refused(refusal) => {
+                                            upload_error.set(Some(refusal.message));
                                         }
                                     },
                                     Err(error) => {
@@ -240,6 +254,27 @@ pub fn MappingAssetEditor(
     }
 }
 
+/// What the host does with a fetched asset body.
+#[derive(Debug, Clone, PartialEq)]
+enum SeedDecision {
+    /// The body parses to the document already mounted: leave the session
+    /// (selection, undo history, camera) alone.
+    Keep,
+    /// The body parses to something new: re-seed the editor.
+    Seed(Map2dDoc),
+    /// The body cannot be read by this build. Mount nothing, apply nothing —
+    /// the stored file is not ours to rewrite.
+    Refuse(DocRefusal),
+}
+
+fn decide_seed(source: &str, body: &str, seeded: Option<&Map2dDoc>) -> SeedDecision {
+    match DocOpen::parse(source, body) {
+        DocOpen::Ready(doc) if seeded == Some(&doc) => SeedDecision::Keep,
+        DocOpen::Ready(doc) => SeedDecision::Seed(doc),
+        DocOpen::Refused(refusal) => SeedDecision::Refuse(refusal),
+    }
+}
+
 /// Click a DOM element by id (file dialogs only open from a user gesture,
 /// which the bar button provides).
 fn click_element(id: &str) {
@@ -266,4 +301,108 @@ fn save_overlay_action() -> UiAction {
         ControllerId::new(ProjectController::NODE_ID),
         ProjectOp::SaveOverlay,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOURCE: &str = "fixture.map2d.json";
+
+    /// A body written by a newer LightPlayer refuses with upgrade wording,
+    /// and — because the editor never mounts — the stored body survives an
+    /// open → close round trip byte for byte, with nothing applied.
+    #[test]
+    fn a_newer_body_is_refused_and_never_rewritten() {
+        // Open: the host decides what to do with the fetched body. A refusal
+        // renders in place of the editor, so the only writer of this asset —
+        // `on_doc_change` → `apply_action`, owned by the MapEditor — is never
+        // mounted and emits nothing.
+        let mut stored = NEWER_BODY.to_string();
+        let applied: Vec<String> = Vec::new();
+        let SeedDecision::Refuse(refusal) = decide_seed(SOURCE, &stored, None) else {
+            panic!("a format-99 body must be refused");
+        };
+        assert!(refusal.needs_newer_build);
+        assert!(
+            refusal.message.contains("needs a newer LightPlayer"),
+            "{}",
+            refusal.message
+        );
+
+        // Close: replay whatever the host emitted onto the stored body.
+        assert!(applied.is_empty(), "a refused body must emit no document");
+        for body in &applied {
+            stored = body.clone();
+        }
+        assert_eq!(stored, NEWER_BODY, "the stored body is byte-identical");
+    }
+
+    /// Corruption is refused too, but worded as a repair, not an upgrade.
+    #[test]
+    fn a_malformed_body_is_refused_without_upgrade_wording() {
+        let SeedDecision::Refuse(refusal) = decide_seed(SOURCE, "{ not json", None) else {
+            panic!("a malformed body must be refused");
+        };
+        assert!(!refusal.needs_newer_build);
+        assert!(!refusal.message.contains("newer LightPlayer"));
+        assert!(refusal.message.starts_with(SOURCE));
+    }
+
+    /// The stored file is pretty-printed and the editor emits compact JSON,
+    /// so the echo suppression compares PARSED documents. Re-seeding on a
+    /// text difference would wipe selection and undo on every render.
+    #[test]
+    fn a_reformatted_body_of_the_same_document_keeps_the_session() {
+        let doc = Map2dDoc::from_json(VALID_BODY).expect("valid body");
+        assert_eq!(
+            decide_seed(SOURCE, &doc.to_json_pretty(), Some(&doc)),
+            SeedDecision::Keep
+        );
+    }
+
+    /// The no-gratuitous-rewrite property, on a document this build *can*
+    /// read: opening a valid mapping and closing it without editing leaves
+    /// the stored bytes exactly as they were, pretty-printing and all.
+    #[test]
+    fn a_valid_body_survives_open_and_close_unedited() {
+        let stored = Map2dDoc::from_json(VALID_BODY)
+            .expect("valid body")
+            .to_json_pretty();
+        let SeedDecision::Seed(doc) = decide_seed(SOURCE, &stored, None) else {
+            panic!("a valid body must seed the editor");
+        };
+        // Re-render with the editor mounted: the same body decides Keep, so
+        // nothing re-seeds and — with no edit to commit — nothing is applied.
+        assert_eq!(decide_seed(SOURCE, &stored, Some(&doc)), SeedDecision::Keep);
+        assert_eq!(
+            stored,
+            Map2dDoc::from_json(VALID_BODY)
+                .expect("valid body")
+                .to_json_pretty()
+        );
+    }
+
+    #[test]
+    fn a_different_document_reseeds_the_editor() {
+        let seeded = Map2dDoc::from_json(VALID_BODY).expect("valid body");
+        let incoming = Map2dDoc::from_json(OTHER_VALID_BODY).expect("valid body");
+        assert_eq!(
+            decide_seed(SOURCE, &incoming.to_json(), Some(&seeded)),
+            SeedDecision::Seed(incoming)
+        );
+    }
+
+    /// Format 99 plus a shape variant this build has never heard of — the
+    /// shape of data a future LightPlayer writes.
+    const NEWER_BODY: &str = r#"{
+  "format": 99,
+  "objects": [
+    { "name": "sector", "shape": { "helix": { "turns": 5, "count": 300 } } }
+  ]
+}"#;
+
+    const VALID_BODY: &str = r#"{"format":1,"objects":[{"name":"run","shape":{"path":{"points":[[0,0],[20,10]],"count":3}}}]}"#;
+
+    const OTHER_VALID_BODY: &str = r#"{"format":1,"objects":[{"name":"ring","shape":{"ring":{"center":[0,0],"radius":10,"outer_count":8}}}]}"#;
 }

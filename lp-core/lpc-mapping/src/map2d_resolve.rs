@@ -9,8 +9,8 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use crate::map2d_doc::{
-    GridCorner, GridRouting, GridShape, Map2dDoc, Map2dShape, PathShape, RingDir, RingOrder,
-    RingShape,
+    GridCorner, GridRouting, GridShape, Map2dDoc, Map2dShape, PathShape, RepeatShape, RingDir,
+    RingOrder, RingShape,
 };
 use crate::map2d_error::Map2dError;
 
@@ -41,11 +41,19 @@ pub struct ResolvedLamp {
     pub address: LampAddress,
 }
 
-/// The contiguous lamp span an object resolved to.
+/// One contiguous physical strand of lamps, and the document object it came
+/// from.
+///
+/// Usually one span per object — but a [`RepeatShape`] object emits **one span
+/// per instance**, all carrying the same `object` index, because each instance
+/// is its own strand of wire. Consumers that mean "this object's whole lamp
+/// range" want [`ResolvedMap2d::object_span`]; consumers that mean "the
+/// physical runs" (the fixture's honest spans, the output face's strip
+/// boundaries, wiring-arrow chain hops) want the span list itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectSpan {
     pub object: u32,
-    /// Zero-based wiring index of the object's first lamp.
+    /// Zero-based wiring index of the strand's first lamp.
     pub start: u32,
     pub count: u32,
 }
@@ -66,6 +74,27 @@ impl ResolvedMap2d {
     pub fn universe_count(&self) -> u32 {
         (self.lamps.len() as u32).div_ceil(LAMPS_PER_UNIVERSE)
     }
+
+    /// The whole lamp range one document object occupies, its strands merged.
+    ///
+    /// An object's lamps are always contiguous in wiring order, so merging is
+    /// exact: `start` is its first strand's start and `count` the sum. This is
+    /// what a per-object read-path wants (rail rows, the properties popover,
+    /// expand) now that [`ObjectSpan`] means *strand*, not *object* — indexing
+    /// `spans[object]` is only correct while no document repeats.
+    pub fn object_span(&self, object: u32) -> Option<ObjectSpan> {
+        let mut start: Option<u32> = None;
+        let mut count = 0;
+        for span in self.spans.iter().filter(|span| span.object == object) {
+            start = Some(start.map_or(span.start, |first: u32| first.min(span.start)));
+            count += span.count;
+        }
+        start.map(|start| ObjectSpan {
+            object,
+            start,
+            count,
+        })
+    }
 }
 
 /// Resolve a document into its ordered lamp list.
@@ -80,11 +109,7 @@ pub fn resolve(doc: &Map2dDoc) -> Result<ResolvedMap2d, Map2dError> {
             name: object.name.clone(),
             reason: reason.to_string(),
         };
-        let positions = match &object.shape {
-            Map2dShape::Grid(grid) => resolve_grid(grid, &invalid)?,
-            Map2dShape::Ring(ring) => resolve_ring(ring, &invalid)?,
-            Map2dShape::Path(path) => resolve_path(path, &invalid)?,
-        };
+        let ShapeLamps { positions, strands } = resolve_shape(&object.shape, &invalid)?;
         for pos in positions {
             let index = lamps.len() as u32;
             lamps.push(ResolvedLamp {
@@ -94,13 +119,109 @@ pub fn resolve(doc: &Map2dDoc) -> Result<ResolvedMap2d, Map2dError> {
                 address: address_of(index),
             });
         }
-        spans.push(ObjectSpan {
-            object: object_index,
-            start,
-            count: lamps.len() as u32 - start,
-        });
+        // One span per strand, all naming this object. A plain shape has
+        // exactly one; a repeat has one per instance.
+        let mut strand_start = start;
+        for count in strands {
+            spans.push(ObjectSpan {
+                object: object_index,
+                start: strand_start,
+                count,
+            });
+            strand_start += count;
+        }
     }
     Ok(ResolvedMap2d { lamps, spans })
+}
+
+/// What one shape resolves to: its lamp positions in wiring order, plus how
+/// those positions divide into physical strands.
+struct ShapeLamps {
+    positions: Vec<[f32; 2]>,
+    /// Lamp count of each strand, in wiring order; sums to `positions.len()`.
+    strands: Vec<u32>,
+}
+
+/// Resolve one shape, recursing through [`Map2dShape::Repeat`].
+///
+/// Every leaf shape is a single strand. Only `Repeat` multiplies them, and it
+/// does so by resolving its inner shape once and rotating the result, so a
+/// nested repeat's strand list is the outer count times the inner list.
+fn resolve_shape(
+    shape: &Map2dShape,
+    invalid: &impl Fn(&str) -> Map2dError,
+) -> Result<ShapeLamps, Map2dError> {
+    let positions = match shape {
+        Map2dShape::Grid(grid) => resolve_grid(grid, invalid)?,
+        Map2dShape::Ring(ring) => resolve_ring(ring, invalid)?,
+        Map2dShape::Path(path) => resolve_path(path, invalid)?,
+        Map2dShape::Repeat(repeat) => return resolve_repeat(repeat, invalid),
+    };
+    let strands = alloc::vec![positions.len() as u32];
+    Ok(ShapeLamps { positions, strands })
+}
+
+/// `count` rotated copies of the inner shape, wired instance by instance.
+///
+/// Instance `k` is the inner shape rotated `k * 360 / count` degrees about
+/// `center` (screen coordinates, y-down, same trig as [`resolve_ring`]);
+/// instance 0 comes out bit-identical to the unrotated inner shape because
+/// `sinf(0)`/`cosf(0)` are exact. All of instance 0's lamps precede all of
+/// instance 1's — instance `k` is physical strand `k`.
+fn resolve_repeat(
+    repeat: &RepeatShape,
+    invalid: &impl Fn(&str) -> Map2dError,
+) -> Result<ShapeLamps, Map2dError> {
+    if repeat.count == 0 {
+        return Err(invalid("repeat count must be at least 1"));
+    }
+    let inner = resolve_shape(&repeat.shape, invalid)?;
+    let mut positions = Vec::with_capacity(inner.positions.len() * repeat.count as usize);
+    let mut strands = Vec::with_capacity(inner.strands.len() * repeat.count as usize);
+    for instance in 0..repeat.count {
+        let rotation = Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
+        for position in &inner.positions {
+            positions.push(rotation.apply(*position));
+        }
+        strands.extend_from_slice(&inner.strands);
+    }
+    Ok(ShapeLamps { positions, strands })
+}
+
+/// A rotation about a point, precomputed once and applied per point.
+///
+/// This is the *only* place a repeat's turn is computed, so an editor that
+/// rotates authored geometry (expanding a repeat into independent objects,
+/// drawing ghost instance outlines) gets bit-identical results to the
+/// resolver instead of its own re-derived trig. Screen coordinates, y-down:
+/// a positive angle turns clockwise, matching [`resolve_ring`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rotation2d {
+    center: [f32; 2],
+    sin: f32,
+    cos: f32,
+}
+
+impl Rotation2d {
+    #[must_use]
+    pub fn about(center: [f32; 2], degrees: f32) -> Self {
+        let radians = degrees * (core::f32::consts::PI / 180.0);
+        Self {
+            center,
+            sin: libm::sinf(radians),
+            cos: libm::cosf(radians),
+        }
+    }
+
+    #[must_use]
+    pub fn apply(&self, point: [f32; 2]) -> [f32; 2] {
+        let dx = point[0] - self.center[0];
+        let dy = point[1] - self.center[1];
+        [
+            self.center[0] + dx * self.cos - dy * self.sin,
+            self.center[1] + dx * self.sin + dy * self.cos,
+        ]
+    }
 }
 
 fn address_of(index: u32) -> LampAddress {
@@ -214,37 +335,84 @@ fn resolve_path(
         return Err(invalid("path needs at least 2 points"));
     }
     let mut points = path.points.clone();
+    let inert = inert_segments(path);
     if path.reversed {
         points.reverse();
     }
 
-    let total = polyline_length(&points);
-    if total <= f32::EPSILON {
-        return Err(invalid("path has zero length"));
+    // Lamps are distributed over the ACTIVE length only: a jumper wire between
+    // two lit runs carries no lamps, and the strip's pitch stays uniform
+    // across the whole channel (fixed-pitch strip cut at a hub and jumpered).
+    let total_active = active_length(&points, &inert);
+    if total_active <= f32::EPSILON {
+        return Err(invalid(if path.gaps.is_empty() {
+            "path has zero length"
+        } else {
+            "path has no active length (every segment is a gap)"
+        }));
     }
 
     let mut positions = Vec::with_capacity(path.count as usize);
     if path.count == 1 {
-        positions.push(points[0]);
+        positions.push(point_at_active_distance(&points, &inert, 0.0));
         return Ok(positions);
     }
     for lamp in 0..path.count {
-        let distance = total * (lamp as f32 / (path.count - 1) as f32);
-        positions.push(point_at_distance(&points, distance));
+        let distance = total_active * (lamp as f32 / (path.count - 1) as f32);
+        positions.push(point_at_active_distance(&points, &inert, distance));
     }
     Ok(positions)
 }
 
-fn polyline_length(points: &[[f32; 2]]) -> f32 {
+/// Per-segment inert flags, already mapped into walk order.
+///
+/// `reversed` mirrors the segment order along with the points
+/// (`n_segments - 1 - i`), so the same *physical* segments stay inert whichever
+/// end of the strip the data enters from. Out-of-range indices name no segment
+/// and are ignored — the editor sanitizes them out, and a hand-authored
+/// document should not fail to resolve over one.
+fn inert_segments(path: &PathShape) -> Vec<bool> {
+    let segments = path.points.len().saturating_sub(1);
+    let mut inert = Vec::new();
+    inert.resize(segments, false);
+    for gap in &path.gaps {
+        let index = *gap as usize;
+        if index < segments {
+            let index = if path.reversed {
+                segments - 1 - index
+            } else {
+                index
+            };
+            inert[index] = true;
+        }
+    }
+    inert
+}
+
+/// Summed length of the segments that carry lamps.
+fn active_length(points: &[[f32; 2]], inert: &[bool]) -> f32 {
     points
         .windows(2)
-        .map(|pair| distance(pair[0], pair[1]))
+        .enumerate()
+        .filter(|(index, _)| !is_inert(inert, *index))
+        .map(|(_, pair)| distance(pair[0], pair[1]))
         .sum()
 }
 
-fn point_at_distance(points: &[[f32; 2]], target_distance: f32) -> [f32; 2] {
+/// The point `target_distance` along the polyline's **active** length.
+///
+/// Inert segments move the walk's position without consuming distance, so a
+/// lamp can never land on one. The fallback (float slop pushing the last lamp
+/// a hair past the total) is the far end of the last *active* segment, which
+/// is not `points.last()` when the path ends in a gap. Degenerate zero-length
+/// segments keep their long-standing skip behavior.
+fn point_at_active_distance(points: &[[f32; 2]], inert: &[bool], target_distance: f32) -> [f32; 2] {
     let mut remaining = target_distance;
-    for pair in points.windows(2) {
+    let mut last_active_end = None;
+    for (index, pair) in points.windows(2).enumerate() {
+        if is_inert(inert, index) {
+            continue;
+        }
         let start = pair[0];
         let end = pair[1];
         let segment = distance(start, end);
@@ -259,8 +427,13 @@ fn point_at_distance(points: &[[f32; 2]], target_distance: f32) -> [f32; 2] {
             ];
         }
         remaining -= segment;
+        last_active_end = Some(end);
     }
-    *points.last().expect("non-empty points")
+    last_active_end.unwrap_or_else(|| *points.first().expect("non-empty points"))
+}
+
+fn is_inert(inert: &[bool], index: usize) -> bool {
+    inert.get(index).copied().unwrap_or(false)
 }
 
 fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -273,6 +446,7 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
 mod tests {
     use super::*;
     use crate::map2d_doc::{Map2dObject, Map2dShape};
+    use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::vec;
 
@@ -375,6 +549,7 @@ mod tests {
             points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
             count: 5,
             reversed: false,
+            gaps: Vec::new(),
         }));
         let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
         assert_eq!(positions[0], [0.0, 0.0]);
@@ -388,9 +563,304 @@ mod tests {
             points: vec![[0.0, 0.0], [10.0, 0.0]],
             count: 2,
             reversed: true,
+            gaps: Vec::new(),
         }));
         assert_eq!(resolved.lamps[0].pos, [10.0, 0.0]);
         assert_eq!(resolved.lamps[1].pos, [0.0, 0.0]);
+    }
+
+    /// The heart of inert segments: `count` lamps spread over the ACTIVE
+    /// length only, at one uniform pitch, and never onto the jumper. The
+    /// lamp landing exactly on the seam sits at the *end* of the active run
+    /// before the gap (the walk's `remaining <= segment` convention).
+    #[test]
+    fn a_mid_path_gap_carries_no_lamps_and_keeps_the_pitch_uniform() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![1], 5, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        // 20 active units (segments 0 and 2), 5 lamps → 5 units apart.
+        assert_eq!(
+            positions,
+            vec![
+                [0.0, 0.0],
+                [5.0, 0.0],
+                [10.0, 0.0],  // end of the run into the jumper
+                [15.0, 10.0], // resumes on the far side, pitch unbroken
+                [20.0, 10.0],
+            ]
+        );
+        // Inert segments emit NO entries: the object's span is exactly `count`,
+        // so every downstream wiring index is unshifted.
+        assert_eq!(resolved.spans[0].count, 5);
+    }
+
+    #[test]
+    fn a_leading_gap_starts_the_lamps_at_the_first_active_segment() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 3, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(positions, vec![[10.0, 0.0], [10.0, 10.0], [20.0, 10.0]]);
+    }
+
+    #[test]
+    fn a_trailing_gap_ends_the_lamps_at_the_last_active_segment() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![2], 3, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(positions, vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]);
+    }
+
+    #[test]
+    fn gaps_either_side_leave_one_active_segment_carrying_every_lamp() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![0, 2], 3, false)));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(positions, vec![[10.0, 0.0], [10.0, 5.0], [10.0, 10.0]]);
+    }
+
+    /// `reversed` mirrors the gap indices along with the points, so the same
+    /// *physical* segment stays inert whichever end the data enters from — the
+    /// reversed lamp list is exactly the forward one, backwards.
+    #[test]
+    fn reversed_remaps_gap_indices_to_the_same_physical_segments() {
+        let forward = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 3, false)));
+        let reversed = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 3, true)));
+        let mut expected: Vec<_> = forward.lamps.iter().map(|l| l.pos).collect();
+        expected.reverse();
+        let actual: Vec<_> = reversed.lamps.iter().map(|l| l.pos).collect();
+        assert_eq!(actual, expected);
+        assert_eq!(actual[0], [20.0, 10.0]);
+    }
+
+    #[test]
+    fn a_single_lamp_on_a_gapped_path_sits_at_the_first_active_point() {
+        let resolved = resolve_shape(Map2dShape::Path(gapped_l(vec![0], 1, false)));
+        assert_eq!(resolved.lamps.len(), 1);
+        assert_eq!(resolved.lamps[0].pos, [10.0, 0.0]);
+    }
+
+    /// Every segment inert is the analogue of a zero-length path: an object
+    /// that cannot place a lamp is a load-time error, not silence.
+    #[test]
+    fn a_path_whose_every_segment_is_a_gap_is_invalid() {
+        let doc = Map2dDoc {
+            objects: vec![object(Map2dShape::Path(gapped_l(vec![0, 1, 2], 4, false)))],
+            ..Map2dDoc::new()
+        };
+        let error = resolve(&doc).unwrap_err();
+        assert!(matches!(
+            &error,
+            Map2dError::InvalidObject { reason, .. } if reason.contains("no active length")
+        ));
+    }
+
+    /// Out-of-range gap indices name no segment; the document still resolves
+    /// (the editor sanitizes them away, a hand-edit should not brick a load).
+    #[test]
+    fn out_of_range_gap_indices_are_ignored() {
+        let with_junk = resolve_shape(Map2dShape::Path(gapped_l(vec![1, 9, 42], 5, false)));
+        let clean = resolve_shape(Map2dShape::Path(gapped_l(vec![1], 5, false)));
+        assert_eq!(with_junk.positions(), clean.positions());
+    }
+
+    // ---- rotational repeat ----------------------------------------------
+
+    /// The rotation itself, read off a shape whose quarter turns are exact
+    /// corners: a two-lamp diagonal repeated four times traces a square, each
+    /// instance a quarter turn on from the last (screen coordinates, y-down,
+    /// so a positive turn runs clockwise).
+    #[test]
+    fn repeat_turns_each_instance_by_its_share_of_the_circle() {
+        let resolved = resolve_shape(Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(Map2dShape::Path(PathShape {
+                points: vec![[10.0, 0.0], [0.0, 10.0]],
+                count: 2,
+                reversed: false,
+                gaps: Vec::new(),
+            })),
+            center: [0.0, 0.0],
+            count: 4,
+        }));
+        let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
+        let expected = [
+            [10.0, 0.0],
+            [0.0, 10.0], // instance 0: unrotated
+            [0.0, 10.0],
+            [-10.0, 0.0], // 90°
+            [-10.0, 0.0],
+            [0.0, -10.0], // 180°
+            [0.0, -10.0],
+            [10.0, 0.0], // 270°
+        ];
+        assert_eq!(positions.len(), expected.len());
+        for (index, (actual, want)) in positions.iter().zip(expected).enumerate() {
+            assert!(
+                (actual[0] - want[0]).abs() < 1e-3 && (actual[1] - want[1]).abs() < 1e-3,
+                "lamp {index}: {actual:?} != {want:?}"
+            );
+        }
+    }
+
+    /// Instance 0 is the inner shape *untouched*, not merely close to it —
+    /// `sinf(0)`/`cosf(0)` are exact, and an author who repeats a traced
+    /// sector must not see the traced copy move.
+    #[test]
+    fn repeat_leaves_the_first_instance_bit_identical() {
+        let inner = square_corner_path();
+        let plain = resolve_shape(Map2dShape::Path(inner.clone()));
+        let repeated = resolve_shape(Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(Map2dShape::Path(inner)),
+            center: [17.0, -4.0],
+            count: 7,
+        }));
+        assert_eq!(
+            repeated.positions()[..plain.lamps.len()].to_vec(),
+            plain.positions()
+        );
+    }
+
+    /// Wiring order is instance by instance: all of instance 0's lamps, then
+    /// all of instance 1's. Instance `k` is physical strand `k`.
+    #[test]
+    fn repeat_wires_each_instance_through_before_the_next() {
+        let resolved = resolve_shape(repeated_sector(3));
+        assert_eq!(resolved.lamps.len(), 12);
+        // Each instance's four lamps share a turn; a strand that interleaved
+        // instances would break the run of equal angular offsets.
+        for instance in 0..3usize {
+            for lamp in 0..4usize {
+                let base = resolved.lamps[lamp].pos;
+                let here = resolved.lamps[instance * 4 + lamp].pos;
+                let turn = angle_of(here) - angle_of(base);
+                let expected = instance as f32 * 120.0;
+                assert!(
+                    (wrap_degrees(turn - expected)).abs() < 0.05,
+                    "instance {instance} lamp {lamp}: turned {turn}°, wanted {expected}°"
+                );
+            }
+        }
+    }
+
+    /// The load-bearing decision: **one span per instance**, all naming the
+    /// same document object. Downstream these spans are the physical strands —
+    /// three strands of four, never one strand of twelve.
+    #[test]
+    fn repeat_emits_one_span_per_instance_all_naming_one_object() {
+        let resolved = resolve_shape(repeated_sector(3));
+        assert_eq!(resolved.spans.len(), 3);
+        for (instance, span) in resolved.spans.iter().enumerate() {
+            assert_eq!(span.object, 0);
+            assert_eq!(span.start, instance as u32 * 4);
+            assert_eq!(span.count, 4);
+        }
+        // Lamps still name the document object, so selection and the rail see
+        // one object however many strands it wires.
+        assert!(resolved.lamps.iter().all(|lamp| lamp.object == 0));
+        // …and the per-object read-path merges the strands back.
+        let whole = resolved.object_span(0).unwrap();
+        assert_eq!((whole.start, whole.count), (0, 12));
+        assert_eq!(resolved.object_span(1), None);
+    }
+
+    /// Composing with P3: a repeated *gapped* path keeps its jumper inert in
+    /// every instance — the gap is a property of the inner shape, resolved
+    /// once and rotated, so it cannot drift instance to instance.
+    #[test]
+    fn repeat_of_a_gapped_path_keeps_the_jumper_inert_in_every_instance() {
+        let plain = resolve_shape(Map2dShape::Path(gapped_l(vec![1], 5, false)));
+        let resolved = resolve_shape(Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(Map2dShape::Path(gapped_l(vec![1], 5, false))),
+            center: [10.0, 5.0],
+            count: 4,
+        }));
+        // 5 lamps per instance — the inert segment adds none, in any instance.
+        assert_eq!(resolved.lamps.len(), 20);
+        assert!(resolved.spans.iter().all(|span| span.count == 5));
+        // Instance 2 is the half turn of instance 0 about [10, 5].
+        for lamp in 0..5usize {
+            let base = plain.lamps[lamp].pos;
+            let want = [2.0 * 10.0 - base[0], 2.0 * 5.0 - base[1]];
+            let actual = resolved.lamps[10 + lamp].pos;
+            assert!(
+                (actual[0] - want[0]).abs() < 1e-3 && (actual[1] - want[1]).abs() < 1e-3,
+                "lamp {lamp}: {actual:?} != {want:?}"
+            );
+        }
+    }
+
+    /// Nesting multiplies strands: the innermost instances are the strands, so
+    /// a 3-way repeat of a 2-way repeat of a path is six of them.
+    #[test]
+    fn nested_repeat_multiplies_the_strands() {
+        let resolved = resolve_shape(Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(repeated_sector(2)),
+            center: [100.0, 100.0],
+            count: 3,
+        }));
+        assert_eq!(resolved.spans.len(), 6);
+        assert_eq!(resolved.lamps.len(), 24);
+        for (strand, span) in resolved.spans.iter().enumerate() {
+            assert_eq!(span.object, 0);
+            assert_eq!(span.start, strand as u32 * 4);
+            assert_eq!(span.count, 4);
+        }
+    }
+
+    /// `count: 1` is the identity: same lamps, same single span as the inner
+    /// shape alone — wrapping a shape must never change what it resolves to.
+    #[test]
+    fn a_repeat_of_one_is_the_inner_shape_unchanged() {
+        let inner = square_corner_path();
+        let plain = resolve_shape(Map2dShape::Path(inner.clone()));
+        let wrapped = resolve_shape(Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(Map2dShape::Path(inner)),
+            center: [-40.0, 90.0],
+            count: 1,
+        }));
+        assert_eq!(wrapped.lamps, plain.lamps);
+        assert_eq!(wrapped.spans, plain.spans);
+    }
+
+    /// Zero instances place no lamps — the same load-time error every other
+    /// shape gives for a count it cannot satisfy, naming the object.
+    #[test]
+    fn a_repeat_of_zero_is_invalid() {
+        let doc = Map2dDoc {
+            objects: vec![object(repeated_sector(0))],
+            ..Map2dDoc::new()
+        };
+        let error = resolve(&doc).unwrap_err();
+        assert!(matches!(
+            &error,
+            Map2dError::InvalidObject { reason, .. } if reason.contains("repeat count")
+        ));
+    }
+
+    /// An invalid *inner* shape is still the outer object's error: the report
+    /// names the wiring index the author can find in the rail.
+    #[test]
+    fn an_invalid_inner_shape_reports_the_repeating_object() {
+        let doc = Map2dDoc {
+            objects: vec![
+                object(Map2dShape::Path(PathShape {
+                    points: vec![[0.0, 0.0], [1.0, 0.0]],
+                    count: 2,
+                    reversed: false,
+                    gaps: Vec::new(),
+                })),
+                object(Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(Map2dShape::Path(PathShape {
+                        points: vec![[0.0, 0.0]],
+                        count: 2,
+                        reversed: false,
+                        gaps: Vec::new(),
+                    })),
+                    center: [0.0, 0.0],
+                    count: 3,
+                })),
+            ],
+            ..Map2dDoc::new()
+        };
+        assert!(matches!(
+            resolve(&doc).unwrap_err(),
+            Map2dError::InvalidObject { object: 1, .. }
+        ));
     }
 
     #[test]
@@ -429,6 +899,7 @@ mod tests {
                     points: vec![[0.0, 0.0], [1.0, 0.0]],
                     count: 3,
                     reversed: false,
+                    gaps: Vec::new(),
                 })),
                 object(Map2dShape::Ring(button_rings())),
             ],
@@ -452,6 +923,7 @@ mod tests {
                     points: vec![[0.0, 0.0]],
                     count: 2,
                     reversed: false,
+                    gaps: Vec::new(),
                 }),
             }],
             ..Map2dDoc::new()
@@ -482,6 +954,60 @@ mod tests {
             name: String::new(),
             shape,
         }
+    }
+
+    /// Three 10-unit segments in an L-and-back: `[0,0] → [10,0] → [10,10] →
+    /// [20,10]`. Every gap test reads off the same geometry.
+    fn gapped_l(gaps: Vec<u32>, count: u32, reversed: bool) -> PathShape {
+        PathShape {
+            points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [20.0, 10.0]],
+            count,
+            reversed,
+            gaps,
+        }
+    }
+
+    /// A four-lamp diagonal well off the origin — deliberately asymmetric, so
+    /// a rotation that silently did nothing would show.
+    fn square_corner_path() -> PathShape {
+        PathShape {
+            points: vec![[30.0, 12.0], [90.0, 42.0]],
+            count: 4,
+            reversed: false,
+            gaps: Vec::new(),
+        }
+    }
+
+    /// `instances` copies of a four-lamp radial rib around the origin — the
+    /// mini-dome shape the span tests read off.
+    fn repeated_sector(instances: u32) -> Map2dShape {
+        Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(Map2dShape::Path(PathShape {
+                points: vec![[0.0, -40.0], [0.0, -100.0]],
+                count: 4,
+                reversed: false,
+                gaps: Vec::new(),
+            })),
+            center: [0.0, 0.0],
+            count: instances,
+        })
+    }
+
+    /// Screen-space angle in degrees (y-down, so increasing = clockwise).
+    fn angle_of(pos: [f32; 2]) -> f32 {
+        libm::atan2f(pos[1], pos[0]) * 180.0 / core::f32::consts::PI
+    }
+
+    /// Fold a degree difference into `(-180, 180]`.
+    fn wrap_degrees(degrees: f32) -> f32 {
+        let mut degrees = degrees % 360.0;
+        if degrees > 180.0 {
+            degrees -= 360.0;
+        }
+        if degrees <= -180.0 {
+            degrees += 360.0;
+        }
+        degrees
     }
 
     fn button_rings() -> RingShape {

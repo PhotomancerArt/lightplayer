@@ -5,10 +5,10 @@
 //!
 //! - `project.schema.json` — the `project.json` container manifest (not a
 //!   node envelope): `format` pinned to
-//!   [`lpc_model::PROJECT_FORMAT_VERSION`], optional `uid`/`name` plus the
-//!   optional provenance fields (`author`/`version`/`license`/`created`),
-//!   nothing else (mirrors the loader gate in `lpc-registry`, which
-//!   hard-refuses a missing/malformed manifest and rejects mismatched
+//!   [`lpc_model::PROJECT_FORMAT_VERSION`], optional `uid`/`name`/`target`
+//!   plus the optional provenance fields (`author`/`version`/`license`/
+//!   `created`), nothing else (mirrors the loader gate in `lpc-registry`,
+//!   which hard-refuses a missing/malformed manifest and rejects mismatched
 //!   formats).
 //! - `module.schema.json` — the `module.json` root module node artifact:
 //!   top-level `kind: "Module"` const plus the compiled `ModuleDef` shape.
@@ -145,13 +145,13 @@ fn populated_registry() -> Result<SlotShapeRegistry> {
 ///
 /// The container is NOT a node envelope (docs/design/modules.md §1/§6): it
 /// carries the workspace identity — `format` pinned to the current
-/// [`PROJECT_FORMAT_VERSION`], optional `uid`/`name`, and the optional
-/// provenance fields `author`/`version`/`license`/`created` — and nothing
-/// else (`additionalProperties: false` mirrors the strict streaming reader
-/// in `lpc_model::ProjectManifest`, which rejects unknown fields). The
-/// property list must track `ProjectManifest`'s fields one-for-one: the
-/// reader accepts exactly these keys, so a field missing here is legal on
-/// disk but flagged by schema validation as unknown.
+/// [`PROJECT_FORMAT_VERSION`], optional `uid`/`name`, the advisory `target`,
+/// and the optional provenance fields `author`/`version`/`license`/`created`
+/// — and nothing else (`additionalProperties: false` mirrors the strict
+/// streaming reader in `lpc_model::ProjectManifest`, which rejects unknown
+/// fields). The property list must track `ProjectManifest`'s fields
+/// one-for-one: the reader accepts exactly these keys, so a field missing
+/// here is legal on disk but flagged by schema validation as unknown.
 fn project_schema() -> Result<Value> {
     Ok(json!({
         "title": "LightPlayer project container manifest",
@@ -186,6 +186,14 @@ fn project_schema() -> Result<Value> {
             },
             "created": {
                 "title": "Provenance: ISO date the project was created",
+                "type": "string",
+            },
+            "target": {
+                "title": "Advisory board target",
+                "description": "A board catalog id in the registry's \
+    vendor/product vocabulary (e.g. espressif/esp32-c6-devkitc-1), the same \
+    strings as RegisteredDevice.board_id. Advisory only — the engine never \
+    reads it.",
                 "type": "string",
             },
         },
@@ -505,6 +513,51 @@ mod tests {
         assert_eq!(
             project["$id"],
             json!(format!("{SCHEMA_ID_BASE}project.schema.json"))
+        );
+    }
+
+    /// P02: `target` validates as an optional string, and stays an unknown
+    /// field like any other stray key (the container schema's whole point
+    /// is that nothing outside its declared vocabulary is accepted).
+    #[test]
+    fn project_schema_validates_advisory_target() {
+        let outputs = generate_outputs().unwrap();
+        let project: Value = serde_json::from_str(&outputs["project.schema.json"]).unwrap();
+        let validator = jsonschema::draft202012::new(&project).expect("compiles");
+
+        let targeted = json!({
+            "format": PROJECT_FORMAT_VERSION,
+            "name": "Porch sign",
+            "target": "espressif/esp32-c6-devkitc-1",
+        });
+        assert!(
+            validator.is_valid(&targeted),
+            "a targeted project must validate: {:?}",
+            validator.iter_errors(&targeted).collect::<Vec<_>>()
+        );
+
+        let untargeted = json!({ "format": PROJECT_FORMAT_VERSION });
+        assert!(
+            validator.is_valid(&untargeted),
+            "target stays optional — an untargeted project must still validate"
+        );
+
+        let wrong_typed = json!({
+            "format": PROJECT_FORMAT_VERSION,
+            "target": 6,
+        });
+        assert!(
+            !validator.is_valid(&wrong_typed),
+            "target must be a string, not a number"
+        );
+
+        let misspelled = json!({
+            "format": PROJECT_FORMAT_VERSION,
+            "targt": "espressif/esp32-c6-devkitc-1",
+        });
+        assert!(
+            !validator.is_valid(&misspelled),
+            "the container stays closed-vocabulary — a stray key is still refused"
         );
     }
 

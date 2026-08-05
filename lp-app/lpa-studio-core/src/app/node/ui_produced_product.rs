@@ -192,7 +192,12 @@ pub struct UiControlProductPreview {
     /// How to interpret the native sample buffer.
     pub sample_layout: ControlSampleLayout,
     /// Optional human-facing display layout for the sample data.
-    pub display_layout: Option<ControlDisplayLayout>,
+    ///
+    /// Shared for the same reason as `bytes`: a dome-scale layout is 1500
+    /// lamps (~bigger than the sample payload), the layout survives
+    /// unchanged across ticks, and the per-tick preview rebuild must not
+    /// deep-copy it.
+    pub display_layout: Option<Rc<ControlDisplayLayout>>,
     /// Native sample bytes, little-endian for `U16`.
     ///
     /// Shared (`Rc<[u8]>`) so cloning a preview into a view is a refcount bump,

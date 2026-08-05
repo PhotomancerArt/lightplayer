@@ -72,6 +72,25 @@ pub struct BoardDisplayFile {
     /// computed join matches. Empty on every normal board.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub firmware_deny: Vec<FirmwarePin>,
+    /// The board-visible wire names LED output goes to by default, **best
+    /// first** — the answer to "where do the pixels plug in" that project
+    /// generation and the provisioning picker need.
+    ///
+    /// Each entry is a silkscreen label from this board's own pin/terminal
+    /// tables (`IO18`, `LED1`, `D10`, `18`), so an endpoint spec is the
+    /// label with the target prefix:
+    /// `ws281x:local:<wire>` (`docs/adr/2026-08-03-multi-endpoint-output-node.md`
+    /// — the middle segment names the device, the last one names the wire).
+    /// [`Self::validate`] refuses a name that is not an output-eligible pin
+    /// or terminal with a gpio, because a wrong wire is the
+    /// physical-damage class of mistake `boards/README.md` is about.
+    ///
+    /// Order is meaningful and is a board fact where the board has one: the
+    /// DOM-Z-102 lists its four fused DATA terminals and deliberately omits
+    /// the un-level-shifted spare. Single-wire generation takes
+    /// [`Self::default_led_wire`]; multi-wire generation is future work.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_led_wires: Vec<String>,
     pub hw: BoardDrawing,
 }
 
@@ -434,12 +453,50 @@ impl BoardDisplayFile {
                 seen.push(gpio);
             }
         }
+        let mut named = Vec::new();
+        for wire in &self.default_led_wires {
+            if named.contains(&wire.as_str()) {
+                return invalid(format!("default LED wire {wire:?} is listed twice"));
+            }
+            named.push(wire.as_str());
+            if !self.output_wires().any(|(label, _)| label == wire) {
+                return invalid(format!(
+                    "default LED wire {wire:?} is not an output-eligible pin or \
+                     terminal with a gpio on this board"
+                ));
+            }
+        }
         Ok(())
     }
 
     /// All rail pins, left then right (terminals excluded).
     pub fn pins(&self) -> impl Iterator<Item = &DrawnPin> {
         self.hw.left.iter().chain(self.hw.right.iter())
+    }
+
+    /// Every wire LED output may be authored onto: rail pins **and** screw
+    /// terminals whose role is output-eligible and whose gpio is known, as
+    /// `(silkscreen label, gpio)`. Terminals matter — a DIN-rail controller
+    /// keeps every LED output in `hw.terminals`, which [`Self::pins`] does
+    /// not walk.
+    pub fn output_wires(&self) -> impl Iterator<Item = (&str, u8)> {
+        self.pins()
+            .map(|pin| (pin.label.as_str(), pin.role, pin.gpio))
+            .chain(
+                self.hw
+                    .terminals
+                    .iter()
+                    .map(|terminal| (terminal.label.as_str(), terminal.role, terminal.gpio)),
+            )
+            .filter(|(_, role, _)| role.output_eligible())
+            .filter_map(|(label, _, gpio)| Some((label, gpio?)))
+    }
+
+    /// The wire a single-output project generates onto — the first of
+    /// [`Self::default_led_wires`]. `None` means the board states no
+    /// default, which generation must refuse rather than guess.
+    pub fn default_led_wire(&self) -> Option<&str> {
+        self.default_led_wires.first().map(String::as_str)
     }
 }
 
@@ -467,6 +524,7 @@ mod tests {
             notes: vec![],
             firmware_allow: vec![],
             firmware_deny: vec![],
+            default_led_wires: vec!["4".into()],
             hw: BoardDrawing {
                 width: 100.0,
                 module: DrawnModule {
@@ -562,6 +620,57 @@ mod tests {
             reason: "bricks the bootloader".into(),
         }];
         assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_a_default_wire_the_board_does_not_expose() {
+        let mut file = minimal();
+        file.default_led_wires = vec!["IO18".into()];
+        let error = file.validate().expect_err("no IO18 pin on this board");
+        assert!(format!("{error}").contains("output-eligible"), "{error}");
+    }
+
+    #[test]
+    fn rejects_a_default_wire_on_a_non_output_role() {
+        let mut file = minimal();
+        file.hw.right = vec![DrawnPin {
+            label: "GND".into(),
+            role: PinRole::Gnd,
+            gpio: None,
+            pad_style: PadStyle::Pad,
+            caps: vec![],
+        }];
+        file.default_led_wires = vec!["GND".into()];
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_a_repeated_default_wire() {
+        let mut file = minimal();
+        file.default_led_wires = vec!["4".into(), "4".into()];
+        assert!(file.validate().is_err());
+    }
+
+    #[test]
+    fn accepts_a_terminal_as_a_default_wire() {
+        let mut file = minimal();
+        file.hw.terminals = vec![DrawnTerminal {
+            label: "LED1".into(),
+            role: PinRole::Io,
+            gpio: Some(16),
+            caps: vec![],
+        }];
+        file.default_led_wires = vec!["LED1".into(), "4".into()];
+        file.validate().expect("terminals are wires too");
+        assert_eq!(file.default_led_wire(), Some("LED1"));
+    }
+
+    #[test]
+    fn no_default_wire_is_a_first_class_state() {
+        let mut file = minimal();
+        file.default_led_wires = vec![];
+        file.validate().expect("a board may state no default");
+        assert_eq!(file.default_led_wire(), None);
     }
 
     #[test]

@@ -57,7 +57,10 @@ pub struct ResolvedSpan {
 /// See the module docs for what this type deliberately is not.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ResolvedMappingCompact {
-    /// One entry per document object, in channel-assignment order.
+    /// One entry per physical strand, in channel-assignment order. Usually
+    /// one per document object — but a rotational `repeat` object contributes
+    /// one per instance, all carrying the same `object` index, because each
+    /// instance is its own run of wire.
     pub spans: Vec<ResolvedSpan>,
     /// Fitted texture-space centers, exact capacity, span-concatenated.
     pub points: Vec<[f32; 2]>,
