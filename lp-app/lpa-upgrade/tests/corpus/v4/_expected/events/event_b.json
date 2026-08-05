@@ -1,0 +1,35 @@
+{
+  "kind": "ComputeShader",
+  "source": "event_b.glsl",
+  "bindings": {
+    "events": {
+      "target": "bus:trigger"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "time": {
+      "kind": "seconds",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": ""
+    }
+  },
+  "produced": {
+    "events": {
+      "kind": "map",
+      "value": "lp::control::Message",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 8,
+        "key": "id",
+        "empty_key": 0
+      },
+      "label": "",
+      "description": ""
+    }
+  }
+}

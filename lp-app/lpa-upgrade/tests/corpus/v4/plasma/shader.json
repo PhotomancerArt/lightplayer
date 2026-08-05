@@ -1,0 +1,45 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "scale": {
+      "source": "bus:scale"
+    },
+    "speed": {
+      "source": "bus:speed"
+    }
+  },
+  "float_mode": "fixed",
+  "consumed": {
+    "scale": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Scale",
+      "description": "Spatial frequency of the folded sine fields"
+    },
+    "speed": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 4,
+      "label": "Speed",
+      "description": "Animation speed multiplier"
+    },
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default_bind": "bus:time",
+      "default": 0,
+      "label": "Time",
+      "description": "Project clock time in seconds"
+    }
+  }
+}

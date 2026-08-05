@@ -24,7 +24,7 @@ use std::rc::Rc;
 use lpa_client::BackoffPolicy;
 use lpa_link::{DeviceSession, DeviceState, LinkConnection, LinkConnector, LinkSession};
 
-use crate::app::places::DeviceSyncState;
+use crate::app::places::{DeviceSyncState, HardwareId};
 use crate::app::studio::refresh_cadence::{
     DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX,
     REFRESH_DUE_SLACK, RefreshCadence,
@@ -195,6 +195,13 @@ pub struct RuntimeSession {
     /// What the attached DEVICE holds, computed by connect-as-pull (D8)
     /// right after the server protocol attaches to hardware.
     device_sync: Option<DeviceSyncState>,
+    /// Where THIS session's identity came from (device identity design
+    /// §3): the efuse MAC the hello/probe reported, or the minted uid a
+    /// legacy stamp carried. Resolved alongside `device_sync` at connect
+    /// and cleared with it — it is evidence about the live board, not a
+    /// remembered fact. The registry row's `hardware_id` column is
+    /// written from this.
+    hardware_id: Option<HardwareId>,
     /// The device copy's and local head's version numbers on the project
     /// line (`ProjectHistory::version_number`), computed alongside
     /// `device_sync` when the pull classifies against a known project —
@@ -259,6 +266,7 @@ impl RuntimeSession {
             server_state: ServerState::Disconnected,
             requested_log_level: UiLogLevel::Info,
             device_sync: None,
+            hardware_id: None,
             device_versions: (None, None),
             device_drift_times: (None, None),
             device_storage_id: None,
@@ -626,6 +634,17 @@ impl RuntimeSession {
         self.device_sync = sync;
     }
 
+    /// This session's resolved identity source (device identity design
+    /// §3), or `None` while the board is anonymous (A4) or the pull has
+    /// not classified yet.
+    pub fn hardware_id(&self) -> Option<HardwareId> {
+        self.hardware_id
+    }
+
+    pub fn set_hardware_id(&mut self, hardware_id: Option<HardwareId>) {
+        self.hardware_id = hardware_id;
+    }
+
     pub fn device_versions(&self) -> (Option<usize>, Option<usize>) {
         self.device_versions
     }
@@ -655,6 +674,7 @@ impl RuntimeSession {
     /// the server protocol detached).
     pub fn clear_reconcile(&mut self) {
         self.device_sync = None;
+        self.hardware_id = None;
         self.device_versions = (None, None);
         self.device_storage_id = None;
     }

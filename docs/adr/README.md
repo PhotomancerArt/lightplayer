@@ -75,8 +75,8 @@ holds the full context.
 | Host-serial ESP32 management; self-hosted/vendored browser esptool; raw LittleFS backup/restore; long-management cancel/retry | `2026-06-22-studio-link-management-workflow` | Host-serial support, offline builds, backup, or flash/erase recovery is prioritized |
 | Cancellation/retry affordances and section-aware Device activity | `2026-06-22-studio-device-ux-workflow`; `2026-06-22-studio-link-management-workflow` | Hardware workflows settle and need finer recovery control |
 | CI/browser tooling for `wasm-bindgen-test`/Playwright worker smoke | `2026-06-17-browser-firmware-runtime`; `2026-06-17-studio-link-and-local-runtimes` | Browser-runtime CI execution is provisioned |
-| Offline artifact upgrader (Studio/desktop) consuming `schemas/history/` shape dumps + fixtures | `2026-07-05-artifact-format-version-and-schema-snapshots` | Fielded devices hold old-format projects that must survive a breaking bump |
-| CI check that a `PROJECT_FORMAT_VERSION` bump lands with a `schemas/history/` snapshot | `2026-07-05-artifact-format-version-and-schema-snapshots` | Still open after three hand-followed bumps (2, 3, 4); a bump that skips the snapshot |
+| ~~Offline artifact upgrader (Studio/desktop) consuming `schemas/history/` shape dumps + fixtures~~ — **closed 2026-08-04**: `lp-app/lpa-upgrade` (`2026-08-04-project-format-migration-architecture`) | `2026-07-05-artifact-format-version-and-schema-snapshots` | Closed |
+| ~~CI check that a `PROJECT_FORMAT_VERSION` bump lands with a `schemas/history/` snapshot~~ — **closed 2026-08-04**: `lpa-upgrade`'s `the_current_format_has_a_history_snapshot` test (`2026-08-04-project-format-migration-architecture`) | `2026-07-05-artifact-format-version-and-schema-snapshots` | Closed |
 | CLI adoption of `DeviceSession` (lp-cli still hand-rolls provider/session bundles; `fwcheck`'s boot-line grep dies then) | `2026-07-15-device-session-model` | Device-link M5 (CLI) work begins |
 | Websocket / server-lightplayer connector classes on the capability model | `2026-07-15-device-session-model` | A remote (non-serial) device class becomes real |
 | Fuel heatmap / GLSL probe synergy (trap pixel = probe selection; vmctx `metadata` reserved for trace state) | `2026-07-20-lpvm-native-fuel` | Probes landed (`lps-probe`, 2026-07-25); revisit with probe/agent-activity visualization work |
@@ -115,7 +115,7 @@ holds the full context.
 | Sim "non-collapsed" probe scope becomes real (collapse is view-local today, so sim probes ALL nodes) | `2026-07-27-completion-based-refresh-pacing` | The ui-state-audit plan moves live collapse state into core |
 | Packed base64 geometry encoding (`points_packed`-style additive field) | `2026-07-27-map2d-document-architecture` | An imported mapping document approaches the 10 KiB asset body budget |
 | Legacy `MappingConfig` variant retirement (`PathPoints`/`RingArray`/`PointList`/`SvgPath`) | `2026-07-27-map2d-document-architecture` | M5 one-home mapping editing lands and shipped projects are migrated |
-| Share-envelope format migration (`format` mismatches are refused outright during alpha, never migrated) | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.md` | The authored formats settle enough that migration is written once, not weekly |
+| Share-envelope format migration — **partly closed 2026-08-04**: envelope-carried project *content* now gates-and-migrates via `lpa-upgrade` (`2026-08-04-project-format-migration-architecture`); the envelope's own `format` field and bare-node migration remain refuse-outright | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.md` | Bare-node migration: the `artifact_format` stamp becomes universal enough to migrate against |
 | Wire-read (`FsRequest`) export for device-hosted projects absent from the local library (editor-popup export is library-backed only) | `2026-07-28-share-envelopes` | Someone needs to export a project that only exists on a device |
 | Size guard on node share envelopes (a large binary asset base64s into something no clipboard should carry) | `2026-07-28-share-envelopes` | A real shader-with-texture share hits a clipboard limit |
 | Per-board partition table selection (4/8/16 MB chosen at build time, so no board assumption is baked into `partitions.csv`) | `2026-07-30-esp32s3-partition-floor` | A second ESP32-S3 board with a different flash size actually exists |
@@ -142,8 +142,13 @@ holds the full context.
 | A kind with no face publishes no panel controls (`ComputeShader`'s bound uniforms reach the wiring drawer, never a knob) | `2026-08-03-panel-visibility-is-derived` | A compute-driven module needs its knobs — `examples/meteor` already does |
 | Authored panel layouts: a curated promoted-control list per module, as an additive override on the derived default | `2026-08-03-panel-visibility-is-derived` | A published/vendored module needs a curated public API |
 | A minted `status-engaged` token family (engaged currently borrows `status-attention` amber; Yona leans maybe-blue) | `2026-08-03-panel-visibility-is-derived` | Yona settles the engaged treatment — do not change it before then |
+| Share-envelope hygiene for device refs (a derived uid embeds a MAC; associations and history events carry uids) | `2026-08-04-device-identity-anchored-in-silicon`; `2026-07-28-share-envelopes` | Envelopes stop being version-and-refuse and start travelling |
+| Multi-studio registry sync (uids now agree across installs by construction; syncing rows is its own feature) | `2026-08-04-device-identity-anchored-in-silicon` | Someone runs two Studio installs against one fleet |
+| Retiring the hello's `device_uid` field and the `/.lp/device.json` read | `2026-08-04-device-identity-anchored-in-silicon` | No fielded board still needs migrating |
 | An LFO node for panel-reachable waveform/offset/modulation (the panel exposes a phasor's period ONLY) | `2026-08-04-time-is-a-product` | A module wants modulation the Speed knob cannot express |
 | Transport UI over the breakpoint log (play/pause/scrub as a first-class surface) | `2026-08-04-time-is-a-product` | `docs/debt/clock-transport-has-no-transport-ui.md` exit criteria |
+| v1–v3 project-format migration (below `lpa-upgrade`'s floor; types are deleted, corpus is `schemas/history/` snapshots only) | `2026-08-04-project-format-migration-architecture` | A real holder of pre-v4 project data appears |
+| Safe-mode board rescue hole (upload cannot reach a safe-mode board, so pull→migrate→push cannot run on one) | `2026-08-04-project-format-migration-architecture` | `docs/debt/safe-mode-board-rescue-hole.md` — first field occurrence |
 
 ## Relationship To Shared Planning
 

@@ -1,4 +1,4 @@
-//! Roster card surfaces for the 14-state card vocabulary.
+//! Roster card surfaces for the roster card-state vocabulary.
 //!
 //! The vocabulary sheet below is the visual gate for the card grammar; it
 //! renders through the SAME card component as the live gallery
