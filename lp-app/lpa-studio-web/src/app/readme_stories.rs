@@ -241,6 +241,7 @@ fn readme_home_view() -> UiHomeView {
                 relation: lpa_studio_core::SyncRelation::AtHead,
             }),
             running_in_sim: false,
+            target: None,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -252,6 +253,7 @@ fn readme_home_view() -> UiHomeView {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: true,
+            target: None,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -263,6 +265,7 @@ fn readme_home_view() -> UiHomeView {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
         },
     ];
     let devices = vec![

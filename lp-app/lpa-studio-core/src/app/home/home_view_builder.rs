@@ -517,6 +517,11 @@ fn package_card(
 ) -> Result<UiPackageCard, crate::app::library::LibraryError> {
     let handle = store.open(summary.uid)?;
     let meta = crate::app::library::package_meta::read_meta(&*handle.package_fs.borrow())?;
+    // Advisory board target (vision D3): straight passthrough from the
+    // container manifest, same seam `provenance`/`on_device` use — no
+    // catalog lookup here, that's the web renderer's job.
+    let target =
+        crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?.target;
 
     let last_saved_at = handle
         .history
@@ -548,6 +553,7 @@ fn package_card(
         open_elsewhere: false,  // stamped by the hydration pass
         connected_device: None, // stamped by the D28 pairing at view build
         running_in_sim: false,  // stamped by the D28 sim arm at view build
+        target,
     })
 }
 
@@ -877,6 +883,45 @@ mod tests {
             .unwrap();
         assert_eq!(scratch.provenance, None);
         assert_eq!(scratch.kind, "Module");
+    }
+
+    /// P02: the advisory `target` passes through from the container
+    /// manifest to the card, and stays `None` for an untargeted project
+    /// (the common case — `store.create` writes no `target`).
+    #[test]
+    fn package_cards_carry_advisory_target() {
+        let store = store();
+        store.create("Untargeted", 1.0).unwrap();
+        store
+            .install_package(
+                "Targeted",
+                &[(
+                    "project.json".to_string(),
+                    br#"{"format":4,"name":"Targeted","target":"espressif/esp32-c6-devkitc-1"}"#
+                        .to_vec(),
+                )],
+                PackageProvenance::Created,
+                2.0,
+            )
+            .unwrap();
+
+        let view = view_of(&store);
+        let targeted = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-targeted")
+            .unwrap();
+        assert_eq!(
+            targeted.target.as_deref(),
+            Some("espressif/esp32-c6-devkitc-1")
+        );
+
+        let untargeted = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-untargeted")
+            .unwrap();
+        assert_eq!(untargeted.target, None);
     }
 
     #[test]

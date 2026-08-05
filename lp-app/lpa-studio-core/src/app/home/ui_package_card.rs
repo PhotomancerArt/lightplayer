@@ -34,6 +34,13 @@ pub struct UiPackageCard {
     /// of `connected_device`: a device and the sim can honestly run the
     /// same project at once.
     pub running_in_sim: bool,
+    /// The project's advisory `target` (gallery-rework vision D3): a board
+    /// catalog id in the registry's `vendor/product` vocabulary, straight
+    /// from `ProjectManifest.target`. `None` for an untargeted project. The
+    /// renderer turns this into a quiet "for \<board\>" badge; no other
+    /// meaning attaches to it here — the engine never reads it, and the
+    /// mismatch warning is P06's job, not this card's.
+    pub target: Option<String>,
 }
 
 /// The live-device indication a unified project card carries (D24).
