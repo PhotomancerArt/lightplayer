@@ -20,5 +20,5 @@ pub use render_product_probe::{
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
 };
 pub use timebase_probe::{
-    TimebaseProbeRequest, TimebaseProbeResult, WirePhasorOrigin, WirePhasorRow,
+    TimebaseProbeRequest, TimebaseProbeResult, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
 };

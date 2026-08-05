@@ -9270,6 +9270,7 @@ mod tests {
             phase: 0.256,
             cycle: 3,
             period_seconds: 4.0,
+            readings: vec![],
         });
         assert_eq!(
             private.origin, "Orbit",
@@ -9295,6 +9296,7 @@ mod tests {
             phase: 0.5,
             cycle: 0,
             period_seconds: 0.0,
+            readings: vec![],
         });
         assert_eq!(shared.origin, "bus:speed");
         assert_eq!(shared.detail.as_deref(), Some("in Orbit"));
@@ -9317,6 +9319,7 @@ mod tests {
             phase: 0.0,
             cycle: 0,
             period_seconds: 1.0,
+            readings: vec![],
         });
         assert_eq!(orphan.origin, "node 99");
     }
@@ -9370,6 +9373,7 @@ mod tests {
                     phase: 0.5,
                     cycle: 2,
                     period_seconds: 4.0,
+                    readings: vec![],
                 }],
             },
         );

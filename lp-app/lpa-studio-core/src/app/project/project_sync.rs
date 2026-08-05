@@ -1114,6 +1114,7 @@ mod tests {
             phase: 0.25,
             cycle: 3,
             period_seconds: 4.0,
+            readings: vec![],
         };
         sync.apply_project_read_events(probe_events(
             9,

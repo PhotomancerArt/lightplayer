@@ -1095,7 +1095,8 @@ fn resolve_phasor_input(
             return Ok((shaped_default, failure));
         }
     };
-    match ctx.time_product_phasor(product, &key, &config) {
+    let reader_node = ctx.node_id();
+    match ctx.time_product_phasor(product, &key, &config, (reader_node, &slot_path)) {
         Ok((phase, _cycle)) => Ok((LpsValueF32::F32(shape_phasor(&config, phase)), failure)),
         Err(error) => {
             failure.get_or_insert_with(|| error.to_string());
