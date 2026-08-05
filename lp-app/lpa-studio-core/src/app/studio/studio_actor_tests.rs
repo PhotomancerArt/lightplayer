@@ -787,6 +787,28 @@ fn revert_between_set_values_is_a_coalescing_barrier() {
     );
 }
 
+/// The tape's drag-scrub (clock-tape-hero P4): a pointer drag floods
+/// `transport.scrub_offset_seconds` through the same `SetValue` path as
+/// every fader, and the queue must collapse to the release value — the
+/// widget throttles at 50 ms but the actor is the backstop.
+#[test]
+fn a_scrub_flood_coalesces_to_the_final_offset() {
+    let plan = CommandPlan::from_batch(vec![
+        set_value_action("transport.scrub_offset_seconds", -3.1),
+        set_value_action("transport.scrub_offset_seconds", -7.6),
+        set_value_action("transport.scrub_offset_seconds", -12.4),
+    ]);
+
+    assert_eq!(
+        planned_slot_ops(&plan),
+        vec![(
+            "transport.scrub_offset_seconds".to_string(),
+            Some(-12.4)
+        )],
+        "a drag's write stream lands as one mutation with the release value"
+    );
+}
+
 // P9 (panel.md P8): per-(scope, channel) PanelWrite coalescing — a knob
 // drag over the command path floods exactly like a SetValue drag and must
 // bound the same way.
