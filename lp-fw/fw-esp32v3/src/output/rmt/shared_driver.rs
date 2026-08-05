@@ -44,7 +44,10 @@ pub const RMT_CLOCK: Rate = Rate::from_mhz(80);
 /// wire, so a healthy frame always finishes inside this deadline — which
 /// matters more now that the wait is deferred to the next frame's write: the
 /// deadline still runs from `start`, and by wait time most of it has already
-/// elapsed in wall-clock terms.
+/// elapsed in wall-clock terms. In the dual-core shape `start` is a mailbox
+/// post and a queued second-wave frame begins a wave (~9 ms at 300 LEDs)
+/// late by design — still comfortably inside the budget; re-derive both
+/// margins if `WS281X_MAX_LEDS_PER_CHANNEL` ever grows.
 pub const FRAME_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// The driver, shared between thread context and the interrupt handler.
@@ -79,47 +82,31 @@ pub fn isr_on_app_core() -> bool {
 /// core never really started, and the caller falls back to single-core.
 const APP_CORE_BIND_TIMEOUT: Duration = Duration::from_millis(10);
 
-/// Everything core 1 ever runs: bind the RMT handler, report, service
-/// interrupts forever.
+/// Everything core 1 ever runs: bind the RMT and doorbell handlers, report,
+/// then schedule wire transmissions forever.
 ///
 /// This executes ON the APP core — which is the entire point:
 /// `interrupt::bind_handler` maps the peripheral source into the **calling**
 /// core's interrupt matrix, and there is no remote-core form of the mapping
 /// call in esp-hal. From here on the APP core services every RMT interrupt
-/// while the PRO core renders; nothing on this core ever masks interrupts,
-/// takes a critical section, allocates, or prints — the silence is the
-/// product.
+/// AND runs the wire pusher (`wire_pusher::run` — admission, slot binding,
+/// GPIO-matrix re-mux, frame starts) while the PRO core renders. Nothing on
+/// this core takes a critical section across work, allocates, or prints;
+/// the one interrupt mask is the pusher's two-instruction idle window
+/// (`wire_pusher::idle_once`), which cannot blow an 80 µs refill deadline.
 ///
 /// ⚠️ This function must NEVER return: esp-hal parks a returned core-1 entry
 /// with a **hardware stall** (`internal_park_core`), and a stalled core
 /// services no interrupts — the wires would go dark with no error anywhere.
-/// The idle loop is `waiti 0`: wait for an interrupt at any level, take it
-/// (the RMT handler runs), resume waiting.
+/// `wire_pusher::run` is `-> !` for exactly this reason.
 fn app_core_main() {
     esp_hal::interrupt::bind_handler(
         Interrupt::RMT,
         InterruptHandler::new(rmt_isr, Priority::max()),
     );
+    super::wire_pusher::bind_doorbell();
     ISR_ON_APP_CORE.store(true, Ordering::Release);
-    idle_forever();
-}
-
-/// The APP core's forever-idle loop, in IRAM.
-///
-/// IRAM placement matters here just as it does for the service path
-/// (lp-ws281x's `isr-in-ram`): flash reads and writes on the PRO core open
-/// cache-disabled windows, and a core fetching flash-resident code inside one
-/// stalls (measured: a service ~110 words late during project-load reads) or
-/// faults. The loop and the ISR path being IRAM-resident is what makes the
-/// APP core independent of the PRO core's flash traffic; flash *writes* still
-/// hardware-stall the core outright — see [`with_app_core_stalled`].
-#[esp_hal::ram]
-fn idle_forever() -> ! {
-    loop {
-        // SAFETY (asm): `waiti 0` only waits for an interrupt with the
-        // threshold at level 0; no registers or memory are touched.
-        unsafe { core::arch::asm!("waiti 0") };
-    }
+    super::wire_pusher::run();
 }
 
 /// Run `f` with the APP core hardware-stalled. **Required around every flash
@@ -219,6 +206,10 @@ pub fn start_app_core_isr(cpu_ctrl: CPU_CTRL<'static>) -> bool {
 #[esp_hal::ram]
 extern "C" fn rmt_isr() {
     DRIVER.on_interrupt();
+    // A completion this pass published may unblock a queued wire; flag the
+    // pusher so its idle path cannot sleep through it. A no-op cost in the
+    // single-core fallback (nothing ever reads the flag there).
+    super::wire_pusher::note_wake();
 }
 
 /// Route the RMT interrupt to [`rmt_isr`], exactly once.

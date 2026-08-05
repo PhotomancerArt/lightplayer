@@ -358,6 +358,13 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
             let close_req = mailbox.close_req_seq.load(Acquire);
             if seq_after(close_req, mailbox.close_ack_seq.load(Relaxed)) {
                 self.dispose_through(wire, close_req, WireOutcome::Cancelled);
+                // A close is wire teardown: the poster releases the pad's
+                // lease once the ack lands, so every binding to this wire's
+                // pad must be forgotten NOW — a later takeover parking a pad
+                // whose lease moved on would drive someone else's pin. The
+                // pad is not parked here: the poster parks it itself after
+                // the ack, while it still holds the lease.
+                self.forget_wire_pads(wire);
                 mailbox.close_ack_seq.store(close_req, Release);
                 progress = true;
             }
@@ -497,6 +504,17 @@ impl<'d, H: RmtHw, P: PadOps, const N: usize, const W: usize> Pusher<'d, H, P, N
         self.wire_channel[wire] = NO_CHANNEL;
         self.transmitting -= 1;
         self.mailboxes[wire].active_channel.store(NO_CHANNEL, Relaxed);
+    }
+
+    /// Drop every slot binding to `wire`'s pad (close-time teardown). The
+    /// slots stay usable — merely unowned, their pads unbound.
+    fn forget_wire_pads(&mut self, wire: usize) {
+        for slot in &mut self.slots[..self.slot_count] {
+            if slot.owner_wire == wire as u8 {
+                slot.owner_wire = NONE;
+                slot.bound_gpio = NONE;
+            }
+        }
     }
 
     /// Publish `wire`'s disposal of `seq` as `outcome`. The `Release` is the
