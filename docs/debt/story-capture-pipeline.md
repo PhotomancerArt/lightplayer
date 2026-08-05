@@ -397,6 +397,51 @@ escalate rather than widening the threshold.
   designing a fix** — this pipeline has now produced several "obviously a
   settling race" diagnoses that the pixels overturned.
 
+- 2026-08-05 — **a churner that was NOT a settling race, again: the clock
+  face's trace canvases were photographed at the wrong RESOLUTION.** Two CI
+  runs on PR #349 (which touches no clock-face code) auto-committed the same
+  five baselines back and forth between two blob hashes, the second run
+  restoring main's bytes exactly — the signature of a bistable render, and
+  the reason to compare a refresh against the PREVIOUS refresh rather than
+  against main. Diffing the two committed variants of
+  `clock-face__crowd__lg` (7 506 px, max Δ243, confined to the eight trace
+  canvases; every other pixel byte-identical) killed the obvious theory
+  first: **the waveforms are at the same phase in both** — peaks, troughs and
+  square transitions on the same output columns — so nothing about time or
+  settling was in play. What differed was that every *device-pixel-absolute*
+  constant shrank together: the 3px pad read ≈0.5, the 1.25px stroke read
+  ≈0.24, and the 1px 14%-alpha midline was **gone entirely** while the
+  vertical risers survived at varying intensity. That asymmetry is the
+  fingerprint of a bitmap being scaled down — a single-row feature is
+  all-or-nothing under it, a column of pixels is not — and normalized
+  quantities (the curve) passing through untouched is the other half.
+  Root cause: `paint_card` sizes the canvas backing store from
+  `getBoundingClientRect()`, and on a frozen story page the driver stops the
+  rAF loop after its first frame, so that one measurement is permanent.
+  Studio's stylesheet is injected by the wasm bundle after boot, so a paint
+  that beats it measures the canvas's unstyled 300×150 intrinsic size. Both
+  outcomes are stable terminals and the stable pair passes on either.
+  Reproduced live by serving the story build with the tailwind stylesheet
+  delayed 1500 ms: the trace canvases painted at the pre-stylesheet box and
+  stayed there. Fixed with a `ResizeObserver` that repaints on box change,
+  an inline box on the canvas (an unstyled canvas takes its box FROM the
+  width/height attributes the paint writes, which at dpr > 1 makes the new
+  repaint feed itself), and a ready-gate assertion that no
+  `canvas.ux-box-sized-canvas` may be captured while its backing store
+  disagrees with its box. See
+  [the defect](../defects/2026-08-05-clock-face-baselines-oscillate.md).
+  Three things for this entry's lore. (1) **"Diff the bytes before designing
+  a fix" paid again** — the third time now (composites 2026-07-28, the
+  code-editor gutter 2026-07-27, this): the settling-race reading was wrong
+  and the pixels said so in one look. (2) The freeze pins *time*; it does
+  not pin *geometry*. Any surface that stops re-rendering to be photographed
+  must have finished reading everything it depends on, and on this app "the
+  stylesheet has applied" is not something a first paint may assume. (3)
+  Debugging note for the harness browser pane: its tab reports
+  `document.hidden === true`, so rAF and ResizeObserver callbacks never fire
+  there until something forces a frame — take a screenshot first, or a
+  working fix reads as a dead one.
+
 - 2026-07-31 — **`just studio-story-pull` was broken, and the guard step's
   message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and
   called `process.exit(2)` at *module scope*, so `story-pull.mjs` — which
