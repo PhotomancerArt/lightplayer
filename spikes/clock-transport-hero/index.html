@@ -171,7 +171,9 @@
   }
   .ftrack .fthumb::after { content: ""; position: absolute; top: 3px; bottom: 3px;
                            left: 50%; border-left: 1px solid var(--accent); }
-  .kread { font: 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* fixed width: the readout must never reflow the fader as it changes */
+  .kread { font: 11px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums;
+           width: 36px; flex: none; text-align: left; }
   .kread b { color: var(--text); font-weight: 600; }
   .kread[data-detent] b { color: var(--accent); }
 
@@ -204,12 +206,13 @@
 
 <h1>Clock transport hero — tape direction <small style="color:var(--dim)">(round 2)</small></h1>
 <p class="hint">
-  Gate verdict (2026-08-04): <b>Tape</b> wins. This round iterates it — speed moves to a
-  <b>fader with snap detents</b>, and the tape <b>zooms with speed</b>: the strip always streams at
-  the same pixel velocity, so what your eye reads as "fast" is tick <em>density</em>, not motion.
-  Section 2 explores where the idiom grows: the <b>piano reel</b> — the future input subsystem's
-  flight-recorder, riding the exact same transport. One shared clock everywhere; scrubbing the reel
-  rewinds the tape and the phasors, scrub-exact like the engine.
+  Gate verdicts (2026-08-04): round 1 — <b>Tape</b> wins. Round 2 — <b>fader feels right</b>,
+  detents are <b>octaves</b> (tenths tried and rejected), <b>speed-linked zoom liked</b> (the strip
+  always streams at the same pixel velocity, so "fast" is tick <em>density</em>; an argument
+  remains for also raising actual velocity — open micro-question for the plan), and the
+  <b>piano reel</b> is a keeper for the future input subsystem — "almost exactly what I imagine
+  the input recorder being". One shared clock everywhere; scrubbing the reel rewinds the tape and
+  the phasors, scrub-exact like the engine.
 </p>
 
 <div class="controls">
@@ -232,10 +235,6 @@
     <button data-zoom="linked" data-on>speed-linked</button>
     <button data-zoom="fixed">fixed</button>
   </span>
-  <span class="group"><b>detents</b>
-    <button data-det="oct" data-on>octaves</button>
-    <button data-det="tenth">tenths</button>
-  </span>
   <span class="group"><b>card</b>
     <button id="g-phasors" data-on>phasors</button>
   </span>
@@ -245,8 +244,8 @@
 <p class="note">Constant pixel velocity: at ×1 a second is 14 px; at ×8 the view zooms out 8× so the
 same px/s carries 8× the time — dense ticks whipping past <em>feel</em> fast. Tick granularity adapts
 like a map. <b>Drag the tape</b> to scrub (px = s at the current zoom). The fader is log ׼–×8;
-detents at the octave stops (toggle <code>tenths</code> in the strip for quantize-to-0.1 instead —
-open question), readout goes green when seated on a detent. Double-click the fader = ×1.
+detents at the octave stops (★ chosen — a quantize-to-0.1 mode was tried and rejected at round 2),
+readout goes green when seated on a detent. Double-click the fader = ×1.
 The <code>fixed</code> zoom toggle keeps round 1's behavior for comparison.</p>
 <div class="row">
   <div class="card">
@@ -274,7 +273,7 @@ The <code>fixed</code> zoom toggle keeps round 1's behavior for comparison.</p>
   </div>
 </div>
 
-<h2>2 · Piano reel <small>— FUTURE · the input flight-recorder the tape grows into (concept, not clock scope)</small></h2>
+<h2>2 · Piano reel <small>— FUTURE · ★ KEEPER (round 2: "almost exactly what I imagine the input recorder being") · not clock scope</small></h2>
 <p class="note">When the proper input subsystem lands, every input is recorded — continuously, by
 design, like a flight recorder — onto lanes riding the same timebase: taps as hits, faders as
 curves, knobs as steps, keys as piano-roll bars. Same transport, same scrub, same zoom: drag the
@@ -339,18 +338,18 @@ function fmtClock(t, tenths) {
 /* ================= speed fader (log ׼..×8) ================= */
 const rateFrac = r => (Math.log2(r) + 2) / 5;
 const fracRate = f => Math.pow(2, clamp(f, 0, 1) * 5 - 2);
+// Octave detents — CHOSEN at round 2 (a tenths/quantize mode was tried
+// and rejected: no landmark stops; fine speed lives on the phasor knobs).
 const DETENTS = [0.25, 0.5, 1, 2, 4, 8];
-let detentMode = "oct";           // 'oct' | 'tenth'
 function applyDetents(r) {
   r = clamp(r, 0.25, 8);
-  if (detentMode === "tenth") return clamp(Math.round(r * 10) / 10, 0.3, 8);
   for (const d of DETENTS) {
     const radius = d === 1 ? 0.05 : 0.028;          // ×1 pulls hardest
     if (Math.abs(Math.log2(r / d)) < radius * 5) return d;
   }
   return r;
 }
-const onDetent = r => detentMode === "tenth" || DETENTS.includes(r);
+const onDetent = r => DETENTS.includes(r);
 
 /* ================= zoom model ================= */
 const BASE_PX_PER_SEC = 14;
@@ -715,13 +714,6 @@ for (const b of document.querySelectorAll("[data-zoom]"))
     zoomMode = b.dataset.zoom;
     for (const x of document.querySelectorAll("[data-zoom]"))
       x.toggleAttribute("data-on", x === b);
-  });
-for (const b of document.querySelectorAll("[data-det]"))
-  b.addEventListener("click", () => {
-    detentMode = b.dataset.det;
-    for (const x of document.querySelectorAll("[data-det]"))
-      x.toggleAttribute("data-on", x === b);
-    clock.rate = applyDetents(clock.rate);
   });
 document.getElementById("g-phasors").addEventListener("click", e => {
   document.body.classList.toggle("no-phasors");
