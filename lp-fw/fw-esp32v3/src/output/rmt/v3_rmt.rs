@@ -74,6 +74,26 @@
 //!   words, the tell that it is an absolute offset) and `CH_TX_LIM.tx_lim` is
 //!   9 bits (max 511; a full 8-block window of 512 words would not fit, which
 //!   is why [`MAX_BLOCKS_PER_CHANNEL`] caps every plan at four blocks).
+//!
+//! # Cross-core register rules
+//!
+//! The interrupt handler runs on the APP core (see `shared_driver`), so
+//! thread context and the ISR touch this peripheral from **different cores**
+//! concurrently. The register-level invariants that keep that sound:
+//!
+//! * **`INT_ENA` is read-modify-written from thread context only**
+//!   ([`enable_tx_interrupts`], at channel open). The ISR never writes it. A
+//!   second RMW writer on the other core would lose updates — do not add one.
+//! * **`INT_CLR` is write-1-to-clear** and written from both sides
+//!   ([`RmtHw::take_interrupts`] on the ISR core, [`RmtHw::start_tx`]'s
+//!   stale-cause drop on the thread core). W1C is race-free by construction:
+//!   each write clears exactly the bits it names.
+//! * **Per-channel registers** (`CHnCONF1`, `CH_TX_LIM`, RAM words) are only
+//!   ever RMW'd cross-core for the *same* channel during an abort race —
+//!   after `stop_tx` has halted the transmitter — where a lost update is
+//!   harmless. In steady state the ISR owns a transmitting channel's
+//!   `CH_TX_LIM`/RAM and thread context owns idle channels'.
+//! * `APB_CONF` is written once at [`init_tx`], before the APP core binds.
 
 use esp_hal::peripherals::RMT;
 use lp_ws281x::{BlockPlan, InterruptFlags, RmtHw, SharedBlockPlan};
