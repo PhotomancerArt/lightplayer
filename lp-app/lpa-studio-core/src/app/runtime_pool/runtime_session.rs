@@ -347,6 +347,23 @@ impl RuntimeSession {
         }
     }
 
+    /// The board manifest's measured total-LED envelope from the hello, when
+    /// the device reported one (a SOFT limit — evidence, never a refusal).
+    pub fn total_led_budget(&self) -> Option<u32> {
+        match self.device_state() {
+            Some(DeviceState::Ready { hello }) => hello.hardware.total_led_budget,
+            _ => None,
+        }
+    }
+
+    /// The latest heartbeat-reported per-wire output status, if one has
+    /// arrived on this session yet.
+    pub fn output_wire_status(&self) -> Option<&[lpc_wire::server::OutputWireStatus]> {
+        self.client
+            .as_ref()
+            .and_then(StudioServerClient::output_wire_status)
+    }
+
     /// The project this SIM session runs, when one has been pushed onto it
     /// (`None` on device sessions and on a sim with nothing loaded).
     pub fn sim_loaded_project(&self) -> Option<&SimLoadedProject> {

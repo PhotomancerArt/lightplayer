@@ -6,13 +6,14 @@
 use base64::Engine as _;
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    CircleDashed, Grid3x3, Hash, Layers, MousePointer, Route, Scan, Spline,
+    CircleDashed, Grid3x3, Hash, Image, Layers, MousePointer, Route, Scan, Spline,
 };
 use lpc_mapping::{Map2dDoc, corpus, resolve};
 
 use crate::editor_core::editor_session::MapEditorSession;
 use crate::editor_core::map_tool::MapTool;
-use crate::view::map_editor::{EditorFileOps, EditorViewOptions};
+use crate::view::map_editor::{EditorFileOps, EditorViewOptions, ReferenceOps};
+use crate::view::reference::ReferenceImage;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -27,6 +28,14 @@ pub fn EditorHeader(
     #[props(default)] file_ops: Option<EditorFileOps>,
     #[props(default = false)] scene_menu: bool,
     #[props(default)] on_doc_change: Option<EventHandler<String>>,
+    /// The current reference image (drives the clear/opacity controls and
+    /// the view toggle's presence).
+    #[props(default)]
+    reference: Option<ReferenceImage>,
+    /// Reference controls render only when the host provides the ops
+    /// (page host), mirroring `file_ops`.
+    #[props(default)]
+    reference_ops: Option<ReferenceOps>,
 ) -> Element {
     let opts = view_opts();
     let (lamp_count, universe_count, dirty, doc_json) = {
@@ -135,6 +144,43 @@ pub fn EditorHeader(
                     "save"
                 }
             }
+            if let Some(ops) = reference_ops {
+                span { class: "lpme-sep" }
+                button {
+                    class: "lpme-btn",
+                    title: "load a reference image to trace over (.svg / .png / .jpg) — stays out of the document",
+                    onclick: move |_| ops.on_pick.call(()),
+                    Image { size: 13 }
+                    "ref"
+                }
+                if let Some(current) = reference.clone() {
+                    input {
+                        class: "lpme-ref-opacity",
+                        r#type: "range",
+                        min: "5",
+                        max: "100",
+                        title: "reference opacity",
+                        value: "{(current.opacity * 100.0).round()}",
+                        oninput: {
+                            let current = current.clone();
+                            move |evt: Event<FormData>| {
+                                if let Ok(percent) = evt.value().parse::<f32>() {
+                                    ops.on_change.call(Some(ReferenceImage {
+                                        opacity: percent / 100.0,
+                                        ..current.clone()
+                                    }));
+                                }
+                            }
+                        },
+                    }
+                    button {
+                        class: "lpme-btn",
+                        title: "clear the reference image",
+                        onclick: move |_| ops.on_change.call(None),
+                        "×"
+                    }
+                }
+            }
             if !external_view {
                 span { class: "lpme-sep" }
                 button {
@@ -160,6 +206,14 @@ pub fn EditorHeader(
                     title: "texture-frame preview — how the doc fits shader space (F)",
                     onclick: move |_| view_opts.write().fit_preview = !opts.fit_preview,
                     Scan { size: 13 }
+                }
+                if reference.is_some() {
+                    button {
+                        class: toggle_class(opts.reference),
+                        title: "reference image (B)",
+                        onclick: move |_| view_opts.write().reference = !opts.reference,
+                        Image { size: 13 }
+                    }
                 }
             }
         }

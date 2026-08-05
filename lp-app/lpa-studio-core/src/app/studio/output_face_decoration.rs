@@ -22,10 +22,12 @@
 //! the web renders the board diagram, it does not parse endpoint specs.
 
 use lpa_boards::board_by_id;
+use lpc_wire::server::OutputWireStatus;
 
 use crate::{
-    ProjectEditorView, UiNodeChild, UiNodeFace, UiNodeSection, UiNodeTabBody, UiOutputBoardFacts,
-    UiOutputFace, UiOutputPin, UiProducedProduct, UiProductPreview, UiProductRef,
+    ProjectEditorView, UiLedBudget, UiNodeChild, UiNodeFace, UiNodeSection, UiNodeTabBody,
+    UiOutputBoardFacts, UiOutputFace, UiOutputPin, UiProducedProduct, UiProductPreview,
+    UiProductRef, UiWireStatus,
 };
 
 /// Samples per lamp on the control bus — the engine's own slice unit
@@ -38,11 +40,123 @@ const SAMPLES_PER_LAMP: u32 = 3;
 /// display manifest for) and the incoming lamp extent + span boundaries
 /// (from whichever node in the same project publishes the control product
 /// this output is bound to).
-pub(crate) fn decorate_output_faces(editor: &mut ProjectEditorView, board_id: Option<&str>) {
+pub(crate) fn decorate_output_faces(
+    editor: &mut ProjectEditorView,
+    board_id: Option<&str>,
+    wire_status: Option<&[OutputWireStatus]>,
+    total_led_budget: Option<u32>,
+) {
     let board = board_id.and_then(board_facts);
     let upstreams = control_sources(&editor.nodes);
     for node in &mut editor.nodes {
         decorate_node(node, board.as_ref(), &upstreams);
+    }
+    // Second pass, after counts are resolved: live wire status (joined by
+    // GPIO — the one key both the heartbeat and the authored rows know) and
+    // the board-wide LED budget bar (every face on the device shows the same
+    // used total, so it is summed across all faces first).
+    let used: u32 = fold_faces(&mut editor.nodes, 0, &mut |used, face| {
+        used + face
+            .channels
+            .iter()
+            .map(|row| row.resolved_count.or(row.count).unwrap_or(0))
+            .sum::<u32>()
+    });
+    let budget = total_led_budget.map(|budget| UiLedBudget { used, budget });
+    for node in &mut editor.nodes {
+        apply_live_facts(node, wire_status, budget.as_ref());
+    }
+}
+
+/// Fold over every output face in the tree (nodes and children alike).
+fn fold_faces<T: Copy>(
+    nodes: &mut [crate::UiNodeView],
+    init: T,
+    fold: &mut impl FnMut(T, &UiOutputFace) -> T,
+) -> T {
+    fn node_faces<T: Copy>(
+        node: &mut crate::UiNodeView,
+        acc: T,
+        fold: &mut impl FnMut(T, &UiOutputFace) -> T,
+    ) -> T {
+        let mut acc = acc;
+        if let Some(UiNodeFace::Output(face)) = node.face.as_ref() {
+            acc = fold(acc, face);
+        }
+        for child in &mut node.children {
+            acc = child_faces(child, acc, fold);
+        }
+        acc
+    }
+    fn child_faces<T: Copy>(
+        child: &mut UiNodeChild,
+        acc: T,
+        fold: &mut impl FnMut(T, &UiOutputFace) -> T,
+    ) -> T {
+        let mut acc = acc;
+        if let Some(UiNodeFace::Output(face)) = child.face.as_ref() {
+            acc = fold(acc, face);
+        }
+        for child in &mut child.children {
+            acc = child_faces(child, acc, fold);
+        }
+        acc
+    }
+    let mut acc = init;
+    for node in nodes {
+        acc = node_faces(node, acc, fold);
+    }
+    acc
+}
+
+/// Inject the live per-wire status (by GPIO) and the budget bar into every
+/// output face under `node`.
+fn apply_live_facts(
+    node: &mut crate::UiNodeView,
+    wire_status: Option<&[OutputWireStatus]>,
+    budget: Option<&UiLedBudget>,
+) {
+    fn apply_face(
+        face: &mut UiOutputFace,
+        wire_status: Option<&[OutputWireStatus]>,
+        budget: Option<&UiLedBudget>,
+    ) {
+        face.led_budget = budget.cloned();
+        let Some(status) = wire_status else {
+            return;
+        };
+        for row in &mut face.channels {
+            let Some(gpio) = row.gpio else {
+                continue;
+            };
+            row.wire_status = status
+                .iter()
+                .find(|wire| u32::from(wire.gpio) == gpio)
+                .map(|wire| UiWireStatus {
+                    sent: wire.sent,
+                    torn: wire.torn,
+                    waves: wire.waved > 0,
+                    queue_wait_ms: wire.queue_wait_max_us.div_ceil(1_000),
+                });
+        }
+    }
+    fn apply_child(
+        child: &mut UiNodeChild,
+        wire_status: Option<&[OutputWireStatus]>,
+        budget: Option<&UiLedBudget>,
+    ) {
+        if let Some(UiNodeFace::Output(face)) = child.face.as_mut() {
+            apply_face(face, wire_status, budget);
+        }
+        for child in &mut child.children {
+            apply_child(child, wire_status, budget);
+        }
+    }
+    if let Some(UiNodeFace::Output(face)) = node.face.as_mut() {
+        apply_face(face, wire_status, budget);
+    }
+    for child in &mut node.children {
+        apply_child(child, wire_status, budget);
     }
 }
 
@@ -247,7 +361,7 @@ mod tests {
         let mut editor =
             editor_with_output(output_face(&[(0, "IO18", Some(100)), (1, "IO2", None)]));
 
-        decorate_output_faces(&mut editor, Some("domraem/dom-z-102"));
+        decorate_output_faces(&mut editor, Some("domraem/dom-z-102"), None, None);
 
         let face = output_face_of(&editor);
         let board = face.board.as_ref().expect("the desk board is known");
@@ -285,7 +399,7 @@ mod tests {
         // `board.pins()` does not iterate.
         let mut editor = editor_with_output(output_face(&[(0, "LED2", None)]));
 
-        decorate_output_faces(&mut editor, Some("quinled/dig-uno"));
+        decorate_output_faces(&mut editor, Some("quinled/dig-uno"), None, None);
 
         let face = output_face_of(&editor);
         let board = face.board.as_ref().expect("board known");
@@ -301,7 +415,7 @@ mod tests {
     fn no_board_known_leaves_the_face_editable_and_unresolved() {
         let mut editor = editor_with_output(output_face(&[(0, "IO18", None)]));
 
-        decorate_output_faces(&mut editor, None);
+        decorate_output_faces(&mut editor, None, None, None);
 
         let face = output_face_of(&editor);
         assert_eq!(face.board, None, "no board known is a first-class state");
@@ -316,7 +430,7 @@ mod tests {
     fn an_unknown_board_id_degrades_to_no_board() {
         let mut editor = editor_with_output(output_face(&[(0, "IO18", None)]));
 
-        decorate_output_faces(&mut editor, Some("acme/not-a-board"));
+        decorate_output_faces(&mut editor, Some("acme/not-a-board"), None, None);
 
         assert_eq!(output_face_of(&editor).board, None);
     }
@@ -325,7 +439,7 @@ mod tests {
     fn a_label_the_board_lacks_stays_unresolved_but_shown() {
         let mut editor = editor_with_output(output_face(&[(0, "IO27", Some(50))]));
 
-        decorate_output_faces(&mut editor, Some("domraem/dom-z-102"));
+        decorate_output_faces(&mut editor, Some("domraem/dom-z-102"), None, None);
 
         let face = output_face_of(&editor);
         assert!(face.board.is_some(), "the board is still known");
@@ -339,7 +453,7 @@ mod tests {
         let mut editor = editor_with_output(output_face(&[(0, "IO18", Some(6)), (1, "IO2", None)]));
         editor.nodes.push(fixture_node(16, &[0, 6]));
 
-        decorate_output_faces(&mut editor, None);
+        decorate_output_faces(&mut editor, None, None, None);
 
         let face = output_face_of(&editor);
         assert_eq!(face.total_lamps, Some(16));
@@ -362,7 +476,7 @@ mod tests {
             editor_with_output(output_face(&[(0, "IO18", Some(40)), (1, "IO2", None)]));
         editor.nodes.push(fixture_node(16, &[]));
 
-        decorate_output_faces(&mut editor, None);
+        decorate_output_faces(&mut editor, None, None, None);
 
         let face = output_face_of(&editor);
         assert_eq!(face.channels[1].resolved_count, Some(0));
@@ -375,7 +489,7 @@ mod tests {
         set_bus_target(&mut fixture, "bus:other.out");
         editor.nodes.push(fixture);
 
-        decorate_output_faces(&mut editor, None);
+        decorate_output_faces(&mut editor, None, None, None);
 
         let face = output_face_of(&editor);
         assert_eq!(face.total_lamps, None, "no upstream publishes this bus");

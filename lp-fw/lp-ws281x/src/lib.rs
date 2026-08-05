@@ -83,6 +83,7 @@ pub mod blocks;
 pub mod driver;
 pub mod hw;
 pub mod pulse;
+pub mod pusher;
 pub mod state;
 pub mod timing;
 
@@ -93,6 +94,7 @@ pub use blocks::{BlockPlan, BlockPlanError, SharedBlockPlan, SharedPlanError};
 pub use driver::{ConfigError, FillResult, Half, StartError, Ws281xDriver};
 pub use hw::{InterruptFlags, RamWindow, RmtHw};
 pub use pulse::{pulse_code, Pulse, PulseItem, MAX_DURATION_TICKS, STOP_WORD};
+pub use pusher::{PadOps, Pusher, WireMailbox, WireOutcome, WireStats};
 pub use state::{
     lag_bucket, ChannelState, ChannelStats, BITS_PER_PIXEL, BYTES_PER_PIXEL, LAG_BUCKETS,
 };

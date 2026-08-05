@@ -15,7 +15,11 @@ Document in, edits out. This crate knows the mapping document schema
 assets, routes, or the Studio server — hosts own persistence:
 
 - `MapEditorPage` (the `#/mapping` route body) adds file open (picker +
-  drag-and-drop), save (data-URL download), and localStorage autosave.
+  drag-and-drop), save (data-URL download), and localStorage autosave —
+  plus the reference tracing image (`ReferenceImage`), persisted under
+  its own localStorage key so tracing state can never touch the document
+  autosave. The reference never enters the map2d document (10KB asset
+  budget; reference art is routinely larger).
 - `MapEditor` is the embeddable seam: `doc` + `doc_epoch` in,
   `on_doc_change(json)` out on every committed change. The fixture face
   mounts it and syncs via the asset pipeline's whole-body apply. Two
@@ -66,4 +70,5 @@ texture-frame fit preview. ⌘Z/⇧⌘Z undo/redo; 0 fits.
 grid / multi-ring circle / path objects; object order is wiring order;
 universes derive from it. Rings auto-space from the outer radius; per-ring
 counts can override the circumference-derived defaults. The SVG importer
-(`lpc-mapping::import`) flattens curve commands to endpoint lines.
+(`lpc-mapping::import`) rejects curve commands (`UnsupportedCommand`) —
+it imports the straight-line subset only.

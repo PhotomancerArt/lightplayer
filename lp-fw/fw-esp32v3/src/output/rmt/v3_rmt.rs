@@ -94,6 +94,29 @@
 //!   harmless. In steady state the ISR owns a transmitting channel's
 //!   `CH_TX_LIM`/RAM and thread context owns idle channels'.
 //! * `APB_CONF` is written once at [`init_tx`], before the APP core binds.
+//!
+//! # Cross-core rules under the pusher (three actors)
+//!
+//! With transmission sequencing on an APP-core pusher thread (the overlap
+//! deployment), "thread context" above splits in two, and the rules extend:
+//!
+//! * **Channel-owning thread context moves to the pusher.** `start_tx`,
+//!   `stop_tx`, RAM prefill, and `CH_TX_LIM` arming are the pusher's; being
+//!   on the ISR's own core, they can never overlap a service pass. The PRO
+//!   core keeps only init-time writes (`INT_ENA` RMW at channel open,
+//!   `APB_CONF` at [`init_tx`]) and the defensive abort on the
+//!   pusher-wedged path — which is a defect state, not a steady-state
+//!   writer.
+//! * **GPIO-matrix writes** ([`route_rmt_to_gpio`], [`park_gpio`]) are
+//!   sound from either core for *different* pins: the shared bitmap
+//!   registers (`GPIO_OUT`, `GPIO_ENABLE`) are written through their
+//!   W1TS/W1TC forms (per-bit atomic, verified against esp-hal 1.1.1
+//!   `write_out_en`), and the function-select/IO_MUX registers are
+//!   per-pin. **Same-pin** access is serialized by the wire lifecycle
+//!   instead: the PRO core touches a pad only while its wire is quiesced —
+//!   before the wire's first post (the open-time park) and after the
+//!   pusher's close ack (the drop-time park) — and the pusher touches it
+//!   only in between.
 
 use esp_hal::peripherals::RMT;
 use lp_ws281x::{BlockPlan, InterruptFlags, RamWindow, RmtHw, SharedBlockPlan};

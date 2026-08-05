@@ -23,6 +23,7 @@
 
 pub(crate) mod agent_support;
 pub mod asset;
+pub(crate) mod control_display_layout_fallback;
 pub mod demo_project;
 pub mod dirty_summary;
 pub mod loaded_project_choice;
