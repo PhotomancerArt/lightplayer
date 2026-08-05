@@ -102,14 +102,19 @@ Three separable steps, cheapest first:
 2. **Render straight into the runtime buffer** (−6 B/LED). Requires the control
    render target contract (`ControlRenderTarget { samples: &'a mut [u16] }`) to
    admit a byte-backed target, which touches every control node.
-3. **Pack the resolved point list** (−17 B/LED). The big one and the schema
-   change. Note the resolved `PathPoints` for a **map2d-sourced** fixture is
-   pure derived runtime data — the def holds only `Map2d { source }`, and
-   `sync_mapping_config_from_def` explicitly says "PointList paths carry no
-   def-synced parameters (positions are resolved data)". So a compact internal
-   carrier for the resolved form may be reachable **without** touching the
-   authored schema, as long as hand-authored `PathPoints` fixtures keep the slot
-   form. That split is the design question to answer first.
+3. ~~**Pack the resolved point list** (−17 B/LED).~~ **PAID DOWN for
+   document-sourced fixtures 2026-08-04** (M6, branch
+   `claude/m6-compact-mappings-f98a49`): the split held exactly as framed —
+   map2d/svg-sourced mappings resolve into `ResolvedMappingCompact`
+   (~8 B/lamp exact-capacity spans+points in lpc-model, non-slot,
+   non-serialized) while hand-authored `PathPoints` keeps the slot form and
+   its editing surface. The *actual* saving was bigger than the estimate:
+   the slot form's live cost was 41 B/LED (power-of-two `VecMap` overshoot;
+   61,440 B at 1500 lamps), so the dome's resolved mapping went
+   61,440 → ~9 KB. The same change deleted a per-tick whole-mapping clone
+   (36 KB/frame at 1500) and the contiguous `Vec<MappingPoint>` expansion
+   (38,400 B doubling peak = the first-tick OOM). Silicon: 1500 lamps runs
+   at 12 fps, used=137,332 of 186,368; post-M6 marginal ≈ 59 B/LED all-in.
 
 ## Incident log
 
