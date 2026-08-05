@@ -44,7 +44,7 @@ use crate::app::node::slot_edit_actions::slot_clear_action;
 use crate::app::node::{
     BindingChip, BindingChipDirection, NodeCardSection, ProducedProductView, SlotDetailButton,
 };
-use crate::base::{InlineButton, InlineButtonTone, StudioIconName};
+use crate::base::{IconActionButton, IconMenuTone, StudioIconName};
 
 use super::phasor_trace::PhasorTraceDriver;
 use super::tape_transport::TapeTransport;
@@ -111,13 +111,15 @@ pub fn ClockFace(
                                     }
                                 }
                                 span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
+                                    // Same 32px box family as the detail
+                                    // button beside it (G1: the text
+                                    // button read as a one-off).
                                     if !override_targets.is_empty() && on_action.is_some() {
-                                        InlineButton {
-                                            label: "Clear transport overrides",
+                                        IconActionButton {
                                             icon: StudioIconName::Revert,
-                                            text: "clear",
-                                            tone: InlineButtonTone::Attention,
+                                            label: "Clear transport overrides",
                                             title: "Clear this transport's debug overrides \u{2014} session only",
+                                            tone: IconMenuTone::Attention,
                                             on_press: move |_| {
                                                 if let Some(handler) = on_action {
                                                     for address in override_targets.clone() {

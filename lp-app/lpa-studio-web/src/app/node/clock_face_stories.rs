@@ -39,7 +39,10 @@ use crate::app::node::face_story_fixtures::{
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ClockCardCanvas(children: Element) -> Element {
     rsx! {
-        div { class: "tw:w-full tw:max-w-md", {children} }
+        // max-w-lg, matching the card's natural editor width (~500px): at
+        // md the taperow's reserved per-control clear slots wrap the row,
+        // which is real responsive behavior, not the design frame.
+        div { class: "tw:w-full tw:max-w-lg", {children} }
     }
 }
 

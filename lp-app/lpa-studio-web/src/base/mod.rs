@@ -41,7 +41,7 @@ pub use detail_popover::{
 };
 pub use field_row::FieldRow;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
-pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
+pub use icon_menu::{IconActionButton, IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use inline_button::{
     INLINE_ICON_SIZE, INLINE_TEXT_ICON_SIZE, InlineButton, InlineButtonTone,
     inline_icon_button_class, inline_text_button_class,
