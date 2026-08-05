@@ -139,6 +139,10 @@ pub fn SlotValueEditor(
             on_action,
             NumberBounds::default(),
         ),
+        // The rich gradient/palette editor is M4 P3; until then a gradient
+        // slot renders as the generic read-only display, same as any other
+        // struct-shaped value without a specialized field yet.
+        UiSlotEditorHint::Gradient => fallback_value(value, state),
     }
 }
 

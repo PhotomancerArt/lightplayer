@@ -13,9 +13,9 @@ use lpa_studio_core::{
     UiBindingEndpoint, UiClockFace, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
     UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputBoardFacts,
     UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl, UiPanelEmit, UiPanelWidget,
-    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProducedValue,
-    UiProductPreview, UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform,
-    UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
+    UiPhasorReading, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview,
+    UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus, UiTimebaseState,
 };
 
 use crate::app::node::node_story_fixtures::{

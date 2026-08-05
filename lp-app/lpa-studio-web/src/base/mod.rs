@@ -11,6 +11,9 @@ pub mod detail_popover;
 #[cfg(feature = "stories")]
 pub(crate) mod detail_popover_stories;
 pub mod field_row;
+pub mod gradient_strip;
+#[cfg(feature = "stories")]
+pub(crate) mod gradient_strip_stories;
 pub mod icon;
 pub mod icon_menu;
 #[cfg(feature = "stories")]
@@ -40,6 +43,7 @@ pub use detail_popover::{
     detail_popover_section_class,
 };
 pub use field_row::FieldRow;
+pub use gradient_strip::GradientStripCanvas;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use inline_button::{

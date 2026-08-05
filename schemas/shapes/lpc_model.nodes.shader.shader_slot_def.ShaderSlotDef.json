@@ -89,7 +89,7 @@
             "some": {
               "value": {
                 "shape": {
-                  "editor": "plain",
+                  "editor": "gradient",
                   "id": 2273791358,
                   "meta": {},
                   "ty": {
