@@ -1007,7 +1007,7 @@ fn scrubbing_the_debug_slider_reproduces_a_phasor_uniform_exactly() {
         .expect("published");
     assert!(live_edge > 0.0, "the clock has to have run: {live_edge}");
 
-    project.write_clock_control("controls.running", LpValue::Bool(false));
+    project.write_clock_control("transport.running", LpValue::Bool(false));
     project.frame(&[compute]);
     let paused_at = project
         .engine
@@ -1019,7 +1019,7 @@ fn scrubbing_the_debug_slider_reproduces_a_phasor_uniform_exactly() {
     let offsets = [-0.45, -0.25, -0.1];
     let mut seen = Vec::new();
     for offset in offsets {
-        project.write_clock_control("controls.scrub_offset_seconds", LpValue::F32(offset));
+        project.write_clock_control("transport.scrub_offset_seconds", LpValue::F32(offset));
         project.frame(&[compute]);
         let entry = project.engine.timebases().entry(clock).expect("timebase");
         assert!(
@@ -1040,7 +1040,7 @@ fn scrubbing_the_debug_slider_reproduces_a_phasor_uniform_exactly() {
 
     // Revisited in the other order, they read the same frames.
     for (offset, expected) in offsets.iter().zip(seen).rev() {
-        project.write_clock_control("controls.scrub_offset_seconds", LpValue::F32(*offset));
+        project.write_clock_control("transport.scrub_offset_seconds", LpValue::F32(*offset));
         project.frame(&[compute]);
         assert_eq!(
             project.read(compute, "out_wave"),
@@ -1051,7 +1051,7 @@ fn scrubbing_the_debug_slider_reproduces_a_phasor_uniform_exactly() {
 
     // Releasing the slider puts the clock back at the live edge, and the
     // phasor picks up from what it was showing there.
-    project.write_clock_control("controls.scrub_offset_seconds", LpValue::F32(0.0));
+    project.write_clock_control("transport.scrub_offset_seconds", LpValue::F32(0.0));
     project.frame(&[compute]);
     assert!(
         (project

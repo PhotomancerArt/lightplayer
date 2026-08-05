@@ -73,7 +73,7 @@ outlive its own range.
   values (`examples/meteor/sim.glsl` is the shape to copy — it is
   still subject to the 9.1 h ceiling on its *input*, but it does not
   compound the f32 rot).
-- To reproduce without waiting: write `controls.scrub_offset_seconds`
+- To reproduce without waiting: write `transport.scrub_offset_seconds`
   on the clock card's Debug section (e.g. 32 000) and watch a
   fixed-mode `seconds` uniform flatten as it crosses the ceiling.
 
