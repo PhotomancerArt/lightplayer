@@ -123,6 +123,10 @@ pub fn EditorCanvas(
     live_colors: Vec<[u8; 3]>,
     /// Fired after any committed (undoable) change.
     on_committed: EventHandler<()>,
+    /// Host-owned reference image, rendered doc-space at the origin between
+    /// the dot grid and the authored canvas rect when `view_opts.reference`.
+    #[props(default)]
+    reference: Option<crate::view::reference::ReferenceImage>,
 ) -> Element {
     // Pointer/wheel math anchors to the mounted svg's live rect, and the
     // measured size feeds the host's viewport signal (fit needs real
@@ -565,6 +569,23 @@ pub fn EditorCanvas(
                     width: "200000",
                     height: "200000",
                     fill: "url(#lpme-dots)",
+                }
+                // Tracing layer: under everything authored, over the grid.
+                // Explicit width/height — a viewBox-only SVG has no usable
+                // intrinsic size (see `ReferenceImage::size`). `<image>`
+                // executes no scripts; foreign SVG stays out of the DOM.
+                if let Some(image) = reference.as_ref().filter(|_| opts.reference) {
+                    // dioxus-html's svg `image` element carries no typed
+                    // attributes; quoted names emit them verbatim.
+                    image {
+                        "href": "{image.data_url}",
+                        "x": "0",
+                        "y": "0",
+                        "width": "{image.size[0]}",
+                        "height": "{image.size[1]}",
+                        "opacity": "{image.opacity}",
+                        "pointer-events": "none",
+                    }
                 }
                 if let Some(rect) = canvas_rect {
                     rect {

@@ -8,18 +8,26 @@
 //! starts fresh or opens a document that does parse. See
 //! [`crate::editor_core::doc_refusal`].
 
+use base64::Engine as _;
 use dioxus::html::HasFileData as _;
 use dioxus::prelude::*;
 use lpc_mapping::Map2dDoc;
 
 use crate::editor_core::doc_refusal::{DocOpen, DocRefusal};
-use crate::view::map_editor::{EditorFileOps, MapEditor};
+use crate::view::map_editor::{EditorFileOps, MapEditor, ReferenceOps};
+use crate::view::reference::{DEFAULT_REFERENCE_OPACITY, ReferenceImage, svg_reference_size};
 
 #[cfg(target_arch = "wasm32")]
 const AUTOSAVE_KEY: &str = "lp-mapping-editor-doc";
+/// The reference image's own slot: editor-side tracing state, deliberately
+/// separate from the document autosave (losing one must never touch the
+/// other).
+#[cfg(target_arch = "wasm32")]
+const REFERENCE_KEY: &str = "lp-mapping-editor-reference";
 /// What the refusal panel calls the autosave slot.
 const AUTOSAVE_LABEL: &str = "autosaved document";
 const OPEN_INPUT_ID: &str = "lpme-open-input";
+const REFERENCE_INPUT_ID: &str = "lpme-reference-input";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -38,12 +46,26 @@ pub fn MapEditorPage() -> Element {
         _ => None,
     });
 
+    // The reference image restores from its own slot; anything unreadable
+    // there is simply "no reference" — tracing state earns no refusal flow.
+    let mut reference = use_signal(|| {
+        reference_read()
+            .as_deref()
+            .and_then(ReferenceImage::from_json)
+    });
+
     let on_doc_change = move |json: String| {
         autosave_store(&json);
     };
     let file_ops = EditorFileOps {
         on_new: EventHandler::new(move |()| start_fresh(doc, doc_epoch, error, refused)),
-        on_open: EventHandler::new(move |()| click_open_input()),
+        on_open: EventHandler::new(move |()| click_input(OPEN_INPUT_ID)),
+    };
+    let reference_ops = ReferenceOps {
+        on_pick: EventHandler::new(move |()| click_input(REFERENCE_INPUT_ID)),
+        on_change: EventHandler::new(move |value: Option<ReferenceImage>| {
+            adopt_reference(&mut reference, error, value);
+        }),
     };
 
     rsx! {
@@ -80,7 +102,7 @@ pub fn MapEditorPage() -> Element {
                     }
                     button {
                         class: "lpme-btn",
-                        onclick: move |_| click_open_input(),
+                        onclick: move |_| click_input(OPEN_INPUT_ID),
                         "Open a document…"
                     }
                     button {
@@ -96,6 +118,8 @@ pub fn MapEditorPage() -> Element {
                     on_doc_change,
                     file_ops,
                     scene_menu: true,
+                    reference: reference(),
+                    reference_ops,
                 }
             }
             input {
@@ -108,6 +132,20 @@ pub fn MapEditorPage() -> Element {
                     async move {
                         if let Some(file) = file {
                             apply_file(doc, doc_epoch, error, refused, file).await;
+                        }
+                    }
+                },
+            }
+            input {
+                id: REFERENCE_INPUT_ID,
+                class: "lpme-hidden-input",
+                r#type: "file",
+                accept: ".svg,.png,.jpg,.jpeg",
+                onchange: move |evt| {
+                    let file = evt.files().first().cloned();
+                    async move {
+                        if let Some(file) = file {
+                            apply_reference_file(reference, error, file).await;
                         }
                     }
                 },
@@ -184,19 +222,119 @@ async fn apply_file(
     }
 }
 
-/// Click the hidden file input (browser file dialogs only open from a user
-/// gesture, which the header button provides).
-fn click_open_input() {
+/// Click a hidden file input (browser file dialogs only open from a user
+/// gesture, which the header buttons provide).
+fn click_input(id: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;
         if let Some(element) = web_sys::window()
             .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(OPEN_INPUT_ID))
+            .and_then(|document| document.get_element_by_id(id))
             && let Ok(element) = element.dyn_into::<web_sys::HtmlElement>()
         {
             element.click();
         }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = id;
+    }
+}
+
+/// Adopt a reference change (load, opacity, clear) and persist it. A slot
+/// write that fails — a photo-sized data URL can blow the localStorage
+/// quota — keeps the in-memory reference and says so; the document autosave
+/// lives in its own slot and is never at risk here.
+fn adopt_reference(
+    reference: &mut Signal<Option<ReferenceImage>>,
+    mut error: Signal<Option<String>>,
+    value: Option<ReferenceImage>,
+) {
+    let stored = reference_store(value.as_ref());
+    reference.set(value);
+    if !stored {
+        error.set(Some(
+            "reference image loaded, but too large for browser storage — it will not \
+             survive a reload (the document autosave is unaffected)"
+                .to_string(),
+        ));
+    }
+}
+
+/// Read a picked reference file into doc-space: SVGs size from their
+/// width/height or viewBox (the Illustrator shape), rasters from their
+/// decoded pixel size. Files we cannot size are reported and ignored.
+async fn apply_reference_file(
+    reference: Signal<Option<ReferenceImage>>,
+    mut error: Signal<Option<String>>,
+    file: dioxus::html::FileData,
+) {
+    let mut reference = reference;
+    let name = file.name();
+    let lower = name.to_lowercase();
+    let loaded = if lower.ends_with(".svg") {
+        match file.read_string().await {
+            Ok(text) => svg_reference_size(&text)
+                .map(|size| ReferenceImage {
+                    data_url: format!(
+                        "data:image/svg+xml;base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+                    ),
+                    opacity: DEFAULT_REFERENCE_OPACITY,
+                    size,
+                })
+                .ok_or_else(|| format!("{name}: could not read an SVG size (no viewBox?)")),
+            Err(read_error) => Err(format!("could not read {name}: {read_error}")),
+        }
+    } else if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        let mime = if lower.ends_with(".png") {
+            "image/png"
+        } else {
+            "image/jpeg"
+        };
+        match file.read_bytes().await {
+            Ok(bytes) => {
+                let data_url = format!(
+                    "data:{mime};base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(&bytes)
+                );
+                match decode_image_size(&data_url).await {
+                    Some(size) => Ok(ReferenceImage {
+                        data_url,
+                        opacity: DEFAULT_REFERENCE_OPACITY,
+                        size,
+                    }),
+                    None => Err(format!("{name}: could not decode the image")),
+                }
+            }
+            Err(read_error) => Err(format!("could not read {name}: {read_error}")),
+        }
+    } else {
+        Err(format!("{name}: not a .svg / .png / .jpg reference"))
+    };
+    match loaded {
+        Ok(image) => adopt_reference(&mut reference, error, Some(image)),
+        Err(message) => error.set(Some(message)),
+    }
+}
+
+/// Decode a raster data URL for its natural pixel size.
+async fn decode_image_size(data_url: &str) -> Option<[f32; 2]> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let image = web_sys::HtmlImageElement::new().ok()?;
+        image.set_src(data_url);
+        wasm_bindgen_futures::JsFuture::from(image.decode())
+            .await
+            .ok()?;
+        let size = [image.natural_width() as f32, image.natural_height() as f32];
+        (size[0] > 0.0 && size[1] > 0.0).then_some(size)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = data_url;
+        None
     }
 }
 
@@ -222,6 +360,42 @@ fn autosave_store(json: &str) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = json;
+    }
+}
+
+fn reference_read() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let storage = web_sys::window()?.local_storage().ok()??;
+        storage.get_item(REFERENCE_KEY).ok()?
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        None
+    }
+}
+
+/// Persist (or clear) the reference slot. `false` means the write itself
+/// failed — in practice a quota overflow — and the caller should say so.
+fn reference_store(reference: Option<&ReferenceImage>) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok()?)
+        else {
+            return true; // no storage at all: nothing to fail
+        };
+        match reference {
+            Some(image) => storage.set_item(REFERENCE_KEY, &image.to_json()).is_ok(),
+            None => {
+                let _ = storage.remove_item(REFERENCE_KEY);
+                true
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = reference;
+        true
     }
 }
 
