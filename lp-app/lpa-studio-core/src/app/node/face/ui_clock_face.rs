@@ -149,63 +149,9 @@ pub fn phasor_speed_display(shown: &str) -> String {
     }
 }
 
-/// Quantize a live phase for display: at most 2 decimals, so the DTO change
-/// gate only fires when the *shown* number moves. A phasor with a 100 s
-/// period then dirties the card roughly once a second instead of once a
-/// frame; a 1 s phasor still moves every frame, which is the honest cost of
-/// a live debug listing (and it only runs while the clock card is
-/// subscribed).
-#[must_use]
-pub fn format_phase(phase: f32) -> String {
-    if !phase.is_finite() {
-        return "—".to_string();
-    }
-    let rounded = (phase * 100.0).round() / 100.0;
-    if rounded.fract() == 0.0 {
-        format!("{rounded:.1}")
-    } else {
-        rounded.to_string()
-    }
-}
-
-/// A phasor's period as text. `0` (or a non-finite/negative value) is
-/// **frozen** — the phasor holds its phase rather than resetting, and the
-/// word says so instead of printing a rate nothing is running at.
-#[must_use]
-pub fn format_period_seconds(period_seconds: f32) -> String {
-    if !period_seconds.is_finite() || period_seconds <= 0.0 {
-        return "frozen".to_string();
-    }
-    let rounded = (period_seconds * 100.0).round() / 100.0;
-    if rounded.fract() == 0.0 {
-        format!("{rounded:.0}s")
-    } else {
-        format!("{rounded}s")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_frozen_phasor_says_so_rather_than_printing_a_rate() {
-        assert_eq!(format_period_seconds(0.0), "frozen");
-        assert_eq!(format_period_seconds(-1.0), "frozen");
-        assert_eq!(format_period_seconds(f32::NAN), "frozen");
-        assert_eq!(format_period_seconds(4.0), "4s");
-        assert_eq!(format_period_seconds(0.25), "0.25s");
-        assert_eq!(format_period_seconds(100.0), "100s");
-    }
-
-    #[test]
-    fn phase_display_quantizes_so_the_dto_gate_stays_quiet() {
-        assert_eq!(format_phase(0.0), "0.0");
-        assert_eq!(format_phase(0.25), "0.25");
-        // Two ticks a hair apart read the same, so the row does not change.
-        assert_eq!(format_phase(0.123_4), format_phase(0.124_9));
-        assert_eq!(format_phase(f32::NAN), "—");
-    }
 
     /// The auto-denominated ladder (G2 convergence): smallest unit keeping
     /// the count ≥ 1, unit riding the string, frozen = 0/s.
