@@ -16,7 +16,7 @@
 
 use lpc_model::Waveform;
 
-use crate::UiProducedProduct;
+use crate::{ProjectSlotAddress, UiProducedProduct};
 
 /// Kind-specific face for a clock node.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,10 +24,13 @@ pub struct UiClockFace {
     /// The published time-product row: identity, detail, and the `bus:time`
     /// binding chip. The same row the produced-products section carries.
     pub product: UiProducedProduct,
-    /// The clock's effective seconds as text ("42.35"), rendered tiny and
-    /// muted in the PHASORS section header (clock-face v2 — the Delta row
-    /// is gone outright; delta was "not useful at all" at the G2 gate).
-    pub seconds: Option<String>,
+    /// The transport instrument's live facts — run/pause, rate, scrub
+    /// offset, and probe-anchored numeric seconds — lifted from the
+    /// flattened `transport.*` Debug rows (plan
+    /// 2026-08-04-2355-clock-tape-hero, P2). `None` when the Debug rows
+    /// have not landed yet (unread project), the same "no read yet, not a
+    /// failure" posture [`UiTimebaseState::Unread`] uses.
+    pub transport: Option<UiClockTransport>,
     /// What the timebase probe last said about this product.
     pub timebase: UiTimebaseState,
     /// Trace cards, one per downstream READING riding this timebase, in
@@ -39,6 +42,49 @@ pub struct UiClockFace {
     /// asked for in the last couple of seconds is simply gone from the next
     /// read.
     pub phasors: Vec<UiPhasorReading>,
+}
+
+/// The clock's tape transport, as the card and panel widgets (P3/P4) will
+/// render it: current values (edit buffer included — a staged drag reads
+/// back through this DTO immediately, the echo-suppression contract the
+/// widgets rely on) plus the addresses `SetValue` dispatches target.
+///
+/// `seconds` is the probe-anchored effective time, copied in by
+/// [`crate::ProjectController::apply_clock_faces`] from the cached
+/// [`UiTimebaseRead::Live`] read the same decoration pass already
+/// consults for the phasor listing — numeric, never formatted, so the web
+/// driver can extrapolate between pulls. It stays `0.0` until a probe
+/// read lands, same as [`UiTimebaseState::Unread`] leaves the phasor list
+/// empty rather than showing a stale number.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiClockTransport {
+    /// Probe-anchored effective seconds (numeric, not display text).
+    pub seconds: f32,
+    /// Whether the transport is currently running, as currently
+    /// staged/acked (edit buffer included).
+    pub running: bool,
+    /// The transport's rate multiplier, as currently staged/acked.
+    pub rate: f32,
+    /// The transport's scrub offset in seconds, as currently staged/acked.
+    pub scrub_offset_seconds: f32,
+    /// `SetValue` target for `running`; `None` = not editable.
+    pub running_address: Option<ProjectSlotAddress>,
+    /// `SetValue` target for `rate`; `None` = not editable.
+    pub rate_address: Option<ProjectSlotAddress>,
+    /// `SetValue` target for `scrub_offset_seconds`; `None` = not editable.
+    pub scrub_address: Option<ProjectSlotAddress>,
+    /// The row's own debug-override edit entry, present while an override
+    /// is ACTIVE (`state.dirty != Clean` on the flattened Debug row) —
+    /// one field serving as both the changed-tint flag and the per-value
+    /// **Clear** target (D7 vocabulary: debug overrides clear, never
+    /// revert/reset). The transport is Debug-role territory; the tape
+    /// wears the debug family's orange tint on a changed control instead
+    /// of the drawer's hazard stripes.
+    pub running_override: Option<ProjectSlotAddress>,
+    /// See [`Self::running_override`].
+    pub rate_override: Option<ProjectSlotAddress>,
+    /// See [`Self::running_override`].
+    pub scrub_override: Option<ProjectSlotAddress>,
 }
 
 /// The timebase probe's verdict for a clock's product.
@@ -102,7 +148,7 @@ impl UiClockFace {
     pub fn new(product: UiProducedProduct) -> Self {
         Self {
             product,
-            seconds: None,
+            transport: None,
             timebase: UiTimebaseState::Unread,
             phasors: Vec::new(),
         }

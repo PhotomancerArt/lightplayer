@@ -21,10 +21,6 @@ pub fn ProducedProductView(
     #[props(default = false)] initially_open: bool,
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
-    /// The clock's live effective seconds — the clock face passes it so its
-    /// time product renders a counter instead of the caption band.
-    #[props(default = None)]
-    time_seconds: Option<String>,
 ) -> Element {
     let aspects = product.visible_aspects();
     // Visual and control previews are width-capped hero media: the pane hugs
@@ -56,7 +52,6 @@ pub fn ProducedProductView(
                 frame: product.frame,
                 focus_action,
                 on_action,
-                time_seconds,
             }
             if let Some(endpoint) = bus_target {
                 div { class: "tw:flex tw:min-w-0 tw:justify-center tw:p-1.5",
@@ -96,31 +91,11 @@ pub(crate) fn ProductPreview(
     // A time product is metadata-only BY DESIGN (nothing to draw behind the
     // handle — the phasor cards below are its real face), so it never gets
     // the aspect-framed hero the pictorial products fill (a full-width box
-    // of nothing — G2 gate feedback). What it shows instead depends on the
-    // caller: the clock face passes the clock's live effective seconds and
-    // gets a COUNTER — the number a scrub or speed change visibly moves
-    // ("Time product" as a caption did nothing for anyone) — while product
-    // rows without a reading keep the compact caption band. The counter
-    // sits on the pane's own surface (the band gradient clashed inside the
-    // violet bound pane — G3); INTERIM per G3 until the stopwatch-widget
-    // spike: a custom time display that also carries the clock's debug
-    // transport is the wanted long-term shape.
+    // of nothing — G2 gate feedback). It keeps the compact caption band;
+    // the clock face's own hero is the tape transport instrument beneath
+    // the row (the interim seconds counter died with it — plan
+    // 2026-08-04-2355-clock-tape-hero, P3).
     if kind == UiProductKind::Time && matches!(preview, UiProductPreview::MetadataOnly) {
-        if let Some(seconds) = time_seconds {
-            return rsx! {
-                div { class: "tw:flex tw:min-w-0 tw:flex-col tw:items-center tw:gap-1 tw:p-3 tw:text-center",
-                    span {
-                        class: "tw:font-mono tw:text-2xl tw:font-semibold tw:leading-none tw:tabular-nums tw:text-strong-foreground",
-                        title: "Effective clock seconds — scrubbing and speed move this number",
-                        "{seconds}"
-                        span { class: "tw:text-sm tw:font-normal tw:text-subtle-foreground", " s" }
-                    }
-                    span { class: "tw:text-[10px] tw:uppercase tw:leading-none tw:tracking-[0.1em] tw:text-dim-foreground",
-                        "seconds"
-                    }
-                }
-            };
-        }
         return rsx! {
             div { class: "ux-produced-product-metadata",
                 strong { class: "tw:text-sm tw:text-strong-foreground",

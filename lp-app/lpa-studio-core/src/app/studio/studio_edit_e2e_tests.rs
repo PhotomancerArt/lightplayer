@@ -81,31 +81,32 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         "container-manifest fields must not surface as root slots"
     );
 
-    // D3/D4 over the real wire: the clock's three `controls.*` Debug fields
-    // land FLAT in the node's Debug section — no "Controls" record row in
-    // the settings section, no nesting inside the Debug one — while the
-    // clock's persisted settings stay where they were.
+    // P5 (clock-tape-hero): the tape face CLAIMED the clock's three
+    // `transport.*` Debug rows — no Debug section renders on a clock at
+    // all, and the face's transport block is the one read/dispatch
+    // surface. (D4 flattening itself stays covered by the partition's own
+    // tests and the output node's `test_pattern`.)
     let clock_sections = node_sections(&snapshot, "/edit_e2e.show/clock.clock");
-    let debug_labels = section_slot_labels(&clock_sections, |section| {
-        matches!(section, UiNodeSection::DebugSlots(_))
-    });
-    assert_eq!(
-        debug_labels,
-        vec!["Running", "Rate", "Scrub offset seconds"],
-        "every Debug field renders directly in the Debug section (D4 flattening)"
+    assert!(
+        !clock_sections
+            .iter()
+            .any(|section| matches!(section, UiNodeSection::DebugSlots(_))),
+        "the tape face claimed the transport rows — a clock renders no Debug drawer"
     );
     let settings_labels = section_slot_labels(&clock_sections, |section| {
         matches!(section, UiNodeSection::ConfigSlots(_))
     });
     assert!(
         !settings_labels.iter().any(|label| label == "Controls"),
-        "the Debug section replaces the old `controls` record row, never duplicates it: {settings_labels:?}"
+        "the face replaces the old `controls` record row, never duplicates it: {settings_labels:?}"
     );
 
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
-    assert!(rate.state.debug, "clock rate is a Debug control");
-    let rate_address = rate.address.clone().expect("rate slot carries an address");
+    let transport = clock_transport_block(&snapshot);
+    assert_eq!(transport.rate_override, None, "clean transport — no tint");
+    let rate_address = transport
+        .rate_address
+        .clone()
+        .expect("transport block carries the rate dispatch address");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
     assert!(!color_order.state.debug, "color order is a persisted slot");
@@ -135,10 +136,12 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         2,
         "three queued rate SetValues coalesce with the color-order edit into two mutations"
     );
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
-    assert!(rate.state.debug);
-    assert_eq!(slot_value_display(rate), "2");
+    let transport = clock_transport_block(&snapshot);
+    assert!(
+        transport.rate_override.is_some(),
+        "the active override lifts its Clear target (the tape's changed tint)"
+    );
+    assert_eq!(transport.rate, 2.0);
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Dirty);
     assert!(!color_order.state.debug);
@@ -168,13 +171,12 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         !clock_json.contains("\"rate\":2"),
         "clock.json must not gain the debug rate override: {clock_json}"
     );
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(
-        rate.state.dirty,
-        UiNodeDirtyState::Dirty,
+    let transport = clock_transport_block(&snapshot);
+    assert!(
+        transport.rate_override.is_some(),
         "the debug override survives the save, live on the project"
     );
-    assert_eq!(slot_value_display(rate), "2");
+    assert_eq!(transport.rate, 2.0);
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
@@ -199,11 +201,10 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("revert emits a snapshot");
 
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
+    let transport = clock_transport_block(&snapshot);
+    assert_eq!(transport.rate_override, None);
     assert_eq!(
-        slot_value_display(rate),
-        "1",
+        transport.rate, 1.0,
         "rate reverted to the authored value through the gated refresh"
     );
     let color_order = find_slot(&snapshot, "color_order");
@@ -240,10 +241,10 @@ fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let rate_address = find_slot(&snapshot, "controls.rate")
-        .address
+    let rate_address = clock_transport_block(&snapshot)
+        .rate_address
         .clone()
-        .expect("rate slot carries an address");
+        .expect("transport block carries the rate dispatch address");
 
     // One batch: the edit is queued (in flight) when the detach lands
     // behind it.
@@ -281,8 +282,8 @@ fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
     .expect("re-attach connects");
     let rebuilt = actor.controller_mut_for_test().view();
     assert_eq!(
-        slot_value_display(find_slot(&rebuilt, "controls.rate")),
-        "2",
+        clock_transport_block(&rebuilt).rate,
+        2.0,
         "the acked edit is visible after detach → re-attach"
     );
 }
@@ -1236,9 +1237,12 @@ fn per_slot_clear_restores_the_debug_default_through_gated_refresh() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(slot_value_display(rate), "1");
-    let rate_address = rate.address.clone().expect("rate slot carries an address");
+    let transport = clock_transport_block(&snapshot);
+    assert_eq!(transport.rate, 1.0);
+    let rate_address = transport
+        .rate_address
+        .clone()
+        .expect("transport block carries the rate dispatch address");
 
     // Edit the debug control, then pull a gated refresh so the synced
     // view itself holds the edited value.
@@ -1249,24 +1253,24 @@ fn per_slot_clear_restores_the_debug_default_through_gated_refresh() {
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("edit + refresh emit a snapshot");
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
-    assert_eq!(slot_value_display(rate), "2");
+    let transport = clock_transport_block(&snapshot);
+    assert!(transport.rate_override.is_some());
+    assert_eq!(transport.rate, 2.0);
 
     // Per-value Clear: drop the debug override, then a gated refresh must
     // show the default again. For a Debug slot the authored default IS the
-    // shape default, so Clear and reset-to-authored coincide.
+    // shape default, so Clear and reset-to-authored coincide. This is the
+    // exact op the tape's `clear` affordance dispatches per override.
     handle.tx.send(clear_action(rate_address));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("clear + refresh emit a snapshot");
 
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
+    let transport = clock_transport_block(&snapshot);
+    assert_eq!(transport.rate_override, None);
     assert_eq!(
-        slot_value_display(rate),
-        "1",
+        transport.rate, 1.0,
         "per-value Clear restores the default through the gated refresh"
     );
 }
@@ -2554,7 +2558,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
 }"#;
     let clock_json = r#"{
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "running": true,
     "rate": 1.0
   }
@@ -2636,7 +2640,7 @@ pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
             "clock.json",
             r#"{
   "kind": "Clock",
-  "controls": {
+  "transport": {
     "running": true,
     "rate": 1.0
   }
@@ -2800,6 +2804,21 @@ pub(crate) fn card_matching(
 /// The workspace card at `path` (a node address).
 pub(crate) fn card_at(view: &UiStudioView, path: &str) -> UiNodeView {
     card_matching(view, path, |card| card.header.path == path)
+}
+
+/// The first clock face's transport block anywhere in the workspace —
+/// since the tape face claimed the clock's Debug rows (clock-tape-hero
+/// P5), this is the transport's ONLY read surface: no slot row renders
+/// its values anywhere.
+pub(crate) fn clock_transport_block(view: &UiStudioView) -> crate::UiClockTransport {
+    let card = card_matching(view, "clock-faced", |card| {
+        matches!(card.face, Some(crate::UiNodeFace::Clock(_)))
+    });
+    let Some(crate::UiNodeFace::Clock(face)) = card.face else {
+        unreachable!("picked by face kind");
+    };
+    face.transport
+        .expect("clock face carries the transport block")
 }
 
 /// The project editor DTO from a studio snapshot.
