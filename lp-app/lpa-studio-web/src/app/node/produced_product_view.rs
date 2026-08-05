@@ -102,11 +102,15 @@ pub(crate) fn ProductPreview(
     // caller: the clock face passes the clock's live effective seconds and
     // gets a COUNTER — the number a scrub or speed change visibly moves
     // ("Time product" as a caption did nothing for anyone) — while product
-    // rows without a reading keep the compact caption band.
+    // rows without a reading keep the compact caption band. The counter
+    // sits on the pane's own surface (the band gradient clashed inside the
+    // violet bound pane — G3); INTERIM per G3 until the stopwatch-widget
+    // spike: a custom time display that also carries the clock's debug
+    // transport is the wanted long-term shape.
     if kind == UiProductKind::Time && matches!(preview, UiProductPreview::MetadataOnly) {
         if let Some(seconds) = time_seconds {
             return rsx! {
-                div { class: "ux-produced-product-metadata",
+                div { class: "tw:flex tw:min-w-0 tw:flex-col tw:items-center tw:gap-1 tw:p-3 tw:text-center",
                     span {
                         class: "tw:font-mono tw:text-2xl tw:font-semibold tw:leading-none tw:tabular-nums tw:text-strong-foreground",
                         title: "Effective clock seconds — scrubbing and speed move this number",

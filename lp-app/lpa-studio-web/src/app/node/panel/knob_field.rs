@@ -335,8 +335,9 @@ const KNOB_DISPATCH_INTERVAL_MS: f64 = 50.0;
 /// The fastest period a phasor knob's gesture can reach, in seconds. The
 /// knob's authored `min` is clamped up to this: an authored min of 0 exists
 /// to admit the frozen sentinel, not to let a drag sweep into thousands of
-/// cycles per second.
-const PHASOR_MIN_PERIOD_SECONDS: f32 = 0.25;
+/// cycles per second. 0.5 s = 2/s at the top — G3 judged 4/s "way too
+/// fast" for the fast end of the sweep.
+const PHASOR_MIN_PERIOD_SECONDS: f32 = 0.5;
 
 /// The log-period domain `[T_min, T_max]` of a phasor knob, or `None` for a
 /// degenerate authored range (log needs two distinct positive ends).
@@ -877,8 +878,8 @@ mod tests {
         // geometric MIDPOINT of the periods lands at the middle of the
         // sweep — the whole point of the log mapping.
         assert_eq!(phasor_knob_fraction(120.0, 0.0, 120.0), 0.0);
-        assert_eq!(phasor_knob_fraction(0.25, 0.0, 120.0), 1.0);
-        let mid = (120.0_f32 * 0.25).sqrt();
+        assert_eq!(phasor_knob_fraction(0.5, 0.0, 120.0), 1.0);
+        let mid = (120.0_f32 * 0.5).sqrt();
         assert!((phasor_knob_fraction(mid, 0.0, 120.0) - 0.5).abs() < 1e-3);
         // The frozen sentinel (period 0) is NO speed — far left, never
         // mapped through the log.
@@ -887,7 +888,7 @@ mod tests {
 
     #[test]
     fn phasor_mapping_round_trips_within_ulp() {
-        for value in [0.25_f32, 1.0, 4.0, 30.0, 120.0] {
+        for value in [0.5_f32, 1.0, 4.0, 30.0, 120.0] {
             let p = phasor_knob_fraction(value, 0.0, 120.0);
             let back = phasor_knob_value(p, 0.0, 120.0);
             assert!(
@@ -897,13 +898,13 @@ mod tests {
         }
         // The curve's ends are the clamped domain, exactly.
         assert_eq!(phasor_knob_value(0.0, 0.0, 120.0), 120.0);
-        assert_eq!(phasor_knob_value(1.0, 0.0, 120.0), 0.25);
+        assert_eq!(phasor_knob_value(1.0, 0.0, 120.0), 0.5);
     }
 
     #[test]
     fn phasor_drag_moves_feel_ratio_and_never_produces_frozen() {
         // A full-range rise sweeps slowest -> fastest.
-        assert_eq!(phasor_knob_drag_value(120.0, 160.0, 0.0, 120.0), 0.25);
+        assert_eq!(phasor_knob_drag_value(120.0, 160.0, 0.0, 120.0), 0.5);
         // Equal drag = equal feel-RATIO: +40px from 120 s and from 12 s
         // divide the period by the same factor.
         let from_slow = phasor_knob_drag_value(120.0, 40.0, 0.0, 120.0);
@@ -916,8 +917,8 @@ mod tests {
         );
         // Overshoot pins to the fast end — never 0, the frozen sentinel
         // stays authored-only.
-        assert_eq!(phasor_knob_drag_value(1.0, 4000.0, 0.0, 120.0), 0.25);
-        assert!(phasor_knob_drag_value(0.25, 4000.0, 0.0, 120.0) > 0.0);
+        assert_eq!(phasor_knob_drag_value(1.0, 4000.0, 0.0, 120.0), 0.5);
+        assert!(phasor_knob_drag_value(0.5, 4000.0, 0.0, 120.0) > 0.0);
         // A frozen anchor drags in from the far left.
         assert_eq!(phasor_knob_drag_value(0.0, 0.0, 0.0, 120.0), 120.0);
     }
@@ -938,7 +939,7 @@ mod tests {
         );
         assert_eq!(
             phasor_knob_key_value(4.0, &Key::End, 1.0, 0.0, 120.0),
-            Some(0.25)
+            Some(0.5)
         );
         assert_eq!(phasor_knob_key_value(4.0, &Key::Tab, 1.0, 0.0, 120.0), None);
     }
