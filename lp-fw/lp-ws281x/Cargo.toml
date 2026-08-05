@@ -19,6 +19,15 @@ mock = []
 # phase P3's truncation test). Adds nothing to the default build and must
 # never be enabled in production firmware.
 test_hooks = []
+# Place the interrupt-service path in `.rwtext` (IRAM on ESP32-class chips,
+# the section esp-hal's `#[ram]` uses). Off by default: host builds have no
+# such section, and single-core deployments already tolerate flash-cached
+# service code. A cross-core deployment must enable it: the ISR core's
+# flash-resident code stalls behind the *other* core's cache misses on the
+# shared SPI bus — measured on the classic ESP32 as entry delays exploding
+# from ≤53 to 65+ words (frame-fatal) the moment transmission overlapped
+# render, with per-refill cost unchanged.
+isr-in-ram = []
 
 [dependencies]
 

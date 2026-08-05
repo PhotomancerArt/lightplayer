@@ -26,4 +26,7 @@ mod esp32v3_rmt_ws281x_driver;
 #[cfg(feature = "frame-dump")]
 pub mod frame_dump;
 
+#[cfg(feature = "ws281x_telemetry")]
+pub mod refill_floor_probe;
+
 pub use esp32v3_rmt_ws281x_driver::Esp32V3RmtWs281xDriver;

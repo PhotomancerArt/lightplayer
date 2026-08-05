@@ -286,6 +286,13 @@ impl LpGraphics for GpuGraphics {
         Ok(())
     }
 
+    /// The trait door onto this backend's own
+    /// [`GpuGraphics::texture_uniform_value`] — the inherent method predates
+    /// the trait one and stays for callers holding a concrete `GpuGraphics`.
+    fn texture_uniform_value(&self, texture: &TextureHandle) -> Result<LpsValueF32, GfxError> {
+        GpuGraphics::texture_uniform_value(self, texture)
+    }
+
     fn blend_textures(
         &self,
         previous: &TextureHandle,

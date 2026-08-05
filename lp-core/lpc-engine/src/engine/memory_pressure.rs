@@ -21,11 +21,12 @@
 //!   reserved; currently never broadcast. Treat as advisory.
 //! - [`High`](PressureLevel::High) — a large allocation transient (a shader
 //!   compile) runs this frame. Drop state that your own render path rebuilds
-//!   **lazily and to identical core-path output** on the next demand — the
-//!   `ensure_*` pattern in the fixture node is the model. After a High
-//!   broadcast, drop → tick → output must be bit-identical to never having
-//!   dropped on the core mapping/sample/render path (gravy features — dither,
-//!   interpolation — are exempt per
+//!   **lazily and to identical core-path output** on the next demand — and
+//!   that **your own tick does not rebuild before the transient runs** (see
+//!   the ordering rule below). After a High broadcast, drop → tick → output
+//!   must be bit-identical to never having dropped on the core
+//!   mapping/sample/render path (gravy features — dither, interpolation —
+//!   are exempt per
 //!   `docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.md`).
 //! - [`Critical`](PressureLevel::Critical) — survival: the device is about
 //!   to OOM. A node may additionally drop **resettable** state whose loss is
@@ -36,6 +37,35 @@
 //! Never drop source-of-truth state at any level: authored/synced slot data,
 //! resolved mappings, compiled shader programs (keep-last-good), or asset
 //! text are inputs, not caches.
+//!
+//! ## What is actually dropped today
+//!
+//! Only the fluid solver's simulation grid, and only at `Critical`
+//! (`nodes/fluid/fluid_node.rs`). **Every `High` handler is a no-op.**
+//!
+//! It did not start that way: the fixture node dropped `precomputed`,
+//! `direct_channels`, `sample_points`, `sample_target` and `render_target`,
+//! and the output node dropped `control_samples`. Measurement on 2026-08-04
+//! removed all six, because the ordering premise they rested on is false as
+//! implemented — the compile runs at **render** time (`ensure_compiled` from
+//! `sample_visual_into` / `render_texture_into`), while each of those buffers
+//! is rebuilt **earlier in the same tick** by the dropping node's own
+//! `produce`/render prep. Net freed at the compile instant was ~0 B, and
+//! clearing the staleness keys made the peak worse by forcing the
+//! mapping-point walk to re-run inside the window frame. Details:
+//! `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+//!
+//! **The ordering rule this leaves behind:** before adding a droppable, name
+//! the tick position of the transient you are making room for and the tick
+//! position where your own code rebuilds the state. If the rebuild comes
+//! first, the drop is not reclaim — it is re-allocation, and it costs a peak.
+//! Host tests cannot falsify this for you: the shader VM's wasmtime backend
+//! allocates from a bump arena whose `free` never reuses memory, so reclaim
+//! is unobservable on the host — only silicon and the emulator allocation
+//! profile can tell you whether a drop bought anything.
+//!
+//! Firmware-side state the engine broadcast cannot reach — `DisplayPipeline`
+//! is not a `NodeRuntime` — remains an open follow-up on the ADR.
 //!
 //! ## The rebuild guarantee
 //!
@@ -59,7 +89,9 @@ pub enum PressureLevel {
     /// Reserved; currently never broadcast.
     Medium,
     /// A large allocation transient runs this frame — drop lazily-rebuildable
-    /// state (identical core-path output required on rebuild).
+    /// state that the same tick does not rebuild before the transient
+    /// (identical core-path output required on rebuild). No node drops
+    /// anything at this level today; see the module docs.
     High,
     /// Survival — may additionally drop resettable simulation state; visual
     /// discontinuity permitted.

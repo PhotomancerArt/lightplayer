@@ -43,6 +43,7 @@ pub fn init_board() -> (
     Result<Uart<'static, Blocking>, ConfigError>,
     esp_hal::peripherals::FLASH<'static>,
     esp_hal::peripherals::RMT<'static>,
+    esp_hal::peripherals::CPU_CTRL<'static>,
 ) {
     // `esp_hal::init` disables the RTC watchdog (RWDT) and both TIMG
     // watchdogs unconditionally (esp-hal 1.1.1 `lib.rs::init`). `CpuClock::max()`
@@ -56,6 +57,11 @@ pub fn init_board() -> (
     // clock rate and registers the driver, so an RMT failure costs the board
     // its LED output rather than its boot.
     let rmt = peripherals.RMT;
+    // Handed on untouched, like RMT: `main.rs` starts the APP core with the
+    // RMT refill ISR on it (`output::rmt::shared_driver::start_app_core_isr`),
+    // and a failure there costs the board its dual-core deployment — it falls
+    // back to the single-core semantics — rather than its boot.
+    let cpu_ctrl = peripherals.CPU_CTRL;
 
     // ⚠️ Load-bearing twice over.
     //
@@ -102,7 +108,7 @@ pub fn init_board() -> (
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    (sw_int, timg0, uart0, flash, rmt)
+    (sw_int, timg0, uart0, flash, rmt, cpu_ctrl)
 }
 
 /// Start the Embassy runtime with the given timer and software interrupt.
