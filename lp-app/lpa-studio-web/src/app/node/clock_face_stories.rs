@@ -31,7 +31,8 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
-    clock_face, clock_face_with_transport, clock_node_view, clock_transport, phasor_reading,
+    clock_face, clock_face_with_transport, clock_node_view, clock_transport,
+    clock_transport_overridden, phasor_reading,
 };
 
 #[component]
@@ -145,7 +146,7 @@ fn scrubbed() -> Element {
 }
 
 #[story(
-    description = "Running ×8: the speed-linked zoom packs 8× the time into the same pixels, so the ruler climbs the tick ladder (5 s minors, 30 s majors) — 'fast' reads as tick density. The thumb sits at the top of the log track; the readout seats on the ×8 detent in accent."
+    description = "Running ×8: the zoom is FIXED (Q5 reversed at the live build — the speed-linked variant is banked for the input-recorder reel), so the ruler keeps its 1 s/5 s scale and ×8 shows as the strip streaming 8× faster. In a still capture only the fader tells: thumb at the top of the log track, readout seated on the ×8 detent in accent."
 )]
 fn fast() -> Element {
     rsx! {
@@ -164,6 +165,33 @@ fn fast() -> Element {
                         0.0,
                     )],
                     clock_transport(447.0, true, 8.0, 0.0),
+                )),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Every transport value carries an ACTIVE debug override (session-only): the changed controls wear the debug family's orange tint — paused run button, ×2 readout and thumb — without the drawer's hazard stripes, and the one `clear` affordance clears them all. The scrubbed offset doubles as off-live, so the box border and chip are already amber."
+)]
+fn overridden() -> Element {
+    rsx! {
+        ClockCardCanvas {
+            NodePane {
+                view: clock_node_view(clock_face_with_transport(
+                    UiTimebaseState::Live,
+                    vec![phasor_reading(
+                        "plasma · phase",
+                        None,
+                        false,
+                        0.62,
+                        17,
+                        20.0,
+                        Waveform::Ramp,
+                        0.0,
+                    )],
+                    clock_transport_overridden(434.6, false, 2.0, -12.4),
                 )),
                 on_action: move |_| {},
             }

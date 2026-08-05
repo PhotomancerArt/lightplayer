@@ -284,7 +284,27 @@ pub(crate) fn clock_transport(
         running_address: Some(story_slot_address("transport.running")),
         rate_address: Some(story_slot_address("transport.rate")),
         scrub_address: Some(story_slot_address("transport.scrub_offset_seconds")),
+        running_override: None,
+        rate_override: None,
+        scrub_override: None,
     }
+}
+
+/// [`clock_transport`] with every value carrying an ACTIVE debug override
+/// — the changed-tint + per-value Clear state (the paused/fast/scrubbed
+/// stories stay clean on purpose: staged values and overrides are
+/// different facts).
+pub(crate) fn clock_transport_overridden(
+    seconds: f32,
+    running: bool,
+    rate: f32,
+    scrub_offset_seconds: f32,
+) -> lpa_studio_core::UiClockTransport {
+    let mut transport = clock_transport(seconds, running, rate, scrub_offset_seconds);
+    transport.running_override = transport.running_address.clone();
+    transport.rate_override = transport.rate_address.clone();
+    transport.scrub_override = transport.scrub_address.clone();
+    transport
 }
 
 /// A clock face in one of the listing's three states, transport running at

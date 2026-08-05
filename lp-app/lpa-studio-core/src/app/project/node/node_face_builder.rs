@@ -160,7 +160,24 @@ fn clock_transport(sections: &[UiNodeSection]) -> Option<crate::UiClockTransport
         running_address: editable_row_address(running_row),
         rate_address: editable_row_address(rate_row),
         scrub_address: editable_row_address(scrub_row),
+        running_override: row_override(running_row),
+        rate_override: row_override(rate_row),
+        scrub_override: row_override(scrub_row),
     })
+}
+
+/// The row's active debug-override entry: `Some` while the row is dirty
+/// (an override is live this session), carrying the address the per-value
+/// **Clear** dispatches — the row's own edit entry, or the row address for
+/// a scalar whose entry annotation has not landed yet. `None` = clean, no
+/// tint, no Clear.
+fn row_override(row: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    if row.state.dirty == crate::UiNodeDirtyState::Clean {
+        return None;
+    }
+    row.edit_entry_address
+        .clone()
+        .or_else(|| row.address.clone())
 }
 
 /// A row's scalar `f32` value, when its body is a plain value of that kind.
@@ -2245,6 +2262,40 @@ mod tests {
         assert_eq!(transport.rate, 1.0);
         assert_eq!(transport.rate_address, None, "read-only → no dispatch");
         assert!(transport.running_address.is_some(), "siblings unaffected");
+    }
+
+    /// A dirty Debug row (an active session override) lifts its own edit
+    /// entry as the override marker — the tape's changed-tint flag and
+    /// per-value Clear target in one; clean rows lift `None`.
+    #[test]
+    fn an_active_override_lifts_its_clear_target() {
+        let dirty = UiSlotFieldState::editable().with_dirty(crate::UiNodeDirtyState::Dirty);
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::time("Product").with_detail("node 2 output 0"),
+            ]),
+            UiNodeSection::DebugSlots(vec![
+                transport_row("running", UiSlotValue::bool(true)),
+                transport_row("rate", UiSlotValue::f32(2.0))
+                    .with_state(dirty)
+                    .with_edit_entry_address(clock_slot_address("transport.rate")),
+                transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
+            ]),
+        ];
+
+        let Some(UiNodeFace::Clock(face)) =
+            kind_face("clock", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a clock face");
+        };
+        let transport = face.transport.expect("block present");
+        assert_eq!(
+            transport.rate_override,
+            Some(clock_slot_address("transport.rate")),
+            "dirty row → its edit entry is the Clear target"
+        );
+        assert_eq!(transport.running_override, None, "clean row → no tint");
+        assert_eq!(transport.scrub_override, None);
     }
 
     /// A clock with no produced product row keeps the generic sections —
