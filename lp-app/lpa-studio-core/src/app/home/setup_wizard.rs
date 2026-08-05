@@ -1,9 +1,12 @@
 //! The setup wizard's card: the P11 machine's state made renderable.
 //!
 //! Design: `docs/design/device-setup-flow.md`; UI ruling F5b (gallery
-//! product vision, G1 round 2b) — **the wizard IS a card**. It renders at
-//! the roster's fixed card width, in the devices grid where today's setup
-//! form lives, and it *becomes* the device card at DEVICE_HOME.
+//! product vision, G1 round 2b) — **the wizard IS a card**, amended at the
+//! G2 gate (2026-08-05) to say WHICH card: while nothing is attached it is
+//! a standalone card in the entry-cards slot, and from the port grant
+//! onward it is the **body of the bound device's own roster card**
+//! ([`UiSetupWizard::takeover_card`]). The wizard is a state of the device
+//! card, never a second card for one physical board.
 //!
 //! Nothing here decides anything. [`SetupSession`] is the controller's
 //! hold on one running flow (the machine, the target it opened on, and the
@@ -103,6 +106,19 @@ pub struct UiSetupWizard {
     /// edge** (design §7.10): rather than swallow the error or invent a
     /// transition, the wizard shows it and offers the ✕ it already has.
     pub error: Option<String>,
+    /// The roster card this wizard rides as a **body takeover**, by
+    /// [`UiDeviceCard::identity_key`](super::ui_device_card::UiDeviceCard::identity_key)
+    /// — the G2 ruling (2026-08-05): the wizard is a STATE of the device
+    /// card, not a card of its own. `None` means there is nothing to
+    /// attach to yet (the pre-device states, and the whole sim path until
+    /// the simulator starts), and the wizard renders standalone in the
+    /// entry-cards slot.
+    ///
+    /// Resolved at view-build time against the assembled roster (the
+    /// builder's `pin_setup_card`, which also pins that card first), so it
+    /// follows the card's key as the uid lands mid-flow rather than
+    /// pinning to a key that moves.
+    pub takeover_card: Option<String>,
 }
 
 impl UiSetupWizard {
@@ -266,8 +282,14 @@ impl SetupSession {
     }
 
     /// The card snapshot, given what only the controller knows: the live
-    /// flash op and the session's console tail.
-    pub fn view(&self, flash: Option<CardOp>, console_tail: Vec<UiLogEntry>) -> UiSetupWizard {
+    /// flash op, the session's console tail, and which roster card (if
+    /// any) this flow has bound to — [`UiSetupWizard::takeover_card`].
+    pub fn view(
+        &self,
+        takeover_card: Option<String>,
+        flash: Option<CardOp>,
+        console_tail: Vec<UiLogEntry>,
+    ) -> UiSetupWizard {
         let state = self.state().clone();
         let project = match &state {
             SetupState::Provision(provision) => UiSetupProject::for_board(&provision.board_id),
@@ -285,6 +307,7 @@ impl SetupSession {
             console_tail,
             project,
             error: self.error.clone(),
+            takeover_card,
             state,
         }
     }
@@ -360,11 +383,14 @@ mod tests {
     fn the_simulator_opens_on_the_board_pick_and_the_hardware_path_on_connect() {
         let sim = SetupSession::simulator("runtime-sim", STAMP, Vec::new());
         assert_eq!(sim.state().kind(), SetupStateKind::BoardPick);
-        assert_eq!(sim.view(None, Vec::new()).title, "Simulate a device");
+        assert_eq!(sim.view(None, None, Vec::new()).title, "Simulate a device");
 
         let hardware = SetupSession::hardware(STAMP, Vec::new());
         assert_eq!(hardware.state().kind(), SetupStateKind::ConnectIntro);
-        assert_eq!(hardware.view(None, Vec::new()).title, "Connect a device");
+        assert_eq!(
+            hardware.view(None, None, Vec::new()).title,
+            "Connect a device"
+        );
     }
 
     #[test]
@@ -380,7 +406,7 @@ mod tests {
     #[test]
     fn the_view_carries_the_project_line_only_at_provision() {
         let mut session = SetupSession::simulator("runtime-sim", STAMP, Vec::new());
-        assert_eq!(session.view(None, Vec::new()).project, None);
+        assert_eq!(session.view(None, None, Vec::new()).project, None);
         session.flow = {
             let mut flow = session.flow.clone();
             flow.handle(crate::SetupEvent::BoardChosen {
@@ -390,7 +416,7 @@ mod tests {
             flow
         };
         assert!(matches!(session.state(), SetupState::Provision(_)));
-        assert!(session.view(None, Vec::new()).project.is_some());
+        assert!(session.view(None, None, Vec::new()).project.is_some());
     }
 
     #[test]
@@ -404,6 +430,7 @@ mod tests {
             console_tail: Vec::new(),
             project: None,
             error: None,
+            takeover_card: None,
         };
         assert_eq!(wizard.recognised_name(), None);
 

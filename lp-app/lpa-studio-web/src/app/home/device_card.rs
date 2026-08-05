@@ -653,6 +653,14 @@ pub(crate) fn DeviceCard(
     /// gallery passes its hydrated project list; empty hides the picker.
     #[props(default)]
     project_choices: Vec<UiDeviceProjectChip>,
+    /// The setup flow bound to THIS card, rendered as a **body takeover**
+    /// (G2 ruling, 2026-08-05): the header stays the device's and grows
+    /// real facts as they land, while the tabs, hero strip, and op overlay
+    /// stand aside for the wizard until the flow hands back. The gallery
+    /// passes it to the one card whose key the wizard names; every other
+    /// card gets `None` and renders normally.
+    #[props(default)]
+    setup: Option<lpa_studio_core::UiSetupWizard>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
@@ -660,11 +668,32 @@ pub(crate) fn DeviceCard(
     let faded = matches!(card.state, RosterCardState::Offline { .. });
     // last-known, not current, on offline/error cards (card grammar)
     let chip_muted = faded || matches!(card.state, RosterCardState::NotResponding);
+    // The bound flow owns the body while it runs (G2 ruling). It borrows
+    // the CARD's live op and console tail rather than the snapshot the
+    // view build handed the wizard: those two are patched progressively
+    // between builds, so this is what keeps the flash step's bar and
+    // terminal moving at the same rate the card's own overlay would.
+    let takeover = setup.map(|mut wizard| {
+        if let Some(op) = card.ui.op.clone() {
+            wizard.flash = Some(op);
+        }
+        if !card.console_tail.is_empty() {
+            wizard.console_tail = card.console_tail.clone();
+        }
+        wizard
+    });
+    let in_setup = takeover.is_some();
     // Needs-a-name opens the name-stamping SHEET (D41 — ratified spike
-    // round 3); renaming a stamped device stays the title-bar inline edit
-    let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
-    let can_rename = card.uid.is_some() && !sim;
-    let droppable = !sim && !faded;
+    // round 3); renaming a stamped device stays the title-bar inline edit.
+    //
+    // Mid-setup the card has exactly one surface: the flow. Renaming
+    // (PROVISION owns the name), dropping a project onto a board that is
+    // still being flashed, and the hero strip's leftover project all
+    // stand aside until the flow hands back.
+    let name_inline = !sim && !in_setup && matches!(card.state, RosterCardState::NeedsAName);
+    let can_rename = card.uid.is_some() && !sim && !in_setup;
+    let droppable = !sim && !faded && !in_setup;
+    let hero = (!in_setup).then(|| card.project.clone()).flatten();
 
     // The rich-object view: sections wired to concrete rows here (the
     // one identity→action hop — a row dispatches or opens a card sheet),
@@ -944,7 +973,7 @@ pub(crate) fn DeviceCard(
             // itself dims instead (identity, not health, per
             // `UiDeviceProjectChip`'s doc comment). No project, no strip:
             // the body's own "nothing on it yet" line carries that case.
-            if let Some(chip) = card.project.as_ref() {
+            if let Some(chip) = hero.as_ref() {
                 CardThumb {
                     seed: chip.uid.clone(),
                     label: chip.name.clone(),
@@ -967,6 +996,17 @@ pub(crate) fn DeviceCard(
             // the troubleshoot sheet leaving the user stuck with no
             // scroll). Content-driven height deletes the class.
             div { class: if pane { "ux-card-stack tw:min-h-0 tw:flex-1" } else { "ux-card-stack" },
+                // The flow, wearing this card's body: the rail (with the
+                // flow's ✕), the state's own component, and the abandon
+                // guard. No tabs, no console strip, no op overlay — the
+                // wizard IS the narration until it hands back, and at
+                // DEVICE_HOME the card's own body below simply returns,
+                // without the card ever leaving the grid.
+                if let Some(wizard) = takeover.as_ref() {
+                    {crate::app::home::setup_wizard::setup_takeover_body(wizard, on_action)}
+                }
+                // The card's own body: exactly when no flow has taken it.
+                if !in_setup {
                 div { class: if pane { "tw:relative tw:flex tw:min-h-0 tw:flex-col" } else { "tw:relative tw:flex tw:flex-col" },
                     // the icon-tab row (below the title bar — spike anatomy;
                     // pane mode drops the Console tab, round 3.5)
@@ -1031,14 +1071,18 @@ pub(crate) fn DeviceCard(
                         {console_strip(&card.console_tail, &card_key, on_action)}
                     }
                 }
-                if let Some(active_sheet) = active_sheet.as_ref() {
+                }
+                if let Some(active_sheet) = active_sheet.as_ref().filter(|_| !in_setup) {
                     {device_card_sheet_view(active_sheet, &card, &card_key, on_action)}
                 }
                 // In-place op progress (device-lifecycle P2): the LAST
                 // child of the body wrapper, so it covers the tab row and
                 // body (the title bar above is spared) — a heavy op takes
-                // over the card here, never an app-level modal.
-                if let Some(op) = card.ui.op.as_ref() {
+                // over the card here, never an app-level modal. Mid-setup
+                // the wizard's own flash step is already showing this op
+                // (same value, same activity view), so the overlay stands
+                // down rather than double-narrating it.
+                if let Some(op) = card.ui.op.as_ref().filter(|_| !in_setup) {
                     {card_op_overlay(op, &card, &card_key, on_action)}
                 }
             }

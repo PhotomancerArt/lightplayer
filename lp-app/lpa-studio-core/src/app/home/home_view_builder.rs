@@ -367,6 +367,39 @@ fn assemble_roster(
     (connections, devices)
 }
 
+/// Give the card an open setup flow is bound to the roster's LEADING
+/// position and report its [`UiDeviceCard::identity_key`] — the key the
+/// wizard's body takeover rides (G2 ruling, 2026-08-05: the wizard is a
+/// state of the device card, not a card of its own).
+///
+/// `session_key` is the flow's binding: the bound session's `RuntimeId`
+/// rendering on the hardware path, the sim's reserved card key on the sim
+/// path. It is matched against `session_key` FIRST because that is the
+/// thread that does not move — a board's `identity_key` becomes its uid
+/// the instant identity lands mid-flow, and a takeover keyed by the uid
+/// would lose its card at exactly that moment. The sim card carries no
+/// session key, so its reserved `identity_key` is the second rung.
+///
+/// `None` (no flow, or a flow with nothing attached yet) leaves the roster
+/// exactly as assembled: the wizard renders standalone in the entry-cards
+/// slot, because there is no card to be the body of.
+pub(crate) fn pin_setup_card(
+    devices: &mut Vec<UiDeviceCard>,
+    session_key: Option<&str>,
+) -> Option<String> {
+    let session_key = session_key?;
+    let index = devices.iter().position(|card| {
+        card.session_key.as_deref() == Some(session_key) || card.identity_key() == session_key
+    })?;
+    let card = devices.remove(index);
+    let key = card.identity_key().to_string();
+    // Ahead of everything, including the sim's own pin: a card mid-setup
+    // is the one the user is looking at, and a leading slot is what keeps
+    // it from hopping columns as facts (and other cards) land.
+    devices.insert(0, card);
+    Some(key)
+}
+
 /// The live sim card (D36): the shared card grammar in the sim
 /// presentation. The session's existence is the status — Running when a
 /// project is loaded, "Connected — nothing loaded" otherwise; no uid, no

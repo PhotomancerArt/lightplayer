@@ -1,10 +1,21 @@
-//! The setup wizard card: one component per machine state.
+//! The setup wizard: one component per machine state.
 //!
 //! Design: `docs/design/device-setup-flow.md`; the visual contract is
-//! `spikes/device-setup-flow/` (four gate rounds). Placement is F5b — **the
-//! wizard is a card**: it renders at the roster's card width, in the
-//! devices grid where the setup form used to sit, and it hands off to the
-//! real device card the moment the flow reaches its device home.
+//! `spikes/device-setup-flow/` (four gate rounds). Placement is F5b as the
+//! G2 gate amended it (2026-08-05) — **the wizard is a state of the device
+//! card**, and it renders in one of two frames:
+//!
+//! * [`SetupWizardCard`] — the standalone card in the entry-cards slot,
+//!   for the states where no device exists yet to be the body of
+//!   (CONNECT_INTRO, BOARD_FIRST, PORT_PICKING, and the whole sim path up
+//!   to the simulator starting).
+//! * [`setup_takeover_body`] — the same rail, the same per-state
+//!   components, rendered as the BODY of the bound device's own roster
+//!   card from the port grant onward. Same card, same key, same grid
+//!   slot: the handoff at DEVICE_HOME is a body swap and nothing else.
+//!
+//! The two frames share every state component below, so a state cannot
+//! look like two different steps depending on where it is drawn.
 //!
 //! **No flow logic lives here.** Every button dispatches a
 //! [`SetupGesture`]; the reducer decides what it means, and a gesture a
@@ -33,6 +44,35 @@ use crate::app::home::package_card::home_action;
 /// Dispatch one wizard gesture through the normal action path.
 fn gesture(gesture: SetupGesture) -> UiAction {
     home_action(HomeOp::Setup(gesture))
+}
+
+/// The wizard as the BODY of the bound device's card (G2 ruling): the
+/// rail (carrying the ✕ the card's own title bar has no room for), the
+/// state's component, and the abandon guard — everything the standalone
+/// card draws except its frame and title, which the DEVICE card owns.
+///
+/// The caller hands over a wizard whose `flash`/`console_tail` are the
+/// CARD's live ones, so the flash step narrates from the same progressive
+/// patch the card op overlay would have used.
+pub(crate) fn setup_takeover_body(
+    wizard: &UiSetupWizard,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let guard = matches!(wizard.state, SetupState::AbandonGuard { .. });
+    rsx! {
+        div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-col",
+            {steps_rail(wizard, Some(on_action))}
+            div { class: "tw:grid tw:content-start tw:gap-3 tw:px-3 tw:py-3",
+                if let Some(error) = wizard.error.clone() {
+                    {failure_note(error)}
+                }
+                {wizard_body(wizard, on_action)}
+            }
+        }
+        if guard {
+            {abandon_guard_sheet(on_action)}
+        }
+    }
 }
 
 /// The wizard, as a card in the devices grid.
@@ -76,7 +116,7 @@ pub(crate) fn SetupWizardCard(wizard: UiSetupWizard, on_action: EventHandler<UiA
                     "✕"
                 }
             }
-            {steps_rail(&wizard)}
+            {steps_rail(&wizard, None)}
             div { class: "tw:grid tw:content-start tw:gap-3 tw:px-3 tw:py-3",
                 if let Some(error) = wizard.error.clone() {
                     {failure_note(error)}
@@ -84,29 +124,36 @@ pub(crate) fn SetupWizardCard(wizard: UiSetupWizard, on_action: EventHandler<UiA
                 {wizard_body(&wizard, on_action)}
             }
             if guard {
-                CardSheet {
-                    // The ✕ IS the question here — dismissing the sheet by
-                    // clicking away must not answer it, so the backdrop
-                    // repeats the (inert) close rather than abandoning.
-                    on_dismiss: move |()| on_action.call(gesture(SetupGesture::CloseRequested)),
-                    CardSheetTitle { text: "Flash in progress".to_string() }
-                    CardSheetMessage {
-                        text: "Leaving now abandons the write. The board keeps its bootloader \
-                               (nothing bricks), but it will not run until a flash completes."
-                            .to_string(),
-                    }
-                    CardSheetButtons {
-                        CardSheetButton {
-                            label: "Keep flashing".to_string(),
-                            tone: SheetButtonTone::Primary,
-                            onclick: move |()| on_action.call(gesture(SetupGesture::KeepFlashing)),
-                        }
-                        CardSheetButton {
-                            label: "Abandon".to_string(),
-                            tone: SheetButtonTone::Destructive,
-                            onclick: move |()| on_action.call(gesture(SetupGesture::Abandon)),
-                        }
-                    }
+                {abandon_guard_sheet(on_action)}
+            }
+        }
+    }
+}
+
+/// ABANDON_GUARD's card-resident sheet — the same one in both frames.
+fn abandon_guard_sheet(on_action: EventHandler<UiAction>) -> Element {
+    rsx! {
+        CardSheet {
+            // The ✕ IS the question here — dismissing the sheet by
+            // clicking away must not answer it, so the backdrop
+            // repeats the (inert) close rather than abandoning.
+            on_dismiss: move |()| on_action.call(gesture(SetupGesture::CloseRequested)),
+            CardSheetTitle { text: "Flash in progress".to_string() }
+            CardSheetMessage {
+                text: "Leaving now abandons the write. The board keeps its bootloader \
+                       (nothing bricks), but it will not run until a flash completes."
+                    .to_string(),
+            }
+            CardSheetButtons {
+                CardSheetButton {
+                    label: "Keep flashing".to_string(),
+                    tone: SheetButtonTone::Primary,
+                    onclick: move |()| on_action.call(gesture(SetupGesture::KeepFlashing)),
+                }
+                CardSheetButton {
+                    label: "Abandon".to_string(),
+                    tone: SheetButtonTone::Destructive,
+                    onclick: move |()| on_action.call(gesture(SetupGesture::Abandon)),
                 }
             }
         }
@@ -115,7 +162,12 @@ pub(crate) fn SetupWizardCard(wizard: UiSetupWizard, on_action: EventHandler<UiA
 
 /// `Connect › Flash › Project › Done` — derived in core (the rail is a
 /// property of the machine's position, not of this layout).
-fn steps_rail(wizard: &UiSetupWizard) -> Element {
+///
+/// `close` is `Some` in the takeover frame ONLY: the device card's title
+/// bar is the device's, so the flow's ✕ moves down to the rail rather
+/// than displacing a card control (or, worse, disappearing — abandoning
+/// mid-flash has to stay one click away).
+fn steps_rail(wizard: &UiSetupWizard, close: Option<EventHandler<UiAction>>) -> Element {
     rsx! {
         div { class: "tw:flex tw:items-center tw:gap-1 tw:border-b tw:border-border-muted tw:bg-terminal tw:px-2.5 tw:py-1.5",
             for (index , step) in wizard.steps.iter().enumerate() {
@@ -150,6 +202,16 @@ fn steps_rail(wizard: &UiSetupWizard) -> Element {
                         }
                     }
                     "{step.label}"
+                }
+            }
+            if let Some(on_action) = close {
+                button {
+                    class: "tw:ml-auto tw:cursor-pointer tw:rounded tw:border-0 tw:bg-transparent tw:px-1.5 tw:text-sm tw:text-dim-foreground tw:hover:text-strong-foreground",
+                    r#type: "button",
+                    title: "Close",
+                    aria_label: "Close setup",
+                    onclick: move |_| on_action.call(gesture(SetupGesture::CloseRequested)),
+                    "✕"
                 }
             }
         }
