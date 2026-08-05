@@ -129,9 +129,11 @@ pub fn PaletteSwatchField(
                 match_anchor_width: true,
                 anchor_id: Some(anchor_id.clone()),
                 // The top-layer copy of the control while open: the same
-                // band inside the frame's own padding, so nothing shifts.
+                // band inside the frame's own padding, laid out exactly as
+                // the in-flow trigger lays it out (flex row, band + caret) —
+                // a grid here stacks the caret BELOW the band.
                 anchor_visual: rsx! {
-                    div { class: "tw:grid tw:h-full tw:w-full tw:min-w-0 tw:content-center tw:p-0.5",
+                    div { class: "tw:flex tw:h-full tw:w-full tw:min-w-0 tw:items-center tw:gap-1 tw:p-0.5",
                         {swatch_band_visual(&config)}
                     }
                 },
