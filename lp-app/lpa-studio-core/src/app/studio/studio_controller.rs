@@ -192,6 +192,17 @@ pub struct StudioController {
     agent: crate::AgentController,
 }
 
+/// What one session's identity resolution produced (device identity
+/// design §3): the identity itself, plus whether the registry already
+/// remembers this board — the difference between a sighting worth
+/// recording and a stranger that registers nothing.
+#[derive(Clone, Debug)]
+struct SessionIdentity {
+    identity: crate::app::places::DeviceIdentity,
+    /// A registry row exists under the resolved uid.
+    registered: bool,
+}
+
 /// What a home card asked to open.
 #[derive(Clone, Debug)]
 enum PendingOpen {
@@ -1109,6 +1120,10 @@ impl StudioController {
             pending_uid: None,
             console_tail: session.console_tail().iter().cloned().collect(),
             recovery: session.recovery_status().cloned(),
+            // `DeviceSnapshot` also carries `probed_mac` (the flash
+            // preflight's efuse read, acquisition rule A2) — consumed by
+            // the identity resolver (`places/identity_resolution.rs`),
+            // not surfaced on the card yet.
             detected_chip: session
                 .hardware_session()
                 .and_then(|hardware| hardware.snapshot().detected_chip),
@@ -1373,6 +1388,30 @@ impl StudioController {
         }
     }
 
+    /// Carry a card's persisted UI view-state across the anonymous →
+    /// identified key flip.
+    ///
+    /// `card_ui` is keyed by `UiDeviceCard::identity_key()`, which is the
+    /// session key while a board is anonymous and its `dev_…` uid the
+    /// moment identity resolves. The flip is the same wart
+    /// [`Self::migrate_card_op`] exists for (2026-08-02): state the user
+    /// built on the anonymous card — the open tab, the open sheet —
+    /// orphans under the old key seconds after it was set. Identity
+    /// arrives EARLIER now (at the hello, not at a stamp mid-provision),
+    /// which narrows the window but does not close it.
+    ///
+    /// The uid's own entry wins when it already has one: a remembered
+    /// board's saved state outranks whatever the pre-identity card
+    /// accumulated.
+    fn migrate_card_ui(&mut self, session_key: &str, uid: &str) {
+        if session_key == uid || self.card_ui.contains_key(uid) {
+            return;
+        }
+        if let Some(state) = self.card_ui.remove(session_key) {
+            self.card_ui.insert(uid.to_string(), state);
+        }
+    }
+
     /// The live device session a CARD KEY names, if any.
     ///
     /// One vocabulary for op targeting (M4): `UiDeviceCard::identity_key()`
@@ -1519,12 +1558,22 @@ impl StudioController {
     ) -> Result<DeviceSyncState, UiError> {
         self.record_logs(core::mem::take(&mut pulled.logs));
         let now = (self.now_secs)();
-        let identity = self
-            .reconcile_identity_name(device_id, pulled.identity.clone())
+        let resolved = self
+            .resolve_session_identity(device_id, pulled.identity.clone())
             .await;
+        let identity = resolved.as_ref().map(|resolved| resolved.identity.clone());
 
-        if let Some(identity) = &identity {
-            self.upsert_device_entry(device_id, identity, now).await;
+        // A sighting alone never registers a board (design §4 step 4): a
+        // MAC-identified stranger has a uid the moment it says hello, but
+        // the registry only remembers boards we were told about — one the
+        // library already knows, or one carrying a legacy stamp. An
+        // unknown board's row is created by ADOPTION (below) or by
+        // provisioning, never by having been seen.
+        if let Some(resolved) = &resolved
+            && (resolved.registered || pulled.identity.is_some())
+        {
+            self.upsert_device_entry(device_id, &resolved.identity, now)
+                .await;
         }
 
         // a content read/hash failure on an IDENTIFIED device: partial
@@ -1567,6 +1616,16 @@ impl StudioController {
                 },
             });
         }
+
+        // What FORMAT the board's project states (P5). Read here, before
+        // any relation talk, because the firmware refuses to load anything
+        // but the current format: a stale-format board is not "running an
+        // older version", it is not running at all. The banking below
+        // still happens — the board's bytes reach the library either way
+        // (D8) — but the CARD is told the truth by the classification at
+        // the end of each branch.
+        let format = device_session::classify_device_project(&pulled.files);
+        let stale_format = !matches!(format, lpa_upgrade::FormatClass::Current);
 
         // resolve the manifest uid against the library
         let local = match (&pulled.manifest_uid, self.library_host()) {
@@ -1644,14 +1703,21 @@ impl StudioController {
                 session.set_device_drift_times((head_saved_at, pushed_at));
             }
             let Some(identity_value) = identity.clone() else {
-                // anonymous hardware: classification only (the wizard
-                // stamps an identity, then this re-runs)
-                let content = DeviceContent::Known {
+                // anonymous hardware (rule A4): classification only —
+                // nothing is banked for a board that can name neither
+                // its silicon nor a stamp; naming re-runs this.
+                let content = device_content_for_format(
+                    &format,
+                    Some(summary.uid.to_string()),
+                    Some(summary.slug.clone()),
+                    pulled.observed,
+                )
+                .unwrap_or(DeviceContent::Known {
                     project_uid: summary.uid.to_string(),
                     slug: summary.slug.clone(),
                     observed: pulled.observed,
                     relation,
-                };
+                });
                 return Ok(DeviceSyncState { identity, content });
             };
             let device_uid: lpc_history::PrefixedUid = identity_value.uid.parse().map_err(|e| {
@@ -1670,11 +1736,7 @@ impl StudioController {
                 let host = self.library_host()?;
                 let op = CatalogOp::RecordDeviceObservation {
                     project_uid: summary.uid.to_string(),
-                    device: device_session::registry_entry_for(
-                        &identity_value,
-                        self.transport_label_for(device_id).unwrap_or_default(),
-                        now,
-                    ),
+                    device: self.registry_entry_for_session(device_id, &identity_value, now),
                     observed: pulled.observed,
                     files: pulled.files.clone(),
                 };
@@ -1703,8 +1765,12 @@ impl StudioController {
             // Edited-on-device is reserved for genuine forks. Skipped
             // when banking didn't happen (another tab owns the history) —
             // the card then asks, which is always safe.
+            // NEVER for a stale-format copy: fast-forwarding would move
+            // the library head BACKWARD onto bytes this build cannot open,
+            // silently undoing an upgrade the user already did.
             let mut relation = relation;
             if relation == lpc_history::SyncRelation::Diverged
+                && !stale_format
                 && banked
                 && head.is_some()
                 && association.as_ref().is_some_and(|assoc| {
@@ -1746,18 +1812,30 @@ impl StudioController {
                 }
             }
 
-            let content = DeviceContent::Known {
+            let content = device_content_for_format(
+                &format,
+                Some(summary.uid.to_string()),
+                Some(summary.slug.clone()),
+                pulled.observed,
+            )
+            .unwrap_or(DeviceContent::Known {
                 project_uid: summary.uid.to_string(),
                 slug: summary.slug.clone(),
                 observed: pulled.observed,
                 relation,
-            };
+            });
             self.request_library_refresh();
             return Ok(DeviceSyncState { identity, content });
         }
 
         // unknown project: adopt when the device has an identity to
-        // attribute it to; otherwise wait for the wizard to stamp one
+        // attribute it to. A MAC board always does (adoption runs here,
+        // at connect); rule A4's anonymous board is what still waits.
+        //
+        // The format is NOT reported here: naming that board comes first
+        // either way (M8′ order — nothing can be pushed to an unnamed
+        // board), and naming re-runs this whole classification, which is
+        // where the format card lands if there is one.
         let Some(identity_value) = &identity else {
             return Ok(DeviceSyncState {
                 identity,
@@ -1769,11 +1847,7 @@ impl StudioController {
         let host = self.library_host()?;
         let outcome = host
             .catalog(CatalogOp::AdoptDevicePackage {
-                device: device_session::registry_entry_for(
-                    identity_value,
-                    self.transport_label_for(device_id).unwrap_or_default(),
-                    now,
-                ),
+                device: self.registry_entry_for_session(device_id, identity_value, now),
                 files: pulled.files.clone(),
             })
             .await
@@ -1787,65 +1861,198 @@ impl StudioController {
             UiLogOrigin::Studio,
             format!("Adopted \"{}\" from {}", summary.slug, identity_value.name),
         ));
-        Ok(DeviceSyncState {
+        // The adoption is byte-faithful BY DESIGN (a pull is not an
+        // import), so a stale-format board becomes a stale-format library
+        // package — listed honestly by its own format card (P3) and named
+        // by the device card here.
+        let content = device_content_for_format(
+            &format,
+            Some(summary.uid.to_string()),
+            Some(summary.slug.clone()),
+            pulled.observed,
+        )
+        .unwrap_or(DeviceContent::Adopted {
+            project_uid: summary.uid.to_string(),
+            slug: summary.slug,
+            observed: pulled.observed,
+        });
+        Ok(DeviceSyncState { identity, content })
+    }
+
+    /// Resolve THIS session's identity from its own evidence (device
+    /// identity design §3, rules A1–A4), migrate the registry row a
+    /// legacy stamp left behind, and name the result from the registry.
+    ///
+    /// The order is the contract: silicon (the hello's efuse MAC, then a
+    /// download-mode read banked on this session) outranks the stamped
+    /// `/.lp/device.json`, because the stamp dies with a flash erase and
+    /// the MAC does not. `None` is rule A4 — the board stays
+    /// session-scoped, exactly today's unstamped behavior.
+    async fn resolve_session_identity(
+        &mut self,
+        device_id: crate::RuntimeId,
+        file_identity: Option<crate::app::places::DeviceIdentity>,
+    ) -> Option<SessionIdentity> {
+        let evidence = self.identity_evidence_for(device_id, file_identity.as_ref());
+        let resolved = crate::app::places::resolve_identity(&evidence)?;
+        let uid = resolved.uid.to_string();
+
+        // D5 (clones): two live boards claiming one MAC. The newcomer
+        // stays anonymous rather than sharing a key — two cards under one
+        // `identity_key()` is a keyed-list duplicate, which panics Dioxus
+        // (the 2026-07-15 crash class), and remembering the wrong board
+        // under a remembered row is worse than not remembering it.
+        if self.another_live_session_wears(device_id, &uid) {
+            self.push_log(UiLogDraft::from_notice(UiNotice::warning(format!(
+                "Two connected boards report the same hardware id ({}) — \
+                 the second one stays unnamed until one is unplugged.",
+                resolved.hardware_id
+            ))));
+            if let Ok(session) = self.pool.device_session_mut(device_id) {
+                session.set_hardware_id(None);
+            }
+            return None;
+        }
+
+        // Lazy re-key (design §4): this board was remembered under the
+        // uid a stamp gave it. Move the row BEFORE the sighting upsert so
+        // name, board, and association all land on the derived key.
+        if let Some(old_uid) = resolved.rekey_from
+            && let Ok(host) = self.library_host()
+            && let Err(error) = host
+                .catalog(CatalogOp::RekeyRegisteredDevice {
+                    old_uid: old_uid.to_string(),
+                    new_uid: uid.clone(),
+                    hardware_id: resolved.hardware_id.to_string(),
+                })
+                .await
+        {
+            log::warn!("device registry re-key failed: {error}");
+        }
+
+        let registered = self.registered_device(&uid).await;
+        // D34: the registry is the naming truth. A row's name wins; a
+        // board with no row falls back to whatever its legacy file said,
+        // and an empty name renders through the card's existing cascade.
+        let name = registered
+            .as_ref()
+            .map(|entry| entry.name.clone())
+            .filter(|name| !name.is_empty())
+            .or_else(|| file_identity.as_ref().map(|identity| identity.name.clone()))
+            .unwrap_or_default();
+        let identity = crate::app::places::DeviceIdentity {
+            uid: uid.clone(),
+            name,
+        };
+
+        // The D34 write-back survives only where the file is still a
+        // store: host-class and legacy boards that ANSWERED with one. An
+        // ESP-class board's name lives in the registry alone (design §5),
+        // so a rename never writes its filesystem again.
+        if let (crate::app::places::HardwareId::Minted { .. }, Some(file_identity)) =
+            (&resolved.hardware_id, &file_identity)
+            && !identity.name.is_empty()
+            && identity.name != file_identity.name
+        {
+            self.write_identity_name_to_device(device_id, &identity)
+                .await;
+        }
+
+        // The anonymous → identified key flip (design §6): the card's
+        // `identity_key()` moves from the session key to the uid the
+        // instant identity resolves, and persisted card UI state keyed by
+        // the old key would orphan — the 2026-08-02 wart `migrate_card_op`
+        // already handles for op flows. Same move, same reason.
+        self.migrate_card_ui(&device_id.to_string(), &uid);
+
+        if let Ok(session) = self.pool.device_session_mut(device_id) {
+            session.set_hardware_id(Some(resolved.hardware_id));
+        }
+        Some(SessionIdentity {
             identity,
-            content: DeviceContent::Adopted {
-                project_uid: summary.uid.to_string(),
-                slug: summary.slug,
-                observed: pulled.observed,
-            },
+            registered: registered.is_some(),
         })
     }
 
-    /// D34 name reconcile at connect: the registry name is the user-facing
-    /// truth, so a device reporting a stale name (renamed while offline)
-    /// gets the registry name written back to `/.lp/device.json` — and the
-    /// UI uses the registry name either way. A failed write-back only
-    /// logs: the next connect retries, and the registry keeps winning in
-    /// the meantime (`upsert_device_merged`).
-    async fn reconcile_identity_name(
+    /// The identity evidence THIS session offers (design §3): the hello's
+    /// efuse MAC (A1), the base MAC a flash preflight read in download
+    /// mode (A2, already normalized by `lpa_link::normalize_base_mac`),
+    /// and the stamped uid (A3) — the legacy file when it exists, else
+    /// the uid the hello carries.
+    fn identity_evidence_for(
+        &self,
+        device_id: crate::RuntimeId,
+        file_identity: Option<&crate::app::places::DeviceIdentity>,
+    ) -> crate::app::places::IdentityEvidence {
+        let session = self.pool.device_session(device_id);
+        crate::app::places::IdentityEvidence {
+            hello_base_mac: session.and_then(|session| match session.device_state() {
+                Some(DeviceState::Ready { hello }) => hello.hardware.base_mac,
+                _ => None,
+            }),
+            probed_mac: session
+                .and_then(crate::RuntimeSession::hardware_session)
+                .and_then(|hardware| hardware.snapshot().probed_mac),
+            stamped_uid: file_identity
+                .map(|identity| identity.uid.clone())
+                .or_else(|| session.and_then(crate::RuntimeSession::device_uid)),
+            file_name: file_identity.map(|identity| identity.name.clone()),
+        }
+    }
+
+    /// Is ANOTHER live device session already wearing `uid`? The D5 clone
+    /// guard's question — asked of the pool, because a duplicate MAC is
+    /// only a problem while both boards are attached.
+    fn another_live_session_wears(&self, device_id: crate::RuntimeId, uid: &str) -> bool {
+        self.pool.device_sessions().any(|session| {
+            session.id() != device_id
+                && session
+                    .device_sync()
+                    .and_then(|sync| sync.identity.as_ref())
+                    .is_some_and(|identity| identity.uid == uid)
+        })
+    }
+
+    /// The registry row for `uid`, from a fresh catalog snapshot.
+    async fn registered_device(
+        &mut self,
+        uid: &str,
+    ) -> Option<crate::app::places::RegisteredDevice> {
+        let fs = self.library_host().ok()?.catalog_snapshot().await.ok()?;
+        crate::app::places::DeviceRegistry::new(fs)
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|entry| entry.uid == uid)
+    }
+
+    /// Write the registry name back into a legacy board's
+    /// `/.lp/device.json`. A failed write only logs: the next connect
+    /// retries, and the registry keeps winning in the meantime
+    /// (`upsert_device_merged`).
+    async fn write_identity_name_to_device(
         &mut self,
         device_id: crate::RuntimeId,
-        identity: Option<crate::app::places::DeviceIdentity>,
-    ) -> Option<crate::app::places::DeviceIdentity> {
-        let mut identity = identity?;
-        let registry_name = match self.library_host() {
-            Ok(host) => match host.catalog_snapshot().await {
-                Ok(fs) => crate::app::places::DeviceRegistry::new(fs)
-                    .list()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .find(|entry| entry.uid == identity.uid)
-                    .map(|entry| entry.name),
-                Err(_) => None,
-            },
-            Err(_) => None,
-        };
-        if let Some(registry_name) = registry_name
-            && !registry_name.is_empty()
-            && registry_name != identity.name
+        identity: &crate::app::places::DeviceIdentity,
+    ) {
+        use lpc_model::AsLpPath;
+        match self
+            .pool
+            .device_session_mut(device_id)
+            .and_then(crate::RuntimeSession::client_mut)
         {
-            use lpc_model::AsLpPath;
-            identity.name = registry_name;
-            match self
-                .pool
-                .device_session_mut(device_id)
-                .and_then(crate::RuntimeSession::client_mut)
+            Ok(server) => match server
+                .fs_write(
+                    crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
+                    &identity.to_json_bytes(),
+                )
+                .await
             {
-                Ok(server) => match server
-                    .fs_write(
-                        crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
-                        &identity.to_json_bytes(),
-                    )
-                    .await
-                {
-                    Ok(logs) => self.record_logs(logs),
-                    Err(error) => log::warn!("device rename write-back failed: {error}"),
-                },
-                Err(_) => log::warn!("device rename write-back skipped: no live server"),
-            }
+                Ok(logs) => self.record_logs(logs),
+                Err(error) => log::warn!("device rename write-back failed: {error}"),
+            },
+            Err(_) => log::warn!("device rename write-back skipped: no live server"),
         }
-        Some(identity)
     }
 
     /// Record the device sighting in the registry (merge semantics: an
@@ -1859,15 +2066,34 @@ impl StudioController {
         let Ok(host) = self.library_host() else {
             return;
         };
-        let entry = device_session::registry_entry_for(
-            identity,
-            self.transport_label_for(device_id).unwrap_or_default(),
-            now,
-        );
+        let entry = self.registry_entry_for_session(device_id, identity, now);
         if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
             log::warn!("device registry upsert failed: {error}");
         }
         self.request_library_refresh();
+    }
+
+    /// The registry row a session's write targets: the pull's identity
+    /// plus the two facts only the live session knows — its transport
+    /// label and the identity SOURCE it resolved (design §4's
+    /// `hardware_id` column).
+    fn registry_entry_for_session(
+        &self,
+        device_id: crate::RuntimeId,
+        identity: &crate::app::places::DeviceIdentity,
+        now: f64,
+    ) -> crate::app::places::RegisteredDevice {
+        let mut entry = device_session::registry_entry_for(
+            identity,
+            self.transport_label_for(device_id).unwrap_or_default(),
+            now,
+        );
+        entry.hardware_id = self
+            .pool
+            .device_session(device_id)
+            .and_then(crate::RuntimeSession::hardware_id)
+            .map(|hardware_id| hardware_id.to_string());
+        entry
     }
 
     /// Where the open project usually lives: the registered device whose
@@ -1903,18 +2129,24 @@ impl StudioController {
             DeployOp::PushProject { target, .. }
             | DeployOp::AdoptDeviceCopy { target }
             | DeployOp::KeepBothFork { target }
+            | DeployOp::UpgradeDeviceProject { target }
             | DeployOp::EraseDevice { target } => target,
         })?;
         match op {
             DeployOp::PushProject { key, .. } => {
                 // The direct push (M5; since M8′ the ONLY push): the
                 // dispatching gesture is the D11 consent. The device must
-                // carry a stamped identity (the Running-family states and
-                // the picker's Connected-empty guarantee it; unstamped
-                // boards go through the name sheet first).
+                // carry a NAMED identity (the Running-family states and
+                // the picker's Connected-empty guarantee it; unnamed
+                // boards go through the name sheet first). A
+                // MAC-identified board has a uid from its first hello
+                // (device identity design §3) — the name is what the
+                // gently-insist-on-a-name flow is still waiting for, so
+                // the gate reads the name, not the uid.
                 let device = self
                     .device_sync_for(device_id)
                     .and_then(|sync| sync.identity.clone())
+                    .filter(|identity| !identity.name.is_empty())
                     .ok_or_else(|| {
                         UiError::MissingSession("no named device is connected".to_string())
                     })?;
@@ -1966,6 +2198,7 @@ impl StudioController {
                     .device_sync_for(device_id)
                     .and_then(|sync| sync.identity.as_ref())
                     .map(|identity| identity.name.clone())
+                    .filter(|name| !name.is_empty())
                     .unwrap_or_else(|| "device".to_string());
                 let host = self.library_host()?;
                 let outcome = host
@@ -1984,11 +2217,197 @@ impl StudioController {
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
             }
+            DeployOp::UpgradeDeviceProject { .. } => {
+                self.run_device_project_upgrade(device_id, updates).await
+            }
             DeployOp::EraseDevice { .. } => {
                 // from the card's Danger tab, behind the D41 confirm sheet
                 self.reset_to_blank(device_id, updates).await
             }
         }
+    }
+
+    /// The roster's Upgrade verb (P5): make the board's old-format project
+    /// runnable again.
+    ///
+    /// The device is NEVER upgraded in place (D14 / ADR 2026-07-05
+    /// decision 5). The migrated bytes are born in the library and travel
+    /// back over the ordinary hash-checked push, so the board's copy and
+    /// the library's stay one thing.
+    ///
+    /// **Which bytes get migrated** — the choice this flow turns on. When
+    /// the board's project resolves to a library package (the common case:
+    /// connect-is-a-pull already adopted or matched it), THAT package is
+    /// the migration subject, not the pulled copy. The board's bytes were
+    /// banked at connect, so nothing is lost either way, and taking the
+    /// library's line means the verb can never overwrite a newer local
+    /// head with an older board copy — that is `Use board copy`'s job, and
+    /// it is a decision the user makes, not one an upgrade makes for them.
+    /// Only when the library has NO copy at all (adoption did not run) is
+    /// the pulled copy migrated and adopted, which is the same
+    /// adopt-then-push shape connect uses.
+    async fn run_device_project_upgrade(
+        &mut self,
+        device_id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let sync = self
+            .device_sync_for(device_id)
+            .cloned()
+            .ok_or_else(|| UiError::MissingSession("this device has not been read".to_string()))?;
+        let DeviceContent::OldFormat {
+            project_uid, class, ..
+        } = &sync.content
+        else {
+            return Err(UiError::UnsupportedAction(
+                "This board's project is not waiting for a format upgrade".to_string(),
+            ));
+        };
+        // Below the floor / from a newer LightPlayer: the card never
+        // offers the verb, and a stray dispatch says why rather than
+        // failing halfway through a migration that cannot run.
+        if !class.is_upgradable() {
+            return Err(UiError::UnsupportedAction(class.describe()));
+        }
+        // The push needs a stamped board (same requirement as any push);
+        // an unnamed board is asked for its name first.
+        let device = sync
+            .identity
+            .clone()
+            .ok_or_else(|| UiError::MissingSession("no named device is connected".to_string()))?;
+        let project_uid = project_uid.clone();
+
+        self.pool
+            .device_session_mut(device_id)?
+            .set_operation(Some("Upgrading".to_string()));
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        let result = self
+            .upgrade_and_push_device_project(device_id, &device, project_uid)
+            .await;
+        if let Ok(session) = self.pool.device_session_mut(device_id) {
+            session.set_operation(None);
+        }
+        self.mark_dirty();
+        let (slug, upgraded_from) = result?;
+        self.request_library_refresh();
+        Ok(
+            UiNotices::new().with_notice(UiNotice::info(match upgraded_from {
+                Some(from) => format!(
+                    "Upgraded {slug} from format {from} to {} and put it back on {}",
+                    lpc_model::PROJECT_FORMAT_VERSION,
+                    device.name
+                ),
+                // The library copy was already current — the board was the
+                // only stale one. Say what actually happened.
+                None => format!("Pushed {slug} to {} — it was already upgraded", device.name),
+            })),
+        )
+    }
+
+    /// The Upgrade verb's body: land current-format bytes in the library,
+    /// then push them. Returns the pushed project's slug and the format it
+    /// was migrated from (`None` when the library copy needed no work).
+    async fn upgrade_and_push_device_project(
+        &mut self,
+        device_id: crate::RuntimeId,
+        device: &crate::app::places::DeviceIdentity,
+        project_uid: Option<String>,
+    ) -> Result<(String, Option<u32>), UiError> {
+        let (project_uid, upgraded_from) = match project_uid {
+            // The library's copy may already be current — the user opened
+            // it in the editor (which migrates on open, P3) and only the
+            // board was left behind. Then there is nothing to migrate and
+            // the push alone fixes it. Checked off a lock-free snapshot
+            // first, because the catalog op would take the project lock
+            // and refuse for a project open in this very tab.
+            Some(project_uid) if self.library_package_is_current(&project_uid).await => {
+                (project_uid, None)
+            }
+            Some(project_uid) => {
+                let host = self.library_host()?;
+                let outcome = host
+                    .catalog(CatalogOp::UpgradePackageFormat {
+                        project_uid: project_uid.clone(),
+                    })
+                    .await
+                    .map_err(|error| self.library_error_with_name(error))?;
+                (project_uid, outcome.upgraded_from)
+            }
+            None => self.adopt_upgraded_device_copy(device_id, device).await?,
+        };
+        let target = self.resolve_deploy_target(&project_uid).await?;
+        self.run_device_push(device_id, device, &target).await?;
+        Ok((target.slug, upgraded_from))
+    }
+
+    /// Whether the library's copy of `project_uid` opens as it stands
+    /// (current format, readable manifest) — read off a lock-free
+    /// snapshot. `false` for a package that needs migrating, is blocked,
+    /// or cannot be found at all: each of those is the caller's next
+    /// question, and none of them may be answered "already fine".
+    async fn library_package_is_current(&mut self, project_uid: &str) -> bool {
+        let Ok(host) = self.library_host() else {
+            return false;
+        };
+        let Ok(fs) = host.catalog_snapshot().await else {
+            return false;
+        };
+        crate::app::library::LibraryStore::read_only(fs)
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|summary| summary.uid.to_string() == project_uid)
+            .is_some_and(|summary| summary.health == crate::app::library::PackageHealth::Ready)
+    }
+
+    /// The unadopted board's half of the Upgrade verb: pull the board's
+    /// copy, migrate it, and adopt the RESULT as a new library package —
+    /// so even here the bytes that land on disk are current-format ones,
+    /// born in the library (D14).
+    async fn adopt_upgraded_device_copy(
+        &mut self,
+        device_id: crate::RuntimeId,
+        device: &crate::app::places::DeviceIdentity,
+    ) -> Result<(String, Option<u32>), UiError> {
+        let default_storage_id = self
+            .pool
+            .device_session(device_id)
+            .and_then(|session| session.device_storage_id().map(str::to_string))
+            .unwrap_or_else(|| {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            });
+        let mut pulled = {
+            let server = self.pool.device_session_mut(device_id)?.client_mut()?;
+            device_session::pull_device_copy(server, &default_storage_id).await?
+        };
+        self.record_logs(core::mem::take(&mut pulled.logs));
+        if let Some(detail) = &pulled.read_error {
+            return Err(UiError::MissingSession(format!(
+                "could not read the device: {detail}"
+            )));
+        }
+        let mut files = device_session::device_project_files(&pulled.files);
+        let report = lpa_upgrade::upgrade_to_current(&mut files)
+            .map_err(|error| UiError::UnsupportedAction(error.to_string()))?;
+
+        let now = (self.now_secs)();
+        let host = self.library_host()?;
+        let outcome = host
+            .catalog(CatalogOp::AdoptDevicePackage {
+                device: device_session::registry_entry_for(
+                    device,
+                    self.transport_label_for(device_id).unwrap_or_default(),
+                    now,
+                ),
+                files: files.into_pairs(),
+            })
+            .await
+            .map_err(|error| self.library_error_with_name(error))?;
+        let summary = outcome.summary.ok_or_else(|| {
+            UiError::MissingSession("upgrading produced no library package".to_string())
+        })?;
+        Ok((summary.uid.to_string(), Some(report.from)))
     }
 
     /// The diverged copy an adopt/keep-both verb targets: the live
@@ -2011,10 +2430,93 @@ impl StudioController {
         }
     }
 
-    /// Stamp a `dev_` identity onto the connected device: mint the uid,
-    /// write `/.lp/device.json` at the device's fs ROOT over the wire
-    /// (identity is device-scoped, outside every project storage dir),
-    /// register the device, and re-pull (adoption may now run for
+    /// Name the connected device (the one naming path: the Needs-a-name
+    /// card's form and the setup form's post-flash name both land here).
+    ///
+    /// A board whose identity is its silicon takes a **registry write**
+    /// (design §5): the name goes on the row keyed by its derived uid and
+    /// nothing at all is written to the board, because a name kept on an
+    /// erasable filesystem was never the truth. Only a session with no
+    /// silicon to anchor to — a host-class embedder, or a board that
+    /// reported no MAC — falls back to the legacy stamp.
+    async fn run_device_naming(
+        &mut self,
+        device_id: crate::RuntimeId,
+        name: String,
+    ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        match self
+            .pool
+            .device_session(device_id)
+            .and_then(crate::RuntimeSession::hardware_id)
+        {
+            Some(hardware_id @ crate::app::places::HardwareId::EspEfuse { .. }) => {
+                self.write_name_to_registry(device_id, hardware_id, name)
+                    .await
+            }
+            _ => {
+                // Current firmware always reports its efuse MAC in the
+                // hello, so an ESP-class session reaching the fallback
+                // means the silicon half went missing somewhere. Say so:
+                // the stamp about to run writes a uid onto a filesystem
+                // the next erase takes with it.
+                if self
+                    .hardware_session_for(device_id)
+                    .and_then(|session| session.snapshot().detected_chip)
+                    .is_some()
+                {
+                    log::warn!(
+                        "naming an ESP board through the legacy identity stamp: \
+                         this session resolved no efuse MAC"
+                    );
+                }
+                self.run_identity_stamp(device_id, name).await
+            }
+        }
+    }
+
+    /// The registry half of naming (design §5): the chosen name lands on
+    /// the row keyed by the board's DERIVED uid, carrying the identity
+    /// source with it, and the live card wears the name immediately. The
+    /// merge keeps what earlier sightings recorded (board choice, push
+    /// association) — and no re-pull is needed, because the identity was
+    /// known at attach and adoption already ran there.
+    async fn write_name_to_registry(
+        &mut self,
+        device_id: crate::RuntimeId,
+        hardware_id: crate::app::places::HardwareId,
+        name: String,
+    ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        let identity = crate::app::places::DeviceIdentity {
+            uid: hardware_id.device_uid().to_string(),
+            name,
+        };
+        let now = (self.now_secs)();
+        let entry = self.registry_entry_for_session(device_id, &identity, now);
+        let host = self.library_host()?;
+        host.catalog(CatalogOp::UpsertRegisteredDevice(entry))
+            .await
+            .map_err(|error| self.library_error_with_name(error))?;
+        if let Some(sync) = self
+            .pool
+            .device_session_mut(device_id)
+            .ok()
+            .and_then(crate::RuntimeSession::device_sync_mut)
+        {
+            sync.identity = Some(identity.clone());
+        }
+        self.request_library_refresh();
+        self.mark_dirty();
+        Ok(identity)
+    }
+
+    /// The naming FALLBACK for sessions with no silicon identity (D3/D6):
+    /// host-class embedders and boards whose hello carries no efuse MAC.
+    /// ESP-class provisioning writes the registry only — see
+    /// [`Self::run_device_naming`].
+    ///
+    /// Mint the uid, write `/.lp/device.json` at the device's fs ROOT over
+    /// the wire (identity is device-scoped, outside every project storage
+    /// dir), register the device, and re-pull (adoption may now run for
     /// previously-anonymous content).
     async fn run_identity_stamp(
         &mut self,
@@ -2078,11 +2580,7 @@ impl StudioController {
         {
             let now = (self.now_secs)();
             if let Ok(host) = self.library_host() {
-                let mut entry = device_session::registry_entry_for(
-                    &identity,
-                    self.transport_label_for(device_id).unwrap_or_default(),
-                    now,
-                );
+                let mut entry = self.registry_entry_for_session(device_id, &identity, now);
                 entry.board_id = Some(board_id.to_string());
                 if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
                     log::warn!("device registry board upsert failed: {error}");
@@ -2161,11 +2659,7 @@ impl StudioController {
         let host = self.library_host()?;
         if recorded_on_active {
             // association still goes through the registry (store root)
-            let mut entry = device_session::registry_entry_for(
-                device,
-                self.transport_label_for(device_id).unwrap_or_default(),
-                now,
-            );
+            let mut entry = self.registry_entry_for_session(device_id, device, now);
             entry.association = Some(lpc_history::DeviceAssociation {
                 device: device_uid,
                 project: target
@@ -2181,11 +2675,7 @@ impl StudioController {
         } else {
             host.catalog(CatalogOp::RecordPush {
                 project_uid: target.project_uid.clone(),
-                device: device_session::registry_entry_for(
-                    device,
-                    self.transport_label_for(device_id).unwrap_or_default(),
-                    now,
-                ),
+                device: self.registry_entry_for_session(device_id, device, now),
                 version: local_hash,
             })
             .await
@@ -2922,19 +3412,15 @@ impl StudioController {
                         bytes: bytes.0,
                     })
                     .await?;
-                let imported = outcome
-                    .summary
-                    .map(|summary| summary.name)
-                    .unwrap_or_default();
-                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Imported {imported}"))))
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(import_message("Imported", &outcome))))
             }
             HomeOp::ImportJson { text } => {
                 let outcome = self.run_catalog_op(CatalogOp::ImportJson { text }).await?;
-                let imported = outcome
-                    .summary
-                    .map(|summary| summary.name)
-                    .unwrap_or_default();
-                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Pasted {imported}"))))
+                Ok(
+                    UiNotices::new()
+                        .with_notice(UiNotice::info(import_message("Pasted", &outcome))),
+                )
             }
             HomeOp::RenameDevice { uid, name } => {
                 let name = name.trim().to_string();
@@ -2967,11 +3453,12 @@ impl StudioController {
                     ));
                 }
                 // the Needs-a-name card's inline form (D14 gently insists
-                // upstream): stamp mints the uid, writes the identity over
-                // the wire, registers the device, and re-pulls (adoption
-                // may now run for previously-anonymous content)
+                // upstream): the name lands on the registry row keyed by
+                // the board's own derived uid — nothing is written to the
+                // board (design §5) — with the legacy stamp standing in
+                // only where there is no silicon to anchor to
                 let device_id = self.resolve_device_target(&target)?;
-                let identity = self.run_identity_stamp(device_id, name).await?;
+                let identity = self.run_device_naming(device_id, name).await?;
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!(
                     "This device is now \"{}\"",
                     identity.name
@@ -3066,10 +3553,15 @@ impl StudioController {
     }
 
     /// The live half of a device rename (D34): when the renamed device is
-    /// the attached one, write `/.lp/device.json` back over the wire and
-    /// update the cached sync state so every surface shows the new name
-    /// immediately. Offline devices skip this — the write-back happens on
-    /// the next connect (`reconcile_identity_name`).
+    /// the attached one, update the cached sync state so every surface
+    /// shows the new name immediately — and, for a board whose identity
+    /// still lives in its filesystem, write `/.lp/device.json` back over
+    /// the wire. Offline devices skip both halves; the write-back happens
+    /// on the next connect (`resolve_session_identity`).
+    ///
+    /// The wire half is `Minted`-only (design §5), the same rule the
+    /// connect path applies: an ESP-class board's name lives in the
+    /// registry alone, so renaming it never touches its filesystem.
     async fn write_back_live_identity_name(
         &mut self,
         uid: &str,
@@ -3088,16 +3580,24 @@ impl StudioController {
             uid: uid.to_string(),
             name: name.to_string(),
         };
-        let logs = self
-            .pool
-            .device_session_mut(device_id)?
-            .client_mut()?
-            .fs_write(
-                crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
-                &identity.to_json_bytes(),
-            )
-            .await?;
-        self.record_logs(logs);
+        let file_is_the_store = matches!(
+            self.pool
+                .device_session(device_id)
+                .and_then(crate::RuntimeSession::hardware_id),
+            Some(crate::app::places::HardwareId::Minted { .. })
+        );
+        if file_is_the_store {
+            let logs = self
+                .pool
+                .device_session_mut(device_id)?
+                .client_mut()?
+                .fs_write(
+                    crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
+                    &identity.to_json_bytes(),
+                )
+                .await?;
+            self.record_logs(logs);
+        }
         if let Some(sync) = self
             .pool
             .device_session_mut(device_id)
@@ -3291,8 +3791,15 @@ impl StudioController {
             Ok(logs) => {
                 self.record_logs(logs);
                 self.note_sim_loaded_project();
+                // The open path's own notices come FIRST — a format upgrade
+                // is the thing the user most needs to read, and it must not
+                // be a console-only line (P3).
+                let mut notices = UiNotices::new();
+                for notice in self.project.take_open_notices() {
+                    notices = notices.with_notice(notice);
+                }
                 let sync = self.sync_project_after_attach(updates).await?;
-                Ok(UiNotices::new().with_notice(project_sync_notice(
+                Ok(notices.with_notice(project_sync_notice(
                     sync.synced,
                     "Project opened",
                     "Project opened; project sync needs attention",
@@ -4625,20 +5132,26 @@ impl StudioController {
                 updates,
             )
             .await?;
-        // The setup form's name stamps at first post-flash contact
+        // The setup form's name lands at first post-flash contact
         // (model §1-A): the happy path never detours through
-        // Needs-a-name. Only an identity-less board takes the stamp —
-        // an update on a stamped device keeps its name. Naming failure
-        // degrades honestly: the flash stands, the card offers naming.
+        // Needs-a-name. Only an UNNAMED board takes the name — an update
+        // on a named device keeps its name. Naming failure degrades
+        // honestly: the flash stands, the card offers naming. A
+        // MAC-identified board arrives with a uid and no name (device
+        // identity design §3), so the gate reads the NAME; the name
+        // itself is a registry write under that uid, and the board's
+        // filesystem is never touched.
         let setup_name = setup_name
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
         if let Some(name) = setup_name
-            && self
-                .device_sync_for(device_id)
-                .is_some_and(|sync| sync.identity.is_none())
+            && self.device_sync_for(device_id).is_some_and(|sync| {
+                sync.identity
+                    .as_ref()
+                    .is_none_or(|identity| identity.name.is_empty())
+            })
         {
-            match self.run_identity_stamp(device_id, name).await {
+            match self.run_device_naming(device_id, name).await {
                 Ok(identity) => {
                     outcome = outcome.with_notice(UiNotice::info(format!(
                         "This device is now \"{}\"",
@@ -4653,7 +5166,7 @@ impl StudioController {
             }
         }
         // The setup form's board choice lands on the device as
-        // `/hardware.json` (D4) — after the identity stamp so the registry
+        // `/hardware.json` (D4) — after the naming write so the registry
         // row exists to cache the board. Generic choice (`None`) writes
         // nothing: the compiled-in default stands. Failure degrades
         // honestly — the flash and name stand; the pin map just stays
@@ -4885,7 +5398,10 @@ impl StudioController {
         let device_label = self
             .device_sync_for(device_id)
             .and_then(|sync| sync.identity.as_ref())
-            .map(|identity| identity.name.clone());
+            .map(|identity| identity.name.clone())
+            // an identified-but-unnamed board (device identity design §3)
+            // is as nameless as an anonymous one for a FILE name
+            .filter(|name| !name.is_empty());
         let sink: Rc<RefCell<Option<LinkManagementResult>>> = Rc::new(RefCell::new(None));
         let mut outcome = self
             .run_device_management(
@@ -5451,6 +5967,27 @@ fn fold_fixture_summaries(
     }
 }
 
+/// The import/paste confirmation, saying so when the archive arrived at an
+/// older format and was migrated on the way in.
+///
+/// Naming the upgrade is the point: the project the user gets back is not
+/// byte-identical to the one they handed over, and the only moment that
+/// fact is cheap to state is the moment it happens.
+fn import_message(verb: &str, outcome: &crate::app::library::CatalogOutcome) -> String {
+    let name = outcome
+        .summary
+        .as_ref()
+        .map(|summary| summary.name.clone())
+        .unwrap_or_default();
+    match outcome.upgraded_from {
+        Some(found) => format!(
+            "{verb} {name} — upgraded from format {found} to {}",
+            lpc_model::PROJECT_FORMAT_VERSION
+        ),
+        None => format!("{verb} {name}"),
+    }
+}
+
 fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> UiNotice {
     if synced {
         UiNotice::info(success)
@@ -5478,7 +6015,37 @@ fn device_content_label(content: &DeviceContent) -> &'static str {
         DeviceContent::Known { .. } => "known",
         DeviceContent::Adopted { .. } => "adopted",
         DeviceContent::PendingIdentity { .. } => "pending-identity",
+        DeviceContent::OldFormat { .. } => "old-format",
         DeviceContent::Unreadable { .. } => "unreadable",
+    }
+}
+
+/// The card-facing content for a board whose project format is not this
+/// build's — `None` when the sniff says the project IS current, which is
+/// the ordinary case and leaves the caller's own classification standing.
+///
+/// A manifest that reads as JSON but is not a project manifest at all
+/// (no `format`, wrong root shape) lands on the unreadable card rather
+/// than on a format claim we cannot back up.
+fn device_content_for_format(
+    class: &lpa_upgrade::FormatClass,
+    project_uid: Option<String>,
+    slug: Option<String>,
+    observed: lpc_history::ContentHash,
+) -> Option<DeviceContent> {
+    match class {
+        lpa_upgrade::FormatClass::Current => None,
+        lpa_upgrade::FormatClass::NotAProject | lpa_upgrade::FormatClass::Unreadable { .. } => {
+            Some(DeviceContent::Unreadable {
+                detail: class.describe(),
+            })
+        }
+        _ => Some(DeviceContent::OldFormat {
+            project_uid,
+            slug,
+            observed,
+            class: class.clone(),
+        }),
     }
 }
 
@@ -5785,6 +6352,40 @@ mod tests {
         assert!(!sim_crash_reboot_allowed(Some(100.0), 129.9, 30.0));
         // Window elapsed: allowed again.
         assert!(sim_crash_reboot_allowed(Some(100.0), 130.0, 30.0));
+    }
+
+    #[test]
+    fn an_upgraded_import_says_so_and_an_ordinary_one_stays_quiet() {
+        use crate::app::library::{CatalogOutcome, PackageHealth, PackageSummary};
+
+        let summary = PackageSummary {
+            uid: "prj_0123456789abcdef".parse().unwrap(),
+            name: "Plasma".to_string(),
+            kind: "Project".to_string(),
+            slug: "2026-08-04-1800-plasma".to_string(),
+            health: PackageHealth::Ready,
+        };
+
+        // The whole point of the import gate reaching the user: the bytes
+        // they handed over are not the bytes that landed.
+        let upgraded = CatalogOutcome {
+            summary: Some(summary.clone()),
+            upgraded_from: Some(4),
+        };
+        let message = import_message("Imported", &upgraded);
+        assert!(message.contains("Plasma"), "{message}");
+        assert!(message.contains("upgraded from format 4"), "{message}");
+        assert!(
+            message.contains(&lpc_model::PROJECT_FORMAT_VERSION.to_string()),
+            "{message}"
+        );
+
+        // ...and the ordinary case is not made noisy by it.
+        let plain = CatalogOutcome {
+            summary: Some(summary),
+            upgraded_from: None,
+        };
+        assert_eq!(import_message("Pasted", &plain), "Pasted Plasma");
     }
 
     #[test]

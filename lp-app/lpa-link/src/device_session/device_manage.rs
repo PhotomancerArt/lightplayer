@@ -89,6 +89,15 @@ impl DeviceSession {
                 return Err(error);
             }
         };
+        // Identity evidence rides the operation that was going to open the
+        // bootloader anyway (A2): the flash preflight reads the base MAC
+        // between the chip guard and the write. Recorded BEFORE the rebuild
+        // so it survives one that fails, and additive by construction —
+        // `record_probed_mac` drops anything it cannot validate, so a
+        // provider that reads nothing changes nothing here.
+        if let LinkManagementResult::FlashFirmware(flashed) = &result {
+            self.shared.record_probed_mac(flashed.probed_mac.as_deref());
+        }
         // The operation SUCCEEDED; a failed rebuild must not swallow that
         // result (P5 regression). Degrade: report the outcome with the state
         // `rebuild_link` recorded (`Gone`) so the caller can surface the

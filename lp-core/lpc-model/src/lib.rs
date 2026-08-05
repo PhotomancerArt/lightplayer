@@ -44,6 +44,7 @@ pub mod slot_views {
 }
 
 pub mod artifact;
+pub mod color;
 pub mod feature;
 pub mod hardware_endpoint_spec;
 pub mod manifest;
@@ -77,8 +78,14 @@ pub use binding::{
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::{
-    ChannelName, PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL, WELL_KNOWN_CHANNELS,
-    WellKnownChannel, well_known_channel,
+    ChannelName, PALETTE_CHANNEL, PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL,
+    WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel,
+};
+pub use color::{
+    COLORSPACE_SHAPE_NAME, Colorspace, GRADIENT_CONFIG_SHAPE_NAME, GRADIENT_SHAPE_NAME, Gradient,
+    GradientConfig, GradientError, GradientStop, INTERP_METHOD_SHAPE_NAME, InterpMethod,
+    MAX_CYCLE_SET, MAX_GRADIENT_STOPS, MIN_CYCLE_SET, MIN_GRADIENT_STOPS, gradient_config_lp_type,
+    gradient_lp_type,
 };
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 /// Legacy semantic value kind used by the pre-slot property model.

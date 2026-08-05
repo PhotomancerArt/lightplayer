@@ -895,6 +895,157 @@ fn card_native_stamp_pushes_and_records_end_to_end() {
     );
 }
 
+/// Provisioning an ESP-class board performs NO identity write (device
+/// identity design §5): the name the user chose lands on the registry row
+/// keyed by the uid the board's own efuse MAC derives, and
+/// `/.lp/device.json` — the erasable copy the stamp used to leave behind —
+/// is never created.
+///
+/// The Minted counterpart is `card_native_stamp_pushes_and_records_end_to_end`
+/// above: its stub board reports no MAC, so it still takes the legacy
+/// stamp, file and all.
+#[test]
+fn naming_a_silicon_identified_board_writes_the_registry_not_the_board() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::app::places::DeviceRegistry;
+
+    let server = Rc::new(RefCell::new(device_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    controller.set_stub_device_for_test(esp_ready_state(SILICON_MAC));
+    // If anything still minted a uid here, this is the value it would use —
+    // so the assertions below can say which scheme actually ran.
+    controller.set_random(|| [7u8; 16]);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [4u8; 16]),
+        Rc::new(|| "2026-08-04-1800".to_string()),
+    );
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
+    controller.attach_library(host);
+    drive(controller.settle_library());
+    drive(controller.refresh_device_sync_for_test());
+
+    let sync = controller
+        .device_sync_for_test()
+        .expect("connect-as-pull landed");
+    let identity = sync.identity.as_ref().expect("silicon is an identity");
+    assert_eq!(identity.uid, silicon_uid(SILICON_MAC));
+    assert_eq!(identity.name, "", "identified is not named");
+
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::NameDevice {
+            target: controller.device_target_for_test(),
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
+    .expect("naming dispatches");
+
+    assert!(
+        server
+            .borrow()
+            .base_fs()
+            .read_file("/.lp/device.json".as_path())
+            .is_err(),
+        "an ESP board's name is registry data — nothing is stamped onto it"
+    );
+    let rows = DeviceRegistry::new(store.fs_handle()).list().unwrap();
+    assert_eq!(rows.len(), 1, "one board, one row: {rows:?}");
+    assert_eq!(
+        rows[0].uid,
+        silicon_uid(SILICON_MAC),
+        "the name landed on the SILICON's uid, not a freshly minted one"
+    );
+    assert_eq!(rows[0].name, "Luna's porch sign");
+    assert_eq!(
+        rows[0].hardware_id.as_deref(),
+        Some(format!("efuse:{SILICON_MAC}").as_str()),
+        "the row records where the identity came from"
+    );
+    assert_eq!(
+        controller
+            .device_sync_for_test()
+            .and_then(|sync| sync.identity.as_ref().map(|identity| identity.name.clone())),
+        Some("Luna's porch sign".to_string()),
+        "the live card wears the new name immediately"
+    );
+}
+
+/// The rename write-back is `Minted`-only too (design §5). Renaming a
+/// silicon-identified board updates the registry and the live card, and
+/// leaves the board's filesystem exactly as it found it — writing a name
+/// there would create a second source of truth that the next erase
+/// silently disagrees with.
+#[test]
+fn renaming_a_silicon_identified_board_never_writes_its_filesystem() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::app::places::DeviceRegistry;
+
+    let server = Rc::new(RefCell::new(device_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    controller.set_stub_device_for_test(esp_ready_state(SILICON_MAC));
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [4u8; 16]),
+        Rc::new(|| "2026-08-04-1800".to_string()),
+    );
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
+    controller.attach_library(host);
+    drive(controller.settle_library());
+    drive(controller.refresh_device_sync_for_test());
+
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::NameDevice {
+            target: controller.device_target_for_test(),
+            name: "Porch sign".to_string(),
+        },
+    )))
+    .expect("naming dispatches");
+
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::RenameDevice {
+            uid: silicon_uid(SILICON_MAC),
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
+    .expect("renaming dispatches");
+
+    assert!(
+        server
+            .borrow()
+            .base_fs()
+            .read_file("/.lp/device.json".as_path())
+            .is_err(),
+        "the rename write-back is for boards whose file is still the store"
+    );
+    let rows = DeviceRegistry::new(store.fs_handle()).list().unwrap();
+    assert_eq!(rows.len(), 1, "one board, one row: {rows:?}");
+    assert_eq!(rows[0].name, "Luna's porch sign");
+    assert_eq!(
+        controller
+            .device_sync_for_test()
+            .and_then(|sync| sync.identity.as_ref().map(|identity| identity.name.clone())),
+        Some("Luna's porch sign".to_string()),
+        "the live card renames immediately even with no wire write"
+    );
+}
+
 #[test]
 fn opening_another_package_releases_the_previous_project_lock() {
     use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
@@ -2871,6 +3022,27 @@ impl ServerTransport for CollectTransport {
     async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
     }
+}
+
+/// The bench board's factory MAC for the device-identity rows.
+const SILICON_MAC: &str = "60:55:f9:0a:0b:0c";
+
+/// A board whose hello carries its factory base MAC (rule A1).
+fn esp_ready_state(mac: &str) -> lpa_link::DeviceState {
+    let mut state = crate::app::runtime_pool::runtime_session::ready_state_for_test();
+    if let lpa_link::DeviceState::Ready { hello } = &mut state {
+        hello.hardware.base_mac = Some(mac.to_string());
+    }
+    state
+}
+
+/// The uid `mac` derives to, through the production derivation — the rows
+/// assert the RELATIONSHIP, never a hand-copied string.
+fn silicon_uid(mac: &str) -> String {
+    crate::app::places::HardwareId::from_base_mac(mac)
+        .expect("a well-formed MAC")
+        .device_uid()
+        .to_string()
 }
 
 /// Drive a future to completion with a self-waking waker (bounded, so a hung

@@ -834,6 +834,7 @@ void tick() {{
                 value: ValueSlot::new(lpc_model::ShaderValueShapeRef::builtin("f32")),
                 key: lpc_model::OptionSlot::none(),
                 phasor: lpc_model::OptionSlot::none(),
+                gradient: lpc_model::OptionSlot::none(),
                 default: lpc_model::OptionSlot::none(),
                 min: lpc_model::OptionSlot::none(),
                 max: lpc_model::OptionSlot::none(),

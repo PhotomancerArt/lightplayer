@@ -87,6 +87,10 @@ impl LpGraphics for TimingGraphics {
         self.inner.clear_texture(texture)
     }
 
+    fn texture_uniform_value(&self, texture: &TextureHandle) -> Result<LpsValueF32, GfxError> {
+        self.inner.texture_uniform_value(texture)
+    }
+
     fn blend_textures(
         &self,
         previous: &TextureHandle,

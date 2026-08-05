@@ -154,12 +154,17 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
 
     let mut issue = None;
     let projects: Vec<UiPackageCard> = match store.list() {
+        // Every listed package gets a card. Dropping the ones whose history
+        // or provenance would not load is how a project vanished from the
+        // gallery with only a `log::warn!` behind it; a card missing its
+        // "edited 3 days ago" line is a far smaller lie than no card at all.
         Ok(summaries) => summaries
             .into_iter()
-            .filter_map(|summary| {
-                package_card(&store, &registered, summary)
-                    .map_err(|error| log::warn!("home: skipping package card: {error}"))
-                    .ok()
+            .map(|summary| {
+                package_card(&store, &registered, summary.clone()).unwrap_or_else(|error| {
+                    log::warn!("home: {} listed without its history: {error}", summary.slug);
+                    degraded_package_card(summary)
+                })
             })
             .map(|mut card| {
                 card.open_elsewhere = open_elsewhere.iter().any(|uid| *uid == card.uid);
@@ -422,10 +427,15 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         head_version: live.head_version,
         local_saved_at: live.local_saved_at,
         pushed_at: live.pushed_at,
-        unstamped: live
-            .sync
-            .as_ref()
-            .is_some_and(|sync| sync.identity.is_none()),
+        // "Needs a name" is about the NAME, not the uid. A MAC-identified
+        // board has a uid from its first hello (device identity design
+        // §3) while still being a board nobody has named, so the gate
+        // reads the name: identity absent, or present with nothing in it.
+        unnamed: live.sync.as_ref().is_some_and(|sync| {
+            sync.identity
+                .as_ref()
+                .is_none_or(|identity| identity.name.is_empty())
+        }),
         registry: None,
         connect: live.connect.clone(),
     });
@@ -440,6 +450,10 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
             uid: project_uid.clone(),
             name: slug.clone(),
         }),
+        // No chip for the rest — including an OLD-FORMAT copy (P5), whose
+        // library package is known but is NOT what the board is running:
+        // the firmware refused to load it. The card's Health section says
+        // what is there instead.
         _ => None,
     });
     // hello build + hardware facts: Technical evidence for the card's
@@ -461,6 +475,10 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         // still key distinctly by `session_key` — see `identity_key`.
         name: identity
             .map(|identity| identity.name.clone())
+            // An identity with an EMPTY name is a board that has a uid
+            // and no name yet (device identity design §3) — it falls
+            // through the same cascade an anonymous board takes.
+            .filter(|name| !name.is_empty())
             .or_else(|| live.detected_chip.as_deref().and_then(display_chip_name))
             .unwrap_or_else(|| "Connected device".to_string()),
         transport: live.transport.clone().unwrap_or_default(),
@@ -548,7 +566,26 @@ fn package_card(
         open_elsewhere: false,  // stamped by the hydration pass
         connected_device: None, // stamped by the D28 pairing at view build
         running_in_sim: false,  // stamped by the D28 sim arm at view build
+        health: summary.health,
     })
+}
+
+/// The card for a package whose history or provenance would not open. The
+/// summary is all we have — and it is enough to name the package, show its
+/// health, and offer export and delete.
+fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPackageCard {
+    UiPackageCard {
+        uid: summary.uid.to_string(),
+        kind: summary.kind,
+        slug: summary.slug,
+        last_saved_at: None,
+        provenance: None,
+        on_device: None,
+        open_elsewhere: false,
+        connected_device: None,
+        running_in_sim: false,
+        health: summary.health,
+    }
 }
 
 /// The card's human provenance line; `None` for created-from-scratch.
@@ -603,7 +640,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         head_version: None,
         local_saved_at: None,
         pushed_at: None,
-        unstamped: false,
+        unnamed: false,
         registry: Some(device),
         connect: ConnectEvidence::Idle,
     });
@@ -657,6 +694,48 @@ mod tests {
     fn view_of(store: &LibraryStore) -> UiHomeView {
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
         build_home_view(Some(&inputs), None, None, &HomePoolEvidence::default())
+    }
+
+    #[test]
+    fn an_unopenable_package_still_gets_a_card() {
+        // Swallow point 2: the card builder's `filter_map` dropped anything
+        // whose history or provenance would not load, on top of the store
+        // already dropping anything whose manifest would not parse. A card
+        // that says what is wrong is the only honest outcome.
+        let store = store();
+        store.create("Healthy", 1.0).unwrap();
+        {
+            let fs = store.fs_handle();
+            let view = fs.borrow();
+            view.write_file(
+                lpc_model::LpPath::new("/packages/z-hand-copied/project.json"),
+                br#"{"kind":"Project","format":2,"nodes":{}}"#,
+            )
+            .unwrap();
+        }
+
+        let view = view_of(&store);
+        assert_eq!(view.projects.len(), 2, "neither package vanished");
+        let stale = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "z-hand-copied")
+            .expect("the unreadable package has a card");
+        let (headline, remedy) = stale.health.blocked().expect("classified as blocked");
+        assert_eq!(headline, "Format 2 — too old for this Studio");
+        assert!(
+            remedy.contains("too old to upgrade automatically"),
+            "{remedy}"
+        );
+        // its identity is addressable, so the card's delete/export work
+        assert!(stale.uid.starts_with("prj_"));
+
+        let healthy = view
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-healthy")
+            .expect("the healthy package is unaffected");
+        assert_eq!(healthy.health, crate::app::library::PackageHealth::Ready);
     }
 
     fn ready_link() -> DeviceState {
@@ -916,6 +995,8 @@ mod tests {
                     last_seen_at: 5.0,
                     association: None,
                     board_id: None,
+                    hardware_id: None,
+                    previous_uids: Vec::new(),
                 })
                 .unwrap();
         }
@@ -997,6 +1078,8 @@ mod tests {
                     at: 5.0,
                 }),
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
 
@@ -1037,6 +1120,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1076,6 +1161,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1116,6 +1203,8 @@ mod tests {
                 last_seen_at: 5.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
@@ -1179,6 +1268,8 @@ mod tests {
                     last_seen_at: seen,
                     association: None,
                     board_id: None,
+                    hardware_id: None,
+                    previous_uids: Vec::new(),
                 })
                 .unwrap();
         }
@@ -1240,6 +1331,8 @@ mod tests {
                 last_seen_at: 50.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
