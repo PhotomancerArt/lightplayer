@@ -1,13 +1,27 @@
-//! The on-device identity convention: `/.lp/device.json` at the device's
-//! filesystem ROOT (the lpa-server base fs).
+//! The LEGACY on-device identity convention: `/.lp/device.json` at the
+//! device's filesystem ROOT (the lpa-server base fs).
 //!
-//! Stamped at provisioning; USB port metadata can't distinguish identical
-//! boards, so the device filesystem carries its own identity. Identity is
-//! DEVICE-scoped: it lives outside every project storage dir, so project
-//! pushes (which replace `projects/<storage>/`) never touch it. Stamping
-//! writes the root path over the wire (`FsRequest::Write`); pulls read it
-//! back the same way, and firmware reads it at boot for the hello's
-//! `device_uid` (the server-side twin of this convention lives in
+//! This file used to be where a device's identity came from — a `dev_`
+//! uid Studio minted and stamped at provisioning. Since
+//! `docs/adr/2026-08-04-device-identity-anchored-in-silicon.md` an
+//! ESP-class board's identity is its factory efuse MAC, and this file
+//! has three narrower jobs:
+//!
+//! - **Read, always** (rule A3): a board carrying a stamp is evidence,
+//!   both for pre-MAC firmware and for migrating a legacy registry row to
+//!   the derived uid at first sight.
+//! - **Store, host-class only** (D3): `fw-host`/`lp-cli` embedders have
+//!   no efuse, and a host filesystem is not erased by a flash tool, so
+//!   the file is an honest store there.
+//! - **Written only as that fallback**: ESP-class provisioning and renames
+//!   write the registry alone (design §5) — nothing is stamped onto a
+//!   board whose name would die with the next erase.
+//!
+//! Identity is DEVICE-scoped: the file lives outside every project storage
+//! dir, so project pushes (which replace `projects/<storage>/`) never
+//! touch it. The fallback write goes over the wire (`FsRequest::Write`);
+//! pulls read it back the same way, and firmware reads it at boot for the
+//! hello's `device_uid` (the server-side twin of this convention lives in
 //! lpa-server's `device_identity` module).
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +36,9 @@ pub const DEVICE_IDENTITY_PATH: &str = "/.lp/device.json";
 /// per-target default stands.
 pub const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
 
-/// A device's stamped identity.
+/// A device's identity as the file spells it — and, in memory, the
+/// resolved identity a live session wears (uid from silicon or a legacy
+/// stamp; name from the registry, D34).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceIdentity {

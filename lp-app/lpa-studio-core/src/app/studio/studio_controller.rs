@@ -1696,8 +1696,9 @@ impl StudioController {
                 session.set_device_drift_times((head_saved_at, pushed_at));
             }
             let Some(identity_value) = identity.clone() else {
-                // anonymous hardware: classification only (the wizard
-                // stamps an identity, then this re-runs)
+                // anonymous hardware (rule A4): classification only —
+                // nothing is banked for a board that can name neither
+                // its silicon nor a stamp
                 let content = DeviceContent::Known {
                     project_uid: summary.uid.to_string(),
                     slug: summary.slug.clone(),
@@ -1805,7 +1806,8 @@ impl StudioController {
         }
 
         // unknown project: adopt when the device has an identity to
-        // attribute it to; otherwise wait for the wizard to stamp one
+        // attribute it to. A MAC board always does (adoption runs here,
+        // at connect); rule A4's anonymous board is what still waits.
         let Some(identity_value) = &identity else {
             return Ok(DeviceSyncState {
                 identity,
@@ -2205,10 +2207,93 @@ impl StudioController {
         }
     }
 
-    /// Stamp a `dev_` identity onto the connected device: mint the uid,
-    /// write `/.lp/device.json` at the device's fs ROOT over the wire
-    /// (identity is device-scoped, outside every project storage dir),
-    /// register the device, and re-pull (adoption may now run for
+    /// Name the connected device (the one naming path: the Needs-a-name
+    /// card's form and the setup form's post-flash name both land here).
+    ///
+    /// A board whose identity is its silicon takes a **registry write**
+    /// (design §5): the name goes on the row keyed by its derived uid and
+    /// nothing at all is written to the board, because a name kept on an
+    /// erasable filesystem was never the truth. Only a session with no
+    /// silicon to anchor to — a host-class embedder, or a board that
+    /// reported no MAC — falls back to the legacy stamp.
+    async fn run_device_naming(
+        &mut self,
+        device_id: crate::RuntimeId,
+        name: String,
+    ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        match self
+            .pool
+            .device_session(device_id)
+            .and_then(crate::RuntimeSession::hardware_id)
+        {
+            Some(hardware_id @ crate::app::places::HardwareId::EspEfuse { .. }) => {
+                self.write_name_to_registry(device_id, hardware_id, name)
+                    .await
+            }
+            _ => {
+                // Current firmware always reports its efuse MAC in the
+                // hello, so an ESP-class session reaching the fallback
+                // means the silicon half went missing somewhere. Say so:
+                // the stamp about to run writes a uid onto a filesystem
+                // the next erase takes with it.
+                if self
+                    .hardware_session_for(device_id)
+                    .and_then(|session| session.snapshot().detected_chip)
+                    .is_some()
+                {
+                    log::warn!(
+                        "naming an ESP board through the legacy identity stamp: \
+                         this session resolved no efuse MAC"
+                    );
+                }
+                self.run_identity_stamp(device_id, name).await
+            }
+        }
+    }
+
+    /// The registry half of naming (design §5): the chosen name lands on
+    /// the row keyed by the board's DERIVED uid, carrying the identity
+    /// source with it, and the live card wears the name immediately. The
+    /// merge keeps what earlier sightings recorded (board choice, push
+    /// association) — and no re-pull is needed, because the identity was
+    /// known at attach and adoption already ran there.
+    async fn write_name_to_registry(
+        &mut self,
+        device_id: crate::RuntimeId,
+        hardware_id: crate::app::places::HardwareId,
+        name: String,
+    ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        let identity = crate::app::places::DeviceIdentity {
+            uid: hardware_id.device_uid().to_string(),
+            name,
+        };
+        let now = (self.now_secs)();
+        let entry = self.registry_entry_for_session(device_id, &identity, now);
+        let host = self.library_host()?;
+        host.catalog(CatalogOp::UpsertRegisteredDevice(entry))
+            .await
+            .map_err(|error| self.library_error_with_name(error))?;
+        if let Some(sync) = self
+            .pool
+            .device_session_mut(device_id)
+            .ok()
+            .and_then(crate::RuntimeSession::device_sync_mut)
+        {
+            sync.identity = Some(identity.clone());
+        }
+        self.request_library_refresh();
+        self.mark_dirty();
+        Ok(identity)
+    }
+
+    /// The naming FALLBACK for sessions with no silicon identity (D3/D6):
+    /// host-class embedders and boards whose hello carries no efuse MAC.
+    /// ESP-class provisioning writes the registry only — see
+    /// [`Self::run_device_naming`].
+    ///
+    /// Mint the uid, write `/.lp/device.json` at the device's fs ROOT over
+    /// the wire (identity is device-scoped, outside every project storage
+    /// dir), register the device, and re-pull (adoption may now run for
     /// previously-anonymous content).
     async fn run_identity_stamp(
         &mut self,
@@ -3149,11 +3234,12 @@ impl StudioController {
                     ));
                 }
                 // the Needs-a-name card's inline form (D14 gently insists
-                // upstream): stamp mints the uid, writes the identity over
-                // the wire, registers the device, and re-pulls (adoption
-                // may now run for previously-anonymous content)
+                // upstream): the name lands on the registry row keyed by
+                // the board's own derived uid — nothing is written to the
+                // board (design §5) — with the legacy stamp standing in
+                // only where there is no silicon to anchor to
                 let device_id = self.resolve_device_target(&target)?;
-                let identity = self.run_identity_stamp(device_id, name).await?;
+                let identity = self.run_device_naming(device_id, name).await?;
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!(
                     "This device is now \"{}\"",
                     identity.name
@@ -3248,10 +3334,15 @@ impl StudioController {
     }
 
     /// The live half of a device rename (D34): when the renamed device is
-    /// the attached one, write `/.lp/device.json` back over the wire and
-    /// update the cached sync state so every surface shows the new name
-    /// immediately. Offline devices skip this — the write-back happens on
-    /// the next connect (`reconcile_identity_name`).
+    /// the attached one, update the cached sync state so every surface
+    /// shows the new name immediately — and, for a board whose identity
+    /// still lives in its filesystem, write `/.lp/device.json` back over
+    /// the wire. Offline devices skip both halves; the write-back happens
+    /// on the next connect (`resolve_session_identity`).
+    ///
+    /// The wire half is `Minted`-only (design §5), the same rule the
+    /// connect path applies: an ESP-class board's name lives in the
+    /// registry alone, so renaming it never touches its filesystem.
     async fn write_back_live_identity_name(
         &mut self,
         uid: &str,
@@ -3270,16 +3361,24 @@ impl StudioController {
             uid: uid.to_string(),
             name: name.to_string(),
         };
-        let logs = self
-            .pool
-            .device_session_mut(device_id)?
-            .client_mut()?
-            .fs_write(
-                crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
-                &identity.to_json_bytes(),
-            )
-            .await?;
-        self.record_logs(logs);
+        let file_is_the_store = matches!(
+            self.pool
+                .device_session(device_id)
+                .and_then(crate::RuntimeSession::hardware_id),
+            Some(crate::app::places::HardwareId::Minted { .. })
+        );
+        if file_is_the_store {
+            let logs = self
+                .pool
+                .device_session_mut(device_id)?
+                .client_mut()?
+                .fs_write(
+                    crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
+                    &identity.to_json_bytes(),
+                )
+                .await?;
+            self.record_logs(logs);
+        }
         if let Some(sync) = self
             .pool
             .device_session_mut(device_id)
@@ -4807,15 +4906,15 @@ impl StudioController {
                 updates,
             )
             .await?;
-        // The setup form's name stamps at first post-flash contact
+        // The setup form's name lands at first post-flash contact
         // (model §1-A): the happy path never detours through
-        // Needs-a-name. Only an UNNAMED board takes the stamp — an update
+        // Needs-a-name. Only an UNNAMED board takes the name — an update
         // on a named device keeps its name. Naming failure degrades
         // honestly: the flash stands, the card offers naming. A
         // MAC-identified board arrives with a uid and no name (device
-        // identity design §3), so the gate reads the name; the stamp it
-        // then takes re-keys to the derived uid on the next pull, name
-        // intact (P4 replaces the stamp with a registry write).
+        // identity design §3), so the gate reads the NAME; the name
+        // itself is a registry write under that uid, and the board's
+        // filesystem is never touched.
         let setup_name = setup_name
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
@@ -4826,7 +4925,7 @@ impl StudioController {
                     .is_none_or(|identity| identity.name.is_empty())
             })
         {
-            match self.run_identity_stamp(device_id, name).await {
+            match self.run_device_naming(device_id, name).await {
                 Ok(identity) => {
                     outcome = outcome.with_notice(UiNotice::info(format!(
                         "This device is now \"{}\"",
@@ -4841,7 +4940,7 @@ impl StudioController {
             }
         }
         // The setup form's board choice lands on the device as
-        // `/hardware.json` (D4) — after the identity stamp so the registry
+        // `/hardware.json` (D4) — after the naming write so the registry
         // row exists to cache the board. Generic choice (`None`) writes
         // nothing: the compiled-in default stands. Failure degrades
         // honestly — the flash and name stand; the pin map just stays
