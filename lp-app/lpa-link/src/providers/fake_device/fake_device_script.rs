@@ -12,6 +12,12 @@ pub const FAKE_DEVICE_PROJECT_DIR: &str = "/projects/studio";
 /// into the flashed device's provenance (`commit=` on the boot line).
 pub const FAKE_IMAGE_IDENTITY: &str = "fake-esp32c6-image";
 
+/// The base MAC the fake connector's scripted flash preflight "reads" from
+/// efuse, in the UPPERCASE spelling a reporter is allowed to use — the
+/// canonical stored form is lowercase, and the fake exists partly to prove
+/// the normalization between them actually runs.
+pub const FAKE_PROBED_MAC: &str = "60:55:F9:0A:0B:0C";
+
 /// Stamped identity for a scripted LightPlayer state, written to
 /// `/.lp/device.json` at the device's fs ROOT.
 ///
@@ -65,6 +71,10 @@ pub struct FakeLightPlayerState {
     /// Stamped identity: written to `/.lp/device.json` at the device's fs
     /// root and reported as the hello's `device_uid`.
     pub identity: Option<FakeDeviceIdentity>,
+    /// The factory efuse base MAC this board reports in its hello
+    /// (`HardwareFacts::base_mac`) — the silicon half of device identity.
+    /// `None` mimics pre-2026-08-03 firmware, which reported none.
+    pub base_mac: Option<String>,
     /// Firmware identity for the boot line and the wire hello. Scripted
     /// flash (`fake_flash(image_identity)`) records the image identity here.
     /// Only the IDENTITY half: the fake's capabilities are the real host
@@ -95,6 +105,7 @@ impl FakeLightPlayerState {
             boot_delay: Duration::ZERO,
             project_files: Vec::new(),
             identity: None,
+            base_mac: None,
             provenance: fake_provenance("fake-firmware"),
             suppress_hello: false,
             proto_override: None,
@@ -115,6 +126,12 @@ impl FakeLightPlayerState {
 
     pub fn with_identity(mut self, identity: FakeDeviceIdentity) -> Self {
         self.identity = Some(identity);
+        self
+    }
+
+    /// Report a factory base MAC in the hello (the A1 identity source).
+    pub fn with_base_mac(mut self, base_mac: &str) -> Self {
+        self.base_mac = Some(base_mac.to_string());
         self
     }
 

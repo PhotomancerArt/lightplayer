@@ -37,6 +37,18 @@ pub struct DeviceSnapshot {
     /// nothing has named the chip — common for a healthy app-mode device
     /// that booted before Studio attached.
     pub detected_chip: Option<String>,
+    /// The chip's factory base MAC, when a download-mode session read it
+    /// (acquisition rule A2) — normalized to lowercase colon hex.
+    ///
+    /// Evidence of the same kind as `detected_chip` and read in the same
+    /// breath, but about the UNIT rather than the silicon family: it is
+    /// unique, and it survives an erase. Only explicitly user-initiated
+    /// flows produce it (today: the flash preflight), because entering the
+    /// bootloader means resetting whatever was running.
+    ///
+    /// `None` means nothing has read one this session — including every
+    /// healthy app-mode device, whose MAC arrives in the hello instead.
+    pub probed_mac: Option<String>,
 }
 
 impl DeviceSnapshot {

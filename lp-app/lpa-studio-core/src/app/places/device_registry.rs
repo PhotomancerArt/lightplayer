@@ -37,6 +37,16 @@ pub struct RegisteredDevice {
     /// generic/unknown; preserved across sightings by the merge upsert.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board_id: Option<String>,
+    /// The identity source, canonical string form (see
+    /// [`super::HardwareId`]'s `Display`: `"efuse:aa:bb:cc:dd:ee:ff"` or
+    /// `"minted"`). `None` = legacy row not yet re-keyed (device identity
+    /// design §4) — the next sighting fills it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware_id: Option<String>,
+    /// Uids this device previously wore before a re-key (device identity
+    /// design §4) — lets old history events resolve for display.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previous_uids: Vec<String>,
 }
 
 /// Load/save wrapper over the store.
@@ -94,6 +104,56 @@ impl DeviceRegistry {
         self.save(&file)
     }
 
+    /// Lazy re-key at sighting (device identity design §4, migration
+    /// steps 2-3): fold a legacy `old_uid` row into the derived
+    /// `new_uid` once a `HardwareId` resolves for it.
+    ///
+    /// - Row under `old_uid` only → moved to `new_uid`: `old_uid` is
+    ///   pushed onto `previous_uids`, `hardware_id` is set.
+    /// - Rows under BOTH → merged into the `new_uid` row: `name` /
+    ///   `board_id` / `transport` prefer the more-recently-seen row's
+    ///   non-empty value; `association` is whichever side has the later
+    ///   `at`; `last_seen_at` is the max of the two; `previous_uids` is
+    ///   the union of both rows plus `old_uid`; the `old_uid` row is
+    ///   dropped.
+    /// - Neither row exists, or `old_uid == new_uid` → no-op.
+    pub fn rekey_or_merge(
+        &self,
+        old_uid: &str,
+        new_uid: &str,
+        hardware_id: &str,
+    ) -> Result<(), LibraryError> {
+        if old_uid == new_uid {
+            return Ok(());
+        }
+        let mut file = self.load()?;
+        let old_index = file.devices.iter().position(|d| d.uid == old_uid);
+        let Some(old_index) = old_index else {
+            // nothing sighted under the old uid: nothing to move or merge
+            return Ok(());
+        };
+        let new_index = file.devices.iter().position(|d| d.uid == new_uid);
+
+        match new_index {
+            None => {
+                let device = &mut file.devices[old_index];
+                device.uid = new_uid.to_string();
+                device.previous_uids.push(old_uid.to_string());
+                device.hardware_id = Some(hardware_id.to_string());
+            }
+            Some(new_index) => {
+                let old_row = file.devices[old_index].clone();
+                let new_row = file.devices[new_index].clone();
+                let merged =
+                    merge_registered_devices(&old_row, &new_row, old_uid, new_uid, hardware_id);
+                file.devices
+                    .retain(|d| d.uid != old_uid && d.uid != new_uid);
+                file.devices.push(merged);
+            }
+        }
+        self.save(&file)
+    }
+
     fn load(&self) -> Result<RegistryFile, LibraryError> {
         let fs = self.fs.borrow();
         let bytes = match fs.read_file(REGISTRY_PATH.as_path()) {
@@ -110,6 +170,62 @@ impl DeviceRegistry {
         let fs = self.fs.borrow();
         fs.write_file(REGISTRY_PATH.as_path(), &bytes)
             .map_err(|e| LibraryError::Fs(e.to_string()))
+    }
+}
+
+/// Field-by-field merge for [`DeviceRegistry::rekey_or_merge`]'s
+/// both-rows case. See that method's doc for the rules.
+fn merge_registered_devices(
+    old_row: &RegisteredDevice,
+    new_row: &RegisteredDevice,
+    old_uid: &str,
+    new_uid: &str,
+    hardware_id: &str,
+) -> RegisteredDevice {
+    let (recent, other) = if old_row.last_seen_at >= new_row.last_seen_at {
+        (old_row, new_row)
+    } else {
+        (new_row, old_row)
+    };
+    let name = if recent.name.is_empty() {
+        other.name.clone()
+    } else {
+        recent.name.clone()
+    };
+    let transport = if recent.transport.is_empty() {
+        other.transport.clone()
+    } else {
+        recent.transport.clone()
+    };
+    let board_id = recent.board_id.clone().or_else(|| other.board_id.clone());
+
+    let association = match (&old_row.association, &new_row.association) {
+        (Some(a), Some(b)) => Some(if a.at >= b.at { a.clone() } else { b.clone() }),
+        (Some(a), None) => Some(a.clone()),
+        (None, Some(b)) => Some(b.clone()),
+        (None, None) => None,
+    };
+
+    let mut previous_uids = old_row.previous_uids.clone();
+    for uid in &new_row.previous_uids {
+        if !previous_uids.contains(uid) {
+            previous_uids.push(uid.clone());
+        }
+    }
+    let old_uid = old_uid.to_string();
+    if !previous_uids.contains(&old_uid) {
+        previous_uids.push(old_uid);
+    }
+
+    RegisteredDevice {
+        uid: new_uid.to_string(),
+        name,
+        transport,
+        last_seen_at: old_row.last_seen_at.max(new_row.last_seen_at),
+        association,
+        board_id,
+        hardware_id: Some(hardware_id.to_string()),
+        previous_uids,
     }
 }
 
@@ -137,6 +253,8 @@ mod tests {
                 at: 1.0,
             }),
             board_id: None,
+            hardware_id: None,
+            previous_uids: Vec::new(),
         };
         registry.upsert(device.clone()).unwrap();
         registry
@@ -167,6 +285,8 @@ mod tests {
                 last_seen_at: 1.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
 
@@ -193,6 +313,8 @@ mod tests {
                 last_seen_at: 1.0,
                 association: None,
                 board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
             })
             .unwrap();
 
@@ -200,5 +322,226 @@ mod tests {
         assert!(registry.list().unwrap().is_empty());
         // forgetting again (or an unknown uid) is a no-op, not an error
         registry.forget("dev_0000000000000001").unwrap();
+    }
+
+    #[test]
+    fn legacy_registry_json_with_no_new_fields_still_parses() {
+        // additive #[serde(default)] fields (device identity design §4):
+        // a pre-P1 row on disk must load with hardware_id: None and an
+        // empty previous_uids, no format version bump.
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let legacy = serde_json::json!({
+            "devices": [{
+                "uid": "dev_0000000000000001",
+                "name": "Porch sign",
+                "transport": "USB",
+                "lastSeenAt": 1.0,
+                "association": null,
+            }]
+        });
+        fs.borrow()
+            .write_file(
+                REGISTRY_PATH.as_path(),
+                serde_json::to_vec(&legacy).unwrap().as_slice(),
+            )
+            .unwrap();
+
+        let registry = DeviceRegistry::new(fs);
+        let listed = registry.list().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].hardware_id, None);
+        assert!(listed[0].previous_uids.is_empty());
+    }
+
+    #[test]
+    fn rekey_or_merge_moves_a_solo_row_and_records_the_old_uid() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_000000000000old1".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1.0,
+                association: None,
+                board_id: Some("esp32-c6-devkit".to_string()),
+                hardware_id: None,
+                previous_uids: Vec::new(),
+            })
+            .unwrap();
+
+        registry
+            .rekey_or_merge(
+                "dev_000000000000old1",
+                "dev_000000000000new1",
+                "efuse:aa:bb:cc:dd:ee:ff",
+            )
+            .unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(listed.len(), 1, "moved, not duplicated");
+        let row = &listed[0];
+        assert_eq!(row.uid, "dev_000000000000new1");
+        assert_eq!(row.previous_uids, vec!["dev_000000000000old1".to_string()]);
+        assert_eq!(row.hardware_id.as_deref(), Some("efuse:aa:bb:cc:dd:ee:ff"));
+        assert_eq!(row.name, "Porch sign");
+        assert_eq!(row.board_id.as_deref(), Some("esp32-c6-devkit"));
+    }
+
+    #[test]
+    fn rekey_or_merge_merges_both_rows_preferring_the_recent_sighting() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        let project = PrefixedUid::mint(UidPrefix::Project, &[1u8; 16]);
+
+        // the OLD (stamped) row: seen first, carries an older association
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_000000000000old1".to_string(),
+                name: "Stamped name".to_string(),
+                transport: "".to_string(),
+                last_seen_at: 10.0,
+                association: Some(DeviceAssociation {
+                    device: "dev_000000000000old1".parse().unwrap(),
+                    project,
+                    version: ContentHash::of(b"v1"),
+                    at: 10.0,
+                }),
+                board_id: None,
+                hardware_id: None,
+                previous_uids: vec!["dev_00000000eviction".to_string()],
+            })
+            .unwrap();
+
+        // the NEW (derived) row: seen more recently, empty name/transport
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_000000000000new1".to_string(),
+                name: "".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 20.0,
+                association: Some(DeviceAssociation {
+                    device: "dev_000000000000new1".parse().unwrap(),
+                    project,
+                    version: ContentHash::of(b"v2"),
+                    at: 20.0,
+                }),
+                board_id: Some("esp32-c6-devkit".to_string()),
+                hardware_id: Some("efuse:aa:bb:cc:dd:ee:ff".to_string()),
+                previous_uids: Vec::new(),
+            })
+            .unwrap();
+
+        registry
+            .rekey_or_merge(
+                "dev_000000000000old1",
+                "dev_000000000000new1",
+                "efuse:aa:bb:cc:dd:ee:ff",
+            )
+            .unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(
+            listed.len(),
+            1,
+            "the old row is dropped, not kept alongside"
+        );
+        let row = &listed[0];
+        assert_eq!(row.uid, "dev_000000000000new1");
+        // transport: new row is more recent AND non-empty -> new wins
+        assert_eq!(row.transport, "USB");
+        // name: new row is more recent but EMPTY -> falls back to old's
+        assert_eq!(row.name, "Stamped name");
+        // board_id: only the new row has one
+        assert_eq!(row.board_id.as_deref(), Some("esp32-c6-devkit"));
+        assert_eq!(row.last_seen_at, 20.0);
+        // association: new row's `at` is later
+        assert_eq!(
+            row.association.as_ref().unwrap().version,
+            ContentHash::of(b"v2")
+        );
+        assert_eq!(row.hardware_id.as_deref(), Some("efuse:aa:bb:cc:dd:ee:ff"));
+        // previous_uids: union of both rows' history, plus the old uid itself
+        let mut previous = row.previous_uids.clone();
+        previous.sort();
+        let mut expected = vec![
+            "dev_00000000eviction".to_string(),
+            "dev_000000000000old1".to_string(),
+        ];
+        expected.sort();
+        assert_eq!(previous, expected);
+    }
+
+    #[test]
+    fn rekey_or_merge_is_a_noop_when_old_uid_is_unknown() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_000000000000new1".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1.0,
+                association: None,
+                board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
+            })
+            .unwrap();
+
+        registry
+            .rekey_or_merge(
+                "dev_000000000000none",
+                "dev_000000000000new1",
+                "efuse:aa:bb:cc:dd:ee:ff",
+            )
+            .unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].hardware_id, None, "nothing to move: untouched");
+    }
+
+    #[test]
+    fn rekey_or_merge_is_a_noop_for_identical_uids() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_0000000000000001".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1.0,
+                association: None,
+                board_id: None,
+                hardware_id: None,
+                previous_uids: Vec::new(),
+            })
+            .unwrap();
+
+        registry
+            .rekey_or_merge(
+                "dev_0000000000000001",
+                "dev_0000000000000001",
+                "efuse:aa:bb:cc:dd:ee:ff",
+            )
+            .unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(listed[0].hardware_id, None, "same uid: untouched");
+    }
+
+    #[test]
+    fn rekey_or_merge_is_a_noop_when_neither_row_exists() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        registry
+            .rekey_or_merge(
+                "dev_000000000000one1",
+                "dev_000000000000two1",
+                "efuse:aa:bb:cc:dd:ee:ff",
+            )
+            .unwrap();
+        assert!(registry.list().unwrap().is_empty());
     }
 }
