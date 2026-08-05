@@ -430,7 +430,7 @@ mod tests {
     fn an_unknown_board_id_degrades_to_no_board() {
         let mut editor = editor_with_output(output_face(&[(0, "IO18", None)]));
 
-        decorate_output_faces(&mut editor, Some("acme/not-a-board"));
+        decorate_output_faces(&mut editor, Some("acme/not-a-board"), None, None);
 
         assert_eq!(output_face_of(&editor).board, None);
     }

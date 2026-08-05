@@ -820,16 +820,11 @@ fn main() -> ! {
 // crate has no harness cfg (build.rs deliberately emits none), and its
 // wire deps (`lpc_wire`, the common chip_identity module) are optional
 // behind `server` — the no-server build must not touch them.
-#[cfg(feature = "server")]
-/// This chip's permanent identity, read from efuse.
-///
-/// Injected rather than derived: the server cannot read silicon, and the
-/// chip-generic firmware layer deliberately has no `esp_hal`
-/// (ADR 2026-07-29-per-chip-fw-toolchains). See
 /// Collect per-wire output telemetry for the heartbeat, from the pusher's
 /// mailboxes. Empty (→ absent heartbeat field) until a wire posts, and in
 /// the single-core fallback (whose inline path keeps no per-wire
 /// attribution).
+#[cfg(feature = "server")]
 fn collect_wire_stats() -> alloc::vec::Vec<lpc_wire::server::OutputWireStatus> {
     let mut out = alloc::vec::Vec::new();
     if !output::rmt::shared_driver::isr_on_app_core() {
@@ -854,8 +849,14 @@ fn collect_wire_stats() -> alloc::vec::Vec<lpc_wire::server::OutputWireStatus> {
     out
 }
 
+/// This chip's permanent identity, read from efuse.
+///
+/// Injected rather than derived: the server cannot read silicon, and the
+/// chip-generic firmware layer deliberately has no `esp_hal`
+/// (ADR 2026-07-29-per-chip-fw-toolchains). See
 /// `fw_esp32_common::chip_identity` for why this reports the BASE MAC
 /// rather than a per-interface list.
+#[cfg(feature = "server")]
 fn chip_identity() -> lpc_wire::HardwareIdentity {
     use esp_hal::efuse;
     let revision = efuse::chip_revision();
