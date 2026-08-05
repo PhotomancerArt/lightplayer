@@ -158,6 +158,9 @@
   .tw\:right-1\.5 {
     right: calc(var(--tw-spacing) * 1.5);
   }
+  .tw\:bottom-0 {
+    bottom: calc(var(--tw-spacing) * 0);
+  }
   .tw\:bottom-0\.5 {
     bottom: calc(var(--tw-spacing) * 0.5);
   }
@@ -373,6 +376,9 @@
   }
   .tw\:h-\[11px\] {
     height: 11px;
+  }
+  .tw\:h-\[12px\] {
+    height: 12px;
   }
   .tw\:h-\[15px\] {
     height: 15px;

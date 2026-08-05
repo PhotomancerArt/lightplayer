@@ -119,7 +119,7 @@ fn paused() -> Element {
 }
 
 #[story(
-    description = "Scrubbed off-live: −12.4 s behind the live edge. The tape box border goes amber (status-attention family), and the amber chip states the offset with its tap-to-return affordance. Alarming is wrong — this is a deliberate state the user chose."
+    description = "Scrubbed off-live: −12.4 s behind the live edge. The tape box border goes amber (status-attention family), and the offset reads on the amber line UNDER the digits — one time cluster next to the run button, tap-to-return (the free-floating chip jumped around and died at G1). Alarming is wrong — this is a deliberate state the user chose."
 )]
 fn scrubbed() -> Element {
     rsx! {
@@ -173,7 +173,7 @@ fn fast() -> Element {
 }
 
 #[story(
-    description = "Every transport value carries an ACTIVE debug override (session-only): the changed controls wear the debug family's orange tint — paused run button, ×2 readout and thumb — without the drawer's hazard stripes, and the one `clear` affordance clears them all. The scrubbed offset doubles as off-live, so the box border and chip are already amber."
+    description = "Every transport value carries an ACTIVE debug override (session-only): the changed controls wear the debug family's orange tint — paused run button, engaged-amber fader rail, ×2 readout — without the drawer's hazard stripes, and the one `clear` affordance sits in the product header beside the detail button (G1: 'the clear should be in the header'). The scrubbed offset doubles as off-live: amber border + the offset line under the digits."
 )]
 fn overridden() -> Element {
     rsx! {
