@@ -6,8 +6,11 @@ use lpa_studio_core::{
     UiSlotFieldState, UiSlotUnit, UiSlotValue,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_model::GradientConfig;
 
-use crate::app::node::node_story_fixtures::slot_value_variants_fixture;
+use crate::app::node::node_story_fixtures::{
+    gradient_slot_value, palette_cycle, slot_value_variants_fixture, sunset_gradient,
+};
 use crate::app::node::{SliderSlotField, SlotValueEditor, XySlotField};
 
 fn story_slot_address(path: &str) -> ProjectSlotAddress {
@@ -202,6 +205,42 @@ pub(crate) fn power_field_read_only() -> Element {
         SlotValueEditor {
             value: fixture_power_value("ws2811_12v", 4000),
             state: UiSlotFieldState::readonly(),
+        }
+    }
+}
+
+#[story(
+    description = "The Gradient hint on a held palette: the slot row shows the ramp itself plus one summary line (space, method, stop count) — never the padded storage struct. Read-only in M4 P2; picking and editing arrive with the palette widget."
+)]
+pub(crate) fn gradient_field() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:max-w-[420px] tw:gap-2",
+            SlotValueEditor {
+                value: gradient_slot_value(&GradientConfig::Static(sunset_gradient())),
+                state: UiSlotFieldState::editable(),
+                address: story_slot_address("palette"),
+                on_action: move |_| {},
+            }
+            SlotValueEditor {
+                value: gradient_slot_value(&GradientConfig::Static(sunset_gradient())),
+                state: UiSlotFieldState::readonly(),
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A cycle config in a slot row: the member SET as mini strips (a read surface states what the value is, not where a running blend happens to be) with the step rate in Studio's auto-denominated units."
+)]
+pub(crate) fn gradient_cycle_field() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:max-w-[420px] tw:gap-2",
+            SlotValueEditor {
+                value: gradient_slot_value(&palette_cycle()),
+                state: UiSlotFieldState::editable(),
+                address: story_slot_address("palette"),
+                on_action: move |_| {},
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ use lpa_studio_core::{
     UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
     UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
+use lpc_model::{Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod, ToLpValue};
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
     return 0.5 + 0.5 * cos(6.28318 * (vec3(0.1, 0.3, 0.6) + t));
@@ -894,6 +895,67 @@ pub(crate) fn slot_value_variants_fixture() -> Vec<UiSlotValue> {
         ])),
         UiSlotValue::vec2([0.42, 0.58]).with_editor(UiSlotEditorHint::Xy),
     ]
+}
+
+/// The stock held palette every gradient story shows: a warm Oklab sunset
+/// ramp.
+pub(crate) fn sunset_gradient() -> Gradient {
+    oklab_ramp(&[
+        (0.0, [0.15, 0.05, -0.1]),
+        (0.5, [0.65, 0.15, 0.1]),
+        (1.0, [0.95, -0.02, 0.12]),
+    ])
+}
+
+/// A four-palette cycle stepping every 20 s (`3/min`) with a half-second
+/// hand-off fade — the shape read surfaces render as a member SET.
+pub(crate) fn palette_cycle() -> GradientConfig {
+    GradientConfig::Cycle {
+        set: vec![
+            sunset_gradient(),
+            oklab_ramp(&[(0.0, [0.1, -0.02, -0.12]), (1.0, [0.85, -0.1, -0.02])]),
+            oklab_ramp(&[(0.0, [0.2, 0.08, 0.06]), (1.0, [0.9, 0.12, 0.14])]),
+            // A discrete swatch list is a Step gradient, not a second type.
+            Gradient {
+                space: Colorspace::Srgb,
+                method: InterpMethod::Step,
+                stops: vec![
+                    GradientStop {
+                        at: 0.0,
+                        c: [0.9, 0.2, 0.2],
+                    },
+                    GradientStop {
+                        at: 0.33,
+                        c: [0.95, 0.85, 0.1],
+                    },
+                    GradientStop {
+                        at: 0.66,
+                        c: [0.15, 0.55, 0.9],
+                    },
+                ],
+            },
+        ],
+        step_seconds: 20.0,
+        fade_seconds: 0.5,
+    }
+}
+
+/// A `Gradient`-hinted slot value carrying `config`, built the way the live
+/// bridge builds one: the model's own storage, mirrored into the UI kind, so
+/// stories exercise the same parse the dispatcher's guard performs.
+pub(crate) fn gradient_slot_value(config: &GradientConfig) -> UiSlotValue {
+    UiSlotValue::from_lp_value(&config.to_lp_value()).with_editor(UiSlotEditorHint::Gradient)
+}
+
+fn oklab_ramp(stops: &[(f32, [f32; 3])]) -> Gradient {
+    Gradient {
+        space: Colorspace::Oklab,
+        method: InterpMethod::Linear,
+        stops: stops
+            .iter()
+            .map(|(at, c)| GradientStop { at: *at, c: *c })
+            .collect(),
+    }
 }
 
 trait NodeStoryProductExt {

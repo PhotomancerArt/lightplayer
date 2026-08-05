@@ -103,6 +103,60 @@ impl UiSlotValueKind {
         }
     }
 
+    /// The [`LpValue`] this kind mirrors — the inverse of the kind mapping
+    /// [`UiSlotValue::from_lp_value`] performs.
+    ///
+    /// Field components that need the MODEL's own reading of a value (a
+    /// `Gradient`/`GradientConfig` record parsed by `lpc-model`, rather than
+    /// a bespoke walk of the UI struct) round-trip through here instead of
+    /// re-deriving the record shape in the UI layer.
+    pub fn to_lp_value(&self) -> LpValue {
+        match self {
+            Self::Unset => LpValue::Unset,
+            Self::String(value) => LpValue::String(value.clone()),
+            Self::I32(value) => LpValue::I32(*value),
+            Self::U32(value) => LpValue::U32(*value),
+            Self::F32(value) => LpValue::F32(*value),
+            Self::Bool(value) => LpValue::Bool(*value),
+            Self::Vec2(value) => LpValue::Vec2(*value),
+            Self::Vec3(value) => LpValue::Vec3(*value),
+            Self::Vec4(value) => LpValue::Vec4(*value),
+            Self::IVec2(value) => LpValue::IVec2(*value),
+            Self::IVec3(value) => LpValue::IVec3(*value),
+            Self::IVec4(value) => LpValue::IVec4(*value),
+            Self::UVec2(value) => LpValue::UVec2(*value),
+            Self::UVec3(value) => LpValue::UVec3(*value),
+            Self::UVec4(value) => LpValue::UVec4(*value),
+            Self::BVec2(value) => LpValue::BVec2(*value),
+            Self::BVec3(value) => LpValue::BVec3(*value),
+            Self::BVec4(value) => LpValue::BVec4(*value),
+            Self::Mat2x2(value) => LpValue::Mat2x2(*value),
+            Self::Mat3x3(value) => LpValue::Mat3x3(*value),
+            Self::Mat4x4(value) => LpValue::Mat4x4(*value),
+            Self::Array(values) => LpValue::Array(
+                values
+                    .iter()
+                    .map(|value| value.kind.to_lp_value())
+                    .collect(),
+            ),
+            Self::Struct { name, fields } => LpValue::Struct {
+                name: name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.kind.to_lp_value()))
+                    .collect(),
+            },
+            Self::Enum { variant, payload } => LpValue::Enum {
+                variant: *variant,
+                payload: payload
+                    .as_ref()
+                    .map(|payload| Box::new(payload.kind.to_lp_value())),
+            },
+            Self::Resource(value) => LpValue::Resource(*value),
+            Self::Product(value) => LpValue::Product(*value),
+        }
+    }
+
     /// Short type description for slot metadata.
     pub fn type_description(&self) -> &'static str {
         match self {
@@ -589,6 +643,55 @@ mod tests {
         for (value, label) in cases {
             assert_eq!(value.kind.type_label(), label);
             assert!(!value.display.is_empty());
+        }
+    }
+
+    /// The kind mapping round-trips: a value that came from the model can be
+    /// handed back to the model (how gradient-shaped values reach
+    /// `lpc-model`'s own parser from a UI field).
+    #[test]
+    fn kinds_round_trip_back_to_lp_values() {
+        let values = [
+            LpValue::Unset,
+            LpValue::String("idle".to_string()),
+            LpValue::I32(-4),
+            LpValue::U32(4),
+            LpValue::F32(0.35),
+            LpValue::Bool(true),
+            LpValue::Vec3([1.0, 2.5, 3.0]),
+            LpValue::IVec4([-1, 2, 3, 4]),
+            LpValue::UVec2([1, 2]),
+            LpValue::BVec3([true, false, true]),
+            LpValue::Mat3x3([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+            LpValue::Array(vec![LpValue::I32(1), LpValue::I32(2)]),
+            LpValue::Struct {
+                name: Some("Pair".to_string()),
+                fields: vec![
+                    ("x".to_string(), LpValue::F32(1.0)),
+                    (
+                        "inner".to_string(),
+                        LpValue::Array(vec![LpValue::Vec2([0.0, 1.0])]),
+                    ),
+                ],
+            },
+            LpValue::Enum {
+                variant: 7,
+                payload: Some(Box::new(LpValue::String("ready".to_string()))),
+            },
+            LpValue::Enum {
+                variant: 1,
+                payload: None,
+            },
+            LpValue::Resource(ResourceRef::runtime_buffer(RuntimeBufferId::new(4))),
+            LpValue::Product(ProductRef::visual(VisualProduct::new(NodeId::new(3), 0))),
+        ];
+
+        for value in values {
+            assert_eq!(
+                UiSlotValue::from_lp_value(&value).kind.to_lp_value(),
+                value,
+                "round trip"
+            );
         }
     }
 
