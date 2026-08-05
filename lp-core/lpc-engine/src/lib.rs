@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+pub mod color;
 pub mod dataflow;
 pub mod engine;
 pub mod features;

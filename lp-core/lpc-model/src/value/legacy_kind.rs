@@ -20,21 +20,12 @@
 
 use crate::value::constraint::{Constraint, ConstraintFree, ConstraintRange};
 use crate::value::lp_type::{LpType, ModelStructMember};
-use alloc::boxed::Box;
 use alloc::string::String;
 
-/// Maximum number of colors in a [`Kind::ColorPalette`] value’s fixed array storage.
-///
-/// v0 is deliberately small for embedded targets; the same constant sizes the
-/// `entries` field in the palette’s [`LpType`] (see `quantity.md` §3 “Storage
-/// recipes” and the roadmap risk note on fixed-size arrays).
-pub const MAX_PALETTE_LEN: u32 = 16;
-
-/// Maximum number of stops in a [`Kind::Gradient`] value’s fixed `stops` array.
-///
-/// See [`MAX_PALETTE_LEN`] and `quantity.md` §3. Constants like this live in
-/// `lp-domain` so layout stays explicit next to the [`Kind`]s that use them.
-pub const MAX_GRADIENT_STOPS: u32 = 16;
+/// The color-family vocabulary now lives in [`crate::color`], which owns both
+/// the authored serde surface and the `color.md` §5 storage recipe. Re-exported
+/// here so the historical `kind::` paths keep resolving.
+pub use crate::color::{Colorspace, InterpMethod, MAX_GRADIENT_STOPS};
 
 /// Number of frequency bands carried by [`Kind::AudioLevel`]: low / mid /
 /// high. See `docs/design/lightplayer/quantity.md` §3.
@@ -76,25 +67,6 @@ pub enum Unit {
     Radians,
 }
 
-/// Authoritative color space tag used **inside** color-family runtime structs; values line up with `docs/design/color.md` and the `space: I32` field in the [`Kind::Color`]/[`Kind::ColorPalette`]/[`Kind::Gradient`] storage recipes (`quantity.md` §3).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub enum Colorspace {
-    Oklch,
-    Oklab,
-    LinearRgb,
-    Srgb,
-}
-
-/// How to interpolate a [`Kind::Gradient`]; the numeric tag lives in the gradient struct’s `method: I32` field (`quantity.md` §3, `color.md`).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub enum InterpMethod {
-    Linear,
-    Cubic,
-    Step,
-}
-
 /// **Semantic** identity of a value in the LightPlayer domain: what it *means*
 /// for tooling, the bus, and defaults — independent of whether it is a scalar
 /// or a structured *value-type* vs an opaque *handle-type* (`quantity.md` §3, open
@@ -106,7 +78,7 @@ pub enum InterpMethod {
 ///
 /// - **Dimensionless value scalars:** `Kind::Amplitude`, `Kind::Ratio`, `Kind::Phase`, `Kind::Count`, `Kind::Bool`, `Kind::Choice`
 /// - **Scalars with a [`Dimension`]:** `Kind::Instant`, `Kind::Duration`, `Kind::Frequency`, `Kind::Angle`
-/// - **Structured *value* kinds (GPU-friendly structs):** `Kind::Color`, `Kind::ColorPalette`, `Kind::Gradient`, `Kind::Position2d`, `Kind::Position3d`, `Kind::AudioLevel`
+/// - **Structured *value* kinds (GPU-friendly structs):** `Kind::Color`, `Kind::Gradient`, `Kind::Position2d`, `Kind::Position3d`, `Kind::AudioLevel`
 /// - **Opaque handle (texture today):** `Kind::Texture`
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -136,12 +108,12 @@ pub enum Kind {
 
     /// Full color in an author-selected space; see `docs/design/color.md` and the struct recipe in `quantity.md` §3.
     Color,
-    /// Fixed-max palette: [`MAX_PALETTE_LEN`], `count`, and `entries` (`quantity.md` §3, `color.md`).
+    /// Palette: stops in one space, read one way — [`MAX_GRADIENT_STOPS`] and
+    /// [`InterpMethod`], defined by [`crate::Gradient`].
     ///
-    /// Note: This is the **authoring/storage** recipe. At runtime the engine bakes the
-    /// palette to a height-one texture and binds it as a shader field like `params.palette`.
-    ColorPalette,
-    /// Gradient with stops; [`MAX_GRADIENT_STOPS`] and [`InterpMethod`] (`quantity.md` §3).
+    /// The semantic tag for the whole color-collection family: a discrete
+    /// swatch list is a gradient with [`InterpMethod::Step`], which is why
+    /// there is no separate `ColorPalette` kind.
     ///
     /// Note: This is the **authoring/storage** recipe. At runtime the engine bakes the
     /// gradient to a height-one texture and binds it as a shader field like `params.gradient`.
@@ -171,8 +143,8 @@ impl Kind {
     /// (`docs/design/lightplayer/quantity.md` §3, “Storage recipes”, and `impl`
     /// block in §3).
     ///
-    /// For `ColorPalette` and `Gradient`, this is the **authoring** storage type.
-    /// The shader-visible runtime form is a baked texture field inside `params`.
+    /// For `Gradient`, this is the **authoring** storage type. The
+    /// shader-visible runtime form is a baked texture field inside `params`.
     pub fn storage(self) -> LpType {
         match self {
             Self::Amplitude
@@ -187,8 +159,7 @@ impl Kind {
             Self::Position2d => LpType::Vec2,
             Self::Position3d => LpType::Vec3,
             Self::Color => color_struct(),
-            Self::ColorPalette => color_palette_struct(),
-            Self::Gradient => gradient_struct(),
+            Self::Gradient => crate::color::gradient_lp_type(),
             Self::Texture => texture_struct(),
             Self::AudioLevel => audio_level_struct(),
         }
@@ -242,63 +213,6 @@ fn color_struct() -> LpType {
             ModelStructMember {
                 name: String::from("coords"),
                 ty: LpType::Vec3,
-            },
-        ],
-    }
-}
-
-fn color_palette_struct() -> LpType {
-    LpType::Struct {
-        name: Some(String::from("ColorPalette")),
-        fields: alloc::vec![
-            ModelStructMember {
-                name: String::from("space"),
-                ty: LpType::I32,
-            },
-            ModelStructMember {
-                name: String::from("count"),
-                ty: LpType::I32,
-            },
-            ModelStructMember {
-                name: String::from("entries"),
-                ty: LpType::Array(Box::new(LpType::Vec3), MAX_PALETTE_LEN as usize),
-            },
-        ],
-    }
-}
-
-fn gradient_struct() -> LpType {
-    let stop = LpType::Struct {
-        name: Some(String::from("GradientStop")),
-        fields: alloc::vec![
-            ModelStructMember {
-                name: String::from("at"),
-                ty: LpType::F32,
-            },
-            ModelStructMember {
-                name: String::from("c"),
-                ty: LpType::Vec3,
-            },
-        ],
-    };
-    LpType::Struct {
-        name: Some(String::from("Gradient")),
-        fields: alloc::vec![
-            ModelStructMember {
-                name: String::from("space"),
-                ty: LpType::I32,
-            },
-            ModelStructMember {
-                name: String::from("method"),
-                ty: LpType::I32,
-            },
-            ModelStructMember {
-                name: String::from("count"),
-                ty: LpType::I32,
-            },
-            ModelStructMember {
-                name: String::from("stops"),
-                ty: LpType::Array(Box::new(stop), MAX_GRADIENT_STOPS as usize),
             },
         ],
     }
@@ -366,7 +280,6 @@ mod tests {
             Kind::Frequency,
             Kind::Angle,
             Kind::Color,
-            Kind::ColorPalette,
             Kind::Gradient,
             Kind::Position2d,
             Kind::Position3d,

@@ -37,7 +37,7 @@ pub use messages::{
     RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
     WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding, WirePhasorOrigin,
-    WirePhasorRow, WireScopeRef,
+    WirePhasorReading, WirePhasorRow, WireScopeRef,
 };
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use project::{

@@ -5824,6 +5824,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-palettes"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "png",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [

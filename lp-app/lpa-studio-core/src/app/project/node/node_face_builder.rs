@@ -110,26 +110,37 @@ pub(in crate::app::project) fn kind_face(
     }
 }
 
-/// The clock card's face: the published time product, the plain seconds
-/// readings beside it, and (after the decoration pass) the read-only
-/// listing of the phasors riding this timebase — parent D10.
+/// The clock card's face: the published time product, the tiny seconds
+/// readout for the PHASORS section header, and (after the decoration pass)
+/// the per-reading trace cards riding this timebase — parent D10, reshaped
+/// by clock-face v2.
+///
+/// The old produced-value rows are gone from the face: seconds shrank into
+/// the section header and the Delta row was deleted outright ("isn't useful
+/// at all" — G2). The rows still exist as produced slots; only the face
+/// stopped renting them space.
 ///
 /// `None` — generic-sections fallback — when the node publishes no time
 /// product row, which is the state of a clock whose runtime state has not
-/// landed yet. The phasor rows are deliberately NOT derivable here: they
+/// landed yet. The trace cards are deliberately NOT derivable here: they
 /// live in the engine's timebase store, not in any slot, so they arrive
 /// through `ProjectController::apply_clock_faces` exactly the way the
 /// output face's board facts do.
 fn clock_face(sections: &[UiNodeSection]) -> Option<crate::UiClockFace> {
     let product = product_of_kind(sections, UiProductKind::Time)?;
     let mut face = crate::UiClockFace::new(product);
-    face.readings = sections
+    face.seconds = sections
         .iter()
         .find_map(|section| match section {
-            UiNodeSection::ProducedValues(values) => Some(values.clone()),
+            UiNodeSection::ProducedValues(values) => Some(values.as_slice()),
             _ => None,
         })
-        .unwrap_or_default();
+        .and_then(|values| {
+            values
+                .iter()
+                .find(|value| value.key == "seconds")
+                .map(|value| value.value.clone())
+        });
     Some(face)
 }
 
@@ -365,12 +376,11 @@ const PHASOR_SLOT_KIND: &str = "phasor";
 const SECONDS_SLOT_KIND: &str = "seconds";
 
 /// Widest period a phasor knob reaches when the uniform authors no range:
-/// two minutes. Past that a "cycle" is not something a person watching the
-/// lights can perceive as one, and the longest period in the whole migrated
-/// example corpus is 100 s — so the default range covers every shipped
-/// phasor with headroom, and an author who wants more says so with
-/// `min`/`max` like any other uniform.
-const PHASOR_PERIOD_MAX_SECONDS: f32 = 120.0;
+/// one hour. The knob sweeps LOG-period, so the slow decades cost no
+/// resolution at the fast end — and G3 judged the old two-minute floor
+/// (30/hr) "too fast" for the slow end of the sweep. An author who wants a
+/// different range says so with `min`/`max` like any other uniform.
+const PHASOR_PERIOD_MAX_SECONDS: f32 = 3600.0;
 
 /// One phasor uniform → its **period** knob (P7 item 5).
 ///
@@ -1917,7 +1927,7 @@ mod tests {
                 max: PHASOR_PERIOD_MAX_SECONDS,
                 step: None,
             },
-            "unauthored range falls back to 0..120 s, continuous"
+            "unauthored range falls back to 0..3600 s, continuous"
         );
         assert_eq!(
             control
@@ -2060,10 +2070,11 @@ mod tests {
 
     // -- clock face (P7 item 4) --------------------------------------------
 
-    /// The clock's face is the published handle plus the readings beside it;
-    /// the phasor listing arrives later, from the timebase probe, so a
-    /// freshly derived face is `Unread` with no rows — NOT an empty listing,
-    /// which would read as "nothing is running".
+    /// The clock's face is the published handle plus the tiny seconds
+    /// readout (clock-face v2 — the Delta row is gone outright); the trace
+    /// cards arrive later, from the timebase probe, so a freshly derived
+    /// face is `Unread` with no cards — NOT an empty listing, which would
+    /// read as "nothing is running".
     #[test]
     fn clock_face_derives_the_product_and_waits_for_the_timebase_probe() {
         let sections = vec![
@@ -2071,8 +2082,8 @@ mod tests {
                 UiProducedProduct::time("Product").with_detail("node 2 output 0"),
             ]),
             UiNodeSection::ProducedValues(vec![
-                UiProducedValue::new("Seconds", "3.5"),
-                UiProducedValue::new("Delta seconds", "0.033"),
+                UiProducedValue::new("Seconds", "3.5").with_key("seconds"),
+                UiProducedValue::new("Delta seconds", "0.033").with_key("delta_seconds"),
             ]),
         ];
 
@@ -2082,7 +2093,11 @@ mod tests {
             panic!("expected a clock face");
         };
         assert_eq!(face.product.kind, UiProductKind::Time);
-        assert_eq!(face.readings.len(), 2);
+        assert_eq!(
+            face.seconds.as_deref(),
+            Some("3.5"),
+            "seconds shrinks into the section header; delta is not carried at all"
+        );
         assert_eq!(face.timebase, crate::UiTimebaseState::Unread);
         assert!(face.phasors.is_empty());
     }

@@ -593,6 +593,33 @@ would need is a different lever from the flash diet the C6 needs**, even though
 both point at `lpc_model`/serde. Flash headroom on this chip is 1.4 MB; heap
 headroom at four channels is 7 KB.
 
+### Amendment 2026-08-04 — compact resolved mappings; the dome runs
+
+The 25.6 B/LED slot-modelled `PathPoints` row in the 2026-08-02 attribution
+table is **paid down for document-sourced fixtures** (M6, branch
+`claude/m6-compact-mappings-f98a49`): map2d/svg-sourced mappings now resolve
+into a compact carrier (`ResolvedMappingCompact`, ~8 B/lamp exact-capacity)
+instead of the slot form, whose *actual* live cost had been 41 B/LED
+(power-of-two `VecMap` overshoot: 61,440 B at 1500 lamps). The same change
+removed a 36 KB-per-frame `MappingConfig` clone and the contiguous
+`Vec<MappingPoint>` expansion whose doubling peak (38,400 B at 1500) was the
+first-tick OOM. Hand-authored `PathPoints` keeps the slot form.
+
+Measured on the DOM-Z-102 (arena 186,368 B after the 2026-08-04 24 KiB JIT
+resize; simple 1,276 B shader; quoted as a **measured configuration**, not a
+single-axis LED ceiling — the ceiling remains LED count × shader size):
+
+| config | fps | tick | steady used | largest_free |
+|---|---|---|---|---|
+| 1200 lamps, 4 wires | 14 | 66 ms | 119,596 B | 56,045 B |
+| **1500 lamps, 4 wires (the dome)** | **12** | **76 ms** | **137,332 B** | **38,883 B** |
+
+Post-M6 marginal ≈ **59 B/LED all-in** (1200→1500 silicon delta; was ~100).
+On-device compile of the simple shader: 69 ms at 1500. The 4,092 B psrdnoise
+reference shader remains out of budget at dome scale — the max-GLSL-size
+constraint stands. fps at 1500 is sequential-flush-bound (45 ms of the
+76 ms tick); concurrent flush is the standing lever.
+
 ## Consequences
 
 - Any 4 MB N4-class classic module is supported. No hardware narrowing.

@@ -17,7 +17,7 @@
 //! rather than as a failure.
 
 use alloc::string::String;
-use lpc_model::{Revision, TimeProduct};
+use lpc_model::{Revision, TimeProduct, Waveform};
 
 use super::WireScopeRef;
 
@@ -78,6 +78,32 @@ pub struct WirePhasorRow {
     /// The period the integrator last advanced at, in seconds. `0.0` means
     /// frozen (or materialized-but-never-advanced).
     pub period_seconds: f32,
+    /// The downstream readings riding this integrator — who consumes it and
+    /// how each consumer shapes the raw ramp on the way out. Witness data
+    /// recorded by tick-side queries; capped at the engine's per-phasor
+    /// readings cap, so a very crowded integrator lists its first eight.
+    /// Empty on a phasor materialized before its first tick-side query
+    /// reached the store (a probe can race the first advance).
+    pub readings: alloc::vec::Vec<WirePhasorReading>,
+}
+
+/// One downstream reading of a phasor: a consumer and its output shaping.
+///
+/// The row's `phase` stays the RAW ramp; this describes how `node`'s `slot`
+/// shapes it (`value = waveform(phase + phase_offset)`), it does not apply
+/// the shaping.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct WirePhasorReading {
+    /// Runtime id of the consuming node.
+    pub node: u32,
+    /// The consumed slot the config was resolved for — the uniform's own
+    /// path, same convention as [`WirePhasorOrigin::Node`].
+    pub slot: String,
+    /// The waveform this reader shapes the ramp with (snake-case tag).
+    pub waveform: Waveform,
+    /// The phase offset this reader adds before shaping.
+    pub phase_offset: f32,
 }
 
 /// Provenance of a phasor integrator.
@@ -125,6 +151,12 @@ mod tests {
                     phase: 0.25,
                     cycle: 3,
                     period_seconds: 4.0,
+                    readings: alloc::vec![WirePhasorReading {
+                        node: 8,
+                        slot: String::from("phase"),
+                        waveform: Waveform::Sine,
+                        phase_offset: 0.25,
+                    }],
                 },
                 WirePhasorRow {
                     origin: WirePhasorOrigin::Channel {
@@ -136,6 +168,20 @@ mod tests {
                     phase: 0.5,
                     cycle: 0,
                     period_seconds: 100.0,
+                    readings: alloc::vec![
+                        WirePhasorReading {
+                            node: 8,
+                            slot: String::from("wave"),
+                            waveform: Waveform::Ramp,
+                            phase_offset: 0.0,
+                        },
+                        WirePhasorReading {
+                            node: 9,
+                            slot: String::from("wave"),
+                            waveform: Waveform::Square,
+                            phase_offset: 0.5,
+                        },
+                    ],
                 },
             ],
         };

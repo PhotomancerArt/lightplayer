@@ -5,7 +5,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lps_shared::TextureStorageFormat;
+use lps_shared::{LpsValueF32, TextureStorageFormat};
 
 use crate::compute_shader::LpComputeShader;
 use crate::gfx_error::GfxError;
@@ -119,6 +119,30 @@ pub trait LpGraphics: Send + Sync {
     /// Upload `texels` into an existing texture (full-texture write; `texels`
     /// length must match the texture).
     fn write_texture(&self, texture: &mut TextureHandle, texels: &[u8]) -> Result<(), GfxError>;
+
+    /// The uniform-tree value that binds `texture` to a `sampler2D` uniform.
+    ///
+    /// The engine currency for a texture input is `LpsValueF32::Texture2D`,
+    /// but what its descriptor's `ptr` lane *means* is the backend's own
+    /// business: a guest pointer on the CPU tier, a registry id on the GPU
+    /// tier. Only the backend that allocated the handle can answer, which is
+    /// why this is on the trait rather than something a caller assembles
+    /// from [`TextureHandle`]'s public dimensions.
+    ///
+    /// The value stays valid as long as `texture` is alive and is not
+    /// reallocated; [`Self::write_texture`] deliberately does not invalidate
+    /// it, which is what lets a bake cache refresh a strip in place instead
+    /// of reallocating per frame.
+    ///
+    /// Defaulted to a refusal rather than a stub: a backend that cannot bind
+    /// textures must say so on the uniform that needs one, not render
+    /// something wrong. See `docs/design/lp-shader-texture-access.md`.
+    fn texture_uniform_value(&self, texture: &TextureHandle) -> Result<LpsValueF32, GfxError> {
+        let _ = texture;
+        Err(GfxError::Backend(String::from(
+            "backend does not bind textures to uniforms",
+        )))
+    }
 
     /// Zero every texel of `texture`.
     fn clear_texture(&self, texture: &mut TextureHandle) -> Result<(), GfxError>;

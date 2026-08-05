@@ -1372,9 +1372,10 @@ impl ResolveHost for EngineResolveHost<'_> {
         product: lpc_model::TimeProduct,
         key: &crate::dataflow::timebase::PhasorKey,
         config: &lpc_model::PhasorConfig,
+        reader: (NodeId, &lpc_model::SlotPath),
     ) -> Result<(f32, u32), SessionResolveError> {
         self.timebases
-            .phasor_tick(product.node(), key, config)
+            .phasor_tick(product.node(), key, config, reader)
             .ok_or_else(|| unpublished_timebase(product))
     }
 }
@@ -1463,11 +1464,12 @@ impl EngineResolveHost<'_> {
             .shader_consumed_slot_def(node, slot)?
             .map(|slot| match slot.kind.value() {
                 lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
-                // A timebase uniform's binding, when it has one, names a
-                // single config channel — never an aggregate.
+                // A timebase or palette uniform's binding, when it has one,
+                // names a single config channel — never an aggregate.
                 lpc_model::ShaderSlotKind::Value
                 | lpc_model::ShaderSlotKind::Phasor
-                | lpc_model::ShaderSlotKind::Seconds => SlotMerge::Latest,
+                | lpc_model::ShaderSlotKind::Seconds
+                | lpc_model::ShaderSlotKind::Palette => SlotMerge::Latest,
             }))
     }
 
@@ -1509,6 +1511,14 @@ impl EngineResolveHost<'_> {
                 | lpc_model::ShaderSlotKind::Seconds => {
                     SlotData::Value(WithRevision::new(self.frame_revision, slot.default_value()))
                 }
+                // A palette's authored default is its whole `GradientConfig`
+                // — the same value shape a `bus:palette` channel carries, so
+                // the bake path reads one thing whether or not anything
+                // drives it (`docs/design/color.md` §5).
+                lpc_model::ShaderSlotKind::Palette => SlotData::Value(WithRevision::new(
+                    self.frame_revision,
+                    lpc_model::ToLpValue::to_lp_value(&slot.gradient_config()),
+                )),
                 lpc_model::ShaderSlotKind::Map => {
                     SlotData::Map(lpc_model::SlotMapDyn::with_revision(
                         self.frame_revision,

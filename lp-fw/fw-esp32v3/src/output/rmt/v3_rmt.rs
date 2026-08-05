@@ -74,6 +74,26 @@
 //!   words, the tell that it is an absolute offset) and `CH_TX_LIM.tx_lim` is
 //!   9 bits (max 511; a full 8-block window of 512 words would not fit, which
 //!   is why [`MAX_BLOCKS_PER_CHANNEL`] caps every plan at four blocks).
+//!
+//! # Cross-core register rules
+//!
+//! The interrupt handler runs on the APP core (see `shared_driver`), so
+//! thread context and the ISR touch this peripheral from **different cores**
+//! concurrently. The register-level invariants that keep that sound:
+//!
+//! * **`INT_ENA` is read-modify-written from thread context only**
+//!   ([`enable_tx_interrupts`], at channel open). The ISR never writes it. A
+//!   second RMW writer on the other core would lose updates — do not add one.
+//! * **`INT_CLR` is write-1-to-clear** and written from both sides
+//!   ([`RmtHw::take_interrupts`] on the ISR core, [`RmtHw::start_tx`]'s
+//!   stale-cause drop on the thread core). W1C is race-free by construction:
+//!   each write clears exactly the bits it names.
+//! * **Per-channel registers** (`CHnCONF1`, `CH_TX_LIM`, RAM words) are only
+//!   ever RMW'd cross-core for the *same* channel during an abort race —
+//!   after `stop_tx` has halted the transmitter — where a lost update is
+//!   harmless. In steady state the ISR owns a transmitting channel's
+//!   `CH_TX_LIM`/RAM and thread context owns idle channels'.
+//! * `APB_CONF` is written once at [`init_tx`], before the APP core binds.
 
 use esp_hal::peripherals::RMT;
 use lp_ws281x::{BlockPlan, InterruptFlags, RmtHw, SharedBlockPlan};
@@ -228,7 +248,10 @@ impl RmtHw for V3Rmt {
         TX_PLAN.window_words(ch, BLOCK_WORDS)
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn write_ram(&self, ch: u8, word_idx: usize, value: u32) {
         let Some(ptr) = ram_word(ch, word_idx) else {
             return;
@@ -240,7 +263,10 @@ impl RmtHw for V3Rmt {
         unsafe { ptr.write_volatile(value) };
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn set_tx_threshold(&self, ch: u8, words: u16) {
         if ch as usize >= TX_CHANNELS {
             return;
@@ -293,7 +319,10 @@ impl RmtHw for V3Rmt {
             .modify(|_, w| unsafe { w.tx_lim().bits(period & TX_LIM_MAX) });
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn read_pos(&self, ch: u8) -> u16 {
         let window = TX_PLAN.window_words(ch, BLOCK_WORDS);
         if window == 0 {
@@ -383,7 +412,10 @@ impl RmtHw for V3Rmt {
         }
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn take_interrupts(&self) -> InterruptFlags {
         let rmt = RMT::regs();
         // `int_st` is `int_raw & int_ena`, so causes this firmware never asked
