@@ -32,8 +32,7 @@ mod ui_playlist_face;
 mod ui_shader_face;
 
 pub use ui_clock_face::{
-    UiClockFace, UiPhasorReading, UiTimebaseState, format_period_seconds, format_phase,
-    phasor_rate_display, phasor_speed_display,
+    UiClockFace, UiPhasorReading, UiTimebaseState, phasor_rate_display, phasor_speed_display,
 };
 pub use ui_fixture_face::UiFixtureFace;
 pub use ui_fixture_power::UiFixturePower;

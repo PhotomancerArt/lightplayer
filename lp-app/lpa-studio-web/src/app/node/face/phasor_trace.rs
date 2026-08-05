@@ -68,6 +68,13 @@ struct DriverInner {
     cards: RefCell<Vec<TraceCard>>,
     raf_id: Cell<Option<i32>>,
     tick: RefCell<Option<web_sys::js_sys::Function>>,
+    /// Lazily-resolved "animations are frozen here" flag: on the story page
+    /// (marked by its `data-story-capture` box) the loop never runs and
+    /// every paint is the deterministic elapsed-zero frame, so consecutive
+    /// capture shots are byte-identical — the harness freezes CSS
+    /// animations but cannot freeze rAF, and an animating baseline would
+    /// churn on every CI capture.
+    frozen: Cell<Option<bool>>,
 }
 
 /// The face-level animation driver. `None` inside when there is no browser
@@ -109,6 +116,7 @@ impl PhasorTraceDriver {
             cards: RefCell::new(Vec::new()),
             raf_id: Cell::new(None),
             tick: RefCell::new(None),
+            frozen: Cell::new(None),
         });
         let for_frames = inner.clone();
         let closure = Closure::wrap(Box::new(move |now: f64| {
@@ -172,15 +180,20 @@ impl PhasorTraceDriver {
     }
 
     /// A card's canvas just mounted: paint its first frame (the sync-time
-    /// paint may have run before the element existed). Deterministic for
-    /// captures — the elapsed time is still measured from the same anchor.
+    /// paint may have run before the element existed). On a frozen page the
+    /// paint is pinned to the anchor (elapsed exactly zero) so a capture of
+    /// the mounted state is byte-stable run to run.
     pub(crate) fn canvas_mounted(&self, index: usize) {
         let Some(inner) = &self.inner else {
             return;
         };
-        let now = inner.performance.now();
+        let now = if inner.is_frozen() {
+            None
+        } else {
+            Some(inner.performance.now())
+        };
         if let Some(card) = inner.cards.borrow().get(index) {
-            paint_card(card, now);
+            paint_card(card, now.unwrap_or(card.anchored_at_ms));
         }
     }
 }
@@ -196,10 +209,32 @@ impl Drop for PhasorTraceDriver {
 }
 
 impl DriverInner {
+    /// Whether this page freezes trace animation (the story page — its
+    /// capture box marks the document). Resolved once: the marker exists
+    /// from the story shell's first render, and a real app never has it.
+    fn is_frozen(&self) -> bool {
+        if let Some(frozen) = self.frozen.get() {
+            return frozen;
+        }
+        let frozen = self
+            .window
+            .document()
+            .and_then(|document| {
+                document
+                    .query_selector("[data-story-capture=\"1\"]")
+                    .ok()
+                    .flatten()
+            })
+            .is_some();
+        self.frozen.set(Some(frozen));
+        frozen
+    }
+
     /// Schedule the next frame while any card is live; quietly stops the
-    /// loop when the card list empties.
+    /// loop when the card list empties. Never runs on a frozen page — the
+    /// cards stay on their deterministic elapsed-zero frame.
     fn schedule(&self) {
-        if self.raf_id.get().is_some() || self.cards.borrow().is_empty() {
+        if self.raf_id.get().is_some() || self.cards.borrow().is_empty() || self.is_frozen() {
             return;
         }
         let scheduled = self.tick.borrow().as_ref().and_then(|tick| {
