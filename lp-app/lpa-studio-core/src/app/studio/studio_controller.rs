@@ -2922,19 +2922,15 @@ impl StudioController {
                         bytes: bytes.0,
                     })
                     .await?;
-                let imported = outcome
-                    .summary
-                    .map(|summary| summary.name)
-                    .unwrap_or_default();
-                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Imported {imported}"))))
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(import_message("Imported", &outcome))))
             }
             HomeOp::ImportJson { text } => {
                 let outcome = self.run_catalog_op(CatalogOp::ImportJson { text }).await?;
-                let imported = outcome
-                    .summary
-                    .map(|summary| summary.name)
-                    .unwrap_or_default();
-                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Pasted {imported}"))))
+                Ok(
+                    UiNotices::new()
+                        .with_notice(UiNotice::info(import_message("Pasted", &outcome))),
+                )
             }
             HomeOp::RenameDevice { uid, name } => {
                 let name = name.trim().to_string();
@@ -5458,6 +5454,27 @@ fn fold_fixture_summaries(
     }
 }
 
+/// The import/paste confirmation, saying so when the archive arrived at an
+/// older format and was migrated on the way in.
+///
+/// Naming the upgrade is the point: the project the user gets back is not
+/// byte-identical to the one they handed over, and the only moment that
+/// fact is cheap to state is the moment it happens.
+fn import_message(verb: &str, outcome: &crate::app::library::CatalogOutcome) -> String {
+    let name = outcome
+        .summary
+        .as_ref()
+        .map(|summary| summary.name.clone())
+        .unwrap_or_default();
+    match outcome.upgraded_from {
+        Some(found) => format!(
+            "{verb} {name} — upgraded from format {found} to {}",
+            lpc_model::PROJECT_FORMAT_VERSION
+        ),
+        None => format!("{verb} {name}"),
+    }
+}
+
 fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> UiNotice {
     if synced {
         UiNotice::info(success)
@@ -5792,6 +5809,40 @@ mod tests {
         assert!(!sim_crash_reboot_allowed(Some(100.0), 129.9, 30.0));
         // Window elapsed: allowed again.
         assert!(sim_crash_reboot_allowed(Some(100.0), 130.0, 30.0));
+    }
+
+    #[test]
+    fn an_upgraded_import_says_so_and_an_ordinary_one_stays_quiet() {
+        use crate::app::library::{CatalogOutcome, PackageHealth, PackageSummary};
+
+        let summary = PackageSummary {
+            uid: "prj_0123456789abcdef".parse().unwrap(),
+            name: "Plasma".to_string(),
+            kind: "Project".to_string(),
+            slug: "2026-08-04-1800-plasma".to_string(),
+            health: PackageHealth::Ready,
+        };
+
+        // The whole point of the import gate reaching the user: the bytes
+        // they handed over are not the bytes that landed.
+        let upgraded = CatalogOutcome {
+            summary: Some(summary.clone()),
+            upgraded_from: Some(4),
+        };
+        let message = import_message("Imported", &upgraded);
+        assert!(message.contains("Plasma"), "{message}");
+        assert!(message.contains("upgraded from format 4"), "{message}");
+        assert!(
+            message.contains(&lpc_model::PROJECT_FORMAT_VERSION.to_string()),
+            "{message}"
+        );
+
+        // ...and the ordinary case is not made noisy by it.
+        let plain = CatalogOutcome {
+            summary: Some(summary),
+            upgraded_from: None,
+        };
+        assert_eq!(import_message("Pasted", &plain), "Pasted Plasma");
     }
 
     #[test]

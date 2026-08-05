@@ -25,6 +25,15 @@ pub enum LibraryError {
     Meta(String),
     History(String),
     NotFound(String),
+    /// An incoming package is at a format this build will not install:
+    /// below the upgrade floor, from a newer LightPlayer, or unreadable.
+    ///
+    /// Carries [`lpa_upgrade::FormatClass::describe`] verbatim, which
+    /// already names what was found, what was expected, and a remedy — so
+    /// this one is printed bare rather than behind a category prefix. It
+    /// exists so an import refusal reaches the user as a visible error
+    /// instead of installing bytes that fail later, node by node.
+    Format(String),
 }
 
 impl core::fmt::Display for LibraryError {
@@ -35,6 +44,7 @@ impl core::fmt::Display for LibraryError {
             LibraryError::Meta(m) => write!(f, "meta: {m}"),
             LibraryError::History(m) => write!(f, "history: {m}"),
             LibraryError::NotFound(m) => write!(f, "not found: {m}"),
+            LibraryError::Format(m) => write!(f, "{m}"),
         }
     }
 }
