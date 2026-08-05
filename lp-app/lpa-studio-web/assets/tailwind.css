@@ -2299,6 +2299,12 @@
       background-color: var(--tw-color-accent);
     }
   }
+  .tw\:after\:bg-status-attention-foreground {
+    &::after {
+      content: var(--tw-content);
+      background-color: var(--tw-color-status-attention-foreground);
+    }
+  }
   .tw\:after\:content-\[\'\'\] {
     &::after {
       content: var(--tw-content);
