@@ -89,9 +89,10 @@ pub use app::rich_object::{
 };
 pub use app::roster::{
     BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
-    DeviceDetailAffordance, DeviceRichInput, RosterAffordance, RosterCardState, RosterEvidence,
-    RosterStateSpec, RosterTreatment, SimDetailAffordance, SimRichInput, derive_roster_card_state,
-    device_card_tabs, device_rich_object, firmware_update_available, sim_rich_object,
+    DeviceDetailAffordance, DeviceFormatStanding, DeviceRichInput, RosterAffordance,
+    RosterCardState, RosterEvidence, RosterStateSpec, RosterTreatment, SimDetailAffordance,
+    SimRichInput, derive_roster_card_state, device_card_tabs, device_rich_object,
+    firmware_update_available, sim_rich_object,
 };
 pub use app::runtime_pool::{
     DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,

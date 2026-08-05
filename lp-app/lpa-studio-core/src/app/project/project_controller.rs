@@ -2305,14 +2305,17 @@ impl ProjectController {
             }
         }
 
-        let mut files: lpa_upgrade::ProjectFiles = handle
-            .read_all_files()
-            .map_err(library_ui_error)?
-            .into_iter()
-            .collect();
-        let report = match lpa_upgrade::upgrade_to_current(&mut files) {
-            Ok(report) => report,
-            Err(error) => {
+        // The migration body is shared with the roster's Upgrade verb
+        // (`package_upgrade`): write every changed file back through
+        // `apply_update`, then `record_save` — which is also what preserves
+        // the pre-migration state.
+        let report = match crate::app::library::migrate_handle_to_current(handle, now) {
+            // Unreachable: `health_for` already said this one upgrades.
+            // Total rather than `unreachable!` — a mismatch must not panic
+            // the editor.
+            Ok(None) => return Ok(()),
+            Ok(Some(report)) => report,
+            Err(crate::app::library::LibraryError::Format(detail)) => {
                 // All-or-nothing by contract: nothing was written, so the
                 // package on disk is exactly as the user left it.
                 return Err(self.refuse_open(
@@ -2321,26 +2324,11 @@ impl ProjectController {
                         "Format {} — this project could not be upgraded automatically",
                         class.found().unwrap_or_default()
                     ),
-                    &error.to_string(),
+                    &detail,
                 ));
             }
+            Err(other) => return Err(library_ui_error(other)),
         };
-
-        for path in &report.changed_files {
-            let bytes = files
-                .get(path)
-                .ok_or_else(|| {
-                    UiError::Project(format!(
-                        "upgrade reported {path} changed but produced no bytes"
-                    ))
-                })?
-                .to_vec();
-            let absolute = format!("/{}", path.trim_start_matches('/'));
-            handle
-                .apply_update(lpc_model::LpPath::new(&absolute), Some(&bytes))
-                .map_err(library_ui_error)?;
-        }
-        handle.record_save(now).map_err(library_ui_error)?;
 
         let mut message = format!(
             "Upgraded \"{}\" from format {} to {}",
