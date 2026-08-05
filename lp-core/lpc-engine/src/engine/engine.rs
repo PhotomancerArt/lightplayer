@@ -2128,9 +2128,11 @@ fn slot_path_semantics_segments(
 
 /// The declared panel hint of the slot a binding consumes: the hint sits on
 /// the TOP-LEVEL declared field (`brightness.some` reads field
-/// `brightness`) in the node's def shape. `None` for undeclared slots
-/// (shader dynamic slots have no hint spelling yet) and for defs that are
-/// not loaded.
+/// `brightness`) in the node's def shape — or, for a shader's dynamic
+/// slots, as the `panel` field of the slot's authored def (a shader slot is
+/// authored data, so it spells the hint as a value where a native def
+/// spells it as `#[slot(panel = "show")]` shape metadata). `None` for
+/// undeclared slots and for defs that are not loaded.
 pub(crate) fn authored_def_slot_panel_hint(
     registry: &ProjectRegistry,
     slot_shapes: &SlotShapeRegistry,
@@ -2138,11 +2140,19 @@ pub(crate) fn authored_def_slot_panel_hint(
     slot: &SlotPath,
 ) -> Option<lpc_model::PanelHint> {
     let def = loaded_registry_def(registry, location).ok()?;
-    let shape = slot_shapes.get_shape(def.shape_id())?;
-    let shape = resolve_shape_projection(shape, slot_shapes).ok()?;
     let SlotPathSegment::Field(name) = slot.segments().first()? else {
         return None;
     };
+    let dynamic_slots = match def {
+        NodeDef::Shader(shader) => Some(&shader.consumed_slots),
+        NodeDef::ComputeShader(compute) => Some(&compute.consumed_slots),
+        _ => None,
+    };
+    if let Some(slots) = dynamic_slots {
+        return slots.entries.get(name.as_str())?.panel_hint();
+    }
+    let shape = slot_shapes.get_shape(def.shape_id())?;
+    let shape = resolve_shape_projection(shape, slot_shapes).ok()?;
     let (_, field) = shape.record_field_by_name(name)?;
     field.panel()
 }

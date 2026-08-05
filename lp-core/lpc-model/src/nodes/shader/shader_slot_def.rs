@@ -40,6 +40,12 @@ pub struct ShaderSlotDef {
     /// instead be driven by a bound channel, in which case this is the
     /// fallback — see the field-split rule on
     /// `lpc_engine::nodes::shader::resolve_gradient_config`.
+    ///
+    /// In authored node-def JSON this option carries the FIXED `LpValue`
+    /// recipe (padded set, explicit `count`) — padded-form-only is the
+    /// contract (`docs/design/color.md` §5, M4-P5). The friendly serde form
+    /// is not accepted here; author through Studio's chooser, or omit the
+    /// option and let `gradient_config()` fall back.
     pub gradient: OptionSlot<ValueSlot<GradientConfig>>,
     /// Declarative default binding endpoint (`bus:<channel>`), materialized
     /// at load when no authored binding names this slot (ADR 2026-07-09).
@@ -130,6 +136,11 @@ impl ShaderSlotDef {
 
     /// A `palette` slot: a `sampler2D` uniform fed by a height-one texture the
     /// engine bakes from `config` (`docs/design/color.md` §5).
+    ///
+    /// Declares `default_bind: "bus:palette"` + `panel: "show"` (D5): an
+    /// unbound palette slot still surfaces its picker on the module panel —
+    /// the default bind materializes the channel and the hint promotes the
+    /// Default-origin binding the derived rule would otherwise keep private.
     pub fn palette(label: &str, description: &str, config: GradientConfig) -> Self {
         Self {
             kind: ValueSlot::new(ShaderSlotKind::Palette),
@@ -140,6 +151,8 @@ impl ShaderSlotDef {
             default: OptionSlot::none(),
             ..Self::value_f32(label, description, 0.0, None)
         }
+        .with_default_bind(BindingRef::parse("bus:palette").expect("bus:palette parses"))
+        .with_panel_show()
     }
 
     /// The phasor config this slot evaluates against when nothing drives it
