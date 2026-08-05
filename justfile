@@ -1586,7 +1586,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
+check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -1613,6 +1613,11 @@ lint-vec-corpus:
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
     ./scripts/check-schemars-fw.sh
+
+# Guard against lpa-upgrade reaching the RV32 firmware graphs (the device
+# refuses old project formats, it never migrates them; see script).
+lint-upgrade-fw:
+    ./scripts/check-upgrade-fw.sh
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.
