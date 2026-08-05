@@ -75,25 +75,18 @@ pub fn ClockFace(
     rsx! {
         NodeCardSection { label: "output", first: true,
             div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-2 tw:p-2",
-                ProducedProductView { product: face.product.clone(), on_action }
+                // The hero is the SECONDS COUNTER — the number a scrub or
+                // speed change visibly moves ("Time product" as a caption
+                // did nothing; PR review). The Delta row stays dead.
+                ProducedProductView {
+                    product: face.product.clone(),
+                    on_action,
+                    time_seconds: face.seconds.clone(),
+                }
             }
         }
         NodeCardSection { label: "phasors",
             div { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:px-3 tw:py-2",
-                // The section header's tiny muted seconds readout — all
-                // that remains of the old readings rows (v2: seconds
-                // shrank, Delta died).
-                if let Some(seconds) = &face.seconds {
-                    div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:px-0.5",
-                        span {
-                            class: "tw:ml-auto tw:font-mono tw:text-[10px] tw:tabular-nums tw:text-dim-foreground",
-                            title: "Effective clock seconds",
-                            "t "
-                            span { class: "tw:text-subtle-foreground", "{seconds}" }
-                            " s"
-                        }
-                    }
-                }
                 match face.timebase {
                     // No read yet: say so plainly rather than showing an
                     // empty listing, which would read as "nothing running".
