@@ -222,10 +222,8 @@ pub fn EditorCanvas(
                 Some(
                     (1..repeat.count)
                         .map(|instance| {
-                            let rotation = Rotation2d::about(
-                                repeat.center,
-                                repeat.instance_degrees(instance),
-                            );
+                            let rotation =
+                                Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
                             path.points.iter().map(|p| rotation.apply(*p)).collect()
                         })
                         .collect(),
