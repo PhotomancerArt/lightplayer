@@ -272,7 +272,18 @@ pub(crate) fn phasor_reading(
 pub(crate) fn clock_face(timebase: UiTimebaseState, phasors: Vec<UiPhasorReading>) -> UiClockFace {
     let mut face =
         UiClockFace::new(UiProducedProduct::time("product").with_detail("node 2 output 0"));
-    face.seconds = Some("42.35".to_string());
+    // Deterministic transport block: the P3 tape anchors on these values
+    // (447 s = the spike's 7:27), and story capture needs a frame-zero
+    // paint that never depends on wall time.
+    face.transport = Some(lpa_studio_core::UiClockTransport {
+        seconds: 447.0,
+        running: true,
+        rate: 1.0,
+        scrub_offset_seconds: 0.0,
+        running_address: Some(story_slot_address("transport.running")),
+        rate_address: Some(story_slot_address("transport.rate")),
+        scrub_address: Some(story_slot_address("transport.scrub_offset_seconds")),
+    });
     face.timebase = timebase;
     face.phasors = phasors;
     face
