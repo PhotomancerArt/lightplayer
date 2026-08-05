@@ -15,6 +15,19 @@
 //! `docs/adr/2026-07-28-share-envelopes.md` for the decision and
 //! `docs/debt/library-format-migration-gap.md` for the standing burden.
 //!
+//! That `format` is the ENVELOPE's version, and it is separate from the
+//! PROJECT format of whatever the envelope carries:
+//!
+//! - [`PackageEnvelope`] carries a whole project including its
+//!   `project.json`, so the format is already inside it. Import classifies
+//!   and — where it can — migrates it before installing
+//!   ([`crate::app::library::import_json`]).
+//! - [`NodeEnvelope`] carries one node def and its assets, with no
+//!   manifest, so it states its own `artifact_format`
+//!   ([`lpc_model::PROJECT_FORMAT_VERSION`] at copy time). Nothing can
+//!   migrate a bare node, so a mismatched or unstamped one is refused on
+//!   decode with a message that names the remedy.
+//!
 //! Sans-IO: these are pure functions over bytes. The clipboard lives in the
 //! web edge (`lpa-studio-web/src/clipboard.rs`), and installing a decoded
 //! package is the library's existing `install_files_with_fresh_uid` path.

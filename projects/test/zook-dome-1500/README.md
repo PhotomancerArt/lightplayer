@@ -60,6 +60,23 @@ retry_saves=0 — the sequential 45 ms wire spin collapsed to ~22 ms at
 the shipped concurrency cap (2). The Yona-gated cap-4 flip
 (`MAX_CONCURRENT_TX` in esp32v3_rmt_ws281x_driver.rs) projects ~23 fps.
 
+## 2026-08-04 (later still): dual-core RMT ISR — wire time off the frame
+
+RMT refill ISR on the APP core + `isr-in-ram` + conditional flush barrier
+(ADR `2026-08-04-rmt-isr-on-app-core.md`, PR #341): transmission overlaps
+render, and the admission cap becomes the ISR-duty knob:
+
+| config | fps | tick | trips |
+|---|---|---|---|
+| dual-core cap 3 (**shipped**) | **23** | 41 ms | **0 on all wires** (130 s, boot incl.) |
+| dual-core cap 4 | ~31 | 30 ms | two wires starved ~100 % — 94 % ISR duty |
+| single-core fallback | 18 | 53 ms | 0 (== the row above exactly) |
+
+fps at 1500 is now the 4th wire's admission wait (~70 % duty at cap 3);
+the ~31 fps engine-bound ceiling needs pin-mux waves (plan P7) or a
+refill-cost reduction (floor measurement spun off separately). Truncated
+frames are cheap — never read the fps column without the trips column.
+
 ## Same-day follow-up (earlier): retrying allocator + 24 KiB JIT region
 
 Two levers landed on this branch and were re-probed (total heap

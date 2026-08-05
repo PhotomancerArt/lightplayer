@@ -4,6 +4,7 @@ pub mod firmware;
 pub mod fwcheck;
 pub mod hardware;
 pub mod profile;
+pub mod project;
 pub mod schema;
 pub mod serve;
 pub mod shader_debug;

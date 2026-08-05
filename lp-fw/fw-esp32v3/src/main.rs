@@ -48,13 +48,16 @@
 // failure reaches the RTC ledger as an `Oom` record carrying free/used, rather
 // than as a generic panic with no heap numbers. Same reason fw-esp32c6 takes
 // the feature; the esp toolchain is nightly-based, so it is available here too.
+// `asm_experimental_arch`: Xtensa inline asm is unstable, and the APP core's
+// idle loop is one `waiti 0` (`output::rmt::shared_driver::app_core_main`) —
+// the same feature xtensa-lx-rt itself builds with.
 #![cfg_attr(
     all(feature = "server", not(feature = "radio_ram_probe")),
-    feature(alloc_error_handler)
+    feature(alloc_error_handler, asm_experimental_arch)
 )]
 #![allow(
     unstable_features,
-    reason = "alloc_error_handler required for custom OOM handler in no_std"
+    reason = "alloc_error_handler + asm_experimental_arch required in no_std; the esp toolchain is nightly-based"
 )]
 
 // The server path is the whole LightPlayer stack. The hello and probe
@@ -434,7 +437,7 @@ struct FirmwareApp {
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
-    let (sw_int, timg0, uart0, flash, rmt_peripheral) = init_board();
+    let (sw_int, timg0, uart0, flash, rmt_peripheral, cpu_ctrl) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     let sram1_heap = add_sram1_heap_region();
@@ -496,6 +499,21 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
+
+    // Start the APP core with the RMT refill ISR on it, BEFORE the RMT driver
+    // exists: `install_isr` (inside the driver constructor below) decides its
+    // shape from the flag this sets. A dedicated core services refills no
+    // matter how long the render core masks interrupts, which is what lets
+    // transmission overlap the engine instead of hiding under quiet spins —
+    // and a failure here is a downgrade to those single-core (M4) semantics,
+    // never a boot failure.
+    if output::rmt::shared_driver::start_app_core_isr(cpu_ctrl) {
+        esp_println::println!("[INIT] RMT ISR on APP core");
+    } else {
+        esp_println::println!(
+            "[INIT] APP core unavailable; RMT ISR on PRO core (single-core semantics)"
+        );
+    }
 
     // The RMT peripheral becomes the WS281x driver's, clock and all. The
     // classic's RMT runs off APB and esp-hal's `validate_clock` for this chip

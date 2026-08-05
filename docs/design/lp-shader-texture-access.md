@@ -306,6 +306,38 @@ axis). Validation rejects runtime textures with `height != 1` when this hint is 
 Palette stop baking is out of scope for `lp-shader`. Higher layers should bake
 UI-style gradient stops into a texture and pass that texture to `lp-shader`.
 
+### Who supplies the specs (the engine side)
+
+`lp-shader` validates the map; it never builds one. On the engine side the
+supplier is the **visual shader node**, and it is driven entirely by the
+authored slot kind:
+
+- A `ShaderSlotDef` whose `kind` is `palette` declares a `sampler2D` uniform,
+  and `lpc_engine::nodes::shader::shader_node::palette_texture_specs` emits one
+  `height_one(Rgba16Unorm, Linear, Repeat)` spec for it into
+  `ShaderCompileOptions.textures`, keyed by the uniform name.
+- A shader node with no palette slots supplies an empty map, which is what
+  every shader in the tree did before palettes existed — and why a `sampler2D`
+  uniform used to fail to compile with "missing texture spec" no matter how it
+  was authored.
+- Filter and wrap are **not** per-slot authorable. Adding them would be a model
+  change (a new authored field on `ShaderSlotDef`); the single spec is what
+  makes every baked strip interchangeable across shaders. Revisit only with a
+  real effect that needs a differently-sampled palette.
+
+The runtime binding for those specs is a texture the engine bakes and owns
+(`lpc_engine::color::gradient_bake`, cached by value hash in
+`nodes::shader::palette_bake_cache`). Its uniform value comes from
+`LpGraphics::texture_uniform_value`, which is the only thing that knows whether
+the descriptor's `ptr` lane is a guest pointer (CPU tier) or a registry id (GPU
+tier).
+
+The palette contract's shader-visible half is pinned by
+`filetests/texture/palette_strip_sampling.glsl` (texel centers, the linear
+blend between them, `uv.y` ignored) and `palette_strip_wrap_seam.glsl` (what
+`Repeat` makes of `u = 0`, and scrolling past either end). See
+[`color.md`](./color.md) §5 and §7.
+
 ### WGSL/wgpu Mapping
 
 The internal model intentionally resembles WGSL/wgpu:
@@ -475,6 +507,9 @@ is not part of the shipped validation story yet.
 
 ## Changelog
 
+- 2026-08-04: Document the engine-side spec supplier (palette slots →
+  `height_one(Rgba16Unorm, Linear, Repeat)`), the
+  `LpGraphics::texture_uniform_value` seam, and the palette strip filetests.
 - 2026-04-28 (afternoon): Document nested `sampler2D` in uniform structs; dotted
   `TextureBindingSpec` / filetest keys (`params.gradient`); disallow indexed
   texture directive names.

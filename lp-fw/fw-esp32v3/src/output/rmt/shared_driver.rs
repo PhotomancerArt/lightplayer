@@ -23,8 +23,10 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use esp_hal::interrupt::{InterruptHandler, Priority};
+use esp_hal::peripherals::{CPU_CTRL, Interrupt};
 use esp_hal::rmt::Rmt;
-use esp_hal::time::{Duration, Rate};
+use esp_hal::system::{Cpu, CpuControl, Stack};
+use esp_hal::time::{Duration, Instant, Rate};
 use lp_ws281x::Ws281xDriver;
 
 use super::v3_rmt::{TX_CHANNELS, V3Rmt};
@@ -57,6 +59,90 @@ pub static DRIVER: Ws281xDriver<V3Rmt, TX_CHANNELS> = Ws281xDriver::new(V3Rmt::n
 /// refills.
 static ISR_INSTALLED: AtomicBool = AtomicBool::new(false);
 
+/// Set (from core 1, `Release`) once the RMT handler is bound into the APP
+/// core's interrupt matrix. This is THE dual-core flag: the admission cap and
+/// the provider's flush behaviour key off it, and `false` means the firmware
+/// runs exactly the single-core (M4) semantics — barrier flush, cap 2, ISR on
+/// the PRO core.
+static ISR_ON_APP_CORE: AtomicBool = AtomicBool::new(false);
+
+/// Is the RMT ISR serviced by the dedicated APP core this boot?
+///
+/// Constant after boot: it is set once, before the RMT driver exists, and
+/// never cleared.
+pub fn isr_on_app_core() -> bool {
+    ISR_ON_APP_CORE.load(Ordering::Acquire)
+}
+
+/// How long [`start_app_core_isr`] waits for core 1 to report its bind. The
+/// core has ~nothing to do before setting the flag; this expiring means the
+/// core never really started, and the caller falls back to single-core.
+const APP_CORE_BIND_TIMEOUT: Duration = Duration::from_millis(10);
+
+/// Everything core 1 ever runs: bind the RMT handler, report, service
+/// interrupts forever.
+///
+/// This executes ON the APP core — which is the entire point:
+/// `interrupt::bind_handler` maps the peripheral source into the **calling**
+/// core's interrupt matrix, and there is no remote-core form of the mapping
+/// call in esp-hal. From here on the APP core services every RMT interrupt
+/// while the PRO core renders; nothing on this core ever masks interrupts,
+/// takes a critical section, allocates, or prints — the silence is the
+/// product.
+///
+/// ⚠️ This function must NEVER return: esp-hal parks a returned core-1 entry
+/// with a **hardware stall** (`internal_park_core`), and a stalled core
+/// services no interrupts — the wires would go dark with no error anywhere.
+/// The idle loop is `waiti 0`: wait for an interrupt at any level, take it
+/// (the RMT handler runs), resume waiting.
+fn app_core_main() {
+    esp_hal::interrupt::bind_handler(
+        Interrupt::RMT,
+        InterruptHandler::new(rmt_isr, Priority::max()),
+    );
+    ISR_ON_APP_CORE.store(true, Ordering::Release);
+    loop {
+        // SAFETY (asm): `waiti 0` only waits for an interrupt with the
+        // threshold at level 0; no registers or memory are touched.
+        unsafe { core::arch::asm!("waiti 0") };
+    }
+}
+
+/// Start the APP core with [`app_core_main`] and wait (briefly) for its bind.
+///
+/// Returns whether the dual-core deployment is live; on `false` the caller
+/// keeps full single-core (M4) behaviour — [`install_isr`] then binds on the
+/// PRO core as before, so a board whose second core will not start still
+/// drives its wires. Call exactly once at boot, before the RMT driver is
+/// constructed.
+pub fn start_app_core_isr(cpu_ctrl: CPU_CTRL<'static>) -> bool {
+    /// Core 1's stack: ISR frames plus the `waiti` loop, nothing else, so
+    /// 4 KiB is generous. A `static` in .bss — this DRAM is the standing
+    /// price of the dedicated core (the m6 compact-mappings relief is what
+    /// pays for it at dome scale; see the plan).
+    static mut APP_CORE_STACK: Stack<4096> = Stack::new();
+
+    let mut cpu_control = CpuControl::new(cpu_ctrl);
+    // SAFETY: the one and only reference ever taken to the stack static —
+    // this function runs once at boot, and the core it hands the stack to
+    // runs forever.
+    let stack = unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) };
+    match cpu_control.start_app_core(stack, app_core_main) {
+        Ok(guard) => {
+            // Dropping the guard would hardware-stall the core mid-ISR
+            // forever after; the core is deliberately permanent.
+            core::mem::forget(guard);
+            let started = Instant::now();
+            while !isr_on_app_core() && started.elapsed() < APP_CORE_BIND_TIMEOUT {}
+            isr_on_app_core()
+        }
+        Err(error) => {
+            esp_println::println!("[INIT] APP core start failed ({error:?})");
+            false
+        }
+    }
+}
+
 /// The RMT interrupt entry point: a trampoline and nothing else.
 ///
 /// Placed in IRAM with `#[ram]` — a flash-cache miss here is exactly the
@@ -76,7 +162,20 @@ extern "C" fn rmt_isr() {
     DRIVER.on_interrupt();
 }
 
-/// Bind [`rmt_isr`] at the highest priority esp-hal can dispatch, exactly once.
+/// Route the RMT interrupt to [`rmt_isr`], exactly once.
+///
+/// Two shapes, decided by [`isr_on_app_core`]:
+///
+/// * **Dual-core (the default deployment).** Core 1 already bound the handler
+///   into its own matrix in [`app_core_main`]; the only thing left is
+///   hygiene — make sure the PRO core's matrix does not also claim the
+///   source. ⚠️ `rmt.set_interrupt_handler` must NOT be called in this shape,
+///   here or anywhere else: its first act is disabling the RMT mapping on
+///   every *other* core, which would silently unmap core 1 and kill every
+///   refill. That foot-gun is the reason this function no longer uses it in
+///   the dual-core path.
+/// * **Single-core fallback** (core 1 failed to start): the pre-dual-core
+///   bind on the current (PRO) core, unchanged M4 behaviour.
 pub fn install_isr(rmt: &mut Rmt<'_, esp_hal::Blocking>) {
     if ISR_INSTALLED
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -84,7 +183,12 @@ pub fn install_isr(rmt: &mut Rmt<'_, esp_hal::Blocking>) {
     {
         return;
     }
-    rmt.set_interrupt_handler(InterruptHandler::new(rmt_isr, Priority::max()));
+    if isr_on_app_core() {
+        esp_hal::interrupt::disable(Cpu::ProCpu, Interrupt::RMT);
+        let _ = rmt;
+    } else {
+        rmt.set_interrupt_handler(InterruptHandler::new(rmt_isr, Priority::max()));
+    }
 }
 
 /// Emit the per-channel WS281x counters, at most once per
