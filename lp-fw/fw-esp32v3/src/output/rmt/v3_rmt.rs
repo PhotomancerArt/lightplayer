@@ -248,7 +248,10 @@ impl RmtHw for V3Rmt {
         TX_PLAN.window_words(ch, BLOCK_WORDS)
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn write_ram(&self, ch: u8, word_idx: usize, value: u32) {
         let Some(ptr) = ram_word(ch, word_idx) else {
             return;
@@ -260,7 +263,10 @@ impl RmtHw for V3Rmt {
         unsafe { ptr.write_volatile(value) };
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn set_tx_threshold(&self, ch: u8, words: u16) {
         if ch as usize >= TX_CHANNELS {
             return;
@@ -313,7 +319,10 @@ impl RmtHw for V3Rmt {
             .modify(|_, w| unsafe { w.tx_lim().bits(period & TX_LIM_MAX) });
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn read_pos(&self, ch: u8) -> u16 {
         let window = TX_PLAN.window_words(ch, BLOCK_WORDS);
         if window == 0 {
@@ -403,7 +412,10 @@ impl RmtHw for V3Rmt {
         }
     }
 
-    #[inline]
+    // `always`: must land inside the IRAM-sectioned refill path (see the
+    // `isr-in-ram` feature in lp-ws281x) — an outlined copy would sit in
+    // flash and reintroduce the cross-core cache-stall this exists to avoid.
+    #[inline(always)]
     fn take_interrupts(&self) -> InterruptFlags {
         let rmt = RMT::regs();
         // `int_st` is `int_raw & int_ena`, so causes this firmware never asked

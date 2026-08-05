@@ -512,6 +512,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// top of its own service and therefore includes every earlier channel's
     /// refill — and it is the reason the deadline budget in the crate README is
     /// stated per *group* rather than per channel.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     pub fn on_interrupt(&self) {
         let flags = self.hw.take_interrupts();
         #[cfg(feature = "test_hooks")]
@@ -601,6 +602,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     }
 
     /// Handle `tx_end`: classify the frame and publish completion.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     fn finish(&self, state: &ChannelState) {
         // `SeqCst`, not `Acquire`: the ISR's entry check is half of the
         // abort handshake — see `ChannelState::is_complete_sync`.
@@ -636,6 +638,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// Which of the two dominates is the whole question when a chip starts
     /// truncating frames: entry delay says the handler could not get in, refill
     /// lag says it could not get out.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     fn refill(&self, ch: u8, state: &ChannelState) {
         // `SeqCst`, not `Acquire`: the ISR's entry check is half of the
         // abort handshake — see `ChannelState::is_complete_sync`.
@@ -698,6 +701,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
     /// Walks bits — not LEDs — so any half size works. When the pixel data runs
     /// out the latch is emitted exactly once and the remainder of the half is
     /// STOP-filled, which is what actually ends the transmission.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
     fn fill_half(&self, ch: u8, state: &ChannelState, half: Half) -> FillResult {
         let half_words = state.half_words.load(Relaxed);
         let start = match half {
