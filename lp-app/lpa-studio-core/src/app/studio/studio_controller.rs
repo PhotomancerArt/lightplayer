@@ -1054,8 +1054,52 @@ impl StudioController {
             .map(|card| self.overlay_card_ui(card))
             .collect();
         view.backup = self.device_backup.clone();
-        view.setup = self.setup_view();
+        // The open flow (if any) rides the bound device's own card as a
+        // body takeover (G2 ruling, 2026-08-05). Resolving it here — after
+        // the roster exists — is what lets the takeover follow the card's
+        // identity key while the flow runs, and pins that card first.
+        let takeover =
+            home_view_builder::pin_setup_card(&mut view.devices, self.setup_binding().as_deref());
+        view.setup = self.setup_view(takeover);
         Some(view)
+    }
+
+    /// The session an open setup flow is bound to, as the roster names it
+    /// — `Some` exactly while the flow should be rendering as a device
+    /// card's body.
+    ///
+    /// `None` covers the three cases where it must not: no flow at all;
+    /// the pre-device states (nothing granted yet, so there is no card to
+    /// be the body of); and DEVICE_HOME/CLOSED, where the handoff is done
+    /// and the card's own body returns. The hardware binding is the bound
+    /// `RuntimeId` rather than the session's stored card key, so a port
+    /// release un-binds the takeover the moment the session goes.
+    fn setup_binding(&self) -> Option<String> {
+        if !self.setup_flow_running() {
+            return None;
+        }
+        let session = self.setup.as_ref()?;
+        if session.sim {
+            // The sim's key is known from the start, but no sim card
+            // exists until the session does — so this resolves to nothing
+            // (a standalone card) for the whole sim path up to the start.
+            session.card_key.clone()
+        } else {
+            self.setup_device.map(|id| id.to_string())
+        }
+    }
+
+    /// Whether a setup flow is still WORKING. DEVICE_HOME is terminal (the
+    /// reducer's own words: "the card owns the surface from here"), so a
+    /// finished flow lingering in `setup` must not keep standing anything
+    /// down.
+    fn setup_flow_running(&self) -> bool {
+        self.setup.as_ref().is_some_and(|session| {
+            !matches!(
+                session.state().kind(),
+                crate::SetupStateKind::DeviceHome | crate::SetupStateKind::Closed
+            )
+        })
     }
 
     /// The runtime pool's roster evidence (P4 → multi-device M3): one
@@ -1071,24 +1115,21 @@ impl StudioController {
     /// not of a session") while nothing is attached. Recorded in the
     /// multi-device ADR so M5 inherits the attribution decision.
     fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
-        // F5b: while the setup wizard owns a flow, the wizard card IS the
-        // bound device's surface — its roster card stands down until
-        // DEVICE_HOME hands off, and the gallery's connect narration stays
-        // quiet (the wizard narrates its own port request). Sessions the
-        // wizard did not open keep their cards.
-        let wizard_active = self.setup.as_ref().is_some_and(|session| {
-            !matches!(
-                session.state().kind(),
-                crate::SetupStateKind::DeviceHome | crate::SetupStateKind::Closed
-            )
-        });
+        // Every session gets its evidence — INCLUDING the one an open setup
+        // flow drives. That card is not a rival to the wizard; it IS the
+        // wizard's card (G2 ruling, 2026-08-05), and standing it down was
+        // what made one board wear two representations.
         let mut devices: Vec<crate::app::home::HomeDeviceEvidence> = self
             .pool
             .device_sessions()
-            .filter(|session| !(wizard_active && self.setup_device == Some(session.id())))
             .map(|session| self.device_evidence(session))
             .collect();
-        let flow_connect = if wizard_active {
+        // The connect NARRATION does still stand down while a flow is
+        // open: the wizard's PORT_PICKING body says "the browser is asking
+        // which port…" itself, and the app-singular connect evidence would
+        // otherwise spawn a session-less "Connecting…" card beside the
+        // wizard — the very twin this model exists to delete.
+        let flow_connect = if self.setup_flow_running() {
             crate::ConnectEvidence::Idle
         } else {
             self.gallery_connect_evidence()
@@ -3589,9 +3630,9 @@ impl StudioController {
                 queue.extend(session.flow.handle(event));
             }
         }
-        // A finished flow takes its card off the grid. DEVICE_HOME keeps
-        // it only until the real device card exists — which it does by
-        // then, because OpenDeviceHome ran.
+        // A closed flow is dropped outright. DEVICE_HOME needs no cleanup
+        // here: it is terminal, and `setup_view` already stopped drawing
+        // it — the bound card is on the grid wearing its own body.
         if self
             .setup
             .as_ref()
@@ -3965,10 +4006,20 @@ impl StudioController {
             .collect()
     }
 
-    /// The wizard card, if one is open: the machine's state plus the two
-    /// things only the controller can see — the live flash op and the
-    /// session's console tail.
-    fn setup_view(&self) -> Option<crate::UiSetupWizard> {
+    /// The wizard, if one is open and still has something to draw: the
+    /// machine's state, the card it rides (`takeover_card` — `None` renders
+    /// it standalone in the entry-cards slot), and the two things only the
+    /// controller can see — the live flash op and the session's console
+    /// tail.
+    ///
+    /// A flow at DEVICE_HOME/CLOSED draws NOTHING: the handoff is a body
+    /// swap, so the bound card is already on the grid wearing its own body
+    /// (G2 ruling), and a standalone frame here would be the card
+    /// appearing that the ruling forbids.
+    fn setup_view(&self, takeover_card: Option<String>) -> Option<crate::UiSetupWizard> {
+        if !self.setup_flow_running() {
+            return None;
+        }
         let session = self.setup.as_ref()?;
         let flash = self
             .setup_device
@@ -3979,7 +4030,7 @@ impl StudioController {
             .and_then(|id| self.pool.device_session(id))
             .map(|session| session.console_tail().iter().cloned().collect())
             .unwrap_or_default();
-        Some(session.view(flash, console_tail))
+        Some(session.view(takeover_card, flash, console_tail))
     }
 
     /// Apply a card UI view-state mutation (2026-07-25 re-home): flip the
@@ -8453,13 +8504,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_wizard_card_is_the_bound_devices_only_card_until_device_home() {
-        // G2 finding 2026-08-05: connecting through the wizard produced TWO
-        // cards — the wizard card plus the live session's roster card. F5b
-        // says the wizard IS the device's card until DEVICE_HOME hands off.
-        let mut studio = StudioController::new(|| 1_800_000_000.0);
-        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+    /// Install a stub device session and bind the open flow to it — the
+    /// port-grant moment, without a wire.
+    fn grant_a_port(studio: &mut StudioController) -> crate::RuntimeId {
         let device_id = studio
             .pool
             .install(
@@ -8469,52 +8516,139 @@ mod tests {
             )
             .unwrap_or_else(|refusal| panic!("stub device installs: {}", refusal.message));
         studio.bind_setup_device(device_id);
+        device_id
+    }
 
+    /// Walk the pure machine from a granted port to DEVICE_HOME. The
+    /// machine does not care where the events came from (R1).
+    fn walk_the_flow_to_device_home(studio: &mut StudioController) {
+        let flow = &mut studio.setup.as_mut().expect("wizard").flow;
+        flow.handle(crate::SetupEvent::ItsConnected);
+        flow.handle(crate::SetupEvent::PortGranted);
+        flow.handle(crate::SetupEvent::ProbeCompleted {
+            probe: crate::BoardProbe {
+                verdict: crate::BoardVerdict::Blank { known: None },
+                detected_chip: Some("esp32c6".to_string()),
+                hardware_uid: None,
+                hardware_origin: None,
+            },
+        });
+        flow.handle(crate::SetupEvent::BoardChosen {
+            board_id: "espressif/esp32-c6-devkitc-1".to_string(),
+        });
+        flow.handle(crate::SetupEvent::Confirm);
+        flow.handle(crate::SetupEvent::FlashSucceeded);
+        flow.handle(crate::SetupEvent::Confirm);
+        flow.handle(crate::SetupEvent::ProjectGenerated {
+            project_uid: "prj_test".to_string(),
+        });
+        flow.handle(crate::SetupEvent::PushCompleted);
+    }
+
+    #[test]
+    fn a_bound_flow_rides_the_devices_own_card_as_a_body_takeover() {
+        // G2 ruling 2026-08-05: one physical board, ONE card. From the
+        // port grant the wizard is the BODY of that board's roster card
+        // (the same card the live evidence produces), not a sibling of it
+        // — the P06 shape rendered two cards for one device, and standing
+        // the live card down only traded that for a card that appears.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+
+        // Pre-device: nothing to attach to, so the wizard is standalone —
+        // and no phantom "Connecting…" card rides along beside it.
         let home = studio.view().home.expect("home view");
-        assert!(home.setup.is_some(), "the wizard card is on the grid");
+        let wizard = home.setup.expect("the wizard is on the grid");
+        assert_eq!(wizard.takeover_card, None, "nothing to be the body of yet");
         assert!(
             home.devices.is_empty(),
-            "the bound session's roster card stands down while the wizard \
-             owns the flow; got {:?}",
+            "the connect narration is the wizard's own; got {:?}",
             home.devices
                 .iter()
                 .map(|card| &card.name)
                 .collect::<Vec<_>>()
         );
 
-        // Walk the pure machine to DEVICE_HOME: the roster card returns
-        // (the wizard's handoff frame yields the surface back).
-        {
-            let flow = &mut studio.setup.as_mut().expect("wizard").flow;
-            flow.handle(crate::SetupEvent::ItsConnected);
-            flow.handle(crate::SetupEvent::PortGranted);
-            flow.handle(crate::SetupEvent::ProbeCompleted {
-                probe: crate::BoardProbe {
-                    verdict: crate::BoardVerdict::Blank { known: None },
-                    detected_chip: Some("esp32c6".to_string()),
-                    hardware_uid: None,
-                    hardware_origin: None,
-                },
-            });
-            flow.handle(crate::SetupEvent::BoardChosen {
-                board_id: "espressif/esp32-c6-devkitc-1".to_string(),
-            });
-            flow.handle(crate::SetupEvent::Confirm);
-            flow.handle(crate::SetupEvent::FlashSucceeded);
-            flow.handle(crate::SetupEvent::Confirm);
-            flow.handle(crate::SetupEvent::ProjectGenerated {
-                project_uid: "prj_test".to_string(),
-            });
-            flow.handle(crate::SetupEvent::PushCompleted);
-        }
+        let device_id = grant_a_port(&mut studio);
+
+        let home = studio.view().home.expect("home view");
+        assert_eq!(
+            home.devices.len(),
+            1,
+            "exactly one card carries the device; got {:?}",
+            home.devices
+                .iter()
+                .map(|card| &card.name)
+                .collect::<Vec<_>>()
+        );
+        let card = &home.devices[0];
+        assert_eq!(
+            card.session_key.as_deref(),
+            Some(device_id.to_string().as_str()),
+            "and it is the bound session's own card"
+        );
+        let wizard = home.setup.as_ref().expect("the wizard still renders");
+        assert_eq!(
+            wizard.takeover_card.as_deref(),
+            Some(card.identity_key()),
+            "the wizard rides that card's body"
+        );
+    }
+
+    #[test]
+    fn the_takeover_ends_at_device_home_without_the_card_changing() {
+        // "Becomes the device card" is a BODY SWAP: at DEVICE_HOME the
+        // same card is still there, in the same place, wearing its own
+        // body again. Nothing appears, nothing disappears.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        grant_a_port(&mut studio);
+        let before = studio.view().home.expect("home view");
+        let key = before.devices[0].identity_key().to_string();
+
+        walk_the_flow_to_device_home(&mut studio);
         assert_eq!(
             studio.setup.as_ref().expect("wizard").state().kind(),
             crate::SetupStateKind::DeviceHome,
         );
-        let home = studio.view().home.expect("home view");
+
+        let after = studio.view().home.expect("home view");
+        assert_eq!(
+            after
+                .devices
+                .iter()
+                .map(|card| card.identity_key().to_string())
+                .collect::<Vec<_>>(),
+            vec![key],
+            "the same one card, still on the grid"
+        );
         assert!(
-            !home.devices.is_empty(),
-            "at DEVICE_HOME the real card is back on the roster"
+            after.setup.is_none(),
+            "the takeover is gone — the card's own body is the landing"
+        );
+    }
+
+    #[test]
+    fn the_mid_setup_card_leads_the_roster() {
+        // A card mid-setup holds a stable, leading grid position: it is
+        // pinned first, ahead even of the sim's own pin, so it does not
+        // hop columns as other cards land.
+        let mut studio = StudioController::new(|| 1_800_000_000.0);
+        block_on_ready(studio.dispatch(setup_action(HomeOp::StartSetup { sim: false }))).unwrap();
+        let first = grant_a_port(&mut studio);
+        let second = grant_a_port(&mut studio);
+        assert_ne!(first, second, "two boards attached");
+
+        let home = studio.view().home.expect("home view");
+        assert_eq!(home.devices.len(), 2, "both boards keep their cards");
+        assert_eq!(
+            home.devices[0].session_key.as_deref(),
+            Some(second.to_string().as_str()),
+            "the board the flow is on leads"
+        );
+        assert_eq!(
+            home.setup.expect("wizard").takeover_card.as_deref(),
+            Some(home.devices[0].identity_key()),
         );
     }
 

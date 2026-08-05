@@ -1,11 +1,19 @@
 //! The setup wizard's vocabulary sheet: one static frame per machine
-//! state, at the card width the flow actually renders at.
+//! state, in the frame that state actually renders in.
 //!
 //! Every frame is built from the SAME core value the live gallery passes
 //! ([`UiSetupWizard`]) and drawn by the same component, so the sheet can
 //! never drift from the shipped wizard. Design:
 //! `docs/design/device-setup-flow.md` §2 — the state list here is that
 //! table's left column.
+//!
+//! Two frames, per the G2 ruling (2026-08-05):
+//!
+//! * [`frame`] — the standalone card in the entry-cards slot, for the
+//!   states with no device to attach to yet.
+//! * [`takeover`] — the bound board's OWN roster card with the wizard as
+//!   its body, for every state from the port grant onward. The header is
+//!   the device's and grows real facts as they land; the body is the flow.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
@@ -13,15 +21,19 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::app::places::RegisteredDevice;
 use lpa_studio_core::{
     BoardPickState, BoardProbe, BoardVerdict, CardOp, ConnectHint, ProvisionPhase, ProvisionState,
-    SetupState, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiSetupProject, UiSetupWizard,
-    setup_rail,
+    RosterCardState, SetupState, UiDeviceCard, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
+    UiSetupProject, UiSetupWizard, setup_rail,
 };
 
-use crate::app::home::device_card::ConnectDeviceCard;
+use crate::app::home::device_card::{ConnectDeviceCard, DeviceCard};
 use crate::app::home::setup_wizard::SetupWizardCard;
 
 const C6: &str = "espressif/esp32-c6-devkitc-1";
 const CHIP: &str = "esp32c6";
+/// Fixed clock: the card's status line reads it.
+const NOW: f64 = 1_800_000_000.0;
+/// The bound session's pool identity — the thread the takeover rides.
+const SESSION: &str = "runtime-1";
 
 /// A remembered board — the "was Porch sign" recognition corpus.
 fn remembered() -> RegisteredDevice {
@@ -65,7 +77,10 @@ fn console() -> Vec<UiLogEntry> {
     .collect()
 }
 
-/// The card the live grid renders, at its real width.
+/// The STANDALONE frame: the wizard as its own card in the entry-cards
+/// slot, at the grid's real width. The states before a port grant (and the
+/// whole sim path up to the start) have nothing to attach to, so this is
+/// where they draw.
 fn frame(wizard: UiSetupWizard) -> Element {
     rsx! {
         section { class: "tw:p-4",
@@ -73,6 +88,60 @@ fn frame(wizard: UiSetupWizard) -> Element {
                 SetupWizardCard { wizard, on_action: |_| {} }
             }
         }
+    }
+}
+
+/// The TAKEOVER frame: the bound board's own roster card — the same card
+/// the live session produces, in the same grid slot — with the wizard as
+/// its body. Nothing appears or disappears when the flow hands back; only
+/// the body swaps.
+fn takeover(card: UiDeviceCard, mut wizard: UiSetupWizard) -> Element {
+    wizard.takeover_card = Some(card.identity_key().to_string());
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[minmax(320px,380px)] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]",
+                DeviceCard {
+                    card,
+                    setup: Some(wizard),
+                    now_secs: Some(NOW),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+/// The bound board's card as it stands for most of the flow: anonymous
+/// (no identity stamped yet, so it keys by its session), named by the chip
+/// the probe reported, transport known from the moment the port opened.
+fn bound_card() -> UiDeviceCard {
+    UiDeviceCard {
+        uid: None,
+        session_key: Some(SESSION.to_string()),
+        name: "ESP32-C6".to_string(),
+        transport: "USB".to_string(),
+        state: RosterCardState::ConnectedEmpty,
+        project: None,
+        fw: None,
+        hardware: None,
+        detected_chip: Some(CHIP.to_string()),
+        board_id: None,
+        port_label: Some("ESP32 Serial (0x303a:0x1001) · port-2".to_string()),
+        safe_clamp: None,
+        sim: false,
+        console_tail: Vec::new(),
+        ui: Default::default(),
+    }
+}
+
+/// The same card once identity has landed — a uid and a name in the
+/// header, while the body carries on with the same step. The header grows
+/// real facts as they are learned; it never becomes a different card.
+fn named_card() -> UiDeviceCard {
+    UiDeviceCard {
+        uid: Some("dev_000000029EVDlKLX".to_string()),
+        name: "Porch sign".to_string(),
+        ..bound_card()
     }
 }
 
@@ -87,6 +156,7 @@ fn hardware(state: SetupState) -> UiSetupWizard {
         console_tail: Vec::new(),
         project: None,
         error: None,
+        takeover_card: None,
     }
 }
 
@@ -101,6 +171,7 @@ fn simulated(state: SetupState) -> UiSetupWizard {
         console_tail: Vec::new(),
         project: None,
         error: None,
+        takeover_card: None,
     }
 }
 
@@ -163,36 +234,45 @@ fn port_picking() -> Element {
 }
 
 #[story(
-    description = "PROBING: one spinner for one probe pass — chip identity and what is already on the board, decided together (design §4)."
+    description = "PROBING, the first frame of the TAKEOVER: the port grant produced a session, so the board now has its own roster card — and the wizard is that card's body from here on. One physical board, one card. The header is already honest (transport known, chip-named, anonymous until identity lands); the body is the flow. One spinner for one probe pass — chip identity and what is already on the board, decided together (design §4)."
 )]
 fn probing() -> Element {
-    frame(hardware(SetupState::Probing {
-        preseeded_board: None,
-    }))
+    takeover(
+        bound_card(),
+        hardware(SetupState::Probing {
+            preseeded_board: None,
+        }),
+    )
 }
 
 #[story(
     description = "BOARD_PICK on a blank board: the SHIPPED setup-form picker, filtered to the detected chip plus Generic. The forward verb is not armed until something is picked — the machine records selection and confirmation separately (design §7.2)."
 )]
 fn board_pick_blank() -> Element {
-    frame(hardware(SetupState::BoardPick(BoardPickState {
-        probe: Some(probe(BoardVerdict::Blank { known: None })),
-        selected: Some(C6.to_string()),
-        replaces_firmware: false,
-    })))
+    takeover(
+        bound_card(),
+        hardware(SetupState::BoardPick(BoardPickState {
+            probe: Some(probe(BoardVerdict::Blank { known: None })),
+            selected: Some(C6.to_string()),
+            replaces_firmware: false,
+        })),
+    )
 }
 
 #[story(
     description = "BOARD_PICK carrying recognition: the probed MAC matched a remembered row, so the card says whose board this was before offering to flash it. Reached from WLED_FOUND's wipe or ALREADY_LP's fresh setup, which is why the replacement warning rides along."
 )]
 fn board_pick_recognised() -> Element {
-    frame(hardware(SetupState::BoardPick(BoardPickState {
-        probe: Some(probe(BoardVerdict::Blank {
-            known: Some(remembered()),
+    takeover(
+        named_card(),
+        hardware(SetupState::BoardPick(BoardPickState {
+            probe: Some(probe(BoardVerdict::Blank {
+                known: Some(remembered()),
+            })),
+            selected: None,
+            replaces_firmware: true,
         })),
-        selected: None,
-        replaces_firmware: true,
-    })))
+    )
 }
 
 #[story(
@@ -210,90 +290,119 @@ fn board_pick_simulator() -> Element {
     description = "WLED_FOUND: the wipe offer, with the migration promise deliberately absent. Presets stay in WLED's own backups; today is wipe-and-set-up and the copy says so."
 )]
 fn wled_found() -> Element {
-    frame(hardware(SetupState::WledFound {
-        probe: probe(BoardVerdict::Wled {
-            known: Some(remembered()),
+    takeover(
+        bound_card(),
+        hardware(SetupState::WledFound {
+            probe: probe(BoardVerdict::Wled {
+                known: Some(remembered()),
+            }),
         }),
-    }))
+    )
 }
 
 #[story(
     description = "ALREADY_LP: adopt is one click and writes nothing but a sighting — the board keeps its name, its project, and its history. The registry name leads, because recognition is the whole point of this state."
 )]
 fn already_lightplayer() -> Element {
-    frame(hardware(SetupState::AlreadyLp {
-        probe: probe(BoardVerdict::LightPlayer {
-            known: Some(remembered()),
+    takeover(
+        named_card(),
+        hardware(SetupState::AlreadyLp {
+            probe: probe(BoardVerdict::LightPlayer {
+                known: Some(remembered()),
+            }),
         }),
-    }))
+    )
 }
 
 #[story(
     description = "PROBE_FAILED: retry, driver help, and back — never a dead end. The BOOT-button hint is the one trick that most often turns this state into a board pick."
 )]
 fn probe_failed() -> Element {
-    frame(hardware(SetupState::ProbeFailed {
-        probe: BoardProbe {
-            verdict: BoardVerdict::Unresponsive { known: None },
+    takeover(
+        // Nothing identified itself, so the card's header falls all the
+        // way back to "Connected device" — the port is the only fact.
+        UiDeviceCard {
+            name: "Connected device".to_string(),
             detected_chip: None,
-            hardware_uid: None,
-            hardware_origin: None,
+            ..bound_card()
         },
-    }))
+        hardware(SetupState::ProbeFailed {
+            probe: BoardProbe {
+                verdict: BoardVerdict::Unresponsive { known: None },
+                detected_chip: None,
+                hardware_uid: None,
+                hardware_origin: None,
+            },
+        }),
+    )
 }
 
 #[story(
-    description = "FLASHING: the card-owned op flow's own activity view, verbatim — same label, same bar, same terminal the device card shows. The wizard runs the existing provisioning op; it does not have a second flash path."
+    description = "FLASHING: the card-owned op flow's own activity view, verbatim — same label, same bar, same terminal the device card shows, now IN the card whose board is being written. The op rides the card (that is where the flash's progress is patched), and the wizard body reads it, so the two can no longer disagree; the card's own overlay stands down rather than narrating it twice."
 )]
 fn flashing() -> Element {
+    let op = CardOp::new("Flashing firmware", Some(42));
     let mut wizard = hardware(SetupState::Flashing {
         board_id: C6.to_string(),
         probe: Some(probe(BoardVerdict::Blank { known: None })),
         attempt: 1,
     });
-    wizard.flash = Some(CardOp::new("Flashing firmware", Some(42)));
-    wizard.console_tail = console();
-    frame(wizard)
+    wizard.flash = Some(op.clone());
+    let mut card = bound_card();
+    card.ui.op = Some(op);
+    card.console_tail = console();
+    takeover(card, wizard)
 }
 
 #[story(
     description = "FLASHING on the second attempt, riding out the expected disconnect: the op flow's AwaitingDevice phase (indeterminate, overlay stays up). An interrupted write is never trusted, so the step number is stated."
 )]
 fn flashing_retry() -> Element {
+    let op = CardOp::awaiting("Waiting for the board…");
     let mut wizard = hardware(SetupState::Flashing {
         board_id: C6.to_string(),
         probe: Some(probe(BoardVerdict::Blank { known: None })),
         attempt: 2,
     });
-    wizard.flash = Some(CardOp::awaiting("Waiting for the board…"));
-    wizard.console_tail = console();
-    frame(wizard)
+    wizard.flash = Some(op.clone());
+    let mut card = bound_card();
+    card.ui.op = Some(op);
+    card.console_tail = console();
+    takeover(card, wizard)
 }
 
 #[story(
     description = "FLASH_FAILED after a second attempt: retry re-runs FROM ERASE, and the replug guidance appears because a wedged serial state survives soft resets. Abandon is the same act as closing here — a part-written board must never be left un-marked."
 )]
 fn flash_failed() -> Element {
-    frame(hardware(SetupState::FlashFailed {
-        board_id: C6.to_string(),
-        probe: Some(probe(BoardVerdict::Blank { known: None })),
-        attempt: 2,
-        detail: "write failed at 0x6a000 — the device reset mid-write".to_string(),
-    }))
+    let mut card = bound_card();
+    card.console_tail = console();
+    takeover(
+        card,
+        hardware(SetupState::FlashFailed {
+            board_id: C6.to_string(),
+            probe: Some(probe(BoardVerdict::Blank { known: None })),
+            attempt: 2,
+            detail: "write failed at 0x6a000 — the device reset mid-write".to_string(),
+        }),
+    )
 }
 
 #[story(
-    description = "ABANDON_GUARD: ✕ during a flash opens the card-resident sheet over an operation that never actually paused (design §7.8). Pressing ✕ again is inert — the sheet IS the answer to it."
+    description = "ABANDON_GUARD: ✕ during a flash opens the card-resident sheet over an operation that never actually paused (design §7.8). Pressing ✕ again is inert — the sheet IS the answer to it. In the takeover the ✕ sits on the steps rail rather than the title bar, which now belongs to the device; abandoning has to stay one click away, so it moves rather than disappearing."
 )]
 fn abandon_guard() -> Element {
+    let op = CardOp::new("Flashing firmware", Some(42));
     let mut wizard = hardware(SetupState::AbandonGuard {
         board_id: C6.to_string(),
         probe: Some(probe(BoardVerdict::Blank { known: None })),
         attempt: 1,
     });
-    wizard.flash = Some(CardOp::new("Flashing firmware", Some(42)));
-    wizard.console_tail = console();
-    frame(wizard)
+    wizard.flash = Some(op.clone());
+    let mut card = bound_card();
+    card.ui.op = Some(op);
+    card.console_tail = console();
+    takeover(card, wizard)
 }
 
 #[story(
@@ -310,11 +419,11 @@ fn provision_hardware() -> Element {
         project_uid: None,
     }));
     wizard.project = UiSetupProject::for_board(C6);
-    frame(wizard)
+    takeover(bound_card(), wizard)
 }
 
 #[story(
-    description = "PROVISION mid-flight: one click, one generate. Confirm, ProjectGenerated, and PushCompleted are each inert out of phase, so the field and the verb are locked while the work runs."
+    description = "PROVISION mid-flight: one click, one generate. Confirm, ProjectGenerated, and PushCompleted are each inert out of phase, so the field and the verb are locked while the work runs. The header has grown its real name by now (the registry row landed with the confirm) — the same card, wearing one more fact."
 )]
 fn provision_working() -> Element {
     let mut wizard = hardware(SetupState::Provision(ProvisionState {
@@ -325,7 +434,7 @@ fn provision_working() -> Element {
         project_uid: Some("prj_3fKq8Zr21bTxYw0AhVmDpe".to_string()),
     }));
     wizard.project = UiSetupProject::for_board(C6);
-    frame(wizard)
+    takeover(named_card(), wizard)
 }
 
 #[story(
@@ -356,11 +465,11 @@ fn provision_failed() -> Element {
     }));
     wizard.project = UiSetupProject::for_board(C6);
     wizard.error = Some("the device disconnected while the project was being written".to_string());
-    frame(wizard)
+    takeover(named_card(), wizard)
 }
 
 #[story(
-    description = "DEVICE_HOME, the handoff frame: the flow has landed and the editor is already lensed to the target (vision D17). The card exists only until the real device card replaces it."
+    description = "DEVICE_HOME, drawn for completeness — the gallery no longer paints it anywhere. Under the G2 ruling the handoff is a BODY SWAP: at DEVICE_HOME the takeover simply ends and the bound card renders its own body again, in the same slot, so there is no landing frame to show and nothing appears or disappears. The copy is kept because the machine's state is real (the editor is already lensed to the target, vision D17); if the celebration is wanted back, it belongs in the card's own body, not in a card of the flow's."
 )]
 fn device_home() -> Element {
     frame(hardware(SetupState::DeviceHome {
@@ -370,7 +479,7 @@ fn device_home() -> Element {
 }
 
 #[story(
-    description = "DEVICE_HOME reached by adopting an already-LightPlayer board: it never stopped glowing, and nothing was written."
+    description = "DEVICE_HOME reached by adopting an already-LightPlayer board: it never stopped glowing, and nothing was written. Drawn for completeness like the frame above — an adopt ends with the board's own card standing exactly where it already was."
 )]
 fn device_home_adopted() -> Element {
     frame(hardware(SetupState::DeviceHome {
@@ -380,7 +489,7 @@ fn device_home_adopted() -> Element {
 }
 
 #[story(
-    description = "DEVICE_HOME on the simulator path: the same landing, reached with no cable and no flash."
+    description = "DEVICE_HOME on the simulator path: the same landing, reached with no cable and no flash — and, like the two above, no longer painted: by the time the sim reaches it the sim card is on the grid and the project is open."
 )]
 fn device_home_simulator() -> Element {
     frame(simulated(SetupState::DeviceHome {

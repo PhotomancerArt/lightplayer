@@ -15,9 +15,11 @@ use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 /// The gallery home screen (roadmap M4, unconditional at `#/` since M5):
 /// a map of everywhere the user's light lives. The runtime roster leads
 /// the page (SDI addendum: Home reads window-switcher-first,
-/// library-second); the two entry cards open the setup wizard, which is
-/// itself a card in that roster (P06) and asks for the port through the
-/// flow's own `RequestPort` — connecting is never a dialog trip.
+/// library-second); the two entry cards open the setup wizard, which asks
+/// for the port through the flow's own `RequestPort` — connecting is never
+/// a dialog trip — and which lives in the roster in one of two frames
+/// (G2 ruling, 2026-08-05): a standalone card while nothing is attached,
+/// then the BODY of the bound device's own card from the port grant on.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HomeGallery(
@@ -148,6 +150,11 @@ pub fn HomeGallery(
                                 // boards), and duplicate keys panic the diff
                                 key: "{card.render_key()}",
                                 sim: card.sim,
+                                // The bound flow rides THIS card's body when
+                                // the wizard names its key (G2 ruling): one
+                                // physical board, one card, whose body is the
+                                // wizard until the flow hands back.
+                                setup: takeover_for(&home, &card),
                                 card,
                                 now_secs,
                                 // M8′: the Project-tab picker's choices
@@ -168,19 +175,22 @@ pub fn HomeGallery(
                                 on_action,
                             }
                         }
-                        // The wizard is a CARD (flow design F5b): it sits
-                        // in the grid where the entry cards are, at the
-                        // same width, and becomes the device card when the
-                        // flow lands. The entry cards stand down while it
-                        // runs — one flow at a time, one serial port.
-                        if let Some(wizard) = home.setup.clone() {
+                        // The wizard in its STANDALONE frame: only while
+                        // the flow has no card to be the body of (the
+                        // pre-device states, and the sim path up to the
+                        // start). Once it binds, it is up in the roster
+                        // above riding the bound device's own card, and
+                        // the entry card returns here — the flow moving
+                        // between frames must never read as a card
+                        // appearing or disappearing.
+                        if let Some(wizard) = standalone_wizard(&home) {
                             SetupWizardCard { wizard, on_action }
                         } else {
                             ConnectDeviceCard { on_action }
                         }
                     }
                 }
-            } else if let Some(wizard) = home.setup.clone() {
+            } else if let Some(wizard) = standalone_wizard(&home) {
                 // Nothing granted yet and no roster: the wizard still gets
                 // its grid, because it IS the first card.
                 div { class: device_grid_class(),
@@ -323,6 +333,29 @@ pub fn HomeGallery(
             }
         }
     }
+}
+
+/// The open flow when it has NO card to ride — the standalone entry-slot
+/// wizard. Core names the card it binds to
+/// ([`UiSetupWizard::takeover_card`](lpa_studio_core::UiSetupWizard)); a
+/// named card means the wizard is already on the grid as that card's body,
+/// so the entry slot goes back to being an entry card.
+fn standalone_wizard(home: &UiHomeView) -> Option<lpa_studio_core::UiSetupWizard> {
+    home.setup
+        .clone()
+        .filter(|wizard| wizard.takeover_card.is_none())
+}
+
+/// The open flow when it rides THIS card — matched on the card key core
+/// resolved, never re-derived here (the key moves from session to uid
+/// mid-flow, and two surfaces deriving it independently is how they drift).
+fn takeover_for(
+    home: &UiHomeView,
+    card: &lpa_studio_core::UiDeviceCard,
+) -> Option<lpa_studio_core::UiSetupWizard> {
+    home.setup
+        .clone()
+        .filter(|wizard| wizard.takeover_card.as_deref() == Some(card.identity_key()))
 }
 
 /// Forward the Import button to the hidden file input (a file dialog
