@@ -329,6 +329,7 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         | CatalogOp::EnsureExampleSeeded { .. }
         | CatalogOp::UpsertRegisteredDevice(_)
         | CatalogOp::RenameRegisteredDevice { .. }
+        | CatalogOp::RekeyRegisteredDevice { .. }
         | CatalogOp::ForgetRegisteredDevice { .. }
         | CatalogOp::AdoptDevicePackage { .. } => None,
     }
