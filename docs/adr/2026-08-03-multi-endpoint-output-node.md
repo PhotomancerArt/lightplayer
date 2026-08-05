@@ -193,8 +193,10 @@ Everything originally listed here (the shared cap, the studio face, the
 hardware walk) landed in this same plan — see the Consequences section above
 for what shipped and where. What remains open:
 
-- Concurrent per-frame transmission of a node's wires (`send_blocking_all`) —
-  wires are still written one at a time (Consequences, above).
+- Concurrent per-frame transmission of a node's wires — **done 2026-08-04**,
+  see `2026-08-04-concurrent-ws281x-flush.md` (a start/wait split plus a
+  frame barrier rather than a literal `send_blocking_all` call; two wires at
+  a time on the classic, 17 → 23 fps at 900 LEDs, zero guard trips).
 - Per-wire diagnostics / color discovery at the face (M7 of the
   hardware/board-selection roadmap) — the face is pre-discovery by design
   (settled Q6/G-A); swatch color-discovery mode already ships elsewhere and

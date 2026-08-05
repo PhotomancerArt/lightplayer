@@ -124,7 +124,11 @@ baseline)
             projects: {}
         }')"
 
-    for project in "${projects[@]}"; do
+    # ${projects[@]+...}: a record with an empty .projects leaves this array
+    # empty, and on bash 3.2 (macOS) a bare "${projects[@]}" would then abort
+    # with an unbound-variable error under `set -u` instead of baselining
+    # nothing.
+    for project in ${projects[@]+"${projects[@]}"}; do
         echo "heap-budget: baselining ${project}..."
         budget="$(budget_for "$project")"
         windows="$(jq '{windows: (.windows | map({key: .name, value: {transient, retained, largest_alloc}}) | from_entries)}' "$budget")"

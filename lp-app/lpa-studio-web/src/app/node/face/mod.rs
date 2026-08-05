@@ -19,6 +19,7 @@ mod node_card_drawers;
 mod node_card_section;
 mod node_face_body;
 mod output_face;
+mod phasor_trace;
 mod playlist_face;
 mod shader_face;
 
