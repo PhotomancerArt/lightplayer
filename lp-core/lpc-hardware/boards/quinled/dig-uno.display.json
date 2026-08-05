@@ -22,6 +22,10 @@
       "href": "https://quinled.info/pre-assembled-quinled-dig-uno/"
     }
   ],
+  "default_led_wires": [
+    "LED1",
+    "LED2"
+  ],
   "hw": {
     "width": 150,
     "module": {

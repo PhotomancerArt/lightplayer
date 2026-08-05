@@ -2321,6 +2321,11 @@ mod tests {
         assert!(node_for_def_path(&rt, "/fixture.json").is_some());
     }
 
+    /// Device-side loud refusal: a mapping written by a newer LightPlayer —
+    /// unknown shape variant and all — must fail the fixture with the honest
+    /// "unsupported format" message, not with an opaque parse error. The
+    /// format peek in `Map2dDoc::from_json` is what makes that true; this
+    /// pins the message a user actually sees on the device.
     #[test]
     fn fixture_map2d_mapping_rejects_newer_format() {
         let fs = fixture_project_fs();
@@ -2340,12 +2345,25 @@ mod tests {
 "#,
         )
         .expect("fixture.json");
-        fs.write_file("/fixture.map2d.json".as_path(), br#"{ "format": 99 }"#)
-            .expect("fixture.map2d.json");
+        fs.write_file(
+            "/fixture.map2d.json".as_path(),
+            br#"
+{
+  "format": 99,
+  "objects": [
+    { "name": "sector", "shape": { "helix": { "turns": 5, "count": 300 } } }
+  ]
+}
+"#,
+        )
+        .expect("fixture.map2d.json");
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
-        assert_fixture_node_error(&rt, "unsupported map2d format 99");
+        assert_fixture_node_error(
+            &rt,
+            "unsupported map2d format 99 (this build reads up to 2)",
+        );
     }
 
     /// A node whose *definition file* will not parse must be reported, not

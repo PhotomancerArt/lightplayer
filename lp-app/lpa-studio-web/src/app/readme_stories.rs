@@ -242,6 +242,7 @@ fn readme_home_view() -> UiHomeView {
                 relation: lpa_studio_core::SyncRelation::AtHead,
             }),
             running_in_sim: false,
+            target: None,
             health: PackageHealth::Ready,
         },
         UiPackageCard {
@@ -254,6 +255,7 @@ fn readme_home_view() -> UiHomeView {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: true,
+            target: None,
             health: PackageHealth::Ready,
         },
         UiPackageCard {
@@ -266,6 +268,7 @@ fn readme_home_view() -> UiHomeView {
             open_elsewhere: false,
             connected_device: None,
             running_in_sim: false,
+            target: None,
             health: PackageHealth::Ready,
         },
     ];

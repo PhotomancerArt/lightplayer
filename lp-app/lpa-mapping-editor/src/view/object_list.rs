@@ -44,9 +44,10 @@ pub fn ObjectList(
 ) -> Element {
     let session_read = session.read();
     let doc = session_read.doc();
-    let spans = resolve(doc)
-        .map(|resolved| resolved.spans)
-        .unwrap_or_default();
+    let resolved = resolve(doc).ok();
+    // A rail row is one object, so it reports the object's WHOLE range: a
+    // repeat resolves to one span per instance, and a row showing only the
+    // first instance's lamps would read as a shorter object than it is.
     let rows: Vec<(usize, String, Option<(u32, u32)>, bool)> = doc
         .objects
         .iter()
@@ -55,7 +56,10 @@ pub fn ObjectList(
             (
                 index,
                 object.name.clone(),
-                spans.get(index).map(|span| (span.start, span.count)),
+                resolved
+                    .as_ref()
+                    .and_then(|resolved| resolved.object_span(index as u32))
+                    .map(|span| (span.start, span.count)),
                 session_read.selection.objects.contains(&index),
             )
         })

@@ -18,6 +18,7 @@ use crate::view::editor_canvas::{CanvasDrag, EditorCanvas};
 use crate::view::editor_header::EditorHeader;
 use crate::view::object_list::ObjectList;
 use crate::view::properties_popover::PropertiesPopover;
+use crate::view::reference::ReferenceImage;
 
 /// Host-provided file operations (the header renders new/open/save when
 /// present; save is a data-URL download built from the live document).
@@ -25,6 +26,18 @@ use crate::view::properties_popover::PropertiesPopover;
 pub struct EditorFileOps {
     pub on_new: EventHandler<()>,
     pub on_open: EventHandler<()>,
+}
+
+/// Host-provided reference-image operations (page host only, like
+/// [`EditorFileOps`]): the header renders "ref" pick/clear/opacity controls
+/// when present. The host owns loading and persistence; the editor only
+/// reports what the user asked for.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ReferenceOps {
+    /// Open the host's file dialog.
+    pub on_pick: EventHandler<()>,
+    /// Opacity change or clear (`None`).
+    pub on_change: EventHandler<Option<ReferenceImage>>,
 }
 
 /// Canvas view toggles (editor defaults: wiring view on — this is the
@@ -38,6 +51,9 @@ pub struct EditorViewOptions {
     /// without a feed this falls back to the object palette.
     pub live: bool,
     pub fit_preview: bool,
+    /// Show the host-supplied reference image (`reference` prop); moot
+    /// without one.
+    pub reference: bool,
 }
 
 impl Default for EditorViewOptions {
@@ -48,6 +64,7 @@ impl Default for EditorViewOptions {
             universes: false,
             live: false,
             fit_preview: false,
+            reference: true,
         }
     }
 }
@@ -83,6 +100,14 @@ pub fn MapEditor(
     /// and the user expects a re-fit).
     #[props(default)]
     refit_epoch: u64,
+    /// Host-owned reference image for tracing, rendered under the authored
+    /// geometry. Editor-side state only — never part of the document.
+    #[props(default)]
+    reference: Option<ReferenceImage>,
+    /// Reference pick/clear/opacity controls render when present (page
+    /// host); the fixture face omits it and loses nothing.
+    #[props(default)]
+    reference_ops: Option<ReferenceOps>,
 ) -> Element {
     let mut session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
@@ -207,6 +232,8 @@ pub fn MapEditor(
                 file_ops,
                 scene_menu,
                 on_doc_change,
+                reference: reference.clone(),
+                reference_ops,
             }
             div { class: "lpme-body",
                 div { class: "lpme-canvas-wrap",
@@ -218,6 +245,7 @@ pub fn MapEditor(
                         drag,
                         live_colors,
                         on_committed,
+                        reference,
                     }
                     PropertiesPopover { session, camera, viewport, drag, on_committed }
                     div { class: "lpme-hint", "{tool_hint}" }
@@ -329,6 +357,7 @@ fn HelpFloat() -> Element {
                     ("V / G / R / P", "select · grid · ring · path tool"),
                     ("N / A / U / L", "numbers · arrows · universes · live"),
                     ("F", "texture-frame preview"),
+                    ("B", "reference image"),
                     ("0", "zoom to fit"),
                     ("⌘ + scroll", "zoom at cursor"),
                     ("right-drag / scroll", "pan"),
@@ -446,6 +475,10 @@ fn handle_key(
                 "f" => {
                     let current = view_opts.peek().fit_preview;
                     view_opts.write().fit_preview = !current;
+                }
+                "b" => {
+                    let current = view_opts.peek().reference;
+                    view_opts.write().reference = !current;
                 }
                 "0" => fit_pending.set(true),
                 _ => {}

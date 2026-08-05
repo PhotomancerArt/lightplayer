@@ -597,7 +597,7 @@ pub(crate) fn map2d_control_preview_product(
                     },
                 }],
             },
-            display_layout: Some(ControlDisplayLayout::Layout2d(layout)),
+            display_layout: Some(std::rc::Rc::new(ControlDisplayLayout::Layout2d(layout))),
             bytes: control_preview_bytes(count).into(),
         }))
 }
@@ -621,7 +621,7 @@ pub(crate) fn control_preview_product(name: &str) -> UiProducedProduct {
                     },
                 }],
             },
-            display_layout: Some(control_layout_2d_fixture()),
+            display_layout: Some(std::rc::Rc::new(control_layout_2d_fixture())),
             bytes: control_preview_bytes(16).into(),
         }))
 }

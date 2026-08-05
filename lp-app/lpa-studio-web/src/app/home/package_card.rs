@@ -130,6 +130,14 @@ pub(crate) fn PackageCard(
                         if let Some(edited) = edited_line {
                             p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Edited {edited}" }
                         }
+                        // Advisory board target (vision D3): a quiet fact,
+                        // not a warning — mismatch tint is P06's job, in
+                        // mismatch context only.
+                        if let Some(target) = card.target.as_deref() {
+                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-muted-foreground",
+                                "for {target_display_name(target)}"
+                            }
+                        }
                         if let Some(provenance) = card.provenance.clone() {
                             p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-dim-foreground", "{provenance}" }
                         }
@@ -359,6 +367,20 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
     }
 }
 
+/// Friendly display form of a project's advisory `target` (vendor/product
+/// board id) for the "for \<board\>" card badge: the catalog's
+/// `display_name` when the id is a known board, else the raw id verbatim —
+/// advisory metadata may name a board this build's catalog doesn't carry
+/// (a future board, a typo'd id), and the badge should still say something
+/// rather than disappear.
+fn target_display_name(target: &str) -> &str {
+    lpa_boards::all_boards()
+        .iter()
+        .find(|board| board.board_id == target)
+        .map(|board| board.display_name.as_str())
+        .unwrap_or(target)
+}
+
 pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
@@ -461,6 +483,31 @@ pub(crate) fn platform_now_secs() -> f64 {
     0.0
 }
 
+/// P02: the "for \<board\>" badge resolves a known catalog id to its
+/// display name, and falls back to the raw string for an id the catalog
+/// doesn't carry — advisory metadata should still render *something*
+/// rather than vanish.
+#[cfg(test)]
+mod target_display_name_tests {
+    use super::target_display_name;
+
+    #[test]
+    fn known_board_resolves_to_its_display_name() {
+        assert_eq!(
+            target_display_name("espressif/esp32-c6-devkitc-1"),
+            "ESP32-C6-DevKitC-1"
+        );
+    }
+
+    #[test]
+    fn unknown_board_falls_back_to_the_raw_id() {
+        assert_eq!(
+            target_display_name("acme/future-board-9000"),
+            "acme/future-board-9000"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::UiCardConnection;
@@ -482,6 +529,7 @@ mod tests {
                 relation,
             }),
             running_in_sim,
+            target: None,
             health: PackageHealth::Ready,
         }
     }
