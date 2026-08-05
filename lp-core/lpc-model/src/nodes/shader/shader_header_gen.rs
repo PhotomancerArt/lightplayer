@@ -30,17 +30,31 @@ pub fn generate_compute_shader_header(
     }
 
     for (binding, (name, slot)) in def.consumed_slots.entries.iter().enumerate() {
-        let ty = glsl_type_for_ref(slot.value.value(), registry)?;
         match slot.kind.value() {
             // Timebase kinds declare exactly what a plain f32 value slot
             // declares: the config that makes them a phasor lives on the def,
             // never in GLSL (`uniform float phase;` is the whole contract).
             ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
+                let ty = glsl_type_for_ref(slot.value.value(), registry)?;
                 writeln!(&mut out, "// consumed: {name}").expect("write string");
                 writeln!(&mut out, "layout(binding = {binding}) uniform {ty} {name};")
                     .expect("write string");
             }
+            // A palette's GLSL spelling comes from the kind, not from a
+            // resolvable `LpType`: `sampler2D` is not an `LpType` at all, and
+            // the palette itself rides the def's `gradient` field. The engine
+            // supplies the matching `TextureBindingSpec` at compile
+            // (`docs/design/lp-shader-texture-access.md`).
+            ShaderSlotKind::Palette => {
+                writeln!(&mut out, "// consumed: {name}").expect("write string");
+                writeln!(
+                    &mut out,
+                    "layout(binding = {binding}) uniform sampler2D {name};"
+                )
+                .expect("write string");
+            }
             ShaderSlotKind::Map => {
+                let ty = glsl_type_for_ref(slot.value.value(), registry)?;
                 let mapping = slot
                     .mapping
                     .data
@@ -63,16 +77,25 @@ pub fn generate_compute_shader_header(
     }
 
     for (name, slot) in &def.produced_slots.entries {
-        let ty = glsl_type_for_ref(slot.value.value(), registry)?;
         match slot.kind.value() {
             // A produced timebase slot is meaningless, but its declaration is
             // still just `float name;` — refusing it here would only move the
             // diagnostic somewhere less useful.
             ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
+                let ty = glsl_type_for_ref(slot.value.value(), registry)?;
                 writeln!(&mut out, "// produced: {name}").expect("write string");
                 writeln!(&mut out, "{ty} {name};").expect("write string");
             }
+            // A shader writes pixels, not palettes: there is nothing for a
+            // produced sampler to mean, and inventing a declaration would
+            // hide the authoring mistake instead of naming it.
+            ShaderSlotKind::Palette => {
+                return Err(ShaderHeaderGenError::Unsupported(
+                    "a palette slot cannot be produced",
+                ));
+            }
             ShaderSlotKind::Map => {
+                let ty = glsl_type_for_ref(slot.value.value(), registry)?;
                 let mapping = slot
                     .mapping
                     .data
@@ -246,6 +269,7 @@ mod tests {
                 value: crate::ValueSlot::new(ShaderValueShapeRef::builtin("f32")),
                 key: crate::OptionSlot::none(),
                 phasor: crate::OptionSlot::none(),
+                gradient: crate::OptionSlot::none(),
                 default: crate::OptionSlot::none(),
                 min: crate::OptionSlot::none(),
                 max: crate::OptionSlot::none(),

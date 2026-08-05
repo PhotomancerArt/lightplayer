@@ -17,10 +17,10 @@ use alloc::vec::Vec;
 
 use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
-    AssetLocation, FloatMode, FromLpValue, MapSlot, NodeId, NodeRuntimeStatus, OptionSlot,
-    PhasorConfig, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, TimeProduct, ValueSlot,
+    AssetLocation, FloatMode, FromLpValue, GradientConfig, MapSlot, NodeId, NodeRuntimeStatus,
+    OptionSlot, PhasorConfig, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
+    ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, TimeProduct, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
@@ -37,6 +37,11 @@ use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, Visual
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
+use super::palette_bake_cache::{PaletteBake, PaletteBakeCache};
+use super::palette_eval::{
+    PaletteCyclePosition, palette_cycle_gradients, palette_cycle_position, palette_frame_zero,
+    palette_phasor_config,
+};
 use super::phasor_eval::{phasor_frame_zero, shape_phasor};
 use super::shader_input_materialize::materialize_shader_input;
 
@@ -101,6 +106,11 @@ pub struct ShaderNode {
     /// frame — a stale window from a tick where this node was not demanded
     /// must not authorize a compile long after the pressure broadcast.
     compile_window: Option<Revision>,
+    /// Baked palette strips for this node's `sampler2D` uniforms, keyed by
+    /// the value hash of what was resolved for them
+    /// ([`PaletteBakeCache`]). Rebuildable: dropped under memory pressure
+    /// and re-baked on the next tick.
+    palette_cache: PaletteBakeCache,
     state: ShaderState,
 }
 
@@ -123,6 +133,7 @@ impl ShaderNode {
             needs_compile: true,
             compile_window_requested: false,
             compile_window: None,
+            palette_cache: PaletteBakeCache::new(),
             state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
     }
@@ -232,6 +243,7 @@ impl ShaderNode {
         let compile_opts = ShaderCompileOptions {
             semantics,
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
+            textures: palette_texture_specs(&self.consumed_slots),
             ..ShaderCompileOptions::new(semantics, graphics.glsl_frontend())
         };
 
@@ -357,7 +369,25 @@ impl ShaderNode {
         let mut uniforms = Vec::new();
         let mut failures = Vec::new();
         let mut timebase = TimeProductCache::new();
+        let palette_slots = palette_slot_count(&self.consumed_slots);
         for (name, slot) in &self.consumed_slots.entries {
+            // Palette uniforms are textures, not values: they resolve to a
+            // gradient config, bake to a strip, and bind as a sampler. The
+            // value path below has no shape that could carry one.
+            if slot.kind.value().is_texture() {
+                let (value, failure) =
+                    resolve_palette_input(ctx, name, slot, &mut self.palette_cache, palette_slots);
+                if let Some(failure) = failure {
+                    failures.push((name.clone(), failure));
+                }
+                // A palette with no texture this tick contributes no uniform
+                // rather than a wrong one; the render path's frame-zero bake
+                // is what keeps the uniform set complete.
+                if let Some(value) = value {
+                    uniforms.push((name.clone(), value));
+                }
+                continue;
+            }
             let (value, failure) =
                 resolve_or_default_input(ctx, name, slot, "visual shader", &mut timebase)?;
             if let Some(failure) = failure {
@@ -372,6 +402,53 @@ impl ShaderNode {
             self.node_id,
             "visual-shader",
         );
+        Ok(())
+    }
+
+    /// Give every palette uniform a texture before the shader runs, even one
+    /// no tick has resolved yet.
+    ///
+    /// The backend treats a uniform its generated header declares but the
+    /// uniform set omits as a hard error, and a `sampler2D` cannot be
+    /// answered from [`default_uniforms`] the way a `float` can — there is no
+    /// graphics backend at node construction to allocate a strip with. So the
+    /// frame-zero answer is baked here instead, on the first render, from the
+    /// slot's own config at [`palette_frame_zero`]: deterministic, allocated
+    /// once, and the same strip a resolved tick would land on when the
+    /// timebase has not moved. Mirrors `phasor_frame_zero`.
+    fn ensure_palette_uniforms(&mut self, ctx: &RenderContext<'_>) -> Result<(), NodeError> {
+        let palette_slots = palette_slot_count(&self.consumed_slots);
+        if palette_slots == 0 {
+            return Ok(());
+        }
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        for (name, slot) in &self.consumed_slots.entries {
+            if !slot.kind.value().is_texture()
+                || self
+                    .visual_uniforms
+                    .iter()
+                    .any(|(uniform, _)| uniform == name)
+            {
+                continue;
+            }
+            let config = slot.gradient_config();
+            let position = palette_frame_zero(&config);
+            let Some((from, to)) = palette_cycle_gradients(&config, position) else {
+                continue;
+            };
+            let bake = PaletteBake {
+                from,
+                to,
+                mix_steps: position.mix_steps,
+            };
+            let value = self
+                .palette_cache
+                .uniform_for(graphics, &bake, palette_slots)
+                .map_err(err_ctx("bake frame-zero palette"))?;
+            self.visual_uniforms.push((name.clone(), value));
+        }
         Ok(())
     }
 }
@@ -425,9 +502,15 @@ impl NodeRuntime for ShaderNode {
         _level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
-        // Nothing droppable: `shader` is the compiled product (keep-last-good
-        // contract, not a rebuildable cache), and the source string is the
-        // input for the next compile.
+        // `shader` is the compiled product (keep-last-good contract, not a
+        // rebuildable cache) and the source string is the input for the next
+        // compile, so neither goes. The palette strips do: they are a pure
+        // function of resolved values, and the next tick re-bakes exactly the
+        // ones still in use. Dropping the textures also clears the uniform
+        // values that pointed at them, so nothing keeps a stale descriptor.
+        self.palette_cache.clear();
+        self.visual_uniforms
+            .retain(|(_, value)| !matches!(value, LpsValueF32::Texture2D(_)));
         Ok(())
     }
 
@@ -580,6 +663,20 @@ pub(super) fn sync_shader_slot_def_from_authored(
             ctx,
             &alloc::format!("{base_path}.phasor.some"),
             &mut slot.phasor,
+        )?;
+    }
+    // The gradient config syncs the same way — one read of a value leaf, so a
+    // live palette edit hot-applies — but its result is deliberately NOT
+    // folded into `changed`. `changed` means *compile*-affecting, and a
+    // palette's compile contract is its `TextureBindingSpec`, which depends
+    // on the slot's KIND alone (`palette_texture_specs`). Or-ing it in would
+    // JIT-recompile the shader on every frame of a color-picker drag, for a
+    // spec that is byte-identical before and after.
+    if matches!(slot.kind.value(), ShaderSlotKind::Palette) {
+        sync_optional_value_from_authored::<GradientConfig>(
+            ctx,
+            &alloc::format!("{base_path}.gradient.some"),
+            &mut slot.gradient,
         )?;
     }
     changed |= sync_optional_value_from_authored::<f32>(
@@ -894,6 +991,7 @@ impl RenderNode for ShaderNode {
                 .map_err(err_ctx("clear render target"))?;
             return Ok(());
         }
+        self.ensure_palette_uniforms(ctx)?;
         let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
         let shader = self
             .shader
@@ -939,6 +1037,7 @@ impl RenderNode for ShaderNode {
                 .map_err(err_ctx("clear sample target"))?;
             return Ok(());
         }
+        self.ensure_palette_uniforms(ctx)?;
         let uniforms = build_uniforms(
             request.output_width,
             request.output_height,
@@ -1005,9 +1104,67 @@ fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform
                 LpsValueF32::F32(phasor_frame_zero(&slot.phasor_config())),
             )),
             ShaderSlotKind::Seconds => Some((name.clone(), LpsValueF32::F32(0.0))),
-            ShaderSlotKind::Map => None,
+            // A map declares an array the backend fills from slot data, and a
+            // palette declares a sampler whose strip cannot be allocated
+            // without a graphics backend. The palette's frame-zero answer is
+            // baked on the first render instead
+            // ([`ShaderNode::ensure_palette_uniforms`]).
+            ShaderSlotKind::Map | ShaderSlotKind::Palette => None,
         })
         .collect()
+}
+
+/// How many of this node's uniforms are palettes.
+///
+/// Sets the bake cache's capacity, and short-circuits the whole palette path
+/// for the overwhelmingly common shader that has none.
+fn palette_slot_count(slots: &MapSlot<String, ShaderSlotDef>) -> usize {
+    slots
+        .entries
+        .values()
+        .filter(|slot| slot.kind.value().is_texture())
+        .count()
+}
+
+/// The compile-time texture binding contract for this node's palette slots.
+///
+/// One [`lps_shared::TextureBindingSpec`] per `sampler2D` uniform leaf, keyed
+/// by uniform name — the map `lp-shader` validates the shader's declared
+/// samplers against, failing compilation on a missing *or* extra spec
+/// (`docs/design/lp-shader-texture-access.md`). A shader node left this
+/// defaulted-empty until palettes existed, which is why any `sampler2D` used
+/// to fail to compile at all.
+///
+/// Every palette gets the same spec, and deliberately so:
+///
+/// - **`Rgba16Unorm`** — the only 16-bit format that supports *filtered*
+///   sampling, and the precision canonical LinearSrgb wants.
+/// - **`Linear`** — a palette is a ramp; nearest sampling would quantize
+///   every gradient to 256 visible bands.
+/// - **`Repeat` on X** — a palette read past its end wraps, so a shader can
+///   scroll `u` without clamping and a cyclic gradient joins seamlessly.
+/// - **height-one** — the strip is `WIDTH × 1`, and the hint tells lowering
+///   to ignore `uv.y` entirely.
+///
+/// Per-slot authoring of filter and wrap is deliberately **not** offered.
+/// That would be a model change (a new authored field on `ShaderSlotDef`),
+/// and nothing has yet wanted a palette sampled any other way; the one spec
+/// is what makes every baked strip interchangeable across shaders.
+fn palette_texture_specs(slots: &MapSlot<String, ShaderSlotDef>) -> lp_shader::TextureBindingSpecs {
+    let mut specs = lp_shader::TextureBindingSpecs::new();
+    for (name, slot) in &slots.entries {
+        if slot.kind.value().is_texture() {
+            specs.insert(
+                name.clone(),
+                lp_shader::texture_binding::height_one(
+                    crate::color::PALETTE_BAKE_FORMAT,
+                    lps_shared::TextureFilter::Linear,
+                    lps_shared::TextureWrap::Repeat,
+                ),
+            );
+        }
+    }
+    specs
 }
 
 /// Per-node-tick memo of the scope's time product.
@@ -1165,6 +1322,157 @@ fn resolve_phasor_config(
     }
 }
 
+/// Evaluate a `palette` uniform: resolve the config (and with it the
+/// integrator's identity), read the cycle position from the timebase, bake.
+///
+/// Returns `None` for the uniform — with the reason — rather than a wrong
+/// texture whenever the strip cannot be produced. The render path's
+/// frame-zero bake is what keeps the uniform set complete in that case, so a
+/// palette whose channel breaks mid-session keeps showing its authored
+/// default instead of going black, exactly as a broken value binding does.
+fn resolve_palette_input(
+    ctx: &mut TickContext<'_>,
+    name: &str,
+    slot: &ShaderSlotDef,
+    cache: &mut PaletteBakeCache,
+    palette_slots: usize,
+) -> (Option<LpsValueF32>, Option<String>) {
+    let slot_path = match SlotPath::parse(name) {
+        Ok(path) => path,
+        Err(e) => return (None, Some(format!("invalid palette slot {name:?}: {e}"))),
+    };
+    let (config, key, mut failure) = resolve_gradient_config(ctx, &slot_path, slot);
+    let position = palette_cycle_position_for(ctx, &config, &key, &mut failure);
+
+    let Some((from, to)) = palette_cycle_gradients(&config, position) else {
+        failure.get_or_insert_with(|| String::from("palette config has no gradients"));
+        return (None, failure);
+    };
+    let bake = PaletteBake {
+        from,
+        to,
+        mix_steps: position.mix_steps,
+    };
+    let Some(graphics) = ctx.graphics() else {
+        failure.get_or_insert_with(|| String::from("no graphics backend to bake a palette into"));
+        return (None, failure);
+    };
+    match cache.uniform_for(graphics, &bake, palette_slots) {
+        Ok(value) => (Some(value), failure),
+        Err(error) => {
+            failure.get_or_insert_with(|| format!("bake palette: {error}"));
+            (None, failure)
+        }
+    }
+}
+
+/// Where a palette config sits in its cycle this tick.
+///
+/// A static config never queries the timebase — there is one gradient and no
+/// phase to read, so a shader whose palette does not cycle costs no timebase
+/// work at all. A cycle makes exactly **one** query, for the whole set's
+/// pass; see [`palette_eval`](super::palette_eval).
+fn palette_cycle_position_for(
+    ctx: &mut TickContext<'_>,
+    config: &GradientConfig,
+    key: &PhasorKey,
+    failure: &mut Option<String>,
+) -> PaletteCyclePosition {
+    if matches!(config, GradientConfig::Static(_)) {
+        return palette_frame_zero(config);
+    }
+    let mut timebase = TimeProductCache::new();
+    let product = match timebase.get(ctx) {
+        Ok(product) => product,
+        Err(message) => {
+            failure.get_or_insert(message);
+            return palette_frame_zero(config);
+        }
+    };
+    match ctx.time_product_phasor(product, key, &palette_phasor_config(config)) {
+        Ok((phase, _cycle)) => palette_cycle_position(config, phase),
+        Err(error) => {
+            failure.get_or_insert_with(|| error.to_string());
+            palette_frame_zero(config)
+        }
+    }
+}
+
+/// The gradient config a palette slot bakes this tick, and the integrator
+/// identity that follows from where the config came from (parent D3).
+///
+/// The provenance rule is the phasor's, unchanged: a channel-driven config is
+/// [`PhasorKey::Shared`], so every reader of that channel walks the set in
+/// lockstep; anything slot-local — an authored config, the default palette,
+/// or a bound channel nobody writes — is [`PhasorKey::Private`] to this
+/// node's slot. Crossing that boundary changes the key and so resets the
+/// phase, which is the intended "grabbing the reins".
+///
+/// # The channel carries the WHOLE config
+///
+/// This is where palettes deliberately **differ** from phasors. A phasor
+/// channel drives the *period only*: `waveform` and `phase_offset` are output
+/// shaping — how one consumer wants to read a cycle — so they stay slot-local
+/// and two readers of one integrator can look different. There is no
+/// equivalent split here. A palette cycle's fields are:
+///
+/// - `set` — *which palettes*. Sharing a palette cycle and not sharing the
+///   palettes is a contradiction: `bus:palette` exists precisely so that two
+///   shaders show the same colors.
+/// - `step_seconds` — the period, by the same argument that makes a phasor's
+///   period shared: it is what the store integrates, so two readers on one
+///   integrator cannot disagree about it and stay in phase.
+/// - `fade_seconds` — arguably shaping, and the one field a split could have
+///   kept local. It is shared anyway, because it is not *output* shaping: the
+///   fade decides which two entries are mixed and by how much, i.e. what the
+///   texels are, not how one reader reads them. Two shaders on `bus:palette`
+///   dissolving on different schedules would show visibly different colors at
+///   the same instant while claiming to share a palette — which is the exact
+///   failure the shared key exists to prevent.
+///
+/// So there is nothing left for the slot-local config to contribute when a
+/// channel drives it, and the driven config is taken whole. The slot's own
+/// `gradient` stays the fallback for when nothing does — never a partial
+/// overlay, which would leave a palette showing a set nobody authored
+/// together.
+fn resolve_gradient_config(
+    ctx: &mut TickContext<'_>,
+    slot_path: &SlotPath,
+    slot: &ShaderSlotDef,
+) -> (GradientConfig, PhasorKey, Option<String>) {
+    let private = PhasorKey::Private {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let Some((scope, channel)) = ctx.consumed_slot_bus_provenance(slot_path) else {
+        return (slot.gradient_config(), private, None);
+    };
+    let query = QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    };
+    let driven = ctx
+        .resolve(&query)
+        .map_err(|e| e.message)
+        .and_then(|production| {
+            production
+                .value_leaf()
+                .ok_or_else(|| String::from("palette channel is not a value"))
+                .and_then(|value| {
+                    GradientConfig::from_lp_value(value.value())
+                        .map_err(|e| format!("palette channel: {e}"))
+                })
+        });
+    match driven {
+        Ok(config) => (config, PhasorKey::Shared { scope, channel }, None),
+        // The channel has a writer but its value is not a gradient config:
+        // report it and keep baking the slot-local palette. Taking the shared
+        // key anyway would attach this node to an integrator whose set it
+        // cannot see.
+        Err(message) => (slot.gradient_config(), private, Some(message)),
+    }
+}
+
 /// Resolve one consumed shader input, falling back to its authored default
 /// when the binding fails to resolve — with the failure *reported*, not
 /// swallowed. An unbound slot resolves `Ok` through the authored-default
@@ -1195,7 +1503,11 @@ pub(super) fn resolve_or_default_input(
     match *slot.kind.value() {
         ShaderSlotKind::Seconds => return Ok(resolve_seconds_input(ctx, timebase)),
         ShaderSlotKind::Phasor => return resolve_phasor_input(ctx, name, slot, timebase),
-        ShaderSlotKind::Value | ShaderSlotKind::Map => {}
+        // A palette never reaches here from the visual shader node — it takes
+        // the bake path before this function is called, and the compute node
+        // has no palette support yet. The materialize helper below refuses it
+        // by name rather than by silence.
+        ShaderSlotKind::Value | ShaderSlotKind::Map | ShaderSlotKind::Palette => {}
     }
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid {context} consumed slot {name:?}: {e}")))?;
