@@ -84,9 +84,14 @@ it). Slew is presentation-grade smoothing (anti-zipper on brightness
 grabs), defined per widget kind with a project-wide default; it never
 changes where a value *ends up*, only how it settles. Writers that
 accumulate (`phase += speed·dt`), oscillate, or generate are forbidden —
-that behavior is a node's. The supported idiom for phase-continuous speed
-is: `speed` channel → phasor **node** → `phase` channel → consumer, with
-`phase` as the bus-vocabulary convention example modules establish.
+that behavior is the clock's. The supported idiom for phase-continuous
+speed is the **clock's time product**: a shader declares a
+`phasor`-kind uniform, the engine's timebase store integrates it, and
+the panel's Speed knob writes a `PhasorConfig` onto the slot's config
+channel — every reader of that channel rides the one integrator it
+retunes (ADR 2026-08-04-time-is-a-product; shipped 2026-08-04,
+PR #328). The knob holds a value like any panel writer; the phase
+lives with the clock.
 
 ### P4 — Precedence (restates modules.md R11)
 
