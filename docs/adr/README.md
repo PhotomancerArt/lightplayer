@@ -142,6 +142,10 @@ holds the full context.
 | A kind with no face publishes no panel controls (`ComputeShader`'s bound uniforms reach the wiring drawer, never a knob) | `2026-08-03-panel-visibility-is-derived` | A compute-driven module needs its knobs — `examples/meteor` already does |
 | Authored panel layouts: a curated promoted-control list per module, as an additive override on the derived default | `2026-08-03-panel-visibility-is-derived` | A published/vendored module needs a curated public API |
 | A minted `status-engaged` token family (engaged currently borrows `status-attention` amber; Yona leans maybe-blue) | `2026-08-03-panel-visibility-is-derived` | Yona settles the engaged treatment — do not change it before then |
+| `run_identity_stamp` still writes `/.lp/device.json` at provisioning (the connect path already reads it as legacy evidence and re-keys) | `2026-08-04-device-identity-anchored-in-silicon` | The provisioning/wizard phase of the device-identity plan |
+| Share-envelope hygiene for device refs (a derived uid embeds a MAC; associations and history events carry uids) | `2026-08-04-device-identity-anchored-in-silicon`; `2026-07-28-share-envelopes` | Envelopes stop being version-and-refuse and start travelling |
+| Multi-studio registry sync (uids now agree across installs by construction; syncing rows is its own feature) | `2026-08-04-device-identity-anchored-in-silicon` | Someone runs two Studio installs against one fleet |
+| Retiring the hello's `device_uid` field and the `/.lp/device.json` read | `2026-08-04-device-identity-anchored-in-silicon` | No fielded board still needs migrating |
 
 ## Relationship To Shared Planning
 

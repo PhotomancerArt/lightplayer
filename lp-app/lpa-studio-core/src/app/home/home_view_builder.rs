@@ -422,10 +422,15 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         head_version: live.head_version,
         local_saved_at: live.local_saved_at,
         pushed_at: live.pushed_at,
-        unstamped: live
-            .sync
-            .as_ref()
-            .is_some_and(|sync| sync.identity.is_none()),
+        // "Needs a name" is about the NAME, not the uid. A MAC-identified
+        // board has a uid from its first hello (device identity design
+        // §3) while still being a board nobody has named, so the gate
+        // reads the name: identity absent, or present with nothing in it.
+        unnamed: live.sync.as_ref().is_some_and(|sync| {
+            sync.identity
+                .as_ref()
+                .is_none_or(|identity| identity.name.is_empty())
+        }),
         registry: None,
         connect: live.connect.clone(),
     });
@@ -461,6 +466,10 @@ pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDev
         // still key distinctly by `session_key` — see `identity_key`.
         name: identity
             .map(|identity| identity.name.clone())
+            // An identity with an EMPTY name is a board that has a uid
+            // and no name yet (device identity design §3) — it falls
+            // through the same cascade an anonymous board takes.
+            .filter(|name| !name.is_empty())
             .or_else(|| live.detected_chip.as_deref().and_then(display_chip_name))
             .unwrap_or_else(|| "Connected device".to_string()),
         transport: live.transport.clone().unwrap_or_default(),
@@ -603,7 +612,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         head_version: None,
         local_saved_at: None,
         pushed_at: None,
-        unstamped: false,
+        unnamed: false,
         registry: Some(device),
         connect: ConnectEvidence::Idle,
     });

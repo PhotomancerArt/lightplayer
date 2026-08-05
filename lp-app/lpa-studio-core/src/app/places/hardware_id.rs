@@ -55,8 +55,20 @@ impl HardwareId {
     /// normalized; the wrong width (notably an 8-group EUI-64 — a
     /// DIFFERENT fact reported alongside `base_mac` on 802.15.4-capable
     /// chips) is rejected rather than silently truncated.
+    ///
+    /// The all-zero and all-ones addresses are rejected too: they are what
+    /// a *failed* efuse read looks like (0x00000000 / 0xffffffff
+    /// registers), and unlike malformed text they parse fine — every board
+    /// whose read failed would answer to one identity. This mirrors
+    /// `lpa_link::normalize_base_mac`, which applies the same rule to the
+    /// download-mode (A2) reader; studio-core cannot depend that way, so
+    /// the rule is stated twice on purpose and both are tested.
     pub fn from_base_mac(s: &str) -> Option<Self> {
-        parse_colon_hex_mac(s).map(|mac| HardwareId::EspEfuse { mac })
+        let mac = parse_colon_hex_mac(s)?;
+        if mac.iter().all(|octet| *octet == 0x00) || mac.iter().all(|octet| *octet == 0xff) {
+            return None;
+        }
+        Some(HardwareId::EspEfuse { mac })
     }
 
     /// The registry-key uid this identity resolves to (design §2, I2).
@@ -186,6 +198,18 @@ mod tests {
         // an EUI-64 (802.15.4) is 8 groups, not 6 — a DIFFERENT fact from
         // base_mac (see HardwareFacts::eui64 docs) and must not parse as one.
         assert_eq!(HardwareId::from_base_mac("aa:bb:cc:dd:ee:ff:00:11"), None);
+    }
+
+    #[test]
+    fn from_base_mac_rejects_the_failed_efuse_read_addresses() {
+        // the shapes an efuse read returns when it FAILS: accepting either
+        // would hand every failed board the same derived uid — worse than
+        // leaving them anonymous (mirrors `lpa_link::normalize_base_mac`).
+        assert_eq!(HardwareId::from_base_mac("00:00:00:00:00:00"), None);
+        assert_eq!(HardwareId::from_base_mac("ff:ff:ff:ff:ff:ff"), None);
+        assert_eq!(HardwareId::from_base_mac("FF:FF:FF:FF:FF:FF"), None);
+        // one non-zero octet makes it a plausible address again
+        assert!(HardwareId::from_base_mac("00:00:00:00:00:01").is_some());
     }
 
     #[test]
