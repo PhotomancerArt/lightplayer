@@ -104,7 +104,8 @@ pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
 pub(crate) use panel::phasor_speed_display;
 pub use panel::{
     HFaderField, KnobField, PaletteCatalog, PaletteChoice, PaletteChooser, PaletteChooserTab,
-    PaletteGroup, PaletteSwatchField, PanelControl, PanelEmit, ToggleField,
+    PaletteEditTarget, PaletteEditor, PaletteGroup, PaletteOrigin, PaletteSwatchField, PanelControl,
+    PanelEmit, ToggleField,
     project_palette_choices,
 };
 pub use produced_product_view::ProducedProductView;

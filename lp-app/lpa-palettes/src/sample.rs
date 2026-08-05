@@ -92,11 +92,45 @@ pub fn to_display_srgb(space: Colorspace, c: [f32; 3]) -> [f32; 3] {
     }
 }
 
+/// Inverse of [`to_display_srgb`]: the coordinates an authoring space needs
+/// to *show* `srgb`.
+///
+/// The editor's color well speaks display sRGB (that is what
+/// `<input type="color">` is), while a stop's `c` is in the gradient's own
+/// [`Colorspace`] — this is the one crossing back. Out-of-gamut coordinates
+/// do not survive the round trip (the forward direction clamps into the
+/// display cube), which is exactly why an editor converts a color the user
+/// just *saw* rather than one it read out of storage.
+#[must_use]
+pub fn from_display_srgb(space: Colorspace, srgb: [f32; 3]) -> [f32; 3] {
+    match space {
+        Colorspace::Srgb => srgb,
+        Colorspace::LinearSrgb => srgb.map(srgb_to_linear),
+        Colorspace::Oklab => display_srgb_to_oklab(srgb),
+        // Mirrors `to_display_srgb`'s fallback for the spaces the catalog
+        // does not use: a clamp, never a panic.
+        Colorspace::Hsl | Colorspace::Hsv | Colorspace::Oklch => [
+            srgb[0].clamp(0.0, 1.0),
+            srgb[1].clamp(0.0, 1.0),
+            srgb[2].clamp(0.0, 1.0),
+        ],
+    }
+}
+
 fn linear_to_srgb(c: f32) -> f32 {
     if c <= 0.0031308 {
         (c * 12.92).clamp(0.0, 1.0)
     } else {
         (1.055 * c.powf(1.0 / 2.4) - 0.055).clamp(0.0, 1.0)
+    }
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.040_45 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
     }
 }
 
@@ -115,6 +149,26 @@ fn oklab_to_display_srgb(lab: [f32; 3]) -> [f32; 3] {
     let bl = -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3;
 
     [linear_to_srgb(r), linear_to_srgb(g), linear_to_srgb(bl)]
+}
+
+/// Inverse of [`oklab_to_display_srgb`] — the standard linear-sRGB → LMS →
+/// cube-root → Oklab chain.
+fn display_srgb_to_oklab(srgb: [f32; 3]) -> [f32; 3] {
+    let [r, g, b] = srgb.map(srgb_to_linear);
+
+    let l = 0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b;
+    let m = 0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b;
+    let s = 0.088_302_46 * r + 0.281_718_84 * g + 0.629_978_5 * b;
+
+    let l_ = l.cbrt();
+    let m_ = m.cbrt();
+    let s_ = s.cbrt();
+
+    [
+        0.210_454_26 * l_ + 0.793_617_8 * m_ - 0.004_072_047 * s_,
+        1.977_998_5 * l_ - 2.428_592_2 * m_ + 0.450_593_7 * s_,
+        0.025_904_037 * l_ + 0.782_771_77 * m_ - 0.808_675_77 * s_,
+    ]
 }
 
 #[cfg(test)]
@@ -194,6 +248,30 @@ mod tests {
         let white = sample_gradient_as_srgb(&gradient, 1.0);
         for channel in white {
             assert!((channel - 1.0).abs() < 1e-3, "{white:?}");
+        }
+    }
+
+    /// The editor's color well hands back display sRGB; the stop it lands in
+    /// is in the gradient's own space, so the crossing has to survive a round
+    /// trip for in-gamut colors.
+    #[test]
+    fn display_srgb_round_trips_through_every_authoring_space_the_editor_offers() {
+        for space in [Colorspace::Srgb, Colorspace::LinearSrgb, Colorspace::Oklab] {
+            for srgb in [
+                [0.0, 0.0, 0.0],
+                [1.0, 1.0, 1.0],
+                [0.2, 0.55, 0.9],
+                [0.93, 0.41, 0.06],
+            ] {
+                let coords = from_display_srgb(space, srgb);
+                let back = to_display_srgb(space, coords);
+                for channel in 0..3 {
+                    assert!(
+                        (back[channel] - srgb[channel]).abs() < 2e-3,
+                        "{space:?}: {srgb:?} -> {coords:?} -> {back:?}"
+                    );
+                }
+            }
         }
     }
 

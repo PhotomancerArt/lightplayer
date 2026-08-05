@@ -22,5 +22,7 @@ pub mod wled_import;
 
 pub use catalog::{all_palettes, palette_by_id};
 pub use entry::{PaletteCategory, PaletteEntry, PaletteLicense, PaletteLoadError};
-pub use sample::{sample_gradient_as_srgb, sample_linear, sample_step, to_display_srgb};
+pub use sample::{
+    from_display_srgb, sample_gradient_as_srgb, sample_linear, sample_step, to_display_srgb,
+};
 pub use wled_import::{WledImportError, import_wled_custom_palette};
