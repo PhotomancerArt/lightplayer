@@ -12,6 +12,12 @@ pub const FAKE_DEVICE_PROJECT_DIR: &str = "/projects/studio";
 /// into the flashed device's provenance (`commit=` on the boot line).
 pub const FAKE_IMAGE_IDENTITY: &str = "fake-esp32c6-image";
 
+/// The base MAC the fake connector's scripted flash preflight "reads" from
+/// efuse, in the UPPERCASE spelling a reporter is allowed to use — the
+/// canonical stored form is lowercase, and the fake exists partly to prove
+/// the normalization between them actually runs.
+pub const FAKE_PROBED_MAC: &str = "60:55:F9:0A:0B:0C";
+
 /// Stamped identity for a scripted LightPlayer state, written to
 /// `/.lp/device.json` at the device's fs ROOT.
 ///
