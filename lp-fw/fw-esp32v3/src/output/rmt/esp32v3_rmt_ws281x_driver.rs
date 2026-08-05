@@ -76,7 +76,7 @@ use lpc_hardware::{
 #[cfg(feature = "frame-dump")]
 use crate::output::rmt::frame_dump::{self, FrameDump};
 use crate::output::rmt::shared_driver::{
-    DRIVER, FRAME_TIMEOUT, install_isr, report_telemetry_if_due,
+    DRIVER, FRAME_TIMEOUT, install_isr, isr_on_app_core, report_telemetry_if_due,
 };
 use crate::output::rmt::v3_rmt::{self, BLOCK_WORDS, TX_CHANNELS, TX_PLAN};
 
@@ -87,28 +87,45 @@ const DISPLAY_LABEL: &str = "ESP32 RMT WS281x";
 ///
 /// The bound is interrupt-service margin, not an RMT limitation. With the
 /// four-channel block plan every transmitter wants a refill each 80 µs
-/// (12.5 k/s per channel) against a measured per-core ISR delivery ceiling of
-/// ~46–55 k/s ([`super::v3_rmt::plan_for_declared`]'s table). Measured
-/// 2026-08-04 on the DOM-Z-102 app path (900 LEDs, 4×225, quiet-covered by
-/// the provider's flush barrier): **both 2 and 4 concurrent run clean**
-/// (zero guard trips), and at this scale the same fps — but their margins
-/// differ sharply. At 2 concurrent the worst entry delay was 8 words of the
-/// 64-word deadline; at 4 concurrent it was 53. Two is the shipped default
-/// because that margin has to survive things this measurement did not
-/// exercise; four (50 k/s demand) is the measured, one-line lever if
-/// dome-scale wire time ever needs halving again.
+/// (12.5 k/s per channel), and one refill costs ≈15 word-times (≈18.75 µs,
+/// measured; APB-write-bound, identical quiet or loaded). Two answers, keyed
+/// on where the ISR runs this boot:
 ///
-/// ⚠️ Any transmission this cap admits is only safe while the CPU quietly
-/// spins: this chip's app path masks interrupts in stretches long enough to
-/// blow the 80 µs refill deadline, so a wire transmitting while the engine
-/// runs truncates on nearly every frame (measured before the barrier
-/// existed). The provider's end-of-flush barrier is what guarantees quiet
-/// coverage — see `Esp32OutputProvider::flush`.
+/// * **Dual-core (ISR on the dedicated APP core): 3** — ≈70 % worst-case ISR
+///   duty, and the measured clean maximum with transmission overlapping
+///   render (DOM-Z-102, zook-dome-1500, 2026-08-04 late: zero trips, zero
+///   skips, zero errors on every wire over 130 s; worst steady entry delay
+///   35/64 words). **Not 4, and the reason is arithmetic, not tuning**: four
+///   coincident 18.75 µs refills ≈ 75 µs against the 80 µs deadline — ≈94 %
+///   duty with the trampoline and dispatch on top — and on silicon the two
+///   last-serviced wires starved on essentially every frame (4,753/4,755
+///   truncated) while the first two ran clean. M4's cap-4-clean measurement
+///   was the same arithmetic surviving only because the whole system was
+///   quiet-spinning. A fifth-plus wire waits in the admission spin; the
+///   render-overlap win survives (18 → 23 fps at 1500), but the wait is why
+///   4 declared wires do not reach the engine-bound ceiling (~31 fps) — the
+///   pin-mux wave milestone (P7) is the planned path to that.
+/// * **Single-core fallback: 2** — the M4-shipped cap, unchanged, proven
+///   unregressed with a forced-fallback boot (18 fps / 53 ms / zero trips at
+///   1500 — the merged-main baseline exactly).
 ///
-/// Starts past the cap wait in [`Ws281xOutput::start`] for a slot to free, so
-/// a four-wire flush is two waves of two and costs roughly two wave wire
-/// times, versus four sequentially before this seam existed.
-const MAX_CONCURRENT_TX: usize = 2;
+/// ⚠️ In the single-core shape, any transmission this cap admits is only
+/// safe while the CPU quietly spins: this chip's app path masks interrupts
+/// in stretches long enough to blow the 80 µs refill deadline, so a wire
+/// transmitting while the engine runs truncates on nearly every frame
+/// (measured before the barrier existed). The provider's end-of-flush
+/// barrier guarantees quiet coverage — and it keys off the same
+/// [`Ws281xOutput::background_tx_safe`] answer, so cap and barrier switch
+/// together. See `Esp32OutputProvider::flush`.
+///
+/// ⚠️ In the dual-core shape, the cap's safety additionally leans on the
+/// `isr-in-ram` feature of lp-ws281x: with the service path in flash, the
+/// APP core stalls behind the PRO core's cache misses on the shared SPI bus
+/// and even cap 3 trips at boot-time flash traffic (measured: a single
+/// service 112 words late during project load).
+fn max_concurrent_tx() -> usize {
+    if isr_on_app_core() { 3 } else { 2 }
+}
 
 /// Channels currently transmitting a frame, across the whole driver.
 fn transmitting_channels() -> usize {
@@ -497,6 +514,16 @@ struct InFlightFrame {
 }
 
 impl Ws281xOutput for Esp32V3RmtWs281xOutput {
+    /// True exactly when the refill ISR is on the dedicated APP core this
+    /// boot: refills then survive anything the render core does, so the
+    /// provider may let this wire's transmission overlap the next render.
+    /// In the single-core fallback this is `false` and the M4 barrier
+    /// semantics apply unchanged — same flag as [`max_concurrent_tx`], so
+    /// the cap and the barrier always switch together.
+    fn background_tx_safe(&self) -> bool {
+        isr_on_app_core()
+    }
+
     fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
         // The borrow of `data` provably outlives the transmission: `start`'s
         // contract holds until `wait_complete` returns, and both happen inside
@@ -515,17 +542,16 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
         }
 
         // Admission control: hold the start until fewer than
-        // [`MAX_CONCURRENT_TX`] other channels are transmitting. The bound is
-        // this chip's ISR budget, not a driver limitation — see the constant.
-        // The in-flight channels complete by interrupt with no help from this
-        // thread, so the spin always ends; the deadline is pure paranoia
-        // against a wedged sibling, and on expiry the start proceeds (worst
-        // case is the over-subscription the cap exists to avoid, for one
-        // frame, on a board that already has a hung channel to report).
+        // [`max_concurrent_tx`] other channels are transmitting. The bound is
+        // this chip's per-core ISR budget, not a driver limitation — see the
+        // function. The in-flight channels complete by interrupt with no help
+        // from this thread, so the spin always ends; the deadline is pure
+        // paranoia against a wedged sibling, and on expiry the start proceeds
+        // (worst case is the over-subscription the cap exists to avoid, for
+        // one frame, on a board that already has a hung channel to report).
         let admission_wait = Instant::now();
-        while transmitting_channels() >= MAX_CONCURRENT_TX
-            && admission_wait.elapsed() <= FRAME_TIMEOUT
-        {}
+        let cap = max_concurrent_tx();
+        while transmitting_channels() >= cap && admission_wait.elapsed() <= FRAME_TIMEOUT {}
 
         // SAFETY: forwarding this method's own contract — the caller keeps
         // `data` alive, in place, and unmodified until `wait_complete` returns
@@ -560,7 +586,16 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
             iterations = iterations.wrapping_add(1);
             if iterations % 1024 == 0 && in_flight.started.elapsed() > FRAME_TIMEOUT {
                 timed_out = true;
-                DRIVER.abort(self.channel);
+                if !DRIVER.abort(self.channel) {
+                    // The teardown handshake could not confirm the ISR idle —
+                    // reachable only if the ISR core wedged mid-service. The
+                    // frame's bytes may still be referenced; shout, because
+                    // this is a defect report, not a recoverable condition.
+                    log::error!(
+                        "RMT channel {}: abort handshake timed out — ISR core wedged mid-service?",
+                        self.channel
+                    );
+                }
                 break;
             }
         }
@@ -606,7 +641,15 @@ impl Drop for Esp32V3RmtWs281xOutput {
     /// release the lease — in that order, so the channel is never offered to a
     /// new open while its transmitter is still running.
     fn drop(&mut self) {
-        DRIVER.abort(self.channel);
+        if !DRIVER.abort(self.channel) {
+            // See wait_complete's timeout path: an unconfirmed handshake means
+            // the ISR core wedged mid-service and the frame bytes may still be
+            // referenced when the channel storage is torn down below.
+            log::error!(
+                "RMT channel {}: abort handshake timed out in drop — ISR core wedged?",
+                self.channel
+            );
+        }
         if let Some(slot) = self.channels.borrow_mut()[self.index].as_mut() {
             slot.in_use = false;
         }
