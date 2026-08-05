@@ -30,6 +30,12 @@ pub enum CloseReason {
     /// Abandoned during or after a flash: the card must say "incomplete
     /// flash — needs re-flash". An incomplete flash is never trusted.
     IncompleteFlash,
+    /// ALREADY_LP's "Done": the board was adopted — its sighting is
+    /// recorded and the flow is over, WITHOUT a lens attach (G2 follow-up,
+    /// 2026-08-05: adopt does not navigate; setup does). The port is
+    /// deliberately NOT released — "it joins your roster as it is" means
+    /// the board is still there, on its own card, when the flow ends.
+    Adopted,
 }
 
 /// BOARD_PICK's data. `probe` is `None` on a target that needs no connect
@@ -243,6 +249,34 @@ impl SetupStateKind {
         }
     }
 
+    /// Whether the probe's VERDICT has landed — the recognition moment.
+    ///
+    /// This is the seam the wizard's placement turns on (G2 follow-up,
+    /// 2026-08-05). Before it, the bound board is a port and nothing else:
+    /// no verdict, so no identity, so its live card cannot be merged with
+    /// the registry row a KNOWN board already has, and rendering both
+    /// would be two representations of one board. So the pre-verdict
+    /// states keep the wizard standalone and stand the bound session's row
+    /// down. From the verdict on, the recognition is in hand and the
+    /// wizard rides the board's own card.
+    ///
+    /// DEVICE_HOME counts (it is reached through a verdict); CLOSED does
+    /// not — a terminal flow places nothing.
+    pub fn has_verdict(self) -> bool {
+        matches!(
+            self,
+            Self::BoardPick
+                | Self::WledFound
+                | Self::AlreadyLp
+                | Self::ProbeFailed
+                | Self::Flashing
+                | Self::FlashFailed
+                | Self::AbandonGuard
+                | Self::Provision
+                | Self::DeviceHome
+        )
+    }
+
     /// Stable label for event-log records and test failure messages
     /// (extend, do not rename).
     pub fn label(self) -> &'static str {
@@ -285,6 +319,34 @@ mod tests {
         labels.sort_unstable();
         labels.dedup();
         assert_eq!(labels.len(), SetupStateKind::ALL.len());
+    }
+
+    #[test]
+    fn the_verdict_seam_starts_at_the_states_that_carry_a_probe() {
+        // The placement rule reads this: pre-verdict the wizard is
+        // standalone, from the verdict on it rides the board's card. The
+        // seam has to line up with "the state carries a probe", because a
+        // probe IS the recognition — the two must not drift.
+        for kind in SetupStateKind::ALL {
+            let carries_probe = matches!(
+                kind,
+                SetupStateKind::BoardPick
+                    | SetupStateKind::WledFound
+                    | SetupStateKind::AlreadyLp
+                    | SetupStateKind::ProbeFailed
+                    | SetupStateKind::Flashing
+                    | SetupStateKind::FlashFailed
+                    | SetupStateKind::AbandonGuard
+                    | SetupStateKind::Provision
+            );
+            let expected = carries_probe || kind == SetupStateKind::DeviceHome;
+            assert_eq!(
+                kind.has_verdict(),
+                expected,
+                "{} is on the wrong side of the verdict seam",
+                kind.label()
+            );
+        }
     }
 
     #[test]

@@ -78,7 +78,11 @@ WLED_FOUND                       "This board runs WLED." (may carry recognition)
   —WipeAndSetUp→                 BOARD_PICK            (flash replaces WLED; migration is future work)
   —Back→                         CONNECT_INTRO         [ReleasePort]
 ALREADY_LP                       "Already running LightPlayer" + identity card
-  —AdoptDone→                    DEVICE_HOME           [RecordSighting, OpenDeviceHome]
+  —AdoptDone→                    CLOSED(Adopted)       [RecordSighting?]
+                                 (primary "Done": adopt and STAY — no lens attach, and no
+                                  ReleasePort either; the board keeps its session and its card)
+  —AdoptAndOpen→                 DEVICE_HOME           [RecordSighting?, OpenDeviceHome]
+                                 (secondary "Open in the editor →" — what Done used to do)
   —SetUpFresh→                   BOARD_PICK            (re-flash path; warns before writing)
 FLASHING                         activity view + step checklist
   —FlashSucceeded→               PROVISION
@@ -126,6 +130,13 @@ CLOSED                           terminal
   mid-flash lands on the incomplete-flash card state.
 - `WriteRegistry` is emitted only when the flow holds a resolved hardware
   uid AND the target `can_rename` — the simulator names nothing (§3).
+  `RecordSighting` is likewise conditional on a hardware uid: a board
+  anchored to nothing is adoptable, it is just not remembered.
+- **CLOSED carries a reason**: `Cancelled` (nothing was written),
+  `IncompleteFlash` (the board's card is marked — it needs re-flashing),
+  and `Adopted` (§5). Only the first two release the port; adopting a
+  board and then dropping its session would contradict the one thing
+  adopt promises.
 
 ## 3 · Provision step (shared)
 
@@ -181,8 +192,18 @@ conservative (a banner match; ambiguous Improv traffic alone is not enough).
 ## 5 · Device home
 
 The editor, lensed to the device — project tree + lensed node + the device
-card grown as the right pane, LEDs already animating. "Done" from ALREADY_LP
-lands in the same place with the device's existing project.
+card grown as the right pane, LEDs already animating. It is where the SETUP
+path lands (PROVISION → PushCompleted): a board that had nothing on it now
+has a project, and the editor is where that project lives.
+
+**Adopt does not land there** (G2 follow-up, 2026-08-05). ALREADY_LP's
+"Done" ends at `CLOSED(Adopted)`: the sighting is recorded, the port is
+kept, the card returns to its own body on the roster, and the user stays on
+the gallery. Adopting a board that was already glowing is not a setup —
+nothing was created and nothing needs opening — and being thrown into the
+editor for it read as one. The board's existing project is one click away
+on its card, and the state keeps a secondary verb, "Open in the editor →"
+(`AdoptAndOpen`), for whoever wanted exactly that.
 
 ## 6 · Architecture
 
@@ -257,6 +278,16 @@ Recorded so the two can be reconciled rather than silently diverge:
     edge (`GenerateFailed` / `PushFailed` → PROVISION at
     `ProvisionPhase::Editing`, presumably) in §2, the reducer, and the
     transition tests together.
+11. **Adopt has two edges, and the primary one does not navigate.**
+    flow-spec (and P11) gave ALREADY_LP a single `AdoptDone` →
+    DEVICE_HOME. The G2 re-walk (2026-08-05) rejected the landing: "Done
+    takes you right into the editor. That doesn't feel right… Done should
+    just go to the main state." So `AdoptDone` now ends at
+    `CLOSED(Adopted)` — sighting recorded, port kept, no lens attach — and
+    the old behaviour became the secondary `AdoptAndOpen` ("Open in the
+    editor →"). The full setup path is untouched: creating a project and
+    then landing in the editor with it running is the ratified north star,
+    and the difference is exactly that adopt creates nothing.
 
 ## 8 · Command → existing machinery
 
@@ -278,12 +309,37 @@ nothing. Each `SetupCommand` names machinery that already exists:
 
 ## 9 · What renders each state (P06)
 
-The wizard is a **card** (flow-spec F5b): the roster's fixed card width, in
-the devices grid where the setup form used to sit, becoming the device card
-at DEVICE_HOME. One component per state, no flow logic in any of them —
-every control dispatches a `SetupGesture` and the reducer decides what it
-means. `lp-app/lpa-studio-web/src/app/home/setup_wizard.rs`, one static
-story per state beside it.
+The wizard is a **card** (flow-spec F5b) — and the G2 gate (2026-08-05)
+settled *which* card: **the wizard is a STATE of the device card, not a
+card of its own.** One physical board renders as one card at every moment
+of the flow. Two frames, one seam:
+
+| Frame | When | What it is |
+|---|---|---|
+| **Standalone** | no verdict yet: CONNECT_INTRO, BOARD_FIRST, PORT_PICKING, PROBING — and the whole simulator path until the sim session starts | a card of its own in the entry-cards slot, at the roster's card width, where the setup form used to sit. There is no device card to be the body of. |
+| **Takeover** | from the VERDICT on: BOARD_PICK, WLED_FOUND, ALREADY_LP, PROBE_FAILED, FLASHING, FLASH_FAILED, ABANDON_GUARD, PROVISION | the bound board's OWN roster card renders the wizard as its body: same card, same identity key, same grid slot (pinned first). The header stays the device's and grows real facts as they land; the ✕ moves to the steps rail. |
+
+**Why the verdict is the seam.** Between the port grant and the probe's
+answer the live session is anonymous, so a board the registry already
+knows would render twice — its remembered card plus a connection card
+nothing can merge with it. So the pre-verdict window keeps the wizard
+standalone AND stands the bound session's roster row down (the only
+suppression in the model; the wizard's own PORT_PICKING/PROBING body is
+that window's narration). At the verdict the probe's `hardware_uid` rides
+the live row as its `pending_uid`, the live card adopts the remembered
+identity, the roster's twin filter drops the registry row, and the wizard
+rides the one merged card. An anonymous board has no row to merge with and
+rides its session's card.
+
+At DEVICE_HOME and CLOSED the wizard draws **nothing at all**: the handoff
+is a body swap, so the card is already there wearing its own body. Nothing
+appears, nothing disappears, and "becomes the device card" is literally
+true.
+
+One component per state, no flow logic in any of them — every control
+dispatches a `SetupGesture` and the reducer decides what it means.
+`lp-app/lpa-studio-web/src/app/home/setup_wizard.rs`, one static story per
+state beside it.
 
 | State | Card body |
 |---|---|
@@ -293,14 +349,14 @@ story per state beside it.
 | PROBING | indeterminate wait, one line about what is being read |
 | BOARD_PICK | recognition line, chip-filtered picker + Generic, picked-board bio, the forward verb (armed only when something is picked), Back |
 | WLED_FOUND | verdict + the wipe warning (migration is future work) + wipe / keep-WLED |
-| ALREADY_LP | registry name + chip, "Done writes nothing", adopt / set-up-fresh |
+| ALREADY_LP | registry name + chip, "Done writes nothing and you stay here", Done (primary) / Open in the editor → (secondary) / set-up-fresh |
 | PROBE_FAILED | the failure, the BOOT-button hint, retry / driver help / back |
 | FLASHING | the card-owned op flow's OWN activity view, verbatim; attempt number when > 1 |
 | FLASH_FAILED | the detail, "retry re-runs from erase", replug guidance from attempt 2, retry / abandon |
 | ABANDON_GUARD | the FLASHING body under the card-resident sheet (keep flashing / abandon) |
 | PROVISION | project box (compact line + ⓘ) + derived name field (hardware only) + the forward verb; any §7.10 failure above it |
-| DEVICE_HOME | the handoff frame — the editor is already lensed to the target |
-| CLOSED | the frame between the last command and the card being removed |
+| DEVICE_HOME | nothing is drawn: the takeover ends and the board's own card body returns while the editor lens attaches (the component is kept for the exhaustive match) |
+| CLOSED | nothing is drawn: the flow is over and the card — if the flow had one — is already back to itself |
 
 The two entry cards (**connect a device** / **simulate a device**, half
 height, one grid cell) are the only way in; the bare "open the port

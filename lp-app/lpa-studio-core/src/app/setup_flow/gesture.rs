@@ -31,8 +31,11 @@ pub enum SetupGesture {
     Confirm,
     /// WLED_FOUND's "Wipe and set up".
     WipeAndSetUp,
-    /// ALREADY_LP's "Done".
+    /// ALREADY_LP's PRIMARY "Done": adopt and stay on the gallery.
     AdoptDone,
+    /// ALREADY_LP's SECONDARY "Open in the editor →": adopt and land in
+    /// the editor lensed to the board.
+    AdoptAndOpen,
     /// ALREADY_LP's "Set it up fresh…".
     SetUpFresh,
     /// PROBE_FAILED's and FLASH_FAILED's retry.
@@ -58,6 +61,7 @@ impl From<SetupGesture> for SetupEvent {
             SetupGesture::Confirm => Self::Confirm,
             SetupGesture::WipeAndSetUp => Self::WipeAndSetUp,
             SetupGesture::AdoptDone => Self::AdoptDone,
+            SetupGesture::AdoptAndOpen => Self::AdoptAndOpen,
             SetupGesture::SetUpFresh => Self::SetUpFresh,
             SetupGesture::Retry => Self::Retry,
             SetupGesture::NameEdited { name } => Self::NameEdited { name },
@@ -98,6 +102,7 @@ mod tests {
             SetupGesture::Confirm,
             SetupGesture::WipeAndSetUp,
             SetupGesture::AdoptDone,
+            SetupGesture::AdoptAndOpen,
             SetupGesture::SetUpFresh,
             SetupGesture::Retry,
             SetupGesture::NameEdited {

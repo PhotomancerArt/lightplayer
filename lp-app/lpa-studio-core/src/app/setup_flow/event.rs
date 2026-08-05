@@ -39,8 +39,11 @@ pub enum SetupEvent {
     PortLost,
     /// WLED_FOUND's "Wipe and set up".
     WipeAndSetUp,
-    /// ALREADY_LP's "Done" — adopt.
+    /// ALREADY_LP's "Done" — adopt and STAY on the gallery.
     AdoptDone,
+    /// ALREADY_LP's "Open in the editor →" — adopt and land in the editor
+    /// lensed to the board (what "Done" used to do).
+    AdoptAndOpen,
     /// ALREADY_LP's "Set it up fresh…".
     SetUpFresh,
     /// PROBE_FAILED's retry, and FLASH_FAILED's.
@@ -83,6 +86,7 @@ impl SetupEvent {
             Self::PortLost => SetupEventKind::PortLost,
             Self::WipeAndSetUp => SetupEventKind::WipeAndSetUp,
             Self::AdoptDone => SetupEventKind::AdoptDone,
+            Self::AdoptAndOpen => SetupEventKind::AdoptAndOpen,
             Self::SetUpFresh => SetupEventKind::SetUpFresh,
             Self::Retry => SetupEventKind::Retry,
             Self::FlashSucceeded => SetupEventKind::FlashSucceeded,
@@ -113,6 +117,7 @@ pub enum SetupEventKind {
     PortLost,
     WipeAndSetUp,
     AdoptDone,
+    AdoptAndOpen,
     SetUpFresh,
     Retry,
     FlashSucceeded,
@@ -128,7 +133,7 @@ pub enum SetupEventKind {
 impl SetupEventKind {
     /// Every event, for the exhaustive transition table. Kept honest the
     /// same way [`SetupStateKind::ALL`](super::SetupStateKind::ALL) is.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::ItsConnected,
         Self::PickBoardFirst,
         Self::ItsPluggedIn,
@@ -142,6 +147,7 @@ impl SetupEventKind {
         Self::PortLost,
         Self::WipeAndSetUp,
         Self::AdoptDone,
+        Self::AdoptAndOpen,
         Self::SetUpFresh,
         Self::Retry,
         Self::FlashSucceeded,
@@ -169,16 +175,17 @@ impl SetupEventKind {
             Self::PortLost => 10,
             Self::WipeAndSetUp => 11,
             Self::AdoptDone => 12,
-            Self::SetUpFresh => 13,
-            Self::Retry => 14,
-            Self::FlashSucceeded => 15,
-            Self::FlashFailed => 16,
-            Self::NameEdited => 17,
-            Self::ProjectGenerated => 18,
-            Self::PushCompleted => 19,
-            Self::CloseRequested => 20,
-            Self::KeepFlashing => 21,
-            Self::Abandon => 22,
+            Self::AdoptAndOpen => 13,
+            Self::SetUpFresh => 14,
+            Self::Retry => 15,
+            Self::FlashSucceeded => 16,
+            Self::FlashFailed => 17,
+            Self::NameEdited => 18,
+            Self::ProjectGenerated => 19,
+            Self::PushCompleted => 20,
+            Self::CloseRequested => 21,
+            Self::KeepFlashing => 22,
+            Self::Abandon => 23,
         }
     }
 
@@ -198,6 +205,7 @@ impl SetupEventKind {
             Self::PortLost => "port-lost",
             Self::WipeAndSetUp => "wipe-and-set-up",
             Self::AdoptDone => "adopt-done",
+            Self::AdoptAndOpen => "adopt-and-open",
             Self::SetUpFresh => "set-up-fresh",
             Self::Retry => "retry",
             Self::FlashSucceeded => "flash-succeeded",
