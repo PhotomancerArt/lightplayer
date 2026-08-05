@@ -133,6 +133,43 @@
           "type": "string"
         }
       ]
+    },
+    "HwMeasuredLimit": {
+      "description": "One measured envelope: a value plus the provenance that makes it\nevidence rather than a guess.",
+      "properties": {
+        "measured": {
+          "description": "Where the number came from: date, firmware, workload, and the\nobserved margins. Free text, for humans reading a warning.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The measured envelope value (unit is the field's, e.g. LEDs).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "value",
+        "measured"
+      ],
+      "type": "object"
+    },
+    "HwSoftLimits": {
+      "description": "The soft-limit records a board manifest carries. All optional — a\nmanifest states only what has actually been measured.",
+      "properties": {
+        "totalLeds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HwMeasuredLimit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Total LEDs across all wires this board×firmware has run clean at."
+        }
+      },
+      "type": "object"
     }
   },
   "$id": "https://lightplayer.dev/schemas/hardware.schema.json",
@@ -168,6 +205,17 @@
         "$ref": "#/$defs/HardwareResourceFile"
       },
       "type": "array"
+    },
+    "soft_limits": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HwSoftLimits"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Measured soft-limit records (see [`HwSoftLimits`]): envelopes this\nboard×firmware has run clean at. Optional and additive — older\nfirmware parsing a manifest that carries them simply ignores the\nfield, which is what keeps this change format-compatible."
     },
     "target": {
       "$ref": "#/$defs/HardwareTarget"

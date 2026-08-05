@@ -173,6 +173,20 @@ fn OutputChannels(
                         }
                     }
                 }
+                // The board's measured LED envelope — a SOFT limit: evidence
+                // of what has run clean, so exceeding it reads as attention
+                // (advice), never as an error.
+                if let Some(budget) = face.led_budget.as_ref() {
+                    p {
+                        class: if budget.used > budget.budget {
+                            "tw:m-0 tw:font-mono tw:text-[0.65rem] tw:text-status-attention-foreground"
+                        } else {
+                            "tw:m-0 tw:font-mono tw:text-[0.65rem] tw:text-dim-foreground"
+                        },
+                        title: "The board's measured envelope: the total LEDs this board and firmware have run clean (heap-bound). Exceeding it proceeds with a warning — expect heap pressure.",
+                        "{budget.used} / {budget.budget} LEDs · measured envelope"
+                    }
+                }
             }
         }
     }
@@ -222,8 +236,37 @@ fn OutputChannelRow(
                     MapEntryRemoveButton { address, on_action: handler }
                 }
             }
-            span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[0.65rem] tw:text-dim-foreground",
-                "{caption}"
+            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
+                span { class: "tw:min-w-0 tw:flex-1 tw:truncate tw:font-mono tw:text-[0.65rem] tw:text-dim-foreground",
+                    "{caption}"
+                }
+                // Live wire health from the device heartbeat, when a device
+                // is reporting. "wave 2" is a discrete state (squared block,
+                // never a warning): this wire time-shares a transmitter slot
+                // and waits its turn each frame — by design at more wires
+                // than slots. Torn frames are the actual distress signal.
+                if let Some(status) = channel.wire_status.as_ref() {
+                    if status.waves {
+                        span {
+                            class: "tw:shrink-0 tw:rounded-xs tw:border tw:border-border-muted tw:px-1 tw:font-mono tw:text-[0.6rem] tw:text-subtle-foreground",
+                            title: "This wire transmits in the second wave: it waits for a pooled transmitter slot each frame (worst wait {status.queue_wait_ms} ms). Structural at more wires than slots — not a fault.",
+                            "wave 2"
+                        }
+                    }
+                    if status.torn > 0 {
+                        span {
+                            class: "tw:shrink-0 tw:font-mono tw:text-[0.6rem] tw:text-status-attention-foreground",
+                            title: "Frames truncated on the strand since boot (guard-word protection). A growing count is distress; a small constant one usually marks project uploads.",
+                            "torn {status.torn}"
+                        }
+                    } else {
+                        span {
+                            class: "tw:shrink-0 tw:font-mono tw:text-[0.6rem] tw:text-dim-foreground",
+                            title: "Frames transmitted since boot, no tears.",
+                            "{status.sent} sent"
+                        }
+                    }
+                }
             }
         }
     }

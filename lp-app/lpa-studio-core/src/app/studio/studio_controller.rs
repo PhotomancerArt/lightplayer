@@ -820,9 +820,12 @@ impl StudioController {
             // extent feeding the node (the upstream card's produced control
             // product). "No board known" is a first-class state — a device
             // provisioned outside Studio simply has no board id.
+            let lens = self.pool.lens_session();
             crate::app::studio::output_face_decoration::decorate_output_faces(
                 editor,
                 self.lens_board_id(),
+                lens.and_then(|session| session.output_wire_status()),
+                lens.and_then(|session| session.total_led_budget()),
             );
         }
         // Hoist the project's edit state to the shell: the web edge arms the

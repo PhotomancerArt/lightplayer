@@ -189,6 +189,10 @@ impl LpServer {
             // becomes populatable when provisioning writes `/hardware.json`
             // (board-selection roadmap M5).
             board_id: None,
+            // The measured LED envelope lands through
+            // `set_total_led_budget` — only the embedder holds the board
+            // manifest (same posture as the efuse facts below).
+            total_led_budget: None,
             // Efuse facts: only the embedder can read them, so they land
             // through `set_hardware_identity` (like build provenance).
             base_mac: None,
@@ -266,6 +270,13 @@ impl LpServer {
     /// never call this and honestly report `None`.
     ///
     /// Call at construction, beside [`Self::set_hello_identity`].
+    /// Stamp the board manifest's measured total-LED envelope into the
+    /// hello (the embedder is the only party holding the manifest — same
+    /// posture as [`Self::set_hardware_identity`]).
+    pub fn set_total_led_budget(&mut self, budget: Option<u32>) {
+        self.hello.hardware.total_led_budget = budget;
+    }
+
     pub fn set_hardware_identity(&mut self, identity: lpc_wire::HardwareIdentity) {
         let lpc_wire::HardwareIdentity {
             base_mac,
