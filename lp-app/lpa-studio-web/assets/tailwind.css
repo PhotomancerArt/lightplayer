@@ -144,6 +144,9 @@
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
   }
+  .tw\:top-full {
+    top: 100%;
+  }
   .tw\:right-1 {
     right: calc(var(--tw-spacing) * 1);
   }

@@ -430,7 +430,7 @@ pub fn TapeTransport(
                 // tap-to-return surface while off-live.
                 button {
                     r#type: "button",
-                    class: if return_live && live_wired.is_some() { "tw:grid tw:cursor-pointer tw:justify-items-start tw:gap-0.5 tw:border-none tw:bg-transparent tw:p-0 tw:text-left" } else { "tw:grid tw:cursor-default tw:justify-items-start tw:gap-0.5 tw:border-none tw:bg-transparent tw:p-0 tw:text-left" },
+                    class: if return_live && live_wired.is_some() { "tw:relative tw:inline-flex tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-left" } else { "tw:relative tw:inline-flex tw:cursor-default tw:border-none tw:bg-transparent tw:p-0 tw:text-left" },
                     disabled: !(return_live && live_wired.is_some()),
                     title: if return_live { "scrubbed off-live \u{2014} tap to return" } else { "" },
                     onclick: move |_| {
@@ -449,11 +449,15 @@ pub fn TapeTransport(
                         class: "tw:font-mono tw:text-lg tw:font-semibold tw:leading-none tw:tracking-[0.01em] tw:tabular-nums tw:text-strong-foreground",
                         "{initial_digits}"
                     }
-                    // Driver-written too (empty while on-live); the height
-                    // is reserved either way.
+                    // Driver-written too (empty while on-live). An absolute
+                    // OVERHANG below the digits — occupying no layout, so
+                    // the digits sit row-centered on-live instead of
+                    // riding high over a reserved empty line (G1 nit), and
+                    // its appearance still reflows nothing (the panel's
+                    // engaged-clear trick).
                     span {
                         id: "{driver.offlive_id()}",
-                        class: "tw:h-[12px] tw:font-mono tw:text-[10px] tw:leading-none tw:tabular-nums tw:text-status-attention-foreground",
+                        class: "tw:absolute tw:left-0 tw:top-full tw:whitespace-nowrap tw:font-mono tw:text-[10px] tw:leading-none tw:tabular-nums tw:text-status-attention-foreground",
                         "{initial_offlive}"
                     }
                 }
