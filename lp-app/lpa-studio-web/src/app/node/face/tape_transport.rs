@@ -22,12 +22,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiClockTransport};
-use wasm_bindgen::JsCast;
+use lpa_studio_core::{LpValue, ProjectSlotAddress, UiAction, UiClockTransport, UiSlotFieldState};
 
-use crate::app::node::slot_edit_actions::{panel_or_slot_action, slot_clear_action};
+use crate::app::node::panel::HFaderField;
+use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::capture_field_pointer;
-use crate::base::{InlineButton, InlineButtonTone, StudioIconName};
 
 use super::tape_driver::TapeTransportDriver;
 
@@ -45,9 +44,9 @@ pub(crate) const TAPE_BASE_PX_PER_SEC: f64 = 14.0;
 /// speed lives on the phasor knobs).
 pub(crate) const RATE_DETENTS: [f32; 6] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
 
-/// The off-live chip appears past this offset magnitude, in seconds (the
-/// amber box border tracks any non-zero offset; the chip waits for one
-/// worth reading).
+/// The off-live readout (the amber line under the digits — G1 killed the
+/// free-floating chip, which "jumped around") appears past this offset
+/// magnitude, in seconds; the amber box border tracks any non-zero offset.
 pub(crate) const OFFLIVE_CHIP_EPSILON_S: f32 = 0.05;
 
 /// Monotonic per-face id base for the tape's imperatively-addressed
@@ -191,26 +190,6 @@ fn transport_wiring(
     Some((address.clone()?, on_action?))
 }
 
-/// The fader-track fraction under a pointer event: the pointer's x inside
-/// the track's padding box, thumb half-width (8 px) inset at both ends,
-/// clamped so a drag past the track pins to the domain edge. `None`
-/// outside a real browser event.
-fn fader_frac_from_event(event: &Event<PointerData>) -> Option<f32> {
-    use dioxus::web::WebEventExt;
-
-    let web_event = event.data().try_as_web_event()?;
-    let target = web_event
-        .target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?;
-    let rect = target.get_bounding_client_rect();
-    let width = rect.width() - 16.0;
-    if width <= 0.0 {
-        return None;
-    }
-    let frac = ((f64::from(web_event.client_x()) - rect.left() - 8.0) / width).clamp(0.0, 1.0);
-    Some(frac as f32)
-}
-
 /// The tape transport instrument, one per clock face. Every gesture —
 /// drag-scrub, fader, run/pause, tap-to-return — dispatches through the
 /// standard slot-edit path (`panel_or_slot_action` with no panel target
@@ -228,18 +207,17 @@ pub fn TapeTransport(
         Rc::new(TapeTransportDriver::new(
             format!("tape-transport-{id}"),
             format!("tape-transport-digits-{id}"),
+            format!("tape-transport-offlive-{id}"),
         ))
     });
     driver.sync(&transport);
 
     let scrub_wired = transport_wiring(&transport.scrub_address, on_action);
-    let rate_wired = transport_wiring(&transport.rate_address, on_action);
     let running_wired = transport_wiring(&transport.running_address, on_action);
 
     let offlive = transport.scrub_offset_seconds != 0.0;
-    let chip_visible = transport.scrub_offset_seconds.abs() > OFFLIVE_CHIP_EPSILON_S;
+    let return_live = transport.scrub_offset_seconds.abs() > OFFLIVE_CHIP_EPSILON_S;
     let running = transport.running;
-    let rate = transport.rate;
     let staged_scrub = transport.scrub_offset_seconds;
 
     // Scrub drag anchor: pointer x and staged scrub at pointerdown; None
@@ -248,14 +226,8 @@ pub fn TapeTransport(
     // stream only.
     let mut scrub_drag = use_signal(|| None::<(f64, f32)>);
     let scrub_last_sent = use_signal(|| 0.0_f64);
-    // Fader drag-local echo (the knob preview pattern): the thumb and
-    // readout render the value under the hand; display truth catches up
-    // through the staged echo.
-    let mut rate_preview = use_signal(|| None::<f32>);
-    let rate_last_sent = use_signal(|| 0.0_f64);
-    let mut fader_dragging = use_signal(|| false);
 
-    let shown_rate = rate_preview().unwrap_or(rate);
+    let shown_rate = transport.rate;
 
     // Amber = off-live, a class toggle on the box (never canvas): the
     // border is the ambient signal, the chip is the actionable one.
@@ -287,11 +259,6 @@ pub fn TapeTransport(
     } else {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default"
     };
-    let track_class = if rate_wired.is_none() {
-        "tw:relative tw:h-[22px] tw:w-[190px] tw:flex-none tw:rounded-md tw:border tw:border-border-muted tw:bg-track"
-    } else {
-        "tw:relative tw:h-[22px] tw:w-[190px] tw:flex-none tw:cursor-ew-resize tw:touch-none tw:rounded-md tw:border tw:border-border-muted tw:bg-track tw:outline-none tw:focus-visible:outline tw:focus-visible:outline-1 tw:focus-visible:outline-border-strong"
-    };
     let readout_value_class = if rate_changed {
         "tw:font-semibold tw:text-status-attention-foreground"
     } else if on_detent(shown_rate) {
@@ -299,37 +266,28 @@ pub fn TapeTransport(
     } else {
         "tw:font-semibold tw:text-strong-foreground"
     };
-    let thumb_class = if rate_changed {
-        "tw:pointer-events-none tw:absolute tw:inset-y-0.5 tw:w-4 tw:rounded tw:border tw:border-status-attention-border tw:bg-card-raised tw:after:absolute tw:after:inset-y-[3px] tw:after:left-1/2 tw:after:w-px tw:after:bg-status-attention-foreground tw:after:content-['']"
+    // The shared fader reads editability off a field state (its own
+    // wiring gate); the DTO encodes it as address presence.
+    let rate_state = if transport.rate_address.is_some() {
+        UiSlotFieldState::editable()
     } else {
-        "tw:pointer-events-none tw:absolute tw:inset-y-0.5 tw:w-4 tw:rounded tw:border tw:border-border-strong tw:bg-card-raised tw:after:absolute tw:after:inset-y-[3px] tw:after:left-1/2 tw:after:w-px tw:after:bg-accent tw:after:content-['']"
+        UiSlotFieldState::readonly()
     };
-    // Every active override's Clear target, for the one clear affordance
-    // (D7 vocabulary: debug overrides CLEAR — never revert/reset).
-    let override_targets: Vec<_> = [
-        transport.running_override.clone(),
-        transport.rate_override.clone(),
-        transport.scrub_override.clone(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let thumb_style = format!(
-        "left: calc((100% - 18px) * {} + 1px);",
-        rate_frac(shown_rate)
-    );
-    let chip_sign = if transport.scrub_offset_seconds < 0.0 {
-        "\u{2212}"
-    } else {
-        "+"
-    };
-    let chip_offset = transport.scrub_offset_seconds.abs();
-    // Captured ONCE: the driver owns this span's text after mount, and a
+    // Captured ONCE: the driver owns these spans' text after mount, and a
     // Dioxus patch racing the driver's imperative writes would flash the
     // stale anchor value (the driver's change-cache would then skip the
     // correction until the next whole-second flip). A constant initial
-    // render means the vdom never patches it again.
+    // render means the vdom never patches them again.
     let initial_digits = use_hook(|| format_clock(f64::from(transport.seconds), false));
+    let initial_offlive = use_hook(|| {
+        let scrub = transport.scrub_offset_seconds;
+        if scrub.abs() > OFFLIVE_CHIP_EPSILON_S {
+            let sign = if scrub < 0.0 { "\u{2212}" } else { "+" };
+            format!("{sign}{:.1} s \u{00b7} live", scrub.abs())
+        } else {
+            String::new()
+        }
+    });
 
     let mounted_driver = driver.clone();
     let scrub_down_wired = scrub_wired.clone();
@@ -338,13 +296,8 @@ pub fn TapeTransport(
     let scrub_move_driver = driver.clone();
     let scrub_up_driver = driver.clone();
     let scrub_cancel_driver = driver.clone();
-    let rate_move_wired = rate_wired.clone();
-    let rate_up_wired = rate_wired.clone();
-    let rate_dbl_wired = rate_wired.clone();
-    let rate_key_wired = rate_wired.clone();
-    let rate_down_wired = rate_wired.clone();
     let run_wired = running_wired.clone();
-    let chip_wired = scrub_wired.clone();
+    let live_wired = scrub_wired.clone();
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-2",
             div { class: box_class,
@@ -433,177 +386,67 @@ pub fn TapeTransport(
                         if running { "\u{275a}\u{275a}" } else { "\u{25b6}" }
                     }
                 }
-                // The driver rewrites this span's text every displayed
-                // second (whole seconds at rest, tenths mid-drag) — the
-                // initial render is the DTO's own anchor, deterministic.
-                span {
-                    id: "{driver.digits_id()}",
-                    class: "tw:font-mono tw:text-lg tw:font-semibold tw:leading-none tw:tracking-[0.01em] tw:tabular-nums tw:text-strong-foreground",
-                    "{initial_digits}"
+                // The time cluster: driver-written digits with the amber
+                // off-live readout on its own reserved line underneath —
+                // "the +7.1s live thing jumps around… it should be
+                // combined with the time clock next to the pause button"
+                // (G1). The sub-line's box is always there, so going
+                // off-live never reflows the row; the whole cluster is the
+                // tap-to-return surface while off-live.
+                button {
+                    r#type: "button",
+                    class: if return_live && live_wired.is_some() { "tw:grid tw:cursor-pointer tw:justify-items-start tw:gap-0.5 tw:border-none tw:bg-transparent tw:p-0 tw:text-left" } else { "tw:grid tw:cursor-default tw:justify-items-start tw:gap-0.5 tw:border-none tw:bg-transparent tw:p-0 tw:text-left" },
+                    disabled: !(return_live && live_wired.is_some()),
+                    title: if return_live { "scrubbed off-live \u{2014} tap to return" } else { "" },
+                    onclick: move |_| {
+                        if let Some((address, handler)) = live_wired.clone() {
+                            handler
+                                .call(
+                                    panel_or_slot_action(&None, address, LpValue::F32(0.0)),
+                                );
+                        }
+                    },
+                    // The driver rewrites this span's text every displayed
+                    // second (whole seconds at rest, tenths mid-drag) —
+                    // the initial render is the DTO's anchor, deterministic.
+                    span {
+                        id: "{driver.digits_id()}",
+                        class: "tw:font-mono tw:text-lg tw:font-semibold tw:leading-none tw:tracking-[0.01em] tw:tabular-nums tw:text-strong-foreground",
+                        "{initial_digits}"
+                    }
+                    // Driver-written too (empty while on-live); the height
+                    // is reserved either way.
+                    span {
+                        id: "{driver.offlive_id()}",
+                        class: "tw:h-[12px] tw:font-mono tw:text-[10px] tw:leading-none tw:tabular-nums tw:text-status-attention-foreground",
+                        "{initial_offlive}"
+                    }
                 }
                 span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-2",
                     span { class: "tw:text-[9px] tw:uppercase tw:tracking-[0.1em] tw:text-dim-foreground",
                         "speed"
                     }
-                    span {
-                        class: track_class,
-                        title: "drag \u{00b7} double-click = \u{00d7}1",
-                        role: "slider",
-                        tabindex: if rate_wired.is_some() { "0" } else { "-1" },
-                        aria_valuemin: "0.25",
-                        aria_valuemax: "8",
-                        aria_valuenow: "{shown_rate}",
-                        onpointerdown: move |event| {
-                            if rate_down_wired.is_none() {
-                                return;
-                            }
-                            capture_field_pointer(&event);
-                            fader_dragging.set(true);
-                            // Jump-to-click, detents applied — the spike's
-                            // pointerdown behavior.
-                            let mut last_sent = rate_last_sent;
-                            if let (Some(frac), Some((address, handler))) = (
-                                fader_frac_from_event(&event),
-                                rate_down_wired.clone(),
-                            ) {
-                                let next = apply_detents(frac_rate(frac));
-                                rate_preview.set(Some(next));
-                                last_sent.set(js_sys::Date::now());
-                                handler
-                                    .call(
-                                        panel_or_slot_action(&None, address, LpValue::F32(next)),
-                                    );
-                            }
-                        },
-                        onpointermove: move |event| {
-                            let mut last_sent = rate_last_sent;
-                            if !fader_dragging() {
-                                return;
-                            }
-                            if event.data().held_buttons().is_empty() {
-                                fader_dragging.set(false);
-                                rate_preview.set(None);
-                                return;
-                            }
-                            let (Some(frac), Some((address, handler))) = (
-                                fader_frac_from_event(&event),
-                                rate_move_wired.clone(),
-                            ) else {
-                                return;
-                            };
-                            let next = apply_detents(frac_rate(frac));
-                            rate_preview.set(Some(next));
-                            let now = js_sys::Date::now();
-                            if now - last_sent() < TAPE_DISPATCH_INTERVAL_MS {
-                                return;
-                            }
-                            last_sent.set(now);
-                            handler
-                                .call(panel_or_slot_action(&None, address, LpValue::F32(next)));
-                        },
-                        onpointerup: move |_| {
-                            fader_dragging.set(false);
-                            // Flush the seated value exactly.
-                            if let (Some(next), Some((address, handler))) = (
-                                rate_preview(),
-                                rate_up_wired.clone(),
-                            ) {
-                                handler
-                                    .call(
-                                        panel_or_slot_action(&None, address, LpValue::F32(next)),
-                                    );
-                            }
-                            rate_preview.set(None);
-                        },
-                        onpointercancel: move |_| {
-                            fader_dragging.set(false);
-                            rate_preview.set(None);
-                        },
-                        ondoubleclick: move |_| {
-                            if let Some((address, handler)) = rate_dbl_wired.clone() {
-                                handler
-                                    .call(
-                                        panel_or_slot_action(&None, address, LpValue::F32(1.0)),
-                                    );
-                            }
-                        },
-                        onkeydown: move |event| {
-                            let Some((address, handler)) = rate_key_wired.clone() else {
-                                return;
-                            };
-                            // Arrows step detent to detent (the stops ARE
-                            // the keyboard grid); Home/End are the ends.
-                            let next = match event.key() {
-                                Key::ArrowUp | Key::ArrowRight => {
-                                    adjacent_detent(shown_rate, true)
-                                }
-                                Key::ArrowDown | Key::ArrowLeft => {
-                                    adjacent_detent(shown_rate, false)
-                                }
-                                Key::Home => 0.25,
-                                Key::End => 8.0,
-                                _ => return,
-                            };
-                            event.prevent_default();
-                            handler
-                                .call(panel_or_slot_action(&None, address, LpValue::F32(next)));
-                        },
-                        // Detent ticks on the track, ×1 emphasized. The
-                        // children stay pointer-transparent so the track
-                        // is always the gesture target (its rect is the
-                        // fraction domain).
-                        for detent in RATE_DETENTS {
-                            span {
-                                key: "{detent}",
-                                class: if detent == 1.0 { "tw:pointer-events-none tw:absolute tw:bottom-0.5 tw:top-[12px] tw:w-px tw:bg-subtle-foreground" } else { "tw:pointer-events-none tw:absolute tw:bottom-0.5 tw:top-[15px] tw:w-px tw:bg-border-strong" },
-                                style: format!(
-                                    "left: calc({:.1}% + {:.1}px);",
-                                    rate_frac(detent) * 100.0,
-                                    (1.0 - rate_frac(detent)) * 16.0 - 8.0,
-                                ),
-                            }
+                    // The one skeuomorphic fader (G1: "we keep re-inventing
+                    // faders") in its rate mode: log ׼–×8 domain, magnetic
+                    // octave detents, detent tick row, double-click = ×1.
+                    // Its ENGAGED amber doubles as the debug-changed tint.
+                    span { class: "tw:w-[190px] tw:flex-none",
+                        HFaderField {
+                            value: shown_rate,
+                            min: 0.25,
+                            max: 8.0,
+                            state: rate_state,
+                            engaged: rate_changed,
+                            address: transport.rate_address.clone(),
+                            rate_log_detents: true,
+                            on_action,
                         }
-                        span { class: thumb_class, style: thumb_style }
                     }
                     // Fixed width: a changing readout must NEVER reflow
                     // the fader (round-2 gate feedback).
                     span { class: "tw:w-9 tw:flex-none tw:text-left tw:font-mono tw:text-[11px] tw:tabular-nums tw:text-muted-foreground",
                         "\u{00d7}"
                         span { class: readout_value_class, {format_rate(shown_rate)} }
-                    }
-                }
-                if chip_visible {
-                    button {
-                        r#type: "button",
-                        class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1 tw:whitespace-nowrap tw:rounded-md tw:border tw:border-status-attention-border tw:bg-status-attention-bg tw:px-2 tw:py-1 tw:font-mono tw:text-[10px] tw:font-normal tw:text-status-attention-foreground tw:disabled:cursor-default",
-                        disabled: chip_wired.is_none(),
-                        title: "scrubbed off-live \u{2014} tap to return",
-                        onclick: move |_| {
-                            if let Some((address, handler)) = chip_wired.clone() {
-                                handler
-                                    .call(
-                                        panel_or_slot_action(&None, address, LpValue::F32(0.0)),
-                                    );
-                            }
-                        },
-                        span { class: "tw:font-semibold", "{chip_sign}{chip_offset:.1} s" }
-                        span { " \u{00b7} live" }
-                    }
-                }
-                if !override_targets.is_empty() && on_action.is_some() {
-                    InlineButton {
-                        label: "Clear transport overrides",
-                        icon: StudioIconName::Revert,
-                        text: "clear",
-                        tone: InlineButtonTone::Attention,
-                        title: "Clear this transport's debug overrides \u{2014} session only",
-                        on_press: move |_| {
-                            if let Some(handler) = on_action {
-                                for address in override_targets.clone() {
-                                    handler.call(slot_clear_action(address));
-                                }
-                            }
-                        },
                     }
                 }
             }

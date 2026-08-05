@@ -50,6 +50,7 @@ struct DriverInner {
     performance: web_sys::Performance,
     canvas_id: String,
     digits_id: String,
+    offlive_id: String,
     anchor: RefCell<Option<TapeAnchor>>,
     raf_id: Cell<Option<i32>>,
     tick: RefCell<Option<web_sys::js_sys::Function>>,
@@ -66,6 +67,9 @@ struct DriverInner {
     /// Last digits string written, so the `textContent` write only happens
     /// when the display actually changes (once a second at rest).
     last_digits: RefCell<String>,
+    /// Last off-live line written (the digits cluster's amber sub-line —
+    /// the separate chip "jumped around" and died at the G1 gate).
+    last_offlive: RefCell<String>,
 }
 
 /// The clock face's tape driver. `None` inside when there is no browser
@@ -75,16 +79,18 @@ pub(crate) struct TapeTransportDriver {
     _closure: Option<Closure<dyn FnMut(f64)>>,
     canvas_id: String,
     digits_id: String,
+    offlive_id: String,
 }
 
 impl TapeTransportDriver {
-    pub(crate) fn new(canvas_id: String, digits_id: String) -> Self {
+    pub(crate) fn new(canvas_id: String, digits_id: String, offlive_id: String) -> Self {
         let Some(window) = web_sys::window() else {
             return Self {
                 inner: None,
                 _closure: None,
                 canvas_id,
                 digits_id,
+                offlive_id,
             };
         };
         let Some(performance) = window.performance() else {
@@ -93,6 +99,7 @@ impl TapeTransportDriver {
                 _closure: None,
                 canvas_id,
                 digits_id,
+                offlive_id,
             };
         };
         let inner = Rc::new(DriverInner {
@@ -100,6 +107,7 @@ impl TapeTransportDriver {
             performance,
             canvas_id: canvas_id.clone(),
             digits_id: digits_id.clone(),
+            offlive_id: offlive_id.clone(),
             anchor: RefCell::new(None),
             raf_id: Cell::new(None),
             tick: RefCell::new(None),
@@ -107,6 +115,7 @@ impl TapeTransportDriver {
             dragging: Cell::new(false),
             scrub_preview: Cell::new(None),
             last_digits: RefCell::new(String::new()),
+            last_offlive: RefCell::new(String::new()),
         });
         let for_frames = inner.clone();
         let closure = Closure::wrap(Box::new(move |now: f64| {
@@ -125,6 +134,7 @@ impl TapeTransportDriver {
             _closure: Some(closure),
             canvas_id,
             digits_id,
+            offlive_id,
         }
     }
 
@@ -134,6 +144,10 @@ impl TapeTransportDriver {
 
     pub(crate) fn digits_id(&self) -> &str {
         &self.digits_id
+    }
+
+    pub(crate) fn offlive_id(&self) -> &str {
+        &self.offlive_id
     }
 
     /// Reconcile the driver against this render's transport block. An
@@ -390,6 +404,31 @@ impl DriverInner {
                 element.set_text_content(Some(&digits));
             }
             *self.last_digits.borrow_mut() = digits;
+        }
+
+        // The off-live readout rides UNDER the digits (its own reserved
+        // line — the free-floating chip "jumped around" during a drag and
+        // died at the G1 gate), imperative like them: the drag preview
+        // updates it per move, and an on-live transport writes it empty.
+        let scrub = self
+            .scrub_preview
+            .get()
+            .unwrap_or(transport.scrub_offset_seconds);
+        let offlive = if scrub.abs() > super::tape_transport::OFFLIVE_CHIP_EPSILON_S {
+            let sign = if scrub < 0.0 { "\u{2212}" } else { "+" };
+            format!("{sign}{:.1} s \u{00b7} live", scrub.abs())
+        } else {
+            String::new()
+        };
+        if *self.last_offlive.borrow() != offlive {
+            if let Some(element) = self
+                .window
+                .document()
+                .and_then(|document| document.get_element_by_id(&self.offlive_id))
+            {
+                element.set_text_content(Some(&offlive));
+            }
+            *self.last_offlive.borrow_mut() = offlive;
         }
 
         // Same ready-marker contract as the preview canvases: the story

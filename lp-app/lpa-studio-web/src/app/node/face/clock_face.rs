@@ -40,9 +40,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiClockFace as UiClockFaceData, UiPhasorReading, UiTimebaseState};
 
+use crate::app::node::slot_edit_actions::slot_clear_action;
 use crate::app::node::{
     BindingChip, BindingChipDirection, NodeCardSection, ProducedProductView, SlotDetailButton,
 };
+use crate::base::{InlineButton, InlineButtonTone, StudioIconName};
 
 use super::phasor_trace::PhasorTraceDriver;
 use super::tape_transport::TapeTransport;
@@ -80,29 +82,58 @@ pub fn ClockFace(
             div { class: "tw:grid tw:min-w-0 tw:justify-items-stretch tw:gap-2 tw:p-2",
                 if let Some(transport) = face.transport.clone() {
                     // The tape IS the time product's face, so it carries the
-                    // product chrome itself — name, publish chip, and the
-                    // same detail affordance every slot surface has — in a
-                    // slim header instead of a boxed pane ("a big Time
-                    // product box that does nothing" — G1-adjacent gate
-                    // feedback, 2026-08-05).
-                    div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-                        strong {
-                            class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
-                            title: face.product.detail.clone().unwrap_or_default(),
-                            "{face.product.name}"
-                        }
-                        if let Some(endpoint) = face.product.binding.bindings.bus_target.clone() {
-                            BindingChip {
-                                endpoint,
-                                direction: BindingChipDirection::Publishes,
-                            }
-                        }
-                        span { class: "tw:ml-auto tw:flex-none",
-                            SlotDetailButton {
-                                label: face.product.name.clone(),
-                                aspects: face.product.visible_aspects(),
-                                on_action,
-                                authoring: face.product.authoring.clone(),
+                    // product chrome itself — name, publish chip, the
+                    // debug-override `clear`, and the same detail affordance
+                    // every slot surface has — in a slim header instead of a
+                    // boxed pane ("a big Time product box that does
+                    // nothing"; "the clear should be in the header with the
+                    // detail popup" — G1 feedback, 2026-08-05).
+                    {
+                        let override_targets: Vec<_> = [
+                            transport.running_override.clone(),
+                            transport.rate_override.clone(),
+                            transport.scrub_override.clone(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        rsx! {
+                            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+                                strong {
+                                    class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
+                                    title: face.product.detail.clone().unwrap_or_default(),
+                                    "{face.product.name}"
+                                }
+                                if let Some(endpoint) = face.product.binding.bindings.bus_target.clone() {
+                                    BindingChip {
+                                        endpoint,
+                                        direction: BindingChipDirection::Publishes,
+                                    }
+                                }
+                                span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
+                                    if !override_targets.is_empty() && on_action.is_some() {
+                                        InlineButton {
+                                            label: "Clear transport overrides",
+                                            icon: StudioIconName::Revert,
+                                            text: "clear",
+                                            tone: InlineButtonTone::Attention,
+                                            title: "Clear this transport's debug overrides \u{2014} session only",
+                                            on_press: move |_| {
+                                                if let Some(handler) = on_action {
+                                                    for address in override_targets.clone() {
+                                                        handler.call(slot_clear_action(address));
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    }
+                                    SlotDetailButton {
+                                        label: face.product.name.clone(),
+                                        aspects: face.product.visible_aspects(),
+                                        on_action,
+                                        authoring: face.product.authoring.clone(),
+                                    }
+                                }
                             }
                         }
                     }
