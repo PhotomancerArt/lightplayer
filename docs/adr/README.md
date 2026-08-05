@@ -142,6 +142,8 @@ holds the full context.
 | A kind with no face publishes no panel controls (`ComputeShader`'s bound uniforms reach the wiring drawer, never a knob) | `2026-08-03-panel-visibility-is-derived` | A compute-driven module needs its knobs — `examples/meteor` already does |
 | Authored panel layouts: a curated promoted-control list per module, as an additive override on the derived default | `2026-08-03-panel-visibility-is-derived` | A published/vendored module needs a curated public API |
 | A minted `status-engaged` token family (engaged currently borrows `status-attention` amber; Yona leans maybe-blue) | `2026-08-03-panel-visibility-is-derived` | Yona settles the engaged treatment — do not change it before then |
+| An LFO node for panel-reachable waveform/offset/modulation (the panel exposes a phasor's period ONLY) | `2026-08-04-time-is-a-product` | A module wants modulation the Speed knob cannot express |
+| Transport UI over the breakpoint log (play/pause/scrub as a first-class surface) | `2026-08-04-time-is-a-product` | `docs/debt/clock-transport-has-no-transport-ui.md` exit criteria |
 
 ## Relationship To Shared Planning
 
