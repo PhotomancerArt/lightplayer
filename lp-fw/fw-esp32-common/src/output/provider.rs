@@ -237,19 +237,38 @@ impl OutputProvider for Esp32OutputProvider {
         Ok(())
     }
 
-    /// Wait out every transmission the frame's `write`s started.
+    /// Wait out the frame's transmissions — for the outputs that need it.
     ///
-    /// This is where the whole frame's wire time is actually spent — inside a
-    /// quiet spin, not under the engine's next tick. That placement is
-    /// load-bearing on the classic ESP32: its app path masks interrupts in
-    /// stretches long enough to starve a running transmission's refill
-    /// deadline (measured 2026-08-04 — wires transmitting while the engine ran
-    /// truncated ~99 % of their frames), so a frame's transmissions must all
-    /// be over before this returns. Every failure is logged with its handle;
-    /// the first is returned.
+    /// Two modes per channel, decided by [`Ws281xOutput::background_tx_safe`]:
+    ///
+    /// * **Barrier** (the default, and every output that has not proven
+    ///   otherwise): the wire time is spent here, inside a quiet spin, not
+    ///   under the engine's next tick. That placement is load-bearing when
+    ///   the transmission's ISR shares the render core: the classic ESP32's
+    ///   app path masks interrupts in stretches long enough to starve the
+    ///   refill deadline (measured 2026-08-04 — wires transmitting while the
+    ///   engine ran truncated ~99 % of their frames).
+    /// * **Background-safe** (the classic with its refill ISR on the
+    ///   dedicated APP core): the wait is skipped and the wire time overlaps
+    ///   the next render. The frame-lifetime guarantee does not move an inch
+    ///   — `write`'s wait-before-stage above waits the previous frame out
+    ///   before anything touches the channel's storage, and that wait is
+    ///   mandatory in both modes. The hang detector also rides that deferred
+    ///   wait: `FRAME_TIMEOUT` (50 ms) runs from `start`, and by the next
+    ///   write a ~33 ms frame interval plus ≤ ~31 ms of worst-case wire time
+    ///   can exceed it only for frames far past dome scale — worth
+    ///   re-checking if `WS281X_MAX_LEDS_PER_CHANNEL` ever grows.
+    ///
+    /// The engine calls this once per frame regardless of modes — the
+    /// barrier-call-count test and the wrapper-forwarding guard from the
+    /// concurrent-flush ADR stay exactly as meaningful. Every failure is
+    /// logged with its handle; the first is returned.
     fn flush(&self) -> Result<(), OutputError> {
         let mut first_error: Option<OutputError> = None;
         for (handle_id, channel) in self.channels.borrow_mut().iter_mut() {
+            if channel.output.background_tx_safe() {
+                continue;
+            }
             if let Err(error) = channel.output.wait_complete() {
                 log::warn!("Esp32OutputProvider::flush: handle={handle_id}: {error}");
                 first_error.get_or_insert(error);
@@ -425,9 +444,16 @@ mod concurrent_flush_tests {
     struct ProbeOutput {
         log: Rc<RefCell<ProbeLog>>,
         in_flight: bool,
+        /// What this output claims via `background_tx_safe` — the provider's
+        /// flush must skip waiting exactly the outputs that claim `true`.
+        background_safe: bool,
     }
 
     impl Ws281xOutput for ProbeOutput {
+        fn background_tx_safe(&self) -> bool {
+            self.background_safe
+        }
+
         fn write(&mut self, _data: &[u8]) -> Result<(), OutputError> {
             self.log.borrow_mut().events.push(ProbeEvent::BlockingWrite);
             Ok(())
@@ -467,6 +493,8 @@ mod concurrent_flush_tests {
     /// tests are about.
     struct ProbeDriver {
         log: Rc<RefCell<ProbeLog>>,
+        /// Bit `n` set = endpoint `Pn`'s outputs report `background_tx_safe`.
+        background_safe: u32,
     }
 
     const PROBE_ENDPOINTS: usize = 2;
@@ -502,22 +530,38 @@ mod concurrent_flush_tests {
 
         fn open(
             &self,
-            _endpoint_id: &HwEndpointId,
+            endpoint_id: &HwEndpointId,
             _config: Ws281xConfig,
         ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
+            let background_safe = (0..PROBE_ENDPOINTS).any(|n| {
+                let spec = HwEndpointSpec::parse(alloc::format!("ws281x:local:P{n}"))
+                    .expect("probe spec parses");
+                HwEndpointId::for_driver_spec(self.driver_id(), &spec) == *endpoint_id
+                    && self.background_safe & (1 << n) != 0
+            });
             Ok(Box::new(ProbeOutput {
                 log: Rc::clone(&self.log),
                 in_flight: false,
+                background_safe,
             }))
         }
     }
 
     fn probe_provider() -> (Esp32OutputProvider, Rc<RefCell<ProbeLog>>) {
+        probe_provider_with_background(0)
+    }
+
+    /// [`probe_provider`] with bit `n` of `background_safe` making endpoint
+    /// `Pn`'s outputs claim `background_tx_safe`.
+    fn probe_provider_with_background(
+        background_safe: u32,
+    ) -> (Esp32OutputProvider, Rc<RefCell<ProbeLog>>) {
         let log = Rc::new(RefCell::new(ProbeLog::default()));
         let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
         let mut system = HardwareSystem::new(registry);
         system.add_ws281x_driver(Box::new(ProbeDriver {
             log: Rc::clone(&log),
+            background_safe,
         }));
         (Esp32OutputProvider::new(Rc::new(system)), log)
     }
@@ -597,6 +641,76 @@ mod concurrent_flush_tests {
 
         provider.flush().expect("flush");
         assert_eq!(log.borrow().in_flight, 0, "flush must drain every wire");
+    }
+
+    /// A background-safe output's transmission overlaps the next render:
+    /// `flush` must not wait it out — and the frame-lifetime guarantee then
+    /// rides on the *next* write's wait-before-stage, which must still find
+    /// and drain the in-flight frame.
+    #[test]
+    fn flush_skips_background_safe_outputs_and_the_next_write_still_waits() {
+        let (provider, log) = probe_provider_with_background(0b11);
+        let first = open_probe(&provider, 0);
+        let second = open_probe(&provider, 1);
+
+        let frame = vec![0u16; 3];
+        provider.write(first, &frame).expect("first wire");
+        provider.write(second, &frame).expect("second wire");
+        assert_eq!(log.borrow().in_flight, 2);
+
+        let waits_before = wait_count(&log);
+        provider.flush().expect("flush");
+        assert_eq!(
+            wait_count(&log),
+            waits_before,
+            "flush must not wait out a background-safe output"
+        );
+        assert_eq!(
+            log.borrow().in_flight,
+            2,
+            "both wires keep transmitting across the barrier"
+        );
+
+        // The deferred wait is not optional: the next write on the handle
+        // must drain the in-flight frame before staging over its bytes.
+        provider.write(first, &frame).expect("next frame");
+        assert!(
+            log.borrow()
+                .events
+                .iter()
+                .rev()
+                .any(|e| *e == ProbeEvent::Wait { had_in_flight: true }),
+            "wait-before-stage must find the overlapped frame in flight"
+        );
+    }
+
+    /// Mixed wires — one barrier, one background-safe — wait exactly the
+    /// barrier one at flush.
+    #[test]
+    fn flush_waits_only_the_barrier_output_in_a_mixed_frame() {
+        let (provider, log) = probe_provider_with_background(0b10);
+        let barrier = open_probe(&provider, 0);
+        let background = open_probe(&provider, 1);
+
+        let frame = vec![0u16; 3];
+        provider.write(barrier, &frame).expect("barrier wire");
+        provider.write(background, &frame).expect("background wire");
+        assert_eq!(log.borrow().in_flight, 2);
+
+        provider.flush().expect("flush");
+        assert_eq!(
+            log.borrow().in_flight,
+            1,
+            "the barrier wire is drained, the background wire keeps going"
+        );
+    }
+
+    fn wait_count(log: &Rc<RefCell<ProbeLog>>) -> usize {
+        log.borrow()
+            .events
+            .iter()
+            .filter(|e| matches!(e, ProbeEvent::Wait { .. }))
+            .count()
     }
 
     /// Closing a handle mid-flight must reach the output's own drop (which on

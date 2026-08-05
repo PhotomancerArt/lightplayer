@@ -101,6 +101,34 @@ pub trait Ws281xOutput {
     fn wait_complete(&mut self) -> Result<(), OutputError> {
         Ok(())
     }
+
+    /// May a frame this output started keep transmitting while the render
+    /// core does arbitrary work?
+    ///
+    /// `true` claims the transmission survives anything the caller's core
+    /// does after `start` returns — interrupt masking included — so a
+    /// provider may skip its end-of-frame barrier for this output and let
+    /// wire time overlap the next render. The caller's frame-lifetime duty is
+    /// unchanged: the bytes stay alive and unmodified until
+    /// [`Ws281xOutput::wait_complete`], which now typically runs at the
+    /// *next* write ("wait-before-stage") rather than at the frame barrier.
+    ///
+    /// The default is `false` — barrier semantics — and `false` must remain
+    /// the default for every implementation that has not proven otherwise on
+    /// its own silicon: the classic ESP32 measured ~99 % frame truncation
+    /// when a wire transmitted under engine load with its ISR on the render
+    /// core. The one current `true` is that same chip once its refill ISR is
+    /// bound on the dedicated APP core.
+    ///
+    /// ⚠️ Any delegating wrapper around a `dyn Ws281xOutput` must forward
+    /// this method explicitly. A wrapper that leaves the default inherits
+    /// `false` silently — which is at least fail-safe — but the mirror-image
+    /// trap on `OutputProvider::flush` (a wrapper silently resolving to a
+    /// defaulted no-op) cost five flash cycles once; see the concurrent-flush
+    /// ADR's near-miss note.
+    fn background_tx_safe(&self) -> bool {
+        false
+    }
 }
 
 /// Driver that exposes WS281x-capable hardware endpoints.
